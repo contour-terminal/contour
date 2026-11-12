@@ -1200,6 +1200,32 @@ class WindowController:
     /// choice (GuiState::sidebar) as the visibility the next window starts with.
     Q_INVOKABLE void toggleSidebar();
 
+    /// Moves keyboard focus into the workspace sidebar, showing the sidebar first when it is hidden (what the
+    /// FocusSidebar action does).
+    Q_INVOKABLE void focusSidebar();
+
+    // {{{ Sidebar actions whose behaviour lands with the attention ledger (Task 7) and the workspace control
+    // API (Task 6). Each has its final signature and does nothing yet.
+    /// Shows the next pane that needs the user (the JumpToNextAttention action). Wired in Task 7.
+    void jumpToNextAttention();
+    /// Marks the active pane's output as seen (the MarkSeen action). Wired in Task 7.
+    void markActivePaneSeen();
+    /// Renames the displayed workspace inline (the RenameWorkspace action). Wired in Task 6.
+    void renameCurrentWorkspace();
+    /// Moves the displayed workspace one place up in the list (the MoveWorkspaceUp action). Wired in Task 6.
+    void moveCurrentWorkspaceUp();
+    /// Moves the displayed workspace one place down in the list (the MoveWorkspaceDown action). Wired in
+    /// Task 6.
+    void moveCurrentWorkspaceDown();
+    /// Closes the displayed workspace after asking (the CloseWorkspace action). Wired in Task 6.
+    void closeCurrentWorkspace();
+    /// Shows the pane a sidebar row names and focuses it (the GoToPane action). Wired with the sidebar tree.
+    void goToSidebarPane();
+    /// Moves the active tab into another workspace (the MoveTabToWorkspace action). Wired in Task 6.
+    /// @param position The target workspace's 1-based place in the window's workspace list.
+    void moveActiveTabToWorkspace(uint32_t position);
+    // }}}
+
     /// Window chrome height in logical pixels OUTSIDE the terminal content area, DECLARED by Main.qml
     /// (bound to the title bar's effective height: 0 when hidden). Geometry math must never measure
     /// window-minus-item deltas — those are transient during relayout and structurally wrong in splits.
@@ -1420,6 +1446,12 @@ class WindowController:
     void tabBarShouldShowChanged();
     /// The chrome focus moved: the area, the focused tab or the focused toolbar item changed.
     void chromeFocusChanged();
+    /// A key of the focused sidebar tree that the tree itself answers (the collapse, expand, rename and
+    /// filter commands, and the row movement and activation): the tree is QML's, so it carries the command
+    /// out.
+    /// @param command A window::ChromeCommand as its underlying value.
+    /// @param text The typed text of a filter command, else empty.
+    void sidebarCommandRequested(int command, QString const& text);
     /// Closing a tab may end a running program, so the window asks first; QML shows the dialog and calls
     /// confirmCloseTab() on "Close". The tab is named by its id, not its row: rows shift while the question
     /// is open.
@@ -1746,7 +1778,9 @@ class WindowController:
     /// Keeps the focused item inside the area after the tab count or the toolbar changed.
     void clampChromeFocus();
     /// Runs @p command on the focused area. @return Whether it was handled.
-    [[nodiscard]] bool runChromeCommand(window::ChromeCommand command);
+    /// @param command What the key does in the focused area.
+    /// @param text The typed text of a Filter command.
+    [[nodiscard]] bool runChromeCommand(window::ChromeCommand command, QString const& text = {});
     /// The actions the active session's key bindings give a key press while the chrome has focus.
     /// @return The bound actions; nullptr when nothing is bound or there is no active session.
     [[nodiscard]] actions::ActionList const* boundActionsFor(int qtKey,
@@ -1758,6 +1792,8 @@ class WindowController:
 
     window::ChromeArea _chromeArea = window::ChromeArea::Terminal;
     window::ChromeAreaPresence _chromePresence {};
+    /// The areas the window shows right now: what QML declared, and the sidebar from its visibility.
+    [[nodiscard]] window::ChromeAreaPresence currentChromePresence() const noexcept;
     /// The tab the tab well's keyboard focus is on, by identity rather than by row: the model changes rows
     /// under it (an insert, a move in from another window, a reorder), but never which tab it is.
     std::optional<vtworkspace::TabId> _focusedTab;

@@ -4,7 +4,9 @@
 // close question, and the way back to the terminal. Headless: sessions run over MockPty, and the Native2026
 // bindings are loaded explicitly because TestApp is Classic.
 
+#include <contour/config/Config.hpp>
 #include <contour/config/ConfigFwd.hpp>
+#include <contour/config/TabBarMode.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/AppFixture.hpp>
@@ -18,10 +20,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <QtTest/QSignalSpy>
@@ -34,6 +38,30 @@ using contour::window::ChromeArea;
 
 constexpr auto ToolbarItems = 2;
 constexpr auto DefaultTabCount = 3;
+
+/// The Qt modifiers of the chord that switches to tab @p position on this host's digit key, as the bindings
+/// hold it: a configured row, else a built-in fallback, in the order the terminal matches them.
+/// @param config The configuration whose bindings to search.
+/// @param position The tab position, 1 to 9.
+/// @return The modifiers; nullopt when nothing binds it.
+[[nodiscard]] std::optional<Qt::KeyboardModifiers> switchToTabChord(contour::config::Config const& config,
+                                                                    int position)
+{
+    auto const digit = static_cast<char32_t>(U'0' + position);
+    auto const switches = [&](contour::config::CharInputMapping const& mapping) {
+        return mapping.input == digit && std::ranges::any_of(mapping.binding, [&](auto const& action) {
+                   auto const* const tab = std::get_if<contour::actions::SwitchToTab>(&action);
+                   return tab != nullptr && tab->position == position;
+               });
+    };
+    for (auto const& mapping: config.inputMappings.value().charMappings)
+        if (switches(mapping))
+            return contour::test::qtModifiersOfChord(mapping.modifiers);
+    for (auto const& row: contour::config::builtinFallbackCharMappings(config.keyboardPlatformKind))
+        if (switches(row.mapping))
+            return contour::test::qtModifiersOfChord(row.mapping.modifiers);
+    return std::nullopt;
+}
 
 /// A window with three tabs over mock PTYs, the Native2026 bindings loaded, and the chrome shown.
 struct ChromeFixture
@@ -79,9 +107,11 @@ struct ChromeFixture
     }
 
     /// Offers a Qt key to the chrome.
-    [[nodiscard]] bool chromeKey(Qt::Key key, Qt::KeyboardModifiers modifiers = {}) const
+    [[nodiscard]] bool chromeKey(Qt::Key key,
+                                 Qt::KeyboardModifiers modifiers = {},
+                                 QString const& text = {}) const
     {
-        return controller().chromeKey(static_cast<int>(key), static_cast<int>(modifiers.toInt()));
+        return controller().chromeKey(static_cast<int>(key), static_cast<int>(modifiers.toInt()), text);
     }
 
   private:
@@ -587,4 +617,110 @@ TEST_CASE("a chord on a key the chrome consumes still runs a binding that names 
 
     CHECK(f.chromeKey(Qt::Key_Right, Qt::ControlModifier));
     CHECK(palette.count() == 1);
+}
+
+TEST_CASE("focusSidebar shows a hidden sidebar and enters its area",
+          "[windowcontroller][chromefocus][sidebar]")
+{
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    REQUIRE(controller.sidebarVisibility() == static_cast<int>(contour::config::SidebarVisibility::Hidden));
+
+    controller.focusSidebar();
+
+    CHECK(controller.sidebarVisibility() == static_cast<int>(contour::config::SidebarVisibility::Shown));
+    CHECK(f.area() == ChromeArea::Sidebar);
+}
+
+TEST_CASE("toggleSidebar leaves the chrome area when it hides the sidebar",
+          "[windowcontroller][chromefocus][sidebar]")
+{
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    controller.focusSidebar();
+    REQUIRE(f.area() == ChromeArea::Sidebar);
+
+    controller.toggleSidebar();
+
+    CHECK(controller.sidebarVisibility() == static_cast<int>(contour::config::SidebarVisibility::Hidden));
+    CHECK(f.area() == ChromeArea::Terminal);
+}
+
+TEST_CASE("the focus cycle reaches the sidebar only while it is shown",
+          "[windowcontroller][chromefocus][sidebar]")
+{
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+
+    controller.moveChromeFocus(contour::window::ChromeFocusAction::Next);
+    CHECK(f.area() == ChromeArea::Tabs);
+    controller.leaveChrome();
+
+    controller.toggleSidebar();
+    controller.moveChromeFocus(contour::window::ChromeFocusAction::Next);
+    CHECK(f.area() == ChromeArea::Sidebar);
+    controller.moveChromeFocus(contour::window::ChromeFocusAction::Next);
+    CHECK(f.area() == ChromeArea::Tabs);
+}
+
+TEST_CASE("the sidebar's keys are requested of the tree, and typed text promotes to a filter",
+          "[windowcontroller][chromefocus][sidebar]")
+{
+    using contour::window::ChromeCommand;
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    controller.focusSidebar();
+    auto spy = QSignalSpy { &controller, &contour::window::WindowController::sidebarCommandRequested };
+
+    CHECK(f.chromeKey(Qt::Key_Left));
+    REQUIRE(spy.count() == 1);
+    CHECK(spy.at(0).at(0).toInt() == static_cast<int>(ChromeCommand::Collapse));
+
+    CHECK(f.chromeKey(Qt::Key_F2));
+    CHECK(spy.at(1).at(0).toInt() == static_cast<int>(ChromeCommand::Rename));
+
+    CHECK(f.chromeKey(Qt::Key_X, Qt::NoModifier, "x"));
+    CHECK(spy.at(2).at(0).toInt() == static_cast<int>(ChromeCommand::Filter));
+    CHECK(spy.at(2).at(1).toString() == "x");
+
+    CHECK(f.chromeKey(Qt::Key_Space, Qt::NoModifier, " "));
+    CHECK(spy.at(3).at(0).toInt() == static_cast<int>(ChromeCommand::Filter));
+    CHECK(spy.at(3).at(1).toString() == " ");
+
+    // Escape is not the tree's: it hands the keyboard back.
+    CHECK(f.chromeKey(Qt::Key_Escape));
+    CHECK(spy.count() == 4);
+    CHECK(f.area() == ChromeArea::Terminal);
+}
+
+TEST_CASE("an application chord is the application's while the sidebar has focus",
+          "[windowcontroller][chromefocus][sidebar]")
+{
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    controller.activateTab(0);
+    controller.focusSidebar();
+    auto spy = QSignalSpy { &controller, &contour::window::WindowController::sidebarCommandRequested };
+    REQUIRE(controller.activeTabIndex() == 0);
+
+    // SwitchToTab 2 as this host binds it: Alt+2 on the desktop, a configured row; ⌘2 on macOS, a built-in
+    // fallback, where Option composes.
+    auto const chord = switchToTabChord(controller.activeSession()->config(), 2);
+    REQUIRE(chord.has_value());
+    CHECK(f.chromeKey(Qt::Key_2, *chord, "2"));
+    CHECK(spy.count() == 0);
+    CHECK(controller.activeTabIndex() == 1);
+}
+
+TEST_CASE("F2 and typed characters are not the tab well's", "[windowcontroller][chromefocus][sidebar]")
+{
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    controller.moveChromeFocus(contour::window::ChromeFocusAction::Next);
+    REQUIRE(f.area() == ChromeArea::Tabs);
+    auto spy = QSignalSpy { &controller, &contour::window::WindowController::sidebarCommandRequested };
+
+    CHECK_FALSE(f.chromeKey(Qt::Key_F2));
+    CHECK_FALSE(f.chromeKey(Qt::Key_X, Qt::NoModifier, "x"));
+    CHECK(spy.count() == 0);
 }

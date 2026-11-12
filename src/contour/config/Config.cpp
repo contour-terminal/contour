@@ -5242,7 +5242,8 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
         }
 
         if (holds_alternative<actions::SwitchToWorkspace>(action)
-            || holds_alternative<actions::OpenWorkspace>(action))
+            || holds_alternative<actions::OpenWorkspace>(action)
+            || holds_alternative<actions::MoveTabToWorkspace>(action))
         {
             // Like SwitchToTab: "which workspace?" has no default, and positions count from 1.
             if (auto index = node["index"]; index && index.IsScalar())
@@ -5250,6 +5251,8 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                 {
                     if (holds_alternative<actions::SwitchToWorkspace>(action))
                         return actions::SwitchToWorkspace { value };
+                    if (holds_alternative<actions::MoveTabToWorkspace>(action))
+                        return actions::MoveTabToWorkspace { value };
                     return actions::OpenWorkspace { value };
                 }
             return std::nullopt;

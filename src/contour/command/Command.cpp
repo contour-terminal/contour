@@ -176,6 +176,9 @@ CommandArguments commandArguments(actions::Action const& action)
             [](OpenWorkspace const& a) -> CommandArguments {
                 return { .id = std::format("{}", a.index), .title = std::format(" {}", a.index) };
             },
+            [](MoveTabToWorkspace const& a) -> CommandArguments {
+                return { .id = std::format("{}", a.index), .title = std::format(" {}", a.index) };
+            },
             [](CycleWorkspace const& a) -> CommandArguments { return cycleArguments(a.direction); },
             [](CycleDaemon const& a) -> CommandArguments { return cycleArguments(a.direction); },
             [](SwitchToDaemon const& a) -> CommandArguments { return daemonArguments(a.daemon); },

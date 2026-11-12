@@ -31,6 +31,8 @@ enum class ChromeKey : uint8_t
     Delete,
     Escape,
     Tab, ///< Tab and, with Shift, Shift+Tab (Qt's Backtab).
+    F2,
+    Printable, ///< A key that types a character (other than Space), with no modifier or Shift alone.
 };
 
 /// The modifier state a chrome key arrives with.
@@ -55,6 +57,10 @@ enum class ChromeCommand : uint8_t
     MoveLeft,      ///< Moves the focused tab one place left.
     MoveRight,     ///< Moves the focused tab one place right.
     Leave,         ///< Returns focus to the terminal.
+    Collapse,      ///< Collapses the focused tree row, or moves to its parent when it is collapsed.
+    Expand,        ///< Expands the focused tree row, or moves to its first child when it is expanded.
+    Rename,        ///< Starts renaming the focused row inline.
+    Filter,        ///< Starts (or extends) the tree's type-to-filter with the typed character.
 };
 
 /// One key of one chrome area.
@@ -68,6 +74,20 @@ struct ChromeKeyRow
 
 /// The keys of each chrome area. The terminal has no rows: every key there goes to the shell.
 inline constexpr std::array ChromeKeyRows {
+    ChromeKeyRow {
+        ChromeArea::Sidebar, ChromeKey::Up, ChromeKeyModifier::None, ChromeCommand::FocusPrevious },
+    ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Down, ChromeKeyModifier::None, ChromeCommand::FocusNext },
+    ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Left, ChromeKeyModifier::None, ChromeCommand::Collapse },
+    ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Right, ChromeKeyModifier::None, ChromeCommand::Expand },
+    ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Return, ChromeKeyModifier::None, ChromeCommand::Activate },
+    ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Escape, ChromeKeyModifier::None, ChromeCommand::Leave },
+    ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::F2, ChromeKeyModifier::None, ChromeCommand::Rename },
+    ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Space, ChromeKeyModifier::None, ChromeCommand::Filter },
+    ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Space, ChromeKeyModifier::Shift, ChromeCommand::Filter },
+    ChromeKeyRow {
+        ChromeArea::Sidebar, ChromeKey::Printable, ChromeKeyModifier::None, ChromeCommand::Filter },
+    ChromeKeyRow {
+        ChromeArea::Sidebar, ChromeKey::Printable, ChromeKeyModifier::Shift, ChromeCommand::Filter },
     ChromeKeyRow { ChromeArea::Tabs, ChromeKey::Left, ChromeKeyModifier::None, ChromeCommand::FocusPrevious },
     ChromeKeyRow { ChromeArea::Tabs, ChromeKey::Right, ChromeKeyModifier::None, ChromeCommand::FocusNext },
     ChromeKeyRow { ChromeArea::Tabs, ChromeKey::Home, ChromeKeyModifier::None, ChromeCommand::FocusFirst },
@@ -92,11 +112,10 @@ inline constexpr std::array ChromeKeyRows {
 /// The keys the chrome takes for itself while it has focus, whether or not its area has a row for them:
 /// they are never an application binding there. Every other chord (the command palette, a new tab, a user
 /// binding) keeps working from inside the chrome.
-inline constexpr std::array ChromeConsumedKeys {
-    ChromeKey::Left,      ChromeKey::Right,  ChromeKey::Up,     ChromeKey::Down,
-    ChromeKey::Home,      ChromeKey::End,    ChromeKey::Return, ChromeKey::Space,
-    ChromeKey::Backspace, ChromeKey::Delete, ChromeKey::Escape, ChromeKey::Tab,
-};
+inline constexpr std::array ChromeConsumedKeys { ChromeKey::Left,   ChromeKey::Right,  ChromeKey::Up,
+                                                 ChromeKey::Down,   ChromeKey::Home,   ChromeKey::End,
+                                                 ChromeKey::Return, ChromeKey::Space,  ChromeKey::Backspace,
+                                                 ChromeKey::Delete, ChromeKey::Escape, ChromeKey::Tab };
 
 /// Whether the chrome takes a key for itself.
 /// @param key The key.
@@ -123,6 +142,22 @@ inline constexpr std::array ChromeConsumedKeys {
     return row != ChromeKeyRows.end() ? row->command : ChromeCommand::None;
 }
 
+/// Whether the focused @p area takes a key for itself: a key every area takes (@see ChromeConsumedKeys), or
+/// one this area has a row for, such as the sidebar's F2 and typed characters, which stay the application's
+/// in the other areas.
+/// @param area The focused chrome area.
+/// @param key The key.
+/// @param modifier The modifier state it arrived with.
+/// @return True when the chrome handles the key.
+[[nodiscard]] constexpr bool chromeConsumes(ChromeArea area,
+                                            ChromeKey key,
+                                            ChromeKeyModifier modifier) noexcept
+{
+    return chromeConsumes(key, modifier)
+           || (modifier != ChromeKeyModifier::Other
+               && chromeCommandFor(area, key, modifier) != ChromeCommand::None);
+}
+
 /// The index focus lands on after a focus-moving command.
 /// @param command The command; anything but the four focus commands leaves the index alone.
 /// @param focused The focused item's index.
@@ -144,7 +179,11 @@ inline constexpr std::array ChromeConsumedKeys {
         case ChromeCommand::Close:
         case ChromeCommand::MoveLeft:
         case ChromeCommand::MoveRight:
-        case ChromeCommand::Leave: break;
+        case ChromeCommand::Leave:
+        case ChromeCommand::Collapse:
+        case ChromeCommand::Expand:
+        case ChromeCommand::Rename:
+        case ChromeCommand::Filter: break;
     }
     return std::clamp(focused, 0, last);
 }

@@ -660,3 +660,28 @@ TEST_CASE("commandCategory.aHostChildDescribesItsUrl", "[contour][palette][comma
     CHECK(commands.front().argument == "starfive");
     CHECK(commands.front().category == CommandCategory::Hosts);
 }
+
+TEST_CASE("every new sidebar action has a catalog entry and a palette category",
+          "[contour][palette][sidebar]")
+{
+    using namespace actions;
+    auto const sidebarActions = std::array {
+        Action { ToggleSidebar {} },      Action { FocusSidebar {} },    Action { JumpToNextAttention {} },
+        Action { MarkSeen {} },           Action { RenameWorkspace {} }, Action { MoveWorkspaceUp {} },
+        Action { MoveWorkspaceDown {} },  Action { CloseWorkspace {} },  Action { GoToPane {} },
+        Action { MoveTabToWorkspace {} },
+    };
+    for (auto const& action: sidebarActions)
+    {
+        auto const name = std::string { actions::name(action) };
+        INFO(name);
+        auto const entry =
+            std::ranges::find(actions::actionCatalog(), name, &actions::ActionCatalogEntry::name);
+        REQUIRE(entry != actions::actionCatalog().end());
+        CHECK_FALSE(entry->documentation.empty());
+        auto const row = std::ranges::find(actionCategories(), name, &ActionCategory::name);
+        CHECK(row != actionCategories().end());
+    }
+    CHECK(commandCategory(Action { ToggleSidebar {} }) == CommandCategory::View);
+    CHECK(commandCategory(Action { JumpToNextAttention {} }) == CommandCategory::Window);
+}

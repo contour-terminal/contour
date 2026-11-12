@@ -21,6 +21,7 @@ A small number of bindings are built in and do **not** appear in `input_mapping`
 |---------|--------|
 | `Ctrl+Tab` / `Ctrl+PageDown` | Switch to the tab on the right (wrapping around) |
 | `Ctrl+Shift+Tab` / `Ctrl+PageUp` | Switch to the tab on the left (wrapping around) |
+| `Ctrl+Shift+Alt+PageDown` / `Ctrl+Shift+Alt+PageUp` (Linux, Windows) / `Ctrl+Cmd+Down` / `Ctrl+Cmd+Up` (macOS) | Show the next / previous workspace of the window's daemon (`CycleWorkspace`, wrapping around) |
 | `Ctrl+Shift+G` (Linux, Windows) / `Cmd+Shift+O` (macOS) | Open the last command's output in the pager named by `command_blocks.pager` (needs a shell that marks its commands with [OSC 133](../vt-extensions/osc-133-shell-integration.md)). With nothing to open the chord is swallowed rather than sent to the shell as `^G`; on the alternate screen it goes to the application |
 | `Ctrl+Shift+L` (Linux, Windows) / `Cmd+K` (macOS) | Clear the scrollback and the screen above the current prompt (`ClearToPrompt`). On the primary screen only; with nothing to clear the chord is swallowed rather than typed |
 | `Alt+Shift+Arrow` (Linux, Windows) / `Cmd+Option+Arrow` (macOS) | Move the focus to the pane on that side. Some desktops and keyboard-layout switchers grab `Alt+Shift`; if the chord never reaches Contour, bind another one to `FocusPaneLeft`/`Right`/`Up`/`Down` in `input_mapping` |
@@ -72,6 +73,7 @@ Shift or moves, and the table says why.
 | Select tab 1…9 (`SwitchToTab`) | `Alt+1` … `Alt+9`, `Alt+0` for the tenth | `⌘1` … `⌘9` | `⌘0` resets the font size |
 | Previous / next tab | `Ctrl+PageUp` / `Ctrl+PageDown`, `Ctrl+Shift+Tab` / `Ctrl+Tab`, `Shift+←` / `Shift+→` | the same, and `⇧⌘[` / `⇧⌘]` | |
 | Move tab left / right | `Ctrl+Shift+PageUp` / `PageDown` | `⌘PageUp` / `⌘PageDown` | |
+| Previous / next workspace (`CycleWorkspace`) | `Ctrl+Shift+Alt+PageUp` / `Ctrl+Shift+Alt+PageDown` | `⌃⌘↑` / `⌃⌘↓` | `Ctrl+Alt+PageUp`/`PageDown` stay Emacs's `C-M-prior`/`C-M-next` |
 | Split side by side / stacked | `Ctrl+Shift+E` / `Ctrl+Shift+O` | `⌘D` / `⇧⌘D` | iTerm2's chords |
 | Focus the pane on that side | `Alt+Shift+Arrow` | `⌥⌘Arrow` | |
 | Swap with the pane on that side | `Ctrl+Alt+Arrow` | `⌃⌥Arrow` | |
@@ -225,8 +227,9 @@ the reason is reported on startup.
 ## Switching daemons and workspaces
 
 These actions re-point the window they fire in at another workspace or daemon (see
-[Switching a window](../persistent-sessions.md#switching-a-window)). None is bound by default; the command
-palette lists them under **Daemons**. They need a window that shows a daemon.
+[Switching a window](../persistent-sessions.md#switching-a-window)). Only `CycleWorkspace` is bound by default:
+`Ctrl+Shift+Alt+PageDown` / `PageUp` (Linux, Windows) and `⌃⌘↓` / `⌃⌘↑` (macOS) show the next / previous
+workspace, beside the tab chords one level down. The command palette lists them all under **Daemons**. They need a window that shows a daemon.
 
 | Action | Key | What it does |
 | --- | --- | --- |
@@ -241,7 +244,7 @@ palette lists them under **Daemons**. They need a window that shows a daemon.
 ```yaml
 input_mapping:
   - { mods: [Control, Alt], key: '2', action: SwitchToWorkspace, index: 2 }
-  - { mods: [Control, Alt], key: RightArrow, action: CycleWorkspace, direction: next }
+  - { mods: [Control, Shift, Alt], key: PageDown, action: CycleWorkspace, direction: next }
   - { mods: [Control, Alt, Shift], key: RightArrow, action: CycleDaemon, direction: next }
   - { mods: [Control, Alt], key: A, action: SwitchToDaemon, label: admin }
   - { mods: [Control, Alt], key: H, action: OpenDaemon, host: home }

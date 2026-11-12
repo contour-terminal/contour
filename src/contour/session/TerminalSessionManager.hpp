@@ -656,6 +656,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param action Where focus goes.
     /// @return Moved when focus changed area; Stayed otherwise, and the key then reaches the terminal.
     window::FocusMove moveChromeFocus(TerminalSession const& session, window::ChromeFocusAction action);
+    /// The window controller a sidebar action of @p session acts on.
+    /// @param session The session that received the action.
+    /// @return The controller of the window hosting @p session, or nullptr when it has none.
+    [[nodiscard]] window::WindowController* windowOf(TerminalSession const& session) const noexcept
+    {
+        return controllerHostingSession(&session);
+    }
     /// Opens the color picker for the active tab of the window hosting @p acting (a `SetTabColor`
     /// keybinding that names no color), routed exactly like beginTabTitleEdit().
     /// @param acting The session that received the keybinding; its hosting window is the target.

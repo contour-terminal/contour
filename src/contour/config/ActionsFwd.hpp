@@ -155,6 +155,16 @@ struct ZoomWindow;
 struct FocusNextArea;
 struct FocusPreviousArea;
 struct FocusToolbar;
+struct ToggleSidebar;
+struct FocusSidebar;
+struct JumpToNextAttention;
+struct MarkSeen;
+struct RenameWorkspace;
+struct MoveWorkspaceUp;
+struct MoveWorkspaceDown;
+struct CloseWorkspace;
+struct GoToPane;
+struct MoveTabToWorkspace;
 
 /// What a key, a character or a mouse button is bound to; the user's actions, one command's worth.
 ///

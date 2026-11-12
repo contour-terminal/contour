@@ -142,6 +142,31 @@ inline constexpr std::array MenuReachabilityExemptions {
                                 .reason = "moves keyboard focus into the window's chrome" },
     MenuReachabilityExemption { .action = "FocusToolbar",
                                 .reason = "moves keyboard focus into the window's chrome" },
+    MenuReachabilityExemption { .action = "FocusSidebar",
+                                .reason = "moves keyboard focus into the window's chrome" },
+    MenuReachabilityExemption {
+        .action = "JumpToNextAttention",
+        .reason = "reached from the palette and key bindings; it needs the attention ledger" },
+    MenuReachabilityExemption { .action = "MarkSeen",
+                                .reason =
+                                    "reached from the palette, key bindings and the sidebar's row menus" },
+    MenuReachabilityExemption {
+        .action = "RenameWorkspace",
+        .reason = "reached from the palette, key bindings and the sidebar's workspace menu" },
+    MenuReachabilityExemption {
+        .action = "MoveWorkspaceUp",
+        .reason = "reached from the palette, key bindings and the sidebar's workspace menu" },
+    MenuReachabilityExemption {
+        .action = "MoveWorkspaceDown",
+        .reason = "reached from the palette, key bindings and the sidebar's workspace menu" },
+    MenuReachabilityExemption { .action = "CloseWorkspace",
+                                .reason =
+                                    "reached from the sidebar's workspace menu, which asks before closing" },
+    MenuReachabilityExemption { .action = "GoToPane",
+                                .reason = "a row of the sidebar's pane menu, which knows which pane" },
+    MenuReachabilityExemption {
+        .action = "MoveTabToWorkspace",
+        .reason = "the rows of the sidebar's \"Move to Workspace\" submenu, one per workspace" },
     MenuReachabilityExemption { .action = "ClearCommandBlockFocus",
                                 .reason = "it is the Escape of a focused block, which a row would need the "
                                           "focus to run" },

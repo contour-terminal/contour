@@ -34,6 +34,7 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/ProgramName.hpp>
 #include <contour/window/TabAttention.hpp>
+#include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/FileUrl.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
@@ -7273,6 +7274,74 @@ bool TerminalSession::operator()(actions::FocusPreviousArea)
 bool TerminalSession::operator()(actions::FocusToolbar)
 {
     return _manager->moveChromeFocus(*this, window::ChromeFocusAction::Toolbar) == window::FocusMove::Moved;
+}
+
+namespace
+{
+    /// Runs @p member on the window hosting @p session, if it has one.
+    /// @return Whether there was a window to run it on.
+    template <typename... Args>
+    bool onWindowOf(TerminalSessionManager const& manager,
+                    TerminalSession const& session,
+                    void (window::WindowController::*member)(Args...),
+                    Args... args)
+    {
+        auto* const controller = manager.windowOf(session);
+        if (controller == nullptr)
+            return false;
+        (controller->*member)(args...);
+        return true;
+    }
+} // namespace
+
+bool TerminalSession::operator()(actions::ToggleSidebar)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::toggleSidebar);
+}
+
+bool TerminalSession::operator()(actions::FocusSidebar)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::focusSidebar);
+}
+
+bool TerminalSession::operator()(actions::JumpToNextAttention)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::jumpToNextAttention);
+}
+
+bool TerminalSession::operator()(actions::MarkSeen)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::markActivePaneSeen);
+}
+
+bool TerminalSession::operator()(actions::RenameWorkspace)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::renameCurrentWorkspace);
+}
+
+bool TerminalSession::operator()(actions::MoveWorkspaceUp)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::moveCurrentWorkspaceUp);
+}
+
+bool TerminalSession::operator()(actions::MoveWorkspaceDown)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::moveCurrentWorkspaceDown);
+}
+
+bool TerminalSession::operator()(actions::CloseWorkspace)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::closeCurrentWorkspace);
+}
+
+bool TerminalSession::operator()(actions::GoToPane)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::goToSidebarPane);
+}
+
+bool TerminalSession::operator()(actions::MoveTabToWorkspace const& event)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::moveActiveTabToWorkspace, event.index);
 }
 
 bool TerminalSession::operator()(actions::MoveTabTo event)

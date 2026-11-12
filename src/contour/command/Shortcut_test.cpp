@@ -288,6 +288,34 @@ TEST_CASE("a Primary row renders per platform", "[command][shortcut]")
     }
 }
 
+TEST_CASE("the palette names the workspace-cycling chords in every defaults edition", "[contour][palette]")
+{
+    using config::KeyboardPlatformKind;
+    auto const next = commandId(actions::CycleWorkspace { .direction = actions::CycleDirection::Next });
+    auto const previous =
+        commandId(actions::CycleWorkspace { .direction = actions::CycleDirection::Previous });
+    for (auto const edition: { config::DefaultsEdition::Classic, config::DefaultsEdition::Native2026 })
+    {
+        auto const spelled = [edition](KeyboardPlatformKind kind) {
+            return shortcutIndex(config::Config { .defaultsEdition = edition, .keyboardPlatformKind = kind },
+                                 shortcutStyleFor(kind));
+        };
+        for (auto const kind: { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32 })
+        {
+            auto const index = spelled(kind);
+            REQUIRE(index.contains(next));
+            REQUIRE(index.contains(previous));
+            CHECK(index.at(next) == "Ctrl+Alt+Shift+PageDown");
+            CHECK(index.at(previous) == "Ctrl+Alt+Shift+PageUp");
+        }
+        auto const mac = spelled(KeyboardPlatformKind::Mac);
+        REQUIRE(mac.contains(next));
+        REQUIRE(mac.contains(previous));
+        CHECK(mac.at(next) == "⌃⌘↓");
+        CHECK(mac.at(previous) == "⌃⌘↑");
+    }
+}
+
 TEST_CASE("shortcutIndex is the chord index rendered", "[contour][palette]")
 {
     auto const configs = std::array {

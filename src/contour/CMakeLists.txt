@@ -1614,6 +1614,7 @@ if(CONTOUR_TESTING)
         command/MenuBarTable_test.cpp
         command/MenuTree_test.cpp
         command/Shortcut_test.cpp
+        command/SidebarMenus_test.cpp
         command/TabMenus_test.cpp
         command/TitleBarContextMenu_test.cpp
         cli/AgentHookConfig_test.cpp
@@ -1693,6 +1694,7 @@ if(CONTOUR_TESTING)
         window/SecureLockPlacement_test.cpp
         window/HostChipState_test.cpp
         window/TabAttention_test.cpp
+        window/SidebarMenuState_test.cpp
         window/WorkspaceDirectory_test.cpp
         window/TabBadge_test.cpp
         window/StatusUrgency_test.cpp

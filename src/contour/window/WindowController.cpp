@@ -1473,6 +1473,7 @@ namespace
         QtChromeKeyRow { .qt = Qt::Key_Escape, .key = window::ChromeKey::Escape },
         QtChromeKeyRow { .qt = Qt::Key_Tab, .key = window::ChromeKey::Tab },
         QtChromeKeyRow { .qt = Qt::Key_Backtab, .key = window::ChromeKey::Tab },
+        QtChromeKeyRow { .qt = Qt::Key_F2, .key = window::ChromeKey::F2 },
     };
 
     [[nodiscard]] window::ChromeKey chromeKeyOf(int qtKey) noexcept
@@ -1545,7 +1546,7 @@ void WindowController::enterChromeArea(window::ChromeArea area)
 
 window::FocusMove WindowController::moveChromeFocus(window::ChromeFocusAction action)
 {
-    auto const target = window::chromeFocusTarget(action, _chromeArea, _chromePresence);
+    auto const target = window::chromeFocusTarget(action, _chromeArea, currentChromePresence());
     if (target == _chromeArea)
         return window::FocusMove::Stayed;
     enterChromeArea(target);
@@ -1576,6 +1577,14 @@ void WindowController::focusActiveDisplay()
         _activeDisplay->forceActiveFocus();
 }
 
+window::ChromeAreaPresence WindowController::currentChromePresence() const noexcept
+{
+    auto presence = _chromePresence;
+    presence.sidebar = _sidebarVisibility == config::SidebarVisibility::Shown ? window::AreaPresence::Present
+                                                                              : window::AreaPresence::Absent;
+    return presence;
+}
+
 void WindowController::setChromePresence(bool tabsShown, int toolbarItems)
 {
     _toolbarItemCount = std::max(toolbarItems, 0);
@@ -1583,7 +1592,7 @@ void WindowController::setChromePresence(bool tabsShown, int toolbarItems)
         .tabs = tabsShown ? window::AreaPresence::Present : window::AreaPresence::Absent,
         .toolbar = _toolbarItemCount > 0 ? window::AreaPresence::Present : window::AreaPresence::Absent,
     };
-    if (!window::isPresent(_chromeArea, _chromePresence))
+    if (!window::isPresent(_chromeArea, currentChromePresence()))
         leaveChrome();
     else
         clampChromeFocus();
@@ -1664,10 +1673,16 @@ bool WindowController::chromeKey(int qtKey, int qtModifiers, QString const& text
         }
     if (_chromeArea == window::ChromeArea::Terminal)
         return false;
-    auto const key = chromeKeyOf(qtKey);
+    auto key = chromeKeyOf(qtKey);
     auto const modifier = chromeModifierOf(modifiers);
-    if (window::chromeConsumes(key, modifier))
-        return runChromeCommand(window::chromeCommandFor(_chromeArea, key, modifier));
+    // Typing in the sidebar filters its tree; a character key is a key of that area alone.
+    auto const typed = text.size() == 1 && text.front().isPrint();
+    auto const plain =
+        modifier == window::ChromeKeyModifier::None || modifier == window::ChromeKeyModifier::Shift;
+    if (_chromeArea == window::ChromeArea::Sidebar && key == window::ChromeKey::Other && typed && plain)
+        key = window::ChromeKey::Printable;
+    if (window::chromeConsumes(_chromeArea, key, modifier))
+        return runChromeCommand(window::chromeCommandFor(_chromeArea, key, modifier), text);
     // Every other chord is the application's, as in the terminal: bound actions run, plain typing does not
     // reach the shell.
     if (bound == nullptr)
@@ -1677,9 +1692,16 @@ bool WindowController::chromeKey(int qtKey, int qtModifiers, QString const& text
     return activeSession()->executeBoundActions(actions) > 0;
 }
 
-bool WindowController::runChromeCommand(window::ChromeCommand command)
+bool WindowController::runChromeCommand(window::ChromeCommand command, QString const& text)
 {
     using window::ChromeCommand;
+    if (_chromeArea == window::ChromeArea::Sidebar && command != ChromeCommand::None
+        && command != ChromeCommand::Leave)
+    {
+        // The tree is QML's: it moves its own row focus, expands, renames and filters.
+        emit sidebarCommandRequested(static_cast<int>(command), text);
+        return true;
+    }
     auto const inTabs = _chromeArea == window::ChromeArea::Tabs;
     switch (command)
     {
@@ -1722,6 +1744,10 @@ bool WindowController::runChromeCommand(window::ChromeCommand command)
             return true;
         }
         case ChromeCommand::Leave: leaveChrome(); return true;
+        case ChromeCommand::Collapse:
+        case ChromeCommand::Expand:
+        case ChromeCommand::Rename:
+        case ChromeCommand::Filter: return false; // the sidebar's, handled above
     }
     return false;
 }
@@ -2968,9 +2994,58 @@ void WindowController::toggleSidebar()
                              ? config::SidebarVisibility::Hidden
                              : config::SidebarVisibility::Shown;
     rememberSidebar();
+    if (!window::isPresent(_chromeArea, currentChromePresence()))
+        leaveChrome(); // a hidden sidebar cannot hold the keyboard
     emit sidebarVisibilityChanged();
     // Hiding takes the width away and showing gives it back: Main.qml's `sidebarWidth` binding follows.
     emit sidebarWidthChanged();
+}
+
+void WindowController::focusSidebar()
+{
+    if (_sidebarVisibility != config::SidebarVisibility::Shown)
+        toggleSidebar();
+    enterChromeArea(window::ChromeArea::Sidebar);
+}
+
+void WindowController::jumpToNextAttention()
+{
+    // wired in Task 7
+}
+
+void WindowController::markActivePaneSeen()
+{
+    // wired in Task 7
+}
+
+void WindowController::renameCurrentWorkspace()
+{
+    // wired in Task 6
+}
+
+void WindowController::moveCurrentWorkspaceUp()
+{
+    // wired in Task 6
+}
+
+void WindowController::moveCurrentWorkspaceDown()
+{
+    // wired in Task 6
+}
+
+void WindowController::closeCurrentWorkspace()
+{
+    // wired in Task 6
+}
+
+void WindowController::goToSidebarPane()
+{
+    // wired in Task 6
+}
+
+void WindowController::moveActiveTabToWorkspace(uint32_t /*position*/)
+{
+    // wired in Task 6
 }
 
 void WindowController::refreshSidebarChrome()

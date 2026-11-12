@@ -318,6 +318,7 @@ namespace
             Table::command(ToggleStatusLine {}),
             windowCommand(ToggleMouseForwarding {}, "Mouse Forwarding").checkedWhen(isMouseForwarded),
             Table::command(ToggleTitleBar {}),
+            inWindow(Table::command(ToggleSidebar {}, "Show Sidebar")),
             Table::command(ToggleFullscreen {}),
             Table::separator(),
             Table::submenu("Scroll", rowsOf<scrollTemplate>),

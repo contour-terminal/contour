@@ -80,7 +80,7 @@ TEST_CASE("the chrome consumes arrows, Return, Space, Escape, Backspace and Tab,
 TEST_CASE("every key a chrome area answers is consumed", "[chromekeys]")
 {
     for (auto const& row: ChromeKeyRows)
-        CHECK(chromeConsumes(row.key, row.modifier));
+        CHECK(chromeConsumes(row.area, row.key, row.modifier));
 }
 
 TEST_CASE("focusedIndexAfter clamps and never wraps", "[chromekeys]")
@@ -117,4 +117,38 @@ TEST_CASE("closeConfirmationFor asks unless every pane is known to be idle", "[c
     CHECK(closeConfirmationFor(std::array { Unknown }) == CloseConfirmation::Ask);
     CHECK(closeConfirmationFor(std::array { Idle, Idle }) == CloseConfirmation::None);
     CHECK(closeConfirmationFor(std::array<PaneActivity, 0> {}) == CloseConfirmation::None);
+}
+
+TEST_CASE("sidebar keys map to commands", "[chromekeys]")
+{
+    constexpr auto Sidebar = ChromeArea::Sidebar;
+    CHECK(chromeCommandFor(Sidebar, ChromeKey::Up, None) == ChromeCommand::FocusPrevious);
+    CHECK(chromeCommandFor(Sidebar, ChromeKey::Down, None) == ChromeCommand::FocusNext);
+    CHECK(chromeCommandFor(Sidebar, ChromeKey::Left, None) == ChromeCommand::Collapse);
+    CHECK(chromeCommandFor(Sidebar, ChromeKey::Right, None) == ChromeCommand::Expand);
+    CHECK(chromeCommandFor(Sidebar, ChromeKey::Return, None) == ChromeCommand::Activate);
+    CHECK(chromeCommandFor(Sidebar, ChromeKey::Escape, None) == ChromeCommand::Leave);
+    CHECK(chromeCommandFor(Sidebar, ChromeKey::F2, None) == ChromeCommand::Rename);
+    CHECK(chromeCommandFor(Sidebar, ChromeKey::Printable, None) == ChromeCommand::Filter);
+    CHECK(chromeCommandFor(Sidebar, ChromeKey::Printable, Shift) == ChromeCommand::Filter);
+    CHECK(chromeCommandFor(Sidebar, ChromeKey::Printable, Other) == ChromeCommand::None);
+    CHECK(chromeCommandFor(ChromeArea::Tabs, ChromeKey::F2, None) == ChromeCommand::None);
+    CHECK(chromeCommandFor(ChromeArea::Tabs, ChromeKey::Printable, None) == ChromeCommand::None);
+}
+
+TEST_CASE("a key only one area answers is consumed in that area alone", "[chromekeys]")
+{
+    CHECK(chromeConsumes(ChromeArea::Sidebar, ChromeKey::F2, None));
+    CHECK_FALSE(chromeConsumes(ChromeArea::Tabs, ChromeKey::F2, None));
+    CHECK_FALSE(chromeConsumes(ChromeArea::Toolbar, ChromeKey::F2, None));
+    CHECK_FALSE(chromeConsumes(ChromeArea::Tabs, ChromeKey::Printable, None));
+    // Alt+character is the application's, in the sidebar too.
+    CHECK_FALSE(chromeConsumes(ChromeArea::Sidebar, ChromeKey::Printable, Alt));
+    CHECK_FALSE(chromeConsumes(ChromeArea::Sidebar, ChromeKey::Other, Alt));
+}
+
+TEST_CASE("the sidebar's filter accepts a space", "[chromekeys]")
+{
+    CHECK(chromeCommandFor(ChromeArea::Sidebar, ChromeKey::Space, None) == ChromeCommand::Filter);
+    CHECK(chromeCommandFor(ChromeArea::Tabs, ChromeKey::Space, None) == ChromeCommand::Activate);
 }

@@ -1835,6 +1835,16 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::FocusNextArea);
     bool operator()(actions::FocusPreviousArea);
     bool operator()(actions::FocusToolbar);
+    bool operator()(actions::ToggleSidebar);
+    bool operator()(actions::FocusSidebar);
+    bool operator()(actions::JumpToNextAttention);
+    bool operator()(actions::MarkSeen);
+    bool operator()(actions::RenameWorkspace);
+    bool operator()(actions::MoveWorkspaceUp);
+    bool operator()(actions::MoveWorkspaceDown);
+    bool operator()(actions::CloseWorkspace);
+    bool operator()(actions::GoToPane);
+    bool operator()(actions::MoveTabToWorkspace const& event);
     bool operator()(actions::SpeakSelection);
     bool operator()(actions::StopSpeaking);
     bool operator()(actions::SetTabBarVisibility);

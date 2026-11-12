@@ -222,6 +222,16 @@ struct ZoomWindow{};          // maximize this window, or restore it from maximi
 struct FocusNextArea{};       // move keyboard focus to the next of terminal, tabs and toolbar
 struct FocusPreviousArea{};   // move keyboard focus to the previous of terminal, tabs and toolbar
 struct FocusToolbar{};        // move keyboard focus to the window's toolbar
+struct ToggleSidebar{};       // show the workspace sidebar when it is hidden, hide it when it is shown
+struct FocusSidebar{};        // show the workspace sidebar if needed and move keyboard focus into it
+struct JumpToNextAttention{}; // show the next pane that needs you
+struct MarkSeen{};            // mark the active pane's output as seen
+struct RenameWorkspace{};     // rename the current workspace inline
+struct MoveWorkspaceUp{};     // move the current workspace one place up in the list
+struct MoveWorkspaceDown{};   // move the current workspace one place down in the list
+struct CloseWorkspace{};      // close the current workspace, asking first
+struct GoToPane{};            // show the pane a sidebar row names and focus it
+struct MoveTabToWorkspace{ uint32_t index = 0; }; // move the current tab into the Nth (1-based) workspace
 // clang-format on
 
 /// The variant of every action alternative, listed once; Action is a class over it.
@@ -356,6 +366,16 @@ using ActionVariant = std::variant<CancelSelection,
                                    FocusNextArea,
                                    FocusPreviousArea,
                                    FocusToolbar,
+                                   ToggleSidebar,
+                                   FocusSidebar,
+                                   JumpToNextAttention,
+                                   MarkSeen,
+                                   RenameWorkspace,
+                                   MoveWorkspaceUp,
+                                   MoveWorkspaceDown,
+                                   CloseWorkspace,
+                                   GoToPane,
+                                   MoveTabToWorkspace,
                                    SwitchToWorkspace,
                                    OpenWorkspace,
                                    CycleWorkspace,
@@ -510,6 +530,13 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     ToggleSplitOrientation,
                                                     TogglePaneZoom,
                                                     NewWorkspace,
+                                                    CloseWorkspace,
+                                                    RenameWorkspace,
+                                                    MoveWorkspaceUp,
+                                                    MoveWorkspaceDown,
+                                                    MoveTabToWorkspace,
+                                                    ToggleSidebar,
+                                                    JumpToNextAttention,
                                                     LaunchLayout,
                                                     SaveLayout,
                                                     AttachToHost,
@@ -580,7 +607,7 @@ concept DaemonActionConcept = core::oneOf<T,
 /// stays in the list — a nameless "launch which layout?" has no default; its per-name rows already
 /// reach the palette through the saved-layout source. AttachToHost likewise, through the saved-host source.
 /// SwitchToWorkspace, SwitchToDaemon and OpenDaemon likewise name nothing bare; their rows come from the
-/// daemon source.
+/// daemon source. GoToPane names no pane bare: it is a row of the sidebar's pane menu, which knows which.
 template <typename T>
 concept ParameterizedActionConcept = core::oneOf<T,
                                                  ChangeProfile,
@@ -595,6 +622,8 @@ concept ParameterizedActionConcept = core::oneOf<T,
                                                  AttachToHost,
                                                  SwitchToWorkspace,
                                                  OpenWorkspace,
+                                                 MoveTabToWorkspace,
+                                                 GoToPane,
                                                  SwitchToDaemon,
                                                  OpenDaemon,
                                                  ToggleFoldAt>;
@@ -836,6 +865,31 @@ namespace documentation
         "Moves keyboard focus to the previous area of the window: terminal, toolbar, tabs, and back."
     };
     constexpr inline std::string_view FocusToolbar { "Moves keyboard focus to the window's toolbar." };
+    constexpr inline std::string_view ToggleSidebar {
+        "Shows the workspace sidebar when it is hidden, and hides it when it is shown."
+    };
+    constexpr inline std::string_view FocusSidebar {
+        "Moves keyboard focus into the workspace sidebar, showing it first when it is hidden."
+    };
+    constexpr inline std::string_view JumpToNextAttention {
+        "Shows the next pane that needs you: one that waits for input, or whose command failed."
+    };
+    constexpr inline std::string_view MarkSeen { "Marks the output of the active pane as seen." };
+    constexpr inline std::string_view RenameWorkspace { "Renames the current workspace inline." };
+    constexpr inline std::string_view MoveWorkspaceUp {
+        "Moves the current workspace one place up in the sidebar's list."
+    };
+    constexpr inline std::string_view MoveWorkspaceDown {
+        "Moves the current workspace one place down in the sidebar's list."
+    };
+    constexpr inline std::string_view CloseWorkspace {
+        "Closes the current workspace and everything in it, after asking. The last workspace of a window "
+        "that runs its sessions in-process cannot be closed."
+    };
+    constexpr inline std::string_view GoToPane { "Shows the pane a sidebar row names and focuses it." };
+    constexpr inline std::string_view MoveTabToWorkspace {
+        "Moves the current tab into the workspace at the 1-based position `index` of this window's list."
+    };
     constexpr inline std::string_view SetTabBarVisibility {
         "Sets when this window's tab bar is shown (mode: always, never or multiple). Applies to this "
         "window until it is closed; the settings page is where the choice is made permanent."

@@ -209,7 +209,8 @@ A window shows one workspace of one daemon, over a connection of its own: each w
 connection, so a window on a remote host does not tie up, or depend on, the other windows. You can point a
 window somewhere else without closing it, and its panes are swapped in place:
 
-- **To another workspace of the same daemon**, with `SwitchToWorkspace` or `CycleWorkspace`.
+- **To another workspace of the same daemon**, with `SwitchToWorkspace` or `CycleWorkspace`
+  (`Ctrl+Shift+Alt+PageDown` / `PageUp`, `⌃⌘↓` / `⌃⌘↑` on macOS, for the next / previous one).
 - **To another daemon**: a local one by its label (`contour daemon --label`), or a saved
   [host](remote-hosts.md), with `SwitchToDaemon` or `CycleDaemon`. The window lands on that
   daemon's only workspace, on a new one when it has none, and asks which when it has several. A workspace
