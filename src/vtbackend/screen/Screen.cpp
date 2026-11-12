@@ -2257,11 +2257,19 @@ void Screen::copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int
 
     // The copy is truncated at the target page's edge: an area that would not fit copies only the part
     // that does. Copying every cell the source names would run the write past the end of a line.
+    //
+    // And at the source page's edge, for the same reason on the reading side. The two are not the
+    // same size as a matter of course: a resize reaches only the page the cursor is on, and every
+    // other page keeps its old size until the cursor moves to it, so an area the caller clamped to
+    // the current page can name cells the source page does not have.
+    auto const sourcePageSize = srcGrid.pageSize();
     auto const targetPageSize = dstGrid.pageSize();
-    auto const height =
-        std::min(*sourceArea.bottom - *sourceArea.top + 1, unbox(targetPageSize.lines) - *targetTopLeft.line);
-    auto const width = std::min(*sourceArea.right - *sourceArea.left + 1,
-                                unbox(targetPageSize.columns) - *targetTopLeft.column);
+    auto const height = std::min({ *sourceArea.bottom - *sourceArea.top + 1,
+                                   unbox(sourcePageSize.lines) - *sourceArea.top,
+                                   unbox(targetPageSize.lines) - *targetTopLeft.line });
+    auto const width = std::min({ *sourceArea.right - *sourceArea.left + 1,
+                                  unbox(sourcePageSize.columns) - *sourceArea.left,
+                                  unbox(targetPageSize.columns) - *targetTopLeft.column });
     if (height <= 0 || width <= 0)
         return;
 
