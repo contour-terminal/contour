@@ -70,8 +70,8 @@ env:
 # leg) plus the guard builds, the lint jobs and clang-tidy on the changed lines. Everything else --
 # the other compiler legs, packaging, valgrind, conformance, bench, notcurses -- runs on master
 # pushes, in the merge queue and on release tags, through `if: github.event_name != 'pull_request'`.
-# That includes FreeBSD, which nothing exempts a release tag from. The full-tree clang-tidy runs on the
-# same events but in a workflow of its own (clang-tidy.yml), so that its hours do not hold this one. The
+# That includes FreeBSD, which nothing exempts a release tag from. The full-tree clang-tidy runs
+# nightly and on release tags, in a workflow of its own (clang-tidy.yml). The
 # static build (`github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')`) runs on
 # master and release tags and never in the merge queue. The release-only jobs use
 # `startsWith(github.ref, 'refs/tags/v')`. The daemon packages: the Debian one
