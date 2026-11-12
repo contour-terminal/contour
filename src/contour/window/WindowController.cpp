@@ -1322,9 +1322,7 @@ void WindowController::dropNodeOnTab(int tabIndex, QString const& nodePayload)
     if (tab == nullptr || drag == nullptr
         || _manager.moveRefusalIn(*drag, _displayed, MovePlace::OnTab) != MoveRefusal::None)
         return;
-    placeNode(*drag,
-              vtworkspace::EdgeTarget { .pane = tab->activePane()->session(),
-                                        .side = vtworkspace::SplitSide::Right });
+    placeNode(*drag, vtworkspace::TabTarget { .workspace = _displayed, .tab = tab->id() });
 }
 
 void WindowController::dropNodeInGap(int index, QString const& nodePayload)

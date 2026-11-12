@@ -534,6 +534,47 @@ struct MoveTabRequest
         0; ///< Its place among that workspace's tabs, counted from 1; clamped. 0 (a missing key) is refused.
 };
 
+/// Where `pane.move` takes a pane.
+enum class PaneDestination : uint8_t
+{
+    Tab = 0,      ///< Into another tab, as a split beside its active pane.
+    Workspace,    ///< Into a workspace, as a tab of its own.
+    NewWorkspace, ///< Into a new workspace, as its only tab.
+};
+
+template <>
+struct EnumTable<PaneDestination>
+{
+    static constexpr std::array Rows {
+        EnumName { PaneDestination::Tab, "tab" },
+        EnumName { PaneDestination::Workspace, "workspace" },
+        EnumName { PaneDestination::NewWorkspace, "newWorkspace" },
+    };
+};
+
+/// `pane.move` request.
+struct MovePaneRequest
+{
+    using ApiRecordTag = void;
+
+    std::string pane {};                       ///< The pane to move.
+    PaneDestination to = PaneDestination::Tab; ///< Where it goes.
+    std::string toTab {};                      ///< `tab`: the tab it joins; empty for the caller's.
+    std::string toWorkspace {}; ///< `workspace`: the workspace it joins; empty for the caller's.
+    /// `workspace`: its place among that workspace's tabs, counted from 1 and clamped, as `tab.move` counts;
+    /// none (a missing key) is the end, and 0 is a bad request.
+    std::optional<uint32_t> toPosition {};
+};
+
+/// `pane.move` reply: where the pane is now.
+struct MovePaneReply
+{
+    using ApiRecordTag = void;
+
+    std::string workspace {}; ///< The workspace holding it.
+    std::string tab {};       ///< The tab holding it.
+};
+
 /// `workspace.switch` request: where one window should go.
 struct SwitchWorkspaceRequest
 {

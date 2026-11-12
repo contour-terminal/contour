@@ -230,6 +230,25 @@ interface types {
         to-position: u32,
     }
 
+    enum pane-destination {
+        tab,
+        workspace,
+        new-workspace,
+    }
+
+    record move-pane-request {
+        pane: string,
+        to: pane-destination,
+        to-tab: string,
+        to-workspace: string,
+        to-position: option<u32>,
+    }
+
+    record move-pane-reply {
+        workspace: string,
+        tab: string,
+    }
+
     record set-label-request {
         object: string,
         label: string,
@@ -342,6 +361,8 @@ interface control {
         close-workspace-request,
         move-workspace-request,
         move-tab-request,
+        move-pane-request,
+        move-pane-reply,
         set-label-request,
         report-status-request,
         clear-status-request,
@@ -406,6 +427,10 @@ interface control {
     /// Move a tab to a position in a workspace, which may be another one; its panes keep running.
     /// Needs `write`.
     tab-move: func(request: move-tab-request) -> result<_, control-error>;
+
+    /// Move a pane into another tab as a split, into a workspace as a tab of its own, or into a new workspace; it keeps running.
+    /// Needs `write`.
+    pane-move: func(request: move-pane-request) -> result<move-pane-reply, control-error>;
 
     /// Give a workspace, tab or pane a label to address it by; an empty label clears it.
     /// Needs `write`.

@@ -343,6 +343,16 @@ inline constexpr auto Methods = std::tuple {
         R"({"tab":"logs","toWorkspace":"build","toPosition":1})",
         R"({})",
     },
+    Method<MovePaneRequest, MovePaneReply> {
+        "pane.move",
+        "Move a pane into another tab as a split, into a workspace as a tab of its own, or into a new "
+        "workspace; "
+        "it keeps running.",
+        Permission::Write,
+        Exposure::Everywhere,
+        R"({"pane":"logs","to":"tab","toTab":"build","toWorkspace":""})",
+        R"({"workspace":"workspace:018f3c4e-9a1b-7c2d-8e3f-0123456789ab","tab":"tab:018f3c4e-9a1b-7c2d-8e3f-0123456789ac"})",
+    },
     Method<SwitchWorkspaceRequest, SwitchWorkspaceReply> {
         "workspace.switch",
         "Ask one window to switch to another workspace or daemon.",

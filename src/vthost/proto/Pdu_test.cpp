@@ -2286,7 +2286,9 @@ TEST_CASE("MoveNode round-trips for every target kind and carries bytes no enume
         .sourceKind = 1, .sourceSessions = { 4, 5, 6 }, .targetKind = 2, .targetSession = 9, .index = 300
     };
     auto const newWorkspace = MoveNode { .sourceKind = 1, .sourceSessions = { 4, 5 }, .targetKind = 3 };
-    for (auto const& move: { edge, swap, well, newWorkspace })
+    auto const tab =
+        MoveNode { .sourceKind = 0, .sourceSessions = { 4 }, .targetKind = 4, .targetSession = 9 };
+    for (auto const& move: { edge, swap, well, newWorkspace, tab })
         CHECK(roundTrip(DecodedPdu { move }) == DecodedPdu { move });
     auto const unknown = MoveNode { .sourceKind = 0xEE,
                                     .sourceSessions = {},

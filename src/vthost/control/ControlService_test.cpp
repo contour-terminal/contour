@@ -922,6 +922,13 @@ namespace
                                                       .uuid = *h.host.objects().uuidOf(workspace) });
 }
 
+/// @return The id the control API gives the daemon's tab @p tab.
+[[nodiscard]] std::string tabIdOf(ControlHarness& h, vtworkspace::TabId tab)
+{
+    return vtcontrol::toString(
+        vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Tab, .uuid = *h.host.objects().uuidOf(tab) });
+}
+
 /// @return The workspaces of @p h's model, in order, by id.
 [[nodiscard]] std::vector<uint64_t> workspaceOrderOf(ControlHarness& h)
 {
@@ -1188,6 +1195,121 @@ TEST_CASE("tab.move moves a tab into a workspace, or within its own", "[vthost][
             h.service,
             h.context,
             vtcontrol::MoveTabRequest { .tab = secondTab->tab, .toWorkspace = "nowhere", .toPosition = 1 });
+        REQUIRE_FALSE(missing.has_value());
+        CHECK(missing.error().code == ControlErrorCode::NotFound);
+    }
+}
+
+TEST_CASE("pane.move moves a pane into a tab, a workspace or a new workspace", "[vthost][control][write]")
+{
+    auto h = ControlHarness {};
+    auto const anchor = h.openTab();
+    auto const split = callSync<vtcontrol::SplitReply>(
+        h.service, h.context, vtcontrol::SplitRequest { .pane = h.paneId(anchor) });
+    REQUIRE(split.has_value());
+    auto const other =
+        callSync<vtcontrol::CreateWorkspaceReply>(h.service, h.context, vtcontrol::CreateWorkspaceRequest {});
+    REQUIRE(other.has_value());
+    auto& model = h.host.model();
+    auto const* const first = model.workspaceAt(0);
+    auto const* const target = model.workspaceAt(1);
+    REQUIRE(first->activeTab()->paneCount() == 2);
+
+    SECTION("into another workspace's tab, as a split")
+    {
+        auto const moved = callSync<vtcontrol::MovePaneReply>(
+            h.service,
+            h.context,
+            vtcontrol::MovePaneRequest {
+                .pane = split->pane, .to = vtcontrol::PaneDestination::Tab, .toTab = other->tab });
+        REQUIRE(moved.has_value());
+        CHECK(moved->tab == other->tab);
+        CHECK(moved->workspace == other->workspace);
+        CHECK(first->activeTab()->paneCount() == 1);
+        CHECK(target->activeTab()->paneCount() == 2);
+    }
+    SECTION("into a workspace, as a tab of its own at the end")
+    {
+        auto const moved = callSync<vtcontrol::MovePaneReply>(
+            h.service,
+            h.context,
+            vtcontrol::MovePaneRequest { .pane = split->pane,
+                                         .to = vtcontrol::PaneDestination::Workspace,
+                                         .toWorkspace = other->workspace });
+        REQUIRE(moved.has_value());
+        CHECK(moved->workspace == other->workspace);
+        REQUIRE(target->tabCount() == 2);
+        CHECK(target->tabAt(1)->paneCount() == 1);
+        CHECK(first->activeTab()->paneCount() == 1);
+    }
+    SECTION("into a workspace at a place counted from 1; place 0 is a bad request, as tab.move has it")
+    {
+        auto const refused = callSync<vtcontrol::MovePaneReply>(
+            h.service,
+            h.context,
+            vtcontrol::MovePaneRequest { .pane = split->pane,
+                                         .to = vtcontrol::PaneDestination::Workspace,
+                                         .toWorkspace = other->workspace,
+                                         .toPosition = 0 });
+        REQUIRE_FALSE(refused.has_value());
+        CHECK(refused.error().code == ControlErrorCode::BadRequest);
+        CHECK(first->activeTab()->paneCount() == 2);
+
+        auto const moved = callSync<vtcontrol::MovePaneReply>(
+            h.service,
+            h.context,
+            vtcontrol::MovePaneRequest { .pane = split->pane,
+                                         .to = vtcontrol::PaneDestination::Workspace,
+                                         .toWorkspace = other->workspace,
+                                         .toPosition = 1 });
+        REQUIRE(moved.has_value());
+        REQUIRE(target->tabCount() == 2);
+        CHECK(target->tabAt(0)->paneCount() == 1);
+        CHECK(moved->tab == tabIdOf(h, target->tabAt(0)->id()));
+    }
+    SECTION("into a new workspace")
+    {
+        auto const workspaces = model.workspaceCount();
+        auto const moved = callSync<vtcontrol::MovePaneReply>(
+            h.service,
+            h.context,
+            vtcontrol::MovePaneRequest { .pane = split->pane,
+                                         .to = vtcontrol::PaneDestination::NewWorkspace });
+        REQUIRE(moved.has_value());
+        CHECK(model.workspaceCount() == workspaces + 1);
+        CHECK(moved->workspace != other->workspace);
+    }
+    SECTION("the last pane of a workspace's last tab empties it, and it goes")
+    {
+        auto const workspaces = model.workspaceCount();
+        auto const moved = callSync<vtcontrol::MovePaneReply>(
+            h.service,
+            h.context,
+            vtcontrol::MovePaneRequest { .pane = other->pane,
+                                         .to = vtcontrol::PaneDestination::Tab,
+                                         .toTab = tabIdOf(h, first->activeTab()->id()) });
+        REQUIRE(moved.has_value());
+        CHECK(model.workspaceCount() == workspaces - 1);
+        CHECK(first->activeTab()->paneCount() == 3);
+    }
+    SECTION("into its own tab is refused, and changes nothing")
+    {
+        auto const refused = callSync<vtcontrol::MovePaneReply>(
+            h.service,
+            h.context,
+            vtcontrol::MovePaneRequest { .pane = split->pane,
+                                         .to = vtcontrol::PaneDestination::Tab,
+                                         .toTab = tabIdOf(h, first->activeTab()->id()) });
+        REQUIRE_FALSE(refused.has_value());
+        CHECK(refused.error().code == ControlErrorCode::Failed);
+        CHECK(first->activeTab()->paneCount() == 2);
+    }
+    SECTION("a pane nobody has is not found")
+    {
+        auto const missing = callSync<vtcontrol::MovePaneReply>(
+            h.service,
+            h.context,
+            vtcontrol::MovePaneRequest { .pane = "nowhere", .to = vtcontrol::PaneDestination::NewWorkspace });
         REQUIRE_FALSE(missing.has_value());
         CHECK(missing.error().code == ControlErrorCode::NotFound);
     }

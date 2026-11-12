@@ -29,7 +29,7 @@ bool isMethodName(std::string_view name)
 
 TEST_CASE("every catalog row is unique and its examples decode", "[vtcontrol][catalog]")
 {
-    STATIC_REQUIRE(std::tuple_size_v<decltype(vtcontrol::Methods)> == 25);
+    STATIC_REQUIRE(std::tuple_size_v<decltype(vtcontrol::Methods)> == 26);
 
     auto names = std::set<std::string_view> {};
     std::apply(
@@ -53,7 +53,7 @@ TEST_CASE("every catalog row is unique and its examples decode", "[vtcontrol][ca
                 ...);
         },
         vtcontrol::Methods);
-    CHECK(names.size() == 25);
+    CHECK(names.size() == 26);
 }
 
 TEST_CASE("daemon.upgrade needs write and is for sockets only", "[vtcontrol][catalog]")
@@ -99,6 +99,11 @@ TEST_CASE("the workspace and tab mutations need write", "[vtcontrol][catalog]")
     STATIC_REQUIRE(Rename.permission == vtcontrol::Permission::Write);
     STATIC_REQUIRE(MoveWorkspace.permission == vtcontrol::Permission::Write);
     STATIC_REQUIRE(MoveTab.permission == vtcontrol::Permission::Write);
+    constexpr auto MovePane =
+        std::get<vtcontrol::Method<vtcontrol::MovePaneRequest, vtcontrol::MovePaneReply>>(vtcontrol::Methods);
+    STATIC_REQUIRE(MovePane.name == "pane.move");
+    STATIC_REQUIRE(MovePane.permission == vtcontrol::Permission::Write);
+    STATIC_REQUIRE(MovePane.exposure == MoveTab.exposure);
 }
 
 TEST_CASE("permissions and exposures are spelled by their tables", "[vtcontrol][catalog]")

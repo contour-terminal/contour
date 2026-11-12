@@ -54,8 +54,19 @@ struct NewWorkspaceTarget
 {
 };
 
+/// Drop onto a tab as a whole: the source joins it as a split, beside its active pane on JoinTabSide.
+struct TabTarget
+{
+    WorkspaceId workspace; //!< The workspace holding the tab.
+    TabId tab;             //!< The tab the source joins.
+};
+
+/// The side of a tab's active pane that a node joining the tab (TabTarget) lands on: where a drop on a tab of
+/// the tab strip has always put it.
+inline constexpr SplitSide JoinTabSide = SplitSide::Right;
+
 /// Where the source is dropped.
-using MoveTarget = std::variant<EdgeTarget, SwapTarget, TabWellTarget, NewWorkspaceTarget>;
+using MoveTarget = std::variant<EdgeTarget, SwapTarget, TabWellTarget, NewWorkspaceTarget, TabTarget>;
 
 /// Wire/host-facing names of the MoveSource alternatives, shared by vthost and contour.
 enum class MoveSourceKind : uint8_t
@@ -71,6 +82,7 @@ enum class MoveTargetKind : uint8_t
     Swap,
     TabWell,
     NewWorkspace,
+    Tab, //!< TabTarget: the wire names the tab by any session of it.
 };
 
 /// Why SessionModel::moveNode refused. On any of these the model is untouched and no event fired.

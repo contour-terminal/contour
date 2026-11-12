@@ -63,6 +63,7 @@ struct FakeControlApi final: public ControlApi
     void handle(CallContext& /*context*/, CloseWorkspaceRequest const& request, Completion<EmptyReply> done) override { lastCloseWorkspace = request; done(EmptyReply {}); }
     void handle(CallContext& /*context*/, MoveWorkspaceRequest const& request, Completion<EmptyReply> done) override { lastMoveWorkspace = request; done(EmptyReply {}); }
     void handle(CallContext& /*context*/, MoveTabRequest const& request, Completion<EmptyReply> done) override { lastMoveTab = request; done(EmptyReply {}); }
+    void handle(CallContext& /*context*/, MovePaneRequest const& request, Completion<MovePaneReply> done) override { lastMovePane = request; done(MovePaneReply {}); }
     void handle(CallContext& /*context*/, SwitchWorkspaceRequest const& request, Completion<SwitchWorkspaceReply> done) override { lastSwitchWorkspace = request; if (switchWorkspaceFailure) done(std::unexpected(*switchWorkspaceFailure)); else done(switchWorkspaceReply); }
     void handle(CallContext& /*context*/, SetLabelRequest const& request, Completion<EmptyReply> done) override { lastSetLabel = request; done(EmptyReply {}); }
     void handle(CallContext& /*context*/, ReportStatusRequest const& request, Completion<EmptyReply> done) override { lastReportStatus = request; done(EmptyReply {}); }
@@ -105,6 +106,7 @@ struct FakeControlApi final: public ControlApi
     std::optional<CloseWorkspaceRequest> lastCloseWorkspace;
     std::optional<MoveWorkspaceRequest> lastMoveWorkspace;
     std::optional<MoveTabRequest> lastMoveTab;
+    std::optional<MovePaneRequest> lastMovePane;
     std::optional<SplitRequest> lastSplit;
     std::optional<SendRequest> lastSend;
     std::optional<ReportStatusRequest> lastReportStatus;

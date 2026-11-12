@@ -802,6 +802,28 @@ TEST_CASE("the workspace and tab verbs build their requests", "[contour][cli][co
               vtcontrol::MoveTabRequest { .tab = "logs", .toWorkspace = "w2", .toPosition = 1 }) },
         { "tab.move", { "tab", "move", "logs", "--workspace", "w2" }, std::nullopt },
         { "tab.move", { "tab", "move", "--to", "1" }, std::nullopt },
+        { "pane.move",
+          { "pane", "move", "--tab", "build", "logs" },
+          vtcontrol::encodeJson(vtcontrol::MovePaneRequest {
+              .pane = "logs", .to = vtcontrol::PaneDestination::Tab, .toTab = "build" }) },
+        { "pane.move",
+          { "pane", "move", "--workspace", "w2", "--to", "3", "logs" },
+          vtcontrol::encodeJson(vtcontrol::MovePaneRequest { .pane = "logs",
+                                                             .to = vtcontrol::PaneDestination::Workspace,
+                                                             .toWorkspace = "w2",
+                                                             .toPosition = 3 }) },
+        { "pane.move",
+          { "pane", "move", "--new-workspace", "logs" },
+          vtcontrol::encodeJson(vtcontrol::MovePaneRequest {
+              .pane = "logs", .to = vtcontrol::PaneDestination::NewWorkspace }) },
+        { "pane.move", { "pane", "move", "logs" }, std::nullopt },
+        { "pane.move", { "pane", "move", "--tab", "a", "--new-workspace", "logs" }, std::nullopt },
+        { "pane.move", { "pane", "move", "--tab", "a", "--to", "2", "logs" }, std::nullopt },
+        // Positions count from 1, as the API's do: 0 is no position, not the end.
+        { "pane.move", { "pane", "move", "--workspace", "w2", "--to", "0", "logs" }, std::nullopt },
+        { "pane.move", { "pane", "move", "--workspace", "w2", "--to", "two", "logs" }, std::nullopt },
+        { "pane.move", { "pane", "move", "--workspace", "w2", "--to", "3x", "logs" }, std::nullopt },
+        { "pane.move", { "pane", "move", "--tab", "a" }, std::nullopt },
     };
     for (auto const& row: rows)
     {

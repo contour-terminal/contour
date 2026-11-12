@@ -1586,21 +1586,21 @@ struct TabMergeRefused
 };
 
 /// Client→server (Capability::MoveNode): move a pane or a whole tab to an edge of a pane, onto a pane (swap),
-/// into a workspace's tab well or into a new workspace. Nothing is spawned or closed: every session keeps
-/// running. Both ends are named by session, like every other client→server layout verb, because tab and pane
-/// ids are minted per model and the two ends have their own. A move the daemon performs is answered by the
-/// layout pushes to every attached client alone.
+/// into another tab as a split, into a workspace's tab well or into a new workspace. Nothing is spawned or
+/// closed: every session keeps running. Both ends are named by session, like every other client→server layout
+/// verb, because tab and pane ids are minted per model and the two ends have their own. A move the daemon
+/// performs is answered by the layout pushes to every attached client alone.
 struct MoveNode
 {
     uint8_t sourceKind = 0; ///< A vtworkspace::MoveSourceKind as the wire spells it.
     /// A pane source: its session. A tab source: EVERY session of the tab as the client sees it, the first
     /// naming the tab; the daemon refuses a request whose sessions are not exactly the tab's now.
     std::vector<uint64_t> sourceSessions = {};
-    uint8_t targetKind = 0; ///< A vtworkspace::MoveTargetKind as the wire spells it.
-    uint64_t targetSession =
-        0;              ///< Edge/swap: the pane. Tab well: any session of the workspace. New workspace: 0.
-    uint8_t side = 0;   ///< Edge only: a vtworkspace::SplitSide as the wire spells it.
-    uint64_t index = 0; ///< Tab well only: the position among the workspace's tabs.
+    uint8_t targetKind = 0;     ///< A vtworkspace::MoveTargetKind as the wire spells it.
+    uint64_t targetSession = 0; ///< Edge/swap: the pane. Tab: any session of the tab. Tab well: any session
+                                ///< of the workspace. New: 0.
+    uint8_t side = 0;           ///< Edge only: a vtworkspace::SplitSide as the wire spells it.
+    uint64_t index = 0;         ///< Tab well only: the position among the workspace's tabs.
     bool operator==(MoveNode const&) const = default;
 };
 

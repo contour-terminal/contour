@@ -28,6 +28,7 @@
 #include <vthost/control/BlockWaiters.hpp>
 #include <vthost/control/EventHub.hpp>
 #include <vtworkspace/ModelEvents.hpp>
+#include <vtworkspace/Move.hpp>
 #include <vtworkspace/Primitives.hpp>
 
 namespace vthost::control
@@ -110,6 +111,7 @@ class ControlService final:
     void handle(vtcontrol::CallContext& context, vtcontrol::CloseWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::MoveWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::MoveTabRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::MovePaneRequest const& request, vtcontrol::Completion<vtcontrol::MovePaneReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::SwitchWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::SwitchWorkspaceReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::SetLabelRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ReportStatusRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
@@ -203,6 +205,13 @@ class ControlService final:
     /// The tab a call is about: @p spec, else the caller pane's tab.
     [[nodiscard]] std::expected<vtworkspace::TabId, vtcontrol::ControlError> resolveTab(
         vtcontrol::CallContext const& context, std::string_view spec) const;
+
+    /// Where a `pane.move` takes its pane, as the model names it.
+    /// @param context The call.
+    /// @param request The request.
+    /// @return The target, or `NotFound` naming the tab or workspace it asked for.
+    [[nodiscard]] std::expected<vtworkspace::MoveTarget, vtcontrol::ControlError> paneDestination(
+        vtcontrol::CallContext const& context, vtcontrol::MovePaneRequest const& request) const;
 
     /// The workspace a call is about: @p spec, else the caller pane's workspace, else the host's.
     [[nodiscard]] std::expected<vtworkspace::WorkspaceId, vtcontrol::ControlError> resolveWorkspace(

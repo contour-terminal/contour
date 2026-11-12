@@ -45,6 +45,7 @@ pane.
 | `contour workspace close WORKSPACE` | Closes a workspace with all its tabs and panes, and ends their shells. Whatever it holds at that moment goes, in one step, and the workspace is removed. The daemon's last workspace cannot be closed. |
 | `contour workspace move --to N WORKSPACE` | Moves a workspace to position `N` of the workspace order, counted from 1 as `contour ls` lists them; a position past the end puts it last. |
 | `contour tab move [--workspace W] --to N TAB` | Moves a tab to position `N` of a workspace, counted from 1: another workspace to take it there, its own to reorder it. Its panes keep running, and a workspace left without tabs is closed. Without `--workspace`, the calling pane's workspace. |
+| `contour pane move (--tab T \| --workspace W [--to N] \| --new-workspace) PANE` | Moves a pane: into tab `T` as a split beside its active pane, into workspace `W` as a tab of its own (at position `N`, counted from 1, or last), or into a new workspace. It keeps running; a tab or a workspace left empty is closed. Prints the workspace it is in now. |
 | `contour block list [--pane P] [--limit N]` | Lists a pane's recent command blocks, newest first: `id  exit  duration  command`. |
 | `contour block read [BLOCK] [--pane P] [--prompt \| --output]` | Prints a block's text; without `BLOCK`, the pane's last finished block. With neither flag, the prompt and then the output. |
 | `contour switch [--workspace W] (--to-label L \| --to-host H \| --to-workspace W2) [--to-workspace W2]` | Asks one window to switch to another workspace or daemon, in place. See [Switching a window](#switching-a-window). |
@@ -89,7 +90,10 @@ A bare word (`--daemon homepc`) names a saved host of the configuration's `hosts
 The workspaces are listed in an order the user can change, and `workspace.list` reports it as each workspace's
 `position` (from 1). `workspace.move` changes it, and a workspace addressed by its position (`contour ls
 --workspace 2`) means the one that holds that place now. `tab.move` is to tabs what `workspace.move` is to
-workspaces, and moves a tab between workspaces as well.
+workspaces, and moves a tab between workspaces as well. `pane.move` moves one pane out of its tab: into another
+tab as a split beside that tab's active pane (on the side a drop on a tab takes), into a workspace as a tab of its
+own, or into a new workspace, which it replies with. Its own tab, or a new workspace for a workspace's only pane,
+is refused as `failed`, and changes nothing.
 
 | Method | Request | Grant |
 | --- | --- | --- |
@@ -98,9 +102,11 @@ workspaces, and moves a tab between workspaces as well.
 | `workspace.close` | `{"workspace":"build"}` | `write` |
 | `workspace.move` | `{"workspace":"build","toPosition":1}` | `write` |
 | `tab.move` | `{"tab":"logs","toWorkspace":"build","toPosition":1}` | `write` |
+| `pane.move` | `{"pane":"logs","to":"tab","toTab":"build"}`; `to` is `tab`, `workspace` (with `toWorkspace` and an optional `toPosition`) or `newWorkspace` | `write` |
 
 `workspace.create` replies with the `workspace`, `tab` and `pane` ids. `workspace.rename` is `object.setLabel`
-on a workspace and publishes the same `workspace.labelChanged` event. A `toPosition` of `0`, which a missing key reads as, is a bad request,
+on a workspace and publishes the same `workspace.labelChanged` event. A `toPosition` of `0`, which a missing key reads as, is a bad request
+(in `pane.move` too, where a missing key is the end instead),
 one past the end is clamped, and a target no object matches is `notFound`. `contour api describe NAME` prints
 the schemas and an example of each.
 

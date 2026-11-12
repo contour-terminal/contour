@@ -3563,6 +3563,8 @@ std::expected<vtworkspace::MoveResult, vtworkspace::MoveError> TerminalSessionMa
                 return std::nullopt;
         },
         target);
+    // A pane joining a tab lands beside that tab's active pane: the tab is known by name.
+    auto const* const joined = std::get_if<vtworkspace::TabTarget>(&target);
     auto const* const paneSource = std::get_if<vtworkspace::PaneSource>(&source);
     // What the entries said before, so a refused move puts them back.
     auto previous = std::vector<std::pair<uint64_t, std::optional<vtworkspace::TabId>>> {};
@@ -3581,6 +3583,8 @@ std::expected<vtworkspace::MoveResult, vtworkspace::MoveError> TerminalSessionMa
                 index(*paneTarget, sourceTab->id());
             index(paneSource->session, targetTab->id());
         }
+    if (joined != nullptr && paneSource != nullptr)
+        index(paneSource->session, joined->tab);
 
     auto const carriedSessions = std::visit(
         [this](auto const& named) -> std::vector<vtworkspace::SessionId> {
@@ -3852,6 +3856,21 @@ std::optional<TerminalSessionManager::DescribedTarget> TerminalSessionManager::d
                                                             : std::nullopt,
                                          .side = vtworkspace::SplitSide::Right,
                                          .index = well.index };
+            },
+            [&](vtworkspace::TabTarget const& joined) -> std::optional<DescribedTarget> {
+                auto const* const tab = _model->findTab(joined.tab);
+                if (tab == nullptr || _model->workspace(joined.workspace) == nullptr)
+                    return std::nullopt;
+                return DescribedTarget { .place = window::MovePlace::OnTab,
+                                         .landing =
+                                             drag.edgePlaceIn(joined.workspace) == window::MovePlace::Edge
+                                                 ? window::MoveLanding::Beside
+                                                 : window::MoveLanding::BesideInOtherWindow,
+                                         .workspace = joined.workspace,
+                                         .kind = vtworkspace::MoveTargetKind::Tab,
+                                         .hostSession = hostIdOf(tab->activePane()->session()),
+                                         .side = vtworkspace::JoinTabSide,
+                                         .index = 0 };
             },
             [](vtworkspace::NewWorkspaceTarget const&) -> std::optional<DescribedTarget> {
                 return DescribedTarget { .place = window::MovePlace::NewWindow,

@@ -14,6 +14,7 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <ranges>
 #include <sstream>
 #include <utility>
@@ -510,6 +511,24 @@ namespace
         return position;
     }
 
+    /// @param verb The verb whose `--to` is read, for the message.
+    /// @param text What `--to` was given, as written; empty when it was not.
+    /// @return The position; none for no `--to`; or why it is none: positions count from 1, so `--to 0`
+    ///         is refused, as the API refuses it, rather than read as "not given".
+    [[nodiscard]] std::expected<std::optional<uint32_t>, std::string> optionalPositionOf(
+        std::string_view verb, std::string_view text)
+    {
+        if (text.empty())
+            return std::nullopt;
+        auto position = uint32_t {};
+        auto const* const first = std::to_address(text.begin());
+        auto const* const end = std::to_address(text.end());
+        if (auto const [last, error] = std::from_chars(first, end, position);
+            error != std::errc {} || last != end || position == 0)
+            return std::unexpected(std::format("{} --to {}: a position counts from 1", verb, text));
+        return position;
+    }
+
     [[nodiscard]] Params buildWorkspaceClose(CLI::FlagStore const& flags)
     {
         auto const& words = VerbFlags { flags, "workspace.close" }.words();
@@ -542,6 +561,45 @@ namespace
         return vtcontrol::encodeJson(vtcontrol::MoveTabRequest { .tab = std::string { f.words()[0] },
                                                                  .toWorkspace = f.text("workspace"),
                                                                  .toPosition = *position });
+    }
+
+    /// The flag that names each place `pane move` can take a pane to.
+    struct PaneDestinationFlag
+    {
+        std::string_view flag;         ///< The option, without its dashes.
+        vtcontrol::PaneDestination to; ///< Where it takes the pane.
+    };
+
+    constexpr auto PaneDestinationFlags = std::array {
+        PaneDestinationFlag { .flag = "tab", .to = vtcontrol::PaneDestination::Tab },
+        PaneDestinationFlag { .flag = "workspace", .to = vtcontrol::PaneDestination::Workspace },
+        PaneDestinationFlag { .flag = "new-workspace", .to = vtcontrol::PaneDestination::NewWorkspace },
+    };
+
+    [[nodiscard]] Params buildPaneMove(CLI::FlagStore const& flags)
+    {
+        auto const f = VerbFlags { flags, "pane.move" };
+        if (f.words().size() != 1)
+            return std::unexpected("pane move takes one PANE"s);
+        auto const named = [&](PaneDestinationFlag const& row) {
+            return row.to == vtcontrol::PaneDestination::NewWorkspace ? f.isSet(row.flag)
+                                                                      : !f.text(row.flag).empty();
+        };
+        auto const chosen = std::ranges::find_if(PaneDestinationFlags, named);
+        if (chosen == PaneDestinationFlags.end()
+            || std::ranges::any_of(std::ranges::subrange(std::next(chosen), PaneDestinationFlags.end()),
+                                   named))
+            return std::unexpected("pane move takes one of --tab, --workspace and --new-workspace"s);
+        if (chosen->to != vtcontrol::PaneDestination::Workspace && !f.text("to").empty())
+            return std::unexpected("pane move takes --to only with --workspace"s);
+        auto const position = optionalPositionOf("pane move", f.text("to"));
+        if (!position)
+            return std::unexpected(position.error());
+        return vtcontrol::encodeJson(vtcontrol::MovePaneRequest { .pane = std::string { f.words()[0] },
+                                                                  .to = chosen->to,
+                                                                  .toTab = f.text("tab"),
+                                                                  .toWorkspace = f.text("workspace"),
+                                                                  .toPosition = *position });
     }
 
     /// Prints the id of the workspace a reply of type @p T names.
@@ -906,6 +964,31 @@ namespace
                 .verbatim = CLI::Verbatim { "TAB", "The tab to move." },
                 .buildParams = buildTabMove,
                 .printHuman = humanNothing,
+            },
+            ControlVerb {
+                .path = "pane.move",
+                .method = "pane.move",
+                .usage = "pane move (--tab T | --workspace W [--to N] | --new-workspace) PANE",
+                .summary =
+                    "Moves a pane into another tab as a split, into a workspace as a tab, or into a new "
+                    "workspace.",
+                .options =
+                    [] {
+                        return withConnectionOptions({
+                            CLI::Option { "tab", CLI::Value { ""s }, "The tab it joins, as a split.", "T" },
+                            CLI::Option {
+                                "workspace", CLI::Value { ""s }, "The workspace it becomes a tab of.", "W" },
+                            CLI::Option { "to",
+                                          CLI::Value { ""s },
+                                          "With --workspace: its position, from 1; the end without.",
+                                          "N" },
+                            CLI::Option {
+                                "new-workspace", CLI::Value { false }, "Moves it into a new workspace." },
+                        });
+                    },
+                .verbatim = CLI::Verbatim { "PANE", "The pane to move." },
+                .buildParams = buildPaneMove,
+                .printHuman = humanWorkspace<vtcontrol::MovePaneReply>,
             },
             ControlVerb {
                 .path = "switch",

@@ -20,6 +20,7 @@
 #include <vtcontrol/Events.hpp>
 #include <vtcontrol/Json.hpp>
 #include <vtcontrol/ObjectRef.hpp>
+#include <vthost/NodeMove.hpp>
 #include <vthost/ViewRouting.hpp>
 #include <vthost/WorkspaceVisibility.hpp>
 #include <vthost/control/PaneText.hpp>
@@ -946,6 +947,71 @@ void ControlService::handle(vtcontrol::CallContext& context,
                     _host.discardWorkspace(source);
                 return vtcontrol::EmptyReply {};
             });
+        });
+    }));
+}
+
+namespace
+{
+    /// @return The control API's error for a move the host refused.
+    [[nodiscard]] ControlError moveRefused(NodeMoveFailure const& failure)
+    {
+        auto const why = failure.model ? vtworkspace::describe(*failure.model) : describe(failure.error);
+        return ControlError { .code = ControlErrorCode::Failed,
+                              .message = std::format("the pane cannot move there: {}", why),
+                              .candidates = {} };
+    }
+} // namespace
+
+std::expected<vtworkspace::MoveTarget, ControlError> ControlService::paneDestination(
+    vtcontrol::CallContext const& context, vtcontrol::MovePaneRequest const& request) const
+{
+    using vtcontrol::PaneDestination;
+    switch (request.to)
+    {
+        case PaneDestination::Tab:
+            return resolveTab(context, request.toTab).transform([&](TabId tab) -> vtworkspace::MoveTarget {
+                return vtworkspace::TabTarget { .workspace = _host.model().workspaceOfTab(tab), .tab = tab };
+            });
+        case PaneDestination::Workspace: {
+            // From 1, as tab.move counts, and clamped by the model; none is the end.
+            auto const index = request.toPosition
+                                   ? indexOfPosition(*request.toPosition)
+                                   : std::expected<int, ControlError> { std::numeric_limits<int>::max() };
+            return index.and_then([&](int at) {
+                return resolveWorkspace(context, request.toWorkspace)
+                    .transform([&](WorkspaceId workspace) -> vtworkspace::MoveTarget {
+                        return vtworkspace::TabWellTarget { .workspace = workspace, .index = at };
+                    });
+            });
+        }
+        case PaneDestination::NewWorkspace: return vtworkspace::NewWorkspaceTarget {};
+    }
+    return std::unexpected(ControlError {
+        .code = ControlErrorCode::BadRequest, .message = "unknown destination", .candidates = {} });
+}
+
+void ControlService::handle(vtcontrol::CallContext& context,
+                            vtcontrol::MovePaneRequest const& request,
+                            vtcontrol::Completion<vtcontrol::MovePaneReply> done)
+{
+    done(resolvePane(context, request.pane).and_then([&](PaneTarget const& pane) {
+        return paneDestination(context, request).and_then([&](vtworkspace::MoveTarget const& target) {
+            // The same move a client's MoveNode makes: a workspace it empties goes, a new one is the host's.
+            auto const hooks = MoveWorkspaceHooks {
+                .create = [this] { return _host.createEmptyWorkspace().id(); },
+                .discard = [this](WorkspaceId workspace) { _host.discardWorkspace(workspace); }
+            };
+            return applyMove(_host.model(), vtworkspace::PaneSource { pane.session }, target, hooks)
+                .transform_error(moveRefused)
+                .transform([&](vtworkspace::MoveResult const& moved) {
+                    auto const& objects = _host.objects();
+                    return vtcontrol::MovePaneReply {
+                        .workspace = idOf(ObjectKind::Workspace,
+                                          objects.uuidOf(moved.workspace).value_or(vtcontrol::Uuid {})),
+                        .tab = idOf(ObjectKind::Tab, objects.uuidOf(moved.tab).value_or(vtcontrol::Uuid {})),
+                    };
+                });
         });
     }));
 }
