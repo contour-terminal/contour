@@ -200,6 +200,17 @@ namespace detail
         SocketLabel { .name = std::string { label } }, {}, std::nullopt, env, sandbox);
 }
 
+/// The directory the sockets of the labelled daemons live in, which is where discovery looks for them.
+/// @param env The environment to read `$XDG_RUNTIME_DIR` and (on Windows) `$USERNAME` from.
+/// @param sandbox Where this process runs.
+/// @return The directory holding the default label's socket, and so every label's.
+[[nodiscard]] inline std::filesystem::path labelSocketDirectory(
+    core::Environment const& env = core::defaultEnvironment(),
+    vtpty::SandboxInfo const& sandbox = vtpty::currentSandbox())
+{
+    return labelSocketPath(DefaultSocketLabel, env, sandbox).parent_path();
+}
+
 [[nodiscard]] inline std::filesystem::path detail::muxSocketPathOf(
     SocketLabel const& label,
     std::string_view explicitPath,

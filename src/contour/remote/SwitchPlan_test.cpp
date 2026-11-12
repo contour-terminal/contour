@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <set>
 #include <string>
@@ -353,4 +354,36 @@ TEST_CASE("a switch is judged by the answer to its own selection request", "[swi
     auto const notMade = std::array { SelectAnswer { .request = 4, .asked = 0, .selected = A } };
     CHECK(switchRefusal(4, 0, before, notMade)
           == std::optional<std::string_view> { "the daemon could not make a workspace" });
+}
+
+TEST_CASE(
+    "launchDaemonAddress names a launch's daemon as discovery does, by its socket in the label directory",
+    "[switch][plan]")
+{
+    using contour::remote::DaemonAddress;
+    using contour::remote::launchDaemonAddress;
+    using vthost::proto::SwitchDaemonKind;
+    auto const dir = std::filesystem::path { "/run/user/1000/contour" };
+    auto const labelled = [](std::string name) {
+        return DaemonAddress { .kind = SwitchDaemonKind::Label, .name = std::move(name) };
+    };
+
+    SECTION("--socket outside the label directory is no label's daemon")
+    {
+        auto const address = launchDaemonAddress("/tmp/elsewhere/own.sock", dir);
+        CHECK(address.kind == SwitchDaemonKind::Same);
+        CHECK(address != labelled("default"));
+    }
+    SECTION("the default socket is default")
+    {
+        CHECK(launchDaemonAddress(dir / "default", dir) == labelled("default"));
+    }
+    SECTION("$CONTOUR_MUX or --socket at another label's socket is that label")
+    {
+        CHECK(launchDaemonAddress(dir / "work", dir) == labelled("work"));
+    }
+    SECTION("a path that is not normal still names its label")
+    {
+        CHECK(launchDaemonAddress(dir / "." / "work", dir) == labelled("work"));
+    }
 }
