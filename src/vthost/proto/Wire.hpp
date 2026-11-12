@@ -64,6 +64,16 @@ constexpr uint64_t MaxFrameSize = uint64_t { 64 } * 1024 * 1024;
 /// other into an allocation it cannot make.
 constexpr uint32_t MaxGridExtent = 10000;
 
+/// The largest magnitude a row's stable id may have on the wire, in either sign: 2^60.
+///
+/// A Grid's ids start at zero and move by one per row scrolled (or, for a grid without history,
+/// reverse-scrolled below zero), so no session approaches this: at a million rows a second it
+/// takes some 36,000 years. The bound is what makes the receiver's arithmetic sound by
+/// construction. The mirror adds and subtracts these ids pairwise and offsets them by page and
+/// history extents, and with each operand within ±2^60 every such sum fits an int64_t with room
+/// to spare, where a peer-chosen INT64_MAX made it signed overflow.
+constexpr int64_t MaxStableRowId = int64_t { 1 } << 60;
+
 /// The largest codepoint either side may name — Unicode's last scalar value.
 ///
 /// Not a redundant guard on a `char32_t` field: char32_t's own range is 32 bits, so a plain

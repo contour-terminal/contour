@@ -449,9 +449,10 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
     // otherwise leave as ghost scrollback). It is one of the two cases that earn a
     // DISCARDING replay: local scrollback is erased and rebuilt from what the server
     // still holds.
-    // Rearranged to avoid signed int64_t overflow: A - B > C - D  ⇔  A + D > C + B.
-    // All four values are non-negative line counts, so the sums cannot overflow
-    // (INT64_MAX is ~9e18 — no terminal history approaches that).
+    // Rearranged as A - B > C - D  ⇔  A + D > C + B. The four values are stable ids, which are
+    // neither non-negative (a grid without history reverse-scrolls below zero) nor chosen by us:
+    // they are the peer's. The decoder admits them only within ±proto::MaxStableRowId, and that
+    // bound, not the values' nature, is why neither sum can overflow.
     auto const floorOutranScroll = screen.stableFloor + _viewportBase > _floor + screen.viewportBase;
     // A generation bump says row identity was destroyed wholesale, but NOT why — and the two reasons
     // want opposite treatment. A RESIZE bumps it because the server reflowed; this terminal reflowed

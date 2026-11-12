@@ -84,6 +84,19 @@ namespace
         });
     }
 
+    /// Admits an svarint read as a row's stable id only within ±MaxStableRowId, the bound that keeps
+    /// the receiver's id arithmetic within int64_t.
+    /// @param value The svarint just read.
+    /// @return The stable id, or the reason it is not one.
+    [[nodiscard]] std::expected<int64_t, DecodeError> asStableRowId(std::expected<int64_t, DecodeError> value)
+    {
+        return value.and_then([](int64_t raw) -> std::expected<int64_t, DecodeError> {
+            if (raw < -MaxStableRowId || raw > MaxStableRowId)
+                return std::unexpected(DecodeError::MalformedPdu);
+            return raw;
+        });
+    }
+
     /// Reserves room for @p count elements, but never more MEMORY than the reader's remaining bytes
     /// could possibly back (@see boundedReserveCount, which states the bound and is tested against
     /// the element types that actually travel).
@@ -1691,7 +1704,7 @@ namespace
     {
         auto line = WireLine {};
         auto error = DecodeError {};
-        if (!assign(in.svarint(), line.stableId, error) || !assign(in.u16(), line.flags, error)
+        if (!assign(asStableRowId(in.svarint()), line.stableId, error) || !assign(in.u16(), line.flags, error)
             || !assign(in.u16(), line.contextId, error) || !assign(in.varint(), line.blockId, error)
             || !assign(in.varint(), line.bornAt, error) || !assign(in.svarint(), line.promptEndOffset, error)
             || !assign(in.svarint(), line.commandEndOffset, error)
@@ -1712,11 +1725,14 @@ namespace
         if (!assign(in.varint(), pdu.session, error) || !assign(in.varint(), pdu.generation, error)
             || !assign(in.varint(), pdu.seqno, error) || !assign(in.u8(), pdu.snapshot, error)
             || !assign(in.u8(), pdu.snapshotPart, error)
-            || !assign(in.svarint(), pdu.stableViewportBase, error)
-            || !assign(in.svarint(), pdu.stableFloor, error)
+            || !assign(asStableRowId(in.svarint()), pdu.stableViewportBase, error)
+            || !assign(asStableRowId(in.svarint()), pdu.stableFloor, error)
             || !assign(in.varint(), pdu.evictedRowCount, error)
             || !assign(in.svarint(), pdu.cursorLine, error) || !assign(in.svarint(), pdu.cursorColumn, error))
             return std::unexpected(error);
+        // A Grid's floor is the oldest row it holds, so it never lies above the page's first row.
+        if (pdu.stableFloor > pdu.stableViewportBase)
+            return std::unexpected(DecodeError::MalformedPdu);
 
         if (auto const decoded = decodeVector(in, pdu.lines, decodeLine); !decoded)
             return std::unexpected(decoded.error());
@@ -1740,7 +1756,7 @@ namespace
                              [](Reader& reader) -> std::expected<ImageCellEntry, DecodeError> {
                                  auto entry = ImageCellEntry {};
                                  auto error = DecodeError {};
-                                 if (!assign(reader.svarint(), entry.stableId, error)
+                                 if (!assign(asStableRowId(reader.svarint()), entry.stableId, error)
                                      || !assign(reader.u16(), entry.column, error)
                                      || !assign(reader.u32(), entry.imageId, error)
                                      || !assign(reader.u16(), entry.offsetLine, error)
@@ -1801,7 +1817,7 @@ namespace
                 in, pdu.softGlyphCells, [](Reader& reader) -> std::expected<SoftGlyphCellEntry, DecodeError> {
                     auto entry = SoftGlyphCellEntry {};
                     auto error = DecodeError {};
-                    if (!assign(reader.svarint(), entry.stableId, error)
+                    if (!assign(asStableRowId(reader.svarint()), entry.stableId, error)
                         || !assign(reader.u16(), entry.column, error)
                         || !assign(reader.u8(), entry.font, error)
                         || !assign(reader.u8(), entry.position, error))
