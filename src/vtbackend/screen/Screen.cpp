@@ -2446,6 +2446,11 @@ void Screen::horizontalTabClear(HorizontalTabClear which)
     }
 }
 
+void Screen::resetTabStops()
+{
+    _terminal->tabs().reset();
+}
+
 void Screen::horizontalTabSet()
 {
     // A stop is recorded as a real column: the page's, not the scroll region's.
@@ -8448,6 +8453,12 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                 r = std::max(r, impl::setModeDEC(seq, i, true, *_terminal));
             return r;
         }
+        case DECST8C:
+            // xterm also takes an omitted (or zero) Ps for the 5 the VT510 manual names.
+            if (seq.paramOr<unsigned>(0, 5) != 5)
+                return ApplyResult::Invalid;
+            resetTabStops();
+            break;
         case DECSTBM:
             // The margins are the main display's. Received on a status line, which keeps none of its own (DEC
             // STD 070 ch. 14 §2.2) and leaves the main display's state alone (ch. 14 §2), it is ignored, as

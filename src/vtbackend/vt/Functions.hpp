@@ -126,6 +126,7 @@ constexpr inline auto DECSPP = FunctionDocumentation { .mnemonic = "DECSPP", .co
 constexpr inline auto DECSR = FunctionDocumentation { .mnemonic = "DECSR", .comment = "Secure Reset", .parameters = "Pr", .description = "Returns the terminal to its power-up state, exactly as a hard reset (RIS) does -- Contour's RIS never disconnects from the host, which is the one difference the VT510 manual draws between the two. If Pr is given and lies within 0..16383, the terminal then confirms with DECSRC, `CSI Pr * q`, echoing Pr back. An omitted or out-of-range Pr resets without a confirmation.", .notes = "VT420. Unlike most sequences it is honoured at every operating level, as the VT510 manual requires.", .examples = "CSI 1234 + p" };
 constexpr inline auto DECSSCLS = FunctionDocumentation { .mnemonic = "DECSSCLS", .comment = "Set Scroll Speed." };
 constexpr inline auto DECSSDT = FunctionDocumentation { .mnemonic = "DECSSDT", .comment = "Select Status Display (Line) Type" };
+constexpr inline auto DECST8C = FunctionDocumentation { .mnemonic = "DECST8C", .comment = "Set Tab at Every 8 Columns", .parameters = "Ps", .description = "Clears every horizontal tab stop and puts back the ones the terminal starts with: one every 8 columns, also on the columns beyond the page's current width. Ps must be 5; an omitted Ps is taken as 5.", .notes = "VT510.", .examples = "CSI ? 5 W" };
 constexpr inline auto DECSTBM = FunctionDocumentation { .mnemonic = "DECSTBM", .comment = "Set top/bottom margin" };
 constexpr inline auto DECSTGLT = FunctionDocumentation { .mnemonic = "DECSTGLT", .comment = "Select Color Look-Up Table", .parameters = "table", .description = "Selects the color mode used to display text: 1 or 2 = alternate color (text color comes from the " "attribute combinations assigned via DECATC, and ANSI SGR color parameters are ignored entirely; a " "combination with no DECATC assignment uses the default text colors), 3 = ANSI SGR color (the " "power-up default, and what an omitted parameter selects). The monochrome table (0) of the original " "VT525 is not supported.", .notes = "VT525. See also DECATC and DECAC.", };
 constexpr inline auto DECSTR = FunctionDocumentation { .mnemonic = "DECSTR", .comment = "Soft terminal reset" };
@@ -843,6 +844,7 @@ constexpr inline auto DECSNLS     = detail::CSI(std::nullopt, 0, 1, '*', '|', VT
 constexpr inline auto DECSR       = detail::atEveryLevel(detail::CSI(std::nullopt, 0, 1, '+', 'p', VTType::VT420, documentation::DECSR));
 constexpr inline auto DECSSCLS    = detail::CSI(std::nullopt, 0, 1, ' ', 'p', VTType::VT510, documentation::DECSSCLS);
 constexpr inline auto DECSSDT     = detail::CSI(std::nullopt, 0, 1, '$', '~', VTType::VT320, documentation::DECSSDT);
+constexpr inline auto DECST8C     = detail::CSI('?', 0, 1, std::nullopt, 'W', VTType::VT510, documentation::DECST8C);
 constexpr inline auto DECSTBM     = detail::CSI(std::nullopt, 0, 2, std::nullopt, 'r', VTType::VT100, documentation::DECSTBM);
 constexpr inline auto DECSTGLT    = detail::CSI(std::nullopt, 0, 1, ')', '{', VTType::VT525, documentation::DECSTGLT);
 constexpr inline auto DECSTR      = detail::CSI(std::nullopt, 0, 0, '!', 'p', VTType::VT100, documentation::DECSTR);
@@ -1128,6 +1130,7 @@ constexpr static auto allFunctionsArray() noexcept
         DECSNLS,
         DECSR,
         DECSSDT,
+        DECST8C,
         DECSTBM,
         DECSTGLT,
         DECSTR,

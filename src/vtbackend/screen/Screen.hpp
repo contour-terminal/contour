@@ -677,6 +677,8 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void backspace();                                  // BS
     void horizontalTabClear(HorizontalTabClear which); // TBC
     void horizontalTabSet();                           // HTS
+    /// Returns the tab stops to one every 8 columns, those beyond the page included (DECST8C).
+    void resetTabStops();
 
     void index();        // IND
     void reverseIndex(); // RI

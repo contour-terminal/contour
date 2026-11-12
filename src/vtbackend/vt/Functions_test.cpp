@@ -293,6 +293,21 @@ TEST_CASE("Functions.DECSTGLT_VTLevelConstrain", "[Functions]")
     CHECK(*f == DECSTGLT);
 }
 
+TEST_CASE("Functions.CSI_DECST8C", "[Functions]")
+{
+    // DECST8C is CSI with leader='?' and final='W' (VT510); it must not resolve below that level.
+    SupportedSequences availableSequences;
+    auto const selector = FunctionSelector {
+        .category = FunctionCategory::CSI, .leader = '?', .argc = 1, .intermediate = 0, .finalSymbol = 'W'
+    };
+    availableSequences.reset(VTType::VT420);
+    REQUIRE(!vtbackend::select(selector, availableSequences.activeSequences()));
+    availableSequences.reset(VTType::VT510);
+    auto const* f = vtbackend::select(selector, availableSequences.activeSequences());
+    REQUIRE(f);
+    CHECK(*f == DECST8C);
+}
+
 namespace
 {
 /// Every selector that names a known definition: each one's own category, leader, intermediate and

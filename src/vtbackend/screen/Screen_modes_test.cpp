@@ -599,6 +599,54 @@ TEST_CASE("DECTABSR", "[screen]")
     }
 }
 
+TEST_CASE("DECST8C", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(35) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // Stops that are neither the defaults nor none at all: one moved, one cleared, one added.
+    screen.moveCursorToColumn(ColumnOffset(8));
+    screen.horizontalTabClear(HorizontalTabClear::UnderCursor);
+    screen.moveCursorToColumn(ColumnOffset(3));
+    screen.horizontalTabSet();
+
+    SECTION("restores the default stops")
+    {
+        mock.writeToScreen("\033[?5W");
+        CHECK(mock.terminal.tabs().isInitial());
+        screen.requestTabStops();
+        CHECK(e(mock.terminal.peekInput()) == e("\033P2$u1/9/17/25/33\033\\"));
+    }
+
+    SECTION("takes an omitted parameter as 5")
+    {
+        mock.writeToScreen("\033[?W");
+        CHECK(mock.terminal.tabs().isInitial());
+    }
+
+    SECTION("restores the stops after TBC 3 cleared them all")
+    {
+        screen.horizontalTabClear(HorizontalTabClear::AllTabs);
+        mock.writeToScreen("\033[?5W");
+        CHECK(mock.terminal.tabs().isInitial());
+    }
+
+    SECTION("restores the stops beyond the page too")
+    {
+        mock.writeToScreen("\033[?5W");
+        auto const stops = mock.terminal.tabs().within(ColumnCount(80));
+        CHECK(stops.back() == ColumnOffset(72));
+    }
+
+    SECTION("ignores any parameter but 5")
+    {
+        mock.writeToScreen("\033[?4W");
+        CHECK(!mock.terminal.tabs().isInitial());
+        screen.requestTabStops();
+        CHECK(e(mock.terminal.peekInput()) == e("\033P2$u1/4/17/25/33\033\\"));
+    }
+}
+
 TEST_CASE("DECSTR", "[screen]")
 {
     // Create a 10x3x5 grid and render a 7x5 image causing one a line-scroll by one.
