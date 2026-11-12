@@ -63,6 +63,12 @@ class Workspace
   private:
     friend class SessionModel;
 
+    /// Inserts @p tab at @p index, shifting the active and previous slots so they keep naming the same
+    /// tabs. Activates nothing and announces nothing; the caller does both.
+    /// @param index Where the tab goes, already clamped to `0..tabCount()`.
+    /// @param tab The tab to insert.
+    void insertTabAt(int index, std::unique_ptr<Tab> tab);
+
     WorkspaceId _id;
     std::vector<std::unique_ptr<Tab>> _tabs;
     int _activeTabIndex = -1;

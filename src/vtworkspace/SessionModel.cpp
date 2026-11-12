@@ -49,6 +49,17 @@ int Workspace::indexOf(Tab const* tab) const noexcept
     return it != _tabs.end() ? static_cast<int>(std::distance(_tabs.begin(), it)) : -1;
 }
 
+void Workspace::insertTabAt(int index, std::unique_ptr<Tab> tab)
+{
+    assert(index >= 0 && std::cmp_less_equal(index, _tabs.size()));
+    _tabs.insert(_tabs.begin() + index, std::move(tab));
+    // Tabs at or after the new slot moved up by one; keep the active/previous slots on the same tabs.
+    if (_activeTabIndex >= index)
+        ++_activeTabIndex;
+    if (_previousActiveTabIndex >= index)
+        ++_previousActiveTabIndex;
+}
+
 // }}}
 
 namespace
@@ -311,12 +322,7 @@ Tab* SessionModel::insertTab(Workspace& workspace, int requestedIndex, std::uniq
     // Bracket the insertion so a Qt host's beginInsertRows() runs BEFORE the tab set grows (its contract
     // requires rowCount() to still report the old count at that point) and endInsertRows() after.
     _events.tabAboutToBeAdded(workspaceId, index);
-    workspace._tabs.insert(workspace._tabs.begin() + index, std::move(tab));
-    // Tabs at or after the new slot moved up by one; keep the active/previous slots on the same tabs.
-    if (workspace._activeTabIndex >= index)
-        ++workspace._activeTabIndex;
-    if (workspace._previousActiveTabIndex >= index)
-        ++workspace._previousActiveTabIndex;
+    workspace.insertTabAt(index, std::move(tab));
     _events.tabAdded(workspaceId, tabId, index);
 
     // A new tab is a genuine activation: remember the outgoing active slot as the previous tab.
@@ -498,7 +504,7 @@ void SessionModel::moveTabToWorkspace(WorkspaceId fromId, TabId tabId, Workspace
     // is torn down (unlike closeTab/removeWorkspace, which report sessions closed).
     auto held = std::move(from->_tabs[static_cast<size_t>(fromIndex)]);
     from->_tabs.erase(from->_tabs.begin() + fromIndex);
-    to->_tabs.insert(to->_tabs.begin() + dstIndex, std::move(held));
+    to->insertTabAt(dstIndex, std::move(held));
     assert(from->indexOf(tabId) < 0 && "the moved tab must have left the source workspace");
 
     // Fix the SOURCE workspace's active/previous indices exactly as closeTabAt does after an erase.
@@ -526,7 +532,8 @@ void SessionModel::moveTabToWorkspace(WorkspaceId fromId, TabId tabId, Workspace
     }
 
     // The DESTINATION adopts the moved tab as its active tab (a genuine activation): remember the old
-    // active slot as the previous tab, then point at the inserted slot.
+    // active slot, which the insertion has already shifted, as the previous tab, then point at the
+    // inserted slot.
     to->_previousActiveTabIndex = to->_activeTabIndex;
     to->_activeTabIndex = dstIndex;
 
