@@ -6257,8 +6257,8 @@ void Screen::processKittyGraphics(std::string_view body)
         return;
     }
 
-    auto const format = toImageFormat(command.transmissionFormat());
-    auto const pixelSize =
+    auto format = toImageFormat(command.transmissionFormat());
+    auto pixelSize =
         ImageSize { Width::cast_from(command.pixelWidth), Height::cast_from(command.pixelHeight) };
 
     // The renderer reads width*height*bytesPerPixel from a raw buffer, so a payload that does not
@@ -6301,12 +6301,23 @@ void Screen::processKittyGraphics(std::string_view body)
         return;
     }
 
-    auto image = _terminal->imagePool().create(format, pixelSize, std::move(pixmap));
-    if (!image)
+    // A PNG is stored as the pixels it decodes to, under the size the file itself states: the bytes
+    // that arrived are a file, which nothing downstream can draw, and `s=`/`v=` are optional for one
+    // and unverified when given. Stored as it came, it would reach the renderer as a few bytes
+    // claiming to be a `s` x `v` pixmap.
+    if (format == ImageFormat::PNG)
     {
-        replyKittyGraphics(command, "EINVAL:could not decode image");
-        return;
+        auto decoded = decodePng(pixmap, pixelSize);
+        if (!decoded)
+        {
+            replyKittyGraphics(command, "EINVAL:could not decode image");
+            return;
+        }
+        pixmap = std::move(*decoded);
+        format = ImageFormat::RGBA;
     }
+
+    auto image = _terminal->imagePool().create(format, pixelSize, std::move(pixmap));
 
     if (command.imageId != 0)
     {

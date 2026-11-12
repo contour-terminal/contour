@@ -213,6 +213,32 @@ TEST_CASE("ImageRenderer.widens a 24-bit RGB image for upload", "[image][rendere
     CHECK(creates.front().data[3] == 0xFF);
 }
 
+TEST_CASE("ImageRenderer.refuses an image that is still an encoded file", "[image][renderer]")
+{
+    // A PNG's bytes are a file, not pixels: its length says nothing about its geometry, so no check
+    // of one against the other can pass it. vtbackend decodes every PNG where it enters; an Image
+    // that reaches this point undecoded would be uploaded as `width * height * 4` bytes it lacks.
+    auto constexpr Span = GridSize { .lines = LineCount(1), .columns = ColumnCount(2) };
+    auto const imageSize = ImageSize { Width::cast_from(unbox(Span.columns) * unbox(CellSize.width)),
+                                       Height::cast_from(unbox(Span.lines) * unbox(CellSize.height)) };
+    auto image = std::make_shared<Image>(
+        ImageId(3), ImageFormat::PNG, Image::Data(8, uint8_t { 0x89 }), imageSize, [](auto) {});
+    auto const rasterized = std::make_shared<RasterizedImage>(std::move(image),
+                                                              ImageAlignment::TopStart,
+                                                              ImageResize::NoResize,
+                                                              RGBAColor { 0, 0, 0, 0xFF },
+                                                              Span,
+                                                              CellSize);
+
+    auto renderTarget = MockRenderTarget {};
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };
+    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
+    renderRow(imageRenderer, rasterized, 2);
+
+    CHECK(renderTarget.getMockImageBackend().createCommands.empty());
+}
+
 TEST_CASE("ImageRenderer.bounds resident texture memory", "[image][renderer]")
 {
     // The tile atlas this replaced was a fixed-size allocation, so image memory was bounded by
