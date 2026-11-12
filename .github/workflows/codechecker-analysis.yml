@@ -54,7 +54,7 @@ jobs:
         # Note: Keep this in sync with that in build.yml!
         run: |
             BUILD_DIR="Build" \
-            CMAKE_BUILD_TYPE="Debug" \
+            CMAKE_PRESET="gcc-debug" \
             CXX="g++-11" \
             ./scripts/ci-prepare-contour.sh
 

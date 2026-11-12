@@ -237,8 +237,8 @@ jobs:
   #
   # Deliberately NOT installing a modern Qt over the distro one: relying on Ubuntu's Qt 6.4.2
   # proves the headless build needs nothing beyond Qt6::Core -- no Qt6::GuiPrivate, no Qt Quick.
-  # Clang only, since this gates a build configuration and not a toolchain. RelWithDebInfo rather than
-  # Debug, because the product is a package: it is what a user installs, and what carries a -dbgsym.
+  # Clang only, since this gates a build configuration and not a toolchain. Release rather than
+  # Debug, because the product is a package: it is what a user installs.
   package_daemon_for_Ubuntu:
     name: "Ubuntu Linux (contour-daemon package, ${{ matrix.os_version }})"
     # 24.04 is the oldest release the package is built for and runs on every pull request. 26.04 is the
@@ -755,7 +755,7 @@ jobs:
   # EPEL for yaml-cpp and libutempter), and a job that can never be run by hand first -- the EL10 package
   # set is unverified -- would be a guess committed to CI. Revisit with a machine to try it on.
   #
-  # Two full RelWithDebInfo builds per leg, so like the other packaging it runs on master pushes, in the
+  # Two full Release builds per leg, so like the other packaging it runs on master pushes, in the
   # merge queue and on release tags, not on ordinary pull requests: the Ubuntu daemon job
   # already builds the GUI-less configuration on every one.
   package_for_Fedora:
@@ -1654,7 +1654,7 @@ jobs:
         env:
           CONTOUR_TEST_TRACE: "1"
         run: |
-          ctest --preset ${{ env.CMAKE_PRESET }} --build-config RelWithDebInfo -j $env:NUMBER_OF_PROCESSORS
+          ctest --preset ${{ env.CMAKE_PRESET }} --build-config Release -j $env:NUMBER_OF_PROCESSORS
       - name: "verify the AF_UNIX tests actually ran"
         # Windows is the ONLY validation the daemon's Windows transport gets -- nobody develops it
         # on a Windows box. The AF_UNIX cases self-skip where the platform has no AF_UNIX, and a
@@ -1700,7 +1700,7 @@ jobs:
         # [pwsh]: contour_test does not run the POSIX shells on Windows at all.
         #
         # ShellIntegrationShells.profileLine runs the very line the one-click install appends to a profile,
-        # which asks contour.exe for the script through a pipe: RelWithDebInfo builds the GUI-subsystem
+        # which asks contour.exe for the script through a pipe: Release builds the GUI-subsystem
         # contour.exe a user installs, so this is where that pipe is proved. Run outside ctest, it learns
         # the binary from CONTOUR_BINARY here, and SKIPs -- failing this step -- without it.
         shell: pwsh
@@ -2071,7 +2071,7 @@ jobs:
         # requests, which have no consumers but keep the steps exercised.
         # The arm Clang leg is OFF too: it runs on master only, so nothing proves it builds clean with
         # -Werror before merge, whereas the x86 Clang leg is proven by every pull request.
-        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"ON","artifacts":true}]' || '[{"runner":"ubuntu-24.04","compiler":"GCC 15","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":true},{"runner":"ubuntu-24.04-arm","compiler":"GCC 15","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":false},{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"ON","artifacts":false},{"runner":"ubuntu-24.04-arm","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":false}]') }}
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"ON","artifacts":true}]' || '[{"runner":"ubuntu-24.04","compiler":"GCC 15","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":true},{"runner":"ubuntu-24.04-arm","compiler":"GCC 15","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":false},{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"ON","artifacts":false},{"runner":"ubuntu-24.04-arm","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":false}]') }}
     name: "${{ matrix.runner }} (${{ matrix.compiler }}, C++${{ matrix.cxx }}, Qt${{ matrix.qt_version }})"
     runs-on: ${{ matrix.runner }}
     env:
@@ -2243,7 +2243,7 @@ jobs:
           CC_VER=$( echo "${{ matrix.compiler }}" | awk '{ print $2; }')
           test "${{ matrix.compiler }}" = "GCC 8"  && EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DPEDANTIC_COMPILER_WERROR=ON"
           test "${CC_NAME}" = "gcc" && CC_EXE="g++"
-          # AArch64 GCC + RelWithDebInfo debug info is what fills the runner; --no-keep-memory
+          # The link of AArch64 GCC objects is what fills the runner; --no-keep-memory
           # tells ld to re-read symbol tables rather than hold them, trading time for RAM.
           #
           # The link cap below is spelled CONTOUR_LINK_JOBS and not CMAKE_JOB_POOL_LINK on
@@ -2609,7 +2609,6 @@ jobs:
           EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS"
           EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_PACKAGE_TERMINFO=OFF"
           BUILD_DIR="build" \
-            CMAKE_BUILD_TYPE=RelWithDebInfo \
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
                                -DCMAKE_CXX_STANDARD=$CMAKE_CXX_STANDARD \
                                -DCMAKE_INSTALL_PREFIX="/usr" \
