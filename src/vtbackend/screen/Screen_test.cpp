@@ -1290,6 +1290,26 @@ TEST_CASE("InsertCharacters.NoMargins", "[screen]")
     }
 }
 
+TEST_CASE("InsertMode.cursorRightOfTheRightMargin", "[screen]")
+{
+    // ICH is refused outside the margins, and IRM makes room through the same code -- so it has to
+    // be refused there as well: right of the right margin there is no room to make, and the count
+    // "margin - cursor + 1" is negative. xterm's InsertChar() inserts nothing; the character
+    // overwrites the cell it lands on.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("hello     world");
+
+    mock.writeToScreen("\033[?69h");  // DECLRMM
+    mock.writeToScreen("\033[1;5s");  // DECSLRM: margins on columns 1..5
+    mock.writeToScreen("\033[4h");    // IRM
+    mock.writeToScreen("\033[1;12H"); // right of the right margin, on the 'o' of "world"
+    mock.writeToScreen("X");
+
+    CHECK(screen.renderMainPageText() == "hello     wXrld     \n                    \n");
+    CHECK(screen.realCursorPosition().column == ColumnOffset(12));
+}
+
 TEST_CASE("InsertCharacters.Margins", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };

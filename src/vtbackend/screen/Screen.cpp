@@ -2135,6 +2135,13 @@ void Screen::insertCharacters(ColumnCount n)
 
 void Screen::insertChars(LineOffset lineOffset, ColumnCount columnsToInsert)
 {
+    // There is room to make only between the cursor and the right margin, so outside the margins
+    // there is none: ICH and DECIC test that before they get here, but insert mode (IRM) does not,
+    // and a cursor right of the right margin would make the count below negative. As in xterm,
+    // whose InsertChar() inserts nothing there.
+    if (!isCursorInsideHorizontalMargins())
+        return;
+
     auto const sanitizedN =
         std::min(*columnsToInsert, *margin().horizontal.to - *logicalCursorPosition().column + 1);
 
