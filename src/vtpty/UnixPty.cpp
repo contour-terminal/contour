@@ -21,7 +21,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
-#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -61,7 +60,6 @@
 using std::make_unique;
 using std::nullopt;
 using std::optional;
-using std::runtime_error;
 using std::scoped_lock;
 using std::string_view;
 
@@ -157,7 +155,14 @@ void UnixPty::waitForClosed()
         std::this_thread::sleep_for(SelectorRetryInterval);
         selector = crispy::ReadSelector::create();
     }
-    (*selector)->wantRead(_masterFd);
+    {
+        // Under the lock close() closes the master under, so that a master closed meanwhile is not watched by
+        // its number, which may name another descriptor by now.
+        auto const _ = std::scoped_lock { _mutex };
+        if (_masterFd.isClosed())
+            return;
+        (*selector)->wantRead(_masterFd);
+    }
     while (true)
     {
         (*selector)->waitOne();
@@ -218,16 +223,21 @@ StartResult UnixPty::start()
             StartFailure { .error = StartError::PtyAllocationFailed,
                            .detail = "Failed to create PTY pipe. "s + fastPipe.error().message() });
     _stdoutFastPipe = *std::move(fastPipe);
-    auto const opened = [this] {
+    auto const [pageSize, pixels] = [this] {
         auto const _ = std::scoped_lock { _mutex };
-        return createUnixPty(_pageSize, _pixels);
+        return std::pair { _pageSize, _pixels };
     }();
+    auto const opened = createUnixPty(pageSize, pixels);
     if (!opened)
         return std::unexpected(StartFailure { .error = StartError::PtyAllocationFailed,
                                               .detail = "Failed to open PTY. "s + opened.error().message() });
     auto const& handles = *opened;
-    _masterFd = crispy::FileDescriptor::fromNative(unbox<int>(handles.master));
-    _masterState.store(MasterState::Open, std::memory_order_release);
+    {
+        // Under the lock a resize on another thread reads it under.
+        auto const _ = std::scoped_lock { _mutex };
+        _masterFd = crispy::FileDescriptor::fromNative(unbox<int>(handles.master));
+        _masterState.store(MasterState::Open, std::memory_order_release);
+    }
     _slave = make_unique<Slave>(handles.slave);
 
     // Close-on-exec, so that no process this one spawns inherits the master: our own children close every
@@ -297,13 +307,14 @@ PtySlave& UnixPty::slave() noexcept
 
 std::expected<InheritedPty, AdoptError> UnixPty::handover() const
 {
+    // Under the lock close() closes the master under: the descriptor handed over is the one still open.
     auto const _ = std::scoped_lock { _mutex };
     return handoverLocked();
 }
 
 std::expected<InheritedPty, AdoptError> UnixPty::handoverLocked() const
 {
-    if (!started())
+    if (!startedLocked())
         return std::unexpected(AdoptError::BadDescriptor);
     auto inherited = InheritedPty {
         .masterFd = _masterFd.get(), .stdoutFastPipe = std::nullopt, .pageSize = _pageSize, .pixels = _pixels
@@ -383,7 +394,14 @@ std::expected<std::unique_ptr<UnixPty>, AdoptError> UnixPty::adopt(InheritedPty 
 
 PtyMasterHandle UnixPty::handle() const noexcept
 {
+    auto const _ = std::scoped_lock { _mutex };
     return PtyMasterHandle::cast_from(_masterFd.get());
+}
+
+bool UnixPty::started() const noexcept
+{
+    auto const _ = std::scoped_lock { _mutex };
+    return startedLocked();
 }
 
 void UnixPty::close()
@@ -417,6 +435,23 @@ InputEcho UnixPty::inputEcho() const noexcept
     if (::tcgetattr(_masterFd, &tio) != 0)
         return InputEcho::Unknown;
     return util::inputEchoOf(tio.c_lflag);
+}
+
+std::optional<pid_t> UnixPty::foregroundProcessGroup() const noexcept
+{
+    auto const _ = std::scoped_lock { _mutex };
+    if (_masterFd.isClosed())
+        return std::nullopt;
+    auto const group = ::tcgetpgrp(_masterFd);
+    if (group <= 0)
+        return std::nullopt;
+    return group;
+}
+
+std::optional<std::string> UnixPty::foregroundProcessName() const
+{
+    // The name is read once the lock is let go: only the descriptor needs it.
+    return foregroundProcessGroup().and_then(&util::processNameOf);
 }
 
 bool UnixPty::isClosed() const noexcept
@@ -656,20 +691,22 @@ void UnixPty::allowWrites()
 
 PageSize UnixPty::pageSize() const noexcept
 {
+    // resizeScreen() writes it under the lock, on another thread than the one asking.
     auto const _ = std::scoped_lock { _mutex };
     return _pageSize;
 }
 
 void UnixPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
 {
-    // Under the lock close() closes the descriptor under: the session's reader thread closes the PTY the
-    // moment its program exits, which may be while the GUI thread resizes it. Read unlocked, the descriptor
-    // could be closed between the check below and the ioctl, which then failed with EBADF -- or reached
-    // a recycled descriptor -- and threw out of a Qt event handler, ending the process.
+    // Under the lock close() closes the descriptor under: a session's reader thread closes the PTY the moment
+    // its program exits, which may be while the GUI thread or the daemon's loop resizes it. Read unlocked,
+    // the descriptor could be closed between the check below and the ioctl, which then failed with EBADF --
+    // or reached a recycled descriptor, another pane's -- and threw out of a Qt event handler or the daemon's
+    // loop, ending the process.
     auto const _ = std::scoped_lock { _mutex };
     if (_masterFd.isClosed())
     {
-        // Not started yet: remember the size rather than drop it, so start() can bake it into the
+        // Not started yet, or closed: remember the size rather than drop it, so start() can bake it into the
         // winsize the child is born with. Dropping it meant the child saw ws_xpixel = 0 until an
         // asynchronous SIGWINCH corrected it -- and an application that reads TIOCGWINSZ once at
         // startup, which is what img2sixel and chafa do, never sees the correction. Once closed, there
@@ -697,8 +734,8 @@ void UnixPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
     }
 
     // Not fatal: the slave side can be gone already while close() has yet to run (EIO or ENOTTY on macOS and
-    // the BSDs), and a resize runs from a GUI event handler, out of which nothing may throw. The size is
-    // kept either way, as what the PTY is meant to have.
+    // the BSDs), and a resize runs from a GUI event handler or on the daemon's loop thread, out of which
+    // nothing may throw. The size is kept either way, as what the PTY is meant to have.
     if (ioctl(_masterFd, TIOCSWINSZ, &w) == -1)
         errorLog()("Could not resize the PTY (file descriptor {}) to {}x{}: {}",
                    _masterFd.get(),

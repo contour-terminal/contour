@@ -705,7 +705,7 @@ string Process::workingDirectory() const
     auto const* const unixPty = dynamic_cast<UnixPty const*>(_d->pty.get());
     if (unixPty == nullptr)
         return "."s;
-    return util::workingDirectoryOf(tcgetpgrp(unbox<int>(unixPty->handle()))).value_or("."s);
+    return unixPty->foregroundProcessGroup().and_then(&util::workingDirectoryOf).value_or("."s);
 #else
     return util::workingDirectoryOf(childPid).value_or("."s);
 #endif
@@ -719,7 +719,7 @@ std::optional<std::string> Process::foregroundProcessName() const
     auto const* const unixPty = dynamic_cast<UnixPty const*>(_d->pty.get());
     if (unixPty == nullptr)
         return std::nullopt;
-    return util::foregroundProcessNameOf(unbox<int>(unixPty->handle()));
+    return unixPty->foregroundProcessName();
 }
 
 // {{{ startDetached

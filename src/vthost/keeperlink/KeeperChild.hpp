@@ -208,7 +208,6 @@ class KeeperChild final: public vtpty::Pty, public vtpty::ChildProcess
     // Set once by start(), before any other thread reads them.
     uint64_t _session = 0; ///< The keeper's name for the child; 0 for none spawned.
     int64_t _pid = 0;
-    int _master = -1; ///< The terminal's master, for tcgetpgrp(); this object's PTY owns it.
     std::shared_ptr<ChildExit> _exit;
 
     mutable std::mutex _settleLock;

@@ -15,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <string_view>
 
 #ifdef __APPLE__
@@ -22,6 +23,8 @@
 #elifdef __linux__
     #include <pty.h>
 #endif
+
+#include <sys/types.h>
 
 #include <fcntl.h>
 
@@ -79,6 +82,14 @@ class UnixPty final: public Pty
     /// flags.
     [[nodiscard]] InputEcho inputEcho() const noexcept override;
 
+    /// Asks the master for its foreground process group (tcgetpgrp()), under _mutex, so a concurrent close()
+    /// cannot hand it a descriptor recycled meanwhile -- another pane's terminal.
+    /// @return The group; none before start(), after close(), or when the terminal has none.
+    [[nodiscard]] std::optional<pid_t> foregroundProcessGroup() const noexcept;
+
+    /// @return The name of the program leading foregroundProcessGroup(); none where there is none.
+    [[nodiscard]] std::optional<std::string> foregroundProcessName() const override;
+
     UnixPipe& stdoutFastPipe() noexcept { return _stdoutFastPipe; }
 
     /// @name Live-upgrade hand-over (exec of the daemon keeps descriptors, not objects)
@@ -110,8 +121,10 @@ class UnixPty final: public Pty
   private:
     std::optional<std::string_view> readSome(int fd, char* target, size_t n) noexcept;
 
-    [[nodiscard]] bool started() const noexcept { return _masterFd != -1; }
-
+    /// @return Whether the master is open; takes _mutex.
+    [[nodiscard]] bool started() const noexcept;
+    /// @return Whether the master is open; with _mutex held.
+    [[nodiscard]] bool startedLocked() const noexcept { return _masterFd != -1; }
     /// handover(), for a caller that holds _mutex already.
     [[nodiscard]] std::expected<InheritedPty, AdoptError> handoverLocked() const;
 

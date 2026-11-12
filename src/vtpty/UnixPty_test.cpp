@@ -220,7 +220,77 @@ TEST_CASE("UnixPty.resizeScreen.racesAConcurrentClose", "[vtpty][unixpty][thread
             std::this_thread::yield();
         pty.close();
         CHECK_NOTHROW(resizing.get());
+        // Closed, the size is kept rather than refused.
+        auto const kept =
+            vtpty::PageSize { .lines = vtpty::LineCount(50), .columns = vtpty::ColumnCount(132) };
+        REQUIRE_NOTHROW(pty.resizeScreen(kept));
+        CHECK(pty.pageSize() == kept);
     }
+}
+
+TEST_CASE("UnixPty.foregroundProcessGroup.isNoneOnceClosed", "[vtpty][unixpty]")
+{
+    auto pty =
+        vtpty::UnixPty { vtpty::PageSize { .lines = vtpty::LineCount(24), .columns = vtpty::ColumnCount(80) },
+                         std::nullopt };
+    CHECK_FALSE(pty.foregroundProcessGroup().has_value());
+    CHECK_FALSE(pty.foregroundProcessName().has_value());
+    REQUIRE(pty.start().has_value());
+    pty.close();
+    CHECK_FALSE(pty.foregroundProcessGroup().has_value());
+    CHECK_FALSE(pty.foregroundProcessName().has_value());
+}
+
+TEST_CASE("UnixPty.foregroundProcessName.racesAConcurrentClose", "[vtpty][unixpty][threading]")
+{
+    // A daemon's loop asks a pane's foreground program while the session's reader thread closes the PTY its
+    // program left. Read unlocked, the master could close -- and its number name another pane's terminal --
+    // between the check and tcgetpgrp(); the clang-tsan tree reports the unlocked read.
+    constexpr auto Rounds = 200;
+    for ([[maybe_unused]] auto const round: std::views::iota(0, Rounds))
+    {
+        auto pty = vtpty::UnixPty {
+            vtpty::PageSize { .lines = vtpty::LineCount(24), .columns = vtpty::ColumnCount(80) }, std::nullopt
+        };
+        REQUIRE(pty.start().has_value());
+        auto asked = std::atomic<bool> { false };
+        auto asking = std::future<void> {};
+        auto const closeOnExit = ClosingPty { pty };
+        asking = std::async(std::launch::async, [&pty, &asked] {
+            while (!pty.isClosed())
+            {
+                std::ignore = pty.foregroundProcessName();
+                asked.store(true, std::memory_order_release);
+            }
+        });
+        while (!asked.load(std::memory_order_acquire) && asking.wait_for(0s) != std::future_status::ready)
+            std::this_thread::yield();
+        pty.close();
+        CHECK_NOTHROW(asking.get());
+        CHECK_FALSE(pty.foregroundProcessName().has_value());
+    }
+}
+
+TEST_CASE("UnixPty.pageSize.seesAConcurrentResize", "[vtpty][unixpty][threading]")
+{
+    // The daemon's loop thread resizes a PTY while its reader thread asks for its size. Read unlocked, the
+    // size raced the locked write; under the clang-tsan tree that is reported on every run.
+    constexpr auto Rounds = 2000;
+    auto const small = vtpty::PageSize { .lines = vtpty::LineCount(24), .columns = vtpty::ColumnCount(80) };
+    auto const large = vtpty::PageSize { .lines = vtpty::LineCount(50), .columns = vtpty::ColumnCount(132) };
+    auto pty = vtpty::UnixPty { small, std::nullopt };
+    REQUIRE(pty.start().has_value());
+    auto resizer = std::thread { [&] {
+        for (auto const round: std::views::iota(0, Rounds))
+            pty.resizeScreen(round % 2 == 0 ? large : small);
+    } };
+    for ([[maybe_unused]] auto const round: std::views::iota(0, Rounds))
+    {
+        auto const size = pty.pageSize();
+        CHECK((size == small || size == large));
+    }
+    resizer.join();
+    pty.close();
 }
 
 TEST_CASE("UnixPty.close.isNotHeldUpByAParkedWrite", "[vtpty][unixpty][threading]")

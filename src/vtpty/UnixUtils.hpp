@@ -262,11 +262,11 @@ inline void saveDup2(int a, int b) noexcept
 }
 // }}}
 
-/// The name of the program leading the foreground process group of a terminal (tcgetpgrp(), which needs
-/// no parenthood of it). Linux and macOS only.
-/// @param master The terminal's master.
+/// The name of a process, as a terminal's foreground process group names its leader (tcgetpgrp()), which
+/// needs no parenthood of it. Linux and macOS only.
+/// @param pid The process.
 /// @return The name, as the operating system shortens it; none where it cannot be told.
-[[nodiscard]] std::optional<std::string> foregroundProcessNameOf(int master);
+[[nodiscard]] std::optional<std::string> processNameOf(pid_t pid);
 
 /// The working directory of a process. Linux and macOS only.
 /// @param pid The process.

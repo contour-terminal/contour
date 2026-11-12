@@ -194,8 +194,6 @@ KeeperChild::KeeperChild(KeeperLink& link,
 {
     _session = std::to_underlying(kept.session);
     _pid = kept.pid;
-    if (auto const terminal = _pty->handover())
-        _master = terminal->masterFd;
     _exit = _exits->watch(kept.session);
     if (kept.exited)
         _exit->record(*kept.exited);
@@ -283,7 +281,6 @@ vtpty::StartResult KeeperChild::spawn()
 
     _session = reply->spawned.session;
     _pid = reply->spawned.pid;
-    _master = terminal->masterFd;
     _exit = _exits->watch(keeper::KeeperSessionId { _session });
 
     // Written once the trampoline exists: a spec larger than the socket's buffer is read as it is written.
@@ -351,9 +348,10 @@ std::string KeeperChild::workingDirectory() const
 
 std::optional<std::string> KeeperChild::foregroundProcessName() const
 {
-    if (_session == 0 || _pty->isClosed())
+    if (_session == 0)
         return std::nullopt;
-    return vtpty::util::foregroundProcessNameOf(_master);
+    // Asked of the PTY, under the lock its close() takes: the master it would read may close meanwhile.
+    return _pty->foregroundProcessName();
 }
 
 void KeeperChild::terminate(vtpty::TerminationHint hint)

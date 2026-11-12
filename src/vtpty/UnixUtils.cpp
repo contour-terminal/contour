@@ -267,27 +267,26 @@ std::expected<void, std::error_code> loginTerminal(int slaveFd, ControllingTermi
     return controlling;
 }
 
-std::optional<std::string> foregroundProcessNameOf(int master)
+std::optional<std::string> processNameOf(pid_t pid)
 {
 #if defined(__linux__) || defined(__APPLE__)
-    auto const group = ::tcgetpgrp(master);
-    if (group <= 0)
+    if (pid <= 0)
         return std::nullopt;
     #ifdef __linux__
     // Streamed: /proc reports a size of zero, so a read sized by the file's length reads nothing.
-    auto in = std::ifstream { std::format("/proc/{}/comm", group) };
+    auto in = std::ifstream { std::format("/proc/{}/comm", pid) };
     auto name = std::string {};
     if (!std::getline(in, name) || name.empty())
         return std::nullopt;
     return name;
     #else
     auto name = std::array<char, (2 * MAXCOMLEN) + 1> {};
-    if (proc_name(group, name.data(), static_cast<uint32_t>(name.size())) <= 0)
+    if (proc_name(pid, name.data(), static_cast<uint32_t>(name.size())) <= 0)
         return std::nullopt;
     return std::string { name.data() };
     #endif
 #else
-    std::ignore = master;
+    std::ignore = pid;
     return std::nullopt;
 #endif
 }
