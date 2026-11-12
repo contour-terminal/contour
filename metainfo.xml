@@ -349,6 +349,7 @@
           <li>Adds closing a tab with a middle click on it, as in a browser</li>
           <li>Adds DECST8C (<code>CSI ? 5 W</code>), which resets the horizontal tab stops to one every 8 columns</li>
           <li>Adds CTC (<code>CSI Ps W</code>), which sets or clears horizontal tab stops: 0 sets one on the cursor's column, 2 clears it, 4 and 5 clear them all</li>
+          <li>Fixes ConEmu <code>OSC 9;9</code> (working directory) and <code>OSC 9;12</code> (prompt start) popping up a desktop notification at every prompt: they now set the working directory as <code>OSC 7</code> does and mark a prompt as <code>OSC 133;A</code> does</li>
         </ul>
       </description>
     </release>

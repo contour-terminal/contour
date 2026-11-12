@@ -4651,13 +4651,28 @@ namespace impl
                 return ApplyResult::Unsupported;
         }
 
-        /// OSC 9 — ConEmu-style notification and progress indicator.
+        /// The directory an `OSC 9 ; 9 ; <path>` names: the rest of the payload, with the double quotes
+        /// ConEmu documents around it taken off. Unquoted is accepted too, as ConEmu and Windows Terminal do.
+        /// @param path The payload after `9;`, which may itself hold a ';'.
+        /// @return The path, or nothing when it is empty.
+        [[nodiscard]] std::optional<std::string> conEmuWorkingDirectory(std::string_view path)
+        {
+            if (path.size() >= 2 && path.front() == '"' && path.back() == '"')
+                path = path.substr(1, path.size() - 2);
+            if (path.empty())
+                return std::nullopt;
+            return std::string { path };
+        }
+
+        /// OSC 9 — ConEmu-style notification, progress indicator, working directory and prompt mark.
         ///
         /// Simple notification: OSC 9 ; <message> ST
         /// Progress indicator:  OSC 9 ; 4 ; <State> ; <progress> ST
+        /// Working directory:   OSC 9 ; 9 ; "<path>" ST   (as OSC 7)
+        /// Prompt start:        OSC 9 ; 12 ST            (as OSC 133 ; A)
 
         // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
-        ApplyResult CONEMU(Sequence const& seq, Terminal& terminal)
+        ApplyResult CONEMU(Sequence const& seq, Screen& screen, Terminal& terminal)
         {
             auto const& value = seq.intermediateCharacters();
             if (value.empty())
@@ -4679,6 +4694,26 @@ namespace impl
                     // A malformed payload leaves the previous indicator alone: withdrawing one the
                     // application still wants shown is worse than ignoring a sequence we cannot read.
                     .value_or(ApplyResult::Invalid);
+            }
+
+            // The sub-functions a shell's prompt emits at every prompt. A notification for either would
+            // pop up each time the prompt is drawn, so even a malformed one is rejected rather than shown.
+            if (firstField == "9")
+            {
+                auto const path =
+                    value.size() > 2 ? std::string_view { value }.substr(2) : std::string_view {};
+                return conEmuWorkingDirectory(path)
+                    .transform([&](std::string const& directory) {
+                        screen.setCurrentWorkingDirectory(directory);
+                        return ApplyResult::Ok;
+                    })
+                    .value_or(ApplyResult::Invalid);
+            }
+            if (firstField == "12")
+            {
+                // ConEmu: "treat current cursor position as prompt start" -- OSC 133;A, as Ghostty reads it.
+                screen.processShellIntegration("A");
+                return ApplyResult::Ok;
             }
 
             // Simple notification: the payload is the notification message
@@ -7677,9 +7712,8 @@ void Screen::synthesizeSemanticMarks(ContextTransition const& transition, Contex
     }
 }
 
-void Screen::processShellIntegration(Sequence const& seq)
+void Screen::processShellIntegration(std::string const& cmd)
 {
-    auto const& cmd = seq.intermediateCharacters();
     if (cmd.empty())
         return;
 
@@ -8883,7 +8917,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case RCOLORMOUSEBG: resetDynamicColor(DynamicColorName::MouseBackgroundColor); break;
         case RCOLORHIGHLIGHTFG: resetDynamicColor(DynamicColorName::HighlightForegroundColor); break;
         case RCOLORHIGHLIGHTBG: resetDynamicColor(DynamicColorName::HighlightBackgroundColor); break;
-        case CONEMU: return impl::CONEMU(seq, *_terminal);
+        case CONEMU: return impl::CONEMU(seq, *this, *_terminal);
         case NOTIFY: return impl::NOTIFY(seq, *this);
         case ITERM2: processITerm2(seq.intermediateCharacters()); return ApplyResult::Ok;
         case TEXTSIZING: return processTextSizing(seq.intermediateCharacters());
@@ -8893,7 +8927,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case PROGRAMSTATUS: return processProgramStatus(seq.intermediateCharacters());
         case DESKTOPNOTIFY: return impl::DESKTOPNOTIFY(seq, *_terminal);
         case DUMPSTATE: inspect(); break;
-        case SEMA: processShellIntegration(seq); break;
+        case SEMA: processShellIntegration(seq.intermediateCharacters()); break;
 
         // hooks
         case DECAUPSS:

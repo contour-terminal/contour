@@ -723,6 +723,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Sets the current working directory as file:// URL.
     void setCurrentWorkingDirectory(std::string const& url); // OSC 7
+    /// Applies one OSC 133 shell-integration command.
+    /// @param cmd The payload after `133;`: the sub-command letter and its arguments.
+    void processShellIntegration(std::string const& cmd);
 
     void hyperlink(std::string id, std::string uri);                   // OSC 8
     void notify(std::string const& title, std::string const& content); // OSC 777
@@ -1835,8 +1838,6 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void replyGipStatus(int statusCode);
 
     [[nodiscard]] std::optional<Image::Data> decodePng(std::span<uint8_t const> data, ImageSize& size) const;
-
-    void processShellIntegration(Sequence const& seq);
 
     /// Marks the cursor's logical line as where a command's output starts (LineFlag::OutputStart), as OSC
     /// 133;C or an OSC 3008 command start says, and notes that the shell marks output starts.
