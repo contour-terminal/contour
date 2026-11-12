@@ -2,6 +2,8 @@
 #include <vtbackend/testing/Workloads.hpp>
 #include <vtbackend/vt/Functions.hpp>
 
+#include <vtparser/Parser.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
@@ -89,6 +91,13 @@ TEST_CASE("Functions.OSC777", "[Functions]")
     Function const* osc = vtbackend::selectOSCommand(777, availableSequences.activeSequences());
     REQUIRE(osc);
     CHECK(*osc == NOTIFY);
+}
+
+TEST_CASE("Functions.OSC_MaxOscCode_names_no_function", "[Functions]")
+{
+    // The parser saturates an out-of-range OSC code to MaxOscCode, which therefore must match nothing.
+    SupportedSequences const availableSequences;
+    CHECK(vtbackend::selectOSCommand(vtparser::MaxOscCode, availableSequences.activeSequences()) == nullptr);
 }
 
 TEST_CASE("Functions.VTLevelConstrain", "[Functions]")
