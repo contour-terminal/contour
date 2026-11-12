@@ -1332,11 +1332,17 @@ for Control connections only: an `Attach` hello whose token lacks any grant is a
 bytes of a wrong token (`token lacks the grants an attach connection needs (has read,screen)` in the
 daemon's log), before it is counted or spawns a session.
 
-**Verified transports.** `ITransportFactory::peerTrust()` says before connecting whether the peer is
-authenticated: `Local` for the unix socket, `Verified` for TLS against a pinned CA (`--tls-ca`) and
-for ssh, which checks the host key, and `Unverified` for TLS without a trust anchor, which encrypts
-but would hand the token to an active machine-in-the-middle. A control client refuses an `Unverified`
-transport before it connects; the interactive `contour client` keeps attaching over it.
+**Trusted transports.** No transport predicts trust: it is settled by the connect. The unix socket is gated by
+its owner's permissions, ssh checks the host key, and `TlsTransportFactory` (`Transport.cpp`) decides on whom a
+TLS connection reached before a token or a signature goes anywhere: a CA (`--tls-ca`) verifies it; otherwise
+the fingerprint it presents is compared with `--daemon-fingerprint`, then with the pin in `known_daemons`
+(a different one is `HostKeyChanged`, never asked about), and a daemon not known yet is put to the user
+through an `IPinPrompt` (a dialog, or the terminal) or refused as `HostKeyUnknown` where there is none. A
+daemon the user trusted is pinned and dialled a second time, because the first connection waited for the
+answer, perhaps longer than the daemon lets a connection wait to sign in (`PreAuthTimeout`). The dialling is
+bounded by `TcpEndpoint::dialTimeout`, the question is not, and an attach over such a transport is given an
+`AttachBudget::promptsOpen`. A control client reports a daemon that is unknown, changed or declined as
+`ControlFailure::Untrusted`.
 
 ### Program status
 

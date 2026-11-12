@@ -46,7 +46,9 @@ Then attach in any of these ways:
   contour client --host ssh://me@homepc:2222     # an ssh URL that is not saved
   ```
 
-  An ad-hoc `tls://` URL works the same way; pass `--daemon-fingerprint SHA256:…` the first time, to pin the daemon.
+  An ad-hoc `tls://` URL works the same way. The first time, a daemon without a CA is pinned
+  [after you trust its fingerprint in a dialog](#the-first-contact-pinning-the-daemon); `--daemon-fingerprint SHA256:…`
+  settles it beforehand.
 
 Attaching to a host works like launching Contour against that daemon: the window selects the workspace the
 daemon had selected last, or its first one (see
@@ -58,9 +60,9 @@ To look at one particular workspace, name it:
 contour client --host home --workspace 018f3c2a   # only that workspace of home
 ```
 
-Naming a workspace asks the daemon for its list, which is never sent over a link whose certificate is not
-pinned: `contour client --connect-tcp HOST:PORT --workspace W` needs `--tls-ca FILE` (or a saved host with
-`tls_ca`). Without `--workspace`, a first-use link attaches as before.
+Naming a workspace asks the daemon for its list first. If the daemon is met for the first time, the dialog that
+asks whether to trust its fingerprint appears once the window is up, and the list is asked once you have
+answered; declining ends the launch.
 
 A window can also move to another host, or back to a local daemon, without closing: see
 [Switching a window](persistent-sessions.md#switching-a-window).
@@ -202,35 +204,84 @@ login, a host key, a missing Contour) ends the attempt with its message instead 
 
 ## Over TLS
 
-The daemon on the remote machine listens on a TCP port itself; every connection is TLS-encrypted and
-must present a token.
+The daemon on the remote machine listens on a TCP port itself. Every connection is TLS 1.3-encrypted with
+the daemon's own identity, a key and certificate it makes on first start and keeps, and clients sign in with
+an SSH key you authorize, as for ssh itself, or with a token.
 
-On the remote machine:
+### Keys: `authorized_keys`
+
+On the remote machine, list the public keys that may log in in `authorized_keys` in Contour's
+configuration directory, in OpenSSH's format (`ssh-ed25519`, `ecdsa-sha2-nistp256` and their `sk-`
+variants; `grants="LIST"` is the only option read, and narrows what the key may do, as an
+[access file](persistent-sessions.md#narrower-tokens-for-scripts) does for a token), and start the daemon
+for keys alone. A line with any other option (`from=`, `no-pty`, `command=`, ...) is **skipped whole**, with
+its number and the reason in the daemon's log, so lines copied from `~/.ssh/authorized_keys` may need their
+options removed to work here:
 
 ```sh
-umask 077 && openssl rand -base64 32 > ~/.config/contour/daemon.token
-contour daemon --background --listen-tcp 192.0.2.10:7297 --token-file ~/.config/contour/daemon.token
+cat ~/.ssh/id_ed25519.pub >> ~/.config/contour/authorized_keys
+contour daemon --background --listen-tcp 192.0.2.10:7297 --auth keys
 ```
 
-Copy the token file to the machine you sit at (for example with `scp`), keeping it private
-(`chmod 600`), and save the host:
+`--auth keys` takes no token and refuses `--token`, `--token-file` and `--access-file`; the default,
+`--auth any`, accepts a token as well. `--authorized-keys FILE` names another file.
+
+On the machine you sit at, save the host with nothing but its address:
 
 ``` yaml
 hosts:
   studio:
     url: "tls://studio.example.net:7297"
-    token_file: "~/.config/contour/studio.token"
 ```
 
-### Unverified TLS, and a pinned CA
+The client signs the daemon's challenge with a key of your SSH agent, bound to this very TLS connection so
+that nobody in between can pass it on. To use one key file instead, name it:
 
-Without `tls_ca`, the daemon presents a certificate it generated itself and **the client does not check
-it**. The connection is encrypted, which stops anyone merely listening, but **an active
-man-in-the-middle can pose as the daemon and take the token**, and with it your sessions. Use this only
-on a network you trust, such as a tailnet (below).
+``` yaml
+hosts:
+  studio:
+    url: "tls://studio.example.net:7297"
+    identity_file: "~/.ssh/id_ed25519_studio"
+```
 
-To have the client verify the daemon, give the daemon a certificate issued by a CA of your own, for the
-name you connect to, and pin that CA on the client:
+A key with a passphrase that is **not** in the agent is asked for when it is used, in a dialog of the window.
+Contour itself waits for your answer as long as the dialog is open, but the daemon gives a connection 20
+seconds from when it connects to sign in: answer within that, or the daemon closes the connection and the
+passphrase is asked for again on a new one. Better, load the key into the agent first with `ssh-add`, which is
+what to recommend for any key that has a passphrase. The `contour`
+control commands cannot ask for a passphrase at all: load such a key with `ssh-add`.
+
+### The first contact: pinning the daemon
+
+Without a CA to check its certificate against, a daemon is trusted on first use, as ssh trusts a new host. The
+first time Contour meets a daemon it shows the daemon's address and its fingerprint, `SHA256:` and a
+base64 text, and asks whether to trust it. In a window that is a dialog, whose Cancel is the default, with the fingerprint selectable. For the `contour`
+control commands it is a question on the terminal, `Trust this daemon? [y/N]`, asked only when both standard
+input and standard error are a terminal (a console, on Windows); anything but `y` or `yes` declines. `contour client --workspace` asks in the dialog,
+once its window is up. Compare the fingerprint with what
+`contour daemon status` prints on that machine, which is also in its log, and trust it only when they are
+the same. The fingerprint is then kept in `known_daemons`, in Contour's configuration directory
+(`~/.config/contour`, `%LOCALAPPDATA%\contour` on Windows) beside `contour.yml`, one line per `HOST:PORT`
+(an IPv6 address in brackets, `[::1]:7297`). A `known_daemons` that cannot be read refuses every daemon
+until it is repaired or removed: a pin that cannot be checked is never taken for no pin.
+
+Where nobody can be asked (a script, or a command whose input is not a terminal), pass the fingerprint
+beforehand: `--daemon-fingerprint SHA256:...` pins it on first contact and refuses a daemon that presents any
+other.
+
+A daemon that presents another certificate than the pinned one is **refused**, with both fingerprints, and
+never asked about: that is a reinstalled daemon, or someone in between, and only you can tell which. After a
+reinstallation, forget the old pin and meet the daemon again:
+
+```sh
+contour daemon forget-pin studio.example.net:7297
+```
+
+### A certificate of your own: `tls_ca`
+
+Pinning needs no certificate authority. To have the client verify the daemon the way a browser does instead,
+give the daemon a certificate issued by a CA of your own, for the name you connect to, and name that CA on
+the client:
 
 ```sh
 # Once, anywhere: a CA of your own.
@@ -249,8 +300,27 @@ Start the daemon with `--tls-cert daemon.pem --tls-key daemon.key`, copy `ca.pem
 the client, and add `tls_ca: "~/.config/contour/studio-ca.pem"` to the saved host. The certificate must
 name the host in the `url`: one merely signed by the CA, for another name, is refused.
 
-Contour's control commands — the `contour` verbs that change a daemon's state from a script — need
-`tls_ca`: they refuse a TLS host whose certificate is not verified.
+A daemon verified by `tls_ca` is never asked about, and the control commands accept it like any other.
+
+### A token
+
+A host with `token_file` signs in with a token instead of a key, and a daemon started with `--token-file`
+accepts one:
+
+```sh
+umask 077 && openssl rand -base64 32 > ~/.config/contour/daemon.token
+contour daemon --background --listen-tcp 192.0.2.10:7297 --token-file ~/.config/contour/daemon.token
+```
+
+``` yaml
+hosts:
+  studio:
+    url: "tls://studio.example.net:7297"
+    token_file: "~/.config/contour/studio.token"
+```
+
+Copy the token file to the machine you sit at (for example with `scp`), keeping it private (`chmod 600`).
+The daemon is pinned on first use here as well, and the token is sent only to a daemon that was trusted.
 
 ## Reaching a home PC from the office with Tailscale
 

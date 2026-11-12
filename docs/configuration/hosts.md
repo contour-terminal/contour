@@ -99,9 +99,12 @@ hosts:
 ```
 
 A `tls://` host needs nothing beyond its `url`: it signs in with the keys of your SSH agent, or with its
-`identity_file`, when the daemon authorizes keys, and with its `token_file` otherwise. The first time a
-daemon without a `tls_ca` is met it is refused unless its fingerprint is given (`--daemon-fingerprint`, as
-`contour daemon status` prints it on that machine); it is then pinned. After a daemon was reinstalled,
+`identity_file` (best loaded into the agent with `ssh-add` when it has a passphrase, as the daemon waits only 20
+seconds for the sign-in), when the daemon authorizes keys, and with its `token_file` otherwise. The first time a
+daemon without a `tls_ca` is met, a dialog (a question on the terminal, for the control commands) shows its
+fingerprint to compare with what `contour daemon status` prints on that machine, and asks whether to trust
+it; where nobody can be asked, it is refused unless the fingerprint is given (`--daemon-fingerprint`). A trusted
+daemon is pinned, and one that later presents another certificate is refused, never asked about. After a daemon was reinstalled,
 `contour daemon forget-pin HOST:PORT` forgets the old pin. The port is required, and a `tls://` URL
 takes no user.
 
