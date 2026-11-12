@@ -1290,6 +1290,58 @@ TEST_CASE("InsertCharacters.NoMargins", "[screen]")
     }
 }
 
+TEST_CASE("InsertMode.cursorRightOfTheRightMargin", "[screen]")
+{
+    // ICH is refused outside the margins, and IRM makes room through the same code -- so it has to
+    // be refused there as well: right of the right margin there is no room to make, and the count
+    // "margin - cursor + 1" is negative. xterm's InsertChar() inserts nothing; the character
+    // overwrites the cell it lands on.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("hello     world");
+
+    mock.writeToScreen("\033[?69h");  // DECLRMM
+    mock.writeToScreen("\033[1;5s");  // DECSLRM: margins on columns 1..5
+    mock.writeToScreen("\033[4h");    // IRM
+    mock.writeToScreen("\033[1;12H"); // right of the right margin, on the 'o' of "world"
+    mock.writeToScreen("X");
+
+    CHECK(screen.renderMainPageText() == "hello     wXrld     \n                    \n");
+    CHECK(screen.realCursorPosition().column == ColumnOffset(12));
+}
+
+TEST_CASE("InsertCharacters.originModeWithALeftMargin", "[screen]")
+{
+    // Under origin mode the cursor's logical column is measured from the left margin, so it is
+    // smaller than the real one by the margin's width. The room left before the right margin is a
+    // matter of real columns: taken from the logical one, the count admits more cells than exist.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[?69h");  // DECLRMM
+    mock.writeToScreen("\033[6;20s"); // DECSLRM: margins on columns 6..20
+    mock.writeToScreen("\033[?6h");   // DECOM
+    mock.writeToScreen("\033[1;1H");
+    mock.writeToScreen("abcdefghijk");
+    mock.writeToScreen("\033[2;1H");
+    mock.writeToScreen("ABCDEFGHIJK");
+    REQUIRE(screen.renderMainPageText() == "     abcdefghijk    \n     ABCDEFGHIJK    \n");
+    mock.writeToScreen("\033[1;4H"); // logical column 4, real column 9
+    REQUIRE(screen.realCursorPosition().column == ColumnOffset(8));
+
+    SECTION("ICH")
+    {
+        mock.writeToScreen("\033[100@");
+        CHECK(screen.renderMainPageText() == "     abc            \n     ABCDEFGHIJK    \n");
+    }
+
+    SECTION("DECIC")
+    {
+        mock.writeToScreen("\033[100'}");
+        CHECK(screen.renderMainPageText() == "     abc            \n     ABC            \n");
+    }
+}
+
 TEST_CASE("InsertCharacters.Margins", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
@@ -3263,8 +3315,8 @@ TEST_CASE("HorizontalTabClear.UnderCursor", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
     auto& screen = mock.terminal.primaryScreen();
 
-    // clear tab at column 4
-    screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 7 });
+    // Clear the default stop on column 9, the first one a tab from the left edge meets.
+    screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 8 });
     screen.horizontalTabClear(HorizontalTabClear::UnderCursor);
 
     screen.moveCursorTo({}, {});
@@ -3273,14 +3325,82 @@ TEST_CASE("HorizontalTabClear.UnderCursor", "[screen]")
     screen.writeText('B');
 
     //      "12345678901234567890"
-    REQUIRE("A              B    " == screen.grid().lineText(LineOffset(0)));
+    REQUIRE("A               B   " == screen.grid().lineText(LineOffset(0)));
     REQUIRE("                    " == screen.grid().lineText(LineOffset(1)));
 
     screen.moveCursorToNextTab();
     screen.writeText('C');
     //    "12345678901234567890"
-    CHECK("A              B   C" == screen.grid().lineText(LineOffset(0)));
+    CHECK("A               B  C" == screen.grid().lineText(LineOffset(0)));
     CHECK("                    " == screen.grid().lineText(LineOffset(1)));
+}
+
+TEST_CASE("TabStops.noStopsAreNotTheDefaultStops", "[screen]")
+{
+    // Each row is one way the two used to be confused, on a 40-column page. The cursor columns are
+    // zero-based; a tab with no stop ahead goes to the right margin.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(40) } };
+    auto& screen = mock.terminal.primaryScreen();
+    auto const tab = [&]() {
+        mock.writeToScreen("\t");
+        return screen.realCursorPosition().column;
+    };
+
+    SECTION("clearing where there is no stop leaves the default stops where they are")
+    {
+        mock.writeToScreen("\033[1;30H\033[g\033[1;1H");
+        CHECK(tab() == ColumnOffset(8));
+        CHECK(tab() == ColumnOffset(16));
+    }
+
+    SECTION("setting a stop keeps the default ones")
+    {
+        mock.writeToScreen("\033[1;4H\033H\033[1;1H");
+        CHECK(tab() == ColumnOffset(3));
+        CHECK(tab() == ColumnOffset(8));
+    }
+
+    SECTION("clearing all of them leaves none")
+    {
+        mock.writeToScreen("\033[3g");
+        CHECK(tab() == ColumnOffset(39));
+    }
+
+    SECTION("a stop set twice is cleared at once")
+    {
+        mock.writeToScreen("\033[3g\033[1;5H\033H\033H\033[g\033[1;1H");
+        CHECK(tab() == ColumnOffset(39));
+    }
+
+    SECTION("a stop is a real column under origin mode too")
+    {
+        // Margins on columns 11..40; the stop on real column 20; the cursor home at real column 10.
+        mock.writeToScreen("\033[?69h\033[11;40s\033[3g\033[1;21H\033H\033[?6h\033[1;1H");
+        REQUIRE(screen.realCursorPosition().column == ColumnOffset(10));
+        CHECK(tab() == ColumnOffset(20));
+    }
+
+    SECTION("the default stops reach columns the page gains later")
+    {
+        mock.writeToScreen("\033[1;4H\033H\033[1;1H");
+        mock.terminal.resizeScreen(PageSize { LineCount(2), ColumnCount(80) });
+        mock.writeToScreen("\033[1;41H");
+        CHECK(tab() == ColumnOffset(48));
+    }
+
+    SECTION("and none appear there once all were cleared")
+    {
+        mock.writeToScreen("\033[3g");
+        mock.terminal.resizeScreen(PageSize { LineCount(2), ColumnCount(80) });
+        mock.writeToScreen("\033[1;1H");
+        CHECK(tab() == ColumnOffset(79));
+    }
+
+    SECTION("a hard reset brings the default stops back")
+    {
+        mock.writeToScreen("\033[3g\033c");
+        CHECK(tab() == ColumnOffset(8));
+    }
 }
 
 TEST_CASE("HorizontalTabSet", "[screen]")

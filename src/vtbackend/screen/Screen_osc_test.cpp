@@ -1081,4 +1081,19 @@ TEST_CASE("SETTABNAME: OSC 30 names the tab, and an empty name clears it", "[scr
     CHECK_FALSE(mock.terminal.tabName().has_value());
 }
 
+TEST_CASE("OSC.code_past_16_bits_names_no_function", "[OSC]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    mock.writeToScreen("\033]2;good\033\\");
+    REQUIRE(mock.windowTitle == "good");
+
+    // 65538 is 2 + 65536: it must not alias OSC 2.
+    mock.writeToScreen("\033]65538;evil\033\\");
+    CHECK(mock.windowTitle == "good");
+
+    // Nor may a code past int overflow on the way.
+    mock.writeToScreen("\033]99999999999;evil\033\\");
+    CHECK(mock.windowTitle == "good");
+}
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

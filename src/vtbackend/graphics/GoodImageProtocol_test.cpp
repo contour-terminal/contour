@@ -134,6 +134,25 @@ TEST_CASE("GoodImageProtocol.Render.ByName", "[GIP]")
     CHECK(fragment->rasterizedImage().image().width() == Width(2));
 }
 
+TEST_CASE("GoodImageProtocol.Render.aSourceRectangleDoesNotMoveTheCursorLikeASixel", "[GIP]")
+{
+    // `x,y,w,h` name the part of the image to show. That it is given in pixels does not make the
+    // image a Sixel one: the cursor goes below the rows the render occupies either way.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.terminal.setCellPixelSize(ImageSize { Width(8), Height(16) });
+    auto const pixels = makeRGBA(2, 2, 0xFF, 0x00, 0x00, 0xFF);
+    mock.writeToScreen(gipUpload("n=red,f=3,w=2,h=2", pixels));
+    REQUIRE(mock.terminal.imagePool().findImageByName("red") != nullptr);
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen(gipRender("n=red,c=4,r=3,u"));
+    REQUIRE(screen.realCursorPosition().line == LineOffset(3));
+
+    mock.writeToScreen("\033[H");
+    mock.writeToScreen(gipRender("n=red,c=4,r=3,u,x=0,y=0,w=2,h=2"));
+    CHECK(screen.realCursorPosition().line == LineOffset(3));
+}
+
 TEST_CASE("GoodImageProtocol.Render.NonexistentName", "[GIP]")
 {
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
@@ -245,6 +264,18 @@ TEST_CASE("GoodImageProtocol.Release.Nonexistent", "[GIP]")
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
     // Releasing a nonexistent name should be a no-op, no crash.
     mock.writeToScreen(gipRelease("n=nope"));
+}
+
+TEST_CASE("GoodImageProtocol.Release.withAnEmptyBody", "[GIP]")
+{
+    // The trailing `;` announces a body that never comes; the name before it still counts.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const pixels = makeRGBA(2, 2, 0xFF, 0x00, 0x00, 0xFF);
+    mock.writeToScreen(gipUpload("n=tmp,f=3,w=2,h=2", pixels));
+    REQUIRE(mock.terminal.imagePool().findImageByName("tmp") != nullptr);
+
+    mock.writeToScreen("\033P!go=d,n=tmp;\033\\");
+    CHECK(mock.terminal.imagePool().findImageByName("tmp") == nullptr);
 }
 
 // ==================== DA1 Test ====================

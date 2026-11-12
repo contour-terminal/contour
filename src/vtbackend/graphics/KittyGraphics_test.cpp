@@ -321,6 +321,79 @@ TEST_CASE("KittyGraphics.mismatched_payload_size_is_refused", "[kitty]")
     CHECK_FALSE(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment());
 }
 
+TEST_CASE("KittyGraphics.dimensions_whose_byte_size_wraps_are_refused", "[kitty]")
+{
+    // 2147549185 x 2147418113 is 2^62 + 1 pixels, so four bytes each wraps size_t to exactly 4: the
+    // one-pixel payload below "matches" a geometry of some 2^62 pixels unless the product is checked.
+    auto mock = KittyTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    auto const onePixel = core::base64::encode("\xFF\xFF\xFF\xFF"sv);
+
+    mock.writeToScreen(std::format("\033_Ga=t,f=32,i=1,s=2147549185,v=2147418113;{}\033\\", onePixel));
+
+    CHECK(mock.terminal.peekInput().contains("EINVAL"));
+    CHECK_FALSE(mock.terminal.peekInput().contains("OK"));
+
+    // Nothing was stored, so there is no image for a frame to be composited into -- with the image
+    // stored, this command wrote its payload 4000 bytes past a 4-byte buffer.
+    mock.discardPendingReplies();
+    mock.writeToScreen(std::format("\033_Ga=f,i=1,r=1,X=1,x=1000,y=0,s=1,v=1;{}\033\\", onePixel));
+
+    CHECK(mock.terminal.peekInput().contains("ENOENT"));
+}
+
+TEST_CASE("KittyGraphics.a_png_is_decoded_before_it_is_stored", "[kitty]")
+{
+    // `f=100` carries a PNG file, and `s=`/`v=` say nothing reliable about it. Stored as it arrived,
+    // under the declared size, it is a few bytes of file header that the renderer uploads as a
+    // 64x64 RGBA texture.
+    auto mock = KittyTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    auto const& screen = mock.terminal.primaryScreen();
+    auto const command =
+        std::format("\033_Ga=T,f=100,i=1,s=64,v=64;{}\033\\", core::base64::encode("\x89PNG\r\n\x1a\n"sv));
+
+    SECTION("decoded")
+    {
+        auto received = std::string {};
+        mock.terminal.setImageDecoder(
+            [&](ImageFormat, std::span<uint8_t const> data, ImageSize& size) -> std::optional<Image::Data> {
+                received.assign(data.begin(), data.end());
+                size = ImageSize { Width(2), Height(2) };
+                return Image::Data(2uz * 2uz * 4uz, uint8_t { 0x7F });
+            });
+
+        mock.writeToScreen(command);
+
+        CHECK(received == "\x89PNG\r\n\x1a\n"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=1;OK\033\\");
+        auto const fragment = screen.at(LineOffset(0), ColumnOffset(0)).imageFragment();
+        REQUIRE(fragment);
+        auto const& image = fragment->rasterizedImage().image();
+        CHECK(image.format() == ImageFormat::RGBA);
+        CHECK(image.size() == ImageSize { Width(2), Height(2) });
+        CHECK(image.data().size() == 2uz * 2uz * 4uz);
+    }
+
+    SECTION("with no decoder there is nothing to store")
+    {
+        mock.writeToScreen(command);
+
+        CHECK(mock.terminal.peekInput().contains("EINVAL"));
+        CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(0)).imageFragment());
+    }
+
+    SECTION("a file the decoder refuses is not stored either")
+    {
+        mock.terminal.setImageDecoder([](ImageFormat,
+                                         std::span<uint8_t const>,
+                                         ImageSize&) -> std::optional<Image::Data> { return std::nullopt; });
+
+        mock.writeToScreen(command);
+
+        CHECK(mock.terminal.peekInput().contains("EINVAL"));
+        CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(0)).imageFragment());
+    }
+}
+
 TEST_CASE("KittyGraphics.unsupported_media_are_refused_not_ignored", "[kitty]")
 {
     // Reading a path the application names would let it point the terminal at any file the user can

@@ -120,12 +120,13 @@ TEST_CASE("layout dimensions near INT_MAX do not overflow the partition check", 
 {
     // Child extents parse into int and are summed along the split axis. In a 32-bit accumulator two
     // INT_MAX-wide children overflow (signed-overflow UB — a UBSan abort on dev/CI builds); the sum
-    // must be computed wide so the check rejects cleanly rather than aborting or wrapping.
+    // must be computed wide so the check rejects cleanly rather than aborting or wrapping. Such an
+    // extent is past MaxGridExtent too, so the bound now refuses it before any sum is taken.
     auto const body = std::string { "5x1,0,0{2147483647x1,0,0,1,2147483647x1,2,0,2}" };
     auto const wire = std::format("{:04x},{}", layoutChecksum(body), body);
     auto const parsed = parseLayout(wire);
     REQUIRE_FALSE(parsed.has_value()); // rejected, and crucially without undefined behavior
-    CHECK(parsed.error().contains("partition"));
+    CHECK(parsed.error().contains("extent"));
 }
 
 TEST_CASE("pane-id backtracking distinguishes ids from sibling geometry", "[vthost][layout]")
@@ -512,4 +513,51 @@ TEST_CASE("collapseToBinary treats a childless container as a leaf", "[vthost][l
     auto const tree = collapseToBinary(node);
     CHECK(tree.leafCount() == 1);
     CHECK(tree.first == nullptr);
+}
+
+// A layout's extents become grids: TmuxClientModel builds a pane of exactly the leaf's shape. A
+// zero extent divided by zero in the ring, a billion-wide one allocated toward it, and negative
+// children can still sum to their parent's extent. The control channel is impersonable behind a
+// forgeable checksum, so every extent is held to the bound the native protocol uses for the same
+// quantity, and offsets and pane ids must not be negative.
+TEST_CASE("parseLayout rejects geometry and pane ids outside the grid bound", "[vthost][layout]")
+{
+    auto const wireOf = [](std::string_view body) {
+        return std::format("{:04x},{}", layoutChecksum(body), body);
+    };
+    auto const hostile = std::array {
+        "2000000000x2000000000,0,0,1",         // allocates toward 2e9 x 2e9 cells
+        "0x0,0,0,1",                           // divides by zero in the grid's ring
+        "-80x-24,0,0,1",                       // negative extents
+        "10x10,0,0{-5x10,0,0,1,14x10,-4,0,2}", // negative children that still partition the parent
+        "10001x24,0,0,1",                      // one column past MaxGridExtent
+        "80x10001,0,0,1",                      // one line past MaxGridExtent
+        "80x24,-1,0,1",                        // negative x offset
+        "80x24,0,-1,1",                        // negative y offset
+        "80x24,0,0,-1",                        // negative pane id
+    };
+    for (auto const* body: hostile)
+    {
+        INFO(body);
+        CHECK_FALSE(parseLayout(wireOf(body)).has_value());
+    }
+
+    auto const json = std::array {
+        R"({"V":2,"L":{"t":"p","w":0,"h":24,"x":0,"y":0,"I":"%1"}})",
+        R"({"V":2,"L":{"t":"p","w":80,"h":10001,"x":0,"y":0,"I":"%1"}})",
+        R"({"V":2,"L":{"t":"p","w":80,"h":24,"x":-1,"y":0,"I":"%1"}})",
+        R"({"V":2,"L":{"t":"h","w":10,"h":10,"x":0,"y":0,"c":[)"
+        R"({"t":"p","w":-5,"h":10,"x":0,"y":0,"I":"%1"},{"t":"p","w":14,"h":10,"x":-4,"y":0,"I":"%2"}]}})",
+    };
+    for (auto const* text: json)
+    {
+        INFO(text);
+        CHECK_FALSE(parseLayout(text).has_value());
+    }
+
+    // The bound itself is a legal extent.
+    auto const widest = parseLayout(wireOf("10000x10000,0,0,1"));
+    REQUIRE(widest.has_value());
+    CHECK(widest->width == 10000);
+    CHECK(widest->height == 10000);
 }

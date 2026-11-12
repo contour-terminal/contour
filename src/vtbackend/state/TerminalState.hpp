@@ -177,10 +177,13 @@ struct PagingState
 /// The three margins and the tab stops.
 struct MarginsState
 {
-    Margin mainDisplay {};             ///< DECSTBM / DECSLRM of the main display, shared by every page.
-    Margin hostWritable {};            ///< The host-writable status line's.
-    Margin indicator {};               ///< The indicator status line's.
-    std::vector<ColumnOffset> tabs {}; ///< The tab stops, ascending.
+    Margin mainDisplay {};  ///< DECSTBM / DECSLRM of the main display, shared by every page.
+    Margin hostWritable {}; ///< The host-writable status line's.
+    Margin indicator {};    ///< The indicator status line's.
+    /// The tab stops of the page's columns, ascending; none listed stands for the stops a terminal
+    /// starts with. A terminal without any stop therefore comes back with the initial ones, and
+    /// what was set or cleared right of the page is not carried: the format has no word for either.
+    std::vector<ColumnOffset> tabs {};
 
     /// Lists the fields for the state codec.
     void visitFields(this auto& self, auto& visitor)

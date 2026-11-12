@@ -262,6 +262,24 @@ TEST_CASE("SshKnownHosts appends a host, and keeps every line the file had", "[s
     }
 #endif
 
+    SECTION("on a port other than 22, under the name and the port")
+    {
+        // As OpenSSH writes it, "[host]:port": a key accepted on one port vouches for no other.
+        auto onPort = added;
+        onPort.port = 2222;
+        REQUIRE(vtpty::SshKnownHosts { session.get() }.appendToFile(onPort, key).has_value());
+
+        CHECK(contentsOf(firstHost.knownHostsFile).starts_with("[added.example]:2222 ssh-ed25519 "));
+        auto reread = vtpty::SshKnownHosts { session.get() };
+        REQUIRE(reread.readFromFile(firstHost.knownHostsFile).has_value());
+        CHECK(reread.checkHostkey(onPort, key).status == LIBSSH2_KNOWNHOST_CHECK_MATCH);
+        // Port 22 has not been seen: neither the key from 2222 nor a key of its own is known there.
+        auto const otherKey =
+            vtpty::SshHostkey { .type = LIBSSH2_HOSTKEY_TYPE_ED25519, .data = ed25519Key('o') };
+        CHECK(reread.checkHostkey(added, key).status == LIBSSH2_KNOWNHOST_CHECK_NOTFOUND);
+        CHECK(reread.checkHostkey(added, otherKey).status == LIBSSH2_KNOWNHOST_CHECK_NOTFOUND);
+    }
+
     SECTION("to a file two directories below any that is there")
     {
         // OpenSSH makes ~/.ssh, and no directory above it.

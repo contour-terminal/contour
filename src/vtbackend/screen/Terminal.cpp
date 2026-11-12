@@ -3804,8 +3804,6 @@ void Terminal::verifyState()
     // out.
     Require(_indicatorStatusScreen.grid().pageSize().columns >= _settings.pageSize.columns);
 
-    Require(_tabs.empty() || _tabs.back() < unbox<ColumnOffset>(_settings.pageSize.columns));
-
     _currentScreen->verifyState();
 
     // Margins are terminal state, so verify them against the terminal's OWN main-display page size —
@@ -8409,7 +8407,7 @@ void Terminal::hardReset()
     publishKittyAnimationDeadline(nullopt);
 
     _imagePool.clear();
-    _tabs.clear();
+    _tabs.reset();
 
     // DEC STD 070: "All macro definitions are cleared on receipt of a Reset to Initial State (RIS) or Secure
     // Reset (DECSR)." A macro body that sent this RIS ends with it, and so does every body around it.
@@ -8729,10 +8727,6 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
                      .from = {}, .to = _settings.pageSize.columns.as<ColumnOffset>() - 1 } };
     _indicatorScreenMargin = statuslineMargin;
     _hostWritableScreenMargin = statuslineMargin;
-
-    // truncating tabs
-    while (!_tabs.empty() && _tabs.back() >= unbox<ColumnOffset>(_settings.pageSize.columns))
-        _tabs.pop_back();
 
     // verifyState();
 }
@@ -9947,12 +9941,11 @@ void Terminal::pushColorPalette(size_t slot)
     if (slot > MaxColorPaletteSaveStackSize)
         return;
 
-    auto const index = [&](size_t slot) {
-        if (slot == MagicStackTopId)
-            return _savedColorPalettes.empty() ? 0 : _savedColorPalettes.size() - 1;
-        else
-            return slot - 1;
-    }(slot);
+    // Without a slot the palette goes on top of the stack -- a push, as in xterm, whose
+    // xtermPushColors() stores at `used` and then increments it. A full stack takes no more.
+    auto const index = slot == MagicStackTopId ? _savedColorPalettes.size() : slot - 1;
+    if (index >= MaxColorPaletteSaveStackSize)
+        return;
 
     if (index >= _savedColorPalettes.size())
         _savedColorPalettes.resize(index + 1);

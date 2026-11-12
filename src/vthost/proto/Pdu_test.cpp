@@ -1690,6 +1690,82 @@ TEST_CASE("a codepoint that is not a Unicode scalar value is malformed", "[vthos
     }
 }
 
+TEST_CASE("a Delta's row ids are bounded at the protocol boundary", "[vthost][proto]")
+{
+    // The mirror does arithmetic on the viewport base, the floor and every row id it is sent
+    // (ScreenMirror::apply compares floor + base sums; RemoteScreen trims below base - keep). An
+    // id near INT64_MAX made those sums signed overflow. A Grid's ids move by one per scrolled
+    // row, so an honest peer never comes anywhere near MaxStableRowId, and its floor never lies
+    // above its base.
+    auto const decodes = [](Delta const& delta) {
+        auto stream = Writer {};
+        encodePdu(stream, 1, DecodedPdu { delta });
+        return decodePdu(stream.view()).has_value();
+    };
+    auto const rowAt = [](int64_t stableId) {
+        auto line = WireLine {};
+        line.stableId = stableId;
+        line.columns = 1;
+        return line;
+    };
+
+    SECTION("ids at the bound, negative ones included, still decode")
+    {
+        auto delta = Delta {};
+        delta.stableFloor = -MaxStableRowId;
+        delta.stableViewportBase = MaxStableRowId;
+        delta.lines = { rowAt(-MaxStableRowId), rowAt(MaxStableRowId) };
+        delta.imageCells = { ImageCellEntry { .stableId = MaxStableRowId } };
+        CHECK(decodes(delta));
+    }
+
+    SECTION("a viewport base past the bound is malformed")
+    {
+        auto delta = Delta {};
+        delta.stableFloor = 7;
+        delta.stableViewportBase = std::numeric_limits<int64_t>::max();
+        CHECK_FALSE(decodes(delta));
+    }
+
+    SECTION("a floor past the bound is malformed")
+    {
+        auto delta = Delta {};
+        delta.stableFloor = std::numeric_limits<int64_t>::min();
+        CHECK_FALSE(decodes(delta));
+    }
+
+    SECTION("a floor above the base is malformed")
+    {
+        auto delta = Delta {};
+        delta.stableFloor = 11;
+        delta.stableViewportBase = 10;
+        CHECK_FALSE(decodes(delta));
+    }
+
+    SECTION("a row id past the bound is malformed")
+    {
+        auto delta = Delta {};
+        delta.lines = { rowAt(std::numeric_limits<int64_t>::min()) };
+        CHECK_FALSE(decodes(delta));
+
+        auto status = Delta {};
+        status.statusLines = { rowAt(MaxStableRowId + 1) };
+        CHECK_FALSE(decodes(status));
+    }
+
+    SECTION("an image or soft glyph cell's row id past the bound is malformed")
+    {
+        auto image = Delta {};
+        image.imageCells = { ImageCellEntry { .stableId = std::numeric_limits<int64_t>::max() } };
+        CHECK_FALSE(decodes(image));
+
+        auto glyph = Delta {};
+        glyph.softGlyphCells = { SoftGlyphCellEntry {
+            .stableId = -MaxStableRowId - 1, .column = 0, .font = 0, .position = FirstSoftCellPosition } };
+        CHECK_FALSE(decodes(glyph));
+    }
+}
+
 TEST_CASE("a cluster continuation codepoint is bounded like the base one", "[vthost][proto]")
 {
     // The extras reach the grapheme segmenter and the shaper through exactly the same path, so a

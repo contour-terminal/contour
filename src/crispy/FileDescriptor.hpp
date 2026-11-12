@@ -17,22 +17,16 @@ struct CloseNativeHandle
 };
 
 #ifndef _WIN32
+/// Closes a POSIX file descriptor.
+///
+/// A failing close() is not retried and not reported: POSIX leaves the descriptor's state unspecified
+/// after one, and Linux has already released it even on EINTR, so a retry could close a descriptor some
+/// other thread has just been handed. The caller is the destructor or a noexcept move in nearly every
+/// case, where there is nothing left to do about the failure anyway.
 template <>
 struct CloseNativeHandle<int>
 {
-    void operator()(int fd)
-    {
-        for (;;)
-        {
-            int const rv = ::close(fd);
-            switch (rv)
-            {
-                case 0: return;
-                case EINTR: break;
-                default: throw std::system_error(errno, std::generic_category(), "close() failed");
-            }
-        }
-    }
+    void operator()(int fd) const noexcept { ::close(fd); }
 };
 #endif
 
@@ -87,7 +81,8 @@ class NativeHandle
         return fd;
     }
 
-    void close()
+    /// Closes the handle, if open. Never throws: the destructor and the move assignment call it.
+    void close() noexcept
     {
         if (_fd == InvalidNativeHandle)
             return;

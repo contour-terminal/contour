@@ -1227,3 +1227,23 @@ TEST_CASE("Parser.CsiParameterBulk.RandomCsiHeavyStreams", "[Parser][BulkScan]")
     INFO(std::format("seed {}\n{}", seed, difference));
     CHECK(difference.empty());
 }
+
+TEST_CASE("Parser.extractCodePrefix", "[Parser]")
+{
+    SECTION("an in-range code")
+    {
+        CHECK(vtparser::extractCodePrefix("52;x"sv) == pair { 52, size_t { 3 } });
+        CHECK(vtparser::extractCodePrefix("65534;x"sv) == pair { 65534, size_t { 6 } });
+    }
+
+    SECTION("a code past 16 bits saturates instead of wrapping onto a real one")
+    {
+        // 65588 is 52 + 65536: truncated to 16 bits it would be OSC 52, the clipboard.
+        CHECK(vtparser::extractCodePrefix("65588;x"sv) == pair { vtparser::MaxOscCode, size_t { 6 } });
+    }
+
+    SECTION("a code past int does not overflow")
+    {
+        CHECK(vtparser::extractCodePrefix("99999999999;x"sv) == pair { vtparser::MaxOscCode, size_t { 12 } });
+    }
+}

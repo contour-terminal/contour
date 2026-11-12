@@ -53,20 +53,37 @@ namespace
     constexpr std::size_t MaxMacroDepth = 32;
     constexpr std::size_t MaxMacroOutput = static_cast<std::size_t>(256 * 1024);
 
+    /// The most input one expansion may read, bodies of invoked macros included.
+    ///
+    /// The depth and output caps bound neither the time nor each other: a macro whose body is only
+    /// invocations of itself emits nothing, and k invocations per level is k^MaxMacroDepth calls.
+    /// Sized so that anything able to fill MaxMacroOutput gets there well within it.
+    constexpr std::size_t MaxMacroScan = 4 * MaxMacroOutput;
+
     /// Expands ReGIS macrographs in @p input, appending the result to @p out.
     ///
     /// @c \@:X...\@; defines macro @c X (stored in @p macros and removed from the stream), @c \@X
     /// invokes it (late-bound, recursively expanded), and @c \@. clears all. Definitions persist in
-    /// @p macros across DCS strings. Expansion stops at the depth and output caps.
+    /// @p macros across DCS strings. Expansion stops at the depth, output and scan caps.
+    ///
+    /// @param out    Receives the expanded text.
+    /// @param input  The text to expand.
+    /// @param macros The macro definitions, read and written.
+    /// @param scan   Input bytes this expansion may still read, shared by every level of it.
+    /// @param depth  How many invocations deep @p input is.
     void expandMacrographs(std::string& out,
                            std::string_view input,
                            std::unordered_map<char, std::string>& macros,
+                           std::size_t& scan,
                            std::size_t depth)
     {
-        if (depth > MaxMacroDepth)
-            return;
         auto i = std::size_t { 0 };
-        while (i < input.size() && out.size() < MaxMacroOutput)
+        // Every pass consumes at least one byte of input, and pays for all it consumes.
+        auto const consume = [&](std::size_t bytes) {
+            i += bytes;
+            scan -= std::min(scan, bytes);
+        };
+        while (i < input.size() && out.size() < MaxMacroOutput && scan != 0)
         {
             auto const c = input[i];
             if (c == '@' && i + 1 < input.size())
@@ -80,28 +97,30 @@ namespace
                     if (end == std::string_view::npos)
                         break;
                     macros[name] = std::string(input.substr(bodyStart, end - bodyStart));
-                    i = end + 2;
+                    consume(end + 2 - i);
                     continue;
                 }
                 if (next == '.')
                 {
                     macros.clear();
-                    i += 2;
+                    consume(2);
                     continue;
                 }
                 if (std::isalpha(static_cast<unsigned char>(next)))
                 {
-                    if (auto const it = macros.find(next); it != macros.end())
+                    // The depth is tested before the body is copied, so that an invocation too deep
+                    // to expand costs what it reads and no more.
+                    if (auto const it = macros.find(next); it != macros.end() && depth < MaxMacroDepth)
                     {
-                        auto const body = it->second; // copy: a nested define may rehash the map
-                        expandMacrographs(out, body, macros, depth + 1);
+                        auto const body = it->second; // copy: a nested @. clears the map
+                        expandMacrographs(out, body, macros, scan, depth + 1);
                     }
-                    i += 2;
+                    consume(2);
                     continue;
                 }
             }
             out.push_back(c);
-            ++i;
+            consume(1);
         }
     }
 } // namespace
@@ -134,7 +153,8 @@ void ReGISParser::finalize()
     // Expand macrographs first: definitions persist in the context, invocations are substituted, so
     // the grammar parser never sees an @.
     auto expanded = std::string {};
-    expandMacrographs(expanded, _buffer, _context.macrographs, 0);
+    auto scan = MaxMacroScan;
+    expandMacrographs(expanded, _buffer, _context.macrographs, scan, 0);
     _buffer = std::move(expanded);
 
     _pos = 0;

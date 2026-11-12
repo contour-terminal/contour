@@ -10,6 +10,7 @@
 #include <gsl/span>
 #include <gsl/span_ext>
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <concepts>
@@ -949,6 +950,12 @@ class Parser
     char const* _fragmentEnd = nullptr;
 };
 
+/// The largest OSC code extractCodePrefix() reports; a longer code saturates to it.
+///
+/// A code is carried onward as a 16-bit sequence parameter, so without the ceiling OSC 65588 would wrap
+/// onto OSC 52. No function is defined at this code, so a code that saturates to it matches none.
+constexpr inline int MaxOscCode = 0xFFFF;
+
 /// @returns parsed tuple with OSC code and offset to first data parameter byte.
 template <typename T>
 inline std::pair<int, size_t> extractCodePrefix(T const& data) noexcept
@@ -961,7 +968,7 @@ inline std::pair<int, size_t> extractCodePrefix(T const& data) noexcept
     // ABIs signed -- char, so any byte >= 0x80 (every UTF-8 lead byte, reachable through PM/APC
     // payloads) would otherwise be passed as a negative int and index the ctype table out of bounds.
     while (i < data.size() && std::isdigit(static_cast<unsigned char>(data[i])))
-        code = (code * 10) + static_cast<int>(data[i++] - '0');
+        code = std::min((code * 10) + static_cast<int>(data[i++] - '0'), MaxOscCode);
 
     if (i == 0 && !data.empty() && data[0] != ';')
     {

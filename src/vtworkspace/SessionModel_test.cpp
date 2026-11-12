@@ -1642,6 +1642,42 @@ TEST_CASE("SessionModel: moveTabToWorkspace transplants a tab between workspaces
         CHECK(b->tabCount() == 1);
     }
 }
+
+TEST_CASE("SessionModel: moveTabToWorkspace keeps the destination's previous tab on the same tab",
+          "[vtworkspace][model][workspace][move]")
+{
+    // Inserting the moved tab shifts every destination tab at or after its slot up by one, so the
+    // outgoing active tab — now the previous one — must be named at its shifted slot.
+    Fixture f;
+    auto* a = f.model.createWorkspace();
+    auto* b = f.model.createWorkspace();
+    auto* t = f.model.createTab(a->id());
+    auto* b0 = f.model.createTab(b->id());
+    auto* b1 = f.model.createTab(b->id()); // b has [b0, b1], b1 active
+
+    SECTION("inserted before the outgoing active tab")
+    {
+        f.model.moveTabToWorkspace(a->id(), t->id(), b->id(), 0); // b becomes [t, b0, b1]
+        CHECK(b->activeTab() == t);
+        CHECK(b->previousActiveTab() == b1);
+    }
+
+    SECTION("inserted after the outgoing active tab")
+    {
+        f.model.activateTab(b->id(), b0->id());                   // b has [b0, b1], b0 active
+        f.model.moveTabToWorkspace(a->id(), t->id(), b->id(), 1); // b becomes [b0, t, b1]
+        CHECK(b->activeTab() == t);
+        CHECK(b->previousActiveTab() == b0);
+    }
+
+    SECTION("into an empty destination there is no previous tab")
+    {
+        auto* c = f.model.createWorkspace();
+        f.model.moveTabToWorkspace(a->id(), t->id(), c->id(), 0);
+        CHECK(c->activeTab() == t);
+        CHECK(c->previousActiveTab() == nullptr);
+    }
+}
 // }}}
 
 // {{{ Zoom

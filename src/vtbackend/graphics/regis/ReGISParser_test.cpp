@@ -452,6 +452,28 @@ TEST_CASE("ReGISParser.macrograph.recursionGuard", "[regis][parser]")
     CHECK(fx.context.position == Point { .x = 1, .y = 1 });
 }
 
+TEST_CASE("ReGISParser.macrograph.expansionWorkIsBounded", "[regis][parser]")
+{
+    // A macro whose body is only invocations of itself emits nothing, so neither the depth cap nor
+    // the output cap ends it: four invocations a level deep is 4^33 calls. The work itself has to
+    // be bounded. Returning at all is the assertion.
+    auto fx = Fixture { 20, 8 };
+    fx.run("@:A@A@A@A@A@;@A");
+
+    // And the parser is still usable afterwards.
+    fx.run("P[1,1]");
+    CHECK(fx.context.position == Point { .x = 1, .y = 1 });
+}
+
+TEST_CASE("ReGISParser.macrograph.aBoundedExpansionIsNotCutShort", "[regis][parser]")
+{
+    // The bound is on runaway work, not on nesting as such: macros invoking one another a few
+    // levels deep, several times each, still expand in full.
+    auto fx = Fixture { 20, 8 };
+    fx.run("@:AP[+1,+0]@;@:B@A@A@A@A@;@:C@B@B@B@B@;@:D@C@C@C@C@;P[0,0]@D");
+    CHECK(fx.context.position == Point { .x = 64, .y = 0 });
+}
+
 TEST_CASE("ReGISParser.persistence.acrossCalls", "[regis][parser]")
 {
     // The context carries across DCS strings: a second parse continues from the first's position.

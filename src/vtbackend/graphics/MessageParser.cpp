@@ -86,8 +86,10 @@ void MessageParser::finalize()
     switch (_state)
     {
         case State::ParamKey:
-        case State::ParamValue: flushHeader(); break;
-        case State::BodyStart: break;
+        case State::ParamValue:
+        // The `;` announced a body and left the last header pending for its first byte to deliver.
+        // A body that never came has no such byte.
+        case State::BodyStart: flushHeader(); break;
         case State::Body:
             if (_body.size() > 1 && _body[0] == '!')
             {

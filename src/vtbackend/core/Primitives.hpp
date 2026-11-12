@@ -15,6 +15,7 @@
 #include <optional>
 #include <ostream>
 #include <string>
+#include <utility>
 #include <variant>
 
 #include <boxed-cpp/boxed.hpp>
@@ -1417,16 +1418,17 @@ constexpr unsigned toAnsiModeNum(AnsiMode m)
     return static_cast<unsigned>(m);
 }
 
+/// Tests whether @p mode is the number of an ANSI mode this terminal implements.
+///
+/// The number is compared as it was received. Converting it to AnsiMode first keeps only its low
+/// byte, which makes 260 the number of IRM (4) and 258 that of KAM (2).
+///
+/// @param mode The mode number, as a control sequence carries it.
+/// @return true if @p mode names one of @ref AnsiModes.
 constexpr bool isValidAnsiMode(unsigned int mode) noexcept
 {
-    switch (static_cast<AnsiMode>(mode))
-    {
-        case AnsiMode::KeyboardAction:
-        case AnsiMode::Insert:
-        case AnsiMode::SendReceive:
-        case AnsiMode::AutomaticNewLine: return true;
-    }
-    return false;
+    return std::ranges::any_of(AnsiModes,
+                               [mode](AnsiMode known) { return std::to_underlying(known) == mode; });
 }
 
 std::string toString(AnsiMode mode);

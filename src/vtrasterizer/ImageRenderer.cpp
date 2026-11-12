@@ -83,8 +83,11 @@ std::optional<atlas::ImageTextureId> ImageRenderer::textureFor(
 
     // The upload hands the backend this geometry and lets it read height * width * 4 bytes from the
     // pixmap, so one that does not match would be read out of bounds. vtbackend rejects those where the
-    // data enters; this restates the guarantee where the memory is actually indexed.
-    if (!vtbackend::isConsistentPixmap(image.format(), image.size(), image.data().size()))
+    // data enters; this restates the guarantee where the memory is actually indexed. An encoded
+    // file is refused outright: its length is unrelated to its geometry, so the check that passes
+    // one as self-describing says nothing about what is safe to upload.
+    if (image.format() == vtbackend::ImageFormat::PNG
+        || !vtbackend::isConsistentPixmap(image.format(), image.size(), image.data().size()))
     {
         errorLog()("Refusing to upload image {}: {} pixmap of {} bytes does not match its size {}.",
                    imageId,

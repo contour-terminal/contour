@@ -113,6 +113,18 @@
         <ul>
           <li>Fixes built-in SSH profiles ignoring keystrokes after a successful login when the connection is idle (#2286)</li>
           <li>Fixes connecting to a daemon on a busy machine waiting past its connect timeout before reporting that it timed out, and reporting a connection that came up at the last moment as timed out</li>
+          <li>Fixes memory corruption and crashes that program output could cause: a kitty graphics image whose declared size overflows (#2294), a character printed in insert mode right of the right margin (#2295), ICH and DECIC under origin mode with a left margin (#2296), DECCRA copying from a page of another size after a resize (#2297) and DECRQCRA for a rectangle whose corners are reversed (#2298)</li>
+          <li>Fixes a ReGIS macrograph that invokes itself several times freezing the terminal (#2299)</li>
+          <li>Fixes PNG images sent over the kitty graphics protocol (<code>f=100</code>) not being shown: they are now decoded when they arrive (#2303)</li>
+          <li>Fixes control sequence numbers being taken modulo their storage size: <code>CSI 260 h</code> no longer sets insert mode and <code>CSI 258 h</code> no longer locks the keyboard (#2305), and <code>OSC 65588</code> is no longer read as <code>OSC 52</code> (#2304)</li>
+          <li>Fixes tab stops: clearing one no longer shifts the default stops a column to the left, setting one keeps the default stops, clearing all leaves none (also in the DECTABSR report), a stop set twice is cleared at once, HT finds its stop under origin mode, and CBT from a tab stop goes to the previous one. The default stops now also reach columns the window gains later (#2309)</li>
+          <li>Fixes XTPUSHCOLORS without a parameter overwriting the top of the palette stack instead of pushing, which lost the outer palette of a nested push and pop (#2310)</li>
+          <li>Fixes the Good Image Protocol leaving the cursor on the image's first row when a render names a source rectangle (#2313), and ignoring the last header of a message that ends in <code>;</code>, such as a release by name (#2314)</li>
+          <li>Fixes built-in SSH: a host key accepted on a port other than 22 is now stored for that port only, as OpenSSH stores it, where it was trusted on every port of the host (#2306), and a long connection message can no longer be written past the read buffer (#2302)</li>
+          <li>Fixes Contour terminating when closing a file descriptor fails, for instance when a signal interrupts it (#2307)</li>
+          <li>Fixes tmux control mode: a layout with zero, negative or oversized pane sizes is refused instead of crashing (#2300), and <code>send-keys</code> sends text after <code>--</code> that spells one of its own options (#2312)</li>
+          <li>Fixes a daemon's client accepting screen updates whose row numbers overflow (#2308)</li>
+          <li>Fixes "switch to previous tab" choosing the wrong tab after a tab was moved into another window's tab strip (#2311)</li>
           <li>Fixes Contour crashing on exit when the window's sessions live in a daemon, which on macOS also started the system crash reporter beside the next launch</li>
           <li>Fixes Contour crashing when a terminal is resized just as its shell exits, for example when a window opens onto a shell that exits at once</li>
           <li>Adds agent status for panes: Claude Code and Codex report working, needs-you and done through hooks that <code>contour agent setup</code> installs for each agent it finds and <code>contour agent setup --uninstall</code> removes. Tab badges now rank needs-you, bell, failed, done, working and unseen output, and done and failed stay shown until the pane is seen</li>

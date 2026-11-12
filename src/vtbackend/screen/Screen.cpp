@@ -86,7 +86,6 @@
 using namespace std::string_view_literals;
 
 using core::escape;
-using core::times;
 
 using std::array;
 using std::clamp;
@@ -113,8 +112,6 @@ namespace vtbackend
 
 auto constexpr inline ColorPaletteUpdateDsrRequestId = 996;
 auto constexpr inline ColorPaletteUpdateDsrReplyId = 997;
-
-auto constexpr inline TabWidth = ColumnCount(8);
 
 auto inline const vtCaptureBufferLog = core::log::Category("vt.ext.capturebuffer",
                                                            "Capture Buffer debug logging.",
@@ -448,7 +445,7 @@ unsigned Screen::numericCapability(capabilities::Code cap) const
     {
         case "li"_tcap: return unbox<unsigned>(pageSize().lines);
         case "co"_tcap: return unbox<unsigned>(pageSize().columns);
-        case "it"_tcap: return unbox<unsigned>(TabWidth);
+        case "it"_tcap: return unbox<unsigned>(TabStops::DefaultInterval);
         default: return StaticDatabase::numericCapability(cap);
     }
 }
@@ -1265,40 +1262,6 @@ optional<LineOffset> Screen::findMarkerDownwards(LineOffset startLine) const
 
     return nullopt;
 }
-
-// {{{ tabs related
-
-void Screen::clearAllTabs()
-{
-    _terminal->tabs().clear();
-}
-
-void Screen::clearTabUnderCursor()
-{
-    // populate tabs vector in case of default tab width is used (until now).
-    if (_terminal->tabs().empty() && *TabWidth != 0)
-        for (auto column = boxed_cast<ColumnOffset>(TabWidth);
-             column < boxed_cast<ColumnOffset>(pageSize().columns);
-             column += boxed_cast<ColumnOffset>(TabWidth))
-            _terminal->tabs().emplace_back(column - 1);
-
-    // erase the specific tab underneath
-    for (auto i = begin(_terminal->tabs()); i != end(_terminal->tabs()); ++i)
-    {
-        if (*i == realCursorPosition().column)
-        {
-            _terminal->tabs().erase(i);
-            break;
-        }
-    }
-}
-
-void Screen::setTabUnderCursor()
-{
-    _terminal->tabs().emplace_back(realCursorPosition().column);
-    sort(begin(_terminal->tabs()), end(_terminal->tabs()));
-}
-// }}}
 
 // {{{ others
 
@@ -2135,8 +2098,17 @@ void Screen::insertCharacters(ColumnCount n)
 
 void Screen::insertChars(LineOffset lineOffset, ColumnCount columnsToInsert)
 {
+    // There is room to make only between the cursor and the right margin, so outside the margins
+    // there is none: ICH and DECIC test that before they get here, but insert mode (IRM) does not,
+    // and a cursor right of the right margin would make the count below negative. As in xterm,
+    // whose InsertChar() inserts nothing there.
+    if (!isCursorInsideHorizontalMargins())
+        return;
+
+    // The room is counted in real columns. The logical column is measured from the left margin
+    // under origin mode (DECOM), which would overstate it by that margin's width.
     auto const sanitizedN =
-        std::min(*columnsToInsert, *margin().horizontal.to - *logicalCursorPosition().column + 1);
+        std::min(*columnsToInsert, *margin().horizontal.to - *realCursorPosition().column + 1);
 
     // Every cell from here to the right margin is about to move sideways, and a block cannot move
     // with them. @see eraseMulticellBlocksInRange.
@@ -2248,11 +2220,19 @@ void Screen::copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int
 
     // The copy is truncated at the target page's edge: an area that would not fit copies only the part
     // that does. Copying every cell the source names would run the write past the end of a line.
+    //
+    // And at the source page's edge, for the same reason on the reading side. The two are not the
+    // same size as a matter of course: a resize reaches only the page the cursor is on, and every
+    // other page keeps its old size until the cursor moves to it, so an area the caller clamped to
+    // the current page can name cells the source page does not have.
+    auto const sourcePageSize = srcGrid.pageSize();
     auto const targetPageSize = dstGrid.pageSize();
-    auto const height =
-        std::min(*sourceArea.bottom - *sourceArea.top + 1, unbox(targetPageSize.lines) - *targetTopLeft.line);
-    auto const width = std::min(*sourceArea.right - *sourceArea.left + 1,
-                                unbox(targetPageSize.columns) - *targetTopLeft.column);
+    auto const height = std::min({ *sourceArea.bottom - *sourceArea.top + 1,
+                                   unbox(sourcePageSize.lines) - *sourceArea.top,
+                                   unbox(targetPageSize.lines) - *targetTopLeft.line });
+    auto const width = std::min({ *sourceArea.right - *sourceArea.left + 1,
+                                  unbox(sourcePageSize.columns) - *sourceArea.left,
+                                  unbox(targetPageSize.columns) - *targetTopLeft.column });
     if (height <= 0 || width <= 0)
         return;
 
@@ -2461,14 +2441,15 @@ void Screen::horizontalTabClear(HorizontalTabClear which)
 {
     switch (which)
     {
-        case HorizontalTabClear::AllTabs: clearAllTabs(); break;
-        case HorizontalTabClear::UnderCursor: clearTabUnderCursor(); break;
+        case HorizontalTabClear::AllTabs: _terminal->tabs().clearAll(); break;
+        case HorizontalTabClear::UnderCursor: _terminal->tabs().clear(realCursorPosition().column); break;
     }
 }
 
 void Screen::horizontalTabSet()
 {
-    setTabUnderCursor();
+    // A stop is recorded as a real column: the page's, not the scroll region's.
+    _terminal->tabs().set(realCursorPosition().column);
 }
 
 void Screen::setCurrentWorkingDirectory(string const& url)
@@ -2643,9 +2624,6 @@ void Screen::moveCursorToLine(LineOffset n)
 
 void Screen::moveCursorToNextTab()
 {
-    // TODO: I guess something must remember when a \t was added, for proper move-back?
-    // TODO: respect HTS/TBC
-
     // DECSET 41 (MoreFix, xterm's curses hack): when the line has just been filled to the right margin
     // (a wrap is pending) and a TAB arrives, honour the pending wrap first -- moving to the next line --
     // and then tab from its left margin. Without it (the default), the pending wrap waits for the next
@@ -2654,40 +2632,17 @@ void Screen::moveCursorToNextTab()
     if (_terminal->isModeEnabled(DECMode::MoreFix))
         crlfIfWrapPending();
 
-    static_assert(TabWidth > ColumnCount(0));
+    // A tab stop is a real column (@see Screen::horizontalTabSet), so the cursor is compared as one
+    // too: under origin mode its logical column is measured from the left margin. With no stop ahead
+    // the cursor goes to the right margin, and it never goes beyond that -- as in xterm, whose
+    // TabToNextStop() caps the stop it found at the margin.
+    auto const column = realCursorPosition().column;
+    auto const rightMost = margin().horizontal.to;
+    auto const target = std::min(_terminal->tabs().nextAfter(column).value_or(rightMost), rightMost);
 
-    auto columnsToAdvance = ColumnCount(0);
-
-    if (!_terminal->tabs().empty())
-    {
-        // advance to the next tab
-        size_t i = 0;
-        while (i < _terminal->tabs().size() && realCursorPosition().column >= _terminal->tabs()[i])
-            ++i;
-
-        auto const currentCursorColumn = logicalCursorPosition().column;
-
-        if (i < _terminal->tabs().size())
-            columnsToAdvance = boxed_cast<ColumnCount>(_terminal->tabs()[i] - currentCursorColumn);
-        else if (realCursorPosition().column < margin().horizontal.to)
-            columnsToAdvance = boxed_cast<ColumnCount>(margin().horizontal.to - currentCursorColumn);
-    }
-    else
-    {
-        // default tab settings
-        if (realCursorPosition().column < margin().horizontal.to)
-        {
-            columnsToAdvance =
-                std::min((TabWidth - boxed_cast<ColumnCount>(_cursor.position.column) % TabWidth),
-                         pageSize().columns - boxed_cast<ColumnCount>(logicalCursorPosition().column));
-        }
-    }
-
-    if (columnsToAdvance > ColumnCount(0))
-    {
-        // HT must NOT overwrite existing cell content — it only moves the cursor.
-        moveCursorForward(columnsToAdvance);
-    }
+    // HT must NOT overwrite existing cell content — it only moves the cursor.
+    if (target > column)
+        moveCursorForward(boxed_cast<ColumnCount>(target - column));
 }
 
 void Screen::notify(string const& title, string const& content)
@@ -2780,51 +2735,18 @@ void Screen::cursorBackwardTab(TabStopCount count)
     if (!count)
         return;
 
-    // Every target below is a real column -- a tab stop as HTS recorded it, or the page's first column --
-    // so all of them are placed with setCurrentAbsoluteColumn(). Going through moveCursorToColumn() would
-    // add the left margin to them again under origin mode, landing the cursor past the tab stop.
-    if (!_terminal->tabs().empty())
+    // The target is a real column -- a tab stop as HTS recorded it, or the page's first column -- so it
+    // is placed with setCurrentAbsoluteColumn(). Going through moveCursorToColumn() would
+    // add the left margin to it again under origin mode, landing the cursor past the tab stop. The
+    // cursor is compared as a real column for the same reason.
+    for ([[maybe_unused]] auto const _: core::times(unbox<unsigned>(count)))
     {
-        for (unsigned k = 0; k < unbox<unsigned>(count); ++k)
-        {
-            // HTS records tab stops as real columns (@see Screen::horizontalTabSet), so the cursor is
-            // compared as one too -- under origin mode its logical column would be measured from the left
-            // margin and pick the wrong stop.
-            auto const i = std::find_if(
-                rbegin(_terminal->tabs()), rend(_terminal->tabs()), [&](ColumnOffset tabPos) -> bool {
-                    return tabPos < realCursorPosition().column;
-                });
-            if (i != rend(_terminal->tabs()))
-            {
-                // prev tab found -> move to prev tab
-                setCurrentAbsoluteColumn(*i);
-            }
-            else
-            {
-                // No earlier tab stop: CBT ignores the left/right margin (xterm), so fall back to the
-                // first column, not the left margin.
-                setCurrentAbsoluteColumn(ColumnOffset(0));
-                break;
-            }
-        }
-    }
-    else if (TabWidth.value)
-    {
-        // Default tab settings. CBT ignores the left/right margin (xterm), so set the target column
-        // directly -- moveCursorBackward() would stop at the left margin.
-        if (*_cursor.position.column < *TabWidth)
-            setCurrentAbsoluteColumn(ColumnOffset(0));
-        else
-        {
-            auto const m = (*_cursor.position.column + 1) % *TabWidth;
-            auto const n = m ? ((*count - 1) * *TabWidth) + m : (*count * *TabWidth) + m;
-            setCurrentAbsoluteColumn(ColumnOffset(std::max(0, *_cursor.position.column - (n - 1))));
-        }
-    }
-    else
-    {
-        // no tab stops configured
-        moveCursorToBeginOfLine();
+        auto const previous = _terminal->tabs().previousBefore(realCursorPosition().column);
+        // No earlier tab stop: CBT ignores the left/right margin (xterm), so fall back to the first
+        // column, not the left margin.
+        setCurrentAbsoluteColumn(previous.value_or(ColumnOffset(0)));
+        if (!previous)
+            break;
     }
 }
 
@@ -3168,7 +3090,7 @@ void Screen::sixelImage(ImageSize pixelSize, Image::Data&& rgbaData)
                 alignmentPolicy,
                 resizePolicy,
                 autoScrollAtBottomMargin,
-                ImageCursorPolicy::BelowImage);
+                ImageCursorPolicy::BelowSixelBands);
 
     if (!_terminal->isModeEnabled(DECMode::SixelCursorNextToGraphic))
         linefeed(topLeft.column);
@@ -3220,12 +3142,16 @@ void Screen::renderImage(shared_ptr<Image const> image,
                                                               kittyPlacementId);
 
     // Compute the cursor line offset after rendering.
-    // For Sixel images (identified by non-zero pixel imageSize), use VT340-compatible sixel band math.
+    // For Sixel images, use VT340-compatible sixel band math. Which image is one is the caller's to
+    // say (@see ImageCursorPolicy::BelowSixelBands): a pixel imageSize does not tell, since GIP names
+    // the part of an image to show the same way.
     // For GIP images, simply place the cursor at the last row of the rendered area.
     // Sixel's band math divides by the cell height, which is zero until the display has reported it; such an
     // image is then placed like a GIP one.
-    auto const isSixelImage =
-        imageSize.width.value > 0 && imageSize.height.value > 0 && _terminal->cellPixelSize().area() > 0;
+    auto const goesBelowImage =
+        cursorPolicy == ImageCursorPolicy::BelowImage || cursorPolicy == ImageCursorPolicy::BelowSixelBands;
+    auto const isSixelImage = cursorPolicy == ImageCursorPolicy::BelowSixelBands && imageSize.width.value > 0
+                              && imageSize.height.value > 0 && _terminal->cellPixelSize().area() > 0;
     auto const cursorLineOffset = [&]() -> LineOffset {
         if (isSixelImage)
         {
@@ -3261,6 +3187,7 @@ void Screen::renderImage(shared_ptr<Image const> image,
         {
             case ImageCursorPolicy::Stay: break;
             case ImageCursorPolicy::BelowImage:
+            case ImageCursorPolicy::BelowSixelBands:
                 moveCursorTo(topLeft.line + cursorLineOffset, topLeft.column);
                 break;
             case ImageCursorPolicy::AdvancePastImage:
@@ -3290,12 +3217,12 @@ void Screen::renderImage(shared_ptr<Image const> image,
         }
         // After auto-scroll, cursor is ON the last image row. Move it below.
         // Only for GIP — Sixel handles its own cursor positioning at the call site.
-        if (cursorPolicy == ImageCursorPolicy::BelowImage && !isSixelImage)
+        if (goesBelowImage && !isSixelImage)
             linefeed(topLeft.column);
     }
 
     // Move ANSI text cursor to the correct column after image placement.
-    if (cursorPolicy == ImageCursorPolicy::BelowImage)
+    if (goesBelowImage)
         moveCursorToColumn(topLeft.column);
 }
 
@@ -3558,20 +3485,12 @@ void Screen::requestTabStops()
     // Response: `DCS 2 $ u Pt ST`
     ostringstream dcs;
     dcs << "\033P2$u"sv; // DCS
-    if (!_terminal->tabs().empty())
+    auto const stops = _terminal->tabs().within(pageSize().columns);
+    for (auto const [index, stop]: core::views::enumerate(stops))
     {
-        for (size_t const i: times(_terminal->tabs().size()))
-        {
-            if (i)
-                dcs << '/';
-            dcs << *_terminal->tabs()[i] + 1;
-        }
-    }
-    else if (*TabWidth != 0)
-    {
-        dcs << 1;
-        for (auto column = *TabWidth + 1; column <= *pageSize().columns; column += *TabWidth)
-            dcs << '/' << column;
+        if (index != 0)
+            dcs << '/';
+        dcs << *stop + 1;
     }
     dcs << "\033\\"sv; // ST
 
@@ -6240,8 +6159,8 @@ void Screen::processKittyGraphics(std::string_view body)
         return;
     }
 
-    auto const format = toImageFormat(command.transmissionFormat());
-    auto const pixelSize =
+    auto format = toImageFormat(command.transmissionFormat());
+    auto pixelSize =
         ImageSize { Width::cast_from(command.pixelWidth), Height::cast_from(command.pixelHeight) };
 
     // The renderer reads width*height*bytesPerPixel from a raw buffer, so a payload that does not
@@ -6249,19 +6168,19 @@ void Screen::processKittyGraphics(std::string_view body)
     // exact bound for inflating one: a bomb is refused after a few KiB instead of being inflated
     // and then found to be the wrong size. A PNG states its own size only once decoded, so it is
     // bounded by what the quota still has room for instead. Declared dimensions are attacker-chosen,
-    // though, so they bound an inflate only when they are sane: an overflowing or over-quota size is
-    // refused before a single byte is inflated.
-    auto const expected = static_cast<size_t>(command.pixelWidth) * command.pixelHeight
-                          * bytesPerPixel(command.transmissionFormat());
-    if (command.compression != Compression::None && format != ImageFormat::PNG
-        && !boundedRawBytes(command.pixelWidth,
-                            command.pixelHeight,
-                            bytesPerPixel(command.transmissionFormat()),
-                            _settings->kittyImageStorageQuota))
+    // though, so they are trusted only when they are sane: an overflowing or over-quota size is
+    // refused before a single byte is inflated -- and before an uncompressed payload is compared
+    // with it, since a product that wrapped compares equal to a payload it has nothing to do with.
+    auto const bounded = boundedRawBytes(command.pixelWidth,
+                                         command.pixelHeight,
+                                         bytesPerPixel(command.transmissionFormat()),
+                                         _settings->kittyImageStorageQuota);
+    if (format != ImageFormat::PNG && !bounded)
     {
         replyKittyGraphics(command, "EINVAL:image dimensions too large");
         return;
     }
+    auto const expected = bounded.value_or(0);
     // Everything stored except this id's image and frames, which a re-transmission replaces.
     auto const storedByOthers = storedKittyBytes() - storedKittyBytesOf(command.imageId);
     auto const quota = _settings->kittyImageStorageQuota;
@@ -6284,12 +6203,23 @@ void Screen::processKittyGraphics(std::string_view body)
         return;
     }
 
-    auto image = _terminal->imagePool().create(format, pixelSize, std::move(pixmap));
-    if (!image)
+    // A PNG is stored as the pixels it decodes to, under the size the file itself states: the bytes
+    // that arrived are a file, which nothing downstream can draw, and `s=`/`v=` are optional for one
+    // and unverified when given. Stored as it came, it would reach the renderer as a few bytes
+    // claiming to be a `s` x `v` pixmap.
+    if (format == ImageFormat::PNG)
     {
-        replyKittyGraphics(command, "EINVAL:could not decode image");
-        return;
+        auto decoded = decodePng(pixmap, pixelSize);
+        if (!decoded)
+        {
+            replyKittyGraphics(command, "EINVAL:could not decode image");
+            return;
+        }
+        pixmap = std::move(*decoded);
+        format = ImageFormat::RGBA;
     }
+
+    auto image = _terminal->imagePool().create(format, pixelSize, std::move(pixmap));
 
     if (command.imageId != 0)
     {
@@ -6660,6 +6590,14 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     if (command.format && toImageFormat(*command.format) != base.format())
     {
         replyKittyGraphics(command, "EINVAL:frame format does not match the image");
+        return;
+    }
+
+    // Everything below indexes the frame by the image's geometry, so that geometry has to be what
+    // the buffer actually holds -- checked here rather than assumed of whoever stored the image.
+    if (!isConsistentPixmap(base.format(), base.size(), base.data().size()))
+    {
+        replyKittyGraphics(command, "EINVAL:frame does not match the image geometry");
         return;
     }
 
@@ -8389,7 +8327,11 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             // A cell holds at most one base codepoint plus its combining marks; sized generously so
             // no realistic grapheme cluster is truncated, and without allocating per cell.
             auto codepoints = std::array<char32_t, 16> {};
-            for (auto const row: std::views::iota(*top, *bottom + 1))
+            // Each corner is clamped to the page, but nothing puts them in order. A rectangle whose
+            // right edge lies left of its left one (or bottom above top) holds no cells, and is
+            // answered with the checksum of nothing, as xterm answers one its validRect() refuses.
+            auto const holdsCells = top <= bottom && left <= right;
+            for (auto const row: std::views::iota(*top, holdsCells ? *bottom + 1 : *top))
             {
                 for (auto const column: std::views::iota(*left, *right + 1))
                 {

@@ -954,7 +954,7 @@ std::optional<SshSession::ReadResult> SshSession::read(crispy::BufferObject<char
 
         if (!_injectedRead.empty())
         {
-            auto const nread = std::min(size, _injectedRead.size());
+            auto const nread = std::min({ size, _injectedRead.size(), storage.bytesAvailable() });
             std::copy_n(_injectedRead.begin(), nread, storage.hotEnd());
             _injectedRead.erase(0, nread);
             return ReadResult { .data = std::string_view { storage.hotEnd(), nread },

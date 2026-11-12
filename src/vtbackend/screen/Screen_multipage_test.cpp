@@ -1530,6 +1530,34 @@ TEST_CASE("MultiPage.DECCRA_cross_page_copy", "[screen]")
     CHECK(page2after == "          \nABCDE     \n          \n");
 }
 
+TEST_CASE("MultiPage.DECCRA_from_a_page_smaller_than_the_current_one", "[screen]")
+{
+    // A resize reaches only the page the cursor is on; every other page keeps its size until the
+    // cursor moves to it. A rectangle clamped to the current page can therefore name cells the
+    // source page does not have, and the copy has to stop at the source page's edge as well.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+
+    mock.writeToScreen("\033[2 P"); // PPA 2
+    mock.writeToScreen("ABCDEFGHIJ\r\nabcdefghij\r\n0123456789");
+    mock.writeToScreen("\033[1 P"); // PPA 1
+
+    terminal.resizeScreen(PageSize { LineCount(6), ColumnCount(20) });
+    REQUIRE(terminal.pageAt(PageIndex(0)).pageSize() == PageSize { LineCount(6), ColumnCount(20) });
+    REQUIRE(terminal.pageAt(PageIndex(1)).pageSize() == PageSize { LineCount(3), ColumnCount(10) });
+
+    // The whole of the current page's area, read from page 2, onto page 1.
+    mock.writeToScreen("\033[1;1;6;20;2;1;1;1$v");
+
+    CHECK(terminal.pageAt(PageIndex(0)).renderMainPageText()
+          == "ABCDEFGHIJ          \n"
+             "abcdefghij          \n"
+             "0123456789          \n"
+             "                    \n"
+             "                    \n"
+             "                    \n");
+}
+
 TEST_CASE("MultiPage.alternate_screen_compatibility", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };

@@ -193,8 +193,12 @@ enum class ImageCursorPolicy : uint8_t
 {
     /// The cursor stays where it was (kitty `C=1`, ReGIS, GIP without `u`).
     Stay,
-    /// The cursor moves to the image's left column, on the line below it (Sixel, GIP `u`, iTerm2).
+    /// The cursor moves to the image's left column, on the line below it (GIP `u`, iTerm2).
     BelowImage,
+    /// As BelowImage, with the line found the way a VT340 finds it: from the image's height in sixel
+    /// bands rather than from the rows it occupies (Sixel). Needs the cell's pixel size, and is
+    /// BelowImage until the display has reported one.
+    BelowSixelBands,
     /// The cursor moves right past the image, on its last row (kitty without `C=1`), walking down by
     /// index so a DECSTBM region scrolls at its bottom margin. The right edge is the one text wraps at:
     /// the right margin inside a DECLRMM band, else the last page column. The spec leaves a cursor pushed
@@ -1734,10 +1738,6 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void configureCurrentLineSize(LineFlags enabled);
 
     void advanceCursorAfterWrite(ColumnCount n) noexcept;
-
-    void clearAllTabs();
-    void clearTabUnderCursor();
-    void setTabUnderCursor();
 
     /// Applies LF but also moves cursor to given column @p column.
     /// @return Whether the cursor reached another row, by moving down or by scrolling one in.

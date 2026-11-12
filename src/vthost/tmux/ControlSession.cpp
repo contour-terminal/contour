@@ -42,18 +42,51 @@ std::chrono::milliseconds pauseAfterFromSeconds(std::uint64_t seconds) noexcept
 
 namespace
 {
+    /// The argument that ends a command line's options, as in tmux's args_parse.
+    constexpr auto EndOfOptions = std::string_view { "--" };
+
+    /// The option part of a command line: the arguments after the command, up to the first `--`.
+    ///
+    /// Nothing after that `--` is an option, a flag or a target, whatever it spells: it is text, and
+    /// send-keys in particular is handed literal text that may well read `-l` or `-H`. Unlike tmux, the
+    /// cut does not know which options take a value, so a `--` given as one's value (`-t --`) ends the
+    /// options here; no target or format a client sends is `--`.
+    /// @param arguments The split command line.
+    /// @return The arguments every option and flag lookup reads.
+    [[nodiscard]] std::span<std::string const> optionArgumentsOf(std::vector<std::string> const& arguments)
+    {
+        if (arguments.empty())
+            return {};
+        auto const afterCommand = std::span { arguments }.subspan(1);
+        return { afterCommand.begin(), std::ranges::find(afterCommand, EndOfOptions) };
+    }
+
+    /// The arguments after a command line's first `--`, every one of them positional.
+    /// @param arguments The split command line.
+    /// @return The arguments after the `--`; none if the line has no `--`.
+    [[nodiscard]] std::span<std::string const> argumentsAfterEndOfOptions(
+        std::vector<std::string> const& arguments)
+    {
+        auto const options = optionArgumentsOf(arguments);
+        auto const endOfOptions = 1 + options.size(); // where the `--` is, if there is one
+        if (endOfOptions >= arguments.size())
+            return {};
+        return std::span { arguments }.subspan(endOfOptions + 1);
+    }
+
     /// Extracts the value of a `-t <target>` option, if present.
     [[nodiscard]] std::optional<std::string_view> targetOf(std::vector<std::string> const& arguments)
     {
-        for (std::size_t i = 1; i + 1 < arguments.size(); ++i)
-            if (arguments[i] == "-t")
-                return arguments[i + 1];
-        return std::nullopt;
+        auto const options = optionArgumentsOf(arguments);
+        auto const option = std::ranges::find(options, std::string_view { "-t" });
+        if (option == options.end() || std::next(option) == options.end())
+            return std::nullopt;
+        return *std::next(option);
     }
 
     [[nodiscard]] bool hasFlag(std::vector<std::string> const& arguments, std::string_view flag)
     {
-        return std::ranges::find(arguments, flag) != arguments.end();
+        return std::ranges::contains(optionArgumentsOf(arguments), flag);
     }
 
     /// Whether the boolean short-flag @p flag is present, honouring tmux's BUNDLED form: `-peqJ` sets
@@ -67,14 +100,16 @@ namespace
                                       char flag,
                                       std::string_view valueOptions)
     {
-        for (std::size_t i = 1; i < arguments.size(); ++i)
+        auto skipValue = false;
+        for (auto const& arg: optionArgumentsOf(arguments))
         {
-            auto const& arg = arguments[i];
+            if (std::exchange(skipValue, false))
+                continue; // the value of the lone value option before it
             if (arg.size() < 2 || arg[0] != '-')
                 continue; // a value or bare token
             if (arg.size() == 2 && valueOptions.contains(arg[1]))
             {
-                ++i; // a lone value option: skip its value
+                skipValue = true; // a lone value option: skip its value
                 continue;
             }
             if (arg.find(flag, 1) != std::string::npos)
@@ -88,9 +123,14 @@ namespace
                                                          std::string_view flag)
     {
         auto values = std::vector<std::string_view> {};
-        for (std::size_t i = 1; i + 1 < arguments.size(); ++i)
-            if (arguments[i] == flag)
-                values.emplace_back(arguments[++i]);
+        auto takeValue = false;
+        for (auto const& argument: optionArgumentsOf(arguments))
+        {
+            if (std::exchange(takeValue, false))
+                values.emplace_back(argument);
+            else if (argument == flag)
+                takeValue = true;
+        }
         return values;
     }
 
@@ -141,7 +181,8 @@ namespace
     }
 
     /// The positional arguments of a command line: everything after the command that is neither an option
-    /// of @p valueOptions with its value, nor one of @p flags, nor the end-of-options `--`.
+    /// of @p valueOptions with its value, nor one of @p flags, nor the end-of-options `--` — and everything
+    /// after that `--`, whatever it spells.
     /// @param arguments The split command line.
     /// @param valueOptions The options that take a following value (e.g. `-t`).
     /// @param flags The boolean flags to skip (e.g. `-l`).
@@ -153,15 +194,17 @@ namespace
     {
         auto positionals = std::vector<std::string_view> {};
         auto skipNext = false;
-        for (auto const& argument: arguments | std::views::drop(1))
+        for (auto const& argument: optionArgumentsOf(arguments))
         {
             if (std::exchange(skipNext, false))
                 continue;
             if (std::ranges::contains(valueOptions, argument))
                 skipNext = true;
-            else if (!std::ranges::contains(flags, argument) && argument != "--")
+            else if (!std::ranges::contains(flags, argument))
                 positionals.emplace_back(argument);
         }
+        for (auto const& argument: argumentsAfterEndOfOptions(arguments))
+            positionals.emplace_back(argument);
         return positionals;
     }
 

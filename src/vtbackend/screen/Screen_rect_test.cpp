@@ -7,6 +7,7 @@
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 #include <vtbackend/vt/Charset.hpp>
+#include <vtbackend/vt/RectangularAreaChecksum.hpp>
 
 #include <core/Escape.hpp>
 #include <core/Utils.hpp>
@@ -17,8 +18,10 @@
 
 #include <charconv>
 #include <cstddef>
+#include <format>
 #include <ranges>
 #include <set>
+#include <string>
 #include <string_view>
 using core::escape;
 using namespace vtbackend;
@@ -742,6 +745,29 @@ TEST_CASE("DECALN: page that wraps the history ring is still filled in bounds", 
     mock.writeToScreen("\033#8");
 
     CHECK(mock.terminal.primaryScreen().renderMainPageText() == "EEEE\nEEEE\nEEEE\n");
+}
+
+TEST_CASE("DECRQCRA: a rectangle whose corners are out of order holds no cells", "[screen]")
+{
+    // Each coordinate is clamped to the page, but nothing orders them: Pl > Pr (or Pt > Pb) names no
+    // cell at all. xterm's validRect() refuses such a rectangle and answers with the checksum of
+    // nothing, which is what a rectangle over blank, never-written cells would not be mistaken for.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    auto const request = [&](std::string_view sequence) -> std::string {
+        mock.mockPty().stdinBuffer().clear();
+        mock.writeToScreen(sequence);
+        mock.terminal.flushInput();
+        return mock.replyData();
+    };
+
+    mock.writeToScreen("abcde");
+    auto const nothing = std::format("\033P1!~{:04X}\033\\",
+                                     RectangularAreaChecksum { mock.terminal.checksumExtension() }.result());
+
+    CHECK(request("\033[1;1;1;5;1;2*y") == nothing); // Pl = 5, Pr = 2
+    CHECK(request("\033[1;1;3;1;1;5*y") == nothing); // Pt = 3, Pb = 1
+    CHECK(request("\033[1;1;3;5;1;2*y") == nothing); // both
 }
 
 TEST_CASE("DECRQCRA: reports the checksum of a rectangular area", "[screen]")

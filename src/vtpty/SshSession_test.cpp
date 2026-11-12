@@ -15,6 +15,7 @@
 #include <format>
 #include <fstream>
 #include <future>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <tuple>
@@ -28,6 +29,16 @@ void writeFile(std::filesystem::path const& path, std::string_view contents)
 {
     auto out = std::ofstream { path, std::ios::binary };
     out.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+}
+
+/// @return A host on the loopback interface's port 1, where nothing listens, logged into as @p username.
+[[nodiscard]] vtpty::SshHostConfig refusingHost(std::string username)
+{
+    auto host = vtpty::SshHostConfig {};
+    host.hostname = "127.0.0.1";
+    host.port = 1;
+    host.username = std::move(username);
+    return host;
 }
 
 } // namespace
@@ -89,6 +100,69 @@ TEST_CASE("closing an SSH session wakes the pre-login reader", "[ssh][threading]
     session.close();
     CHECK(reader.wait_for(std::chrono::milliseconds { 500 }) == std::future_status::ready);
     CHECK_FALSE(reader.get());
+}
+
+TEST_CASE("closing an SSH session wakes a reader that waits without a timeout", "[ssh][threading]")
+{
+    // A reader parked in read() with no timeout, as the terminal's reader thread is when the tab is closed.
+    auto session = vtpty::SshSession { refusingHost("user"), {} };
+
+    SECTION("after a failed connection whose message has been read")
+    {
+        // Nothing listens on port 1, so the connection is refused.
+        std::ignore = session.start();
+        auto buffers = crispy::BufferObjectPool<char> { 4096 };
+        auto storage = buffers.allocateBufferObject();
+        while (session.read(*storage, std::chrono::milliseconds { 0 }, 4096).has_value())
+        {
+            // Drain the injected text.
+        }
+    }
+
+    SECTION("before the session has left its initial state")
+    {
+    }
+
+    auto waiting = std::promise<void> {};
+    auto entered = waiting.get_future();
+    auto reader = std::async(std::launch::async, [&] {
+        auto buffers = crispy::BufferObjectPool<char> { 4096 };
+        auto storage = buffers.allocateBufferObject();
+        waiting.set_value();
+        return session.read(*storage, std::nullopt, 4096).has_value();
+    });
+    entered.wait();
+    session.close();
+
+    auto const status = reader.wait_for(std::chrono::seconds { 5 });
+    if (status != std::future_status::ready)
+        session.wakeupReader(); // Should close() stop waking it: fail the check below, do not hang.
+    CHECK(status == std::future_status::ready);
+    CHECK_FALSE(reader.get());
+}
+
+TEST_CASE("SSH injected text is read no further than the buffer's free space", "[ssh]")
+{
+    // The user name is echoed in the "Starting SSH session" text start() injects, so a long one makes
+    // that text far longer than the buffer it is read into. Nothing need listen on the port: the text
+    // is injected before the connection is attempted.
+    auto const username = std::string(600, 'u');
+    auto session = vtpty::SshSession { refusingHost(username), {} };
+    std::ignore = session.start();
+
+    // The pool rounds a buffer up, so ask the one it hands out how much it holds.
+    auto buffers = crispy::BufferObjectPool<char> { 16 };
+    auto storage = buffers.allocateBufferObject();
+    auto const freeSpace = storage->bytesAvailable();
+    REQUIRE(freeSpace < username.size());
+
+    auto text = std::string {};
+    while (auto const result = session.read(*storage, std::chrono::milliseconds { 0 }, 4096))
+    {
+        REQUIRE(result->data.size() <= freeSpace);
+        text += result->data;
+    }
+    CHECK(text.contains(username));
 }
 
 TEST_CASE("readSshKeyFiles reads a key pair under a directory beyond ASCII", "[ssh]")
