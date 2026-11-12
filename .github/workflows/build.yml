@@ -521,6 +521,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
+    # The ccache action installs ccache with apt; a stale package index fails that (exit 100).
+    - name: "update APT database"
+      if: runner.os == 'Linux'
+      run: sudo ./scripts/apt-update.sh
     - name: ccache
       uses: hendrikmuhs/ccache-action@v1.2
       with:
@@ -2065,6 +2069,10 @@ jobs:
       # Only the leg a pull request builds, Clang on x86. The other three run on master alone, so no pull
       # request would restore their caches, and at 0.6 to 1.2 GB each they would push a key that pull
       # requests do need out of the quota (docs/internals/build-times.md, "Sizes").
+      # The ccache action installs ccache with apt; a stale package index fails that (exit 100).
+      - name: "update APT database"
+        if: runner.os == 'Linux'
+        run: sudo ./scripts/apt-update.sh
       - name: ccache
         if: ${{ matrix.runner == 'ubuntu-24.04' && !startsWith(matrix.compiler, 'GCC') }}
         uses: hendrikmuhs/ccache-action@v1.2
