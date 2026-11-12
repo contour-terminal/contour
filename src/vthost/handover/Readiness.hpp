@@ -156,8 +156,19 @@ class ReadinessProbe
         ReadinessQuery query) = 0;
 };
 
-/// How long the native probe waits for the target's answer.
-inline constexpr auto DefaultReadinessTimeout = std::chrono::milliseconds { 5000 };
+/// How long the native probe waits for the target's answer. It is there for a target that hangs, and has to
+/// outlast a cold start: the probe is the first run of a freshly staged image, every file of which the OS
+/// checks as it is first loaded. The answer itself costs ~50 ms; a fresh copy of the same binary starts ~20x
+/// slower on macOS (Gatekeeper/XProtect), and on Windows real-time antivirus scans contour.exe and each of
+/// the dozens of DLLs it imports before main() runs, which took a CI runner more than 5 s. Nothing but the
+/// requester waits on it: NativeSession spawns the request on the loop, LiveUpgrade::run() awaits the probe
+/// before it holds a listener or closes a client, and CommandReadinessProbe waits on its own worker. Held
+/// meanwhile are only the image's lease and UpgradeState::Running, which refuses a second upgrade.
+inline constexpr auto DefaultReadinessTimeout = std::chrono::milliseconds { 20'000 };
+
+/// The slowest first run measured of a freshly staged image: 7.26 s, a debug build's fresh copy on macOS.
+inline constexpr auto MeasuredColdStart = std::chrono::milliseconds { 7'500 };
+static_assert(DefaultReadinessTimeout >= MeasuredColdStart, "the probe must outlast a measured cold start");
 
 /// @param query The binary to ask, and the configuration it is to load.
 /// @return The command the native probe runs: the binary's query mode, given the configuration file and
