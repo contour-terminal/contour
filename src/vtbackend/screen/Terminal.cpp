@@ -3804,8 +3804,6 @@ void Terminal::verifyState()
     // out.
     Require(_indicatorStatusScreen.grid().pageSize().columns >= _settings.pageSize.columns);
 
-    Require(_tabs.empty() || _tabs.back() < unbox<ColumnOffset>(_settings.pageSize.columns));
-
     _currentScreen->verifyState();
 
     // Margins are terminal state, so verify them against the terminal's OWN main-display page size —
@@ -8409,7 +8407,7 @@ void Terminal::hardReset()
     publishKittyAnimationDeadline(nullopt);
 
     _imagePool.clear();
-    _tabs.clear();
+    _tabs.reset();
 
     // DEC STD 070: "All macro definitions are cleared on receipt of a Reset to Initial State (RIS) or Secure
     // Reset (DECSR)." A macro body that sent this RIS ends with it, and so does every body around it.
@@ -8729,10 +8727,6 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
                      .from = {}, .to = _settings.pageSize.columns.as<ColumnOffset>() - 1 } };
     _indicatorScreenMargin = statuslineMargin;
     _hostWritableScreenMargin = statuslineMargin;
-
-    // truncating tabs
-    while (!_tabs.empty() && _tabs.back() >= unbox<ColumnOffset>(_settings.pageSize.columns))
-        _tabs.pop_back();
 
     // verifyState();
 }

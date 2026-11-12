@@ -138,6 +138,19 @@ TEST_CASE("DECSLRM margins and tab stops survive", "[TerminalState]")
     requireSameAfter(*source, *restored, "\033[2;3Habc\tdef\tghi\r\nx\ty\ty\ty\033[5;1H\n\n\nzz"sv);
 }
 
+TEST_CASE("a tab stop set among the initial ones survives along with them", "[TerminalState]")
+{
+    auto source = makeTerminal();
+    REQUIRE(source->terminal.captureState().margins.tabs.empty()); // none listed: the initial stops
+    REQUIRE(restoredCopyOf(*source)->terminal.tabs().isInitial());
+
+    source->writeToScreen("\033[1;4H\033H"sv);
+    auto restored = restoredCopyOf(*source);
+    CHECK(restored->terminal.tabs().within(TestPage.columns)
+          == std::vector { ColumnOffset(0), ColumnOffset(3), ColumnOffset(8), ColumnOffset(16) });
+    requireSameAfter(*source, *restored, "\033[1;1H\ta\tb\tc\td"sv);
+}
+
 TEST_CASE("title stack push/pop survives", "[TerminalState]")
 {
     auto source = makeTerminal();

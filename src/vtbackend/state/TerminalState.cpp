@@ -419,7 +419,8 @@ TerminalState Terminal::captureState() const
     state.margins = MarginsState { .mainDisplay = _mainDisplayMargin,
                                    .hostWritable = _hostWritableScreenMargin,
                                    .indicator = _indicatorScreenMargin,
-                                   .tabs = _tabs };
+                                   .tabs = _tabs.isInitial() ? std::vector<ColumnOffset> {}
+                                                             : _tabs.within(_settings.pageSize.columns) };
 
     state.colors.current = sliceOf(_colorPalette);
     for (auto const& saved: _savedColorPalettes)
@@ -740,7 +741,7 @@ void Terminal::commitRestore(TerminalState const& state,
     _mainDisplayMargin = state.margins.mainDisplay;
     _hostWritableScreenMargin = state.margins.hostWritable;
     _indicatorScreenMargin = state.margins.indicator;
-    _tabs = state.margins.tabs;
+    _tabs = state.margins.tabs.empty() ? TabStops {} : TabStops::only(state.margins.tabs);
 
     // The palette is overlaid on what this process was configured with; the saved slots likewise.
     _savedColorPalettes.clear();

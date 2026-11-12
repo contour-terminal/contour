@@ -1735,10 +1735,6 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     void advanceCursorAfterWrite(ColumnCount n) noexcept;
 
-    void clearAllTabs();
-    void clearTabUnderCursor();
-    void setTabUnderCursor();
-
     /// Applies LF but also moves cursor to given column @p column.
     /// @return Whether the cursor reached another row, by moving down or by scrolling one in.
     LineFeedTarget linefeed(ColumnOffset column);

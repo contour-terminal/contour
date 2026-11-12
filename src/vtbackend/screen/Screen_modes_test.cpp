@@ -572,9 +572,10 @@ TEST_CASE("DECTABSR", "[screen]")
 
     SECTION("cleared tabs")
     {
+        // No stops is what the report then says -- not the stops the terminal started with.
         screen.horizontalTabClear(HorizontalTabClear::AllTabs);
         screen.requestTabStops();
-        CHECK(e(mock.terminal.peekInput()) == e("\033P2$u1/9/17/25/33\033\\"));
+        CHECK(e(mock.terminal.peekInput()) == e("\033P2$u\033\\"));
     }
 
     SECTION("custom tabstops")

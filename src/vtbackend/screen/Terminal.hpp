@@ -40,6 +40,7 @@
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/StatusLineCommandCache.hpp>
 #include <vtbackend/screen/StatusLineExtensions.hpp>
+#include <vtbackend/screen/TabStops.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
 #include <vtbackend/screen/Viewport.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
@@ -4304,8 +4305,10 @@ class Terminal: public IStatusLinePublishTarget
     [[nodiscard]] constexpr uint64_t instructionCounter() const noexcept { return _instructionCounter; }
     // }}}
 
-    std::vector<ColumnOffset>& tabs() noexcept { return _tabs; }
-    std::vector<ColumnOffset> const& tabs() const noexcept { return _tabs; }
+    /// @return The horizontal tab stops, which every page shares.
+    TabStops& tabs() noexcept { return _tabs; }
+    /// @return The horizontal tab stops, which every page shares.
+    TabStops const& tabs() const noexcept { return _tabs; }
 
     ImagePool& imagePool() noexcept { return _imagePool; }
     ImagePool const& imagePool() const noexcept { return _imagePool; }
@@ -5775,7 +5778,7 @@ class Terminal: public IStatusLinePublishTarget
     /// Not captured: wiring.
     ImageDecoderCallback _imageDecoder;
 
-    std::vector<ColumnOffset> _tabs;
+    TabStops _tabs;
 
     /// Switched by the parser thread under the state lock, and read without it by the renderer each frame.
     /// @see RelaxedAtomic

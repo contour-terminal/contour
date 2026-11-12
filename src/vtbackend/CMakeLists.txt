@@ -157,6 +157,7 @@ set(vtbackend_HEADERS
     screen/StatusLineCommandCache.hpp
     screen/StatusLineExtensions.hpp
     screen/OverlayClearance.hpp
+    screen/TabStops.hpp
     screen/Terminal.hpp
     screen/TerminalClocks.hpp
     screen/TerminalTestFixtures.hpp
@@ -451,6 +452,7 @@ if(LIBTERMINAL_TESTING)
         screen/GitHead_test.cpp
         screen/StatusLineCommandCache_test.cpp
         core/WindowSizeStack_test.cpp
+        screen/TabStops_test.cpp
         screen/Terminal_test.cpp
         screen/Terminal_extensions_test.cpp
         screen/Terminal_scroll_test.cpp
