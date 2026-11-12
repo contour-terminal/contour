@@ -26,6 +26,7 @@
 #include <ranges>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <vthost/DaemonBinary.hpp>
@@ -547,6 +548,20 @@ namespace
         figures.add(outcome);
         return true;
     }
+
+    /// @param daemon The daemon a run left a session behind in, or that answered no status after it.
+    /// @return Why the daemon is not empty: still hosting a session, or gone.
+    [[nodiscard]] std::string describeLeftover(BenchProcess& daemon)
+    {
+        auto const ended = daemon.waitFor(0ms);
+        if (!ended)
+            return "bench-latency: the daemon still hosts a session after the run\n";
+        if (auto const* const signal = std::get_if<vtpty::Process::SignalExit>(&*ended))
+            return std::format("bench-latency: the daemon died during the run, of signal {}\n",
+                               signal->signum);
+        return std::format("bench-latency: the daemon ended during the run, with status {}\n",
+                           std::get<vtpty::Process::NormalExit>(*ended).exitCode);
+    }
 } // namespace
 
 int runHeadlessBench(HeadlessOptions const& options, std::ostream& out, std::ostream& err)
@@ -641,7 +656,7 @@ int runHeadlessBench(HeadlessOptions const& options, std::ostream& out, std::ost
                 failed |= !take(runDaemonLeg(socketPath, options), "daemon", viaDaemon, err);
                 if (!awaitEmptyDaemon(socketPath))
                 {
-                    err << "bench-latency: the daemon still hosts a session after the run\n";
+                    err << describeLeftover(**daemon);
                     failed = true;
                 }
             }
