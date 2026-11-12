@@ -112,6 +112,23 @@ enum class SnapshotScript : uint8_t
     SettingsHost,      //!< The Settings window on a saved host's page, `starfive`.
     ToolTipNewTab,     //!< two tabs: the new-tab control's tooltip, with the shortcut the mock binds.
     ToolTipTab,        //!< two tabs: the first tab's two-line hover tooltip.
+    SidebarTree,       //!< three tabs under the workspace sidebar: every row kind and status it draws.
+    SidebarNeedsYou,   //!< The sidebar with another workspace's agent asking for a permission.
+    SidebarCollapsed,  //!< The sidebar with every workspace folded to its own row.
+    SidebarTopTabs,    //!< The sidebar listing workspaces while the tabs stay in the band.
+    SidebarHiddenChip, //!< The sidebar hidden: the workspace chip in the band, marked for another workspace.
+    SidebarChipDropdown, //!< The sidebar hidden, the workspace chip's dropdown open below it.
+};
+
+/// What the workspace sidebar of a script shows.
+enum class SnapshotSidebar : uint8_t
+{
+    None = 0,  //!< No workspaces listed; the window is the plain one.
+    Tree,      //!< Shown, tabs in the sidebar, the first workspace displayed.
+    NeedsYou,  //!< Shown, the second workspace displayed while the first asks the user.
+    Collapsed, //!< Shown, every workspace row folded.
+    TopTabs,   //!< Shown, with the tabs on top.
+    Hidden,    //!< Hidden: the chip in the band stands for it.
 };
 
 /// How a script's active tab is divided into panes.
@@ -170,6 +187,8 @@ enum class ScriptAction : uint8_t
     ShowNewTabToolTip, //!< The new-tab control's tooltip, opened under it.
     ShowTabToolTip,    //!< The first tab's two-line hover tooltip, opened under it.
     OpenMainMenu,      //!< The header bar's main menu, as its button opens it.
+    /// The workspace chip's dropdown: the switcher listing the window's daemon's workspaces, below the chip.
+    OpenWorkspaceDropdown,
 };
 
 /// What a script's tabs carry beyond their titles.
@@ -486,6 +505,7 @@ struct SnapshotScriptRow
     SnapshotSettingsPage settingsPage = SnapshotSettingsPage::None;
     SnapshotShellCard shellCard = SnapshotShellCard::None; ///< The active pane's shell integration card.
     SnapshotButtons buttons = SnapshotButtons::Desktop;    ///< Where the desktop puts the buttons.
+    SnapshotSidebar sidebar = SnapshotSidebar::None;       ///< What the workspace sidebar shows.
 };
 
 /// The rows of the script table, in enumerator order.
@@ -2240,6 +2260,31 @@ inline constexpr auto SnapshotScripts = std::array {
                         .find = SnapshotFind::None,
                         .permission = SnapshotPermission::None,
                         .buttons = SnapshotButtons::Desktop },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarTree,
+                        .name = "sidebar-tree",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarNeedsYou,
+                        .name = "sidebar-needs-you",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::NeedsYou },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarCollapsed,
+                        .name = "sidebar-collapsed",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Collapsed },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarTopTabs,
+                        .name = "sidebar-top-tabs",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::TopTabs },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarHiddenChip,
+                        .name = "sidebar-hidden-chip",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Hidden },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarChipDropdown,
+                        .name = "workspace-chip-dropdown",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenWorkspaceDropdown,
+                        .sidebar = SnapshotSidebar::Hidden },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),

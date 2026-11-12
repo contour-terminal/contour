@@ -32,12 +32,14 @@
 #include <contour/test/QmlMocks.hpp>
 #include <contour/test/RecordingShellRcEditor.hpp>
 #include <contour/test/SettingsDressingFixtures.hpp>
+#include <contour/test/SidebarFakes.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/NoticeQueue.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/PopupAnchor.hpp>
 #include <contour/window/QuickTerminalPolicy.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/SettingsController.hpp>
@@ -45,12 +47,14 @@
 #include <contour/window/SettingsWindowRules.hpp>
 #include <contour/window/StickyHeaderChrome.hpp>
 #include <contour/window/StickyHeaderPlacement.hpp>
+#include <contour/window/SwitcherController.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/TitleBandSurface.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <vtbackend/shell/ScrollbarMarks.hpp>
+#include <vtbackend/vt/ProgramStatus.hpp>
 
 #include <core/platform/FileSystem.hpp>
 #include <core/platform/NativeFileSystem.hpp>
@@ -70,6 +74,7 @@
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
+#include <QtGui/QPainter>
 #include <QtGui/QWindow>
 #include <QtGui/qpa/qwindowsysteminterface.h>
 #include <QtQml/QQmlComponent>
@@ -81,6 +86,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -91,6 +97,8 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include <QtTest/QTest>
@@ -394,6 +402,7 @@ class ChromeSnapshotScene
                 break;
             case ScriptAction::DeactivateWindow: deactivateWindow(); break;
             case ScriptAction::OpenMainMenu: openMainMenu(); break;
+            case ScriptAction::OpenWorkspaceDropdown: openWorkspaceDropdown(); break;
             case ScriptAction::ShowNewTabToolTip: showToolTips(ToolTipOf::NewTab); break;
             case ScriptAction::ShowTabToolTip: showToolTips(ToolTipOf::Tab); break;
         }
@@ -409,6 +418,9 @@ class ChromeSnapshotScene
         _incubation.settle();
         QCoreApplication::processEvents();
         QCoreApplication::processEvents();
+        // The rows' status rings are Canvas items, which paint on the frames after the window is shown.
+        if (scriptRow(_variant.script).sidebar != SnapshotSidebar::None)
+            QTest::qWait(SidebarCanvasSettleMs);
         // The inactive look is the picture: an activation the platform reported late must not have undone it.
         if (scriptRow(_variant.script).action == ScriptAction::DeactivateWindow)
             REQUIRE(QTest::qWaitFor([&] { return !window().isActive(); }, InactiveSettleMs));
@@ -417,7 +429,31 @@ class ChromeSnapshotScene
     /// The window the picture is of, as rendered. Needs a display: the offscreen platform grabs nothing
     /// worth keeping.
     /// @return The grabbed frame of subject().
-    [[nodiscard]] QImage grab() const { return subject().grabWindow(); }
+    /// A script with the workspace chip's dropdown open is the window with the dropdown drawn where it hangs
+    /// below the chip (window::popupBelow, within the window), as the two are seen together on screen.
+    [[nodiscard]] QImage grab() const
+    {
+        auto image = subject().grabWindow();
+        if (_dropdownWindow == nullptr || !_controller.workspaceDropdownAnchor)
+            return image;
+        auto const dropdown = _dropdownWindow->grabWindow();
+        auto const& chip = *_controller.workspaceDropdownAnchor;
+        auto const at =
+            window::popupBelow({ .x = static_cast<int>(chip.x()),
+                                 .y = static_cast<int>(chip.y()),
+                                 .width = static_cast<int>(chip.width()),
+                                 .height = static_cast<int>(chip.height()) },
+                               _dropdownWindow->width(),
+                               _dropdownWindow->height(),
+                               0,
+                               { .x = 0, .y = 0, .width = window().width(), .height = window().height() });
+        auto painter = QPainter { &image };
+        painter.drawImage(QPointF { static_cast<qreal>(at.x), static_cast<qreal>(at.y) }, dropdown);
+        return image;
+    }
+
+    /// @return The workspace chip's dropdown, once OpenWorkspaceDropdown opened it; else null.
+    [[nodiscard]] QQuickWindow const* workspaceDropdown() const noexcept { return _dropdownWindow.get(); }
 
     /// The window the picture is of: the Settings window for SnapshotSurface::SettingsWindow, else window().
     /// @return That window.
@@ -534,6 +570,9 @@ class ChromeSnapshotScene
                 break;
         }
     }
+
+    /// How long the sidebar's Canvas status rings get to paint before the picture is taken.
+    static constexpr int SidebarCanvasSettleMs = 250;
 
     /// A cell of the stubbed terminal: StubContourTerminal's rows, and the width the link pill's clearance
     /// measures columns in.
@@ -1428,6 +1467,63 @@ class ChromeSnapshotScene
 
     /// Asks for the main menu as the header bar's button does, and waits for it where the row has one: the
     /// band rows have no main menu, and show the window as it is.
+    /// Clicks the workspace chip, and opens what the application opens for it: the switcher over the window's
+    /// own daemon alone, its workspaces listed (`billing` and `docs`, docs shown here).
+    void openWorkspaceDropdown()
+    {
+        auto* chip = root().findChild<QQuickItem*>(QStringLiteral("workspaceChip"));
+        REQUIRE(chip != nullptr);
+        // Clicked where the user would click it: once the band has settled, its place the same over a few
+        // frames (the band lays its row out over the first ones).
+        auto last = QPointF { -1, -1 };
+        auto steady = 0;
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                auto const at = chip->mapToScene(QPointF {});
+                steady = at == last ? steady + 1 : 0;
+                last = at;
+                return steady >= 5;
+            },
+            3000));
+        QMetaObject::invokeMethod(chip, "clicked");
+        REQUIRE(_controller.workspaceDropdownAnchor.has_value());
+        auto const workspaceOf =
+            [](uint32_t position, char const* name, std::size_t tabs, window::SwitcherWorkspaceState state) {
+                return window::SwitcherWorkspace {
+                    .ref = {}, .position = position, .name = name, .tabs = tabs, .state = state
+                };
+            };
+        auto workspaces = std::vector {
+            workspaceOf(1, "billing", 5, window::SwitcherWorkspaceState::Hidden),
+            workspaceOf(2, "docs", 3, window::SwitcherWorkspaceState::ThisWindow),
+        };
+        _dropdown = std::make_unique<window::SwitcherController>(window::SwitcherServices {
+            .discovery = nullptr,
+            .savedHosts = [] { return std::vector<window::SwitcherDaemon> {}; },
+            .list = [workspaces](vtworkspace::WorkspaceId,
+                                 session::SwitchTarget const&,
+                                 window::SwitcherListed const& done) { done(workspaces); },
+            .request = [](vtworkspace::WorkspaceId, session::SwitchTarget const&, session::SwitchMode) {},
+            .startDaemon = nullptr,
+        });
+        _dropdown->open(window::SwitcherOpening {
+            .window = vtworkspace::WorkspaceId { 1 },
+            .windowDaemon = session::SwitchTarget { .kind = vthost::proto::SwitchDaemonKind::Label,
+                                                    .daemon = "default",
+                                                    .workspace = {} },
+            .mode = session::SwitchMode::Switch,
+            .prompt = window::SwitcherPrompt::Browse,
+            .pick = std::nullopt,
+            .scope = window::SwitcherScope::OneDaemon });
+        _dropdownWindow = window::loadSwitcherWindow(_engine, *_dropdown);
+        REQUIRE(_dropdownWindow != nullptr);
+        _dropdownWindow->setFlags(Qt::Tool | Qt::FramelessWindowHint);
+        _dropdownWindow->show();
+        REQUIRE(QTest::qWaitForWindowExposed(_dropdownWindow.get()));
+        _incubation.settle();
+        QCoreApplication::processEvents();
+    }
+
     void openMainMenu()
     {
         _controller.activateHeaderBarItem(static_cast<int>(window::HeaderBarItem::MainMenu), {});
@@ -1529,6 +1625,103 @@ class ChromeSnapshotScene
         return nullptr;
     }
 
+    /// A program-status record of @p state that changed state @p age ago, by the sidebar's clock.
+    [[nodiscard]] static vtbackend::ProgramStatusRecord sidebarRecord(vtbackend::ProgramState state,
+                                                                      std::string message,
+                                                                      std::chrono::seconds age)
+    {
+        auto record = vtbackend::ProgramStatusRecord {};
+        record.state = state;
+        record.app = "claude";
+        record.message = std::move(message);
+        record.since = MockMainController::SidebarEpoch - age;
+        record.generation = 1;
+        return record;
+    }
+
+    /// Lists what the sidebar shows of the window's workspaces for @p sidebar: `billing` with a blocked
+    /// agent, a working tab, a finished one nobody looked at, a failed command and a split tab, on a branch
+    /// two commits ahead; `docs`, idle; and `infra`, folded. Nothing for SnapshotSidebar::None.
+    /// @param sidebar What the script shows of the sidebar.
+    void listWorkspaces(SnapshotSidebar sidebar)
+    {
+        using namespace std::chrono_literals;
+        if (sidebar == SnapshotSidebar::None)
+            return;
+        auto blocked = sidebarRecord(vtbackend::ProgramState::Blocked, "Bash: psql $DEV_URL", 30s);
+        blocked.kind = vtbackend::BlockedKind::Permission;
+        auto claude = directoryPaneOf(10, "claude");
+        claude.cwd = "/src/billing";
+        claude.status = { blocked };
+        auto build = directoryPaneOf(11, "build");
+        build.status = { sidebarRecord(vtbackend::ProgramState::Working, {}, 252s) };
+        auto notes = directoryPaneOf(12, "review");
+        notes.status = { sidebarRecord(vtbackend::ProgramState::Done, "All tests pass", 120s) };
+        auto deploy = directoryPaneOf(13, "deploy");
+        deploy.finished = vthost::proto::FinishedCommand { .exitCode = 1,
+                                                           .durationMs = 18000,
+                                                           .commandLine = "make deploy" };
+        deploy.finishedSerial = 1;
+
+        auto billing = directoryWorkspaceOf(1, "billing", { claude, build, notes, deploy });
+        auto split = window::DirectoryTab {};
+        split.id = 14;
+        split.label = "server";
+        split.panes = { directoryPaneOf(14, "server"), directoryPaneOf(15, "logs") };
+        billing.tabs.push_back(std::move(split));
+        billing.git = window::DirectoryGit { .branch = "feat/billing", .ahead = 2 };
+
+        auto const shown = sidebar == SnapshotSidebar::NeedsYou || sidebar == SnapshotSidebar::Hidden
+                               ? uint64_t { 2 }
+                               : uint64_t { 1 };
+        auto& listed = _controller.sidebarSource().listed;
+        listed.workspaces = { std::move(billing),
+                              directoryWorkspaceOf(2,
+                                                   "docs",
+                                                   { directoryPaneOf(20, "notes"),
+                                                     directoryPaneOf(21, "preview"),
+                                                     directoryPaneOf(22, "publish") }),
+                              // Folded below, so every sidebar picture shows the collapsed disclosure too.
+                              directoryWorkspaceOf(3, "infra", { directoryPaneOf(30, "terraform") }) };
+        listed.selected = shown;
+        // The band names the shown workspace's tabs as the directory does, so the breadcrumb and the sidebar
+        // agree on the tab's name.
+        for (auto const& tab: listed.workspaces[static_cast<std::size_t>(shown - 1)].tabs)
+            _controller.shownWorkspaceTabTitles.push_back(QString::fromStdString(tab.label));
+        _controller.sidebarHost().displayed =
+            window::TabRef { .workspace = shown, .tab = shown == 1 ? 10u : 20u };
+        _controller.sidebarModel().refreshNow();
+        auto const& rows = _controller.sidebarModel().rows();
+        auto const infra = std::ranges::find_if(rows, [](auto const& row) { return row.key.workspace == 3; });
+        REQUIRE(infra != rows.end());
+        _controller.sidebarModel().collapse(static_cast<int>(std::distance(rows.begin(), infra)));
+        if (sidebar == SnapshotSidebar::Collapsed)
+        {
+            // The first row is billing; once it is folded, docs is the second.
+            _controller.sidebarModel().collapse(0);
+            _controller.sidebarModel().collapse(1);
+        }
+        // Hidden keeps the sidebar placement: the chip then leads the strip that took the tabs back.
+        _controller.setTabPlacement(sidebar == SnapshotSidebar::TopTabs ? config::TabPlacement::Top
+                                                                        : config::TabPlacement::Sidebar);
+    }
+
+    /// Shows the sidebar at the width its look asks for, once the window is loaded; Hidden and None leave it
+    /// off.
+    /// @param sidebar What the script shows of the sidebar.
+    void showSidebar(SnapshotSidebar sidebar)
+    {
+        if (sidebar == SnapshotSidebar::None || sidebar == SnapshotSidebar::Hidden)
+            return;
+        auto const* style =
+            _engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+        REQUIRE(style != nullptr);
+        auto const* look = style->property("sidebar").value<QObject*>();
+        REQUIRE(look != nullptr);
+        _controller.showSidebar(static_cast<int>(look->property("width").toReal()));
+        _incubation.settle();
+    }
+
     /// Loads Main.qml against the controller under the variant's chrome row.
     [[nodiscard]] std::unique_ptr<QObject> load()
     {
@@ -1548,8 +1741,10 @@ class ChromeSnapshotScene
         // The panes the active tab shows, as WindowController counts them: two or more make cards.
         _controller.setVisiblePaneCount(static_cast<int>(paneCount(scriptRow(_variant.script).panes)));
         _engine.rootContext()->setContextProperty(QStringLiteral("newDefaults"), &_newDefaults);
+        listWorkspaces(scriptRow(_variant.script).sidebar);
         auto root = loadMainWindow(_engine, _controller, _warnings, chrome);
         REQUIRE(qobject_cast<QQuickWindow*>(root.get()) != nullptr);
+        showSidebar(scriptRow(_variant.script).sidebar);
         _incubation.settle();
         return root;
     }
@@ -1583,6 +1778,10 @@ class ChromeSnapshotScene
     std::unique_ptr<window::SettingsWindowHost> _settingsWindow;
     IncubationDriver _incubation;
     std::unique_ptr<QObject> _root; ///< The QML tree dies before everything it borrows.
+    /// The workspace chip's dropdown and its window (openWorkspaceDropdown()); null otherwise. The window, on
+    /// _engine and borrowing the controller, goes first.
+    std::unique_ptr<window::SwitcherController> _dropdown;
+    std::unique_ptr<QQuickWindow> _dropdownWindow;
     /// Last: openKitDialog()'s dialog, parented into _root's tree, dies first.
     std::unique_ptr<QObject> _overlay;
     QObject const* _tabColorFlyout = nullptr; ///< The flyout openTabColorFlyout() opened; owned by _root.

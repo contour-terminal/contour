@@ -35,6 +35,7 @@
 #include <QtCore/QPointF>
 #include <QtCore/QRectF>
 #include <QtCore/QSizeF>
+#include <QtCore/QString>
 #include <QtCore/QStringList>
 #include <QtGui/QColor>
 #include <QtGui/QFont>
@@ -47,6 +48,7 @@
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -56,7 +58,10 @@
 #include <filesystem>
 #include <iterator>
 #include <limits>
+#include <map>
+#include <optional>
 #include <ranges>
+#include <utility>
 
 #include <QtQuickControls2/QQuickStyle>
 #include <QtTest/QTest>
@@ -562,6 +567,63 @@ void checkToolTipScript(contour::test::snapshot::ChromeSnapshotScene const& scen
     CHECK(open.front()->property("shortcutShown").toBool()
           == (variant.script == SnapshotScript::ToolTipNewTab));
 }
+
+/// Whether @p sidebar draws the workspace sidebar itself, rather than leaving it off or hidden.
+[[nodiscard]] bool sidebarIsDrawn(contour::test::snapshot::SnapshotSidebar sidebar) noexcept
+{
+    using contour::test::snapshot::SnapshotSidebar;
+    return sidebar == SnapshotSidebar::Tree || sidebar == SnapshotSidebar::NeedsYou
+           || sidebar == SnapshotSidebar::Collapsed || sidebar == SnapshotSidebar::TopTabs;
+}
+
+/// Checks what a sidebar script drew: the sidebar present or absent, the workspace chip standing in for a
+/// hidden one, and the one selected row the script displays.
+/// @param scene The scene the script ran in.
+/// @param variant The picture.
+/// @return The x, in the scene, of the sidebar's divider column; none while the sidebar is not drawn.
+[[nodiscard]] std::optional<qreal> checkSidebarScript(
+    contour::test::snapshot::ChromeSnapshotScene const& scene,
+    contour::test::snapshot::SnapshotVariant const& variant)
+{
+    using namespace contour::test::snapshot;
+    auto const sidebar = scriptRow(variant.script).sidebar;
+    auto const drawn = sidebarIsDrawn(sidebar);
+    auto const& content = *scene.window().contentItem();
+    auto const* slot = scene.root().findChild<QQuickItem*>(QStringLiteral("sidebarSlot"));
+    REQUIRE(slot != nullptr);
+    CHECK(slot->property("shown").toBool() == drawn);
+    CHECK(contour::test::itemsNamed(content, QStringLiteral("sidebar")).size() == (drawn ? 1U : 0U));
+    CHECK(contour::test::itemsNamed(content, QStringLiteral("tabStrip")).empty()
+          == (sidebar == SnapshotSidebar::Tree || sidebar == SnapshotSidebar::NeedsYou
+              || sidebar == SnapshotSidebar::Collapsed));
+
+    if (sidebar == SnapshotSidebar::Hidden)
+    {
+        auto const* chip = scene.root().findChild<QQuickItem*>(QStringLiteral("workspaceChip"));
+        REQUIRE(chip != nullptr);
+        CHECK(chip->isVisible());
+        auto const* marker = scene.root().findChild<QQuickItem*>(QStringLiteral("workspaceChipMarker"));
+        REQUIRE(marker != nullptr);
+        CHECK(marker->isVisible()); // billing asks for a permission while docs is shown
+    }
+    if (!drawn)
+        return std::nullopt;
+
+    // The row the window displays is the one selected: billing's claude tab, or docs' notes tab.
+    if (sidebar != SnapshotSidebar::Collapsed)
+    {
+        auto selected = std::vector<QString> {};
+        for (auto const* row: contour::test::itemsNamed(content, QStringLiteral("sidebarRow")))
+            if (row->property("selected").toBool())
+                selected.push_back(row->property("title").toString());
+        REQUIRE(selected.size() == 1);
+        CHECK(selected.front()
+              == (sidebar == SnapshotSidebar::NeedsYou ? QStringLiteral("notes") : QStringLiteral("claude")));
+    }
+    auto const dividers = contour::test::itemsNamed(content, QStringLiteral("sidebarDivider"));
+    REQUIRE(dividers.size() == 1);
+    return dividers.front()->mapToScene(QPointF { 0, 0 }).x();
+}
 } // namespace
 
 TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscreen)",
@@ -1061,6 +1123,21 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             case SnapshotScript::MainMenu: checkHeaderBarScript(scene, variant); break;
             case SnapshotScript::ToolTipNewTab:
             case SnapshotScript::ToolTipTab: checkToolTipScript(scene, variant); break;
+            case SnapshotScript::SidebarTree:
+            case SnapshotScript::SidebarNeedsYou:
+            case SnapshotScript::SidebarCollapsed:
+            case SnapshotScript::SidebarTopTabs:
+            case SnapshotScript::SidebarHiddenChip:
+                static_cast<void>(checkSidebarScript(scene, variant));
+                break;
+            case SnapshotScript::SidebarChipDropdown: {
+                static_cast<void>(checkSidebarScript(scene, variant));
+                // The dropdown lists this window's daemon's workspaces, and nothing else.
+                auto const* dropdown = scene.workspaceDropdown();
+                REQUIRE(dropdown != nullptr);
+                CHECK(dropdown->isVisible());
+                break;
+            }
             case SnapshotScript::QuickTerminal: {
                 // The panel's frame, and a role that made the window a frameless tool window.
                 CHECK(scene.window().size() == ChromeSnapshotScene::quickTerminalPanelSize());
@@ -1121,6 +1198,48 @@ TEST_CASE("The Linux header bar scripts on the rows this process draws (offscree
         scene.show();
         CHECK(scene.diagnostics().isEmpty());
         checkHeaderBarScript(scene, variant);
+    }
+}
+
+TEST_CASE("The sidebar scripts on the rows this process draws (offscreen)",
+          "[contour][gui][qml][snapshot][sidebar]")
+{
+    // The Fluent and ContourLinux rows draw only under their own styles, so this is what covers them.
+    using namespace contour::test::snapshot;
+    auto const rows = rowsRenderableUnder(QQuickStyle::name().toStdString());
+    REQUIRE_FALSE(rows.empty());
+    // Keyed by edition as well: the Terminal row counts the sidebar's width in cells of the edition's font,
+    // and an edition's font differs where the host's defaults do (macOS sets Native2026 a point larger).
+    auto dividerOf =
+        std::map<std::pair<contour::config::ChromeStyle, contour::config::DefaultsEdition>, qreal> {};
+    for (auto const& variant: snapshotMatrix(rows))
+    {
+        if (scriptRow(variant.script).sidebar == SnapshotSidebar::None
+            || variant.appearance != vtbackend::ColorPreference::Dark)
+            continue; // one appearance is enough to prove the structure
+        INFO(snapshotFileName(variant));
+        auto scene = ChromeSnapshotScene { variant };
+        scene.show();
+        CHECK(scene.diagnostics().isEmpty());
+        auto const divider = checkSidebarScript(scene, variant);
+        if (!divider)
+            continue;
+        // The divider column is where the sidebar ends: the same on every script of a row and edition, and on
+        // the Terminal row a whole number of cells from the window's edge.
+        auto const [place, fresh] =
+            dividerOf.try_emplace(std::pair { variant.row, variant.edition }, *divider);
+        if (!fresh)
+            CHECK(*divider == Catch::Approx(place->second));
+        if (variant.row == contour::config::ChromeStyle::Terminal)
+        {
+            // The divider is one cell wide there, and starts on a cell boundary.
+            auto const dividers =
+                contour::test::itemsNamed(*scene.window().contentItem(), QStringLiteral("sidebarDivider"));
+            REQUIRE(dividers.size() == 1);
+            auto const cell = dividers.front()->width();
+            REQUIRE(cell > 0);
+            CHECK(*divider == Catch::Approx(std::round(*divider / cell) * cell).margin(0.5));
+        }
     }
 }
 

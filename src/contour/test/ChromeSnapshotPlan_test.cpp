@@ -731,12 +731,16 @@ TEST_CASE("snapshot.scriptTable.linuxHeaderBar", "[snapshot]")
     CHECK(static_cast<int>(SnapshotScript::ButtonsLeading)
           == static_cast<int>(SnapshotScript::InactiveWindow) + 1);
     CHECK(static_cast<int>(SnapshotScript::MainMenu) == static_cast<int>(SnapshotScript::NoButtons) + 1);
-    // The Hosts page's Settings row comes after the quick terminal, and the two tooltip rows close the table.
+    // The Hosts page's Settings row comes after the quick terminal, the two tooltip rows follow it and the
+    // sidebar's five close the table.
     CHECK(static_cast<int>(SnapshotScript::SettingsHost)
           == static_cast<int>(SnapshotScript::QuickTerminal) + 1);
     CHECK(static_cast<int>(SnapshotScript::ToolTipNewTab)
           == static_cast<int>(SnapshotScript::SettingsHost) + 1);
-    CHECK(SnapshotScripts.back().script == SnapshotScript::ToolTipTab);
+    CHECK(static_cast<int>(SnapshotScript::SidebarTree) == static_cast<int>(SnapshotScript::ToolTipTab) + 1);
+    CHECK(SnapshotScripts.back().script == SnapshotScript::SidebarChipDropdown);
+    CHECK(scriptRow(SnapshotScript::SidebarChipDropdown).action == ScriptAction::OpenWorkspaceDropdown);
+    CHECK(scriptRow(SnapshotScript::SidebarChipDropdown).sidebar == SnapshotSidebar::Hidden);
     struct Expected
     {
         SnapshotScript script;
