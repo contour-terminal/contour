@@ -3090,7 +3090,7 @@ void Screen::sixelImage(ImageSize pixelSize, Image::Data&& rgbaData)
                 alignmentPolicy,
                 resizePolicy,
                 autoScrollAtBottomMargin,
-                ImageCursorPolicy::BelowImage);
+                ImageCursorPolicy::BelowSixelBands);
 
     if (!_terminal->isModeEnabled(DECMode::SixelCursorNextToGraphic))
         linefeed(topLeft.column);
@@ -3142,12 +3142,16 @@ void Screen::renderImage(shared_ptr<Image const> image,
                                                               kittyPlacementId);
 
     // Compute the cursor line offset after rendering.
-    // For Sixel images (identified by non-zero pixel imageSize), use VT340-compatible sixel band math.
+    // For Sixel images, use VT340-compatible sixel band math. Which image is one is the caller's to
+    // say (@see ImageCursorPolicy::BelowSixelBands): a pixel imageSize does not tell, since GIP names
+    // the part of an image to show the same way.
     // For GIP images, simply place the cursor at the last row of the rendered area.
     // Sixel's band math divides by the cell height, which is zero until the display has reported it; such an
     // image is then placed like a GIP one.
-    auto const isSixelImage =
-        imageSize.width.value > 0 && imageSize.height.value > 0 && _terminal->cellPixelSize().area() > 0;
+    auto const goesBelowImage =
+        cursorPolicy == ImageCursorPolicy::BelowImage || cursorPolicy == ImageCursorPolicy::BelowSixelBands;
+    auto const isSixelImage = cursorPolicy == ImageCursorPolicy::BelowSixelBands && imageSize.width.value > 0
+                              && imageSize.height.value > 0 && _terminal->cellPixelSize().area() > 0;
     auto const cursorLineOffset = [&]() -> LineOffset {
         if (isSixelImage)
         {
@@ -3183,6 +3187,7 @@ void Screen::renderImage(shared_ptr<Image const> image,
         {
             case ImageCursorPolicy::Stay: break;
             case ImageCursorPolicy::BelowImage:
+            case ImageCursorPolicy::BelowSixelBands:
                 moveCursorTo(topLeft.line + cursorLineOffset, topLeft.column);
                 break;
             case ImageCursorPolicy::AdvancePastImage:
@@ -3212,12 +3217,12 @@ void Screen::renderImage(shared_ptr<Image const> image,
         }
         // After auto-scroll, cursor is ON the last image row. Move it below.
         // Only for GIP — Sixel handles its own cursor positioning at the call site.
-        if (cursorPolicy == ImageCursorPolicy::BelowImage && !isSixelImage)
+        if (goesBelowImage && !isSixelImage)
             linefeed(topLeft.column);
     }
 
     // Move ANSI text cursor to the correct column after image placement.
-    if (cursorPolicy == ImageCursorPolicy::BelowImage)
+    if (goesBelowImage)
         moveCursorToColumn(topLeft.column);
 }
 
