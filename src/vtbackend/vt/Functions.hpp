@@ -639,6 +639,7 @@ namespace detail // {{{
 // C0
 constexpr inline auto EOT = detail::C0('\x04', "EOT", "End of Transmission");
 constexpr inline auto BEL = detail::C0('\x07', "BEL", "Bell");
+constexpr inline auto ENQ = detail::C0('\x05', "ENQ", "Enquiry; replies with the configured answerback message, if any.");
 constexpr inline auto BS  = detail::C0('\x08', "BS", "Backspace");
 constexpr inline auto TAB = detail::C0('\x09', "TAB", "Tab");
 constexpr inline auto LF  = detail::C0('\x0A', "LF", "Line Feed");
@@ -979,6 +980,7 @@ constexpr static auto allFunctionsArray() noexcept
         EOT,
         BEL,
         BS,
+        ENQ,
         TAB,
         LF,
         VT,

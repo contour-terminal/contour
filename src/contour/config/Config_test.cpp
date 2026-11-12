@@ -291,6 +291,31 @@ profiles:
     CHECK(settings.graphemeClustering == false);
 }
 
+TEST_CASE("Config: answerback loads, round-trips and reaches the emulation", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+    told:
+        shell: /bin/sh
+        answerback: "contour here"
+)"sv);
+    // Empty by default: ENQ tells a host nothing unless the user says what to tell it.
+    CHECK(config.profile("main")->answerback.value().empty());
+    REQUIRE(config.profile("told") != nullptr);
+    CHECK(config.profile("told")->answerback.value() == "contour here");
+    CHECK(contour::config::emulationSettings(config, *config.profile("told")).answerback == "contour here");
+
+    writeSideFile(dir, "profiles/roundtrip.yml", contour::config::emitProfileYaml(*config.profile("told")));
+    auto const reloaded = loadFromYaml(dir, "default_profile: main\n");
+    auto const* roundTripped = reloaded.findProfile("roundtrip");
+    REQUIRE(roundTripped != nullptr);
+    CHECK(roundTripped->answerback.value() == "contour here");
+}
+
 TEST_CASE("Config: emulationSettings carries an unlimited history", "[config]")
 {
     // maxHistoryLineCount is a variant; the daemon must inherit the Infinite arm too, or an

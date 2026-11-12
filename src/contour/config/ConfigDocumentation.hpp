@@ -414,6 +414,13 @@ constexpr StringLiteral TerminalIdConfig {
     "\n"
 };
 
+constexpr StringLiteral AnswerbackConfig {
+    "{comment} The answerback message sent when an application sends ENQ (Ctrl+E).\n"
+    "{comment} Empty (the default) sends nothing.\n"
+    "answerback: \"{}\"\n"
+    "\n"
+};
+
 constexpr StringLiteral MaxHistoryLineCountConfig {
     "{comment} Number of lines to preserve (-1 for infinite).\n"
     "limit: {}\n"
@@ -2730,6 +2737,20 @@ constexpr StringLiteral TabBarVisibilityWeb {
     "\n"
 };
 
+constexpr StringLiteral AnswerbackWeb {
+    "\n"
+    "configuration option sets the answerback message: the text the terminal sends to the application when "
+    "it receives ENQ (Ctrl+E). It is empty by default, so nothing is sent, as in xterm and Windows Terminal. "
+    "Anything put here is told to every program that asks, so it should not hold anything secret.\n"
+    "\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    answerback: \"contour\"\n"
+    "```\n"
+    "\n"
+};
+
 constexpr StringLiteral TerminalIdWeb {
     "\n"
     "configuration option allows you to specify the terminal type that will be advertised by the terminal "
@@ -3768,6 +3789,10 @@ struct Text<TerminalSize>: DocumentationEntry<TerminalSizeConfig, TerminalSizeWe
 };
 template <>
 struct Text<TerminalId>: DocumentationEntry<TerminalIdConfig, TerminalIdWeb>
+{
+};
+template <>
+struct Text<Answerback>: DocumentationEntry<AnswerbackConfig, AnswerbackWeb>
 {
 };
 template <>

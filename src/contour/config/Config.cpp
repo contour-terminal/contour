@@ -904,6 +904,7 @@ vtbackend::Settings emulationSettings(Config const& config, TerminalProfile cons
     settings.contextMarkPolicy = oscContext.deriveMarkers;
     settings.contextTintScope = oscContext.tinting;
     settings.terminalId = profile.terminalId.value();
+    settings.answerback = profile.answerback.value();
     settings.frozenModes = profile.frozenModes.value();
     settings.maxImageRegisterCount = config.images.value().maxImageColorRegisters;
     settings.goodImageProtocol = config.images.value().goodImageProtocol;
@@ -2057,6 +2058,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child,
         loadFromEntry(child, "option_as_alt", where.optionAsAlt);
         loadFromEntry(child, "margins", where.margins);
         loadFromEntry(child, "terminal_id", where.terminalId);
+        loadFromEntry(child, "answerback", where.answerback);
         loadFromEntry(child, "frozen_dec_modes", where.frozenModes);
         loadFromEntry(child, "slow_scrolling_time", where.smoothLineScrolling);
         loadFromEntry(child, "smooth_scrolling", where.smoothScrolling);

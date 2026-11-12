@@ -53,6 +53,7 @@ struct UiFontSize {};
 struct Margins {};
 struct TerminalSize {};
 struct TerminalId {};
+struct Answerback {};
 struct History {};
 struct Folding {};
 struct Gutter {};

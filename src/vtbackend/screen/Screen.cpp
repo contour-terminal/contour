@@ -5107,6 +5107,10 @@ void Screen::executeControlCode(char controlCode)
 #endif
 
     _terminal->incrementInstructionCounter();
+        case ENQ.finalSymbol:
+            if (auto const& message = _terminal->answerback(); !message.empty())
+                reply(message);
+            break;
     switch (controlCode)
     {
         case 0x00: // NUL

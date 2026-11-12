@@ -1038,6 +1038,7 @@ struct TerminalProfile
         .volume = 1.0f } };
     ConfigEntry<FinishNotificationConfig, documentation::NotifyOnCommandFinish> notifyOnCommandFinish {};
     ConfigEntry<vtbackend::VTType, documentation::TerminalId> terminalId { vtbackend::VTType::VT525 };
+    ConfigEntry<std::string, documentation::Answerback> answerback { "" };
     ConfigEntry<PixelReporting, documentation::PixelReporting> pixelReporting { PixelReporting::Device };
     ConfigEntry<std::map<vtbackend::DECMode, bool>, documentation::FrozenDecMode> frozenModes {};
     ConfigEntry<std::chrono::milliseconds, documentation::SmoothLineScrolling> smoothLineScrolling { 100 };
