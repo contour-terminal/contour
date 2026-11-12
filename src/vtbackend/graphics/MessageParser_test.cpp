@@ -104,6 +104,18 @@ TEST_CASE("MessageParser.headers.many", "[MessageParser]")
     }
 }
 
+TEST_CASE("MessageParser.headers.beforeAnEmptyBody", "[MessageParser]")
+{
+    // The `;` that ends the headers leaves the last of them pending until the first body byte
+    // arrives. When none does, the end of the message has to deliver it.
+    auto const m = MessageParser::parse("a=A,bee=eeeh;");
+    REQUIRE(m.header("a"));
+    CHECK(*m.header("a") == "A");
+    REQUIRE(m.header("bee"));
+    CHECK(*m.header("bee") == "eeeh");
+    CHECK(m.body().empty());
+}
+
 TEST_CASE("MessageParser.body", "[MessageParser]")
 {
     SECTION("empty body")

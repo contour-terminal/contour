@@ -266,6 +266,18 @@ TEST_CASE("GoodImageProtocol.Release.Nonexistent", "[GIP]")
     mock.writeToScreen(gipRelease("n=nope"));
 }
 
+TEST_CASE("GoodImageProtocol.Release.withAnEmptyBody", "[GIP]")
+{
+    // The trailing `;` announces a body that never comes; the name before it still counts.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const pixels = makeRGBA(2, 2, 0xFF, 0x00, 0x00, 0xFF);
+    mock.writeToScreen(gipUpload("n=tmp,f=3,w=2,h=2", pixels));
+    REQUIRE(mock.terminal.imagePool().findImageByName("tmp") != nullptr);
+
+    mock.writeToScreen("\033P!go=d,n=tmp;\033\\");
+    CHECK(mock.terminal.imagePool().findImageByName("tmp") == nullptr);
+}
+
 // ==================== DA1 Test ====================
 
 TEST_CASE("GoodImageProtocol.DA1.IncludesGIPCode", "[GIP]")
