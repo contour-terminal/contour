@@ -48,6 +48,24 @@ std::string letters(std::size_t size)
     return text;
 }
 
+/// Closes a PTY when it goes out of scope, so that a thread waiting for the close ends however the test does.
+///
+/// Not gsl::finally: the tree pins Microsoft GSL 3.1.0, which spells that header `gsl/gsl_util`, while
+/// GSL 4.x spells it `gsl/util`, so no single include builds everywhere. close() is idempotent.
+class ClosingPty
+{
+  public:
+    explicit ClosingPty(vtpty::UnixPty& pty) noexcept: _pty { pty } {}
+    ClosingPty(ClosingPty const&) = delete;
+    ClosingPty(ClosingPty&&) = delete;
+    ClosingPty& operator=(ClosingPty const&) = delete;
+    ClosingPty& operator=(ClosingPty&&) = delete;
+    ~ClosingPty() { _pty.close(); }
+
+  private:
+    vtpty::UnixPty& _pty;
+};
+
 /// What a flood read back through UnixPty::read() came to.
 struct Flood
 {
@@ -165,6 +183,43 @@ TEST_CASE("UnixPty.isClosed.seesAConcurrentClose", "[vtpty][unixpty][threading]"
         std::this_thread::yield();
     CHECK(pty.isClosed());
     closer.join();
+}
+
+TEST_CASE("UnixPty.resizeScreen.racesAConcurrentClose", "[vtpty][unixpty][threading]")
+{
+    // The session's parser thread closes the PTY the moment its shell exits, while the GUI thread may be
+    // resizing it -- a window that lays itself out as its shell exits at once. A resize that read the
+    // descriptor before close() and issued TIOCSWINSZ after it failed with EBADF and threw from a Qt event
+    // handler, which ended the process. Each round closes while resizes run; none may throw.
+    constexpr auto Rounds = 200;
+    for ([[maybe_unused]] auto const round: std::views::iota(0, Rounds))
+    {
+        auto pty = vtpty::UnixPty {
+            vtpty::PageSize { .lines = vtpty::LineCount(24), .columns = vtpty::ColumnCount(80) }, std::nullopt
+        };
+        REQUIRE(pty.start().has_value());
+
+        auto started = std::atomic<bool> { false };
+        auto resizing = std::future<void> {};
+        // Declared after the future, so that it runs before the future is destroyed, which waits for the
+        // resizer: a check that fails early must fail the test, not leave it waiting for a close.
+        auto const closeOnExit = ClosingPty { pty };
+        resizing = std::async(std::launch::async, [&pty, &started] {
+            auto lines = 10;
+            while (!pty.isClosed())
+            {
+                pty.resizeScreen(
+                    vtpty::PageSize { .lines = vtpty::LineCount(lines), .columns = vtpty::ColumnCount(80) });
+                lines = lines == 10 ? 11 : 10;
+                started.store(true, std::memory_order_release);
+            }
+        });
+        // Also done waiting where the resizer ended without one resize: it threw on the first.
+        while (!started.load(std::memory_order_acquire) && resizing.wait_for(0s) != std::future_status::ready)
+            std::this_thread::yield();
+        pty.close();
+        CHECK_NOTHROW(resizing.get());
+    }
 }
 
 TEST_CASE("UnixPty.close.isNotHeldUpByAParkedWrite", "[vtpty][unixpty][threading]")
