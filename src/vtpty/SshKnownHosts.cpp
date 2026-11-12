@@ -22,6 +22,9 @@ namespace vtpty
 
 namespace
 {
+    /// The port a known_hosts entry names its host without one at.
+    constexpr auto DefaultSshPort = 22;
+
     /// @return Whether the file at @p path ends part-way through a line, its last byte no line feed. One
     ///         that is empty, or not there, does not.
     [[nodiscard]] bool endsMidLine(std::filesystem::path const& path)
@@ -152,9 +155,14 @@ std::expected<void, std::string> SshKnownHosts::appendToFile(SshHostConfig const
     auto const knownhostType = hostkeyTypeToKnownHostType(hostkey.type);
     auto const comment = host.toKnownhostComment();
     auto const typeMask = LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW | knownhostType;
+    // Named as OpenSSH's put_host_port() names it: "[host]:port" off the default port, so that the key
+    // accepted on one port vouches for no other port of the host.
+    auto const name = host.port <= 0 || host.port == DefaultSshPort
+                          ? host.hostname
+                          : std::format("[{}]:{}", host.hostname, host.port);
     libssh2_knownhost* entry = nullptr;
     if (libssh2_knownhost_addc(_handle,
-                               host.hostname.c_str(),
+                               name.c_str(),
                                nullptr /* salt */,
                                hostkey.data.data(),
                                hostkey.data.size(),
