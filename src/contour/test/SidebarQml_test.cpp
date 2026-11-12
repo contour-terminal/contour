@@ -46,13 +46,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <QtQuickControls2/QQuickStyle>
@@ -120,6 +123,13 @@ enum class PaneTree : uint8_t
     None,     ///< None, as a window that is closing has pruned its tree before its controller goes.
 };
 
+/// Whether billing's first tab, claude's, is split.
+enum class ClaudeTab : uint8_t
+{
+    OnePane = 0, ///< claude alone.
+    Split,       ///< claude and a second pane, review (key 12).
+};
+
 /// How the window the sidebar is loaded in is set up.
 struct SidebarScene
 {
@@ -134,6 +144,7 @@ struct SidebarScene
     PaneTree paneTree = PaneTree::Leaf; ///< Whether the window shows a pane tree.
     /// The sidebar's width in logical pixels; the row's own default when unset.
     std::optional<int> width = std::nullopt;
+    ClaudeTab claudeTab = ClaudeTab::OnePane; ///< Whether claude's tab is split.
 };
 
 /// Main.qml over a mock whose sidebar lists two workspaces: billing (a pane that asks for a permission and
@@ -175,6 +186,8 @@ struct SidebarWindow
         auto& listed = controller.sidebarSource().listed;
         auto billingWorkspace = contour::test::directoryWorkspaceOf(1, "billing", { claude, build });
         billingWorkspace.git = contour::window::DirectoryGit { .branch = "feat/billing", .ahead = 2 };
+        if (scene.claudeTab == ClaudeTab::Split)
+            billingWorkspace.tabs.front().panes.push_back(contour::test::directoryPaneOf(12, "review"));
         listed.workspaces = {
             std::move(billingWorkspace),
             contour::test::directoryWorkspaceOf(2, "docs", { contour::test::directoryPaneOf(20, "notes") }),
@@ -349,20 +362,16 @@ void dragFrom(QQuickWindow& window, QPoint from)
     QCoreApplication::processEvents();
 }
 
-/// Drags the row @p from onto the row @p to as the user does, and drops at @p fraction of @p to's height.
+/// Drags the row @p from to @p end, a point of the window, as the user does, and drops there.
 ///
 /// The gesture is real mouse events: a press, and moves past the drag threshold, which the row's DragHandler
 /// must turn into the node drag (the controller is asked for its payload, and told when the drag is over).
 /// The offscreen platform has no OS drag loop, so that drag returns at once; what the OS does with the
 /// payload next -- drag-enter, drag-move and drop events to the window under the pointer -- is delivered here
 /// through the platform interface, to the DropArea of the row the pointer is over.
-void dragRowOnto(SidebarWindow& scene, QQuickItem const& from, QQuickItem const& to, double fraction)
+void dragRowTo(SidebarWindow& scene, QQuickItem const& from, QPoint end)
 {
-    auto const at = [&](QQuickItem const& item, double x, double y) {
-        return item.mapToScene(QPointF { item.width() * x, item.height() * y }).toPoint();
-    };
-    auto const start = at(from, 0.5, 0.5);
-    auto const end = at(to, 0.5, fraction);
+    auto const start = from.mapToScene(QPointF { from.width() / 2, from.height() / 2 }).toPoint();
 
     QTest::mousePress(scene.window, Qt::LeftButton, Qt::NoModifier, start);
     for (auto const step: std::views::iota(1, 6))
@@ -385,6 +394,12 @@ void dragRowOnto(SidebarWindow& scene, QQuickItem const& from, QQuickItem const&
     QWindowSystemInterface::handleDrop(
         scene.window, &mime, end, Qt::MoveAction, Qt::LeftButton, Qt::NoModifier);
     QCoreApplication::processEvents();
+}
+
+/// Drags the row @p from onto the row @p to (dragRowTo()), and drops at @p fraction of @p to's height.
+void dragRowOnto(SidebarWindow& scene, QQuickItem const& from, QQuickItem const& to, double fraction)
+{
+    dragRowTo(scene, from, to.mapToScene(QPointF { to.width() / 2, to.height() * fraction }).toPoint());
 }
 
 /// Whether @p item is @p ancestor or lies beneath it.
@@ -881,10 +896,10 @@ TEST_CASE("RenameWorkspace shows a hidden sidebar and opens the editor (offscree
     }
 }
 
-TEST_CASE("workspace and tab rows drag, pane rows do not (offscreen)", "[contour][gui][qml][sidebar]")
+TEST_CASE("workspace, tab and pane rows drag (offscreen)", "[contour][gui][qml][sidebar]")
 {
-    auto scene = SidebarWindow { { .row = drawnRows().front() } };
-    for (auto const& title: { QStringLiteral("billing"), QStringLiteral("claude") })
+    auto scene = SidebarWindow { { .row = drawnRows().front(), .claudeTab = ClaudeTab::Split } };
+    for (auto const& title: { QStringLiteral("billing"), QStringLiteral("claude"), QStringLiteral("review") })
     {
         auto* item = scene.rowTitled(title);
         REQUIRE(item != nullptr);
@@ -1694,12 +1709,248 @@ TEST_CASE("dragging a tab row onto another workspace with the mouse moves the ta
         // Dropped on the middle of the docs row: the tab goes to the end of that workspace.
         dragRowOnto(scene, *claude, *docs, 0.5);
 
-        REQUIRE(scene.controller.sidebarHost().movedTabs.size() == 1);
-        auto const& [tab, target] = scene.controller.sidebarHost().movedTabs.front();
-        CHECK(tab.workspace == 1);
-        CHECK(tab.tab == 10);
-        CHECK(target.first == 2);
+        REQUIRE(scene.controller.sidebarHost().movedNodes.size() == 1);
+        auto const& [node, target] = scene.controller.sidebarHost().movedNodes.front();
+        CHECK(node == contour::window::SidebarNode { contour::window::TabRef { .workspace = 1, .tab = 10 } });
+        REQUIRE(std::holds_alternative<contour::window::MoveTab>(target));
+        CHECK(std::get<contour::window::MoveTab>(target).toWorkspace == 2);
         CHECK(scene.controller.finishedDrags == 1);
         CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
+}
+
+TEST_CASE("dragging a pane row with the mouse joins a tab, or becomes a tab or a workspace (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    using contour::window::SidebarNode;
+    struct Case
+    {
+        QString target;  ///< The row it is dropped on; empty for the tree's empty area.
+        double fraction; ///< Where on that row's height.
+        std::function<bool(contour::window::NodeDestination const&)> lands; ///< Where it must land.
+    };
+    auto const cases = std::vector<Case> {
+        // The middle of the build tab: review joins it as a split.
+        { QStringLiteral("build"),
+          0.5,
+          [](auto const& to) {
+              auto const* join = std::get_if<contour::window::JoinTab>(&to);
+              return join != nullptr && join->tab == contour::window::TabRef { .workspace = 1, .tab = 11 };
+          } },
+        // The middle of the docs workspace: review becomes its last tab.
+        { QStringLiteral("docs"),
+          0.5,
+          [](auto const& to) {
+              auto const* move = std::get_if<contour::window::MoveTab>(&to);
+              return move != nullptr && move->toWorkspace == 2
+                     && move->toPosition == contour::window::AppendTab;
+          } },
+        // Below the rows: a workspace of its own.
+        { QString {},
+          0.5,
+          [](auto const& to) { return std::holds_alternative<contour::window::IntoNewWorkspace>(to); } },
+    };
+    for (auto const row: drawnRows())
+        for (auto const& [target, fraction, lands]: cases)
+        {
+            INFO("row " << static_cast<int>(row) << " onto " << target.toStdString());
+            auto scene = SidebarWindow { { .row = row, .claudeTab = ClaudeTab::Split } };
+            auto* review = scene.rowTitled(QStringLiteral("review"));
+            REQUIRE(review != nullptr);
+            if (target.isEmpty())
+            {
+                auto* empty = scene.item(QStringLiteral("sidebarTreeEmptyDrop"));
+                REQUIRE(empty != nullptr);
+                REQUIRE(empty->height() > 0);
+                dragRowTo(scene, *review, sceneRectOf(*empty).center().toPoint());
+            }
+            else
+            {
+                auto* onto = scene.rowTitled(target);
+                REQUIRE(onto != nullptr);
+                dragRowOnto(scene, *review, *onto, fraction);
+            }
+            REQUIRE(scene.controller.sidebarHost().movedNodes.size() == 1);
+            auto const& [node, to] = scene.controller.sidebarHost().movedNodes.front();
+            CHECK(node == SidebarNode { contour::window::PaneKey { 12 } });
+            CHECK(lands(to));
+            CHECK(scene.controller.finishedDrags == 1);
+            CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
+        }
+}
+
+TEST_CASE("a pane dragged over its own tab is refused, and over another shows where it lands (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    auto scene = SidebarWindow { { .row = drawnRows().front(), .claudeTab = ClaudeTab::Split } };
+    auto* review = scene.rowTitled(QStringLiteral("review"));
+    auto* claude = scene.rowTitled(QStringLiteral("claude"));
+    auto* build = scene.rowTitled(QStringLiteral("build"));
+    REQUIRE(review != nullptr);
+    REQUIRE(claude != nullptr);
+    REQUIRE(build != nullptr);
+    auto mime = QMimeData {};
+    mime.setData(QString::fromLatin1(contour::window::NodeDragMime),
+                 scene.controller.beginSidebarDrag(review->property("index").toInt()).toUtf8());
+    auto const hover = [&](QQuickItem const& row, double fraction) {
+        auto const at = row.mapToScene(QPointF { row.width() / 2, row.height() * fraction }).toPoint();
+        return QWindowSystemInterface::handleDrag(
+            scene.window, &mime, at, Qt::MoveAction, Qt::LeftButton, Qt::NoModifier);
+    };
+    auto const shown = [](QQuickItem const& row, char const* name) {
+        auto* item = SidebarWindow::findNamed(row, QString::fromLatin1(name));
+        return item != nullptr && item->isVisible();
+    };
+
+    // Its own tab's middle: the row refuses it (the window beneath takes it as a no-op), and shows nothing.
+    std::ignore = hover(*claude, 0.5);
+    QCoreApplication::processEvents();
+    auto* ownDrop = SidebarWindow::findNamed(*claude, QStringLiteral("sidebarRowDrop"));
+    REQUIRE(ownDrop != nullptr);
+    CHECK_FALSE(ownDrop->property("containsDrag").toBool());
+    CHECK_FALSE(shown(*claude, "sidebarRowDropHighlight"));
+    // Another tab's middle: that row is highlighted; its upper third: a line above it.
+    auto const into = hover(*build, 0.5);
+    QCoreApplication::processEvents();
+    CHECK(into.isAccepted());
+    CHECK(SidebarWindow::findNamed(*build, QStringLiteral("sidebarRowDrop"))
+              ->property("containsDrag")
+              .toBool());
+    CHECK(shown(*build, "sidebarRowDropHighlight"));
+    std::ignore = hover(*build, 0.1);
+    QCoreApplication::processEvents();
+    CHECK(shown(*build, "sidebarRowDropLine"));
+    CHECK_FALSE(shown(*build, "sidebarRowDropHighlight"));
+    QWindowSystemInterface::handleDrag(
+        scene.window, nullptr, QPoint { -1, -1 }, Qt::IgnoreAction, Qt::NoButton, Qt::NoModifier);
+    QCoreApplication::processEvents();
+    CHECK(scene.controller.sidebarHost().movedNodes.empty());
+}
+
+namespace
+{
+/// Every sidebar control on screen in @p scene (SidebarControlButton, wherever its look stands it).
+[[nodiscard]] std::vector<QQuickItem*> shownSidebarControls(QQuickItem const& parent)
+{
+    auto found = std::vector<QQuickItem*> {};
+    for (auto* child: parent.childItems())
+    {
+        if (child->isVisible() && child->width() > 0 && child->property("control").isValid()
+            && child->property("toolTipCommand").isValid())
+            found.push_back(child);
+        std::ranges::copy(shownSidebarControls(*child), std::back_inserter(found));
+    }
+    return found;
+}
+
+/// The configuration of @p row's host with @p inputMapping as its `input_mapping` section, of the native2026
+/// defaults edition.
+[[nodiscard]] contour::config::Config bindingsOf(ChromeStyle row, std::string_view inputMapping)
+{
+    auto const kind = row == ChromeStyle::MacOS ? contour::config::KeyboardPlatformKind::Mac
+                                                : contour::config::KeyboardPlatformKind::Xkb;
+    return contour::test::loadConfigFromYaml(
+        "defaults_edition: native2026\n"
+            + contour::test::profileConfigYaml("main", std::format("input_mapping:\n{}", inputMapping)),
+        kind);
+}
+
+/// Hovers @p control until its tooltip is open, and returns it.
+[[nodiscard]] QObject* openToolTipOf(QQuickWindow& window, QQuickItem const& control)
+{
+    REQUIRE(QMetaObject::invokeMethod(window.property("tooltipClock").value<QObject*>(), "touch"));
+    auto const centre = control.mapToScene(QPointF { control.width() / 2, control.height() / 2 }).toPoint();
+    // From elsewhere first: a move to where the pointer already is sends no hover.
+    QTest::mouseMove(&window, QPoint { window.width() / 2, window.height() - 40 });
+    QTest::mouseMove(&window, centre - QPoint { 2, 0 });
+    QTest::mouseMove(&window, centre);
+    auto const* host = control.findChild<QQuickItem*>(QStringLiteral("kitToolTipHost"));
+    REQUIRE(host != nullptr);
+    REQUIRE(QTest::qWaitFor(
+        [&] {
+            auto const* tip = host->property("toolTip").value<QObject*>();
+            return tip != nullptr && tip->property("opened").toBool();
+        },
+        5000));
+    return host->property("toolTip").value<QObject*>();
+}
+} // namespace
+
+TEST_CASE("every sidebar control's tooltip names the chord its action is bound to now, or none (offscreen)",
+          "[contour][gui][qml][sidebar][tooltip]")
+{
+    // A configuration written before the sidebar existed: it binds New Tab only, and the sidebar's chords
+    // come from the defaults' fallbacks. Then one that binds all three controls' actions itself, with the
+    // host's Primary chord, which a Mac prefers over a fallback's as the menus do (ChordPreference).
+    constexpr auto Predating =
+        std::string_view { "  - { mods: [Primary], key: 'T', action: CreateNewTab }\n" };
+    constexpr auto Rebound =
+        std::string_view { "  - { mods: [Primary, Alt], key: 'B', action: ToggleSidebar }\n"
+                           "  - { mods: [Primary, Alt], key: 'N', action: NewWorkspace }\n"
+                           "  - { mods: [Primary, Alt], key: 'F', action: FilterWorkspaces }\n" };
+    using contour::window::SidebarControl;
+    using vtbackend::Modifier;
+    // In SidebarControl order, as the expected chords below are.
+    constexpr auto Controls =
+        std::array { SidebarControl::Toggle, SidebarControl::NewWorkspace, SidebarControl::Filter };
+
+    for (auto const row: drawnRows())
+        for (auto const visibility:
+             { contour::config::SidebarVisibility::Shown, contour::config::SidebarVisibility::Hidden })
+        {
+            INFO("row " << static_cast<int>(row) << ", sidebar " << static_cast<int>(visibility));
+            auto scene = SidebarWindow { { .row = row, .visibility = visibility } };
+            auto const style = scene.controller.shortcutStyle;
+            auto const spelled = [&](vtbackend::Modifiers modifiers, char32_t key) {
+                return QString::fromStdString(contour::command::shortcutText(
+                    modifiers, contour::command::ShortcutInput { key }, style));
+            };
+            // The toggle's default: Ctrl+Shift+B, and Command+\ on a Mac.
+            auto const toggleDefault = row == ChromeStyle::MacOS
+                                           ? spelled(vtbackend::Modifiers { Modifier::Super }, U'\\')
+                                           : QStringLiteral("Ctrl+Shift+B");
+            // Primary+Alt: Command+Option on a Mac, Ctrl+Shift+Alt elsewhere.
+            auto const primaryAlt =
+                row == ChromeStyle::MacOS
+                    ? vtbackend::Modifiers { Modifier::Super, Modifier::Alt }
+                    : vtbackend::Modifiers { Modifier::Control, Modifier::Shift, Modifier::Alt };
+
+            auto const controls = shownSidebarControls(*scene.window->contentItem());
+            REQUIRE_FALSE(controls.empty());
+            // The toggle stands on every row, shown or hidden.
+            CHECK(std::ranges::any_of(controls, [](QQuickItem const* control) {
+                return control->property("control").toString() == QStringLiteral("toggle");
+            }));
+
+            for (auto const& [mapping, toggle, newWorkspace, filter]:
+                 { std::tuple { Predating, toggleDefault, QString {}, QString {} },
+                   std::tuple { Rebound,
+                                spelled(primaryAlt, U'B'),
+                                spelled(primaryAlt, U'N'),
+                                spelled(primaryAlt, U'F') } })
+            {
+                scene.controller.chords = contour::command::chordIndex(bindingsOf(row, mapping));
+                for (auto* control: controls)
+                {
+                    auto const name = control->property("control").toString();
+                    INFO("control " << name.toStdString() << " (" << control->objectName().toStdString()
+                                    << ")");
+                    // The command comes from the table, never from the placement.
+                    auto const which = std::ranges::find_if(Controls, [&](SidebarControl each) {
+                        return name.toStdString() == contour::window::sidebarControlName(each);
+                    });
+                    REQUIRE(which != Controls.end());
+                    CHECK(control->property("toolTipCommand").toString().toStdString()
+                          == contour::window::sidebarControlCommand(*which));
+                    auto const expected =
+                        std::array { toggle, newWorkspace, filter }[static_cast<std::size_t>(*which)];
+                    auto const* tip = openToolTipOf(*scene.window, *control);
+                    CHECK_FALSE(tip->property("text").toString().isEmpty());
+                    CHECK(tip->property("shownShortcut").toString().toStdString() == expected.toStdString());
+                    // Unbound: the plain label, with no slot (and so no gap) for a chord.
+                    CHECK(tip->property("shortcutShown").toBool() == !expected.isEmpty());
+                }
+            }
+            CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+        }
 }

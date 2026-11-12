@@ -10,6 +10,9 @@ ToolbarButton {
 
     /// Which control: "toggle", "newWorkspace" or "filter".
     required property string control
+    /// The window's sidebar model, on a New Workspace control: a pane or a tab dropped on it gets a workspace of
+    /// its own (SidebarNewWorkspaceDrop). Null on every other control, and where no sidebar is.
+    property var dropSidebar: null
 
     readonly property var face: chromeStyle.sidebarControls[root.control] ?? ({})
 
@@ -18,4 +21,10 @@ ToolbarButton {
     iconSource: root.face.bundledIcon ?? ""
     // The control's action, from the table: the tooltip names the chord it is bound to when it shows.
     toolTipCommand: root.face.command ?? ""
+
+    SidebarNewWorkspaceDrop {
+        anchors.fill: parent
+        sidebar: root.dropSidebar
+        enabled: !!root.face.takesNewWorkspaceDrop && !!root.dropSidebar
+    }
 }

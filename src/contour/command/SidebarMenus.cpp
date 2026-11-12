@@ -12,6 +12,42 @@ namespace contour::command
 
 namespace
 {
+    // {{{ Tab choices
+    /// One header per workspace, its joinable tabs beneath it, each running MoveToTab on the row.
+    [[nodiscard]] std::vector<ContextMenuEntry> joinRows(std::span<TabChoiceGroup const> groups)
+    {
+        auto entries = std::vector<ContextMenuEntry> {};
+        for (auto const& group: groups)
+        {
+            entries.push_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Header,
+                                                 .title = group.workspace,
+                                                 .action = {},
+                                                 .availability = RowAvailability::Disabled,
+                                                 .check = RowCheck::None,
+                                                 .role = MenuItemRole::None,
+                                                 .swatch = std::nullopt,
+                                                 .children = {} });
+            for (auto const& choice: group.tabs)
+                entries.push_back(detail::commandEntry(
+                    choice.title, actions::MoveToTab { .workspace = choice.workspace, .tab = choice.tab }));
+        }
+        return entries;
+    }
+
+    template <typename State>
+    [[nodiscard]] std::vector<ContextMenuEntry> joinRowsOf(State const& state)
+    {
+        return joinRows(state.joinable);
+    }
+
+    /// Whether the window's host moves panes and tabs anywhere: a join, a new tab and a new workspace.
+    template <typename State>
+    bool movesNodes(State const& state) noexcept
+    {
+        return state.moves == MenuMoves::Nodes;
+    }
+    // }}}
+
     // {{{ Workspace rows
     using WorkspaceTable = detail::MenuTable<WorkspaceMenuState>;
 
@@ -44,6 +80,9 @@ namespace
 
             WorkspaceTable::command(MoveWorkspaceUp {}, "Move Up").enabledWhen(canMoveUp),
             WorkspaceTable::command(MoveWorkspaceDown {}, "Move Down").enabledWhen(canMoveDown),
+            // Empty, and so not drawn, for a workspace of several tabs.
+            WorkspaceTable::submenu("Merge into Tab", joinRowsOf<WorkspaceMenuState>)
+                .enabledWhen(movesNodes<WorkspaceMenuState>),
 
             WorkspaceTable::separator(),
 
@@ -75,12 +114,23 @@ namespace
                                             }));
     }
 
+    /// A new workspace for a workspace's only tab would only rebuild the one it has.
+    bool canLeaveWorkspace(SidebarTabMenuState const& state) noexcept
+    {
+        return state.workspaceTabs > 1 && movesNodes(state);
+    }
+
     [[nodiscard]] std::span<TabTable::Row const> sidebarTabMenuTemplate()
     {
         static auto const rows = std::array {
             TabTable::rows(tabStripRows),
             TabTable::separator(),
-            TabTable::submenu("Move to Workspace", moveTargetRows),
+            TabTable::submenu("Move to Workspace", moveTargetRows)
+                .enabledWhen(movesNodes<SidebarTabMenuState>),
+            TabTable::submenu("Merge into Tab", joinRowsOf<SidebarTabMenuState>)
+                .enabledWhen(movesNodes<SidebarTabMenuState>),
+            TabTable::command(actions::MoveToNewWorkspace {}, "Move to New Workspace")
+                .enabledWhen(canLeaveWorkspace),
         };
         return rows;
     }
@@ -89,6 +139,18 @@ namespace
     // {{{ Pane rows
     using PaneTable = detail::MenuTable<SidebarPaneMenuState>;
 
+    /// A tab of its own for its tab's only pane would only rebuild the tab it has.
+    bool canLeaveTab(SidebarPaneMenuState const& state) noexcept
+    {
+        return state.tabPanes > 1 && movesNodes(state);
+    }
+
+    /// A new workspace for what is all its workspace holds would only rebuild the one it has.
+    bool canLeavePaneWorkspace(SidebarPaneMenuState const& state) noexcept
+    {
+        return (state.tabPanes > 1 || state.workspaceTabs > 1) && movesNodes(state);
+    }
+
     [[nodiscard]] std::span<PaneTable::Row const> sidebarPaneMenuTemplate()
     {
         using namespace actions;
@@ -96,6 +158,14 @@ namespace
         static auto const rows = std::array {
             PaneTable::command(GoToPane {}, "Go to Pane"),
             PaneTable::command(MarkSeen {}, "Mark Seen"),
+
+            PaneTable::separator(),
+
+            PaneTable::submenu("Move to Tab", joinRowsOf<SidebarPaneMenuState>)
+                .enabledWhen(movesNodes<SidebarPaneMenuState>),
+            PaneTable::command(MoveToNewTab {}, "Move to New Tab").enabledWhen(canLeaveTab),
+            PaneTable::command(MoveToNewWorkspace {}, "Move to New Workspace")
+                .enabledWhen(canLeavePaneWorkspace),
 
             PaneTable::separator(),
 

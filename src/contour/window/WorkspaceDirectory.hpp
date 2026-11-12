@@ -6,6 +6,7 @@
 #include <vtbackend/screen/GitHead.hpp>
 #include <vtbackend/vt/ProgramStatus.hpp>
 
+#include <algorithm>
 #include <array>
 #include <concepts>
 #include <cstddef>
@@ -100,6 +101,92 @@ struct WorkspaceDirectory
     std::optional<uint64_t> selected; ///< The workspace the window shows, if it follows one.
     bool operator==(WorkspaceDirectory const&) const = default;
 };
+
+/// A tab of a directory with the workspace that lists it. Both point into the directory searched, so they
+/// live as long as it does.
+struct ListedTab
+{
+    DirectoryWorkspace const* workspace = nullptr; ///< The workspace listing it.
+    DirectoryTab const* tab = nullptr;             ///< The tab.
+};
+
+/// @param directory A window's directory.
+/// @param workspace A workspace's id.
+/// @return The workspace @p directory lists under that id; null for none.
+[[nodiscard]] inline DirectoryWorkspace const* findWorkspace(WorkspaceDirectory const& directory,
+                                                             uint64_t workspace) noexcept
+{
+    auto const found = std::ranges::find(directory.workspaces, workspace, &DirectoryWorkspace::id);
+    return found != directory.workspaces.end() ? &*found : nullptr;
+}
+
+/// @param workspace A workspace of a directory.
+/// @param tab A tab's id.
+/// @return The tab @p workspace lists under that id; null for none.
+[[nodiscard]] inline DirectoryTab const* findTab(DirectoryWorkspace const& workspace, uint64_t tab) noexcept
+{
+    auto const found = std::ranges::find(workspace.tabs, tab, &DirectoryTab::id);
+    return found != workspace.tabs.end() ? &*found : nullptr;
+}
+
+/// @param directory A window's directory.
+/// @param workspace The id of the workspace listing the tab.
+/// @param tab The tab's id.
+/// @return The tab; none where either id names nothing listed.
+[[nodiscard]] inline std::optional<ListedTab> findTab(WorkspaceDirectory const& directory,
+                                                      uint64_t workspace,
+                                                      uint64_t tab) noexcept
+{
+    auto const* const holder = findWorkspace(directory, workspace);
+    auto const* const found = holder != nullptr ? findTab(*holder, tab) : nullptr;
+    if (found == nullptr)
+        return std::nullopt;
+    return ListedTab { .workspace = holder, .tab = found };
+}
+
+/// @param directory A window's directory.
+/// @param tab A tab's id, whichever workspace lists it.
+/// @return The first tab listed under that id; none for none.
+[[nodiscard]] inline std::optional<ListedTab> findTabAnywhere(WorkspaceDirectory const& directory,
+                                                              uint64_t tab) noexcept
+{
+    for (auto const& workspace: directory.workspaces)
+        if (auto const* const found = findTab(workspace, tab))
+            return ListedTab { .workspace = &workspace, .tab = found };
+    return std::nullopt;
+}
+
+/// @param directory A window's directory.
+/// @param pane A pane's key.
+/// @return The tab listing @p pane; none for none.
+[[nodiscard]] inline std::optional<ListedTab> tabHoldingPane(WorkspaceDirectory const& directory,
+                                                             PaneKey pane) noexcept
+{
+    for (auto const& workspace: directory.workspaces)
+        for (auto const& tab: workspace.tabs)
+            if (std::ranges::contains(tab.panes, pane, &DirectoryPane::key))
+                return ListedTab { .workspace = &workspace, .tab = &tab };
+    return std::nullopt;
+}
+
+// The lookups above point into the directory searched: one of a temporary would dangle at once, so a
+// directory() result is held in a local first.
+DirectoryWorkspace const* findWorkspace(WorkspaceDirectory const&& directory, uint64_t workspace) = delete;
+DirectoryTab const* findTab(DirectoryWorkspace const&& workspace, uint64_t tab) = delete;
+std::optional<ListedTab> findTab(WorkspaceDirectory const&& directory,
+                                 uint64_t workspace,
+                                 uint64_t tab) = delete;
+std::optional<ListedTab> findTabAnywhere(WorkspaceDirectory const&& directory, uint64_t tab) = delete;
+std::optional<ListedTab> tabHoldingPane(WorkspaceDirectory const&& directory, PaneKey pane) = delete;
+
+/// @param tabs Tabs of a directory.
+/// @return The session of every pane of them, in order.
+[[nodiscard]] inline std::vector<uint64_t> sessionsOf(std::span<DirectoryTab const> tabs)
+{
+    return std::ranges::to<std::vector>(
+        tabs | std::views::transform(&DirectoryTab::panes) | std::views::join
+        | std::views::transform([](DirectoryPane const& pane) { return pane.key.value; }));
+}
 
 /// What is known of one pane besides its place in a layout.
 struct PaneStatus

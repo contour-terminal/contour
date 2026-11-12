@@ -5,6 +5,7 @@
 #include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SidebarModel.hpp>
 
+#include <core/Overloaded.hpp>
 #include <core/Utils.hpp>
 
 #include <QtCore/QByteArray>
@@ -21,7 +22,9 @@
 #include <format>
 #include <initializer_list>
 #include <ranges>
+#include <span>
 #include <utility>
+#include <variant>
 
 namespace contour::window
 {
@@ -204,17 +207,6 @@ namespace
         return keys;
     }
 
-    /// The tab of @p directory that holds @p pane.
-    [[nodiscard]] std::optional<std::pair<TabRef, std::size_t>> tabHolding(
-        WorkspaceDirectory const& directory, PaneKey pane)
-    {
-        for (auto const& workspace: directory.workspaces)
-            for (auto const& tab: workspace.tabs)
-                if (std::ranges::contains(tab.panes, pane, &DirectoryPane::key))
-                    return std::pair { TabRef { .workspace = workspace.id, .tab = tab.id },
-                                       tab.panes.size() };
-        return std::nullopt;
-    }
 } // namespace
 
 void registerSidebarQmlTypes()
@@ -619,10 +611,7 @@ void SidebarModel::activate(int row)
         return;
     switch (shown->key.kind)
     {
-        case SidebarRowKind::Workspace:
-            if (auto* const source = _host.directorySource())
-                std::ignore = source->select(shown->key.workspace);
-            break;
+        case SidebarRowKind::Workspace: _host.showWorkspace(shown->key.workspace); break;
         case SidebarRowKind::Tab:
         case SidebarRowKind::Pane:
             // A tab shows its first pane; showing one selects its workspace, activates its tab and focuses
@@ -723,40 +712,105 @@ void SidebarModel::setFilter(QString const& text)
     refreshNow();
 }
 
-void SidebarModel::drop(int row, double y, QString const& payload)
+std::optional<SidebarModel::Dragged> SidebarModel::draggedOf(QString const& payload) const
 {
     auto const drag = parseNodeDrag(payload);
     // Ids are the host's own: another host's tab 3 or workspace 2 is not this one's.
     if (!drag || drag->host != _host.hostIdentity())
-        return;
+        return std::nullopt;
     auto const current = directory();
-    auto const paneKey = [&]() -> std::optional<PaneKey> {
-        if (drag->sessions.empty())
-            return std::nullopt;
-        return PaneKey { drag->sessions.front() };
-    }();
-    auto subject = DragSubject::Pane;
+    auto const host = _host.hostMoves();
+    auto const tabsOf = [&](uint64_t workspace) {
+        auto const* const found = findWorkspace(current, workspace);
+        return found != nullptr ? std::span<DirectoryTab const> { found->tabs }
+                                : std::span<DirectoryTab const> {};
+    };
     switch (drag->payload)
     {
-        case DropPayload::Workspace: subject = DragSubject::Workspace; break;
-        case DropPayload::Tab: subject = DragSubject::Tab; break;
-        case DropPayload::Pane:
+        case DropPayload::Workspace: {
+            auto const tabs = tabsOf(drag->workspace);
+            if (tabs.size() != 1)
+                return Dragged {
+                    .dragged = { .subject = DragSubject::Workspace, .tab = {}, .share = {}, .host = host },
+                    .node = TabRef {},
+                    .workspace = drag->workspace
+                };
+            // A workspace of one tab joins a tab as that tab does.
+            auto const only = TabRef { .workspace = drag->workspace, .tab = tabs.front().id };
+            return Dragged { .dragged = { .subject = DragSubject::OneTabWorkspace,
+                                          .tab = only,
+                                          .share = WorkspaceShare::Whole,
+                                          .host = host },
+                             .node = only,
+                             .workspace = drag->workspace };
+        }
+        case DropPayload::Tab:
+        case DropPayload::Pane: {
+            if (drag->sessions.empty())
+                return std::nullopt;
+            auto const pane = PaneKey { drag->sessions.front() };
+            auto const held = tabHoldingPane(current, pane);
+            if (!held)
+                return std::nullopt;
+            auto const tab = TabRef { .workspace = held->workspace->id, .tab = held->tab->id };
+            auto const share =
+                held->workspace->tabs.size() == 1 ? WorkspaceShare::Whole : WorkspaceShare::Part;
             // A pane that is its tab's only one is the tab, as the tab strip takes it.
-            if (paneKey)
-                if (auto const held = tabHolding(current, *paneKey); held && held->second == 1)
-                    subject = DragSubject::Tab;
-            break;
+            if (drag->payload == DropPayload::Tab || held->tab->panes.size() == 1)
+                return Dragged {
+                    .dragged = { .subject = DragSubject::Tab, .tab = tab, .share = share, .host = host },
+                    .node = tab,
+                    .workspace = 0
+                };
+            return Dragged { .dragged = { .subject = DragSubject::Pane,
+                                          .tab = tab,
+                                          .share = WorkspaceShare::Part,
+                                          .host = host },
+                             .node = pane,
+                             .workspace = 0 };
+        }
         case DropPayload::None:
         case DropPayload::Files:
-        case DropPayload::Text: return;
+        case DropPayload::Text: break;
     }
+    return std::nullopt;
+}
 
-    auto const outcome = resolveSidebarDrop(_rows, row, y, subject);
-    if (auto const* const reorder = std::get_if<ReorderWorkspace>(&outcome))
-        _host.moveWorkspace(drag->workspace, reorder->to);
-    else if (auto const* const move = std::get_if<MoveTab>(&outcome); move != nullptr && paneKey)
-        if (auto const held = tabHolding(current, *paneKey))
-            _host.moveTab(held->first, move->toWorkspace, move->toPosition);
+void SidebarModel::apply(Dragged const& dragged, SidebarDrop const& drop)
+{
+    std::visit(
+        core::Overloaded {
+            [&](ReorderWorkspace const& reorder) { _host.moveWorkspace(dragged.workspace, reorder.to); },
+            [](Refuse const&) {},
+            // Every other drop moves a node: into a workspace, into a tab, or into one of its own.
+            [&](auto const& destination) { _host.moveNode(dragged.node, NodeDestination { destination }); },
+        },
+        drop);
+}
+
+void SidebarModel::drop(int row, double y, QString const& payload)
+{
+    if (auto const dragged = draggedOf(payload))
+        apply(*dragged, resolveSidebarDrop(_rows, row, y, dragged->dragged));
+}
+
+int SidebarModel::dropIndicator(int row, double y, QString const& payload) const
+{
+    auto const dragged = draggedOf(payload);
+    return std::to_underlying(dragged ? sidebarDropIndicator(_rows, row, y, dragged->dragged)
+                                      : DropIndicator::Refused);
+}
+
+bool SidebarModel::takesNewWorkspaceDrop(QString const& payload) const
+{
+    auto const dragged = draggedOf(payload);
+    return dragged && std::holds_alternative<IntoNewWorkspace>(resolveNewWorkspaceDrop(dragged->dragged));
+}
+
+void SidebarModel::dropOnNewWorkspace(QString const& payload)
+{
+    if (auto const dragged = draggedOf(payload))
+        apply(*dragged, resolveNewWorkspaceDrop(dragged->dragged));
 }
 
 } // namespace contour::window

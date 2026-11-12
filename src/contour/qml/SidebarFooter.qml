@@ -64,6 +64,7 @@ Item {
         implicitWidth: chromeStyle.snapToCells(extent)
         glyphColor: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.sidebarSecondaryInk
         accessibleName: qsTr("New workspace")
+        dropSidebar: root.sidebar
         onClicked: if (root.controller && root.controller.newWorkspace) root.controller.newWorkspace()
     }
 

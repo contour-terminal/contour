@@ -7349,6 +7349,22 @@ bool TerminalSession::operator()(actions::MoveTabToWorkspace const& event)
     return onWindowOf(*_manager, *this, &window::WindowController::moveActiveTabToWorkspace, event.index);
 }
 
+bool TerminalSession::operator()(actions::MoveToTab const& event)
+{
+    return onWindowOf(
+        *_manager, *this, &window::WindowController::moveActivePaneToTab, event.workspace, event.tab);
+}
+
+bool TerminalSession::operator()(actions::MoveToNewTab)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::moveActivePaneToNewTab);
+}
+
+bool TerminalSession::operator()(actions::MoveToNewWorkspace)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::moveActivePaneToNewWorkspace);
+}
+
 bool TerminalSession::operator()(actions::MoveTabTo event)
 {
     _manager->moveTabTo(event.position, this);

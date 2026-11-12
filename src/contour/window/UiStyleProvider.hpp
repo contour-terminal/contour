@@ -232,6 +232,8 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(int dropCaretWidth READ dropCaretWidth CONSTANT)
     Q_PROPERTY(int tabDwellMs READ tabDwellMs CONSTANT)
     Q_PROPERTY(qreal dropRingWidth READ dropRingWidth CONSTANT)
+    /// The opacity of the accent fill of a place that takes a drag (window::DropFillOpacity).
+    Q_PROPERTY(qreal dropFillOpacity READ dropFillOpacity CONSTANT)
     Q_PROPERTY(qreal dropEdgeWidth READ dropEdgeWidth CONSTANT)
     Q_PROPERTY(int resizeBorderThickness READ resizeBorderThickness CONSTANT)
 
@@ -689,6 +691,9 @@ class UiStyleProvider: public QObject
 
     /// The width of the ring around a pane that takes a drag, in logical pixels (window::DropRingWidth).
     [[nodiscard]] static constexpr qreal dropRingWidth() noexcept { return DropRingWidth; }
+
+    /// The opacity of the accent fill of a place that takes a drag, 0 to 1 (window::DropFillOpacity).
+    [[nodiscard]] static constexpr qreal dropFillOpacity() noexcept { return DropFillOpacity; }
 
     /// The width of a drop ghost's edge and of the outline of a tab a drag hovers, in logical pixels
     /// (window::DropEdgeWidth).

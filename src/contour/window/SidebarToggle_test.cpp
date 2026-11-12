@@ -128,3 +128,26 @@ TEST_CASE("SidebarControls: one glyph means one thing in a bar", "[sidebar][side
     }
     CHECK(sidebarControlName(SidebarControl::NewWorkspace) == "newWorkspace");
 }
+
+TEST_CASE("SidebarControls: only the new-workspace control takes a dropped pane or tab, on every look",
+          "[sidebar][sidebarcontrols]")
+{
+    for (auto const& row: SidebarControlRows)
+        for (auto const control:
+             { SidebarControl::Toggle, SidebarControl::NewWorkspace, SidebarControl::Filter })
+            CHECK((row.faces[static_cast<size_t>(control)].drop == SidebarControlDrop::NewWorkspace)
+                  == (control == SidebarControl::NewWorkspace));
+}
+
+TEST_CASE("SidebarControls: each control runs an action of the catalog, whatever the look",
+          "[sidebar][sidebarcontrols]")
+{
+    CHECK(sidebarControlCommand(SidebarControl::Toggle) == "ToggleSidebar");
+    CHECK(sidebarControlCommand(SidebarControl::NewWorkspace) == "NewWorkspace");
+    CHECK(sidebarControlCommand(SidebarControl::Filter) == "FilterWorkspaces");
+    for (auto const command: SidebarControlCommands)
+    {
+        INFO(command);
+        CHECK(contour::actions::fromString(std::string { command }).has_value());
+    }
+}

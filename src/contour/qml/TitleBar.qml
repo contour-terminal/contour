@@ -449,6 +449,7 @@ Item {
                     control: "newWorkspace"
                     glyphColor: root.headerInk
                     accessibleName: qsTr("New workspace")
+                    dropSidebar: root.controller ? root.controller.sidebar : null
                     onClicked: if (root.controller && root.controller.newWorkspace) root.controller.newWorkspace()
                 }
             }

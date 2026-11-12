@@ -565,7 +565,12 @@ QVariantMap UiStyleProvider::sidebarControls() const
         controls.insert(nameOf(sidebarControlName(control)),
                         QVariantMap { { QStringLiteral("iconName"), nameOf(face.iconName) },
                                       { QStringLiteral("bundledIcon"), nameOf(face.bundledIcon) },
-                                      { QStringLiteral("glyph"), nameOf(face.glyph) } });
+                                      { QStringLiteral("glyph"), nameOf(face.glyph) },
+                                      // The action it runs, whose bound chord its tooltip names.
+                                      { QStringLiteral("command"), nameOf(sidebarControlCommand(control)) },
+                                      // Whether a pane or a tab dropped on it gets a workspace of its own.
+                                      { QStringLiteral("takesNewWorkspaceDrop"),
+                                        face.drop == SidebarControlDrop::NewWorkspace } });
     }
     return controls;
 }

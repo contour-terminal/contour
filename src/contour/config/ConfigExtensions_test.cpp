@@ -486,6 +486,37 @@ input_mapping:
     CHECK(mappings.size() == 7);
 }
 
+TEST_CASE("Config: MoveToTab parses both places, and drops a binding missing one or naming 0",
+          "[config][sidebar]")
+{
+    using namespace contour::actions;
+
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control, Shift], key: F1, action: MoveToTab, workspace: 2, tab: 3 }
+    - { mods: [Control, Shift], key: F2, action: MoveToTab, workspace: 2 }
+    - { mods: [Control, Shift], key: F3, action: MoveToTab, tab: 3 }
+    - { mods: [Control, Shift], key: F4, action: MoveToTab, workspace: 0, tab: 3 }
+    - { mods: [Control, Shift], key: F5, action: MoveToTab, workspace: 2, tab: 0 }
+    - { mods: [Control, Shift], key: F6, action: MoveToNewTab }
+    - { mods: [Control, Shift], key: F7, action: MoveToNewWorkspace }
+)"sv);
+
+    auto const& mappings = config.inputMappings.value().keyMappings;
+    REQUIRE(mappings.size() == 3);
+    auto const* const moveToTab = std::get_if<MoveToTab>(&mappings[0].binding.at(0));
+    REQUIRE(moveToTab != nullptr);
+    CHECK(moveToTab->workspace == 2);
+    CHECK(moveToTab->tab == 3);
+    CHECK(std::holds_alternative<MoveToNewTab>(mappings[1].binding.at(0)));
+    CHECK(std::holds_alternative<MoveToNewWorkspace>(mappings[2].binding.at(0)));
+}
+
 TEST_CASE("Config: font features, text shaping engine, frozen DEC modes and hint patterns load", "[config]")
 {
     QTemporaryDir dir;

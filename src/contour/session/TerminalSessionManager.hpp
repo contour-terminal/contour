@@ -27,6 +27,7 @@
 #include <contour/window/PaneKey.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
+#include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SwitcherRows.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TaskbarAttentionTally.hpp>
@@ -472,6 +473,30 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
                             uint64_t tab,
                             uint64_t toWorkspace,
                             int toPosition);
+
+    /// Moves a pane or a whole tab of @p window's directory: into a workspace as a tab, into a tab as its
+    /// splits (beside that tab's active pane), or into a workspace of its own, which the window then shows.
+    /// None of its sessions closes; a tab or a workspace it empties closes. A tab into a workspace is
+    /// moveTabToWorkspace(). On a daemon the daemon moves it (MoveNode), and its push brings the result.
+    /// @param window The window the user acts in.
+    /// @param node The pane, by its key, or the tab, as the directory names them.
+    /// @param destination Where it goes; a MoveTab's position is the 0-based place it ends at.
+    void moveSidebarNode(window::WindowController& window,
+                         window::SidebarNode const& node,
+                         window::NodeDestination const& destination);
+
+    /// @param window A window.
+    /// @return What the host of the workspace @p window shows can move (SessionFactory::hostMoves()).
+    [[nodiscard]] window::HostMoves hostMovesOf(window::WindowController const& window) const noexcept;
+
+    /// @param window The window the user acts in.
+    /// @param subject What moves: a tab or a pane.
+    /// @param landing What the move does.
+    /// @return Why @p window's host would not make the move (window::sidebarHostTakes()); None where it
+    /// would.
+    [[nodiscard]] window::MoveRefusal sidebarMoveRefusal(window::WindowController const& window,
+                                                         window::DragSubject subject,
+                                                         window::SidebarLanding landing) const noexcept;
 
     /// Closes the workspace @p workspace that @p window lists, with all its tabs and panes. A workspace that
     /// may be running a program is asked about first, as a tab is: the window raises
@@ -1826,6 +1851,31 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @return The name the workspace gets once, at creation (@see vtbackend::defaultWorkspaceName).
     [[nodiscard]] std::string defaultWorkspaceName(std::filesystem::path const& directory);
 
+    /// Names a new workspace after the folder @p directory, once (@see defaultWorkspaceName()); an unknown
+    /// (empty) folder names nothing.
+    /// @param workspace The new workspace.
+    /// @param directory The folder of the pane it starts with.
+    void nameNewWorkspace(vtworkspace::WorkspaceId workspace, std::filesystem::path const& directory);
+
+    /// moveSidebarNode() in a window that lists a daemon's workspaces: one MoveNode, named by the daemon's
+    /// sessions the directory lists. A pane or a tab sent into a new workspace is followed there once the
+    /// daemon's push lists it (WindowController::followIntoNewWorkspace()).
+    void moveSidebarNodeRemotely(window::WindowController& window,
+                                 window::SidebarNode const& node,
+                                 window::NodeDestination const& destination);
+
+    /// moveSidebarNode() in a window that lists this process's workspaces: a model move, which a node of
+    /// another host's, or one into a workspace of another host's, does not make.
+    void moveSidebarNodeInProcess(window::WindowController& window,
+                                  window::SidebarNode const& node,
+                                  window::NodeDestination const& destination);
+
+    /// Moves @p moving into a workspace of its own, made in @p window as a new workspace is, named after its
+    /// folder and shown there. Nothing for what already is all its workspace holds.
+    /// @param window The window the user acts in.
+    /// @param moving The pane or tab, in the model.
+    void moveIntoNewWorkspace(window::WindowController& window, vtworkspace::MoveSource const& moving);
+
     /// Drops what an in-process directory holds of @p workspace, which is gone: its label and its git state.
     /// @param workspace The workspace.
     void forgetDirectoryState(vtworkspace::WorkspaceId workspace);
@@ -1984,6 +2034,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param source What a move moves.
     /// @return The window it is in; WorkspaceId {} for a pane no window shows.
     [[nodiscard]] vtworkspace::WorkspaceId windowOfSource(vtworkspace::MoveSource const& source) const;
+    /// @return Whether the model still holds what @p source names: a move made once a drag ended may find it
+    ///         closed.
+    [[nodiscard]] bool holdsMoveSource(vtworkspace::MoveSource const& source) const;
 
     /// @param session A session of this manager.
     /// @return The factory of the window @p session is in (@see factoryFor); the one this manager was

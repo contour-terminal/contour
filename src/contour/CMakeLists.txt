@@ -518,6 +518,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SidebarControlButton.qml
         qml/SidebarRow.qml
         qml/SidebarHoverCard.qml
+        qml/SidebarNewWorkspaceDrop.qml
         qml/SidebarFooter.qml
         qml/ConfirmClose.qml
         qml/ToolbarButton.qml

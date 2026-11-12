@@ -10,6 +10,7 @@
 #include <contour/window/CloseDialogTable.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/PaneKey.hpp>
+#include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SidebarTree.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/WorkspaceDirectorySource.hpp>
@@ -103,6 +104,24 @@ enum class FooterCounts : uint8_t
 };
 Q_ENUM_NS(FooterCounts)
 
+/// What a drag hovering a row or the New Workspace area shows (@see window::DropIndicator, which it mirrors).
+enum class DropIndicator : uint8_t
+{
+    Refused = 0, ///< Nothing; the drop is not taken.
+    LineAbove,   ///< A line at the row's upper edge.
+    LineBelow,   ///< A line at the row's lower edge.
+    Highlight,   ///< The row, or the area, highlighted.
+};
+Q_ENUM_NS(DropIndicator)
+
+static_assert(std::to_underlying(DropIndicator::Refused)
+              == std::to_underlying(window::DropIndicator::Refused));
+static_assert(std::to_underlying(DropIndicator::LineAbove)
+              == std::to_underlying(window::DropIndicator::LineAbove));
+static_assert(std::to_underlying(DropIndicator::LineBelow)
+              == std::to_underlying(window::DropIndicator::LineBelow));
+static_assert(std::to_underlying(DropIndicator::Highlight)
+              == std::to_underlying(window::DropIndicator::Highlight));
 static_assert(std::to_underlying(SidebarRowKind::Workspace)
               == std::to_underlying(window::SidebarRowKind::Workspace));
 static_assert(std::to_underlying(SidebarRowKind::Tab) == std::to_underlying(window::SidebarRowKind::Tab));
@@ -155,6 +174,10 @@ class ISidebarHost
     ///         ids are in. A drop from another host names ids of that host's, which mean nothing here.
     [[nodiscard]] virtual HostIdentity hostIdentity() const = 0;
 
+    /// @return What the window's host can move: a drop it would not make is refused up front, so the drag
+    ///         shows the refusal (window::sidebarHostTakes()).
+    [[nodiscard]] virtual HostMoves hostMoves() const = 0;
+
     /// @param directory What the window lists now, as directorySource() gave it: read once per rebuild.
     /// @return The tab the window shows, if any, by @p directory's ids.
     [[nodiscard]] virtual std::optional<TabRef> displayedTab(WorkspaceDirectory const& directory) const = 0;
@@ -162,6 +185,10 @@ class ISidebarHost
     /// Shows @p pane: selects its workspace, activates its tab, focuses it and counts it as seen.
     /// @param pane The pane to show.
     virtual void showPane(PaneKey pane) = 0;
+
+    /// Shows a workspace the user picked: selects it, and gives up what waited for an earlier look.
+    /// @param workspace The workspace's id.
+    virtual void showWorkspace(uint64_t workspace) = 0;
 
     /// Counts @p pane as seen.
     /// @param pane The pane the user has looked at.
@@ -182,11 +209,13 @@ class ISidebarHost
     /// @param to The position among all the workspaces to insert before (ReorderWorkspace::to).
     virtual void moveWorkspace(uint64_t workspace, std::size_t to) = 0;
 
-    /// Moves a tab into a workspace.
-    /// @param tab The tab.
-    /// @param toWorkspace The target workspace's id.
-    /// @param toPosition The position among its tabs; AppendTab for the end.
-    virtual void moveTab(TabRef tab, uint64_t toWorkspace, std::size_t toPosition) = 0;
+    /// Moves a pane or a whole tab: into a workspace as a tab (MoveTab), into a tab as its splits (JoinTab),
+    /// or into a workspace of its own (IntoNewWorkspace). The sessions keep running; a tab or a workspace the
+    /// move empties closes.
+    /// @param node The pane, by its key, or the tab.
+    /// @param destination Where it goes; a MoveTab's position is among the tabs as they are now, AppendTab
+    ///        for the end.
+    virtual void moveNode(SidebarNode const& node, NodeDestination const& destination) = 0;
 
     /// Opens the context menu of a row.
     /// @param row The row, as the model lists it.
@@ -489,6 +518,20 @@ class SidebarModel: public QAbstractListModel
     /// @param payload The drag's data of type NodeDragMime (parseNodeDrag()); decides what is dragged. A
     ///        payload that does not read as a node drag is refused.
     Q_INVOKABLE void drop(int row, double y, QString const& payload);
+    /// What a drag hovering @p row shows (SidebarDropPolicy): where it would land, or that it is refused.
+    /// @param row The row under the pointer.
+    /// @param y The pointer's position within the row, 0 (top) to 1 (bottom).
+    /// @param payload The drag's data of type NodeDragMime.
+    /// @return A sidebarrows::DropIndicator.
+    [[nodiscard]] Q_INVOKABLE int dropIndicator(int row, double y, QString const& payload) const;
+    /// @param payload The drag's data of type NodeDragMime.
+    /// @return Whether dropping it on the tree's empty area, or on the New Workspace control, moves it into a
+    ///         workspace of its own (a tab or a pane that is not all its workspace holds).
+    [[nodiscard]] Q_INVOKABLE bool takesNewWorkspaceDrop(QString const& payload) const;
+    /// Drops what a node drag carries on the tree's empty area or the New Workspace control: a workspace of
+    /// its own for it, if takesNewWorkspaceDrop().
+    /// @param payload The drag's data of type NodeDragMime.
+    Q_INVOKABLE void dropOnNewWorkspace(QString const& payload);
 
   signals:
     /// The footer's counts changed.
@@ -499,6 +542,21 @@ class SidebarModel: public QAbstractListModel
     void summaryChanged();
 
   private:
+    /// A node drag as the sidebar reads it: what it is to the drop policy, and what moves.
+    struct Dragged
+    {
+        SidebarDragged dragged; ///< Its subject, its tab and its share of its workspace.
+        SidebarNode node;       ///< What moves when it lands among the tabs; a OneTabWorkspace's tab.
+        uint64_t workspace = 0; ///< A workspace drag's workspace id; 0 otherwise.
+    };
+
+    /// @return What @p payload drags, read against the directory; none for one this sidebar does not take
+    ///         (unreadable, another host's, or no node).
+    [[nodiscard]] std::optional<Dragged> draggedOf(QString const& payload) const;
+
+    /// Carries out @p drop for @p dragged.
+    void apply(Dragged const& dragged, SidebarDrop const& drop);
+
     /// Where the rows stand against what they list.
     enum class RowsState : uint8_t
     {

@@ -381,6 +381,25 @@ inline constexpr auto MoveRefusalRows = std::array {
     return row != MoveRefusalRows.end() ? row->text : MoveRefusedText;
 }
 
+/// What the toast says when this process's model refused a move, by vtworkspace::MoveError: nothing for a
+/// drop that would change nothing, the stale text for a pane or a target that is gone.
+inline constexpr auto LocalMoveRefusalTexts = std::array<std::string_view, 5> {
+    MoveStaleText,                                                          // UnknownSource
+    MoveStaleText,                                                          // UnknownTarget
+    "",                                                                     // SelfTarget
+    "Not moved: a tab of several panes cannot trade places with one pane.", // TabIntoSwap
+    "",                                                                     // NoOp
+};
+static_assert(LocalMoveRefusalTexts.size() == static_cast<std::size_t>(vtworkspace::MoveError::NoOp) + 1);
+
+/// What the toast for a move this process's model refused says.
+/// @param error The model's reason.
+/// @return The text; empty when the refusal needs no toast.
+[[nodiscard]] constexpr std::string_view localMoveRefusedText(vtworkspace::MoveError error) noexcept
+{
+    return LocalMoveRefusalTexts[static_cast<std::size_t>(error)];
+}
+
 /// What the toast for a refused drop says.
 /// @param error Why the drop was refused.
 /// @param subject What the drop held, named in the text.

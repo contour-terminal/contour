@@ -171,6 +171,15 @@ inline constexpr std::array MenuReachabilityExemptions {
     MenuReachabilityExemption {
         .action = "MoveTabToWorkspace",
         .reason = "the rows of the sidebar's \"Move to Workspace\" submenu, one per workspace" },
+    MenuReachabilityExemption {
+        .action = "MoveToTab",
+        .reason = "the rows of the sidebar's Move to Tab and Merge into Tab submenus, one per tab" },
+    MenuReachabilityExemption { .action = "MoveToNewTab",
+                                .reason =
+                                    "reached from the palette, key bindings and the sidebar's pane menu" },
+    MenuReachabilityExemption {
+        .action = "MoveToNewWorkspace",
+        .reason = "reached from the palette, key bindings and the sidebar's pane and tab menus" },
     MenuReachabilityExemption { .action = "ClearCommandBlockFocus",
                                 .reason = "it is the Escape of a focused block, which a row would need the "
                                           "focus to run" },

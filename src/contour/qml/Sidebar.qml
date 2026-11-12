@@ -236,6 +236,7 @@ Rectangle {
                 extent: titleRow.buttonExtent
                 implicitWidth: chromeStyle.snapToCells(extent)
                 accessibleName: qsTr("New workspace")
+                dropSidebar: root.model
                 onClicked: if (root.controller && root.controller.newWorkspace) root.controller.newWorkspace()
             }
         }
@@ -333,6 +334,18 @@ Rectangle {
                 }
             }
         }
+    }
+
+    // The tree's empty area below its last row: a pane or a tab dropped there gets a workspace of its own.
+    SidebarNewWorkspaceDrop {
+        objectName: "sidebarTreeEmptyDrop"
+        sidebar: root.model
+        anchors.left: tree.left
+        anchors.right: tree.right
+        anchors.bottom: tree.bottom
+        height: Math.max(0, tree.height - (tree.contentHeight - tree.contentY))
+        enabled: height > 0
+        radius: 0
     }
 
     SidebarFooter {

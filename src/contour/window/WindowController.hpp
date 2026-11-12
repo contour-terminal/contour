@@ -29,6 +29,7 @@
 #include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
+#include <contour/window/SidebarMenuState.hpp>
 #include <contour/window/SidebarModel.hpp>
 #include <contour/window/SidebarToggle.hpp>
 #include <contour/window/TabAttention.hpp>
@@ -346,7 +347,8 @@ class WindowController:
     /// window moves between a daemon's workspaces and its own process's as it is bound, which the manager
     /// follows (TerminalSessionManager::bindWindow).
     /// @param source The source; borrowed, and it must outlive its use here, or be replaced first.
-    void setDirectorySource(IWorkspaceDirectorySource* source) noexcept { _directorySource = source; }
+    /// A jump, a row action or a follow that waited for the old source is given up.
+    void setDirectorySource(IWorkspaceDirectorySource* source) noexcept;
 
     /// When @p workspace is one of several this window owns and holds no tab, ends it: the window shows the
     /// next owned one first, if it was showing this, and the manager forgets the workspace
@@ -1295,6 +1297,10 @@ class WindowController:
     /// the tab and pane are shown then), and it is counted as seen once shown. Replaces a pending jump.
     /// @param target The pane to show.
     void jumpToPane(PaneKey target);
+    /// Shows @p workspace because the user picked it (a sidebar row): selects it, and gives up a pending
+    /// jump, row action or follow, as the user went elsewhere.
+    /// @param workspace The workspace's id, as the window's directory lists it.
+    void showWorkspace(uint64_t workspace);
     /// Shows the pane a jump selected a workspace for, once the displayed workspace holds it, and counts it
     /// as seen. Nothing when no jump is pending or the pane is not there (yet). Called when a daemon's layout
     /// lands, and by displayWorkspace(), which then ends the jump either way.
@@ -1305,6 +1311,16 @@ class WindowController:
     [[nodiscard]] bool jumpPending() const noexcept { return _pendingJump.has_value(); }
     /// @return Whether a sidebar action waits for a workspace to be shown, or for its pane to appear in it.
     [[nodiscard]] bool rowActionPending() const noexcept { return _pendingRowAction.has_value(); }
+    /// Shows the workspace a daemon makes for @p pane, once its push lists it there: the first directory that
+    /// lists @p pane in a workspace the directory does not list now. A move into a new workspace is followed
+    /// so, as an in-process window shows the workspace it made. A jump elsewhere, a later follow, or
+    /// session::TerminalSessionManager::RemoteMoveTimeout passing gives it up.
+    /// @param pane The pane moved, by the daemon's key.
+    void followIntoNewWorkspace(PaneKey pane);
+    /// @return Whether a move into a new workspace waits to be followed there.
+    [[nodiscard]] bool followPending() const noexcept { return _pendingFollow.has_value(); }
+    /// Gives up every look that waits: a jump, a row action and a follow.
+    void cancelPendingNavigation() noexcept;
     /// Marks the active pane as seen (the MarkSeen action).
     void markActivePaneSeen();
     /// Renames the displayed workspace inline (the RenameWorkspace action): shows the sidebar, puts the
@@ -1323,6 +1339,15 @@ class WindowController:
     /// Moves the active tab to the end of another workspace (the MoveTabToWorkspace action).
     /// @param position The target workspace's 1-based place in the window's workspace list.
     void moveActiveTabToWorkspace(uint32_t position);
+    /// Moves the active pane into another tab, as a split beside its active pane (the MoveToTab action).
+    /// @param workspace The tab's workspace's 1-based place in the window's workspace list.
+    /// @param tab The tab's 1-based place among that workspace's tabs.
+    void moveActivePaneToTab(uint32_t workspace, uint32_t tab);
+    /// Moves the active pane into a tab of its own at the end of its workspace (the MoveToNewTab action);
+    /// nothing for a pane that already is its tab's only one.
+    void moveActivePaneToNewTab();
+    /// Moves the active pane into a workspace of its own (the MoveToNewWorkspace action).
+    void moveActivePaneToNewWorkspace();
 
     /// @name The workspace operations, by the ids the window's directory lists (TerminalSessionManager's).
     /// @{
@@ -1735,6 +1760,20 @@ class WindowController:
     /// Moves the workspace @p workspace @p by places in the list; nothing past either end.
     /// @param workspace The workspace's id, as the directory lists it.
     void moveWorkspaceBy(uint64_t workspace, int by);
+    /// Moves a pane or a tab as the sidebar asks (ISidebarHost::moveNode): through the manager.
+    /// @param node The pane or the tab, as the directory names them.
+    /// @param destination Where it goes; a MoveTab's position is the 0-based place it ends at.
+    void moveSidebarNode(SidebarNode const& node, NodeDestination const& destination);
+    /// @return What a menu on @p row moves: its pane, its tab, or a workspace's only tab; none for a
+    ///         workspace of several tabs.
+    [[nodiscard]] std::optional<SidebarNode> sidebarNodeOf(SidebarRowKey const& row) const;
+    /// @return The active pane, as the directory names it; none without one.
+    [[nodiscard]] std::optional<SidebarNode> activePaneNode() const;
+    /// Moves @p node into a tab, by the 1-based places MoveToTab names; nothing where they name none.
+    void moveNodeToTab(SidebarNode const& node, uint32_t workspace, uint32_t tab);
+    /// Moves the pane @p node into a tab of its own at the end of its workspace; nothing for a tab, or for a
+    /// pane that is its tab's only one.
+    void moveNodeToNewTab(SidebarNode const& node);
     /// Moves tab @p tab to the end of another workspace, as MoveTabToWorkspace does.
     /// @param tab The tab, as the directory names it.
     /// @param position The target workspace's 1-based place in the window's workspace list.
@@ -1869,6 +1908,16 @@ class WindowController:
     /// Counts the directory's entry for @p key as seen, as far as the daemon's flags go (the serials).
     void noteDirectoryPaneSeenByKey(PaneKey key);
     std::optional<PendingJump> _pendingJump; ///< The jump whose workspace is being selected.
+    /// A pane moved into a new workspace of the daemon's, which the window shows once it is listed.
+    struct PendingFollow
+    {
+        PaneKey pane;                 ///< The pane moved.
+        std::vector<uint64_t> listed; ///< The workspaces listed when it was asked: none of them is new.
+        core::platform::SteadyTimePoint giveUp; ///< When it is no longer waited for.
+    };
+    std::optional<PendingFollow> _pendingFollow; ///< @see followIntoNewWorkspace
+    /// Shows the new workspace a pending follow waits for, if the directory lists it now.
+    void followMovedPane();
     /// Whether a sidebar row's action ran, or waits for the pane it needs.
     enum class RowActionOutcome : uint8_t
     {
@@ -1886,6 +1935,9 @@ class WindowController:
     std::optional<SidebarRowKey> _sidebarActionRow;
     /// The row the sidebar's menu was last opened over.
     std::optional<SidebarRowKey> _sidebarMenuRow;
+    /// The tabs that menu offered, by id: a Move to Tab row resolves by them, not by the places as they are
+    /// now.
+    std::vector<OfferedTab> _sidebarMenuTabs;
     QPointF _sidebarMenuAnchor; ///< Where that menu was asked for, in window coordinates.
     /// Runs @p run once the directory shows @p workspace: now when it does, else after selecting it. A @p run
     /// that is Waiting (its pane is not there yet) stays pending, as a jump does, until the layout lands;

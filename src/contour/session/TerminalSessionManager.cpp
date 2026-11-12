@@ -1425,16 +1425,32 @@ void TerminalSessionManager::newWorkspace(TerminalSession const& acting)
     newWorkspaceStartingIn(acting, acting.workingDirectory());
 }
 
+namespace
+{
+    /// @param cwd A pane's working directory, as TerminalSession::workingDirectory() says it.
+    /// @return It as a path; empty where it is unknown ("." is what workingDirectory() says then).
+    [[nodiscard]] std::filesystem::path knownDirectoryOf(std::string const& cwd)
+    {
+        if (cwd.empty() || cwd == ".")
+            return {};
+        return core::pathFromUtf8(cwd).value_or(std::filesystem::path {});
+    }
+
+    /// @param position A 0-based place, as the sidebar names it (AppendTab for the end).
+    /// @return It as the model's int index, the end clamped to the largest.
+    [[nodiscard]] int clampedIndexOf(std::size_t position) noexcept
+    {
+        return static_cast<int>(std::min<std::size_t>(position, std::numeric_limits<int>::max()));
+    }
+} // namespace
+
 void TerminalSessionManager::newWorkspaceStartingIn(TerminalSession const& acting, std::string const& cwd)
 {
     auto* const controller = hostOf(&acting).controller;
     if (controller == nullptr)
         return;
-    // Started where the pane that asked is, and named after that folder -- once: a later cd renames nothing.
-    // "." is what workingDirectory() says for a session whose directory is unknown.
-    auto const known = !cwd.empty() && cwd != ".";
-    auto const directory =
-        known ? core::pathFromUtf8(cwd).value_or(std::filesystem::path {}) : std::filesystem::path {};
+    // Started where the pane that asked is, and named after that folder.
+    auto const directory = knownDirectoryOf(cwd);
     auto const workspace = createWorkspaceIn(controller->windowId());
     controller->displayWorkspace(workspace);
     if (createSessionInBackground(workspace,
@@ -1449,8 +1465,7 @@ void TerminalSessionManager::newWorkspaceStartingIn(TerminalSession const& actin
         controller->dropWorkspaceIfEmpty(workspace);
         return;
     }
-    if (auto name = defaultWorkspaceName(directory); !name.empty())
-        setWorkspaceLabel(workspace, std::move(name));
+    nameNewWorkspace(workspace, directory);
 }
 
 std::string TerminalSessionManager::defaultWorkspaceName(std::filesystem::path const& directory)
@@ -1472,26 +1487,6 @@ void TerminalSessionManager::setWorkspaceLabel(vtworkspace::WorkspaceId workspac
 
 namespace
 {
-    /// @param directory A window's directory.
-    /// @param workspace A workspace's id.
-    /// @return The workspace the directory lists under that id, or null.
-    [[nodiscard]] window::DirectoryWorkspace const* findWorkspace(window::WorkspaceDirectory const& directory,
-                                                                  uint64_t workspace)
-    {
-        auto const found =
-            std::ranges::find(directory.workspaces, workspace, &window::DirectoryWorkspace::id);
-        return found != directory.workspaces.end() ? &*found : nullptr;
-    }
-
-    /// @param tabs Tabs of a directory.
-    /// @return Every session of every pane of them.
-    [[nodiscard]] std::vector<uint64_t> sessionsOf(std::span<window::DirectoryTab const> tabs)
-    {
-        return std::ranges::to<std::vector>(
-            tabs | std::views::transform(&window::DirectoryTab::panes) | std::views::join
-            | std::views::transform([](window::DirectoryPane const& pane) { return pane.key.value; }));
-    }
-
     /// @param model The model.
     /// @param workspace A workspace of it.
     /// @return Its place in the model's workspace order, or -1 for one the model lacks.
@@ -1545,25 +1540,22 @@ void TerminalSessionManager::renameTab(window::WindowController& window, uint64_
     if (source == nullptr)
         return;
     auto const directory = source->directory();
-    auto const holder = std::ranges::find_if(directory.workspaces, [&](window::DirectoryWorkspace const& w) {
-        return std::ranges::contains(w.tabs, tab, &window::DirectoryTab::id);
-    });
-    if (holder == directory.workspaces.end())
+    auto const listed = window::findTabAnywhere(directory, tab);
+    if (!listed)
         return;
     if (listsRemotely(window))
     {
-        auto const listed = std::ranges::find(holder->tabs, tab, &window::DirectoryTab::id);
-        if (listed->panes.empty())
+        if (listed->tab->panes.empty())
             return;
         // The daemon's title change comes back as the window's new directory and, where it is mirrored,
         // its tab.
         if (factoryFor(window.displayedWorkspace())
-                .requestRemoteTabTitle(listed->panes.front().key.value, title)
+                .requestRemoteTabTitle(listed->tab->panes.front().key.value, title)
             == RemoteRouting::Refused)
             managerLog()("The daemon cannot title tab {}.", tab);
         return;
     }
-    if (!ownsWorkspace(window, vtworkspace::WorkspaceId { holder->id }))
+    if (!ownsWorkspace(window, vtworkspace::WorkspaceId { listed->workspace->id }))
         return;
     if (title.empty())
         _model->resetTabTitle(vtworkspace::TabId { tab });
@@ -1608,27 +1600,57 @@ void TerminalSessionManager::moveWorkspace(window::WindowController& window,
     _model->moveWorkspace(moving, modelIndexOf(*_model, target));
 }
 
+namespace
+{
+    /// Tells the user in @p window that the move asked for there was not made.
+    /// @param window The window the user acts in.
+    /// @param text Why; empty for a move with nothing to tell (one that would change nothing).
+    void postMoveRefused(window::WindowController& window, std::string_view text)
+    {
+        if (!text.empty())
+            window.notices().post(
+                window::Notice { .kind = window::NoticeKind::DropRefused, .text = std::string { text } });
+    }
+} // namespace
+
+window::HostMoves TerminalSessionManager::hostMovesOf(window::WindowController const& window) const noexcept
+{
+    return factoryFor(window.displayedWorkspace()).hostMoves();
+}
+
+window::MoveRefusal TerminalSessionManager::sidebarMoveRefusal(window::WindowController const& window,
+                                                               window::DragSubject subject,
+                                                               window::SidebarLanding landing) const noexcept
+{
+    auto const host = hostMovesOf(window);
+    return window::sidebarHostTakes(host, subject, landing) ? window::MoveRefusal::None
+                                                            : window::sidebarRefusalOf(host);
+}
+
 void TerminalSessionManager::moveTabToWorkspace(window::WindowController& window,
                                                 uint64_t tab,
                                                 uint64_t toWorkspace,
                                                 int toPosition)
 {
+    if (auto const refusal =
+            sidebarMoveRefusal(window, window::DragSubject::Tab, window::SidebarLanding::TabWell);
+        refusal != window::MoveRefusal::None)
+    {
+        postMoveRefused(window, window::refusalTextOf(refusal));
+        return;
+    }
     if (listsRemotely(window))
     {
         auto const* const source = window.directorySource();
         if (source == nullptr)
             return;
         auto const directory = source->directory();
-        auto const holder =
-            std::ranges::find_if(directory.workspaces, [&](window::DirectoryWorkspace const& w) {
-                return std::ranges::contains(w.tabs, tab, &window::DirectoryTab::id);
-            });
-        auto const* const destination = findWorkspace(directory, toWorkspace);
-        if (holder == directory.workspaces.end() || destination == nullptr)
+        auto const moving = window::findTabAnywhere(directory, tab);
+        auto const* const destination = window::findWorkspace(directory, toWorkspace);
+        if (!moving || destination == nullptr)
             return;
-        auto const moving = std::ranges::find(holder->tabs, tab, &window::DirectoryTab::id);
-        auto const sources = sessionsOf(std::span { &*moving, 1 });
-        auto const targets = sessionsOf(destination->tabs);
+        auto const sources = window::sessionsOf(std::span { moving->tab, 1 });
+        auto const targets = window::sessionsOf(destination->tabs);
         // A daemon names a workspace by a session it holds: an empty one is nothing to name.
         if (sources.empty() || targets.empty())
             return;
@@ -1641,7 +1663,7 @@ void TerminalSessionManager::moveTabToWorkspace(window::WindowController& window
                                                 .index = std::max(toPosition, 0),
                                                 .request = _nextRemoteMove++ });
         if (routing == RemoteRouting::Refused)
-            managerLog()("The daemon cannot move tab {}.", tab);
+            postMoveRefused(window, window::MoveRefusedText);
         return;
     }
     auto const moving = vtworkspace::TabId { tab };
@@ -1649,7 +1671,233 @@ void TerminalSessionManager::moveTabToWorkspace(window::WindowController& window
     auto const to = vtworkspace::WorkspaceId { toWorkspace };
     if (!ownsWorkspace(window, from) || !ownsWorkspace(window, to))
         return;
+    // Two hosts share no layout: a tab shown here would stay on the host it came from.
+    if (bindingOf(from) != bindingOf(to))
+    {
+        postMoveRefused(window, window::refusalTextOf(window::MoveRefusal::OtherHost));
+        return;
+    }
     moveTabToWorkspace(from, _model->workspace(from)->indexOf(moving), to, toPosition);
+}
+
+namespace
+{
+    /// A sidebar destination as a daemon's MoveNode names it: its kind, a session of where it lands, and a
+    /// tab well's place.
+    struct RemoteDestination
+    {
+        vtworkspace::MoveTargetKind kind = vtworkspace::MoveTargetKind::NewWorkspace;
+        uint64_t targetSession = 0;
+        int index = 0;
+    };
+
+    /// @return @p destination as a daemon names it, by what @p directory lists; none where it names nothing
+    ///         the daemon could find (a workspace or a tab without a pane).
+    [[nodiscard]] std::optional<RemoteDestination> remoteDestinationOf(
+        window::WorkspaceDirectory const& directory, window::NodeDestination const& destination)
+    {
+        return std::visit(
+            core::Overloaded {
+                [&](window::MoveTab const& move) -> std::optional<RemoteDestination> {
+                    auto const* const workspace = window::findWorkspace(directory, move.toWorkspace);
+                    auto const sessions =
+                        workspace != nullptr ? window::sessionsOf(workspace->tabs) : std::vector<uint64_t> {};
+                    if (sessions.empty())
+                        return std::nullopt;
+                    return RemoteDestination { .kind = vtworkspace::MoveTargetKind::TabWell,
+                                               .targetSession = sessions.front(),
+                                               .index = clampedIndexOf(move.toPosition) };
+                },
+                [&](window::JoinTab const& join) -> std::optional<RemoteDestination> {
+                    auto const listed = window::findTab(directory, join.tab.workspace, join.tab.tab);
+                    if (!listed || listed->tab->panes.empty())
+                        return std::nullopt;
+                    return RemoteDestination { .kind = vtworkspace::MoveTargetKind::Tab,
+                                               .targetSession = listed->tab->panes.front().key.value,
+                                               .index = 0 };
+                },
+                [](window::IntoNewWorkspace const&) -> std::optional<RemoteDestination> {
+                    return RemoteDestination {};
+                },
+            },
+            destination);
+    }
+
+    /// @return The sessions @p node names, by what @p directory lists; none for what it does not list.
+    [[nodiscard]] std::vector<uint64_t> remoteSourcesOf(window::WorkspaceDirectory const& directory,
+                                                        window::SidebarNode const& node)
+    {
+        return std::visit(core::Overloaded {
+                              [&](window::PaneKey pane) {
+                                  return window::tabHoldingPane(directory, pane)
+                                             ? std::vector<uint64_t> { pane.value }
+                                             : std::vector<uint64_t> {};
+                              },
+                              [&](window::TabRef const& tab) {
+                                  auto const listed = window::findTab(directory, tab.workspace, tab.tab);
+                                  return listed ? window::sessionsOf(std::span { listed->tab, 1 })
+                                                : std::vector<uint64_t> {};
+                              },
+                          },
+                          node);
+    }
+} // namespace
+
+void TerminalSessionManager::moveSidebarNode(window::WindowController& window,
+                                             window::SidebarNode const& node,
+                                             window::NodeDestination const& destination)
+{
+    // A tab into a workspace is the tab move it has always been.
+    if (auto const* const tab = std::get_if<window::TabRef>(&node))
+        if (auto const* const move = std::get_if<window::MoveTab>(&destination))
+        {
+            moveTabToWorkspace(window, tab->tab, move->toWorkspace, clampedIndexOf(move->toPosition));
+            return;
+        }
+    // What the window's host does not move is refused here, not left to the model of this process: a tmux
+    // pane moved only here would leave the server's layout as it was.
+    if (auto const refusal =
+            sidebarMoveRefusal(window, window::sidebarSubjectOf(node), window::sidebarLandingOf(destination));
+        refusal != window::MoveRefusal::None)
+    {
+        postMoveRefused(window, window::refusalTextOf(refusal));
+        return;
+    }
+    if (listsRemotely(window))
+        moveSidebarNodeRemotely(window, node, destination);
+    else
+        moveSidebarNodeInProcess(window, node, destination);
+}
+
+void TerminalSessionManager::moveSidebarNodeRemotely(window::WindowController& window,
+                                                     window::SidebarNode const& node,
+                                                     window::NodeDestination const& destination)
+{
+    auto const* const source = window.directorySource();
+    if (source == nullptr)
+        return;
+    auto const directory = source->directory();
+    auto const sources = remoteSourcesOf(directory, node);
+    auto const target = remoteDestinationOf(directory, destination);
+    // The push the drop was resolved against is not the one listed now: what it named has gone meanwhile.
+    if (sources.empty() || !target)
+    {
+        postMoveRefused(window, window::MoveStaleText);
+        return;
+    }
+    auto const routing =
+        factoryFor(window.displayedWorkspace())
+            .requestRemoteMove(RemoteMove { .source = std::holds_alternative<window::PaneKey>(node)
+                                                          ? vtworkspace::MoveSourceKind::Pane
+                                                          : vtworkspace::MoveSourceKind::Tab,
+                                            .sourceSessions = sources,
+                                            .target = target->kind,
+                                            .targetSession = target->targetSession,
+                                            .side = vtworkspace::JoinTabSide,
+                                            .index = target->index,
+                                            .request = _nextRemoteMove++ });
+    if (routing == RemoteRouting::Refused)
+        postMoveRefused(window, window::MoveRefusedText);
+    // The daemon makes the workspace and its push lists it: the window shows it then, as an in-process window
+    // shows the one it made.
+    else if (routing == RemoteRouting::Routed
+             && std::holds_alternative<window::IntoNewWorkspace>(destination))
+        window.followIntoNewWorkspace(window::PaneKey { sources.front() });
+}
+
+void TerminalSessionManager::moveSidebarNodeInProcess(window::WindowController& window,
+                                                      window::SidebarNode const& node,
+                                                      window::NodeDestination const& destination)
+{
+    auto const moving =
+        std::visit(core::Overloaded {
+                       [](window::PaneKey pane) -> vtworkspace::MoveSource {
+                           return vtworkspace::PaneSource { vtworkspace::SessionId { pane.value } };
+                       },
+                       [](window::TabRef const& tab) -> vtworkspace::MoveSource {
+                           return vtworkspace::TabSource { vtworkspace::WorkspaceId { tab.workspace },
+                                                           vtworkspace::TabId { tab.tab } };
+                       },
+                   },
+                   node);
+    auto const from = windowOfSource(moving);
+    if (!ownsWorkspace(window, from))
+        return;
+    auto const moveInto = [&](vtworkspace::WorkspaceId to, vtworkspace::MoveTarget const& target) {
+        if (!ownsWorkspace(window, to))
+            return;
+        // Two hosts share no layout: a node shown here would stay on the host it came from.
+        if (bindingOf(to) != bindingOf(from))
+        {
+            postMoveRefused(window, window::refusalTextOf(window::MoveRefusal::OtherHost));
+            return;
+        }
+        if (auto const moved = applyNodeMove(moving, target); !moved)
+            postMoveRefused(window, window::localMoveRefusedText(moved.error()));
+    };
+    std::visit(core::Overloaded {
+                   [&](window::MoveTab const& move) {
+                       auto const to = vtworkspace::WorkspaceId { move.toWorkspace };
+                       moveInto(to,
+                                vtworkspace::TabWellTarget { .workspace = to,
+                                                             .index = clampedIndexOf(move.toPosition) });
+                   },
+                   [&](window::JoinTab const& join) {
+                       auto const to = vtworkspace::WorkspaceId { join.tab.workspace };
+                       moveInto(to,
+                                vtworkspace::TabTarget { .workspace = to,
+                                                         .tab = vtworkspace::TabId { join.tab.tab } });
+                   },
+                   [&](window::IntoNewWorkspace const&) { moveIntoNewWorkspace(window, moving); },
+               },
+               destination);
+}
+
+void TerminalSessionManager::moveIntoNewWorkspace(window::WindowController& window,
+                                                  vtworkspace::MoveSource const& moving)
+{
+    // A move made once a drag ended may find its tab or pane closed meanwhile: no workspace is made for it,
+    // only to be dropped again.
+    if (!holdsMoveSource(moving))
+    {
+        postMoveRefused(window, window::localMoveRefusedText(vtworkspace::MoveError::UnknownSource));
+        return;
+    }
+    // What already is all of its workspace would only rebuild the one it has.
+    if (_model->fillsItsWorkspace(moving))
+        return;
+    auto const focused = std::visit(core::Overloaded {
+                                        [](vtworkspace::PaneSource const& pane) { return pane.session; },
+                                        [this](vtworkspace::TabSource const& tab) {
+                                            auto const* const found = _model->findTab(tab.tab);
+                                            return found != nullptr ? found->activePane()->session()
+                                                                    : vtworkspace::SessionId {};
+                                        },
+                                    },
+                                    moving);
+    auto const* const session = sessionForId(focused);
+    auto const directory =
+        knownDirectoryOf(session != nullptr ? session->workingDirectory() : std::string {});
+    // The window's own workspace, made as any new one is, then the well the node moves into.
+    auto const workspace = createWorkspaceIn(window.windowId());
+    if (auto const moved =
+            applyNodeMove(moving, vtworkspace::TabWellTarget { .workspace = workspace, .index = 0 });
+        !moved)
+    {
+        window.dropWorkspaceIfEmpty(workspace);
+        postMoveRefused(window, window::localMoveRefusedText(moved.error()));
+        return;
+    }
+    nameNewWorkspace(workspace, directory);
+    window.displayWorkspace(workspace);
+}
+
+void TerminalSessionManager::nameNewWorkspace(vtworkspace::WorkspaceId workspace,
+                                              std::filesystem::path const& directory)
+{
+    // Named after the folder -- once: a later cd renames nothing.
+    if (auto name = defaultWorkspaceName(directory); !name.empty())
+        setWorkspaceLabel(workspace, std::move(name));
 }
 
 void TerminalSessionManager::closeWorkspace(window::WindowController& window, uint64_t workspace)
@@ -1662,12 +1910,12 @@ void TerminalSessionManager::closeWorkspace(window::WindowController& window, ui
         auto const* const source = window.directorySource();
         auto const directory = source != nullptr ? source->directory() : window::WorkspaceDirectory {};
         // The daemon keeps its last workspace, as an in-process window keeps its own.
-        auto const* const listed = findWorkspace(directory, workspace);
+        auto const* const listed = window::findWorkspace(directory, workspace);
         if (listed == nullptr || directory.workspaces.size() < 2)
             return;
         label = listed->label;
         // A daemon's pane runs a program this process cannot name: it may be running vim.
-        activities.assign(sessionsOf(listed->tabs).size(), window::PaneActivity::Unknown);
+        activities.assign(window::sessionsOf(listed->tabs).size(), window::PaneActivity::Unknown);
     }
     else
     {
@@ -1699,7 +1947,7 @@ void TerminalSessionManager::confirmCloseWorkspace(window::WindowController& win
     {
         auto const* const source = window.directorySource();
         auto const directory = source != nullptr ? source->directory() : window::WorkspaceDirectory {};
-        auto const* const listed = findWorkspace(directory, workspace);
+        auto const* const listed = window::findWorkspace(directory, workspace);
         if (listed == nullptr)
             return;
         if (factoryFor(window.displayedWorkspace()).requestRemoteCloseWorkspace(workspace)
@@ -3545,6 +3793,20 @@ vtworkspace::WorkspaceId TerminalSessionManager::windowOfSource(vtworkspace::Mov
             }
         },
         source);
+}
+
+bool TerminalSessionManager::holdsMoveSource(vtworkspace::MoveSource const& source) const
+{
+    return std::visit(core::Overloaded {
+                          [this](vtworkspace::PaneSource const& pane) {
+                              return std::get<0>(_model->findSessionLeaf(pane.session)) != nullptr;
+                          },
+                          [this](vtworkspace::TabSource const& tab) {
+                              auto const* const workspace = _model->workspace(tab.workspace);
+                              return workspace != nullptr && workspace->indexOf(tab.tab) >= 0;
+                          },
+                      },
+                      source);
 }
 
 std::expected<vtworkspace::MoveResult, vtworkspace::MoveError> TerminalSessionManager::applyNodeMove(

@@ -5258,6 +5258,22 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
             return std::nullopt;
         }
 
+        if (holds_alternative<actions::MoveToTab>(action))
+        {
+            // Both places count from 1, and neither has a default.
+            auto const place = [&](char const* key) -> std::optional<uint32_t> {
+                if (auto value = node[key]; value && value.IsScalar())
+                    if (auto const number = value.as<uint32_t>(); number >= 1)
+                        return number;
+                return std::nullopt;
+            };
+            auto const workspace = place("workspace");
+            auto const tab = place("tab");
+            if (!workspace || !tab)
+                return std::nullopt;
+            return actions::MoveToTab { .workspace = *workspace, .tab = *tab };
+        }
+
         if (holds_alternative<actions::CycleWorkspace>(action)
             || holds_alternative<actions::CycleDaemon>(action))
         {

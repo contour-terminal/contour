@@ -617,8 +617,8 @@ class MainWindowControllerMock: public QAbstractListModel
     Q_INVOKABLE void showWorkspaceDropdown(QRectF const& chip) { workspaceDropdownAnchor = chip; }
     /// Mirrors WindowController::openSidebarFilter().
     Q_INVOKABLE void openSidebarFilter() { emit sidebarFilterRequested(); }
-    /// Mirrors WindowController::beginSidebarDrag(): the payload a workspace row or a tab row carries, as the
-    /// sidebar's own host would name it (the tab by its panes' keys); empty for anything else.
+    /// Mirrors WindowController::beginSidebarDrag(): the payload a workspace, tab or pane row carries, as the
+    /// sidebar's own host would name it (a tab by its panes' keys, a pane by its own); empty out of range.
     Q_INVOKABLE [[nodiscard]] QString beginSidebarDrag(int row) const
     {
         auto const& rows = _sidebar.rows();
@@ -645,7 +645,10 @@ class MainWindowControllerMock: public QAbstractListModel
                     drag.sessions.size() > 1 ? window::DropPayload::Tab : window::DropPayload::Pane;
                 drag.tabIndex = static_cast<int>(rows[static_cast<std::size_t>(row)].position);
                 return window::writeNodeDrag(drag);
-            case window::SidebarRowKind::Pane: return {};
+            case window::SidebarRowKind::Pane:
+                drag.payload = window::DropPayload::Pane;
+                drag.sessions = { key.pane.value };
+                return window::writeNodeDrag(drag);
         }
         return {};
     }

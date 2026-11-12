@@ -5,6 +5,7 @@
 
 #include <array>
 #include <map>
+#include <utility>
 
 using namespace contour::window;
 namespace proto = vthost::proto;
@@ -152,4 +153,72 @@ TEST_CASE("a workspace's title is its label, else its host's 1-based number for 
         workspace.position = 2;
         CHECK(workspaceTitleOf(workspace, 1) == "ops");
     }
+}
+
+namespace
+{
+// Whether each lookup takes a directory of that type: an lvalue does, a temporary -- whose workspaces and
+// tabs a result would point into after it is gone -- does not.
+template <typename Directory>
+concept FindsWorkspaceIn =
+    requires(Directory&& directory) { findWorkspace(std::forward<Directory>(directory), 1U); };
+template <typename Directory>
+concept FindsTabIn = requires(Directory&& directory) { findTab(std::forward<Directory>(directory), 1U, 1U); };
+template <typename Directory>
+concept FindsTabAnywhereIn =
+    requires(Directory&& directory) { findTabAnywhere(std::forward<Directory>(directory), 1U); };
+template <typename Directory>
+concept FindsPaneIn =
+    requires(Directory&& directory) { tabHoldingPane(std::forward<Directory>(directory), PaneKey { 1 }); };
+template <typename Workspace>
+concept FindsTabOf = requires(Workspace&& workspace) { findTab(std::forward<Workspace>(workspace), 1U); };
+} // namespace
+
+static_assert(FindsWorkspaceIn<WorkspaceDirectory const&> && !FindsWorkspaceIn<WorkspaceDirectory>);
+static_assert(FindsTabIn<WorkspaceDirectory const&> && !FindsTabIn<WorkspaceDirectory>);
+static_assert(FindsTabAnywhereIn<WorkspaceDirectory const&> && !FindsTabAnywhereIn<WorkspaceDirectory>);
+static_assert(FindsPaneIn<WorkspaceDirectory const&> && !FindsPaneIn<WorkspaceDirectory>);
+static_assert(FindsTabOf<DirectoryWorkspace const&> && !FindsTabOf<DirectoryWorkspace>);
+
+TEST_CASE("WorkspaceDirectory: a workspace, a tab and a pane's tab are looked up by id", "[directory]")
+{
+    auto const tabOf = [](uint64_t id, std::vector<uint64_t> const& panes) {
+        auto tab = DirectoryTab {};
+        tab.id = id;
+        for (auto const pane: panes)
+            tab.panes.emplace_back().key = PaneKey { pane };
+        return tab;
+    };
+    auto build = DirectoryWorkspace {};
+    build.id = 10;
+    build.tabs = { tabOf(100, { 1000, 1001 }), tabOf(101, { 1002 }) };
+    auto docs = DirectoryWorkspace {};
+    docs.id = 20;
+    docs.tabs = { tabOf(200, { 2000 }) };
+    auto const directory = WorkspaceDirectory { .workspaces = { build, docs }, .selected = 10 };
+
+    REQUIRE(findWorkspace(directory, 20) != nullptr);
+    CHECK(findWorkspace(directory, 20)->id == 20);
+    CHECK(findWorkspace(directory, 30) == nullptr);
+
+    auto const tab = findTab(directory, 10, 101);
+    REQUIRE(tab);
+    CHECK(tab->workspace->id == 10);
+    CHECK(tab->tab->id == 101);
+    CHECK_FALSE(findTab(directory, 20, 101)); // listed, but by another workspace
+    CHECK_FALSE(findTab(directory, 30, 101));
+
+    auto const anywhere = findTabAnywhere(directory, 200);
+    REQUIRE(anywhere);
+    CHECK(anywhere->workspace->id == 20);
+    CHECK_FALSE(findTabAnywhere(directory, 999));
+
+    auto const holding = tabHoldingPane(directory, PaneKey { 1001 });
+    REQUIRE(holding);
+    CHECK(holding->workspace->id == 10);
+    CHECK(holding->tab->id == 100);
+    CHECK_FALSE(tabHoldingPane(directory, PaneKey { 9 }));
+
+    CHECK(sessionsOf(directory.workspaces[0].tabs) == std::vector<uint64_t> { 1000, 1001, 1002 });
+    CHECK(sessionsOf({}).empty());
 }

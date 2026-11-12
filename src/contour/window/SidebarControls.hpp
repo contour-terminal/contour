@@ -35,12 +35,20 @@ enum class SidebarControl : uint8_t
 /// Number of @c SidebarControl enumerators, derived from the last one.
 inline constexpr size_t SidebarControlCount = static_cast<size_t>(SidebarControl::Filter) + 1;
 
-/// How one control is drawn.
+/// What a control does with a pane or a tab dropped on it.
+enum class SidebarControlDrop : uint8_t
+{
+    None = 0,     ///< Nothing: the drop falls through to the window.
+    NewWorkspace, ///< A workspace of its own for it (SidebarModel::dropOnNewWorkspace()).
+};
+
+/// How one control is drawn, and what it takes.
 struct SidebarControlFace
 {
     std::string_view iconName {};    ///< The freedesktop icon, resolved through the theme; empty for none.
     std::string_view bundledIcon {}; ///< The icon drawn where the theme lacks @c iconName; empty for a glyph.
     std::string_view glyph {};       ///< The glyph drawn where there is no icon.
+    SidebarControlDrop drop = SidebarControlDrop::None; ///< What a pane or a tab dropped on it does.
 
     [[nodiscard]] bool operator==(SidebarControlFace const&) const = default;
 };
@@ -65,29 +73,33 @@ namespace detail
 inline constexpr auto SidebarControlRows = std::array {
     // macOS: SF-Symbol-shaped icons in the title row ("sidebar.left", a funnel); the source list's "+" in its
     // footer is the platform's text button.
-    SidebarControlRow { .look = config::SidebarLook::SourceList,
-                        .faces = { SidebarControlFace { .bundledIcon = detail::ToggleIcon },
-                                   SidebarControlFace { .glyph = "+" },
-                                   SidebarControlFace { .bundledIcon = detail::FilterIcon } } },
+    SidebarControlRow {
+        .look = config::SidebarLook::SourceList,
+        .faces = { SidebarControlFace { .bundledIcon = detail::ToggleIcon },
+                   SidebarControlFace { .glyph = "+", .drop = SidebarControlDrop::NewWorkspace },
+                   SidebarControlFace { .bundledIcon = detail::FilterIcon } } },
     // Fluent: the navigation pane's own toggle (GlobalNavigationButton, three lines) and a funnel; the row
     // has no main menu for the lines to be mistaken for. The "+" heads the footer, as a pane footer item.
-    SidebarControlRow { .look = config::SidebarLook::NavigationPane,
-                        .faces = { SidebarControlFace { .bundledIcon = detail::PaneToggleIcon },
-                                   SidebarControlFace { .glyph = "+" },
-                                   SidebarControlFace { .bundledIcon = detail::FilterIcon } } },
+    SidebarControlRow {
+        .look = config::SidebarLook::NavigationPane,
+        .faces = { SidebarControlFace { .bundledIcon = detail::PaneToggleIcon },
+                   SidebarControlFace { .glyph = "+", .drop = SidebarControlDrop::NewWorkspace },
+                   SidebarControlFace { .bundledIcon = detail::FilterIcon } } },
     // ContourLinux: themed symbolic icons in the header bar, like its other items (HeaderBarItems).
     SidebarControlRow { .look = config::SidebarLook::HeaderPane,
                         .faces = { SidebarControlFace { .iconName = "sidebar-show-symbolic",
                                                         .bundledIcon = detail::ToggleIcon },
                                    SidebarControlFace { .iconName = "folder-new-symbolic",
-                                                        .bundledIcon = detail::NewWorkspaceIcon },
+                                                        .bundledIcon = detail::NewWorkspaceIcon,
+                                                        .drop = SidebarControlDrop::NewWorkspace },
                                    SidebarControlFace { .iconName = "view-filter-symbolic",
                                                         .bundledIcon = detail::FilterIcon } } },
     // Terminal: one cell each.
-    SidebarControlRow { .look = config::SidebarLook::CellTree,
-                        .faces = { SidebarControlFace { .glyph = "☰" },
-                                   SidebarControlFace { .glyph = "+" },
-                                   SidebarControlFace { .glyph = "/" } } },
+    SidebarControlRow {
+        .look = config::SidebarLook::CellTree,
+        .faces = { SidebarControlFace { .glyph = "☰" },
+                   SidebarControlFace { .glyph = "+", .drop = SidebarControlDrop::NewWorkspace },
+                   SidebarControlFace { .glyph = "/" } } },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(size_t { 0 }, SidebarControlRows.size()),

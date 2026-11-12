@@ -11,8 +11,8 @@
 //
 // A click shows what the row names; a double click on a workspace or tab row renames it inline, as F2 (and,
 // for the shown workspace, the RenameWorkspace action) does; a right click opens its menu; a workspace row
-// drags to reorder the workspaces and a tab row to move the tab (WindowController.beginSidebarDrag), and every
-// row takes a node drop (SidebarModel.drop).
+// drags to reorder the workspaces, a tab row to move the tab and a pane row to move the pane
+// (WindowController.beginSidebarDrag), and every row takes a node drop (SidebarModel.drop).
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.impl
@@ -523,7 +523,8 @@ Item {
                                                                row.mapToItem(null, eventPoint.position.x, eventPoint.position.y))
     }
 
-    // A tab row drags as a strip tab does: the window starts it (beginSidebarDrag), the OS runs it.
+    // Every row drags: a workspace to reorder it, a tab as a strip tab does, a pane to move it out of its tab.
+    // The window starts it (beginSidebarDrag), the OS runs it.
     NodeDragSource {
         id: dragSource
         anchors.fill: parent
@@ -534,20 +535,76 @@ Item {
 
     DragHandler {
         objectName: "sidebarRowDragHandler"
-        enabled: row.renamable && !renameLoader.active
+        enabled: !renameLoader.active
         target: null
         acceptedButtons: Qt.LeftButton
         onActiveChanged: if (active) dragSource.carry()
     }
 
-    // A node dropped on the row: above or below its middle decides where it lands (SidebarDropPolicy).
+    // A node dropped on the row: the band of the row it is in decides where it lands (SidebarDropPolicy) --
+    // the gap above or below the row, or into it -- and what it would do is shown while it hovers: a line at
+    // the gap, or the row highlighted. One the row refuses shows the refusal, and falls through to the window.
     DropArea {
+        id: rowDrop
         objectName: "sidebarRowDrop"
         anchors.fill: parent
         keys: [NodeDrag.mime]
+
+        /// What a drop here now would do, as a SidebarRows.DropIndicator.
+        property int indicator: SidebarRows.DropIndicator.Refused
+
+        function refresh(drag) {
+            const answer = row.sidebar ? row.sidebar.dropIndicator(row.index, drag.y / row.height,
+                                                                   drag.getDataAsString(NodeDrag.mime))
+                                       : SidebarRows.DropIndicator.Refused
+            // Fail closed: a call the engine could not make answers `undefined`, which is no drop at all.
+            rowDrop.indicator = typeof answer === "number" ? answer : SidebarRows.DropIndicator.Refused
+            drag.accepted = rowDrop.indicator !== SidebarRows.DropIndicator.Refused
+        }
+
+        onEntered: (drag) => rowDrop.refresh(drag)
+        onPositionChanged: (drag) => rowDrop.refresh(drag)
+        onExited: rowDrop.indicator = SidebarRows.DropIndicator.Refused
         onDropped: (drop) => {
+            rowDrop.refresh(drop)
+            const takes = rowDrop.indicator !== SidebarRows.DropIndicator.Refused
+            rowDrop.indicator = SidebarRows.DropIndicator.Refused
+            if (!takes) {
+                drop.accepted = false
+                return
+            }
             row.sidebar.drop(row.index, drop.y / row.height, drop.getDataAsString(NodeDrag.mime))
             drop.accept(Qt.MoveAction)
+        }
+
+        readonly property color mark: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.accentColor
+
+        // "Into": the row highlighted.
+        Rectangle {
+            objectName: "sidebarRowDropHighlight"
+            anchors.fill: parent
+            anchors.leftMargin: row.fillInset
+            anchors.rightMargin: row.fillInset
+            visible: rowDrop.containsDrag && rowDrop.indicator === SidebarRows.DropIndicator.Highlight
+            radius: chromeStyle.sidebar.selectionRadius
+            color: Qt.alpha(rowDrop.mark, chromeStyle.dropFillOpacity)
+            border.width: chromeStyle.borderWidth
+            border.color: rowDrop.mark
+        }
+
+        // A gap: the line it lands at, at the row's upper or lower edge.
+        Rectangle {
+            objectName: "sidebarRowDropLine"
+            readonly property bool above: rowDrop.indicator === SidebarRows.DropIndicator.LineAbove
+            visible: rowDrop.containsDrag && (above || rowDrop.indicator === SidebarRows.DropIndicator.LineBelow)
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: row.fillInset
+            anchors.rightMargin: row.fillInset
+            // As thick as the ring a pane card wears for a drop.
+            height: chromeStyle.dropRingWidth
+            y: above ? 0 : parent.height - height
+            color: rowDrop.mark
         }
     }
 }

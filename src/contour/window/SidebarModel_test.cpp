@@ -251,6 +251,8 @@ TEST_CASE("SidebarModel: activate selects, activates and marks seen", "[contour]
     SECTION("a workspace row selects the workspace")
     {
         t.sidebar().activate(2);
+        // Through the window, which drops what waited for an earlier look: the user went elsewhere.
+        CHECK(t.host.shownWorkspaces == std::vector<uint64_t> { 2 });
         CHECK(t.source.selected == std::vector<uint64_t> { 2 });
         CHECK(t.host.shown.empty());
     }
@@ -349,39 +351,139 @@ TEST_CASE("SidebarModel: rename calls the window's rename", "[contour][sidebar]"
     CHECK(t.host.renamed.front() == std::pair { uint64_t { 1 }, std::string { "invoices" } });
 }
 
+namespace
+{
+/// Workspace 1: tab 10 of panes 10 and 11, and tab 12. Workspace 2: tab 20.
+[[nodiscard]] std::vector<DirectoryWorkspace> moveSample()
+{
+    auto first = directoryWorkspaceOf(1, "a", { directoryPaneOf(10), directoryPaneOf(12) });
+    first.tabs[0].panes.push_back(directoryPaneOf(11));
+    return { std::move(first), directoryWorkspaceOf(2, "b", { directoryPaneOf(20) }) };
+}
+
+/// @return The JSON of a drag of @p payload from @p host.
+[[nodiscard]] QString dragOf(HostIdentity const& host,
+                             DropPayload payload,
+                             std::vector<uint64_t> sessions,
+                             uint64_t workspace = 0)
+{
+    auto drag = NodeDrag {};
+    drag.payload = payload;
+    drag.host = host;
+    drag.sessions = std::move(sessions);
+    drag.workspace = workspace;
+    return writeNodeDrag(drag);
+}
+} // namespace
+
 TEST_CASE("SidebarModel: a drop resolves to the window's move operations", "[contour][sidebar]")
 {
-    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "a", { directoryPaneOf(10) }),
-                                  directoryWorkspaceOf(2, "b", { directoryPaneOf(20) }) } };
+    auto t = SidebarUnderTest { moveSample() };
     auto const host = t.host.identity;
+    auto const rowOf = [&](SidebarRowKind kind, uint64_t workspace, uint64_t tab, uint64_t pane = 0) {
+        auto const index = t.sidebar().rowIndexOf(
+            SidebarRowKey { .kind = kind, .workspace = workspace, .tab = tab, .pane = PaneKey { pane } });
+        REQUIRE(index >= 0);
+        return index;
+    };
+    auto const moved = [&]() -> std::pair<SidebarNode, NodeDestination> const& {
+        REQUIRE(t.host.movedNodes.size() == 1);
+        return t.host.movedNodes.front();
+    };
 
     SECTION("a workspace dropped on the lower half of another goes after it")
     {
-        auto drag = NodeDrag {};
-        drag.payload = DropPayload::Workspace;
-        drag.host = host;
-        drag.workspace = 1;
-        t.sidebar().drop(2, 0.8, writeNodeDrag(drag));
+        t.sidebar().drop(
+            rowOf(SidebarRowKind::Workspace, 2, 0), 0.8, dragOf(host, DropPayload::Workspace, {}, 1));
         REQUIRE(t.host.movedWorkspaces.size() == 1);
         CHECK(t.host.movedWorkspaces.front() == std::pair { uint64_t { 1 }, std::size_t { 2 } });
     }
     SECTION("a one-pane tab's pane dropped into the middle of a workspace row is a tab move")
     {
-        auto drag = NodeDrag {};
-        drag.payload = DropPayload::Pane;
-        drag.host = host;
-        drag.sessions = { 10 };
-        t.sidebar().drop(2, 0.5, writeNodeDrag(drag));
-        REQUIRE(t.host.movedTabs.size() == 1);
-        CHECK(t.host.movedTabs.front().first == TabRef { .workspace = 1, .tab = 10 });
-        CHECK(t.host.movedTabs.front().second.first == 2);
-        CHECK(t.host.movedTabs.front().second.second == AppendTab);
+        t.sidebar().drop(
+            rowOf(SidebarRowKind::Workspace, 2, 0), 0.5, dragOf(host, DropPayload::Pane, { 12 }));
+        auto const& [node, destination] = moved();
+        CHECK(node == SidebarNode { TabRef { .workspace = 1, .tab = 12 } });
+        REQUIRE(std::holds_alternative<MoveTab>(destination));
+        CHECK(std::get<MoveTab>(destination).toWorkspace == 2);
+        CHECK(std::get<MoveTab>(destination).toPosition == AppendTab);
+    }
+    SECTION("a pane of several dropped on a workspace row becomes a tab of it")
+    {
+        t.sidebar().drop(
+            rowOf(SidebarRowKind::Workspace, 2, 0), 0.5, dragOf(host, DropPayload::Pane, { 11 }));
+        auto const& [node, destination] = moved();
+        CHECK(node == SidebarNode { PaneKey { 11 } });
+        REQUIRE(std::holds_alternative<MoveTab>(destination));
+        CHECK(std::get<MoveTab>(destination).toWorkspace == 2);
+    }
+    SECTION("a pane dropped on the middle of another tab's row joins that tab")
+    {
+        t.sidebar().drop(rowOf(SidebarRowKind::Tab, 2, 20), 0.5, dragOf(host, DropPayload::Pane, { 11 }));
+        auto const& [node, destination] = moved();
+        CHECK(node == SidebarNode { PaneKey { 11 } });
+        REQUIRE(std::holds_alternative<JoinTab>(destination));
+        CHECK(std::get<JoinTab>(destination).tab == TabRef { .workspace = 2, .tab = 20 });
+    }
+    SECTION("a pane dropped on its own tab, or on a pane row, is refused, and shows it")
+    {
+        auto const pane = dragOf(host, DropPayload::Pane, { 11 });
+        auto const own = rowOf(SidebarRowKind::Tab, 1, 10);
+        auto const paneRow = rowOf(SidebarRowKind::Pane, 1, 10, 10);
+        t.sidebar().drop(own, 0.5, pane);
+        t.sidebar().drop(paneRow, 0.5, pane);
+        CHECK(t.host.movedNodes.empty());
+        CHECK(t.sidebar().dropIndicator(own, 0.5, pane) == std::to_underlying(DropIndicator::Refused));
+        CHECK(t.sidebar().dropIndicator(paneRow, 0.5, pane) == std::to_underlying(DropIndicator::Refused));
+        CHECK(t.sidebar().dropIndicator(own, 0.1, pane) == std::to_underlying(DropIndicator::LineAbove));
+        CHECK(t.sidebar().dropIndicator(rowOf(SidebarRowKind::Tab, 2, 20), 0.5, pane)
+              == std::to_underlying(DropIndicator::Highlight));
+    }
+    SECTION("a whole tab dropped on another tab's middle band merges into it")
+    {
+        t.sidebar().drop(rowOf(SidebarRowKind::Tab, 2, 20), 0.5, dragOf(host, DropPayload::Tab, { 10, 11 }));
+        auto const& [node, destination] = moved();
+        CHECK(node == SidebarNode { TabRef { .workspace = 1, .tab = 10 } });
+        CHECK(std::holds_alternative<JoinTab>(destination));
+    }
+    SECTION("a workspace of one tab joins a tab as that tab; one of several is refused there")
+    {
+        t.sidebar().drop(rowOf(SidebarRowKind::Tab, 1, 12), 0.5, dragOf(host, DropPayload::Workspace, {}, 2));
+        auto const& [node, destination] = moved();
+        CHECK(node == SidebarNode { TabRef { .workspace = 2, .tab = 20 } });
+        CHECK(std::get<JoinTab>(destination).tab == TabRef { .workspace = 1, .tab = 12 });
+
+        t.host.movedNodes.clear();
+        t.sidebar().drop(rowOf(SidebarRowKind::Tab, 2, 20), 0.5, dragOf(host, DropPayload::Workspace, {}, 1));
+        CHECK(t.host.movedNodes.empty());
+        CHECK(t.host.movedWorkspaces.empty());
+    }
+    SECTION("the new workspace area takes a pane or a tab that is not all its workspace holds")
+    {
+        auto const pane = dragOf(host, DropPayload::Pane, { 11 });
+        CHECK(t.sidebar().takesNewWorkspaceDrop(pane));
+        t.sidebar().dropOnNewWorkspace(pane);
+        auto const& [node, destination] = moved();
+        CHECK(node == SidebarNode { PaneKey { 11 } });
+        CHECK(std::holds_alternative<IntoNewWorkspace>(destination));
+
+        // Tab 20 is all workspace 2 holds, and a workspace is not a node.
+        auto const sole = dragOf(host, DropPayload::Pane, { 20 });
+        auto const workspace = dragOf(host, DropPayload::Workspace, {}, 1);
+        CHECK_FALSE(t.sidebar().takesNewWorkspaceDrop(sole));
+        CHECK_FALSE(t.sidebar().takesNewWorkspaceDrop(workspace));
+        t.host.movedNodes.clear();
+        t.sidebar().dropOnNewWorkspace(sole);
+        t.sidebar().dropOnNewWorkspace(workspace);
+        CHECK(t.host.movedNodes.empty());
     }
     SECTION("garbage is refused")
     {
         t.sidebar().drop(2, 0.5, "not json");
+        t.sidebar().dropOnNewWorkspace("not json");
         CHECK(t.host.movedWorkspaces.empty());
-        CHECK(t.host.movedTabs.empty());
+        CHECK(t.host.movedNodes.empty());
+        CHECK(t.sidebar().dropIndicator(2, 0.5, "not json") == std::to_underlying(DropIndicator::Refused));
     }
     SECTION("a drag from another host is refused, though its ids name a tab and a workspace here")
     {
@@ -391,19 +493,14 @@ TEST_CASE("SidebarModel: a drop resolves to the window's move operations", "[con
         };
         for (auto const& other: elsewhere)
         {
-            auto pane = NodeDrag {};
-            pane.payload = DropPayload::Pane;
-            pane.host = other;
-            pane.sessions = { 10 };
-            t.sidebar().drop(2, 0.5, writeNodeDrag(pane));
-            auto workspace = NodeDrag {};
-            workspace.payload = DropPayload::Workspace;
-            workspace.host = other;
-            workspace.workspace = 1;
-            t.sidebar().drop(2, 0.8, writeNodeDrag(workspace));
+            t.sidebar().drop(
+                rowOf(SidebarRowKind::Workspace, 2, 0), 0.5, dragOf(other, DropPayload::Pane, { 10 }));
+            t.sidebar().drop(
+                rowOf(SidebarRowKind::Workspace, 2, 0), 0.8, dragOf(other, DropPayload::Workspace, {}, 1));
+            t.sidebar().dropOnNewWorkspace(dragOf(other, DropPayload::Pane, { 11 }));
         }
         CHECK(t.host.movedWorkspaces.empty());
-        CHECK(t.host.movedTabs.empty());
+        CHECK(t.host.movedNodes.empty());
     }
 }
 

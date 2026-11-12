@@ -47,6 +47,8 @@ struct FakeSidebarHost final: window::ISidebarHost
     FakeDirectorySource* source = nullptr;
     /// The host the window's ids are of.
     window::HostIdentity identity { .kind = window::HostKind::Process, .id = "fake-host" };
+    /// What the window's host moves.
+    window::HostMoves moves = window::HostMoves::Nodes;
     std::optional<window::TabRef> displayed;
     std::vector<window::PaneKey> shown;
     std::vector<uint64_t> shownWorkspaces;
@@ -54,18 +56,25 @@ struct FakeSidebarHost final: window::ISidebarHost
     std::vector<std::pair<uint64_t, std::string>> renamed;
     std::vector<std::pair<window::TabRef, std::string>> renamedTabs;
     std::vector<std::pair<uint64_t, std::size_t>> movedWorkspaces;
-    std::vector<std::pair<window::TabRef, std::pair<uint64_t, std::size_t>>> movedTabs;
+    std::vector<std::pair<window::SidebarNode, window::NodeDestination>> movedNodes;
     std::vector<window::SidebarRowKey> menus;
     std::vector<QPointF> menuPositions; ///< Where each menu was asked for, in the window's coordinates.
 
     [[nodiscard]] window::IWorkspaceDirectorySource* directorySource() const override { return source; }
     [[nodiscard]] window::HostIdentity hostIdentity() const override { return identity; }
+    [[nodiscard]] window::HostMoves hostMoves() const override { return moves; }
     [[nodiscard]] std::optional<window::TabRef> displayedTab(
         window::WorkspaceDirectory const& /*directory*/) const override
     {
         return displayed;
     }
     void showPane(window::PaneKey pane) override { shown.push_back(pane); }
+    void showWorkspace(uint64_t workspace) override
+    {
+        shownWorkspaces.push_back(workspace);
+        if (source != nullptr)
+            std::ignore = source->select(workspace);
+    }
     void markSeen(window::PaneKey pane) override { seen.push_back(pane); }
     void renameWorkspace(uint64_t workspace, std::string const& name) override
     {
@@ -79,9 +88,9 @@ struct FakeSidebarHost final: window::ISidebarHost
     {
         movedWorkspaces.emplace_back(workspace, to);
     }
-    void moveTab(window::TabRef tab, uint64_t toWorkspace, std::size_t toPosition) override
+    void moveNode(window::SidebarNode const& node, window::NodeDestination const& destination) override
     {
-        movedTabs.push_back({ tab, { toWorkspace, toPosition } });
+        movedNodes.emplace_back(node, destination);
     }
     void openContextMenu(window::SidebarRow const& row, QPointF position) override
     {

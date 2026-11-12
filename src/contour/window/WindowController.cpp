@@ -111,15 +111,17 @@ class WindowController::SidebarHost final: public ISidebarHost
         auto const* const active = _window.activeSession();
         if (active == nullptr)
             return std::nullopt;
-        auto const key = _window._manager.paneKeyOf(active->modelSessionId());
-        for (auto const& workspace: directory.workspaces)
-            for (auto const& tab: workspace.tabs)
-                if (std::ranges::contains(tab.panes, key, &DirectoryPane::key))
-                    return TabRef { .workspace = workspace.id, .tab = tab.id };
-        return std::nullopt;
+        auto const listed = tabHoldingPane(directory, _window._manager.paneKeyOf(active->modelSessionId()));
+        if (!listed)
+            return std::nullopt;
+        return TabRef { .workspace = listed->workspace->id, .tab = listed->tab->id };
     }
 
+    [[nodiscard]] HostMoves hostMoves() const override { return _window._manager.hostMovesOf(_window); }
+
     void showPane(PaneKey pane) override { _window.jumpToPane(pane); }
+
+    void showWorkspace(uint64_t workspace) override { _window.showWorkspace(workspace); }
 
     void markSeen(PaneKey pane) override { _window.noteDirectoryPaneSeenByKey(pane); }
 
@@ -143,27 +145,39 @@ class WindowController::SidebarHost final: public ISidebarHost
         _window.moveWorkspace(workspace, static_cast<int>(window::placeAfterMove(from, to)));
     }
 
-    void moveTab(TabRef tab, uint64_t toWorkspace, std::size_t toPosition) override
+    void moveNode(SidebarNode const& node, NodeDestination const& destination) override
     {
+        auto const* const move = std::get_if<MoveTab>(&destination);
+        if (move == nullptr)
+        {
+            _window.moveSidebarNode(node, destination);
+            return;
+        }
         auto const* const source = _window._directorySource;
         if (source == nullptr)
             return;
         auto const listed = source->directory();
-        auto const target = std::ranges::find(listed.workspaces, toWorkspace, &DirectoryWorkspace::id);
-        if (target == listed.workspaces.end())
+        auto const* const target = findWorkspace(listed, move->toWorkspace);
+        // A drop on a workspace the listing lost meanwhile: said, as every move not made is.
+        if (target == nullptr)
+        {
+            _window.notices().post(
+                Notice { .kind = NoticeKind::DropRefused, .text = std::string { MoveStaleText } });
             return;
-        // Within its own workspace a tab leaves its place first, as a workspace does among the workspaces.
-        auto const own = tab.workspace == toWorkspace
-                             ? std::ranges::find(target->tabs, tab.tab, &DirectoryTab::id)
-                             : target->tabs.end();
+        }
+        // Within its own workspace a tab leaves its place first, as a workspace does among the workspaces; a
+        // pane that becomes a tab leaves no place among them.
+        auto const* const tab = std::get_if<TabRef>(&node);
+        auto const* const own =
+            tab != nullptr && tab->workspace == move->toWorkspace ? findTab(*target, tab->tab) : nullptr;
         auto const from =
-            own != target->tabs.end()
-                ? std::optional { static_cast<std::size_t>(std::distance(target->tabs.begin(), own)) }
+            own != nullptr
+                ? std::optional { static_cast<std::size_t>(std::distance(target->tabs.data(), own)) }
                 : std::nullopt;
-        _window.moveTabToWorkspace(
-            tab.tab,
-            toWorkspace,
-            static_cast<int>(window::tabPlaceAfterMove(from, toPosition, target->tabs.size())));
+        _window.moveSidebarNode(
+            node,
+            MoveTab { .toWorkspace = move->toWorkspace,
+                      .toPosition = tabPlaceAfterMove(from, move->toPosition, target->tabs.size()) });
     }
 
     void openContextMenu(SidebarRow const& row, QPointF windowPosition) override
@@ -265,6 +279,7 @@ void WindowController::initSidebar()
     _sidebarHost = std::make_unique<SidebarHost>(*this);
     _sidebar = std::make_unique<SidebarModel>(*_sidebarHost, _attention, _wallClock, *_noticeAnnouncer);
     connect(this, &WindowController::workspaceDirectoryChanged, _sidebar.get(), &SidebarModel::noteChanged);
+    connect(this, &WindowController::workspaceDirectoryChanged, this, &WindowController::followMovedPane);
     connect(_sidebar.get(),
             &SidebarModel::summaryChanged,
             this,
@@ -3186,15 +3201,10 @@ QString WindowController::beginSidebarDrag(int row)
                 return beginTabDrag(static_cast<int>(shown.position));
             // Another workspace's tab is named by what the directory lists of its panes: their keys are the
             // host's session ids, which is what a drag payload carries.
-            auto const holder =
-                std::ranges::find(directory.workspaces, shown.key.workspace, &DirectoryWorkspace::id);
-            if (holder == directory.workspaces.end())
+            auto const listed = findTab(directory, shown.key.workspace, shown.key.tab);
+            if (!listed || listed->tab->panes.empty())
                 return {};
-            auto const tab = std::ranges::find(holder->tabs, shown.key.tab, &DirectoryTab::id);
-            if (tab == holder->tabs.end() || tab->panes.empty())
-                return {};
-            auto sessions = std::ranges::to<std::vector<uint64_t>>(
-                tab->panes | std::views::transform([](DirectoryPane const& pane) { return pane.key.value; }));
+            auto sessions = sessionsOf(std::span { listed->tab, 1 });
             return beginNodeDrag(
                 NodeDrag { .payload = sessions.size() > 1 ? DropPayload::Tab : DropPayload::Pane,
                            .host = _manager.hostIdentity(_displayed),
@@ -3204,7 +3214,15 @@ QString WindowController::beginSidebarDrag(int row)
                            .sessions = std::move(sessions) },
                 nullptr);
         }
-        case SidebarRowKind::Pane: break;
+        case SidebarRowKind::Pane:
+            // A pane is named by its key, which is the host's session id a drag payload carries.
+            return beginNodeDrag(NodeDrag { .payload = DropPayload::Pane,
+                                            .host = _manager.hostIdentity(_displayed),
+                                            .window = _displayed,
+                                            .tabIndex = 0,
+                                            .workspace = 0,
+                                            .sessions = { shown.key.pane.value } },
+                                 nullptr);
     }
     return {};
 }
@@ -3222,27 +3240,75 @@ void WindowController::jumpToNextAttention()
         jumpToPane(*target);
 }
 
+void WindowController::setDirectorySource(IWorkspaceDirectorySource* source) noexcept
+{
+    if (source == _directorySource)
+        return;
+    // What waited names the old source's ids, which mean nothing in the new one.
+    cancelPendingNavigation();
+    _directorySource = source;
+}
+
+void WindowController::cancelPendingNavigation() noexcept
+{
+    _pendingJump.reset();
+    _pendingRowAction.reset();
+    _pendingFollow.reset();
+}
+
+void WindowController::showWorkspace(uint64_t workspace)
+{
+    // Navigating supersedes what waited for an earlier look.
+    cancelPendingNavigation();
+    if (_directorySource != nullptr && _directorySource->directory().selected != workspace)
+        std::ignore = _directorySource->select(workspace);
+}
+
 void WindowController::jumpToPane(PaneKey target)
 {
     // Navigating supersedes what waited for an earlier look.
-    _pendingJump.reset();
-    _pendingRowAction.reset();
+    cancelPendingNavigation();
     if (_directorySource == nullptr)
         return;
     auto const directory = _directorySource->directory();
-    auto const holder = std::ranges::find_if(directory.workspaces, [&](DirectoryWorkspace const& workspace) {
-        return std::ranges::any_of(workspace.tabs, [&](DirectoryTab const& tab) {
-            return std::ranges::contains(tab.panes, target, &DirectoryPane::key);
-        });
-    });
-    if (holder == directory.workspaces.end())
+    auto const listed = tabHoldingPane(directory, target);
+    if (!listed)
         return;
+    auto const holder = listed->workspace->id;
     // Seen only once it lands: a switch that never does leaves the pane asking.
-    _pendingJump = PendingJump { .pane = target, .workspace = holder->id };
-    if (directory.selected == holder->id)
+    _pendingJump = PendingJump { .pane = target, .workspace = holder };
+    if (directory.selected == holder)
         completePendingJump();
-    else if (_directorySource->select(holder->id) == SelectResult::Refused)
+    else if (_directorySource->select(holder) == SelectResult::Refused)
         _pendingJump.reset();
+}
+
+void WindowController::followIntoNewWorkspace(PaneKey pane)
+{
+    if (_directorySource == nullptr)
+        return;
+    _pendingFollow = PendingFollow {
+        .pane = pane,
+        .listed = std::ranges::to<std::vector>(_directorySource->directory().workspaces
+                                               | std::views::transform(&DirectoryWorkspace::id)),
+        .giveUp = _clock.now() + session::TerminalSessionManager::RemoteMoveTimeout,
+    };
+}
+
+void WindowController::followMovedPane()
+{
+    if (!_pendingFollow || _directorySource == nullptr)
+        return;
+    if (_clock.now() >= _pendingFollow->giveUp)
+    {
+        _pendingFollow.reset();
+        return;
+    }
+    auto const directory = _directorySource->directory();
+    auto const listed = tabHoldingPane(directory, _pendingFollow->pane);
+    if (!listed || std::ranges::contains(_pendingFollow->listed, listed->workspace->id))
+        return;
+    jumpToPane(std::exchange(_pendingFollow, std::nullopt)->pane);
 }
 
 void WindowController::completePendingJump()
@@ -3268,11 +3334,10 @@ void WindowController::noteDirectoryPaneSeenByKey(PaneKey key)
 {
     if (_directorySource == nullptr)
         return;
-    for (auto const& workspace: _directorySource->directory().workspaces)
-        for (auto const& tab: workspace.tabs)
-            for (auto const& pane: tab.panes)
-                if (pane.key == key)
-                    std::ignore = noteDirectoryPaneSeen(_attention, pane);
+    auto const directory = _directorySource->directory();
+    if (auto const listed = tabHoldingPane(directory, key))
+        std::ignore = noteDirectoryPaneSeen(_attention,
+                                            *std::ranges::find(listed->tab->panes, key, &DirectoryPane::key));
 }
 
 void WindowController::cancelPendingJump() noexcept
@@ -3347,17 +3412,14 @@ void WindowController::renameTab(TabRef tab, std::string const& title)
     if (_directorySource == nullptr)
         return;
     auto const directory = _directorySource->directory();
-    auto const holder = std::ranges::find(directory.workspaces, tab.workspace, &DirectoryWorkspace::id);
-    if (holder == directory.workspaces.end())
-        return;
-    auto const listed = std::ranges::find(holder->tabs, tab.tab, &DirectoryTab::id);
-    if (listed == holder->tabs.end())
+    auto const listed = findTab(directory, tab.workspace, tab.tab);
+    if (!listed)
         return;
     // A tab of the shown workspace is one of the window's rows, in the directory's order: the strip's rename.
     auto const displayed = _sidebarHost->displayedTab(directory);
     if (displayed && displayed->workspace == tab.workspace)
     {
-        setTabTitle(static_cast<int>(std::distance(holder->tabs.begin(), listed)),
+        setTabTitle(static_cast<int>(std::distance(listed->workspace->tabs.data(), listed->tab)),
                     QString::fromStdString(title));
         return;
     }
@@ -3372,7 +3434,11 @@ void WindowController::renameWorkspace(uint64_t workspace, std::string label)
 
 void WindowController::moveWorkspace(uint64_t workspace, int toPosition)
 {
-    _manager.moveWorkspace(*this, workspace, toPosition);
+    // As moveSidebarNode(): a workspace row dropped among the rows waits for the drag to end.
+    _manager.afterNodeDrag([manager = &_manager, window = _windowId, workspace, toPosition] {
+        if (auto* const controller = manager->controllerOf(window))
+            manager->moveWorkspace(*controller, workspace, toPosition);
+    });
 }
 
 void WindowController::moveTabToWorkspace(uint64_t tab, uint64_t toWorkspace, int toPosition)
@@ -3438,6 +3504,25 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
             window.moveTabToWorkspaceAt(TabRef { .workspace = key.workspace, .tab = key.tab },
                                         std::get<actions::MoveTabToWorkspace>(what).index);
         };
+    constexpr Run MoveRowToTab =
+        [](WindowController& window, SidebarRowKey const& key, actions::Action const& what) {
+            // The tab the row offered when the menu opened: places shift when a tab closes meanwhile.
+            auto const& place = std::get<actions::MoveToTab>(what);
+            auto const node = window.sidebarNodeOf(key);
+            if (auto const target = offeredTabAt(window._sidebarMenuTabs, place.workspace, place.tab);
+                node && target)
+                window._sidebarHost->moveNode(*node, JoinTab { .tab = *target });
+        };
+    constexpr Run MoveRowToNewTab =
+        [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
+            if (auto const node = window.sidebarNodeOf(key))
+                window.moveNodeToNewTab(*node);
+        };
+    constexpr Run MoveRowToNewWorkspace =
+        [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
+            if (auto const node = window.sidebarNodeOf(key))
+                window._sidebarHost->moveNode(*node, IntoNewWorkspace {});
+        };
     /// A menu action that names its row by id, and how it is run on it.
     struct ByIdAction
     {
@@ -3454,6 +3539,9 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
         ByIdAction { .matches = holds<actions::MoveWorkspaceUp>, .run = MoveRowUp },
         ByIdAction { .matches = holds<actions::MoveWorkspaceDown>, .run = MoveRowDown },
         ByIdAction { .matches = holds<actions::MoveTabToWorkspace>, .run = MoveRowTab },
+        ByIdAction { .matches = holds<actions::MoveToTab>, .run = MoveRowToTab },
+        ByIdAction { .matches = holds<actions::MoveToNewTab>, .run = MoveRowToNewTab },
+        ByIdAction { .matches = holds<actions::MoveToNewWorkspace>, .run = MoveRowToNewWorkspace },
     };
     /// A menu close, and what it closes: from the sidebar's menu a close always asks first.
     struct ConfirmedClose
@@ -3505,22 +3593,18 @@ QVariantMap WindowController::closeConfirmation(
     auto subject = CloseSubject {
         .label = label.toStdString(), .tabs = 0, .panes = 0, .program = program.toStdString()
     };
-    if (_directorySource != nullptr)
-        for (auto const& listed: _directorySource->directory().workspaces)
+    auto const directory =
+        _directorySource != nullptr ? _directorySource->directory() : WorkspaceDirectory {};
+    if (auto const* const listed = findWorkspace(directory, workspace))
+    {
+        if (static_cast<CloseKind>(kind) == CloseKind::Workspace)
         {
-            if (listed.id != workspace)
-                continue;
-            for (auto const& candidate: listed.tabs)
-            {
-                if (static_cast<CloseKind>(kind) == CloseKind::Workspace)
-                {
-                    ++subject.tabs;
-                    subject.panes += candidate.panes.size();
-                }
-                else if (candidate.id == tab)
-                    subject.panes = candidate.panes.size();
-            }
+            subject.tabs = listed->tabs.size();
+            subject.panes = sessionsOf(listed->tabs).size();
         }
+        else if (auto const* const closing = findTab(*listed, tab))
+            subject.panes = closing->panes.size();
+    }
     auto const text = closeDialogText(static_cast<CloseKind>(kind), subject);
     return { { QStringLiteral("heading"), QString::fromStdString(text.heading) },
              { QStringLiteral("message"), QString::fromStdString(text.message) },
@@ -3557,16 +3641,16 @@ void WindowController::runSidebarActionShown(SidebarRowKey const& row, actions::
         switch (row.kind)
         {
             case SidebarRowKind::Workspace: break;
-            case SidebarRowKind::Tab:
-                if (_directorySource != nullptr)
-                    for (auto const& workspace: _directorySource->directory().workspaces)
-                        if (workspace.id == row.workspace)
-                            for (auto const& tab: workspace.tabs)
-                                if (tab.id == row.tab && !tab.panes.empty())
-                                    shown = tab.panes.front().key;
+            case SidebarRowKind::Tab: {
+                auto const directory =
+                    _directorySource != nullptr ? _directorySource->directory() : WorkspaceDirectory {};
+                if (auto const listed = findTab(directory, row.workspace, row.tab);
+                    listed && !listed->tab->panes.empty())
+                    shown = listed->tab->panes.front().key;
                 if (!shown)
                     return RowActionOutcome::Waiting; // the tab is not listed (yet)
                 break;
+            }
             case SidebarRowKind::Pane: shown = row.pane; break;
         }
         // The row the menu was opened over, not whichever one is current: when it cannot be shown the action
@@ -3590,18 +3674,29 @@ void WindowController::openSidebarContextMenu(SidebarRow const& row, QPointF win
 {
     auto const directory =
         _directorySource != nullptr ? _directorySource->directory() : WorkspaceDirectory {};
-    auto const holder = std::ranges::find(directory.workspaces, row.key.workspace, &DirectoryWorkspace::id);
-    // Pinned by key: rows shift while the menu is open.
+    auto const* const holder = findWorkspace(directory, row.key.workspace);
+    // Pinned by key: rows shift while the menu is open; its tabs by id, for the same reason.
     _sidebarMenuRow = row.key;
     _sidebarMenuAnchor = windowPosition;
+    _sidebarMenuTabs = offeredTabsOf(directory);
+    auto const moves = menuMovesOf(_manager.hostMovesOf(*this));
 
     auto entries = std::vector<command::ContextMenuEntry> {};
     switch (row.key.kind)
     {
-        case SidebarRowKind::Workspace:
+        case SidebarRowKind::Workspace: {
+            // A workspace of one tab merges into another tab as that tab does.
+            auto const only =
+                holder != nullptr && holder->tabs.size() == 1
+                    ? std::optional { TabRef { .workspace = holder->id, .tab = holder->tabs.front().id } }
+                    : std::nullopt;
             entries = command::buildWorkspaceMenu(
-                { .position = row.position, .count = directory.workspaces.size() });
+                { .position = row.position,
+                  .count = directory.workspaces.size(),
+                  .joinable = only ? joinTargetsOf(directory, only) : std::vector<command::TabChoiceGroup> {},
+                  .moves = moves });
             break;
+        }
         case SidebarRowKind::Tab: {
             // Every workspace but the tab's own can take it.
             auto others = directory;
@@ -3609,14 +3704,25 @@ void WindowController::openSidebarContextMenu(SidebarRow const& row, QPointF win
             auto const palette = _manager.model().colorPalette();
             entries = command::buildSidebarTabMenu(
                 { .tab = { .tabIndex = static_cast<int>(row.position),
-                           .tabCount = holder != directory.workspaces.end()
-                                           ? static_cast<int>(holder->tabs.size())
-                                           : 0,
+                           .tabCount = holder != nullptr ? static_cast<int>(holder->tabs.size()) : 0,
                            .palette = { palette.begin(), palette.end() } },
-                  .others = moveTargetsOf(others) });
+                  .others = moveTargetsOf(others),
+                  .joinable =
+                      joinTargetsOf(directory, TabRef { .workspace = row.key.workspace, .tab = row.key.tab }),
+                  .workspaceTabs = holder != nullptr ? holder->tabs.size() : 0,
+                  .moves = moves });
             break;
         }
-        case SidebarRowKind::Pane: entries = command::buildSidebarPaneMenu({}); break;
+        case SidebarRowKind::Pane: {
+            auto const listed = findTab(directory, row.key.workspace, row.key.tab);
+            entries = command::buildSidebarPaneMenu(
+                { .joinable =
+                      joinTargetsOf(directory, TabRef { .workspace = row.key.workspace, .tab = row.key.tab }),
+                  .tabPanes = listed ? listed->tab->panes.size() : 0,
+                  .workspaceTabs = listed ? listed->workspace->tabs.size() : 0,
+                  .moves = moves });
+            break;
+        }
     }
     // At the row, not the pointer: the menu key opens it with the pointer anywhere.
     presentSurface(MenuSurface::Sidebar, resolveMenu(entries), _sidebarMenuAnchor);
@@ -3633,6 +3739,83 @@ void WindowController::moveActiveTabToWorkspace(uint32_t position)
         return;
     if (auto const displayed = _sidebarHost->displayedTab(_directorySource->directory()))
         moveTabToWorkspaceAt(*displayed, position);
+}
+
+std::optional<SidebarNode> WindowController::sidebarNodeOf(SidebarRowKey const& row) const
+{
+    switch (row.kind)
+    {
+        case SidebarRowKind::Pane: return row.pane;
+        case SidebarRowKind::Tab: return TabRef { .workspace = row.workspace, .tab = row.tab };
+        case SidebarRowKind::Workspace: {
+            // A workspace moves as its tab while it holds only that one.
+            if (_directorySource == nullptr)
+                return std::nullopt;
+            auto const directory = _directorySource->directory();
+            auto const* const workspace = findWorkspace(directory, row.workspace);
+            if (workspace == nullptr || workspace->tabs.size() != 1)
+                return std::nullopt;
+            return TabRef { .workspace = row.workspace, .tab = workspace->tabs.front().id };
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<SidebarNode> WindowController::activePaneNode() const
+{
+    auto const* const active = activeSession();
+    if (active == nullptr)
+        return std::nullopt;
+    return SidebarNode { _manager.paneKeyOf(active->modelSessionId()) };
+}
+
+void WindowController::moveSidebarNode(SidebarNode const& node, NodeDestination const& destination)
+{
+    // A drop is handled inside the OS drag's loop, and a move that rebuilt the rows or the tab strip there
+    // would destroy the delegate the loop runs on: it waits for the drag to end. Named by value and by this
+    // window's id, as the window may be gone by then.
+    _manager.afterNodeDrag([manager = &_manager, window = _windowId, node, destination] {
+        if (auto* const controller = manager->controllerOf(window))
+            manager->moveSidebarNode(*controller, node, destination);
+    });
+}
+
+void WindowController::moveNodeToTab(SidebarNode const& node, uint32_t workspace, uint32_t tab)
+{
+    if (_directorySource == nullptr)
+        return;
+    if (auto const target = tabAtPlaces(_directorySource->directory(), workspace, tab))
+        _sidebarHost->moveNode(node, JoinTab { .tab = *target });
+}
+
+void WindowController::moveNodeToNewTab(SidebarNode const& node)
+{
+    auto const* const pane = std::get_if<PaneKey>(&node);
+    if (_directorySource == nullptr || pane == nullptr)
+        return;
+    auto const directory = _directorySource->directory();
+    // A pane that is its tab's only one already is a tab of its own.
+    if (auto const listed = tabHoldingPane(directory, *pane); listed && listed->tab->panes.size() > 1)
+        _sidebarHost->moveNode(node,
+                               MoveTab { .toWorkspace = listed->workspace->id, .toPosition = AppendTab });
+}
+
+void WindowController::moveActivePaneToTab(uint32_t workspace, uint32_t tab)
+{
+    if (auto const node = activePaneNode())
+        moveNodeToTab(*node, workspace, tab);
+}
+
+void WindowController::moveActivePaneToNewTab()
+{
+    if (auto const node = activePaneNode())
+        moveNodeToNewTab(*node);
+}
+
+void WindowController::moveActivePaneToNewWorkspace()
+{
+    if (auto const node = activePaneNode())
+        _sidebarHost->moveNode(*node, IntoNewWorkspace {});
 }
 
 void WindowController::moveTabToWorkspaceAt(TabRef tab, uint32_t position)

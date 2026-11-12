@@ -310,6 +310,10 @@ inline constexpr double DropEdgeFraction = 0.20;
 /// The width of the ring around a pane that takes the drag, in logical pixels: the design's 2 px.
 inline constexpr double DropRingWidth = 2.0;
 
+/// The opacity of the accent a place that takes a drag is filled with (a sidebar row, the new-workspace
+/// area), 0 to 1: the ring's colour, light enough that what the place shows stays legible beneath it.
+inline constexpr double DropFillOpacity = 0.18;
+
 /// The width of the edge of a drop ghost and of a tab outlined by a drag, in logical pixels: the design's 1.5
 /// px.
 inline constexpr double DropEdgeWidth = 1.5;

@@ -1840,6 +1840,42 @@ TEST_CASE("DaemonLink: a client started after one switched away and back shows a
     requireDrivesPane(daemon, rig.app.manager(), boot.windowId, pane, "restarted");
 }
 
+TEST_CASE("DaemonLink: a tab moved into a new workspace is followed there and shows and drives its pane",
+          "[attach][link][switch][move]")
+{
+    auto daemon = DaemonFixture {};
+    auto const ids = seedWorkspaces(daemon, 1);
+    auto rig = LinkRig { daemon.endpoint(), {}, {}, selecting(ids[0]) };
+    auto& link = *rig.link;
+    auto& manager = rig.app.manager();
+    auto const boot = contour::test::ScopedController { manager };
+    REQUIRE(pollUntilAttached(link, 10s).has_value());
+    REQUIRE(waitUntil([&] { return link.workspaceOf(boot.id) == ids[0]; }));
+    auto const first = onlyPaneOf(daemon, ids[0]);
+    auto const moved =
+        daemon.onDaemon([&] { return daemon.host->createTab({}, first)->rootPane()->session(); });
+    REQUIRE(waitUntil([&] { return sessionsOf(manager, boot.id).size() == 2; }));
+    auto const listedTab = [&]() -> std::optional<contour::window::TabRef> {
+        for (auto const& workspace: link.liveController()->directory().workspaces)
+            for (auto const& listed: workspace.tabs)
+                if (std::ranges::contains(listed.panes,
+                                          contour::window::PaneKey { moved.value },
+                                          &contour::window::DirectoryPane::key))
+                    return contour::window::TabRef { .workspace = workspace.id, .tab = listed.id };
+        return std::nullopt;
+    };
+    REQUIRE(waitUntil([&] { return listedTab().has_value(); }));
+
+    // The daemon takes the tab out of the shown workspace -- the window's next push no longer names its pane,
+    // and the window lets the pane go -- then lists it in a workspace of its own, which the window follows.
+    manager.moveSidebarNode(*boot.controller, *listedTab(), contour::window::IntoNewWorkspace {});
+    REQUIRE(waitUntil([&] {
+        auto const shown = displayedBy(manager, link, boot.windowId);
+        return shown.has_value() && *shown != ids[0];
+    }));
+    requireDrivesPane(daemon, manager, boot.windowId, moved, "followed");
+}
+
 TEST_CASE("DaemonLink: seen marks survive a reconnect", "[attach][link][reconnect]")
 {
     using vthost::client::ConnectionState;

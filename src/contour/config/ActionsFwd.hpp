@@ -166,6 +166,9 @@ struct MoveWorkspaceDown;
 struct CloseWorkspace;
 struct GoToPane;
 struct MoveTabToWorkspace;
+struct MoveToTab;
+struct MoveToNewTab;
+struct MoveToNewWorkspace;
 
 /// What a key, a character or a mouse button is bound to; the user's actions, one command's worth.
 ///

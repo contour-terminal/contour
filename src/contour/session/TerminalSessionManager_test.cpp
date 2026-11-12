@@ -6158,8 +6158,11 @@ class RoutingFactory final: public contour::session::SessionFactory
         contour::session::RemoteMove const& move) override
     {
         tabMoves.push_back(move);
-        return contour::session::RemoteRouting::Routed;
+        return moveRouting;
     }
+
+    /// What requestRemoteMove() answers.
+    contour::session::RemoteRouting moveRouting = contour::session::RemoteRouting::Routed;
 
     std::vector<std::pair<uint64_t, std::string>> renamed;
     std::vector<std::pair<uint64_t, uint32_t>> moved;
@@ -6195,12 +6198,17 @@ class DaemonDirectorySource final: public contour::window::IWorkspaceDirectorySo
         auto directory = WorkspaceDirectory {};
         directory.workspaces = { build, other };
         directory.selected = 10;
-        return directory;
+        return replaced.value_or(directory);
     }
-    contour::window::SelectResult select(uint64_t /*workspace*/) override
+    contour::window::SelectResult select(uint64_t workspace) override
     {
+        selected.push_back(workspace);
         return contour::window::SelectResult::Requested;
     }
+
+    /// What the daemon lists instead, once a test changed it.
+    std::optional<contour::window::WorkspaceDirectory> replaced;
+    std::vector<uint64_t> selected; ///< Every workspace asked to be shown.
 };
 
 class DaemonDirectoryBinding final: public contour::session::WindowBinding
@@ -6319,7 +6327,12 @@ TEST_CASE("TerminalSessionManager: an in-process window's sidebar reaches the wo
         f.controller().beginSidebarDrag(sidebarRowOf(sidebar, SidebarRowKind::Workspace, f.second.value));
     REQUIRE_FALSE(workspaceDrag.isEmpty());
     sidebar.drop(sidebarRowOf(sidebar, SidebarRowKind::Workspace, f.first.value), 0.1, workspaceDrag);
+    // A drop is handled inside the OS drag's loop: the rows must not change under it, so the move waits for
+    // the drag to end, and is made from the event loop after.
+    CHECK(f.listed() == std::vector { f.first.value, f.second.value });
     std::ignore = f.manager().endNodeDrag(&f.controller());
+    CHECK(f.listed() == std::vector { f.first.value, f.second.value });
+    drainPosted();
     CHECK(f.listed() == std::vector { f.second.value, f.first.value });
 
     // The shown workspace (the first) moves up again through its action.
@@ -6335,7 +6348,9 @@ TEST_CASE("TerminalSessionManager: an in-process window's sidebar reaches the wo
         sidebarRowOf(sidebar, SidebarRowKind::Tab, f.first.value, firstTabs[1]));
     REQUIRE_FALSE(tabDrag.isEmpty());
     sidebar.drop(sidebarRowOf(sidebar, SidebarRowKind::Tab, f.second.value, secondTab.value), 0.1, tabDrag);
+    CHECK(model.workspace(f.second)->tabCount() == 1);
     std::ignore = f.manager().endNodeDrag(&f.controller());
+    drainPosted();
     REQUIRE(model.workspace(f.second)->tabCount() == 2);
     CHECK(model.workspace(f.second)->tabAt(0)->id().value == firstTabs[1]);
     CHECK(model.workspace(f.first)->tabCount() == 1);
@@ -6391,7 +6406,9 @@ TEST_CASE("TerminalSessionManager: a daemon window's sidebar routes the workspac
         window.controller->beginSidebarDrag(sidebarRowOf(sidebar, SidebarRowKind::Workspace, 20));
     REQUIRE_FALSE(workspaceDrag.isEmpty());
     sidebar.drop(sidebarRowOf(sidebar, SidebarRowKind::Workspace, 10), 0.1, workspaceDrag);
+    CHECK(factory.moved.empty());
     std::ignore = manager.endNodeDrag(window.controller);
+    drainPosted();
     REQUIRE(factory.moved.size() == 1);
     CHECK(factory.moved[0] == std::pair<uint64_t, uint32_t> { 20, 1 });
 
@@ -6400,7 +6417,9 @@ TEST_CASE("TerminalSessionManager: a daemon window's sidebar routes the workspac
         window.controller->beginSidebarDrag(sidebarRowOf(sidebar, SidebarRowKind::Tab, 10, 101));
     REQUIRE_FALSE(tabDrag.isEmpty());
     sidebar.drop(sidebarRowOf(sidebar, SidebarRowKind::Tab, 20, 200), 0.9, tabDrag);
+    CHECK(factory.tabMoves.empty());
     std::ignore = manager.endNodeDrag(window.controller);
+    drainPosted();
     REQUIRE(factory.tabMoves.size() == 1);
     CHECK(factory.tabMoves[0].sourceSessions == std::vector<uint64_t> { 1001 });
     CHECK(factory.tabMoves[0].targetSession == 2000);
@@ -6415,6 +6434,421 @@ TEST_CASE("TerminalSessionManager: a daemon window's sidebar routes the workspac
     CHECK(asked.first().at(0).toULongLong() == 10);
     window.controller->confirmCloseWorkspace(10);
     CHECK(factory.closed == std::vector<uint64_t> { 10 });
+
+    manager.releaseBinding(binding);
+}
+// }}}
+
+// {{{ the sidebar's moves of panes and tabs
+TEST_CASE(
+    "TerminalSessionManager: an in-process window moves a pane into a tab, a workspace and one of its own",
+    "[manager][workspace][sidebar]")
+{
+    using contour::window::AppendTab;
+    using contour::window::IntoNewWorkspace;
+    using contour::window::JoinTab;
+    using contour::window::MoveTab;
+    auto f = TwoWorkspaces {};
+    auto& manager = f.manager();
+    auto const& model = manager.model();
+    manager.splitActivePane(false, f.controller().activeSession());
+    drainPosted();
+    auto const* const split = model.workspace(f.first)->activeTab();
+    REQUIRE(split->paneCount() == 2);
+    auto const splitId = split->id();
+    auto const moving = manager.paneKeyOf(split->activePane()->session());
+    auto const other = model.workspace(f.second)->tabAt(0)->id();
+
+    // Into another workspace's tab, as a split beside its active pane.
+    manager.moveSidebarNode(
+        f.controller(), moving, JoinTab { .tab = { .workspace = f.second.value, .tab = other.value } });
+    CHECK(model.findTab(splitId)->paneCount() == 1);
+    CHECK(model.findTab(other)->paneCount() == 2);
+
+    // Into a workspace as a tab of its own, at its end: the end is clamped to what the model takes.
+    manager.moveSidebarNode(
+        f.controller(), moving, MoveTab { .toWorkspace = f.first.value, .toPosition = AppendTab });
+    REQUIRE(model.workspace(f.first)->tabCount() == 3);
+    CHECK(model.findTab(other)->paneCount() == 1);
+    CHECK(model.workspace(f.first)->tabAt(2)->paneCount() == 1);
+
+    // Into a workspace of its own, which the window then shows.
+    auto const owned = f.controller().ownedWorkspaces().size();
+    manager.moveSidebarNode(f.controller(), moving, IntoNewWorkspace {});
+    REQUIRE(f.controller().ownedWorkspaces().size() == owned + 1);
+    auto const made = f.controller().displayedWorkspace();
+    CHECK(made != f.first);
+    CHECK(made != f.second);
+    CHECK(model.workspace(made)->tabCount() == 1);
+    CHECK(model.workspace(f.first)->tabCount() == 2);
+
+    // What is all of its workspace already gets no new one: nothing changes, and nothing is said.
+    manager.moveSidebarNode(f.controller(), moving, IntoNewWorkspace {});
+    CHECK(f.controller().ownedWorkspaces().size() == owned + 1);
+    CHECK(f.controller().displayedWorkspace() == made);
+    CHECK_FALSE(f.controller().notices().toastShown());
+
+    // A join into a tab that is gone is refused, and the user is told why.
+    manager.moveSidebarNode(
+        f.controller(), moving, JoinTab { .tab = { .workspace = f.first.value, .tab = 987654 } });
+    CHECK(model.workspace(made)->tabCount() == 1);
+    REQUIRE(f.controller().notices().toastShown());
+    CHECK(f.controller().notices().toastText().contains(
+        QString::fromUtf8(contour::window::MoveStaleText.data(),
+                          static_cast<qsizetype>(contour::window::MoveStaleText.size()))));
+    f.controller().notices().clear(contour::window::NoticeKind::DropRefused);
+
+    // A tab closed before its deferred move ran gets no workspace: none is made, only to be dropped again.
+    auto const ids = model.idState().nextWorkspace;
+    manager.moveSidebarNode(f.controller(),
+                            contour::window::TabRef { .workspace = f.first.value, .tab = 987654 },
+                            IntoNewWorkspace {});
+    CHECK(model.idState().nextWorkspace == ids);
+    CHECK(f.controller().ownedWorkspaces().size() == owned + 1);
+    CHECK(f.controller().displayedWorkspace() == made);
+    CHECK(f.controller().notices().toastShown());
+}
+
+TEST_CASE("TerminalSessionManager: the move actions move the active pane", "[manager][workspace][sidebar]")
+{
+    namespace actions = contour::actions;
+    auto f = TwoWorkspaces {};
+    auto& manager = f.manager();
+    auto const& model = manager.model();
+    auto const tabsOfFirst = [&] {
+        return model.workspace(f.first)->tabCount();
+    };
+    REQUIRE(tabsOfFirst() == 2);
+    manager.splitActivePane(false, f.controller().activeSession());
+    drainPosted();
+    auto const splitId = model.workspace(f.first)->activeTab()->id();
+
+    // MoveToNewTab: the split's active pane becomes a tab of its own, at the end of its workspace.
+    REQUIRE(f.controller().activeSession()->executeAction(actions::Action { actions::MoveToNewTab {} }));
+    CHECK(tabsOfFirst() == 3);
+    CHECK(model.findTab(splitId)->paneCount() == 1);
+    // ...and a pane that is its tab's only one (the moved pane, now active) is a tab already.
+    REQUIRE(model.workspace(f.first)->activeTab()->paneCount() == 1);
+    std::ignore = f.controller().activeSession()->executeAction(actions::Action { actions::MoveToNewTab {} });
+    CHECK(tabsOfFirst() == 3);
+
+    // MoveToTab names the tab by its places, counted from 1: the second workspace's first tab.
+    auto const target = model.workspace(f.second)->tabAt(0)->id();
+    REQUIRE(f.controller().activeSession()->executeAction(
+        actions::Action { actions::MoveToTab { .workspace = 2, .tab = 1 } }));
+    CHECK(model.findTab(target)->paneCount() == 2);
+    CHECK(tabsOfFirst() == 2);
+
+    // MoveToNewWorkspace: the window shows the workspace made for it.
+    manager.selectWorkspace(f.controller().windowId(), 0);
+    auto const before = f.controller().ownedWorkspaces().size();
+    REQUIRE(
+        f.controller().activeSession()->executeAction(actions::Action { actions::MoveToNewWorkspace {} }));
+    CHECK(f.controller().ownedWorkspaces().size() == before + 1);
+    CHECK(f.controller().displayedWorkspace() != f.first);
+}
+
+TEST_CASE("TerminalSessionManager: a daemon window's sidebar moves name the daemon's sessions",
+          "[manager][workspace][sidebar]")
+{
+    using contour::window::AppendTab;
+    using contour::window::IntoNewWorkspace;
+    using contour::window::JoinTab;
+    using contour::window::MoveTab;
+    using contour::window::PaneKey;
+    using contour::window::TabRef;
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = RoutingFactory {};
+    auto binding = DaemonDirectoryBinding { factory };
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, binding);
+    auto& controller = *window.controller;
+
+    // A pane joins a tab: named by its own session and by the target tab's first pane.
+    manager.moveSidebarNode(
+        controller, PaneKey { 1001 }, JoinTab { .tab = TabRef { .workspace = 20, .tab = 200 } });
+    REQUIRE(factory.tabMoves.size() == 1);
+    CHECK(factory.tabMoves[0].source == vtworkspace::MoveSourceKind::Pane);
+    CHECK(factory.tabMoves[0].sourceSessions == std::vector<uint64_t> { 1001 });
+    CHECK(factory.tabMoves[0].target == vtworkspace::MoveTargetKind::Tab);
+    CHECK(factory.tabMoves[0].targetSession == 2000);
+    CHECK(factory.tabMoves[0].side == vtworkspace::JoinTabSide);
+
+    // A tab joins a tab: named by every session of it.
+    manager.moveSidebarNode(controller,
+                            TabRef { .workspace = 10, .tab = 100 },
+                            JoinTab { .tab = TabRef { .workspace = 20, .tab = 200 } });
+    REQUIRE(factory.tabMoves.size() == 2);
+    CHECK(factory.tabMoves[1].source == vtworkspace::MoveSourceKind::Tab);
+    CHECK(factory.tabMoves[1].sourceSessions == std::vector<uint64_t> { 1000 });
+
+    // A pane into a workspace's tab well: named by a session the workspace holds, at the place asked for,
+    // the end clamped.
+    manager.moveSidebarNode(controller, PaneKey { 1000 }, MoveTab { .toWorkspace = 20, .toPosition = 0 });
+    manager.moveSidebarNode(
+        controller, PaneKey { 1000 }, MoveTab { .toWorkspace = 20, .toPosition = AppendTab });
+    REQUIRE(factory.tabMoves.size() == 4);
+    CHECK(factory.tabMoves[2].target == vtworkspace::MoveTargetKind::TabWell);
+    CHECK(factory.tabMoves[2].targetSession == 2000);
+    CHECK(factory.tabMoves[2].index == 0);
+    CHECK(factory.tabMoves[3].index == std::numeric_limits<int>::max());
+
+    // What the directory does not list is not asked about, and the user is told the move was not made.
+    manager.moveSidebarNode(
+        controller, PaneKey { 1000 }, JoinTab { .tab = TabRef { .workspace = 20, .tab = 999 } });
+    manager.moveSidebarNode(controller, PaneKey { 1000 }, MoveTab { .toWorkspace = 999, .toPosition = 0 });
+    manager.moveSidebarNode(controller,
+                            TabRef { .workspace = 10, .tab = 999 },
+                            JoinTab { .tab = TabRef { .workspace = 20, .tab = 200 } });
+    // A pane that ended before its deferred move ran.
+    manager.moveSidebarNode(
+        controller, PaneKey { 9999 }, JoinTab { .tab = TabRef { .workspace = 20, .tab = 200 } });
+    CHECK(factory.tabMoves.size() == 4);
+    REQUIRE(controller.notices().toastShown());
+    CHECK(controller.notices().toastText().contains(
+        QString::fromUtf8(contour::window::MoveStaleText.data(),
+                          static_cast<qsizetype>(contour::window::MoveStaleText.size()))));
+    controller.notices().clear(contour::window::NoticeKind::DropRefused);
+
+    // A pane into a new workspace: the daemon makes it, and the window follows it there once it is listed.
+    manager.moveSidebarNode(controller, PaneKey { 1001 }, IntoNewWorkspace {});
+    REQUIRE(factory.tabMoves.size() == 5);
+    CHECK(factory.tabMoves[4].target == vtworkspace::MoveTargetKind::NewWorkspace);
+    CHECK(controller.followPending());
+    // A push that lists nothing new is not it.
+    manager.notifyWorkspaceDirectoryChanged(binding);
+    CHECK(controller.followPending());
+    CHECK(binding.source.selected.empty());
+    auto moved = binding.source.directory();
+    moved.workspaces[0].tabs.pop_back();
+    auto made = contour::window::DirectoryWorkspace {};
+    made.id = 30;
+    made.tabs.emplace_back().id = 300;
+    made.tabs.back().panes.emplace_back().key = PaneKey { 1001 };
+    moved.workspaces.push_back(made);
+    binding.source.replaced = moved;
+    manager.notifyWorkspaceDirectoryChanged(binding);
+    CHECK_FALSE(controller.followPending());
+    CHECK(binding.source.selected == std::vector<uint64_t> { 30 });
+
+    // A move the daemon refuses is said, in this window.
+    factory.moveRouting = contour::session::RemoteRouting::Refused;
+    manager.moveSidebarNode(controller, PaneKey { 1000 }, IntoNewWorkspace {});
+    CHECK_FALSE(controller.followPending());
+    REQUIRE(controller.notices().toastShown());
+    CHECK(controller.notices().toastText().contains(QStringLiteral("Not moved")));
+
+    manager.releaseBinding(binding);
+}
+
+TEST_CASE(
+    "TerminalSessionManager: a join and a new workspace dropped in the sidebar wait for the drag to end",
+    "[manager][workspace][sidebar]")
+{
+    using contour::window::SidebarRowKind;
+    auto f = TwoWorkspaces {};
+    auto& manager = f.manager();
+    auto const& model = manager.model();
+    auto& sidebar = f.controller().sidebar();
+    auto const moving = model.workspace(f.first)->tabAt(1)->id();
+    auto const other = model.workspace(f.second)->tabAt(0)->id();
+    sidebar.refreshNow();
+    auto const drag = f.controller().beginSidebarDrag(
+        sidebarRowOf(sidebar, SidebarRowKind::Tab, f.first.value, moving.value));
+    REQUIRE_FALSE(drag.isEmpty());
+
+    SECTION("a tab joins another workspace's tab")
+    {
+        sidebar.drop(sidebarRowOf(sidebar, SidebarRowKind::Tab, f.second.value, other.value), 0.5, drag);
+        // Handled inside the OS drag's loop, which turns the event loop: nothing moves there.
+        drainPosted();
+        CHECK(model.findTab(other)->paneCount() == 1);
+        CHECK(model.workspace(f.first)->tabCount() == 2);
+        std::ignore = manager.endNodeDrag(&f.controller());
+        drainPosted();
+        CHECK(model.findTab(other)->paneCount() == 2);
+        CHECK(model.workspace(f.first)->tabCount() == 1);
+    }
+    SECTION("a tab gets a workspace of its own")
+    {
+        auto const owned = f.controller().ownedWorkspaces().size();
+        REQUIRE(sidebar.takesNewWorkspaceDrop(drag));
+        sidebar.dropOnNewWorkspace(drag);
+        drainPosted();
+        CHECK(f.controller().ownedWorkspaces().size() == owned);
+        CHECK(model.workspace(f.first)->tabCount() == 2);
+        std::ignore = manager.endNodeDrag(&f.controller());
+        drainPosted();
+        CHECK(f.controller().ownedWorkspaces().size() == owned + 1);
+        CHECK(model.workspace(f.first)->tabCount() == 1);
+        CHECK(model.workspace(f.controller().displayedWorkspace())->tabAt(0)->id() == moving);
+    }
+}
+
+TEST_CASE("TerminalSessionManager: a workspace's drag is refused everywhere but the sidebar",
+          "[manager][workspace][sidebar]")
+{
+    auto f = TwoWorkspaces {};
+    auto& manager = f.manager();
+    auto const workspace = manager.resolveNodeDrag(
+        contour::window::NodeDrag { .payload = contour::window::DropPayload::Workspace,
+                                    .host = manager.hostIdentity(f.first),
+                                    .window = f.first,
+                                    .tabIndex = 0,
+                                    .workspace = f.second.value,
+                                    .sessions = {} });
+    CHECK_FALSE(workspace.tab.has_value());
+    for (auto const& verdict: workspace.places)
+        CHECK(verdict.route == contour::window::MoveRoute::Refused);
+    // A pane's drag of the same window is taken beside a pane, so the refusal is the workspace's alone.
+    auto const* const session = f.controller().activeSession();
+    REQUIRE(session != nullptr);
+    auto const pane = manager.paneDragOf(*session);
+    REQUIRE(pane.has_value());
+    CHECK(manager.resolveNodeDrag(*pane).at(contour::window::MovePlace::Edge).route
+          != contour::window::MoveRoute::Refused);
+}
+
+TEST_CASE("TerminalSessionManager: a drop on a workspace the daemon stopped listing is said",
+          "[manager][workspace][sidebar]")
+{
+    using contour::window::SidebarRowKind;
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = RoutingFactory {};
+    auto binding = DaemonDirectoryBinding { factory };
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, binding);
+    auto& controller = *window.controller;
+    auto& sidebar = controller.sidebar();
+    sidebar.refreshNow();
+    auto const drag = controller.beginSidebarDrag(sidebarRowOf(sidebar, SidebarRowKind::Tab, 10, 101));
+    REQUIRE_FALSE(drag.isEmpty());
+    auto const row = sidebarRowOf(sidebar, SidebarRowKind::Workspace, 20);
+
+    // The daemon's next push no longer lists workspace 20; the rows the drop lands on still do.
+    auto lost = binding.source.directory();
+    lost.workspaces.pop_back();
+    binding.source.replaced = lost;
+    sidebar.drop(row, 0.5, drag);
+    std::ignore = manager.endNodeDrag(&controller);
+    drainPosted();
+
+    CHECK(factory.tabMoves.empty());
+    REQUIRE(controller.notices().toastShown());
+    CHECK(controller.notices().toastText().contains(
+        QString::fromUtf8(contour::window::MoveStaleText.data(),
+                          static_cast<qsizetype>(contour::window::MoveStaleText.size()))));
+
+    manager.releaseBinding(binding);
+}
+
+TEST_CASE("TerminalSessionManager: the user's own navigation gives up a pending follow",
+          "[manager][workspace][sidebar]")
+{
+    using contour::window::IntoNewWorkspace;
+    using contour::window::PaneKey;
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = RoutingFactory {};
+    auto binding = DaemonDirectoryBinding { factory };
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, binding);
+    auto& controller = *window.controller;
+
+    // The workspace a pane moves into, as the daemon's next push lists it.
+    auto moved = binding.source.directory();
+    moved.workspaces[0].tabs.pop_back();
+    auto made = contour::window::DirectoryWorkspace {};
+    made.id = 30;
+    made.tabs.emplace_back().id = 300;
+    made.tabs.back().panes.emplace_back().key = PaneKey { 1001 };
+    moved.workspaces.push_back(made);
+
+    SECTION("a workspace the user picks")
+    {
+        manager.moveSidebarNode(controller, PaneKey { 1001 }, IntoNewWorkspace {});
+        REQUIRE(controller.followPending());
+        controller.showWorkspace(20);
+        CHECK_FALSE(controller.followPending());
+        CHECK(binding.source.selected == std::vector<uint64_t> { 20 });
+        // The push that lists the new workspace no longer pulls the window there.
+        binding.source.replaced = moved;
+        manager.notifyWorkspaceDirectoryChanged(binding);
+        CHECK(binding.source.selected == std::vector<uint64_t> { 20 });
+    }
+    SECTION("another source of workspaces")
+    {
+        manager.moveSidebarNode(controller, PaneKey { 1001 }, IntoNewWorkspace {});
+        REQUIRE(controller.followPending());
+        auto other = DaemonDirectorySource {};
+        controller.setDirectorySource(&other);
+        CHECK_FALSE(controller.followPending());
+        controller.setDirectorySource(&binding.source);
+        binding.source.replaced = moved;
+        manager.notifyWorkspaceDirectoryChanged(binding);
+        CHECK(binding.source.selected.empty());
+    }
+
+    manager.releaseBinding(binding);
+}
+
+TEST_CASE("TerminalSessionManager: a tmux window's sidebar moves nothing into or out of its layout",
+          "[manager][workspace][sidebar]")
+{
+    using contour::window::IntoNewWorkspace;
+    using contour::window::JoinTab;
+    using contour::window::MoveTab;
+    using contour::window::SidebarRowKind;
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto tmux = contour::test::MockPtySessionFactory {};
+    tmux.reportedHostKind = contour::session::SessionHostKind::Tmux;
+    auto binding = contour::session::FactoryBinding { tmux };
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, binding);
+    auto& controller = *window.controller;
+    REQUIRE(manager.hostMovesOf(controller) == contour::window::HostMoves::Nothing);
+    auto const made = contour::test::createSessionTabs(manager, controller, 2);
+    manager.splitActivePane(false, controller.activeSession());
+    drainPosted();
+    auto const& model = manager.model();
+    auto const workspace = controller.displayedWorkspace();
+    REQUIRE(model.findTab(made.tabs[1])->paneCount() == 2);
+    auto const pane = manager.paneKeyOf(model.findTab(made.tabs[1])->activePane()->session());
+    auto const owned = controller.ownedWorkspaces().size();
+
+    // Neither a join, nor a tab of its own, nor a workspace of its own: tmux's layout would not follow.
+    manager.moveSidebarNode(
+        controller, pane, JoinTab { .tab = { .workspace = workspace.value, .tab = made.tabs[0].value } });
+    manager.moveSidebarNode(controller, pane, MoveTab { .toWorkspace = workspace.value, .toPosition = 0 });
+    manager.moveSidebarNode(controller, pane, IntoNewWorkspace {});
+    manager.moveTabToWorkspace(controller, made.tabs[0].value, workspace.value, 1);
+    CHECK(model.findTab(made.tabs[0])->paneCount() == 1);
+    CHECK(model.findTab(made.tabs[1])->paneCount() == 2);
+    CHECK(model.workspace(workspace)->tabCount() == 2);
+    CHECK(model.workspace(workspace)->tabAt(0)->id() == made.tabs[0]);
+    CHECK(controller.ownedWorkspaces().size() == owned);
+    REQUIRE(controller.notices().toastShown());
+    auto const tmuxText = contour::window::refusalTextOf(contour::window::MoveRefusal::Tmux);
+    CHECK(controller.notices().toastText().contains(
+        QString::fromUtf8(tmuxText.data(), static_cast<qsizetype>(tmuxText.size()))));
+
+    // The sidebar refuses the drop up front, so the drag shows the refusal.
+    auto& sidebar = controller.sidebar();
+    sidebar.refreshNow();
+    auto const paneDrag = controller.beginSidebarDrag(sidebar.rowIndexOf({ .kind = SidebarRowKind::Pane,
+                                                                           .workspace = workspace.value,
+                                                                           .tab = made.tabs[1].value,
+                                                                           .pane = pane }));
+    REQUIRE_FALSE(paneDrag.isEmpty());
+    auto const tabRow = sidebar.rowIndexOf(
+        { .kind = SidebarRowKind::Tab, .workspace = workspace.value, .tab = made.tabs[0].value, .pane = {} });
+    CHECK(sidebar.dropIndicator(tabRow, 0.5, paneDrag)
+          == std::to_underlying(contour::window::DropIndicator::Refused));
+    CHECK_FALSE(sidebar.takesNewWorkspaceDrop(paneDrag));
+    std::ignore = manager.endNodeDrag(&controller);
 
     manager.releaseBinding(binding);
 }

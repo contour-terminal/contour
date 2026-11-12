@@ -233,6 +233,9 @@ struct MoveWorkspaceDown{};   // move the current workspace one place down in th
 struct CloseWorkspace{};      // close the current workspace, asking first
 struct GoToPane{};            // show the pane a sidebar row names and focus it
 struct MoveTabToWorkspace{ uint32_t index = 0; }; // move the current tab into the Nth (1-based) workspace
+struct MoveToTab{ uint32_t workspace = 0; uint32_t tab = 0; }; // join the current pane into a tab, by 1-based places
+struct MoveToNewTab{};        // move the current pane into a tab of its own, at the end of its workspace
+struct MoveToNewWorkspace{};  // move the current pane into a workspace of its own
 // clang-format on
 
 /// The variant of every action alternative, listed once; Action is a class over it.
@@ -378,6 +381,9 @@ using ActionVariant = std::variant<CancelSelection,
                                    CloseWorkspace,
                                    GoToPane,
                                    MoveTabToWorkspace,
+                                   MoveToTab,
+                                   MoveToNewTab,
+                                   MoveToNewWorkspace,
                                    SwitchToWorkspace,
                                    OpenWorkspace,
                                    CycleWorkspace,
@@ -537,6 +543,9 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     MoveWorkspaceUp,
                                                     MoveWorkspaceDown,
                                                     MoveTabToWorkspace,
+                                                    MoveToTab,
+                                                    MoveToNewTab,
+                                                    MoveToNewWorkspace,
                                                     ToggleSidebar,
                                                     FilterWorkspaces,
                                                     JumpToNextAttention,
@@ -626,6 +635,7 @@ concept ParameterizedActionConcept = core::oneOf<T,
                                                  SwitchToWorkspace,
                                                  OpenWorkspace,
                                                  MoveTabToWorkspace,
+                                                 MoveToTab,
                                                  GoToPane,
                                                  SwitchToDaemon,
                                                  OpenDaemon,
@@ -896,6 +906,16 @@ namespace documentation
     constexpr inline std::string_view GoToPane { "Shows the pane a sidebar row names and focuses it." };
     constexpr inline std::string_view MoveTabToWorkspace {
         "Moves the current tab into the workspace at the 1-based position `index` of this window's list."
+    };
+    constexpr inline std::string_view MoveToTab {
+        "Moves the current pane into another tab, as a split beside its active pane: the tab at the 1-based "
+        "position `tab` of the workspace at the 1-based position `workspace` of this window's list."
+    };
+    constexpr inline std::string_view MoveToNewTab {
+        "Moves the current pane into a tab of its own, at the end of its workspace."
+    };
+    constexpr inline std::string_view MoveToNewWorkspace {
+        "Moves the current pane into a workspace of its own, named as a new workspace is."
     };
     constexpr inline std::string_view SetTabBarVisibility {
         "Sets when this window's tab bar is shown (mode: always, never or multiple). Applies to this "

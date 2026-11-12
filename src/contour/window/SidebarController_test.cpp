@@ -525,3 +525,145 @@ TEST_CASE("a sidebar menu's Close Tab… asks first and closes the row it was op
     CHECK_FALSE(closedSession(1));
     CHECK_FALSE(closedSession(2));
 }
+
+namespace
+{
+/// The model row of pane @p pane among @p window's sidebar rows.
+[[nodiscard]] int paneRowOf(contour::window::WindowController& window, PaneKey pane)
+{
+    window.sidebar().refreshNow();
+    auto const& rows = window.sidebar().rows();
+    auto const at = std::ranges::find_if(
+        rows, [&](auto const& row) { return row.key.kind == SidebarRowKind::Pane && row.key.pane == pane; });
+    REQUIRE(at != rows.end());
+    return static_cast<int>(std::distance(rows.begin(), at));
+}
+
+/// The model row of workspace @p workspace among @p window's sidebar rows.
+[[nodiscard]] int workspaceRowOf(contour::window::WindowController& window, uint64_t workspace)
+{
+    window.sidebar().refreshNow();
+    auto const& rows = window.sidebar().rows();
+    auto const at = std::ranges::find_if(rows, [&](auto const& row) {
+        return row.key.kind == SidebarRowKind::Workspace && row.key.workspace == workspace;
+    });
+    REQUIRE(at != rows.end());
+    return static_cast<int>(std::distance(rows.begin(), at));
+}
+
+/// @return The row titled @p title in @p rows, searching submenus too; an empty map for none.
+[[nodiscard]] QVariantMap menuRowOf(QVariantList const& rows, QString const& title)
+{
+    for (auto const& value: rows)
+    {
+        auto row = value.toMap();
+        if (row["title"].toString() == title)
+            return row;
+        if (auto nested = menuRowOf(row["children"].toList(), title); !nested.isEmpty())
+            return nested;
+    }
+    return {};
+}
+
+/// @return The action ids of the command rows of submenu @p title, in order.
+[[nodiscard]] std::vector<int> submenuActionsOf(QVariantList const& rows, QString const& title)
+{
+    auto ids = std::vector<int> {};
+    for (auto const& child: menuRowOf(rows, title)["children"].toList())
+        if (auto const row = child.toMap(); row["kind"].toString() == "command")
+            ids.push_back(row["actionId"].toInt());
+    return ids;
+}
+} // namespace
+
+TEST_CASE("a sidebar pane menu moves its pane into the tab it offered, though the tabs moved meanwhile",
+          "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    auto const made = contour::test::createSessionTabs(manager, *window, 3);
+    manager.splitActivePane(false, window->activeSession());
+    auto const& model = manager.model();
+    REQUIRE(model.findTab(made.tabs[2])->paneCount() == 2);
+    auto const pane = manager.paneKeyOf(model.findTab(made.tabs[2])->activePane()->session());
+
+    window->sidebar().openContextMenu(paneRowOf(*window, pane), QPointF { 3, 4 });
+    // Its tab has another pane, so both moves out of it are offered.
+    CHECK(menuRowOf(window->sidebarContextMenuModel(), "Move to New Tab")["enabled"].toBool());
+    CHECK(menuRowOf(window->sidebarContextMenuModel(), "Move to New Workspace")["enabled"].toBool());
+    // The tabs it can join: the first and the second, its own excluded.
+    auto const joins = submenuActionsOf(window->sidebarContextMenuModel(), "Move to Tab");
+    REQUIRE(joins.size() == 2);
+
+    // The first tab moves to the end while the menu is open: the row offered for the second tab still means
+    // the second, where its places now name the pane's own tab.
+    manager.moveTab(window->displayedWorkspace(), 0, 2);
+    window->triggerSidebarContextMenuAction(joins[1]);
+    CHECK(model.findTab(made.tabs[1])->paneCount() == 2);
+    CHECK(model.findTab(made.tabs[2])->paneCount() == 1);
+}
+
+TEST_CASE("a sidebar pane menu moves its pane to a new tab and to a new workspace",
+          "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    auto const made = contour::test::createSessionTabs(manager, *window, 2);
+    manager.splitActivePane(false, window->activeSession());
+    auto const& model = manager.model();
+    auto const workspace = window->displayedWorkspace();
+    REQUIRE(model.findTab(made.tabs[1])->paneCount() == 2);
+    auto const pane = manager.paneKeyOf(model.findTab(made.tabs[1])->activePane()->session());
+
+    window->sidebar().openContextMenu(paneRowOf(*window, pane), QPointF { 3, 4 });
+    auto const newTab = actionIdOf(window->sidebarContextMenuModel(), "Move to New Tab");
+    REQUIRE(newTab.has_value());
+    window->triggerSidebarContextMenuAction(*newTab);
+    CHECK(model.workspace(workspace)->tabCount() == 3);
+    CHECK(model.findTab(made.tabs[1])->paneCount() == 1);
+    // Its tab of its own lists no pane row any more: the move back into a split comes from the drag.
+    manager.moveSidebarNode(
+        *window,
+        pane,
+        contour::window::JoinTab { .tab = { .workspace = workspace.value, .tab = made.tabs[1].value } });
+    REQUIRE(model.findTab(made.tabs[1])->paneCount() == 2);
+    CHECK(model.workspace(workspace)->tabCount() == 2);
+
+    window->sidebar().openContextMenu(paneRowOf(*window, pane), QPointF { 3, 4 });
+    auto const newWorkspace = actionIdOf(window->sidebarContextMenuModel(), "Move to New Workspace");
+    REQUIRE(newWorkspace.has_value());
+    window->triggerSidebarContextMenuAction(*newWorkspace);
+    CHECK(window->displayedWorkspace() != workspace);
+    CHECK(model.workspace(workspace)->tabCount() == 2);
+    CHECK(model.findTab(made.tabs[1])->paneCount() == 1);
+    CHECK(window->ownedWorkspaces().size() == 2);
+}
+
+TEST_CASE("a one-tab workspace's menu merges its tab into another tab", "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    auto const first = contour::test::createSessionTabs(manager, *window, 2);
+    auto const firstWorkspace = window->displayedWorkspace();
+    auto const second = manager.createWorkspaceIn(window->windowId());
+    manager.selectWorkspace(window->windowId(), 1);
+    auto const lone = contour::test::createSessionTabs(manager, *window, 1);
+    manager.selectWorkspace(window->windowId(), 0);
+    auto const& model = manager.model();
+
+    window->sidebar().openContextMenu(workspaceRowOf(*window, second.value), QPointF { 3, 4 });
+    auto const merges = submenuActionsOf(window->sidebarContextMenuModel(), "Merge into Tab");
+    REQUIRE(merges.size() == 2);
+    window->triggerSidebarContextMenuAction(merges[0]);
+    // Its tab joined the first workspace's first tab; the workspace it emptied is gone.
+    CHECK(model.findTab(first.tabs[0])->paneCount() == 2);
+    CHECK(model.findTab(lone.tabs[0]) == nullptr);
+    CHECK(window->ownedWorkspaces().size() == 1);
+    CHECK(window->displayedWorkspace() == firstWorkspace);
+}

@@ -128,27 +128,47 @@ filter is only a view: it never changes what a drag or a rename acts on.
   label is shared: every window of the daemon and every `workspace.labelChanged` subscriber of the
   [control API](control-api.md) hears it.
 - **Right-click** for the row's menu:
-    - a workspace: Rename…, Mark Seen, New Tab Here, Move Up, Move Down, Close Workspace…
-      (the last workspace of an in-process window cannot be closed);
-    - a tab: the tab strip's menu (its close row reads Close Tab…), plus **Move to Workspace**;
-    - a pane: Go to Pane, Mark Seen, Close Pane….
+    - a workspace: Rename…, Mark Seen, New Tab Here, Move Up, Move Down, **Merge into Tab** (a workspace of
+      one tab only), Close Workspace… (the last workspace of an in-process window cannot be closed);
+    - a tab: the tab strip's menu (its close row reads Close Tab…), plus **Move to Workspace**, **Merge into
+      Tab** and **Move to New Workspace**;
+    - a pane: Go to Pane, Mark Seen, **Move to Tab**, **Move to New Tab**, **Move to New Workspace**, Close
+      Pane….
 
-  Mark Seen, Rename…, Move Up, Move Down and Move to Workspace act on the row the menu was opened on and
+  Move to Tab and Merge into Tab list every other tab, under the name of its workspace; the pane, or the
+  tab's panes, join that tab as splits, as a drop on its row does. Move to New Workspace makes a workspace
+  named as any new one is, which an in-process window then shows. Move to New Workspace is greyed out for a workspace's
+  only tab, which already is a workspace of its own.
+
+  Mark Seen, Rename…, Move Up, Move Down and the Move and Merge rows act on the row the menu was opened on and
   leave the window where it is. The rest (Go to Pane, New Tab Here and the tab strip's own commands) act on
   what the window shows, so the window shows that row first.
 
   The three close rows (Close Workspace…, Close Tab…, Close Pane…) always ask first, in one confirmation
   that names what ends (the tabs and panes, and the running command where known). Cancel is the default
   button and Escape cancels; the answer closes the row the menu was opened on.
-- **Drag** to reorder or move:
+- **Drag** to reorder or move. A row's upper and lower thirds are the gaps beside it, shown as a line where
+  the drop lands; its middle is the row itself, shown highlighted. A drop the row refuses shows the refusal.
     - a workspace onto another workspace row: before it in the upper half, after it in the lower half;
-    - a tab onto a tab row: before or after that tab, in its own workspace or another;
-    - a tab onto a workspace row: to the end of it (the middle of the row), or to the start of it (the lower
-      third), or to the end of the workspace above (the upper third);
-    - a pane is never a drop target or a drop, and what is dropped on a pane row is refused.
+    - a tab or a pane onto a tab row: in the upper or lower third, before or after that tab, as a tab (a
+      pane becomes a tab of its own); in the middle, **into** that tab: the pane, or every pane of the tab,
+      joins it as a split beside its active pane, on the side a drop on a tab of the tab strip takes, and
+      becomes its active pane;
+    - a workspace that holds one tab onto the middle of a tab row: its tab joins that tab, and the emptied
+      workspace closes. A workspace of several tabs is refused there;
+    - a tab or a pane onto a workspace row: to the end of it (the middle of the row), or to the start of it
+      (the lower third), or to the end of the workspace above (the upper third);
+    - a tab or a pane onto the tree's empty area below the last row, or onto a **New Workspace** button: a
+      workspace of its own, named as any new workspace is. A workspace's only tab is refused there, as it
+      already is one;
+    - anything onto a pane row, or onto its own tab's middle, is refused.
+
+  A pane that is its tab's only pane moves as that tab. Its sessions keep running wherever it goes: the
+  shell, its scrollback and its status move with it, and nothing restarts.
 
   Drops resolve to the real positions in the daemon, so a filter or a folded row never moves where a drop
-  lands. Moving the last tab out of a workspace closes that workspace, as its last tab ending does. A window
+  lands. Moving the last pane out of a tab closes that tab, and moving the last tab out of a workspace closes
+  that workspace, as their last pane or tab ending does. A window
   and a daemon keep their last workspace, so that one cannot be closed.
 - **Drag the divider** at the sidebar's right edge to resize it. The width snaps to whole cells on the Terminal
   style, stays within the style's bounds (160 to 480 px, 18 to 60 cells) and is saved when you let go.
