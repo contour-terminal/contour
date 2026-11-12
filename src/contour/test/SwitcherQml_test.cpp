@@ -866,3 +866,33 @@ TEST_CASE("Switcher: a popup reopened while it has the focus stays over its wind
     // Focused itself, the popup is not made its own parent: it keeps the one it has.
     CHECK(window::popupParentFor(&popup, popup) == &terminal);
 }
+
+TEST_CASE("Switcher: the workspace chip's dropdown lists the window's daemon's workspaces alone",
+          "[contour][switcher][qml]")
+{
+    auto fixture = SwitcherFixture {};
+    fixture.switcher->open(window::SwitcherOpening { .window = ThisWindow,
+                                                     .windowDaemon = labelled("default"),
+                                                     .mode = SwitchMode::Switch,
+                                                     .prompt = window::SwitcherPrompt::Browse,
+                                                     .pick = std::nullopt,
+                                                     .scope = window::SwitcherScope::OneDaemon });
+    fixture.window->show();
+    REQUIRE(QTest::qWaitForWindowExposed(fixture.window.get()));
+    REQUIRE(waitUntil([&] { return fixture.titles().contains("3 \"scratch\""); }));
+
+    // No other daemon is looked for or listed: only the window's own, whose workspaces are the whole list.
+    CHECK(fixture.listed == std::vector<std::string> { "default" });
+    CHECK_FALSE(fixture.titles().contains("admin"));
+    CHECK_FALSE(fixture.titles().contains("studio"));
+    CHECK(fixture.switcher->pickTitle() == QStringLiteral("Workspaces on default"));
+    for (auto const& row: fixture.switcher->rows())
+        CHECK(row.kind != window::SwitcherRowKind::Daemon);
+
+    // Return on one switches this window to it.
+    fixture.selectTitled("3 \"scratch\"");
+    QTest::keyClick(fixture.window.get(), Qt::Key_Return);
+    REQUIRE(fixture.requested.size() == 1);
+    CHECK(fixture.requested[0].target == labelled("default", workspaceRef("w3")));
+    CHECK(fixture.requested[0].mode == SwitchMode::Switch);
+}

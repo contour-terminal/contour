@@ -10,8 +10,13 @@
     <qresource prefix="/contour/icons">
         <file alias="lock-symbolic.svg">res/icons/lock-symbolic.svg</file>
         <file alias="edit-find-symbolic.svg">res/icons/edit-find-symbolic.svg</file>
+        <file alias="folder-new-symbolic.svg">res/icons/folder-new-symbolic.svg</file>
         <file alias="open-menu-symbolic.svg">res/icons/open-menu-symbolic.svg</file>
+        <file alias="pan-down-symbolic.svg">res/icons/pan-down-symbolic.svg</file>
+        <file alias="pane-toggle-symbolic.svg">res/icons/pane-toggle-symbolic.svg</file>
+        <file alias="sidebar-show-symbolic.svg">res/icons/sidebar-show-symbolic.svg</file>
         <file alias="tab-new-symbolic.svg">res/icons/tab-new-symbolic.svg</file>
+        <file alias="view-filter-symbolic.svg">res/icons/view-filter-symbolic.svg</file>
         <file alias="window-close-symbolic.svg">res/icons/window-close-symbolic.svg</file>
         <file alias="window-maximize-symbolic.svg">res/icons/window-maximize-symbolic.svg</file>
         <file alias="window-minimize-symbolic.svg">res/icons/window-minimize-symbolic.svg</file>

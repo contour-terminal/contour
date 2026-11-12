@@ -150,6 +150,7 @@ namespace
         ActionCategory { .name = "FocusToolbar", .category = CommandCategory::Window },
         ActionCategory { .name = "ToggleSidebar", .category = CommandCategory::View },
         ActionCategory { .name = "FocusSidebar", .category = CommandCategory::Window },
+        ActionCategory { .name = "FilterWorkspaces", .category = CommandCategory::View },
         ActionCategory { .name = "JumpToNextAttention", .category = CommandCategory::Window },
         ActionCategory { .name = "MarkSeen", .category = CommandCategory::Window },
         ActionCategory { .name = "RenameWorkspace", .category = CommandCategory::Window },

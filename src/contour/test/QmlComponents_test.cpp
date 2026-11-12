@@ -1798,7 +1798,9 @@ TEST_CASE("A TabItem shows its badge and gives it back its width when there is n
     tab->setProperty("tabBadge", static_cast<int>(TabBadgeKind::Output));
     CHECK(glyph->property("text").toString() == QStringLiteral("\u2022"));
     tab->setProperty("tabBadge", static_cast<int>(TabBadgeKind::Error));
-    CHECK(glyph->property("text").toString() == QStringLiteral("\u2715"));
+    // Failed is the red cross-mark emoji on the native rows, a one-cell cross on the Terminal row.
+    auto const failed = glyph->property("text").toString();
+    CHECK((failed == QStringLiteral("\u2715") || failed == QStringLiteral("\u274C")));
 
     tab->setProperty("tabBadge", static_cast<int>(TabBadgeKind::None));
     CHECK_FALSE(badge->isVisible());

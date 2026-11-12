@@ -62,6 +62,7 @@
 #include <contour/window/HotkeyRefusals.hpp>
 #include <contour/window/NewDefaultsNotice.hpp>
 #include <contour/window/NoticeModel.hpp>
+#include <contour/window/PopupAnchor.hpp>
 #include <contour/window/PopupParent.hpp>
 #include <contour/window/PopupShadowImageProvider.hpp>
 #include <contour/window/QtSaveScheduler.hpp>
@@ -70,6 +71,7 @@
 #include <contour/window/SettingsPreview.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
+#include <contour/window/SidebarModel.hpp>
 #include <contour/window/SwitcherController.hpp>
 #include <contour/window/TabBarHitValue.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
@@ -144,6 +146,7 @@
 #include <QtCore/QtPlugin>
 #include <QtDBus/QtDBus>
 #include <QtGui/QCursor>
+#include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
 #include <QtGui/QStyleHints>
@@ -2580,6 +2583,7 @@ window::ChromeInputs ContourGuiApp::chromeInputs() const
     return window::ChromeInputs {
         .row = _chromeStyle,
         .font = window::resolveChromeFont(_config, _chromeStyle, profileName()),
+        .fixedFont = QFontDatabase::systemFont(QFontDatabase::FixedFont),
         .accessibility = accessibilityPreferences(),
         .appearance = window::chromeAppearanceOf(platformAppearance()),
         .scheme = config::chromeSchemeColorsOf(palette ? *palette : vtbackend::ColorPalette {}),
@@ -3344,6 +3348,7 @@ int ContourGuiApp::terminalGuiAction()
     qmlRegisterUncreatableType<window::SettingsPreview>("Contour.Terminal", 1, 0, "SettingsPreview", "Created by the Settings window host.");
     session::registerPermissionQmlTypes();
     window::registerTabBarQmlTypes();
+    window::registerSidebarQmlTypes();
     qRegisterMetaType<session::TerminalSession*>("TerminalSession*");
     qRegisterMetaType<session::PaneProxy*>("PaneProxy*");
     qRegisterMetaType<window::WindowController*>("WindowController*");
@@ -4482,7 +4487,9 @@ void ContourGuiApp::returnFocusTo(FocusReturn const& target)
         controller->focusActiveDisplay();
 }
 
-std::expected<void, std::string> ContourGuiApp::openSwitcher(window::SwitcherOpening opening, QScreen* anchor)
+std::expected<void, std::string> ContourGuiApp::openSwitcher(window::SwitcherOpening opening,
+                                                             QScreen* anchor,
+                                                             std::optional<QRect> control)
 {
     if (!_qmlEngine)
         return std::unexpected(std::string { "there is no window to show the switcher in" });
@@ -4495,6 +4502,7 @@ std::expected<void, std::string> ContourGuiApp::openSwitcher(window::SwitcherOpe
             _switcher.reset();
             return std::unexpected(std::string { "the switcher popup could not be loaded" });
         }
+        _switcherWindowFlags = _switcherWindow->flags();
         // Both a choice and a cancel close it; the choice was handed to the window switcher already.
         connect(_switcher.get(), &window::SwitcherController::finished, this, [this] {
             if (_switcherWindow)
@@ -4513,10 +4521,29 @@ std::expected<void, std::string> ContourGuiApp::openSwitcher(window::SwitcherOpe
     _switcher->open(std::move(opening));
     _switcherWindow->setTransientParent(
         window::popupParentFor(QGuiApplication::focusWindow(), *_switcherWindow));
-    _switcherWindow->setModality(_switcherWindow->transientParent() != nullptr ? Qt::WindowModal
-                                                                               : Qt::NonModal);
     if (anchor != nullptr)
         _switcherWindow->setScreen(anchor);
+    if (control)
+    {
+        // A dropdown: a popup hanging below the control that opened it, which a click elsewhere closes, as a
+        // pop-up button's menu does. Not modal: the popup's own grab already keeps the window's input.
+        _switcherWindow->setFlags(Qt::Popup | Qt::FramelessWindowHint);
+        _switcherWindow->setModality(Qt::NonModal);
+        auto const area = _switcherWindow->screen()->availableGeometry();
+        auto const at = window::popupBelow(
+            { .x = control->x(), .y = control->y(), .width = control->width(), .height = control->height() },
+            _switcherWindow->width(),
+            _switcherWindow->height(),
+            0,
+            { .x = area.x(), .y = area.y(), .width = area.width(), .height = area.height() });
+        _switcherWindow->setPosition(at.x, at.y);
+    }
+    else
+    {
+        _switcherWindow->setFlags(_switcherWindowFlags);
+        _switcherWindow->setModality(_switcherWindow->transientParent() != nullptr ? Qt::WindowModal
+                                                                                   : Qt::NonModal);
+    }
     _switcherWindow->show();
     _switcherWindow->raise();
     _switcherWindow->requestActivate();

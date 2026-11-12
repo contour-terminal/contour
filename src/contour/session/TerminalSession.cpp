@@ -7304,6 +7304,11 @@ bool TerminalSession::operator()(actions::FocusSidebar)
     return onWindowOf(*_manager, *this, &window::WindowController::focusSidebar);
 }
 
+bool TerminalSession::operator()(actions::FilterWorkspaces)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::openSidebarFilter);
+}
+
 bool TerminalSession::operator()(actions::JumpToNextAttention)
 {
     return onWindowOf(*_manager, *this, &window::WindowController::jumpToNextAttention);

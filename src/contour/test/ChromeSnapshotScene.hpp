@@ -282,6 +282,7 @@ class ChromeSnapshotScene
             .nativeControlsInset = 0,
             .secure = scriptRow(variant.script).secure,
             .affordances = affordancesFor(variantHost(variant), scriptRow(variant.script).frame),
+            .shortcutStyle = command::shortcutStyleFor(variantHost(variant)),
         } },
         _newDefaults { newDefaultsOfferFor(scriptRow(variant.script).banner) },
         _settingsWindow { makeSettingsWindow() },

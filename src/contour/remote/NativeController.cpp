@@ -1505,6 +1505,24 @@ contour::session::RemoteRouting NativeController::requestRemoteRenameWorkspace(u
     return contour::session::RemoteRouting::Routed;
 }
 
+contour::session::RemoteRouting NativeController::requestRemoteTabTitle(uint64_t session,
+                                                                        std::string_view title)
+{
+    if (!negotiated())
+        return contour::session::RemoteRouting::Refused;
+    auto edit = vthost::proto::EditTab {
+        .session = session,
+        .kind = title.empty() ? vthost::proto::TabEditKind::ClearTitle : vthost::proto::TabEditKind::SetTitle,
+        .title = std::string { title },
+        .color = 0,
+    };
+    _reactor.post([this, edit = std::move(edit)] {
+        if (_client != nullptr)
+            std::ignore = _client->editTab(edit);
+    });
+    return contour::session::RemoteRouting::Routed;
+}
+
 contour::session::RemoteRouting NativeController::requestRemoteMoveWorkspace(uint64_t workspace,
                                                                              uint32_t position)
 {

@@ -1539,6 +1539,38 @@ void TerminalSessionManager::renameWorkspace(window::WindowController& window,
         setWorkspaceLabel(vtworkspace::WorkspaceId { workspace }, std::move(label));
 }
 
+void TerminalSessionManager::renameTab(window::WindowController& window, uint64_t tab, std::string title)
+{
+    auto const* const source = window.directorySource();
+    if (source == nullptr)
+        return;
+    auto const directory = source->directory();
+    auto const holder = std::ranges::find_if(directory.workspaces, [&](window::DirectoryWorkspace const& w) {
+        return std::ranges::contains(w.tabs, tab, &window::DirectoryTab::id);
+    });
+    if (holder == directory.workspaces.end())
+        return;
+    if (listsRemotely(window))
+    {
+        auto const listed = std::ranges::find(holder->tabs, tab, &window::DirectoryTab::id);
+        if (listed->panes.empty())
+            return;
+        // The daemon's title change comes back as the window's new directory and, where it is mirrored,
+        // its tab.
+        if (factoryFor(window.displayedWorkspace())
+                .requestRemoteTabTitle(listed->panes.front().key.value, title)
+            == RemoteRouting::Refused)
+            managerLog()("The daemon cannot title tab {}.", tab);
+        return;
+    }
+    if (!ownsWorkspace(window, vtworkspace::WorkspaceId { holder->id }))
+        return;
+    if (title.empty())
+        _model->resetTabTitle(vtworkspace::TabId { tab });
+    else
+        _model->setTabTitle(vtworkspace::TabId { tab }, std::move(title));
+}
+
 void TerminalSessionManager::moveWorkspace(window::WindowController& window,
                                            uint64_t workspace,
                                            int toPosition)
@@ -1815,12 +1847,26 @@ void TerminalSessionManager::cycleWorkspace(TerminalSession const& acting, actio
 
 void TerminalSessionManager::showSwitcher(TerminalSession const& acting)
 {
-    openSwitcherOver(acting, window::SwitcherPrompt::Browse, "ShowSwitcher");
+    openSwitcherOver(acting,
+                     window::SwitcherPrompt::Browse,
+                     "ShowSwitcher",
+                     window::SwitcherScope::Everything,
+                     std::nullopt);
+}
+
+void TerminalSessionManager::showWorkspaceDropdown(TerminalSession const& acting, QRect chip)
+{
+    openSwitcherOver(
+        acting, window::SwitcherPrompt::Browse, "WorkspaceChip", window::SwitcherScope::OneDaemon, chip);
 }
 
 void TerminalSessionManager::newDaemon(TerminalSession const& acting)
 {
-    openSwitcherOver(acting, window::SwitcherPrompt::NewDaemon, "NewDaemon");
+    openSwitcherOver(acting,
+                     window::SwitcherPrompt::NewDaemon,
+                     "NewDaemon",
+                     window::SwitcherScope::Everything,
+                     std::nullopt);
 }
 
 void TerminalSessionManager::upgradeDaemon(TerminalSession const& acting)
@@ -1839,7 +1885,9 @@ void TerminalSessionManager::upgradeDaemon(TerminalSession const& acting)
 
 void TerminalSessionManager::openSwitcherOver(TerminalSession const& acting,
                                               window::SwitcherPrompt prompt,
-                                              std::string_view what)
+                                              std::string_view what,
+                                              window::SwitcherScope scope,
+                                              std::optional<QRect> control)
 {
     auto const* const window = hostOf(&acting).window;
     auto const daemon = window != nullptr ? daemonTargetOf(window->id()) : std::nullopt;
@@ -1855,8 +1903,10 @@ void TerminalSessionManager::openSwitcherOver(TerminalSession const& acting,
                                                                        .windowDaemon = *daemon,
                                                                        .mode = SwitchMode::Switch,
                                                                        .prompt = prompt,
-                                                                       .pick = std::nullopt },
-                                             controller != nullptr ? controller->screen() : nullptr);
+                                                                       .pick = std::nullopt,
+                                                                       .scope = scope },
+                                             controller != nullptr ? controller->screen() : nullptr,
+                                             control);
         !shown)
         managerLog()("{}: {}.", what, shown.error());
 }
@@ -3278,11 +3328,11 @@ void TerminalSessionManager::activateTab(vtworkspace::WorkspaceId window, int in
     activateModelTabByRow(window, index);
 }
 
-bool TerminalSessionManager::showPane(vtworkspace::WorkspaceId window, window::PaneKey key)
+PaneShowing TerminalSessionManager::showPane(vtworkspace::WorkspaceId window, window::PaneKey key)
 {
     auto const* const win = _model->workspace(window);
     if (win == nullptr)
-        return false;
+        return PaneShowing::NotHeld;
     for (auto const row: std::views::iota(0, win->tabCount()))
     {
         auto* const tab = win->tabAt(row);
@@ -3295,9 +3345,9 @@ bool TerminalSessionManager::showPane(vtworkspace::WorkspaceId window, window::P
         activateModelTabByRow(window, row);
         activatePane(tab->id(), leaf->id());
         markPaneSeen(window, leaf->session());
-        return true;
+        return PaneShowing::Shown;
     }
-    return false;
+    return PaneShowing::NotHeld;
 }
 
 void TerminalSessionManager::markActivePaneSeen(vtworkspace::WorkspaceId window)

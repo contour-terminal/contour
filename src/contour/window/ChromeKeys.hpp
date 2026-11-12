@@ -32,6 +32,8 @@ enum class ChromeKey : uint8_t
     Escape,
     Tab, ///< Tab and, with Shift, Shift+Tab (Qt's Backtab).
     F2,
+    F10,       ///< F10; with Shift, the context-menu chord of Windows and KDE.
+    Menu,      ///< The Menu (application) key.
     Printable, ///< A key that types a character (other than Space), with no modifier or Shift alone.
 };
 
@@ -61,6 +63,38 @@ enum class ChromeCommand : uint8_t
     Expand,        ///< Expands the focused tree row, or moves to its first child when it is expanded.
     Rename,        ///< Starts renaming the focused row inline.
     Filter,        ///< Starts (or extends) the tree's type-to-filter with the typed character.
+    ClearFilter,   ///< Clears the tree's type-to-filter; the keyboard stays in the tree.
+    OpenMenu,      ///< Opens the focused row's context menu, as a right click on it does.
+};
+
+/// Whether the focused chrome area answered a key's command, or left the key to whoever is next.
+enum class ChromeKeyOutcome : uint8_t
+{
+    Unhandled = 0, ///< The area has nothing to do with it.
+    Handled,       ///< The area carried it out (or, for the sidebar's own commands, handed it to the tree).
+};
+
+/// A command the focused sidebar tree carries out itself, by the name its QML handles it by: what
+/// WindowController.sidebarCommands publishes, and sidebarCommandRequested() carries.
+struct NamedChromeCommand
+{
+    std::string_view name; ///< The QML name.
+    ChromeCommand command; ///< The command.
+};
+
+/// The sidebar tree's own commands, by name.
+inline constexpr auto SidebarCommandNames = std::array {
+    NamedChromeCommand { .name = "previous", .command = ChromeCommand::FocusPrevious },
+    NamedChromeCommand { .name = "next", .command = ChromeCommand::FocusNext },
+    NamedChromeCommand { .name = "first", .command = ChromeCommand::FocusFirst },
+    NamedChromeCommand { .name = "last", .command = ChromeCommand::FocusLast },
+    NamedChromeCommand { .name = "activate", .command = ChromeCommand::Activate },
+    NamedChromeCommand { .name = "collapse", .command = ChromeCommand::Collapse },
+    NamedChromeCommand { .name = "expand", .command = ChromeCommand::Expand },
+    NamedChromeCommand { .name = "rename", .command = ChromeCommand::Rename },
+    NamedChromeCommand { .name = "filter", .command = ChromeCommand::Filter },
+    NamedChromeCommand { .name = "clearFilter", .command = ChromeCommand::ClearFilter },
+    NamedChromeCommand { .name = "openMenu", .command = ChromeCommand::OpenMenu },
 };
 
 /// One key of one chrome area.
@@ -79,9 +113,14 @@ inline constexpr std::array ChromeKeyRows {
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Down, ChromeKeyModifier::None, ChromeCommand::FocusNext },
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Left, ChromeKeyModifier::None, ChromeCommand::Collapse },
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Right, ChromeKeyModifier::None, ChromeCommand::Expand },
+    ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Home, ChromeKeyModifier::None, ChromeCommand::FocusFirst },
+    ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::End, ChromeKeyModifier::None, ChromeCommand::FocusLast },
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Return, ChromeKeyModifier::None, ChromeCommand::Activate },
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Escape, ChromeKeyModifier::None, ChromeCommand::Leave },
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::F2, ChromeKeyModifier::None, ChromeCommand::Rename },
+    // A row's context menu without a pointer: the Menu key, and Shift+F10 (Windows and KDE).
+    ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Menu, ChromeKeyModifier::None, ChromeCommand::OpenMenu },
+    ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::F10, ChromeKeyModifier::Shift, ChromeCommand::OpenMenu },
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Space, ChromeKeyModifier::None, ChromeCommand::Filter },
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Space, ChromeKeyModifier::Shift, ChromeCommand::Filter },
     ChromeKeyRow {
@@ -183,7 +222,9 @@ inline constexpr std::array ChromeConsumedKeys { ChromeKey::Left,   ChromeKey::R
         case ChromeCommand::Collapse:
         case ChromeCommand::Expand:
         case ChromeCommand::Rename:
-        case ChromeCommand::Filter: break;
+        case ChromeCommand::Filter:
+        case ChromeCommand::ClearFilter:
+        case ChromeCommand::OpenMenu: break;
     }
     return std::clamp(focused, 0, last);
 }

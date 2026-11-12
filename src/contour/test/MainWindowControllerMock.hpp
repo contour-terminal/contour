@@ -6,14 +6,20 @@
 #include <contour/command/Shortcut.hpp>
 #include <contour/command/TabMenus.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
+#include <contour/config/TabBarMode.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 #include <contour/platform/CaptionHitTest.hpp>
 #include <contour/platform/ColorConversion.hpp>
+#include <contour/test/SidebarFakes.hpp>
+#include <contour/window/CloseDialogTable.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/NoticeModel.hpp>
 #include <contour/window/PromptHost.hpp>
 #include <contour/window/RemoteChrome.hpp>
+#include <contour/window/SidebarModel.hpp>
+#include <contour/window/StatusUrgency.hpp>
+#include <contour/window/TabAttention.hpp>
 #include <contour/window/TabBarDropPolicy.hpp>
 #include <contour/window/TabBarHitValue.hpp>
 #include <contour/window/TabColorScheme.hpp>
@@ -33,6 +39,7 @@
 #include <QtGui/QColor>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -130,6 +137,10 @@ class MainWindowControllerMock: public QAbstractListModel
     // Mirrors WindowController's tab and new-tab menu surfaces, which TabStrip.qml binds and
     // Connections-targets.
     Q_PROPERTY(QVariantList tabContextMenuModel READ tabContextMenuModel NOTIFY tabContextMenuModelChanged)
+    // The sidebar rows' menu surface: Main.qml binds an ActionContextMenu to sidebarContextMenuModel and pops
+    // it on sidebarContextMenuRequested, so every controller Main.qml loads against carries both.
+    Q_PROPERTY(QVariantList sidebarContextMenuModel READ sidebarContextMenuModel NOTIFY
+                   sidebarContextMenuModelChanged)
     Q_PROPERTY(QVariantList newTabMenuModel READ newTabMenuModel NOTIFY newTabMenuModelChanged)
     // {{{ Panes
     // Mirrors WindowController's visible pane count; a test sets it to drive the pane headers.
@@ -153,6 +164,16 @@ class MainWindowControllerMock: public QAbstractListModel
     // setNativeMaximizeVisual().
     Q_PROPERTY(bool nativeMaximizeHovered READ nativeMaximizeHovered NOTIFY nativeMaximizeVisualChanged)
     Q_PROPERTY(bool nativeMaximizePressed READ nativeMaximizePressed NOTIFY nativeMaximizeVisualChanged)
+    // {{{ The workspace sidebar
+    // Mirrors WindowController's: a real SidebarModel over a fake window (sidebarSource(), sidebarHost()),
+    // hidden until a test shows it (showSidebar()).
+    Q_PROPERTY(QObject* sidebar READ sidebarObject CONSTANT)
+    Q_PROPERTY(int sidebarVisibility READ sidebarVisibility NOTIFY sidebarVisibilityChanged)
+    Q_PROPERTY(int sidebarWidth READ sidebarWidth NOTIFY sidebarWidthChanged)
+    Q_PROPERTY(int tabPlacement READ tabPlacement NOTIFY tabPlacementChanged)
+    Q_PROPERTY(int otherWorkspacesUrgency READ otherWorkspacesUrgency NOTIFY otherWorkspacesUrgencyChanged)
+    Q_PROPERTY(QVariantMap sidebarCommands READ sidebarCommands CONSTANT)
+    // }}}
 
   public:
     using QAbstractListModel::QAbstractListModel;
@@ -184,13 +205,34 @@ class MainWindowControllerMock: public QAbstractListModel
     /// Mirrors WindowController::applicationVersion() with a fixed test value.
     [[nodiscard]] QString applicationVersion() const { return QStringLiteral("0.0.0-test"); }
 
-    /// Mirrors WindowController::shortcutText(): a ClosePane chord (the desktop's Ctrl+Shift+X),
-    /// CreateNewTab's, Ctrl+Shift+T, and nothing for any other command (an ended pane's footer names
-    /// Close's).
+    /// How the chords shortcutText() names are spelled: the row's host spelling, as the palette's are.
+    command::ShortcutStyle shortcutStyle = command::ShortcutStyle::Text;
+
+    /// The chords a configuration binds, by command, where a test hands one (command::chordIndex()); none
+    /// keeps the fixed answers below.
+    std::optional<command::ChordIndex> chords;
+
+    /// Mirrors WindowController::shortcutText(): with chords, the chord they bind @p commandName to, spelled
+    /// in shortcutStyle, or nothing; without, a ClosePane chord (the desktop's Ctrl+Shift+X), CreateNewTab's,
+    /// Ctrl+Shift+T, JumpToNextAttention's, Ctrl+Shift+J, and nothing for any other command (an ended pane's
+    /// footer names Close's).
     [[nodiscard]] Q_INVOKABLE QString shortcutText(QString const& commandName) const
     {
+        if (chords)
+        {
+            auto const chord = chords->find(commandName.toStdString());
+            return chord != chords->end()
+                       ? QString::fromStdString(command::shortcutText(chord->second, shortcutStyle))
+                       : QString {};
+        }
         if (commandName == QStringLiteral("CreateNewTab"))
             return QStringLiteral("Ctrl+Shift+T");
+        // The sidebar footer's jump chord, as native2026 binds it on the desktop.
+        if (commandName == QStringLiteral("JumpToNextAttention"))
+            return QString::fromStdString(command::shortcutText(
+                vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                command::ShortcutInput { U'J' },
+                shortcutStyle));
         return commandName == QStringLiteral("ClosePane") ? QStringLiteral("Ctrl+Shift+X") : QString {};
     }
 
@@ -314,6 +356,21 @@ class MainWindowControllerMock: public QAbstractListModel
 
     /// Mirrors WindowController::triggerTabContextMenuAction(), recording the pick.
     Q_INVOKABLE void triggerTabContextMenuAction(int actionId) { tabMenuPicks.push_back(actionId); }
+
+    /// @return The sidebar row menu last published by openSidebarContextMenu().
+    [[nodiscard]] QVariantList const& sidebarContextMenuModel() const noexcept
+    {
+        return _sidebarContextMenuModel;
+    }
+    /// Mirrors WindowController::openSidebarContextMenu(): publishes a row's menu, then asks for it at @p at.
+    void openSidebarContextMenu(QVariantList model, int row, QPointF at)
+    {
+        _sidebarContextMenuModel = std::move(model);
+        emit sidebarContextMenuModelChanged();
+        emit sidebarContextMenuRequested(row, at);
+    }
+    /// Mirrors WindowController::triggerSidebarContextMenuAction(), recording the pick.
+    Q_INVOKABLE void triggerSidebarContextMenuAction(int actionId) { sidebarMenuPicks.push_back(actionId); }
 
     /// Mirrors WindowController::openNewTabMenu(): publishes the menu, then asks for it, counting the calls.
     Q_INVOKABLE void openNewTabMenu(QPointF /*windowPosition*/)
@@ -472,9 +529,151 @@ class MainWindowControllerMock: public QAbstractListModel
     std::vector<int> clearedCaptionKinds {}; ///< Every clearCaptionButtonRect() kind, in order.
     // }}}
 
-    std::vector<int> tabMenuPicks {};    ///< Every tab menu pick, in order.
-    std::vector<int> newTabMenuPicks {}; ///< Every new-tab menu pick, in order.
-    int newTabMenuOpenings = 0;          ///< How often the new-tab menu was asked for.
+    // {{{ The workspace sidebar
+    /// @return The sidebar model, as QML sees it.
+    [[nodiscard]] QObject* sidebarObject() noexcept { return &_sidebar; }
+    /// @return The sidebar model.
+    [[nodiscard]] window::SidebarModel& sidebarModel() noexcept { return _sidebar; }
+    /// @return What the sidebar lists; a test sets its workspaces, then calls sidebarModel().refreshNow().
+    [[nodiscard]] FakeDirectorySource& sidebarSource() noexcept { return _sidebarSource; }
+    /// @return The fake window the sidebar asks things of.
+    [[nodiscard]] FakeSidebarHost& sidebarHost() noexcept { return _sidebarHost; }
+    /// When the sidebar's clock stands.
+    static constexpr auto SidebarEpoch =
+        std::chrono::system_clock::time_point { std::chrono::seconds { 1'000'000 } };
+    /// @return The window's seen-state, which the sidebar's statuses read.
+    [[nodiscard]] window::TabAttention& sidebarAttention() noexcept { return _sidebarAttention; }
+
+    /// Mirrors WindowController::sidebarVisibility(): a config::SidebarVisibility's underlying value.
+    [[nodiscard]] int sidebarVisibility() const noexcept { return static_cast<int>(_sidebarVisibility); }
+    /// Mirrors WindowController::sidebarWidth(): the width it takes, 0 while hidden.
+    [[nodiscard]] int sidebarWidth() const noexcept
+    {
+        return _sidebarVisibility == config::SidebarVisibility::Shown ? _sidebarUnits : 0;
+    }
+    /// Mirrors WindowController::tabPlacement(): a config::TabPlacement's underlying value.
+    [[nodiscard]] int tabPlacement() const noexcept { return static_cast<int>(_tabPlacement); }
+    /// Mirrors WindowController::otherWorkspacesUrgency().
+    [[nodiscard]] int otherWorkspacesUrgency() const noexcept { return _sidebar.otherWorkspacesUrgency(); }
+    /// Mirrors WindowController::sidebarCommands().
+    [[nodiscard]] static QVariantMap sidebarCommands() { return window::sidebarCommandMap(); }
+
+    /// Shows the sidebar @p width pixels wide, as a user's toggle would.
+    void showSidebar(int width)
+    {
+        _sidebarUnits = width;
+        _sidebarVisibility = config::SidebarVisibility::Shown;
+        emit sidebarVisibilityChanged();
+        emit sidebarWidthChanged();
+    }
+    /// Where the tabs live, as the configuration says.
+    void setTabPlacement(config::TabPlacement placement)
+    {
+        _tabPlacement = placement;
+        emit tabPlacementChanged();
+    }
+    /// Mirrors WindowController::setSidebarWidth(): records the width the drag ended at, and takes it.
+    Q_INVOKABLE void setSidebarWidth(int width)
+    {
+        savedSidebarWidths.push_back(width);
+        _sidebarUnits = width;
+        emit sidebarWidthChanged();
+    }
+    /// Mirrors WindowController::toggleSidebar().
+    Q_INVOKABLE void toggleSidebar()
+    {
+        ++sidebarToggles;
+        _sidebarVisibility = _sidebarVisibility == config::SidebarVisibility::Shown
+                                 ? config::SidebarVisibility::Hidden
+                                 : config::SidebarVisibility::Shown;
+        emit sidebarVisibilityChanged();
+        emit sidebarWidthChanged();
+    }
+    /// Mirrors WindowController::confirmCloseWorkspace(): records the answer.
+    Q_INVOKABLE void confirmCloseWorkspace(quint64 workspace)
+    {
+        confirmedWorkspaceCloses.push_back(workspace);
+    }
+    /// Mirrors WindowController::closeConfirmation(): the table's wording, with the counts the mock's scene
+    /// knows nothing of left at zero.
+    Q_INVOKABLE [[nodiscard]] QVariantMap closeConfirmation(
+        int kind, quint64 /*workspace*/, quint64 /*tab*/, QString const& label, QString const& program) const
+    {
+        auto const text = contour::window::closeDialogText(
+            static_cast<contour::window::CloseKind>(kind),
+            { .label = label.toStdString(), .tabs = 0, .panes = 0, .program = program.toStdString() });
+        return { { QStringLiteral("heading"), QString::fromStdString(text.heading) },
+                 { QStringLiteral("message"), QString::fromStdString(text.message) },
+                 { QStringLiteral("acceptText"), QString::fromStdString(text.acceptText) } };
+    }
+    /// Mirrors WindowController::confirmClose(): records the answer.
+    Q_INVOKABLE void confirmClose(int kind, quint64 workspace, quint64 tab, quint64 pane)
+    {
+        confirmedCloses.push_back({ kind, workspace, tab, pane });
+    }
+    /// Mirrors WindowController::newWorkspace(): counts the request.
+    Q_INVOKABLE void newWorkspace() { ++newWorkspaces; }
+    /// Mirrors WindowController::showWorkspaceDropdown(): records where the chip asked it to drop down.
+    Q_INVOKABLE void showWorkspaceDropdown(QRectF const& chip) { workspaceDropdownAnchor = chip; }
+    /// Mirrors WindowController::openSidebarFilter().
+    Q_INVOKABLE void openSidebarFilter() { emit sidebarFilterRequested(); }
+    /// Mirrors WindowController::beginSidebarDrag(): the payload a workspace row or a tab row carries, as the
+    /// sidebar's own host would name it (the tab by its panes' keys); empty for anything else.
+    Q_INVOKABLE [[nodiscard]] QString beginSidebarDrag(int row) const
+    {
+        auto const& rows = _sidebar.rows();
+        if (row < 0 || static_cast<std::size_t>(row) >= rows.size())
+            return {};
+        auto const& key = rows[static_cast<std::size_t>(row)].key;
+        auto drag = window::NodeDrag {};
+        drag.host = _sidebarHost.identity;
+        switch (key.kind)
+        {
+            case window::SidebarRowKind::Workspace:
+                drag.payload = window::DropPayload::Workspace;
+                drag.workspace = key.workspace;
+                return window::writeNodeDrag(drag);
+            case window::SidebarRowKind::Tab:
+                for (auto const& workspace: _sidebarSource.listed.workspaces)
+                    for (auto const& tab: workspace.tabs)
+                        if (workspace.id == key.workspace && tab.id == key.tab)
+                            for (auto const& pane: tab.panes)
+                                drag.sessions.push_back(pane.key.value);
+                if (drag.sessions.empty())
+                    return {};
+                drag.payload =
+                    drag.sessions.size() > 1 ? window::DropPayload::Tab : window::DropPayload::Pane;
+                drag.tabIndex = static_cast<int>(rows[static_cast<std::size_t>(row)].position);
+                return window::writeNodeDrag(drag);
+            case window::SidebarRowKind::Pane: return {};
+        }
+        return {};
+    }
+
+    /// Mirrors WindowController::toggleMaximized(): counts the request, as a title-bar double-click makes it.
+    Q_INVOKABLE void toggleMaximized() { ++maximizeToggles; }
+
+    std::vector<int> savedSidebarWidths {};           ///< Every setSidebarWidth() width, in order.
+    int sidebarToggles = 0;                           ///< How often toggleSidebar() ran.
+    int maximizeToggles = 0;                          ///< How often toggleMaximized() ran.
+    int newWorkspaces = 0;                            ///< How often newWorkspace() ran.
+    std::optional<QRectF> workspaceDropdownAnchor;    ///< What showWorkspaceDropdown() was last asked.
+    std::vector<quint64> confirmedWorkspaceCloses {}; ///< Every confirmCloseWorkspace() workspace, in order.
+    /// One confirmClose() answer: the kind, the workspace, the tab and the pane.
+    struct ConfirmedClose
+    {
+        int kind = 0;
+        quint64 workspace = 0;
+        quint64 tab = 0;
+        quint64 pane = 0;
+    };
+    std::vector<ConfirmedClose> confirmedCloses {}; ///< Every confirmClose() answer, in order.
+    // }}}
+
+    std::vector<int> tabMenuPicks {};     ///< Every tab menu pick, in order.
+    std::vector<int> sidebarMenuPicks {}; ///< Every sidebar row menu pick, in order.
+    std::vector<int> newTabMenuPicks {};  ///< Every new-tab menu pick, in order.
+    int newTabMenuOpenings = 0;           ///< How often the new-tab menu was asked for.
 
   signals:
     void hostChipStateChanged();
@@ -489,6 +688,8 @@ class MainWindowControllerMock: public QAbstractListModel
     void alertRequested();
     void tabContextMenuModelChanged();
     void tabContextMenuRequested(int index);
+    void sidebarContextMenuModelChanged();
+    void sidebarContextMenuRequested(int row, QPointF windowPosition);
     void newTabMenuModelChanged();
     void newTabMenuRequested();
     void aboutRequested();
@@ -496,12 +697,26 @@ class MainWindowControllerMock: public QAbstractListModel
     void headerRevealChanged();
     void titleBandChanged();
     void nativeMaximizeVisualChanged();
+    void sidebarVisibilityChanged();
+    void sidebarWidthChanged();
+    void tabPlacementChanged();
+    void otherWorkspacesUrgencyChanged();
+    void sidebarCommandRequested(int command, QString const& text);
+    /// Mirrors WindowController::sidebarFilterRequested().
+    void sidebarFilterRequested();
+    void workspaceRenameRequested();
+    void sidebarCloseConfirmationRequested(
+        int kind, quint64 workspace, quint64 tab, quint64 pane, QString const& label, QString const& program);
+    void closeWorkspaceConfirmationRequested(quint64 workspace,
+                                             QString const& workspaceLabel,
+                                             QString const& program);
 
   private:
     std::shared_ptr<contour::askpass::AskpassPromptRouter> _promptRouter =
         std::make_shared<contour::askpass::AskpassPromptRouter>();
     contour::window::PromptHost _promptHost { _promptRouter, 1 };
     QVariantList _tabContextMenuModel {};
+    QVariantList _sidebarContextMenuModel {};
     QVariantList _newTabMenuModel {};
     int _hostChipState = 0;        ///< @see hostChipState; 0 = HostChipState::Connected.
     int _visiblePaneCount = 1;     ///< @see visiblePaneCount; one pane, unsplit.
@@ -513,6 +728,16 @@ class MainWindowControllerMock: public QAbstractListModel
     platform::CaptionButtonVisual _nativeMaximizeVisual = platform::CaptionButtonVisual::Rest;
     platform::NullAnnouncer _noticeAnnouncer;
     window::NoticeModel _notices { noticeClock, _noticeAnnouncer, [](window::NoticeAction) {} };
+    // The sidebar's window, in the order the model needs them built.
+    FakeDirectorySource _sidebarSource;
+    FakeSidebarHost _sidebarHost { &_sidebarSource };
+    window::TabAttention _sidebarAttention;
+    core::platform::ManualWallClock _sidebarClock { SidebarEpoch };
+    platform::NullAnnouncer _sidebarAnnouncer;
+    window::SidebarModel _sidebar { _sidebarHost, _sidebarAttention, _sidebarClock, _sidebarAnnouncer };
+    config::SidebarVisibility _sidebarVisibility = config::SidebarVisibility::Hidden;
+    int _sidebarUnits = 0;
+    config::TabPlacement _tabPlacement = config::TabPlacement::Top;
 };
 
 } // namespace contour::test

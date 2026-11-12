@@ -27,6 +27,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace contour::window
@@ -82,7 +83,8 @@ enum class RowExpansion : uint8_t
 enum class RowSelection : uint8_t
 {
     None = 0,
-    Selected, ///< The tab this window displays; panes are not marked.
+    Selected,         ///< The tab this window displays; panes are not marked.
+    ContainsSelected, ///< A folded workspace holding that tab: the selection moves to the nearest row shown.
 };
 
 /// A tree connector in one column of the Terminal look's tree.
@@ -92,6 +94,17 @@ enum class TreeGlyph : uint8_t
     Tee,      ///< `├`: a child with later siblings.
     Last,     ///< `└`: the last child.
     Bar,      ///< `│`: an ancestor's later siblings pass by.
+};
+
+/// A reason in its two parts: the words, set in the proportional face, and the command, set in the
+/// monospace face after them. A plain reason (`All tests pass`) is all label.
+struct ReasonParts
+{
+    std::string label;   ///< The words, with their separator when a command follows (`Permission · `).
+    std::string command; ///< The command the words are about; empty for a plain reason.
+
+    /// @return The reason as one line, label then command.
+    [[nodiscard]] std::string joined() const { return label + command; }
 };
 
 /// The connectors of a row: column @c i belongs to depth @c i+1. A row of depth @c d fills columns 0..d-1:
@@ -120,6 +133,13 @@ struct SidebarRow
     uint8_t depth = 0;                           ///< 0 workspace, 1 tab, 2 pane.
     std::string title;                           ///< The name; plain text.
     std::string reason;                          ///< The second line; empty when there is nothing to say.
+    std::string reasonLabel;                     ///< Its words (the proportional part).
+    std::string reasonCommand;                   ///< Its command (the monospace part); often empty.
+    std::string fullReason;                      ///< The hover card's reason: whole, to MaxFullReasonLength.
+    std::string fullReasonLabel;                 ///< Its words.
+    std::string fullReasonCommand;               ///< Its command.
+    std::string program;                         ///< The program the reason is about; empty when unknown.
+    std::string folder;                          ///< The pane's working directory; empty when unknown.
     std::string gitText;                         ///< Workspace rows: `feat/billing ↑2 ↓1`.
     TimeText time;                               ///< The right-hand side.
     Urgency urgency = Urgency::Idle;             ///< Rolled up over the panes beneath a parent row.
@@ -130,7 +150,10 @@ struct SidebarRow
     /// among the workspaces, a tab's among its workspace's tabs, a pane's among its tab's panes. A drop
     /// resolves to these, never to an index among the rows shown.
     std::size_t position = 0;
-    TreeLines lines;   ///< The Terminal look's tree connectors.
+    TreeLines lines; ///< The Terminal look's tree connectors.
+    /// The connectors on the row's second line (its reason): every line that passes the row goes on through
+    /// it, and so does the line down to the row's own children. Empty columns on a workspace row.
+    TreeLines continued;
     LeafCounts leaves; ///< The panes beneath it, for the footer.
 
     bool operator==(SidebarRow const&) const = default;
@@ -167,6 +190,31 @@ struct SidebarFooter
 /// The longest text a row holds (title or reason), in characters, the ellipsis included.
 inline constexpr std::size_t MaxRowTextLength = 120;
 
+/// The longest full reason a row holds for its hover card (SidebarRow::fullReason), in characters, the
+/// ellipsis included: far above any reason a program means to show, well below one that floods the card.
+inline constexpr std::size_t MaxFullReasonLength = 2000;
+
+/// What one pass over a directory gives the sidebar: the rows it draws, and every workspace's row whatever
+/// the filter hides, which the footer and the summary count over.
+struct SidebarListing
+{
+    std::vector<SidebarRow> rows;       ///< The rows drawn, depth-first (sidebarRows()).
+    std::vector<SidebarRow> workspaces; ///< Every workspace's row, in order, filtered or not.
+};
+
+/// Flattens @p directory into the rows the sidebar draws and the workspace rows a count needs, in one pass.
+/// @param directory The workspaces, tabs and panes.
+/// @param attention This window's seen-state.
+/// @param state What is collapsed, and the filter.
+/// @param now The wall clock the times are measured against.
+/// @param displayedTab The tab this window shows, if any.
+/// @return The listing; its rows are what sidebarRows() returns.
+[[nodiscard]] SidebarListing sidebarListing(WorkspaceDirectory const& directory,
+                                            TabAttention const& attention,
+                                            SidebarState const& state,
+                                            std::chrono::system_clock::time_point now,
+                                            std::optional<TabRef> displayedTab);
+
 /// Flattens @p directory into the rows the sidebar draws, depth-first.
 /// @param directory The workspaces, tabs and panes.
 /// @param attention This window's seen-state.
@@ -181,10 +229,89 @@ inline constexpr std::size_t MaxRowTextLength = 120;
                                                   std::optional<TabRef> displayedTab);
 
 /// The footer over @p rows.
-/// @param rows Rows from sidebarRows(); build them with an empty filter for a count of everything.
+/// @param rows Rows from sidebarRows() built with an empty filter, or SidebarListing::workspaces, for a count
+///             of everything.
 /// @return The panes that need the user and that work, counted over the leaves under each workspace row
 ///         (LeafCounts), not over the rolled-up urgencies.
 [[nodiscard]] SidebarFooter sidebarFooter(std::span<SidebarRow const> rows);
+
+/// What the window's chrome says of the workspaces around the rows: which one it shows, and what the others
+/// ask of the user.
+struct SidebarSummary
+{
+    std::string currentWorkspace;            ///< The shown workspace's name, as its row titles it.
+    Urgency otherWorkspaces = Urgency::Idle; ///< The most urgent roll-up of every other workspace.
+    TabBadgeKind otherWorkspacesGlyph = TabBadgeKind::None; ///< That roll-up's glyph, the first among equals.
+
+    bool operator==(SidebarSummary const&) const = default;
+};
+
+/// The summary over @p rows.
+/// @param rows Rows from sidebarRows() built with an empty filter, or SidebarListing::workspaces, so no
+///             workspace row is left out.
+/// @param current The workspace the window shows; none leaves the name empty and counts every workspace.
+/// @return The summary.
+[[nodiscard]] SidebarSummary sidebarSummary(std::span<SidebarRow const> rows,
+                                            std::optional<uint64_t> current);
+
+/// Whether the workspace chip marks that another workspace asks for the user.
+enum class ChipMarker : uint8_t
+{
+    None = 0, ///< Nothing elsewhere waits for the user.
+    Shown,    ///< Another workspace needs the user, or has a result they have not seen.
+};
+
+/// @param otherWorkspaces The most urgent roll-up of the workspaces the window does not show.
+/// @return Shown from DoneUnseen up: a result not seen, a failure not seen, or a request for the user. Work
+///         still running and output alone do not mark it; the chip is not a progress indicator.
+[[nodiscard]] constexpr ChipMarker chipMarkerOf(Urgency otherWorkspaces) noexcept
+{
+    return otherWorkspaces >= Urgency::DoneUnseen ? ChipMarker::Shown : ChipMarker::None;
+}
+
+/// What a status says, as words: `needs you`, `failed`, `done`, `new output`, `working`.
+/// @param urgency The status.
+/// @return The words; empty for Idle.
+[[nodiscard]] std::string_view urgencyText(Urgency urgency) noexcept;
+
+/// What a screen reader says of the workspace chip: the workspace it names and, while it is marked, what the
+/// other workspaces ask in the words of their roll-up (`Workspace docs, another workspace failed`).
+/// @param summary The summary the chip shows.
+/// @return The name.
+[[nodiscard]] std::string workspaceChipAccessibleName(SidebarSummary const& summary);
+
+/// The detail line of a row's hover card: what it is about, where, and how long (`claude · ~/src · 4:12`).
+/// @param row The row.
+/// @return The parts it has, joined by ` · `; empty when it has none.
+[[nodiscard]] std::string hoverDetailOf(SidebarRow const& row);
+
+/// The index of the row @p row hangs under.
+/// @param rows The rows as shown.
+/// @param row A row's index.
+/// @return The nearest row above it of a lesser depth; -1 for a workspace row or an index out of range.
+[[nodiscard]] int parentRowOf(std::span<SidebarRow const> rows, int row) noexcept;
+
+/// The Terminal look's connectors of a row as text: two cells per column of @p lines that the row's depth
+/// fills, the connector and a blank (`│ ├ `).
+/// @param lines The row's connectors.
+/// @param depth The row's depth; a workspace row (0) has none.
+/// @return The text, empty for a workspace row.
+[[nodiscard]] std::string treeLinesText(TreeLines const& lines, uint8_t depth);
+
+/// The Terminal look's connectors of a row's second line as text: two cells per column, both columns of a
+/// tab or pane row, so the line to a tab's panes reaches them (`│ │ `).
+/// @param row The row.
+/// @return The text, empty for a workspace row.
+[[nodiscard]] std::string treeContinuationText(SidebarRow const& row);
+
+/// The cells of the Terminal look's progress meter.
+inline constexpr int MeterCells = 5;
+
+/// The Terminal look's progress meter as block characters: @ref MeterCells cells, full blocks for what is
+/// done, a partial block for the cell it is in, shade for the rest (`██▌░░`).
+/// @param percent The percent done; clamped to 0..100.
+/// @return The meter.
+[[nodiscard]] std::string meterText(int percent);
 
 /// Time spent in a state.
 /// @param elapsed How long; below zero reads as zero.

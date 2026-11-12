@@ -399,6 +399,18 @@ class SessionFactory
         return RemoteRouting::Local;
     }
 
+    /// Attach mode: sets the title of the DAEMON's tab that holds @p session, whether or not this client
+    /// mirrors it (proto::EditTab, which names a tab by any session it holds); the daemon's change reaches
+    /// every window listing it.
+    /// @param session A daemon session id of the tab, as a directory lists its panes.
+    /// @param title The new title; empty returns the tab to its automatic title.
+    /// @return As requestRemoteRenameWorkspace().
+    [[nodiscard]] virtual RemoteRouting requestRemoteTabTitle(uint64_t /*session*/,
+                                                              std::string_view /*title*/)
+    {
+        return RemoteRouting::Local;
+    }
+
     /// Attach mode: moves the DAEMON's workspace @p workspace to a place in its workspace order; the daemon
     /// states the new order to every window (WorkspaceMeta::position).
     /// @param workspace The daemon's workspace id, as a directory lists it.

@@ -2516,7 +2516,7 @@ TEST_CASE("sidebar tokens per row", "[chrometokens][sidebar]")
 TEST_CASE("the sidebar's colour roles are one family", "[chrometokens][sidebar]")
 {
     using namespace contour::config;
-    CHECK(SidebarColorRoleEnd - SidebarColorRoleBegin == 6);
+    CHECK(SidebarColorRoleEnd - SidebarColorRoleBegin == 8);
     CHECK(SidebarColorRoleEnd == ChromeColorRoleCount);
 }
 
@@ -2531,6 +2531,12 @@ TEST_CASE("sidebar selection ink reaches 4.5:1 on its fill on every row", "[chro
                                    .contrast = ContrastPreference::Increased },
     };
 
+    // The selection with the keyboard in the sidebar, and without it.
+    constexpr auto SelectionPairs = std::array {
+        std::pair { SidebarSelectionFill, SidebarSelectionInk },
+        std::pair { SidebarSelectionFillInactive, SidebarSelectionInkInactive },
+    };
+
     SECTION("the native rows, over the kit's surfaces and a typical OS window")
     {
         auto const grounds = std::array {
@@ -2541,48 +2547,50 @@ TEST_CASE("sidebar selection ink reaches 4.5:1 on its fill on every row", "[chro
         };
         for (auto const style: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
             for (auto const& preference: preferences)
-            {
-                auto const row = resolveChromeTokens(style, preference);
-                auto const& fill = row.colors[static_cast<size_t>(SidebarSelectionFill)];
-                auto const& ink = row.colors[static_cast<size_t>(SidebarSelectionInk)];
-                CAPTURE(static_cast<int>(style));
-                if (fill.kind == ColorSourceKind::PaletteHighlight)
+                for (auto const& [fillRole, inkRole]: SelectionPairs)
                 {
-                    // The OS's own pair: the row's part is to name it as a pair. The ratio of what it
-                    // resolves to is measured on real colours in UiStyleProvider_test.
-                    CHECK(ink.kind == ColorSourceKind::PaletteHighlightedText);
-                    continue;
+                    auto const row = resolveChromeTokens(style, preference);
+                    auto const& fill = row.colors[static_cast<size_t>(fillRole)];
+                    auto const& ink = row.colors[static_cast<size_t>(inkRole)];
+                    CAPTURE(static_cast<int>(style), static_cast<int>(fillRole));
+                    if (fill.kind == ColorSourceKind::PaletteHighlight)
+                    {
+                        // The OS's own pair: the row's part is to name it as a pair. The ratio of what it
+                        // resolves to is measured on real colours in UiStyleProvider_test.
+                        CHECK(ink.kind == ColorSourceKind::PaletteHighlightedText);
+                        continue;
+                    }
+                    for (auto const& ground: grounds)
+                    {
+                        CAPTURE(ground.dark);
+                        auto const filled = nativeInkOver(fill, ground);
+                        auto const text =
+                            nativeInkOver(ink, NativeGround { .color = filled, .dark = ground.dark });
+                        CHECK(contrastRatio(text, filled) >= MinimumTextContrast);
+                    }
                 }
-                for (auto const& ground: grounds)
-                {
-                    CAPTURE(ground.dark);
-                    auto const filled = nativeInkOver(fill, ground);
-                    auto const text =
-                        nativeInkOver(ink, NativeGround { .color = filled, .dark = ground.dark });
-                    CHECK(contrastRatio(text, filled) >= MinimumTextContrast);
-                }
-            }
     }
 
     SECTION("the Terminal row, on every bundled scheme")
     {
         for (auto const& preference: preferences)
-        {
-            auto const row = resolveChromeTokens(ChromeStyle::Terminal, preference);
-            auto const& fill = row.colors[static_cast<size_t>(SidebarSelectionFill)];
-            auto const& ink = row.colors[static_cast<size_t>(SidebarSelectionInk)];
-            REQUIRE(fill.kind == ColorSourceKind::Scheme);
-            REQUIRE(ink.kind == ColorSourceKind::Scheme);
-            for (auto const name: defaultColorPaletteNames())
+            for (auto const& [fillRole, inkRole]: SelectionPairs)
             {
-                INFO("scheme: " << name);
-                auto palette = ColorPalette {};
-                REQUIRE(defaultColorPalettes(name, palette));
-                auto const colors = chromeSchemeColorsOf(palette);
-                CHECK(contrastRatio(slotIn(colors, ink.slot), slotIn(colors, fill.slot))
-                      >= MinimumTextContrast);
+                auto const row = resolveChromeTokens(ChromeStyle::Terminal, preference);
+                auto const& fill = row.colors[static_cast<size_t>(fillRole)];
+                auto const& ink = row.colors[static_cast<size_t>(inkRole)];
+                REQUIRE(fill.kind == ColorSourceKind::Scheme);
+                REQUIRE(ink.kind == ColorSourceKind::Scheme);
+                for (auto const name: defaultColorPaletteNames())
+                {
+                    INFO("scheme: " << name);
+                    auto palette = ColorPalette {};
+                    REQUIRE(defaultColorPalettes(name, palette));
+                    auto const colors = chromeSchemeColorsOf(palette);
+                    CHECK(contrastRatio(slotIn(colors, ink.slot), slotIn(colors, fill.slot))
+                          >= MinimumTextContrast);
+                }
             }
-        }
     }
 }
 

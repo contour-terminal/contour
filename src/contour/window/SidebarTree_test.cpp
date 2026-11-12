@@ -8,6 +8,7 @@
 #include <chrono>
 #include <initializer_list>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <utility>
 #include <vector>
@@ -205,6 +206,31 @@ TEST_CASE("SidebarTree.reason_text_is_sanitized_and_elided", "[sidebar]")
     CHECK(big.reason == std::string(MaxRowTextLength - 1, 'x') + "…");
 }
 
+TEST_CASE("SidebarTree.full_reason_is_sanitized_whole_and_capped", "[sidebar]")
+{
+    // Longer than the row's line, but whole on the hover card, and sanitized the same way.
+    auto const longReason = std::string(300, 'y');
+    auto const row = tabRowOf(rowsOf(oneTabWith(recordOf(ProgramState::Blocked,
+                                                         "a\x01" + bidiOverride() + longReason + "\nmore",
+                                                         42s,
+                                                         BlockedKind::Permission))));
+    CHECK(row.reason.size() < row.fullReason.size());
+    CHECK(row.fullReason == "Permission · a" + longReason + " more");
+
+    // Even the full reason is bounded: a hostile one cannot flood the card.
+    auto const flood =
+        tabRowOf(rowsOf(oneTabWith(recordOf(ProgramState::Working, std::string(100'000, 'z')))));
+    CHECK(flood.fullReason == std::string(MaxFullReasonLength - 1, 'z') + "…");
+
+    // A finished command's verdict is short already: both say the same.
+    auto pane = paneOf(1, "p");
+    pane.finished = vthost::proto::FinishedCommand { .exitCode = 1 };
+    pane.finishedSerial = 1;
+    auto const failed = tabRowOf(rowsOf(directoryOf({ workspaceOf(1, "w", { tabOf(1, "t", { pane }) }) })));
+    CHECK(failed.fullReason == failed.reason);
+    CHECK(failed.reason == "exit 1");
+}
+
 TEST_CASE("SidebarTree.blocked_reason_is_prefixed_by_its_kind", "[sidebar]")
 {
     struct Case
@@ -225,6 +251,34 @@ TEST_CASE("SidebarTree.blocked_reason_is_prefixed_by_its_kind", "[sidebar]")
         auto const row = tabRowOf(rowsOf(oneTabWith(recordOf(ProgramState::Blocked, message, 42s, kind))));
         CHECK(row.reason == reason);
         CHECK(row.glyph == TabBadgeKind::Blocked);
+    }
+}
+
+TEST_CASE("SidebarTree.a_permission_names_its_tool_in_the_label_and_its_command_apart", "[sidebar]")
+{
+    struct Case
+    {
+        BlockedKind kind;
+        std::string message;
+        std::string label;
+        std::string command;
+    };
+    auto const cases = std::vector<Case> {
+        { BlockedKind::Permission, "Bash: psql $DEV_URL", "Permission · Bash: ", "psql $DEV_URL" },
+        { BlockedKind::Permission, "Edit: src/a.cpp", "Permission · Edit: ", "src/a.cpp" },
+        { BlockedKind::Permission, "rm -rf build", "Permission · ", "rm -rf build" },
+        { BlockedKind::Permission, "Run this: ls", "Permission · ", "Run this: ls" },
+        { BlockedKind::Permission, "Bash: ", "Permission · ", "Bash: " },
+        { BlockedKind::Permission, ": ls", "Permission · ", ": ls" },
+        { BlockedKind::Question, "Pick: a or b", "Question · Pick: a or b", "" },
+    };
+    for (auto const& [kind, message, label, command]: cases)
+    {
+        INFO(message);
+        auto const row = tabRowOf(rowsOf(oneTabWith(recordOf(ProgramState::Blocked, message, 42s, kind))));
+        CHECK(row.reasonLabel == label);
+        CHECK(row.reasonCommand == command);
+        CHECK(row.reason == label + command);
     }
 }
 
@@ -251,6 +305,24 @@ TEST_CASE("SidebarTree.failed_command_shows_exit_and_duration", "[sidebar]")
         CHECK(tabRowOf(rows).urgency == Urgency::Failed);
         CHECK(tabRowOf(rows).glyph == TabBadgeKind::Error);
     }
+}
+
+TEST_CASE("SidebarTree.a_failed_command_with_its_line_splits_into_words_and_command", "[sidebar]")
+{
+    auto pane = paneOf(1, "p");
+    pane.finished = vthost::proto::FinishedCommand { .exitCode = 1,
+                                                     .durationMs = std::nullopt,
+                                                     .commandLine = "make deploy" };
+    pane.finishedSerial = 1;
+    auto const rows = rowsOf(directoryOf({ workspaceOf(1, "w", { tabOf(1, "t", { pane }) }) }));
+    CHECK(tabRowOf(rows).reasonLabel == "exit 1 · ");
+    CHECK(tabRowOf(rows).reasonCommand == "make deploy");
+    CHECK(tabRowOf(rows).reason == "exit 1 · make deploy");
+
+    // A plain reason is all words.
+    auto const plain = rowsOf(oneTabWith(recordOf(ProgramState::Done, "All tests pass")));
+    CHECK(tabRowOf(plain).reasonLabel == "All tests pass");
+    CHECK(tabRowOf(plain).reasonCommand.empty());
 }
 
 TEST_CASE("SidebarTree.bell_is_needs_you_with_its_own_glyph", "[sidebar]")
@@ -385,6 +457,23 @@ TEST_CASE("SidebarTree.footer_counts_leaves_not_roll_ups", "[sidebar]")
     CHECK(sidebarFooter({}) == SidebarFooter {});
 }
 
+TEST_CASE("SidebarTree.listing_counts_every_workspace_in_the_same_pass_as_a_filtered_tree", "[sidebar]")
+{
+    auto const directory = directoryOf({
+        workspaceOf(1, "alpha", { tabOf(1, "t", { paneOf(1, "p", { recordOf(ProgramState::Blocked) }) }) }),
+        workspaceOf(2, "beta", { tabOf(2, "u", { paneOf(2, "q", { recordOf(ProgramState::Working) }) }) }),
+    });
+    auto const listing =
+        sidebarListing(directory, TabAttention {}, SidebarState { .filter = "beta" }, Now, std::nullopt);
+    // The filter hides alpha's rows, not its workspace from the count.
+    CHECK(listing.rows == rowsOf(directory, SidebarState { .filter = "beta" }));
+    REQUIRE(listing.workspaces.size() == 2);
+    CHECK(listing.workspaces[0].title == "alpha");
+    CHECK(listing.workspaces[1].title == "beta");
+    CHECK(sidebarFooter(listing.workspaces) == sidebarFooter(rowsOf(directory)));
+    CHECK(sidebarSummary(listing.workspaces, 2) == sidebarSummary(rowsOf(directory), 2));
+}
+
 TEST_CASE("SidebarTree.terminal_tree_lines", "[sidebar]")
 {
     auto const rows = rowsOf(directoryOf({ workspaceOf(
@@ -421,6 +510,11 @@ TEST_CASE("SidebarTree.displayed_tab_is_selected", "[sidebar]")
     CHECK(selections(TabRef { 1, 2 }) == std::vector { None, None, Selected, None, None, None, None });
     CHECK(selections(TabRef { 2, 1 }) == std::vector { None, None, None, None, Selected, None, None });
     CHECK(selections(TabRef { 2, 2 }) == std::vector { None, None, None, None, None, None, None });
+
+    // Folded away, the displayed tab hands its selection to its workspace, the nearest row shown.
+    auto const folded = rowsOf(directory, SidebarState { .collapsedWorkspaces = { 2 } }, TabRef { 2, 1 });
+    CHECK(std::ranges::to<std::vector>(folded | std::views::transform(&SidebarRow::selection))
+          == std::vector { None, None, None, ContainsSelected });
 }
 
 TEST_CASE("SidebarTree.collapsing_a_tab_does_not_collapse_its_namesake", "[sidebar]")
@@ -540,4 +634,171 @@ TEST_CASE("SidebarTree.a_seen_ledger_quiets_a_row", "[sidebar]")
     auto const changed = attention.noteSeen(PaneKey { 1 }, 1);
     CHECK(changed == AttentionChange::Changed);
     CHECK(sidebarRows(directory, attention, {}, Now, std::nullopt).at(1).urgency == Urgency::Idle);
+}
+
+TEST_CASE("SidebarTree.a_permission_reads_as_a_command_with_its_program_and_folder", "[sidebar]")
+{
+    auto directory = oneTabWith(recordOf(ProgramState::Blocked, "Bash: psql", 42s, BlockedKind::Permission));
+    directory.workspaces[0].tabs[0].panes[0].cwd = "/src/billing";
+    auto const rows = rowsOf(directory);
+    auto const& tab = tabRowOf(rows);
+    CHECK(tab.reason == "Permission · Bash: psql");
+    CHECK(tab.reasonLabel == "Permission · Bash: ");
+    CHECK(tab.reasonCommand == "psql");
+    CHECK(tab.fullReasonLabel == "Permission · Bash: ");
+    CHECK(tab.fullReasonCommand == "psql");
+    CHECK(tab.program == "app");
+    CHECK(tab.folder == "/src/billing");
+
+    // A question is words, not a command; a workspace row names no program of its own.
+    auto const asked =
+        rowsOf(oneTabWith(recordOf(ProgramState::Blocked, "Proceed?", 42s, BlockedKind::Question)));
+    CHECK(tabRowOf(asked).reasonLabel == "Question · Proceed?");
+    CHECK(tabRowOf(asked).reasonCommand.empty());
+    CHECK(rows.front().program.empty());
+}
+
+TEST_CASE("SidebarTree.the_summary_names_the_shown_workspace_and_rolls_up_the_others", "[sidebar]")
+{
+    auto const directory = directoryOf({
+        workspaceOf(
+            1, "billing", { tabOf(10, "a", { paneOf(10, "a", { recordOf(ProgramState::Blocked) }) }) }),
+        workspaceOf(2, "docs", { tabOf(20, "b", { paneOf(20, "b", { recordOf(ProgramState::Working) }) }) }),
+    });
+    auto const rows = rowsOf(directory);
+
+    auto const onDocs = sidebarSummary(rows, 2);
+    CHECK(onDocs.currentWorkspace == "docs");
+    CHECK(onDocs.otherWorkspaces == Urgency::NeedsYou);
+    CHECK(onDocs.otherWorkspacesGlyph == rows.front().glyph);
+    CHECK(chipMarkerOf(onDocs.otherWorkspaces) == ChipMarker::Shown);
+
+    // Work running elsewhere does not mark the chip.
+    auto const onBilling = sidebarSummary(rows, 1);
+    CHECK(onBilling.currentWorkspace == "billing");
+    CHECK(onBilling.otherWorkspaces == Urgency::Working);
+    CHECK(chipMarkerOf(onBilling.otherWorkspaces) == ChipMarker::None);
+
+    // No shown workspace: no name, and every workspace counts.
+    CHECK(sidebarSummary(rows, std::nullopt).currentWorkspace.empty());
+    CHECK(sidebarSummary(rows, std::nullopt).otherWorkspaces == Urgency::NeedsYou);
+}
+
+TEST_CASE("SidebarTree.chip_marker_from_done_unseen_up", "[sidebar]")
+{
+    CHECK(chipMarkerOf(Urgency::Idle) == ChipMarker::None);
+    CHECK(chipMarkerOf(Urgency::UnseenOutput) == ChipMarker::None);
+    CHECK(chipMarkerOf(Urgency::Working) == ChipMarker::None);
+    CHECK(chipMarkerOf(Urgency::DoneUnseen) == ChipMarker::Shown);
+    CHECK(chipMarkerOf(Urgency::Failed) == ChipMarker::Shown);
+    CHECK(chipMarkerOf(Urgency::NeedsYou) == ChipMarker::Shown);
+}
+
+TEST_CASE("SidebarTree.parent_row_of", "[sidebar]")
+{
+    auto const rows = rowsOf(directoryOf({ workspaceOf(
+        1, "w", { tabOf(1, "split", { paneOf(1, "a"), paneOf(2, "b") }), tabOf(2, "t", { paneOf(3) }) }) }));
+    REQUIRE(rows.size() == 5); // w, split, a, b, t
+    CHECK(parentRowOf(rows, 0) == -1);
+    CHECK(parentRowOf(rows, 1) == 0);
+    CHECK(parentRowOf(rows, 2) == 1);
+    CHECK(parentRowOf(rows, 3) == 1);
+    CHECK(parentRowOf(rows, 4) == 0);
+    CHECK(parentRowOf(rows, 5) == -1);
+    CHECK(parentRowOf(rows, -1) == -1);
+}
+
+TEST_CASE("SidebarTree.tree_lines_text_is_two_cells_a_column", "[sidebar]")
+{
+    auto const rows = rowsOf(directoryOf({ workspaceOf(
+        1, "w", { tabOf(1, "split", { paneOf(1, "a"), paneOf(2, "b") }), tabOf(2, "t", { paneOf(3) }) }) }));
+    REQUIRE(rows.size() == 5);
+    CHECK(treeLinesText(rows[0].lines, rows[0].depth).empty());
+    CHECK(treeLinesText(rows[1].lines, rows[1].depth) == "├ ");
+    CHECK(treeLinesText(rows[2].lines, rows[2].depth) == "│ ├ ");
+    CHECK(treeLinesText(rows[3].lines, rows[3].depth) == "│ └ ");
+    CHECK(treeLinesText(rows[4].lines, rows[4].depth) == "└ ");
+}
+
+TEST_CASE("SidebarTree.tree_lines_connect_through_second_lines", "[sidebar]")
+{
+    // Every row drawn as two lines -- its first, and the continuation its reason line carries -- the way a
+    // tree(1) drawing reads: a line leaving a cell downwards arrives in the cell below, and a line arriving
+    // from above left the cell above, or hangs from the row whose children it leads to.
+    struct Line
+    {
+        TreeLines glyphs;
+        uint8_t depth = 0;
+        bool first = false;
+    };
+    auto const sends = [](TreeGlyph glyph) {
+        return glyph == TreeGlyph::Tee || glyph == TreeGlyph::Bar;
+    };
+    auto const receives = [](TreeGlyph glyph) {
+        return glyph != TreeGlyph::None;
+    };
+
+    auto const rows =
+        rowsOf(directoryOf({ workspaceOf(1,
+                                         "w",
+                                         { tabOf(1, "split", { paneOf(1, "a"), paneOf(2, "b") }),
+                                           tabOf(2, "t", { paneOf(3) }),
+                                           tabOf(3, "last", { paneOf(4, "c"), paneOf(5, "d") }) }),
+                             workspaceOf(2, "v", { tabOf(4, "only", { paneOf(6) }) }) }));
+    auto lines = std::vector<Line> {};
+    for (auto const& row: rows)
+    {
+        lines.push_back({ .glyphs = row.lines, .depth = row.depth, .first = true });
+        if (row.depth > 0)
+            lines.push_back({ .glyphs = row.continued, .depth = row.depth, .first = false });
+    }
+    for (auto const index: std::views::iota(std::size_t { 1 }, lines.size()))
+    {
+        auto const& above = lines[index - 1];
+        auto const& below = lines[index];
+        for (auto const column: std::views::iota(std::size_t { 0 }, below.glyphs.columns.size()))
+        {
+            INFO("line " << index << ", column " << column);
+            if (sends(above.glyphs.columns[column]))
+                CHECK(receives(below.glyphs.columns[column]));
+            if (receives(below.glyphs.columns[column]))
+                CHECK((sends(above.glyphs.columns[column]) || (above.first && above.depth == column)));
+        }
+    }
+    // The line from a tab down to its panes runs through the tab's second line.
+    CHECK(treeContinuationText(rows[1]) == "│ │ ");
+    CHECK(treeContinuationText(rows[3]) == "│   ");
+    CHECK(treeContinuationText(rows[0]).empty());
+}
+
+TEST_CASE("SidebarTree.meter_text_fills_eighths_of_cells", "[sidebar]")
+{
+    CHECK(meterText(0) == "░░░░░");
+    CHECK(meterText(100) == "█████");
+    CHECK(meterText(50) == "██▌░░");
+    CHECK(meterText(-5) == meterText(0));
+    CHECK(meterText(250) == meterText(100));
+}
+
+TEST_CASE("SidebarTree.the_chip_names_what_the_other_workspaces_ask", "[sidebar]")
+{
+    auto summary = SidebarSummary { .currentWorkspace = "docs", .otherWorkspaces = Urgency::Failed };
+    CHECK(workspaceChipAccessibleName(summary) == "Workspace docs, another workspace failed");
+    summary.otherWorkspaces = Urgency::DoneUnseen;
+    CHECK(workspaceChipAccessibleName(summary) == "Workspace docs, another workspace done");
+    summary.otherWorkspaces = Urgency::NeedsYou;
+    CHECK(workspaceChipAccessibleName(summary) == "Workspace docs, another workspace needs you");
+    // What does not mark the chip is not said either.
+    summary.otherWorkspaces = Urgency::Working;
+    CHECK(workspaceChipAccessibleName(summary) == "Workspace docs");
+    CHECK(urgencyText(Urgency::Idle).empty());
+}
+
+TEST_CASE("SidebarTree.hover_detail_joins_what_it_has", "[sidebar]")
+{
+    auto directory = oneTabWith(recordOf(ProgramState::Working));
+    directory.workspaces[0].tabs[0].panes[0].cwd = "/src";
+    auto const rows = rowsOf(directory);
+    CHECK(hoverDetailOf(tabRowOf(rows)) == "app · /src · 0:42");
+    CHECK(hoverDetailOf(rows.front()).empty());
 }

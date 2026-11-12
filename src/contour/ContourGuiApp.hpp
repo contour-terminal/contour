@@ -68,6 +68,7 @@
 #include <core/platform/SystemPower.hpp>
 
 #include <QtCore/QPointer>
+#include <QtCore/QRect>
 #include <QtCore/QTimer>
 #include <QtGui/QPalette>
 #include <QtQml/QQmlApplicationEngine>
@@ -519,9 +520,13 @@ class ContourGuiApp:
     /// nothing.
     /// @param opening Over which window, and what to show: everything, a pick, or the "New daemon…" prompt.
     /// @param anchor The screen of the window that asked; null for the primary screen.
+    /// @param control The control that opened it, in screen coordinates, the gap below it included: the
+    ///                popup is then a dropdown hanging below it (window::popupBelow) and closed by a click
+    ///                outside it. None centres it over the window, as the action's chord does.
     /// @return Nothing once shown; why it cannot be (no QML engine, or Switcher.qml did not load).
     [[nodiscard]] std::expected<void, std::string> openSwitcher(window::SwitcherOpening opening,
-                                                                QScreen* anchor);
+                                                                QScreen* anchor,
+                                                                std::optional<QRect> control = std::nullopt);
 
     /// The app-wide keyboard layout (single instance; see KeyboardLayout.h). The active layout is
     /// process-global ambient state, and the macOS implementation registers an observer for changes
@@ -1855,6 +1860,9 @@ class ContourGuiApp:
     /// The daemon and workspace switcher popup, created on first use; ordered as the picker's pair is.
     std::unique_ptr<window::SwitcherController> _switcher;
     std::unique_ptr<QQuickWindow> _switcherWindow;
+    /// The switcher window's own flags, as Switcher.qml built it: what a centred opening restores after a
+    /// dropdown made it a popup.
+    Qt::WindowFlags _switcherWindowFlags {};
 
     // Build the two OS appearance sources, each bound to its change handler. The app keeps these
     // factories and builds each source the first time it is read, not at construction (ruling R-i): the

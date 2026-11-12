@@ -118,6 +118,20 @@ TEST_CASE("tabBadge.progressOnlyForWorking", "[tabbadge]")
     CHECK(resolveTabBadge({ BadgeKind::Working, 40 }).progressPercent == 40);
 }
 
+TEST_CASE("tabBadge.failedIsAnEmojiOnTheNativeRowsAndOneCellOnTheTerminalRow", "[tabbadge]")
+{
+    using contour::config::SidebarLook;
+    CHECK(tabBadgeGlyph(TabBadgeKind::Error, SidebarLook::SourceList) == "\u274C");
+    CHECK(tabBadgeGlyph(TabBadgeKind::Error, SidebarLook::NavigationPane) == "\u274C");
+    CHECK(tabBadgeGlyph(TabBadgeKind::Error, SidebarLook::HeaderPane) == "\u274C");
+    CHECK(tabBadgeGlyph(TabBadgeKind::Error, SidebarLook::CellTree) == "✕");
+    // Every other status draws its own glyph on every row.
+    for (auto const index: std::views::iota(size_t { 1 }, TabBadgeKindCount))
+        for (auto const look: { SidebarLook::SourceList, SidebarLook::CellTree })
+            if (auto const kind = TabBadgeKind(index); kind != TabBadgeKind::Error)
+                CHECK(tabBadgeGlyph(kind, look) == tabBadgeLook(kind).glyph);
+}
+
 TEST_CASE("tabBadge.everyKindHasALook", "[tabbadge]")
 {
     for (auto const i: std::views::iota(size_t { 0 }, TabBadgeKindCount))

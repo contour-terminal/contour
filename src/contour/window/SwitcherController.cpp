@@ -80,6 +80,21 @@ void SwitcherController::open(SwitcherOpening opening)
     setLabelState({}, {});
     if (_opening.pick)
         _daemons.push_back(*_opening.pick);
+    else if (_opening.scope == SwitcherScope::OneDaemon)
+    {
+        // The window's own daemon alone, listed now: its workspaces are the whole list, and no other daemon
+        // is looked for.
+        auto const& own = _opening.windowDaemon;
+        _daemons.push_back(
+            SwitcherDaemon { .address = { .kind = own.kind, .daemon = own.daemon, .workspace = {} },
+                             .workspaceCount = std::nullopt,
+                             .tag = {},
+                             .expansion = SwitcherExpansion::Expanded,
+                             .listing = SwitcherListing::NotListed,
+                             .failure = {},
+                             .workspaces = {} });
+        listDaemon(0);
+    }
     else
     {
         // The saved hosts, and the window's own daemon: first when no label names it (`--connect-tcp`), else
@@ -215,10 +230,9 @@ void SwitcherController::rebuild(std::optional<session::SwitchTarget> const& kee
     _rows =
         _prompt == SwitcherPrompt::NewDaemon
             ? std::vector<SwitcherRow> {}
-            : switcherRows({ .daemons = _daemons,
-                             .windowDaemon = _opening.windowDaemon,
-                             .scope = _opening.pick ? SwitcherScope::OneDaemon : SwitcherScope::Everything },
-                           _filter.toStdString());
+            : switcherRows(
+                  { .daemons = _daemons, .windowDaemon = _opening.windowDaemon, .scope = scopeOf(_opening) },
+                  _filter.toStdString());
     endResetModel();
     // Until the user takes the selection, it is the popup's: it goes to the first daemon that is not this
     // window's, again each time discovery fills the list in.
@@ -316,7 +330,8 @@ void SwitcherController::expandCurrent()
 
 void SwitcherController::collapseCurrent()
 {
-    if (_current < 0 || static_cast<std::size_t>(_current) >= _rows.size() || _opening.pick)
+    if (_current < 0 || static_cast<std::size_t>(_current) >= _rows.size()
+        || scopeOf(_opening) == SwitcherScope::OneDaemon)
         return;
     auto const& row = _rows[static_cast<std::size_t>(_current)];
     if (row.kind == SwitcherRowKind::NewDaemon)
@@ -332,7 +347,8 @@ void SwitcherController::collapseCurrent()
 
 void SwitcherController::toggle(int row)
 {
-    if (row < 0 || static_cast<std::size_t>(row) >= _rows.size() || _opening.pick)
+    if (row < 0 || static_cast<std::size_t>(row) >= _rows.size()
+        || scopeOf(_opening) == SwitcherScope::OneDaemon)
         return;
     auto const& chosen = _rows[static_cast<std::size_t>(row)];
     if (chosen.kind != SwitcherRowKind::Daemon)
@@ -443,9 +459,9 @@ void SwitcherController::cancel()
 
 QString SwitcherController::pickTitle() const
 {
-    if (!_opening.pick)
+    if (scopeOf(_opening) != SwitcherScope::OneDaemon || _daemons.empty())
         return {};
-    return tr("Workspaces on %1").arg(QString::fromStdString(switcherDaemonName(_opening.pick->address)));
+    return tr("Workspaces on %1").arg(QString::fromStdString(switcherDaemonName(_daemons.front().address)));
 }
 
 void SwitcherController::setPrompt(SwitcherPrompt prompt)

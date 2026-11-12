@@ -25,6 +25,7 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/AttentionJump.hpp>
+#include <contour/window/CloseDialogTable.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/DropZonePolicy.hpp>
@@ -32,9 +33,11 @@
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneState.hpp>
 #include <contour/window/PromptHost.hpp>
+#include <contour/window/QtChromeKeys.hpp>
 #include <contour/window/QtString.hpp>
 #include <contour/window/RemoteChrome.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
+#include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SidebarMenuState.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabColorScheme.hpp>
@@ -96,16 +99,20 @@ class WindowController::SidebarHost final: public ISidebarHost
         return _window._directorySource;
     }
 
-    [[nodiscard]] std::optional<TabRef> displayedTab() const override
+    [[nodiscard]] HostIdentity hostIdentity() const override
+    {
+        return _window._manager.hostIdentity(_window._displayed);
+    }
+
+    [[nodiscard]] std::optional<TabRef> displayedTab(WorkspaceDirectory const& directory) const override
     {
         // The tab that holds the active pane, by what the directory lists: a daemon's tab ids are its own,
         // so the local tab's id says nothing there, while a pane's key is the same in both.
-        auto const* const source = _window._directorySource;
         auto const* const active = _window.activeSession();
-        if (source == nullptr || active == nullptr)
+        if (active == nullptr)
             return std::nullopt;
         auto const key = _window._manager.paneKeyOf(active->modelSessionId());
-        for (auto const& workspace: source->directory().workspaces)
+        for (auto const& workspace: directory.workspaces)
             for (auto const& tab: workspace.tabs)
                 if (std::ranges::contains(tab.panes, key, &DirectoryPane::key))
                     return TabRef { .workspace = workspace.id, .tab = tab.id };
@@ -116,14 +123,12 @@ class WindowController::SidebarHost final: public ISidebarHost
 
     void markSeen(PaneKey pane) override { _window.noteDirectoryPaneSeenByKey(pane); }
 
-    void renameWorkspace(uint64_t workspace, std::string const& /*name*/) override
+    void renameWorkspace(uint64_t workspace, std::string const& name) override
     {
-        // The name is carried by renameCurrentWorkspace()'s own prompt once Task 6 wires it.
-        _window.afterShowing(workspace, [w = &_window] {
-            w->renameCurrentWorkspace();
-            return true;
-        });
+        _window.renameWorkspace(workspace, name);
     }
+
+    void renameTab(TabRef tab, std::string const& title) override { _window.renameTab(tab, title); }
 
     void moveWorkspace(uint64_t workspace, std::size_t to) override
     {
@@ -135,19 +140,10 @@ class WindowController::SidebarHost final: public ISidebarHost
         if (at == listed.end())
             return;
         auto const from = static_cast<std::size_t>(std::distance(listed.begin(), at));
-        _window.afterShowing(workspace, [w = &_window, from, to] {
-            // Inserting before `to` lands at to-1 once the dragged one has left its place.
-            if (to > from + 1)
-                for ([[maybe_unused]] auto const _: std::views::iota(from + 1, to))
-                    w->moveCurrentWorkspaceDown();
-            else if (to < from)
-                for ([[maybe_unused]] auto const _: std::views::iota(to, from))
-                    w->moveCurrentWorkspaceUp();
-            return true;
-        });
+        _window.moveWorkspace(workspace, static_cast<int>(window::placeAfterMove(from, to)));
     }
 
-    void moveTab(TabRef tab, uint64_t toWorkspace, std::size_t /*toPosition*/) override
+    void moveTab(TabRef tab, uint64_t toWorkspace, std::size_t toPosition) override
     {
         auto const* const source = _window._directorySource;
         if (source == nullptr)
@@ -156,20 +152,18 @@ class WindowController::SidebarHost final: public ISidebarHost
         auto const target = std::ranges::find(listed.workspaces, toWorkspace, &DirectoryWorkspace::id);
         if (target == listed.workspaces.end())
             return;
-        auto const position = static_cast<uint32_t>(std::distance(listed.workspaces.begin(), target) + 1);
-        auto const holder = std::ranges::find(listed.workspaces, tab.workspace, &DirectoryWorkspace::id);
-        if (holder == listed.workspaces.end())
-            return;
-        auto const owned = std::ranges::find(holder->tabs, tab.tab, &DirectoryTab::id);
-        if (owned == holder->tabs.end() || owned->panes.empty())
-            return;
-        auto const first = owned->panes.front().key;
-        _window.afterShowing(tab.workspace, [w = &_window, first, position] {
-            if (!w->_manager.showPane(w->_displayed, first))
-                return false;
-            w->moveActiveTabToWorkspace(position);
-            return true;
-        });
+        // Within its own workspace a tab leaves its place first, as a workspace does among the workspaces.
+        auto const own = tab.workspace == toWorkspace
+                             ? std::ranges::find(target->tabs, tab.tab, &DirectoryTab::id)
+                             : target->tabs.end();
+        auto const from =
+            own != target->tabs.end()
+                ? std::optional { static_cast<std::size_t>(std::distance(target->tabs.begin(), own)) }
+                : std::nullopt;
+        _window.moveTabToWorkspace(
+            tab.tab,
+            toWorkspace,
+            static_cast<int>(window::tabPlaceAfterMove(from, toPosition, target->tabs.size())));
     }
 
     void openContextMenu(SidebarRow const& row, QPointF windowPosition) override
@@ -271,6 +265,10 @@ void WindowController::initSidebar()
     _sidebarHost = std::make_unique<SidebarHost>(*this);
     _sidebar = std::make_unique<SidebarModel>(*_sidebarHost, _attention, _wallClock, *_noticeAnnouncer);
     connect(this, &WindowController::workspaceDirectoryChanged, _sidebar.get(), &SidebarModel::noteChanged);
+    connect(_sidebar.get(),
+            &SidebarModel::summaryChanged,
+            this,
+            &WindowController::otherWorkspacesUrgencyChanged);
     refreshSidebarPresence();
 }
 
@@ -335,6 +333,8 @@ void WindowController::openContextMenu()
     // window, so it is filled in here rather than reached for from the session.
     auto const* tab = activeModelTab();
     state.hasSplits = tab != nullptr && tab->hasMultiplePanes();
+    // Nor whether the sidebar's toggle is on screen: with none, this menu is the pointer's way back.
+    state.sidebarRecovery = window::sidebarRecoveryOf(_sidebarVisibility, _sidebarToggleHost);
 
     // The pane the rows were built for. Held, so that picking one acts on it and not on whichever pane is
     // active by the time the click lands.
@@ -620,6 +620,7 @@ void WindowController::openTitleBarContextMenu()
         // window changed since startup must show what it is actually doing.
         .tabBarVisibility = _tabBarVisibility,
         .tabBarPosition = _tabBarPosition,
+        .sidebar = _sidebarVisibility,
         .activeProfile = {},
         .profileNames = {},
         // `hosts` is ordered by name already.
@@ -682,6 +683,17 @@ void WindowController::showSwitcher() const
 {
     if (auto* session = activeSession())
         session->executeAction(actions::ShowSwitcher {});
+}
+
+void WindowController::showWorkspaceDropdown(QRectF const& chip) const
+{
+    auto const* session = activeSession();
+    if (session == nullptr)
+        return;
+    // The scene is the window's content; the OS window places it on the screen.
+    auto const origin =
+        _osWindow != nullptr ? _osWindow->mapToGlobal(chip.topLeft().toPoint()) : chip.topLeft().toPoint();
+    _manager.showWorkspaceDropdown(*session, QRect { origin, chip.size().toSize() });
 }
 
 void WindowController::runMenuBarAction(actions::Action const& action) const
@@ -1405,6 +1417,10 @@ void WindowController::finishNodeDrag(int dropAction)
     auto const& probe = ended->probe();
     if (probe.pointerOverContourAtEnd() == PointerOverContour::Yes)
         return;
+    // Only what this process shows tears off into a window of its own: a workspace, or a tab of a workspace
+    // the window lists but does not show, has no tab here to move there.
+    if (!ended->drag().tab)
+        return;
     auto const spot = probe.dropSpot();
     std::ignore = _manager.moveNode(ended->drag(),
                                     vtworkspace::NewWorkspaceTarget {},
@@ -1598,51 +1614,6 @@ void WindowController::resetTabColor(int index)
 // {{{ Keyboard focus in the chrome
 namespace
 {
-    /// A Qt key and the chrome key it is.
-    struct QtChromeKeyRow
-    {
-        Qt::Key qt;
-        window::ChromeKey key;
-    };
-
-    inline constexpr auto QtChromeKeyRows = std::array {
-        QtChromeKeyRow { .qt = Qt::Key_Left, .key = window::ChromeKey::Left },
-        QtChromeKeyRow { .qt = Qt::Key_Right, .key = window::ChromeKey::Right },
-        QtChromeKeyRow { .qt = Qt::Key_Up, .key = window::ChromeKey::Up },
-        QtChromeKeyRow { .qt = Qt::Key_Down, .key = window::ChromeKey::Down },
-        QtChromeKeyRow { .qt = Qt::Key_Home, .key = window::ChromeKey::Home },
-        QtChromeKeyRow { .qt = Qt::Key_End, .key = window::ChromeKey::End },
-        QtChromeKeyRow { .qt = Qt::Key_Return, .key = window::ChromeKey::Return },
-        QtChromeKeyRow { .qt = Qt::Key_Enter, .key = window::ChromeKey::Return },
-        QtChromeKeyRow { .qt = Qt::Key_Space, .key = window::ChromeKey::Space },
-        QtChromeKeyRow { .qt = Qt::Key_Backspace, .key = window::ChromeKey::Backspace },
-        QtChromeKeyRow { .qt = Qt::Key_Delete, .key = window::ChromeKey::Delete },
-        QtChromeKeyRow { .qt = Qt::Key_Escape, .key = window::ChromeKey::Escape },
-        QtChromeKeyRow { .qt = Qt::Key_Tab, .key = window::ChromeKey::Tab },
-        QtChromeKeyRow { .qt = Qt::Key_Backtab, .key = window::ChromeKey::Tab },
-        QtChromeKeyRow { .qt = Qt::Key_F2, .key = window::ChromeKey::F2 },
-    };
-
-    [[nodiscard]] window::ChromeKey chromeKeyOf(int qtKey) noexcept
-    {
-        auto const row =
-            std::ranges::find(QtChromeKeyRows, qtKey, [](auto const& r) { return static_cast<int>(r.qt); });
-        return row != QtChromeKeyRows.end() ? row->key : window::ChromeKey::Other;
-    }
-
-    /// Qt's keypad flag marks where a key sits, not a chord; the chrome ignores it.
-    [[nodiscard]] window::ChromeKeyModifier chromeModifierOf(Qt::KeyboardModifiers modifiers) noexcept
-    {
-        modifiers &= ~Qt::KeypadModifier;
-        if (modifiers == Qt::NoModifier)
-            return window::ChromeKeyModifier::None;
-        if (modifiers == Qt::AltModifier)
-            return window::ChromeKeyModifier::Alt;
-        if (modifiers == Qt::ShiftModifier)
-            return window::ChromeKeyModifier::Shift;
-        return window::ChromeKeyModifier::Other;
-    }
-
     /// The Qt key codes of the printable ASCII characters equal their codepoints (upper case for letters).
     inline constexpr auto PrintableAsciiBegin = 0x20;
     inline constexpr auto PrintableAsciiEnd = 0x80;
@@ -1730,6 +1701,11 @@ window::ChromeAreaPresence WindowController::currentChromePresence() const noexc
     presence.sidebar = _sidebarVisibility == config::SidebarVisibility::Shown ? window::AreaPresence::Present
                                                                               : window::AreaPresence::Absent;
     return presence;
+}
+
+void WindowController::setSidebarToggleHost(QString const& host)
+{
+    _sidebarToggleHost = window::sidebarToggleHostNamed(host.toStdString());
 }
 
 void WindowController::setChromePresence(bool tabsShown, int toolbarItems)
@@ -1820,8 +1796,8 @@ bool WindowController::chromeKey(int qtKey, int qtModifiers, QString const& text
         }
     if (_chromeArea == window::ChromeArea::Terminal)
         return false;
-    auto key = chromeKeyOf(qtKey);
-    auto const modifier = chromeModifierOf(modifiers);
+    auto key = window::chromeKeyOf(qtKey);
+    auto const modifier = window::chromeModifierOf(modifiers);
     // Typing in the sidebar filters its tree; a character key is a key of that area alone.
     auto const typed = text.size() == 1 && text.front().isPrint();
     auto const plain =
@@ -1829,7 +1805,8 @@ bool WindowController::chromeKey(int qtKey, int qtModifiers, QString const& text
     if (_chromeArea == window::ChromeArea::Sidebar && key == window::ChromeKey::Other && typed && plain)
         key = window::ChromeKey::Printable;
     if (window::chromeConsumes(_chromeArea, key, modifier))
-        return runChromeCommand(window::chromeCommandFor(_chromeArea, key, modifier), text);
+        return runChromeCommand(window::chromeCommandFor(_chromeArea, key, modifier), text)
+               == window::ChromeKeyOutcome::Handled;
     // Every other chord is the application's, as in the terminal: bound actions run, plain typing does not
     // reach the shell.
     if (bound == nullptr)
@@ -1839,20 +1816,26 @@ bool WindowController::chromeKey(int qtKey, int qtModifiers, QString const& text
     return activeSession()->executeBoundActions(actions) > 0;
 }
 
-bool WindowController::runChromeCommand(window::ChromeCommand command, QString const& text)
+window::ChromeKeyOutcome WindowController::runChromeCommand(window::ChromeCommand command,
+                                                            QString const& text)
 {
     using window::ChromeCommand;
+    using window::ChromeKeyOutcome;
+    // Escape in the tree clears a typed filter first, as it does in the filter field; the next one leaves.
+    if (_chromeArea == window::ChromeArea::Sidebar && command == ChromeCommand::Leave
+        && _sidebar->isFiltered())
+        command = ChromeCommand::ClearFilter;
     if (_chromeArea == window::ChromeArea::Sidebar && command != ChromeCommand::None
         && command != ChromeCommand::Leave)
     {
         // The tree is QML's: it moves its own row focus, expands, renames and filters.
         emit sidebarCommandRequested(static_cast<int>(command), text);
-        return true;
+        return ChromeKeyOutcome::Handled;
     }
     auto const inTabs = _chromeArea == window::ChromeArea::Tabs;
     switch (command)
     {
-        case ChromeCommand::None: return false;
+        case ChromeCommand::None: return ChromeKeyOutcome::Unhandled;
         case ChromeCommand::FocusPrevious:
         case ChromeCommand::FocusNext:
         case ChromeCommand::FocusFirst:
@@ -1861,17 +1844,17 @@ bool WindowController::runChromeCommand(window::ChromeCommand command, QString c
             auto const moved =
                 window::focusedIndexAfter(command, focused, inTabs ? count() : _toolbarItemCount);
             if (moved == focused)
-                return true;
+                return ChromeKeyOutcome::Handled;
             if (inTabs)
                 _focusedTab = tabIdAtRow(moved);
             else
                 _focusedToolbarIndex = moved;
             emit chromeFocusChanged();
-            return true;
+            return ChromeKeyOutcome::Handled;
         }
         case ChromeCommand::Activate:
             if (!inTabs)
-                return false; // a toolbar item is pressed by the item itself
+                return ChromeKeyOutcome::Unhandled; // a toolbar item is pressed by the item itself
             // Leave first: the window gives the terminal the keyboard when the active tab changes, and only
             // while the chrome no longer holds it (a reorder or a background close keeps it).
             {
@@ -1879,8 +1862,8 @@ bool WindowController::runChromeCommand(window::ChromeCommand command, QString c
                 leaveChrome();
                 activateTab(tab);
             }
-            return true;
-        case ChromeCommand::Close: closeTabAskingIfBusy(focusedTabIndex()); return true;
+            return ChromeKeyOutcome::Handled;
+        case ChromeCommand::Close: closeTabAskingIfBusy(focusedTabIndex()); return ChromeKeyOutcome::Handled;
         case ChromeCommand::MoveLeft:
         case ChromeCommand::MoveRight: {
             auto const row = focusedTabIndex();
@@ -1888,15 +1871,17 @@ bool WindowController::runChromeCommand(window::ChromeCommand command, QString c
             // The focus is on the tab, so it goes with it.
             if (row >= 0 && target >= 0 && target < count())
                 moveTab(row, target);
-            return true;
+            return ChromeKeyOutcome::Handled;
         }
-        case ChromeCommand::Leave: leaveChrome(); return true;
+        case ChromeCommand::Leave: leaveChrome(); return ChromeKeyOutcome::Handled;
         case ChromeCommand::Collapse:
         case ChromeCommand::Expand:
         case ChromeCommand::Rename:
-        case ChromeCommand::Filter: return false; // the sidebar's, handled above
+        case ChromeCommand::Filter:
+        case ChromeCommand::ClearFilter:
+        case ChromeCommand::OpenMenu: return ChromeKeyOutcome::Unhandled; // the sidebar's, handled above
     }
-    return false;
+    return ChromeKeyOutcome::Unhandled;
 }
 
 void WindowController::closeTabAskingIfBusy(int row)
@@ -3138,6 +3123,14 @@ void WindowController::setSidebarWidth(int width)
     emit sidebarWidthChanged();
 }
 
+void WindowController::openSidebarFilter()
+{
+    // The field lives in the sidebar: shown first, so the sidebar is there to take the request.
+    if (_sidebarVisibility != config::SidebarVisibility::Shown)
+        toggleSidebar();
+    emit sidebarFilterRequested();
+}
+
 void WindowController::toggleSidebar()
 {
     _sidebarVisibility = _sidebarVisibility == config::SidebarVisibility::Shown
@@ -3157,6 +3150,65 @@ void WindowController::focusSidebar()
     if (_sidebarVisibility != config::SidebarVisibility::Shown)
         toggleSidebar();
     enterChromeArea(window::ChromeArea::Sidebar);
+}
+
+QVariantMap WindowController::sidebarCommands()
+{
+    return sidebarCommandMap();
+}
+
+void WindowController::newWorkspace() const
+{
+    if (auto* session = activeSession())
+        session->executeAction(actions::NewWorkspace {});
+}
+
+QString WindowController::beginSidebarDrag(int row)
+{
+    auto const& rows = _sidebar->rows();
+    if (row < 0 || std::cmp_greater_equal(row, rows.size()) || _directorySource == nullptr)
+        return {};
+    auto const& shown = rows[static_cast<std::size_t>(row)];
+    switch (shown.key.kind)
+    {
+        case SidebarRowKind::Workspace:
+            return beginNodeDrag(NodeDrag { .payload = DropPayload::Workspace,
+                                            .host = _manager.hostIdentity(_displayed),
+                                            .window = _displayed,
+                                            .tabIndex = 0,
+                                            .workspace = shown.key.workspace,
+                                            .sessions = {} },
+                                 nullptr);
+        case SidebarRowKind::Tab: {
+            // A tab of the workspace the window shows is one of its own rows, in the directory's order, and
+            // drags as a strip tab does.
+            auto const directory = _directorySource->directory();
+            auto const displayed = _sidebarHost->displayedTab(directory);
+            if (displayed && displayed->workspace == shown.key.workspace)
+                return beginTabDrag(static_cast<int>(shown.position));
+            // Another workspace's tab is named by what the directory lists of its panes: their keys are the
+            // host's session ids, which is what a drag payload carries.
+            auto const holder =
+                std::ranges::find(directory.workspaces, shown.key.workspace, &DirectoryWorkspace::id);
+            if (holder == directory.workspaces.end())
+                return {};
+            auto const tab = std::ranges::find(holder->tabs, shown.key.tab, &DirectoryTab::id);
+            if (tab == holder->tabs.end() || tab->panes.empty())
+                return {};
+            auto sessions = std::ranges::to<std::vector<uint64_t>>(
+                tab->panes | std::views::transform([](DirectoryPane const& pane) { return pane.key.value; }));
+            return beginNodeDrag(
+                NodeDrag { .payload = sessions.size() > 1 ? DropPayload::Tab : DropPayload::Pane,
+                           .host = _manager.hostIdentity(_displayed),
+                           .window = _displayed,
+                           .tabIndex = static_cast<int>(shown.position),
+                           .workspace = 0,
+                           .sessions = std::move(sessions) },
+                nullptr);
+        }
+        case SidebarRowKind::Pane: break;
+    }
+    return {};
 }
 
 void WindowController::jumpToNextAttention()
@@ -3202,12 +3254,12 @@ void WindowController::completePendingJump()
     {
         // Taken out while it runs, as running it may set a new one; put back when it is not done.
         auto waiting = std::exchange(_pendingRowAction, std::nullopt);
-        if (!waiting->run())
+        if (waiting->run() == RowActionOutcome::Waiting)
             _pendingRowAction = std::move(waiting);
     }
     if (!_pendingJump)
         return;
-    if (!_manager.showPane(_displayed, _pendingJump->pane))
+    if (_manager.showPane(_displayed, _pendingJump->pane) == session::PaneShowing::NotHeld)
         return;
     // What the directory states of the pane counts as seen from here on: the jump is the user looking.
     noteDirectoryPaneSeenByKey(_pendingJump->pane);
@@ -3240,22 +3292,99 @@ void WindowController::markActivePaneSeen()
 
 void WindowController::renameCurrentWorkspace()
 {
-    // wired in Task 6
+    // The name is edited where it is shown: on the workspace's row, in a sidebar shown for it.
+    focusSidebar();
+    emit workspaceRenameRequested();
 }
 
 void WindowController::moveCurrentWorkspaceUp()
 {
-    // wired in Task 6
+    moveShownWorkspaceBy(-1);
 }
 
 void WindowController::moveCurrentWorkspaceDown()
 {
-    // wired in Task 6
+    moveShownWorkspaceBy(+1);
 }
 
 void WindowController::closeCurrentWorkspace()
 {
-    // wired in Task 6
+    if (auto const shown = shownWorkspaceId())
+        closeWorkspace(*shown);
+}
+
+std::optional<uint64_t> WindowController::shownWorkspaceId() const
+{
+    if (_directorySource == nullptr)
+        return std::nullopt;
+    auto const directory = _directorySource->directory();
+    if (directory.selected)
+        return directory.selected;
+    if (auto const displayed = _sidebarHost->displayedTab(directory))
+        return displayed->workspace;
+    return std::nullopt;
+}
+
+void WindowController::moveShownWorkspaceBy(int by)
+{
+    if (auto const shown = shownWorkspaceId())
+        moveWorkspaceBy(*shown, by);
+}
+
+void WindowController::moveWorkspaceBy(uint64_t workspace, int by)
+{
+    if (_directorySource == nullptr)
+        return;
+    auto const listed = _directorySource->directory().workspaces;
+    auto const at = std::ranges::find(listed, workspace, &DirectoryWorkspace::id);
+    if (at == listed.end())
+        return;
+    auto const to = static_cast<int>(std::distance(listed.begin(), at)) + by;
+    if (to >= 0 && std::cmp_less(to, listed.size()))
+        moveWorkspace(workspace, to);
+}
+
+void WindowController::renameTab(TabRef tab, std::string const& title)
+{
+    if (_directorySource == nullptr)
+        return;
+    auto const directory = _directorySource->directory();
+    auto const holder = std::ranges::find(directory.workspaces, tab.workspace, &DirectoryWorkspace::id);
+    if (holder == directory.workspaces.end())
+        return;
+    auto const listed = std::ranges::find(holder->tabs, tab.tab, &DirectoryTab::id);
+    if (listed == holder->tabs.end())
+        return;
+    // A tab of the shown workspace is one of the window's rows, in the directory's order: the strip's rename.
+    auto const displayed = _sidebarHost->displayedTab(directory);
+    if (displayed && displayed->workspace == tab.workspace)
+    {
+        setTabTitle(static_cast<int>(std::distance(holder->tabs.begin(), listed)),
+                    QString::fromStdString(title));
+        return;
+    }
+    // Another workspace's tab is titled where it lives: in the model, or in the daemon by a session it holds.
+    _manager.renameTab(*this, tab.tab, title);
+}
+
+void WindowController::renameWorkspace(uint64_t workspace, std::string label)
+{
+    _manager.renameWorkspace(*this, workspace, std::move(label));
+}
+
+void WindowController::moveWorkspace(uint64_t workspace, int toPosition)
+{
+    _manager.moveWorkspace(*this, workspace, toPosition);
+}
+
+void WindowController::moveTabToWorkspace(uint64_t tab, uint64_t toWorkspace, int toPosition)
+{
+    _manager.moveTabToWorkspace(*this, tab, toWorkspace, toPosition);
+}
+
+void WindowController::closeWorkspace(uint64_t workspace)
+{
+    _manager.closeWorkspace(*this, workspace);
 }
 
 void WindowController::goToSidebarPane()
@@ -3264,13 +3393,13 @@ void WindowController::goToSidebarPane()
         jumpToPane(_sidebarActionRow->pane);
 }
 
-void WindowController::afterShowing(uint64_t workspace, std::function<bool()> run)
+void WindowController::afterShowing(uint64_t workspace, std::function<RowActionOutcome()> run)
 {
     _pendingRowAction.reset();
     if (_directorySource == nullptr)
         return;
     auto const shown = _directorySource->directory().selected == workspace;
-    if (shown && run())
+    if (shown && run() == RowActionOutcome::Done)
         return;
     // A daemon states its selection later, and a pane may land only with its layout: the action waits, and is
     // dropped if the daemon refuses or the workspace is shown without it (cancelPendingJump()).
@@ -3279,7 +3408,151 @@ void WindowController::afterShowing(uint64_t workspace, std::function<bool()> ru
         _pendingRowAction.reset();
 }
 
+namespace
+{
+    template <typename Alternative>
+    [[nodiscard]] bool holds(actions::Action const& action) noexcept
+    {
+        return std::holds_alternative<Alternative>(action);
+    }
+} // namespace
+
 void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Action const& action)
+{
+    using Run = void (*)(WindowController&, SidebarRowKey const&, actions::Action const&);
+    constexpr Run MarkRowSeen =
+        [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
+            window._sidebar->markSeen(window._sidebar->rowIndexOf(key));
+        };
+    constexpr Run RenameRow = [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
+        window.focusSidebar();
+        emit window.sidebarRowRenameRequested(window._sidebar->rowIndexOf(key));
+    };
+    constexpr Run MoveRowUp = [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
+        window.moveWorkspaceBy(key.workspace, -1);
+    };
+    constexpr Run MoveRowDown =
+        [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
+            window.moveWorkspaceBy(key.workspace, +1);
+        };
+    constexpr Run MoveRowTab =
+        [](WindowController& window, SidebarRowKey const& key, actions::Action const& what) {
+            window.moveTabToWorkspaceAt(TabRef { .workspace = key.workspace, .tab = key.tab },
+                                        std::get<actions::MoveTabToWorkspace>(what).index);
+        };
+    /// A menu action that names its row by id, and how it is run on it.
+    struct ByIdAction
+    {
+        bool (*matches)(actions::Action const&) noexcept;
+        Run run;
+    };
+    // What reaches its row by id, wherever the row is: the window stays where it is. Any other action (Go to
+    // Pane, Close Pane, New Tab Here, the tab strip's commands) works on what the window shows, so its row is
+    // shown first.
+    static constexpr auto ByIdActions = std::array {
+        ByIdAction { .matches = holds<actions::MarkSeen>, .run = MarkRowSeen },
+        ByIdAction { .matches = holds<actions::RenameWorkspace>, .run = RenameRow },
+        ByIdAction { .matches = holds<actions::SetTabTitle>, .run = RenameRow },
+        ByIdAction { .matches = holds<actions::MoveWorkspaceUp>, .run = MoveRowUp },
+        ByIdAction { .matches = holds<actions::MoveWorkspaceDown>, .run = MoveRowDown },
+        ByIdAction { .matches = holds<actions::MoveTabToWorkspace>, .run = MoveRowTab },
+    };
+    /// A menu close, and what it closes: from the sidebar's menu a close always asks first.
+    struct ConfirmedClose
+    {
+        bool (*matches)(actions::Action const&) noexcept;
+        CloseKind kind;
+    };
+    static constexpr auto ConfirmedCloses = std::array {
+        ConfirmedClose { .matches = holds<actions::CloseWorkspace>, .kind = CloseKind::Workspace },
+        ConfirmedClose { .matches = holds<actions::CloseTab>, .kind = CloseKind::Tab },
+        ConfirmedClose { .matches = holds<actions::ClosePane>, .kind = CloseKind::Pane },
+    };
+    if (auto const asked = std::ranges::find_if(
+            ConfirmedCloses, [&](ConfirmedClose const& entry) { return entry.matches(action); });
+        asked != ConfirmedCloses.end())
+    {
+        askToClose(asked->kind, row);
+        return;
+    }
+    if (auto const byId =
+            std::ranges::find_if(ByIdActions, [&](ByIdAction const& entry) { return entry.matches(action); });
+        byId != ByIdActions.end())
+    {
+        byId->run(*this, row, action);
+        return;
+    }
+    runSidebarActionShown(row, action);
+}
+
+void WindowController::askToClose(CloseKind kind, SidebarRowKey const& key)
+{
+    auto label = QString {};
+    auto program = QString {};
+    if (auto const index = _sidebar->rowIndexOf(key); index >= 0)
+    {
+        auto const& shown = _sidebar->rows()[static_cast<std::size_t>(index)];
+        label = QString::fromStdString(shown.title);
+        program = QString::fromStdString(shown.program);
+    }
+    emit sidebarCloseConfirmationRequested(
+        static_cast<int>(kind), key.workspace, key.tab, key.pane.value, label, program);
+}
+
+QVariantMap WindowController::closeConfirmation(
+    int kind, quint64 workspace, quint64 tab, QString const& label, QString const& program) const
+{
+    if (kind < 0 || std::cmp_greater_equal(kind, CloseKindCount))
+        return {};
+    auto subject = CloseSubject {
+        .label = label.toStdString(), .tabs = 0, .panes = 0, .program = program.toStdString()
+    };
+    if (_directorySource != nullptr)
+        for (auto const& listed: _directorySource->directory().workspaces)
+        {
+            if (listed.id != workspace)
+                continue;
+            for (auto const& candidate: listed.tabs)
+            {
+                if (static_cast<CloseKind>(kind) == CloseKind::Workspace)
+                {
+                    ++subject.tabs;
+                    subject.panes += candidate.panes.size();
+                }
+                else if (candidate.id == tab)
+                    subject.panes = candidate.panes.size();
+            }
+        }
+    auto const text = closeDialogText(static_cast<CloseKind>(kind), subject);
+    return { { QStringLiteral("heading"), QString::fromStdString(text.heading) },
+             { QStringLiteral("message"), QString::fromStdString(text.message) },
+             { QStringLiteral("acceptText"), QString::fromStdString(text.acceptText) } };
+}
+
+void WindowController::confirmClose(int kind, quint64 workspace, quint64 tab, quint64 pane)
+{
+    if (kind < 0 || std::cmp_greater_equal(kind, CloseKindCount))
+        return;
+    switch (static_cast<CloseKind>(kind))
+    {
+        case CloseKind::Workspace: confirmCloseWorkspace(workspace); break;
+        case CloseKind::Tab:
+            runSidebarActionShown(
+                SidebarRowKey {
+                    .kind = SidebarRowKind::Tab, .workspace = workspace, .tab = tab, .pane = PaneKey {} },
+                actions::Action { actions::CloseTab {} });
+            break;
+        case CloseKind::Pane:
+            runSidebarActionShown(SidebarRowKey { .kind = SidebarRowKind::Pane,
+                                                  .workspace = workspace,
+                                                  .tab = tab,
+                                                  .pane = PaneKey { pane } },
+                                  actions::Action { actions::ClosePane {} });
+            break;
+    }
+}
+
+void WindowController::runSidebarActionShown(SidebarRowKey const& row, actions::Action const& action)
 {
     afterShowing(row.workspace, [this, row, action] {
         auto shown = std::optional<PaneKey> {};
@@ -3294,14 +3567,14 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
                                 if (tab.id == row.tab && !tab.panes.empty())
                                     shown = tab.panes.front().key;
                 if (!shown)
-                    return false; // the tab is not listed (yet)
+                    return RowActionOutcome::Waiting; // the tab is not listed (yet)
                 break;
             case SidebarRowKind::Pane: shown = row.pane; break;
         }
         // The row the menu was opened over, not whichever one is current: when it cannot be shown the action
         // waits, and is never run against the active session or tab instead.
-        if (shown && !_manager.showPane(_displayed, *shown))
-            return false;
+        if (shown && _manager.showPane(_displayed, *shown) == session::PaneShowing::NotHeld)
+            return RowActionOutcome::Waiting;
         _sidebarActionRow = row;
         if (row.kind == SidebarRowKind::Tab)
         {
@@ -3311,7 +3584,7 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
         else if (auto* const session = activeSession())
             session->executeAction(action);
         _sidebarActionRow.reset();
-        return true;
+        return RowActionOutcome::Done;
     });
 }
 
@@ -3359,9 +3632,25 @@ void WindowController::triggerSidebarContextMenuAction(int actionId)
     triggerSurfaceAction(MenuSurface::Sidebar, actionId);
 }
 
-void WindowController::moveActiveTabToWorkspace(uint32_t /*position*/)
+void WindowController::moveActiveTabToWorkspace(uint32_t position)
 {
-    // wired in Task 6
+    if (_directorySource == nullptr)
+        return;
+    if (auto const displayed = _sidebarHost->displayedTab(_directorySource->directory()))
+        moveTabToWorkspaceAt(*displayed, position);
+}
+
+void WindowController::moveTabToWorkspaceAt(TabRef tab, uint32_t position)
+{
+    if (_directorySource == nullptr || position == 0)
+        return;
+    auto const listed = _directorySource->directory().workspaces;
+    if (position > listed.size())
+        return;
+    auto const& target = listed[position - 1];
+    if (target.id == tab.workspace)
+        return;
+    moveTabToWorkspace(tab.tab, target.id, static_cast<int>(target.tabs.size()));
 }
 
 void WindowController::refreshSidebarChrome()

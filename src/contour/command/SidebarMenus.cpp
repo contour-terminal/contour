@@ -5,6 +5,7 @@
 #include <array>
 #include <ranges>
 #include <span>
+#include <variant>
 
 namespace contour::command
 {
@@ -55,9 +56,14 @@ namespace
     // {{{ Tab rows
     using TabTable = detail::MenuTable<SidebarTabMenuState>;
 
+    /// The tab strip's menu, with its close row ending in an ellipsis: from the sidebar it always asks first.
     [[nodiscard]] std::vector<ContextMenuEntry> tabStripRows(SidebarTabMenuState const& state)
     {
-        return buildTabContextMenu(state.tab);
+        auto entries = buildTabContextMenu(state.tab);
+        for (auto& entry: entries)
+            if (std::holds_alternative<actions::CloseTab>(entry.action))
+                entry.title = "Close Tab…";
+        return entries;
     }
 
     [[nodiscard]] std::vector<ContextMenuEntry> moveTargetRows(SidebarTabMenuState const& state)
@@ -93,7 +99,7 @@ namespace
 
             PaneTable::separator(),
 
-            PaneTable::command(ClosePane {}, "Close Pane"),
+            PaneTable::command(ClosePane {}, "Close Pane…"),
         };
         return rows;
     }

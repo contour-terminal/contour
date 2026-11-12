@@ -165,7 +165,17 @@ struct SwitcherOpening
     SwitcherPrompt prompt = SwitcherPrompt::Browse; ///< What it shows first.
     /// For a pick a switch asked for: the one daemon, its workspaces listed. None for the whole switcher.
     std::optional<SwitcherDaemon> pick;
+    /// Every daemon, or the window's own alone, listed afresh as it opens: the workspace chip's dropdown asks
+    /// which workspace of this window's daemon to show. A pick is always one daemon, whatever this says.
+    SwitcherScope scope = SwitcherScope::Everything;
 };
+
+/// @param opening What opens the popup.
+/// @return Whether it lists one daemon's workspaces alone: a pick's, or the window's own.
+[[nodiscard]] constexpr SwitcherScope scopeOf(SwitcherOpening const& opening) noexcept
+{
+    return opening.pick ? SwitcherScope::OneDaemon : opening.scope;
+}
 
 /// The popup's rows: every daemon in its group, its workspaces and "+ new workspace on X" under it when
 /// expanded, and "New daemon…" closing *This computer*. A filter keeps a daemon matching it with what is

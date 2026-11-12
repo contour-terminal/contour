@@ -7,6 +7,8 @@
 /// burst of events into one rebuild, the one-second timer behind the running times, and the announcement of
 /// a pane that starts to need the user in a workspace the window is not showing.
 #include <contour/platform/Announcer.hpp>
+#include <contour/window/CloseDialogTable.hpp>
+#include <contour/window/NodeDrag.hpp>
 #include <contour/window/PaneKey.hpp>
 #include <contour/window/SidebarTree.hpp>
 #include <contour/window/TabAttention.hpp>
@@ -15,19 +17,122 @@
 #include <core/platform/Clock.hpp>
 
 #include <QtCore/QAbstractListModel>
+#include <QtCore/QObject>
 #include <QtCore/QPointF>
 #include <QtCore/QString>
 #include <QtCore/QTimer>
+#include <QtCore/QVariantMap>
 
 #include <cstddef>
 #include <cstdint>
 #include <map>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
+
+/// The enumerators a sidebar row's kind, time and expansion roles carry, as QML names them. Their own
+/// namespace, because Q_ENUM_NS needs Q_NAMESPACE in the namespace that declares the enums, and
+/// SidebarTree.hpp -- where the rows are decided -- stays Qt-free; each enum here mirrors that one value for
+/// value. QML names them as SidebarRows.SidebarRowKind.Workspace, ... once registerSidebarQmlTypes() has
+/// run. A row compares its roles with these, never with its model's properties: a row can outlive its model
+/// for as long as its window's teardown takes, and an enumerator needs no model to be read.
+namespace contour::window::sidebarrows
+{
+Q_NAMESPACE
+
+/// What a sidebar row stands for (@see window::SidebarRowKind, which it mirrors).
+enum class SidebarRowKind : uint8_t
+{
+    Workspace = 0, ///< A workspace.
+    Tab,           ///< A tab of a workspace.
+    Pane,          ///< One pane of a tab with more than one.
+};
+Q_ENUM_NS(SidebarRowKind)
+
+/// What a row's time is (@see window::TimeKind, which it mirrors).
+enum class TimeKind : uint8_t
+{
+    None = 0, ///< Nothing.
+    Live,     ///< Time spent in the current state.
+    Relative, ///< Time since it ended.
+    Progress, ///< The percentage the program reports.
+};
+Q_ENUM_NS(TimeKind)
+
+/// Whether a row's children show (@see window::RowExpansion, which it mirrors).
+enum class RowExpansion : uint8_t
+{
+    None = 0,  ///< A row with nothing to expand.
+    Collapsed, ///< Its children are hidden.
+    Expanded,  ///< Its children follow it.
+};
+Q_ENUM_NS(RowExpansion)
+
+/// Whether a row is what the window shows (@see window::RowSelection, which it mirrors).
+enum class RowSelection : uint8_t
+{
+    None = 0,         ///< Neither.
+    Selected,         ///< The tab the window displays.
+    ContainsSelected, ///< A folded row holding it.
+};
+Q_ENUM_NS(RowSelection)
+
+/// What a close confirmation is about (@see window::CloseKind, which it mirrors).
+enum class CloseKind : uint8_t
+{
+    Workspace = 0, ///< A workspace.
+    Tab,           ///< A tab.
+    Pane,          ///< One pane.
+};
+Q_ENUM_NS(CloseKind)
+
+/// Whether the sidebar's footer has room for the chord that jumps to the next pane that needs the user.
+enum class FooterChord : uint8_t
+{
+    Dropped = 0, ///< No: the counts keep the room.
+    Shown,       ///< Yes: it follows the counts.
+};
+Q_ENUM_NS(FooterChord)
+
+/// Which wording of its counts the sidebar's footer shows.
+enum class FooterCounts : uint8_t
+{
+    Full = 0, ///< `1 needs you · 1 working`.
+    Compact,  ///< `1 waiting · 1 busy`: the same counts in fewer letters, for the narrowest sidebar.
+};
+Q_ENUM_NS(FooterCounts)
+
+static_assert(std::to_underlying(SidebarRowKind::Workspace)
+              == std::to_underlying(window::SidebarRowKind::Workspace));
+static_assert(std::to_underlying(SidebarRowKind::Tab) == std::to_underlying(window::SidebarRowKind::Tab));
+static_assert(std::to_underlying(SidebarRowKind::Pane) == std::to_underlying(window::SidebarRowKind::Pane));
+static_assert(std::to_underlying(TimeKind::None) == std::to_underlying(window::TimeKind::None));
+static_assert(std::to_underlying(TimeKind::Live) == std::to_underlying(window::TimeKind::Live));
+static_assert(std::to_underlying(TimeKind::Relative) == std::to_underlying(window::TimeKind::Relative));
+static_assert(std::to_underlying(TimeKind::Progress) == std::to_underlying(window::TimeKind::Progress));
+static_assert(std::to_underlying(RowExpansion::None) == std::to_underlying(window::RowExpansion::None));
+static_assert(std::to_underlying(RowExpansion::Collapsed)
+              == std::to_underlying(window::RowExpansion::Collapsed));
+static_assert(std::to_underlying(RowExpansion::Expanded)
+              == std::to_underlying(window::RowExpansion::Expanded));
+static_assert(std::to_underlying(CloseKind::Workspace) == std::to_underlying(window::CloseKind::Workspace));
+static_assert(std::to_underlying(CloseKind::Tab) == std::to_underlying(window::CloseKind::Tab));
+static_assert(std::to_underlying(CloseKind::Pane) == std::to_underlying(window::CloseKind::Pane));
+static_assert(std::to_underlying(RowSelection::None) == std::to_underlying(window::RowSelection::None));
+static_assert(std::to_underlying(RowSelection::Selected)
+              == std::to_underlying(window::RowSelection::Selected));
+static_assert(std::to_underlying(RowSelection::ContainsSelected)
+              == std::to_underlying(window::RowSelection::ContainsSelected));
+
+} // namespace contour::window::sidebarrows
 
 namespace contour::window
 {
+
+/// Registers the sidebar rows' enums with QML under Contour.Terminal, as SidebarRows. The first call
+/// registers; later ones return.
+void registerSidebarQmlTypes();
 
 /// What the sidebar asks of the window it sits in. The window implements it; a test answers it with a fake.
 /// Every operation is the window's own (the same ones its actions reach), so the sidebar and the keyboard
@@ -46,8 +151,13 @@ class ISidebarHost
     ///         window's source is replaced when it switches daemons.
     [[nodiscard]] virtual IWorkspaceDirectorySource* directorySource() const = 0;
 
-    /// @return The tab the window shows, if any.
-    [[nodiscard]] virtual std::optional<TabRef> displayedTab() const = 0;
+    /// @return Who hosts the window's sessions, as a drag names it: the id space its pane keys and workspace
+    ///         ids are in. A drop from another host names ids of that host's, which mean nothing here.
+    [[nodiscard]] virtual HostIdentity hostIdentity() const = 0;
+
+    /// @param directory What the window lists now, as directorySource() gave it: read once per rebuild.
+    /// @return The tab the window shows, if any, by @p directory's ids.
+    [[nodiscard]] virtual std::optional<TabRef> displayedTab(WorkspaceDirectory const& directory) const = 0;
 
     /// Shows @p pane: selects its workspace, activates its tab, focuses it and counts it as seen.
     /// @param pane The pane to show.
@@ -61,6 +171,11 @@ class ISidebarHost
     /// @param workspace The workspace's id.
     /// @param name The new label.
     virtual void renameWorkspace(uint64_t workspace, std::string const& name) = 0;
+
+    /// Sets the title a tab shows, as the strip's inline rename does.
+    /// @param tab The tab.
+    /// @param title Its title; empty clears the one the user set.
+    virtual void renameTab(TabRef tab, std::string const& title) = 0;
 
     /// Moves a workspace in the list.
     /// @param workspace The workspace's id.
@@ -94,11 +209,69 @@ enum class WindowActivity : uint8_t
     Active,       ///< This window has focus.
 };
 
-/// What a screen reader says of a row: its title, kind, whether it is expanded and what it asks of the user.
+/// What a screen reader names a row by: its title, which is what the row shows. Its kind, fold and status are
+/// the description's (accessibleDescriptionOf()), its selection the item's own state.
 /// @param row The row.
-/// @return For example `billing, workspace, expanded, 1 needs you`; a row that asks nothing leaves the status
-///         out, one with nothing to fold leaves the expansion out.
+/// @return The title.
 [[nodiscard]] QString accessibleNameOf(SidebarRow const& row);
+
+/// What a screen reader says of a row after its name, in the user's language: its kind, whether it is folded
+/// (Qt Quick's Accessible has no expanded state to carry it) and what it asks of the user, counted with the
+/// right plural form.
+/// @param row The row.
+/// @return For example `Workspace, expanded, 1 pane needs you`; a row that asks nothing and folds nothing
+/// says
+///         its kind alone.
+[[nodiscard]] QString accessibleDescriptionOf(SidebarRow const& row);
+
+/// What the sidebar's footer says of every pane the window lists: the counts that are not zero, in the user's
+/// language, joined by ` · ` (`1 needs you · 2 working`).
+/// @param footer The counts.
+/// @return The text; empty when no pane needs the user or works.
+[[nodiscard]] QString footerTextOf(SidebarFooter const& footer);
+
+/// footerTextOf() in its shorter wording (`1 waiting · 2 busy`), for a footer too narrow for the full one.
+/// @param footer The counts.
+/// @return The text; empty when no pane needs the user or works.
+[[nodiscard]] QString footerCompactTextOf(SidebarFooter const& footer);
+
+/// What the sidebar's footer has to place, in logical pixels: the footer's text parts and the room they
+/// share.
+struct FooterRoom
+{
+    double available = 0;   ///< The width the counts and the chord share.
+    double countsWidth = 0; ///< The counts' whole text; 0 while there are none.
+    double chordWidth = 0;  ///< The chord's text; 0 while none is bound.
+    double gap = 0;         ///< The space kept between the counts and the chord.
+};
+
+/// Decides whether the footer's chord stays: the counts are what the footer is for and the chord only a
+/// shortcut to act on them, so the chord is dropped before the counts lose a word to an ellipsis.
+/// @param room The text widths and the room for them.
+/// @return Shown when the counts and the chord both fit whole, Dropped otherwise.
+[[nodiscard]] constexpr sidebarrows::FooterChord footerChordFor(FooterRoom const& room) noexcept
+{
+    if (room.chordWidth <= 0)
+        return sidebarrows::FooterChord::Dropped;
+    auto const needed =
+        room.countsWidth > 0 ? room.countsWidth + room.gap + room.chordWidth : room.chordWidth;
+    return needed <= room.available ? sidebarrows::FooterChord::Shown : sidebarrows::FooterChord::Dropped;
+}
+
+/// Decides which wording of the counts the footer shows: the full one whenever it fits, so the counts are
+/// never cut short by an ellipsis while a shorter wording of them would fit.
+/// @param available The width the counts have, with no chord beside them.
+/// @param fullWidth The full wording's width.
+/// @return Full when it fits, Compact otherwise.
+[[nodiscard]] constexpr sidebarrows::FooterCounts footerCountsFor(double available, double fullWidth) noexcept
+{
+    return fullWidth <= available ? sidebarrows::FooterCounts::Full : sidebarrows::FooterCounts::Compact;
+}
+
+/// The sidebar tree's own commands for QML (SidebarCommandNames): each name to its window::ChromeCommand
+/// value, as sidebarCommandRequested() carries it.
+/// @return The map.
+[[nodiscard]] QVariantMap sidebarCommandMap();
 
 /// The sidebar's rows as a QAbstractListModel.
 ///
@@ -111,7 +284,25 @@ class SidebarModel: public QAbstractListModel
     Q_OBJECT
     Q_PROPERTY(int footerNeedYou READ footerNeedYou NOTIFY footerChanged)
     Q_PROPERTY(int footerWorking READ footerWorking NOTIFY footerChanged)
+    /// The footer's counts as words, zeros left out (footerTextOf()); empty while nothing is pending.
+    Q_PROPERTY(QString footerText READ footerText NOTIFY footerChanged)
+    /// The same counts in fewer letters (footerCompactTextOf()), for the narrowest sidebar.
+    Q_PROPERTY(QString footerCompactText READ footerCompactText NOTIFY footerChanged)
     Q_PROPERTY(int currentIndex READ currentIndex NOTIFY currentIndexChanged)
+    /// The shown workspace's name, as its row titles it: the breadcrumb's and the workspace chip's.
+    Q_PROPERTY(QString currentWorkspaceTitle READ currentWorkspaceTitle NOTIFY summaryChanged)
+    /// The row of the shown workspace, or -1: where the RenameWorkspace action edits.
+    Q_PROPERTY(int currentWorkspaceIndex READ currentWorkspaceIndex NOTIFY summaryChanged)
+    /// The most urgent roll-up of the workspaces the window does not show, an Urgency's underlying value.
+    Q_PROPERTY(int otherWorkspacesUrgency READ otherWorkspacesUrgency NOTIFY summaryChanged)
+    /// Whether the workspace chip carries its marker (chipMarkerOf()). A bool by the QML-facing carve-out:
+    /// the rule's answer, which QML only shows.
+    Q_PROPERTY(bool workspaceChipMarked READ workspaceChipMarked NOTIFY summaryChanged)
+    /// The marker's glyph, a TabBadgeKind's underlying value: the other workspaces' roll-up while the chip is
+    /// marked, TabBadgeKind::None otherwise.
+    Q_PROPERTY(int workspaceChipGlyph READ workspaceChipGlyph NOTIFY summaryChanged)
+    /// What a screen reader says of the workspace chip (workspaceChipAccessibleName()).
+    Q_PROPERTY(QString workspaceChipAccessibleName READ workspaceChipAccessibleName NOTIFY summaryChanged)
 
   public:
     /// What each row of the model says; QML reads them by the names in roleNames().
@@ -131,6 +322,22 @@ class SidebarModel: public QAbstractListModel
         SelectedRole,                ///< Whether the window shows this row's tab.
         TreeLinesRole,               ///< The Terminal look's connectors, one TreeGlyph per column.
         AccessibleNameRole,          ///< Kind, state and status as text, for a screen reader.
+        ProgramRole,                 ///< The program the reason is about; empty when unknown.
+        FolderRole,                  ///< The pane's working directory; empty when unknown.
+        ReasonLabelRole,             ///< The reason's words, set proportional (SidebarRow::reasonLabel).
+        ReasonCommandRole,           ///< The reason's command, set monospace; empty for a plain reason.
+        TreeTextRole,                ///< The Terminal look's connectors as text (treeLinesText()).
+        MeterTextRole,         ///< The Terminal look's block meter (meterText()), empty without progress.
+        HoverDetailRole,       ///< The hover card's `program · folder · time` (hoverDetailOf()).
+        ProgressFractionRole,  ///< The progress as 0 to 1, clamped; 0 without one.
+        FullReasonRole,        ///< The hover card's reason, whole (SidebarRow::fullReason).
+        FullReasonLabelRole,   ///< Its words.
+        FullReasonCommandRole, ///< Its command.
+        /// The row's kind and status as words, for a screen reader (accessibleDescriptionOf()).
+        AccessibleDescriptionRole,
+        SelectionRole,         ///< RowSelection: the displayed tab, or the folded row that holds it.
+        TreeTextContinuedRole, ///< The Terminal look's connectors on the second line
+                               ///< (treeContinuationText()).
     };
 
     /// @param host The window the sidebar sits in; must outlive the model.
@@ -157,8 +364,62 @@ class SidebarModel: public QAbstractListModel
     [[nodiscard]] int footerNeedYou() const noexcept { return static_cast<int>(_footer.needYou); }
     /// @return Panes at work, over every pane the window lists.
     [[nodiscard]] int footerWorking() const noexcept { return static_cast<int>(_footer.working); }
+    /// @return The footer's counts as words; empty while nothing is pending.
+    [[nodiscard]] QString footerText() const { return footerTextOf(_footer); }
+    [[nodiscard]] QString footerCompactText() const { return footerCompactTextOf(_footer); }
+
+    /// Decides the footer's counts wording for QML (footerCountsFor()), as a sidebarrows::FooterCounts.
+    /// @param available The width the counts have alone.
+    /// @param fullWidth The full wording's width.
+    /// @return The FooterCounts value.
+    [[nodiscard]] Q_INVOKABLE int footerCounts(qreal available, qreal fullWidth) const noexcept
+    {
+        return static_cast<int>(std::to_underlying(footerCountsFor(available, fullWidth)));
+    }
+
+    /// Decides the footer's chord for QML (footerChordFor()), as a sidebarrows::FooterChord.
+    /// @param available The width the counts and the chord share.
+    /// @param countsWidth The counts' whole width.
+    /// @param chordWidth The chord's width.
+    /// @param gap The space between them.
+    /// @return The FooterChord value.
+    [[nodiscard]] Q_INVOKABLE int footerChord(qreal available,
+                                              qreal countsWidth,
+                                              qreal chordWidth,
+                                              qreal gap) const noexcept
+    {
+        return static_cast<int>(std::to_underlying(footerChordFor(FooterRoom {
+            .available = available, .countsWidth = countsWidth, .chordWidth = chordWidth, .gap = gap })));
+    }
     /// @return The row of the tab the window shows, or -1.
     [[nodiscard]] int currentIndex() const noexcept { return _currentIndex; }
+    /// @return The shown workspace's name.
+    [[nodiscard]] QString currentWorkspaceTitle() const
+    {
+        return QString::fromStdString(_summary.currentWorkspace);
+    }
+    /// @return The row of the shown workspace, or -1.
+    [[nodiscard]] int currentWorkspaceIndex() const noexcept { return _currentWorkspaceIndex; }
+    /// @return The other workspaces' roll-up, an Urgency's underlying value.
+    [[nodiscard]] int otherWorkspacesUrgency() const noexcept
+    {
+        return static_cast<int>(_summary.otherWorkspaces);
+    }
+    /// @return Whether the workspace chip carries its marker.
+    [[nodiscard]] bool workspaceChipMarked() const noexcept
+    {
+        return chipMarkerOf(_summary.otherWorkspaces) == ChipMarker::Shown;
+    }
+    /// @return The marker's glyph, a TabBadgeKind's underlying value.
+    [[nodiscard]] int workspaceChipGlyph() const noexcept
+    {
+        return static_cast<int>(workspaceChipMarked() ? _summary.otherWorkspacesGlyph : TabBadgeKind::None);
+    }
+    /// @return What a screen reader says of the workspace chip.
+    [[nodiscard]] QString workspaceChipAccessibleName() const
+    {
+        return QString::fromStdString(window::workspaceChipAccessibleName(_summary));
+    }
     /// @return Whether anyone can see the rows, as setPresence() last said.
     [[nodiscard]] SidebarPresence presence() const noexcept { return _presence; }
     /// @return Whether the window has the user's attention, as setActivity() last said.
@@ -166,7 +427,9 @@ class SidebarModel: public QAbstractListModel
     /// @return Whether the one-second timer that keeps the running times current is armed.
     [[nodiscard]] bool isTimerActive() const noexcept { return _timer.isActive(); }
     /// @return Whether a rebuild waits for the event loop.
-    [[nodiscard]] bool isRebuildPending() const noexcept { return _rebuildPending; }
+    [[nodiscard]] bool isRebuildPending() const noexcept { return _rowsState == RowsState::Stale; }
+    /// @return Whether a filter narrows the rows.
+    [[nodiscard]] bool isFiltered() const noexcept { return !_state.filter.empty(); }
 
     /// @param key A row's key.
     /// @return The row's index, or -1 when it is not listed.
@@ -198,9 +461,17 @@ class SidebarModel: public QAbstractListModel
     /// Hides @p row's children.
     /// @param row The row.
     Q_INVOKABLE void collapse(int row);
-    /// Renames the workspace of @p row.
-    /// @param row A workspace row; others have no name of their own to change.
-    /// @param name The new label.
+    /// The Collapse key of the tree: collapses @p row when it is expanded, else names its parent.
+    /// @param row The focused row.
+    /// @return The row the focus is on afterwards: @p row, or its parent; @p row when it has none.
+    Q_INVOKABLE int collapseOrParent(int row);
+    /// The Expand key of the tree: expands @p row when it is collapsed, else names its first child.
+    /// @param row The focused row.
+    /// @return The row the focus is on afterwards: @p row, or the row after it when that is its child.
+    Q_INVOKABLE int expandOrChild(int row);
+    /// Renames what @p row names: a workspace's label, or the title a tab shows.
+    /// @param row A workspace or tab row; a pane has no name of its own to change.
+    /// @param name The new name.
     Q_INVOKABLE void rename(int row, QString const& name);
     /// Counts every pane under @p row as seen.
     /// @param row The row.
@@ -224,18 +495,33 @@ class SidebarModel: public QAbstractListModel
     void footerChanged();
     /// The row of the tab the window shows changed.
     void currentIndexChanged();
+    /// The shown workspace, its row or what the other workspaces ask changed.
+    void summaryChanged();
 
   private:
+    /// Where the rows stand against what they list.
+    enum class RowsState : uint8_t
+    {
+        Unbuilt = 0, ///< Never built: the first build resets the model instead of diffing against nothing.
+        Current,     ///< Built, and nothing has changed since.
+        Stale,       ///< Something changed; the rebuild waits for the event loop.
+    };
+
     struct Rebuilt
     {
         std::vector<SidebarRow> rows;
         SidebarFooter footer;
+        SidebarSummary summary;
         std::optional<TabRef> displayed;
+        std::optional<uint64_t> currentWorkspace; ///< The workspace the window shows.
     };
 
     [[nodiscard]] SidebarRow const* rowAt(int row) const noexcept;
     [[nodiscard]] WorkspaceDirectory directory() const;
     [[nodiscard]] Rebuilt build(WorkspaceDirectory const& directory) const;
+    /// Replaces the rows with @p next in one model reset: the first build's.
+    void resetRows(std::vector<SidebarRow> next);
+    /// Diffs @p next against the rows and applies it as removals, moves, insertions and dataChanged.
     void apply(std::vector<SidebarRow> next);
     void announceNewNeeds(WorkspaceDirectory const& directory);
     void updateTimer();
@@ -248,9 +534,10 @@ class SidebarModel: public QAbstractListModel
     SidebarState _state;
     std::vector<SidebarRow> _rows;
     SidebarFooter _footer;
+    SidebarSummary _summary;
     int _currentIndex = -1;
-    bool _built = false;
-    bool _rebuildPending = false;
+    int _currentWorkspaceIndex = -1;
+    RowsState _rowsState = RowsState::Unbuilt;
     SidebarPresence _presence = SidebarPresence::Hidden;
     WindowActivity _activity = WindowActivity::Inactive;
     /// The source the last rebuild read; a different one is a new baseline, not news.

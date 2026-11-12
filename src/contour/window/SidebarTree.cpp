@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <initializer_list>
 #include <iterator>
 #include <ranges>
 #include <string_view>
@@ -24,7 +25,10 @@ namespace
     {
         Urgency urgency = Urgency::Idle;
         TabBadgeKind glyph = TabBadgeKind::None;
-        std::string reason;
+        ReasonParts reason;
+        ReasonParts fullReason;
+        std::string program;
+        std::string folder;
         TimeText time;
     };
 
@@ -73,10 +77,17 @@ namespace
         return TabBadgeKind::None;
     }
 
-    /// Text from outside, made fit for a row: no controls, no invisible or bidi formatting, bounded.
+    /// Text from outside, made fit for a row: no controls, no invisible or bidi formatting, at most
+    /// @p maxLength characters.
+    std::string sanitizedTo(std::string_view text, std::size_t maxLength)
+    {
+        return elided(disarmInvisibleFormatting(text), maxLength);
+    }
+
+    /// Text from outside, made fit for a row's line (sanitizedTo() MaxRowTextLength).
     std::string sanitized(std::string_view text)
     {
-        return elided(disarmInvisibleFormatting(text), MaxRowTextLength);
+        return sanitizedTo(text, MaxRowTextLength);
     }
 
     /// The record that decides a pane's badge, as badgeFor() picks it.
@@ -103,17 +114,42 @@ namespace
         return {};
     }
 
-    std::string reasonOf(vtbackend::ProgramStatusRecord const& record, BadgeKind kind)
+    /// The length of the tool name that leads a permission's message (`Bash: ` in `Bash: psql …`), with its
+    /// colon and space; zero when the message does not start with one word and `: `.
+    std::size_t toolPrefixLength(std::string_view message) noexcept
     {
-        auto text = sanitized(record.message.empty() ? record.title : record.message);
+        constexpr auto Separator = std::string_view { ": " };
+        auto const end = message.find(Separator);
+        if (end == 0 || end == std::string_view::npos)
+            return 0;
+        auto const tool = message.substr(0, end);
+        if (std::ranges::any_of(tool, [](char ch) { return ch == ' ' || ch == '\t'; }))
+            return 0;
+        return end + Separator.size();
+    }
+
+    /// What @p record says it is doing or waits for, at most @p maxLength characters. A permission asks for a
+    /// command the program wants to run, which is the reason's command part; whatever leads it, the kind and
+    /// the tool that would run it (`Permission · Bash: `), is its label.
+    ReasonParts reasonOf(vtbackend::ProgramStatusRecord const& record, BadgeKind kind, std::size_t maxLength)
+    {
+        auto text = sanitizedTo(record.message.empty() ? record.title : record.message, maxLength);
         if (kind != BadgeKind::Blocked)
-            return text;
+            return { .label = std::move(text), .command = {} };
         auto const label = std::ranges::find(BlockedLabels, record.kind, &BlockedLabel::kind)->label;
         if (label.empty())
-            return text;
-        return elided(text.empty() ? std::string { label }
-                                   : std::format("{}{}{}", label, LabelSeparator, text),
-                      MaxRowTextLength);
+            return { .label = std::move(text), .command = {} };
+        auto const lead = text.empty() ? std::string { label } : std::format("{}{}", label, LabelSeparator);
+        if (record.kind == vtbackend::BlockedKind::Permission && !record.message.empty() && !text.empty())
+        {
+            auto const prefix = toolPrefixLength(text);
+            auto const tool =
+                prefix < text.size() ? prefix : std::size_t { 0 }; // A tool with no command stays one.
+            auto const withTool = lead + text.substr(0, tool);
+            auto const room = withTool.size() < maxLength ? maxLength - withTool.size() : std::size_t { 1 };
+            return { .label = withTool, .command = elided(std::string_view { text }.substr(tool), room) };
+        }
+        return { .label = elided(text.empty() ? lead : lead + text, maxLength), .command = {} };
     }
 
     TimeText timeOf(vtbackend::ProgramStatusRecord const& record,
@@ -133,8 +169,8 @@ namespace
                  .percent = std::nullopt };
     }
 
-    /// `exit 1 · 18s`.
-    std::string finishedText(vthost::proto::FinishedCommand const& finished)
+    /// `exit 1 · 18s`, or `exit 1 · 18s · ` and the command line as its command part when it is known.
+    ReasonParts finishedText(vthost::proto::FinishedCommand const& finished)
     {
         auto text =
             finished.exitCode ? std::format("exit {}", *finished.exitCode) : std::string { "finished" };
@@ -143,7 +179,9 @@ namespace
                                 LabelSeparator,
                                 vtbackend::formatCommandDuration(std::chrono::milliseconds {
                                     static_cast<int64_t>(*finished.durationMs) }));
-        return text;
+        if (finished.commandLine.empty())
+            return { .label = std::move(text), .command = {} };
+        return { .label = text + std::string { LabelSeparator }, .command = sanitized(finished.commandLine) };
     }
 
     LeafStatus leafOf(DirectoryPane const& pane,
@@ -152,11 +190,14 @@ namespace
     {
         auto leaf = LeafStatus {};
         leaf.urgency = paneUrgency(pane, attention);
+        leaf.folder = sanitized(pane.cwd);
         auto const winner = winnerOf(pane.status, attention.seenStatusGeneration);
         if (winner.record && urgencyOf(winner.kind, StatusSeen::Unseen) == leaf.urgency)
         {
             leaf.glyph = glyphOf(winner.kind);
-            leaf.reason = reasonOf(*winner.record, winner.kind);
+            leaf.reason = reasonOf(*winner.record, winner.kind, MaxRowTextLength);
+            leaf.fullReason = reasonOf(*winner.record, winner.kind, MaxFullReasonLength);
+            leaf.program = sanitized(winner.record->app);
             leaf.time = timeOf(*winner.record, winner.kind, now);
             return leaf;
         }
@@ -174,7 +215,7 @@ namespace
             return std::nullopt;
         }();
         if (verdict && pane.finished && finishedBadgeOf(*pane.finished) == *verdict)
-            leaf.reason = finishedText(*pane.finished);
+            leaf.reason = leaf.fullReason = finishedText(*pane.finished);
         return leaf;
     }
 
@@ -199,7 +240,14 @@ namespace
     {
         row.urgency = leaf.urgency;
         row.glyph = leaf.glyph;
-        row.reason = leaf.reason;
+        row.reason = leaf.reason.joined();
+        row.reasonLabel = leaf.reason.label;
+        row.reasonCommand = leaf.reason.command;
+        row.fullReason = leaf.fullReason.joined();
+        row.fullReasonLabel = leaf.fullReason.label;
+        row.fullReasonCommand = leaf.fullReason.command;
+        row.program = leaf.program;
+        row.folder = leaf.folder;
         row.time = leaf.time;
     }
 
@@ -305,19 +353,61 @@ namespace
         leavesOut.insert(leavesOut.end(), leaves.begin(), leaves.end());
         return block;
     }
+    /// Appends the rows of @p tabs, each tab followed by its panes, with the Terminal look's connectors on
+    /// both of every row's lines.
+    void appendTabRows(std::vector<SidebarRow>& rows, std::span<TabBlock const> tabs)
+    {
+        for (auto const& [index, block]: core::views::enumerate(tabs))
+        {
+            auto const lastTab = static_cast<std::size_t>(index) + 1 == tabs.size();
+            // The line past a tab goes on to its next sibling, and from a tab with panes shown down to them.
+            auto const pastTab = lastTab ? TreeGlyph::None : TreeGlyph::Bar;
+            auto tabRow = block.row;
+            tabRow.lines.columns[0] = lastTab ? TreeGlyph::Last : TreeGlyph::Tee;
+            tabRow.continued.columns = { pastTab, block.panes.empty() ? TreeGlyph::None : TreeGlyph::Bar };
+            rows.push_back(std::move(tabRow));
+            for (auto const& [paneIndex, pane]: core::views::enumerate(block.panes))
+            {
+                auto const lastPane = static_cast<std::size_t>(paneIndex) + 1 == block.panes.size();
+                auto paneRow = pane;
+                paneRow.lines.columns = { pastTab, lastPane ? TreeGlyph::Last : TreeGlyph::Tee };
+                paneRow.continued.columns = { pastTab, lastPane ? TreeGlyph::None : TreeGlyph::Bar };
+                rows.push_back(std::move(paneRow));
+            }
+        }
+    }
+
+    /// Whether a workspace row carries the selection for the displayed tab its fold or filter hides.
+    /// @param workspace The workspace.
+    /// @param tabs Its tabs as shown.
+    /// @param displayedTab The tab the window displays.
+    /// @return ContainsSelected when the workspace holds that tab and none of @p tabs is it; else None.
+    [[nodiscard]] RowSelection workspaceSelectionOf(DirectoryWorkspace const& workspace,
+                                                    std::span<TabBlock const> tabs,
+                                                    std::optional<TabRef> displayedTab)
+    {
+        auto const holdsDisplayed =
+            displayedTab && displayedTab->workspace == workspace.id
+            && std::ranges::contains(workspace.tabs, displayedTab->tab, &DirectoryTab::id);
+        auto const showsDisplayed = std::ranges::any_of(
+            tabs, [](TabBlock const& block) { return block.row.selection == RowSelection::Selected; });
+        return holdsDisplayed && !showsDisplayed ? RowSelection::ContainsSelected : RowSelection::None;
+    }
+
 } // namespace
 
-std::vector<SidebarRow> sidebarRows(WorkspaceDirectory const& directory,
-                                    TabAttention const& attention,
-                                    SidebarState const& state,
-                                    std::chrono::system_clock::time_point now,
-                                    std::optional<TabRef> displayedTab)
+SidebarListing sidebarListing(WorkspaceDirectory const& directory,
+                              TabAttention const& attention,
+                              SidebarState const& state,
+                              std::chrono::system_clock::time_point now,
+                              std::optional<TabRef> displayedTab)
 {
     auto const context = Building {
         .attention = attention, .state = state, .now = now, .lowerFilter = asciiLowered(state.filter)
     };
     auto const filtering = !context.lowerFilter.empty();
-    auto rows = std::vector<SidebarRow> {};
+    auto listing = SidebarListing {};
+    auto& rows = listing.rows;
 
     for (auto const& [position, workspace]: core::views::enumerate(directory.workspaces))
     {
@@ -357,27 +447,24 @@ std::vector<SidebarRow> sidebarRows(WorkspaceDirectory const& directory,
         else
             row.expansion = folded ? RowExpansion::Collapsed : RowExpansion::Expanded;
 
+        // A fold that hides the displayed tab hands its selection to the workspace, the nearest row shown.
+        row.selection = workspaceSelectionOf(workspace, tabs, displayedTab);
+        listing.workspaces.push_back(row);
         if (filtering && !matches(row, context.lowerFilter) && tabs.empty())
             continue;
         rows.push_back(std::move(row));
-        for (auto const& [index, block]: std::views::enumerate(tabs))
-        {
-            auto const lastTab = static_cast<std::size_t>(index) + 1 == tabs.size();
-            auto tabRow = block.row;
-            tabRow.lines.columns[0] = lastTab ? TreeGlyph::Last : TreeGlyph::Tee;
-            rows.push_back(std::move(tabRow));
-            for (auto const& [paneIndex, pane]: std::views::enumerate(block.panes))
-            {
-                auto paneRow = pane;
-                paneRow.lines.columns[0] = lastTab ? TreeGlyph::None : TreeGlyph::Bar;
-                paneRow.lines.columns[1] = static_cast<std::size_t>(paneIndex) + 1 == block.panes.size()
-                                               ? TreeGlyph::Last
-                                               : TreeGlyph::Tee;
-                rows.push_back(std::move(paneRow));
-            }
-        }
+        appendTabRows(rows, tabs);
     }
-    return rows;
+    return listing;
+}
+
+std::vector<SidebarRow> sidebarRows(WorkspaceDirectory const& directory,
+                                    TabAttention const& attention,
+                                    SidebarState const& state,
+                                    std::chrono::system_clock::time_point now,
+                                    std::optional<TabRef> displayedTab)
+{
+    return sidebarListing(directory, attention, state, now, displayedTab).rows;
 }
 
 SidebarFooter sidebarFooter(std::span<SidebarRow const> rows)
@@ -391,6 +478,106 @@ SidebarFooter sidebarFooter(std::span<SidebarRow const> rows)
         footer.working += row.leaves.working;
     }
     return footer;
+}
+
+SidebarSummary sidebarSummary(std::span<SidebarRow const> rows, std::optional<uint64_t> current)
+{
+    auto summary = SidebarSummary {};
+    for (auto const& row: rows | std::views::filter([](SidebarRow const& r) {
+                              return r.key.kind == SidebarRowKind::Workspace;
+                          }))
+    {
+        if (current == row.key.workspace)
+            summary.currentWorkspace = row.title;
+        else if (row.urgency > summary.otherWorkspaces)
+        {
+            summary.otherWorkspaces = row.urgency;
+            summary.otherWorkspacesGlyph = row.glyph;
+        }
+    }
+    return summary;
+}
+
+std::string_view urgencyText(Urgency urgency) noexcept
+{
+    switch (urgency)
+    {
+        case Urgency::Idle: return {};
+        case Urgency::UnseenOutput: return "new output";
+        case Urgency::Working: return "working";
+        case Urgency::DoneUnseen: return "done";
+        case Urgency::Failed: return "failed";
+        case Urgency::NeedsYou: return "needs you";
+    }
+    return {};
+}
+
+std::string workspaceChipAccessibleName(SidebarSummary const& summary)
+{
+    auto name = std::format("Workspace {}", summary.currentWorkspace);
+    if (chipMarkerOf(summary.otherWorkspaces) == ChipMarker::Shown)
+        name += std::format(", another workspace {}", urgencyText(summary.otherWorkspaces));
+    return name;
+}
+
+std::string hoverDetailOf(SidebarRow const& row)
+{
+    auto detail = std::string {};
+    for (auto const* part: { &row.program, &row.folder, &row.time.text })
+    {
+        if (part->empty())
+            continue;
+        if (!detail.empty())
+            detail += LabelSeparator;
+        detail += *part;
+    }
+    return detail;
+}
+
+int parentRowOf(std::span<SidebarRow const> rows, int row) noexcept
+{
+    if (row <= 0 || std::cmp_greater_equal(row, rows.size()))
+        return -1;
+    auto const depth = rows[static_cast<std::size_t>(row)].depth;
+    for (auto const above: std::views::iota(0, row) | std::views::reverse)
+        if (rows[static_cast<std::size_t>(above)].depth < depth)
+            return above;
+    return -1;
+}
+
+std::string treeLinesText(TreeLines const& lines, uint8_t depth)
+{
+    auto text = std::string {};
+    for (auto const glyph: lines.columns | std::views::take(depth))
+    {
+        switch (glyph)
+        {
+            case TreeGlyph::None: text += ' '; break;
+            case TreeGlyph::Tee: text += "├"; break;
+            case TreeGlyph::Last: text += "└"; break;
+            case TreeGlyph::Bar: text += "│"; break;
+        }
+        text += ' ';
+    }
+    return text;
+}
+
+std::string treeContinuationText(SidebarRow const& row)
+{
+    return row.depth == 0 ? std::string {}
+                          : treeLinesText(row.continued, static_cast<uint8_t>(row.continued.columns.size()));
+}
+
+std::string meterText(int percent)
+{
+    // Eighths of a cell, empty to full: the partial blocks Unicode has, left-aligned.
+    static constexpr auto Eighths =
+        std::array<std::string_view, 9> { "░", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█" };
+    auto const eighths = std::clamp(percent, 0, 100) * MeterCells * 8 / 100;
+    auto text = std::string {};
+    for (auto const cell: std::views::iota(0, MeterCells))
+        text += Eighths[static_cast<std::size_t>(std::clamp(eighths - (cell * 8), 0, 8))];
+    return text;
 }
 
 std::string formatLive(std::chrono::seconds elapsed)

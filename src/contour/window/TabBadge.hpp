@@ -5,6 +5,7 @@
 /// Which badge a tab shows and how it looks: the decision is one priority table, the look another, and
 /// both are pure so the strip, the accessibility tree and the tests read the same rows.
 
+#include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/StatusUrgency.hpp>
@@ -214,6 +215,24 @@ inline constexpr std::array<TabBadgeLook, TabBadgeKindCount> TabBadgeLooks {
     TabBadgeLook { TabBadgeKind::Bell, "♪", BadgeMark::Glyph, config::StatusColorRole::Warning, "Bell" },
 };
 
+/// One glyph a badge kind draws on one chrome row, where it differs from the kind's own @c
+/// TabBadgeLook::glyph.
+struct TabBadgeGlyphRow
+{
+    TabBadgeKind kind;        ///< The status.
+    config::SidebarLook look; ///< The chrome row (the sidebar look is the row's name).
+    std::string_view glyph;   ///< What the row draws for the status.
+};
+
+/// The per-row glyphs. Failed is a red cross-mark emoji on the three native rows; the Terminal row keeps the
+/// single-cell `✕`, because the emoji is two cells wide and breaks the monospace grid. U+274C is
+/// emoji-default, so it needs no variation selector to render in colour.
+inline constexpr auto TabBadgeGlyphRows = std::array {
+    TabBadgeGlyphRow { TabBadgeKind::Error, config::SidebarLook::SourceList, "\u274C" },
+    TabBadgeGlyphRow { TabBadgeKind::Error, config::SidebarLook::NavigationPane, "\u274C" },
+    TabBadgeGlyphRow { TabBadgeKind::Error, config::SidebarLook::HeaderPane, "\u274C" },
+};
+
 namespace detail
 {
     [[nodiscard]] constexpr bool tabBadgeLooksInOrder() noexcept
@@ -245,6 +264,18 @@ static_assert(detail::everyTabBadgeKindMaps(), "every TabBadgeKind must map to a
 [[nodiscard]] constexpr TabBadgeLook const& tabBadgeLook(TabBadgeKind kind) noexcept
 {
     return TabBadgeLooks[static_cast<size_t>(kind)];
+}
+
+/// The glyph a badge kind draws on a chrome row.
+/// @param kind The kind.
+/// @param look The chrome row, as its sidebar look.
+/// @return The row's override from @c TabBadgeGlyphRows, else the kind's own glyph.
+[[nodiscard]] constexpr std::string_view tabBadgeGlyph(TabBadgeKind kind, config::SidebarLook look) noexcept
+{
+    auto const row = std::ranges::find_if(TabBadgeGlyphRows, [&](TabBadgeGlyphRow const& candidate) {
+        return candidate.kind == kind && candidate.look == look;
+    });
+    return row != TabBadgeGlyphRows.end() ? row->glyph : tabBadgeLook(kind).glyph;
 }
 
 /// The name QML reads a mark by.

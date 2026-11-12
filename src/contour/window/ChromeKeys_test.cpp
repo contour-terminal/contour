@@ -6,6 +6,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <string>
@@ -145,6 +146,21 @@ TEST_CASE("a key only one area answers is consumed in that area alone", "[chrome
     // Alt+character is the application's, in the sidebar too.
     CHECK_FALSE(chromeConsumes(ChromeArea::Sidebar, ChromeKey::Printable, Alt));
     CHECK_FALSE(chromeConsumes(ChromeArea::Sidebar, ChromeKey::Other, Alt));
+}
+
+TEST_CASE("the sidebar's rows have a keyboard path to every pointer action", "[chromekeys]")
+{
+    constexpr auto Sidebar = ChromeArea::Sidebar;
+    CHECK(chromeCommandFor(Sidebar, ChromeKey::Home, None) == ChromeCommand::FocusFirst);
+    CHECK(chromeCommandFor(Sidebar, ChromeKey::End, None) == ChromeCommand::FocusLast);
+    // The row's context menu, as a right click opens it.
+    CHECK(chromeCommandFor(Sidebar, ChromeKey::Menu, None) == ChromeCommand::OpenMenu);
+    CHECK(chromeCommandFor(Sidebar, ChromeKey::F10, Shift) == ChromeCommand::OpenMenu);
+    CHECK(chromeConsumes(Sidebar, ChromeKey::F10, Shift));
+    // F10 alone stays the application's (it is a terminal key), as does the Menu key outside the sidebar.
+    CHECK_FALSE(chromeConsumes(Sidebar, ChromeKey::F10, None));
+    CHECK_FALSE(chromeConsumes(ChromeArea::Tabs, ChromeKey::Menu, None));
+    CHECK(std::ranges::contains(SidebarCommandNames, ChromeCommand::OpenMenu, &NamedChromeCommand::command));
 }
 
 TEST_CASE("the sidebar's filter accepts a space", "[chromekeys]")

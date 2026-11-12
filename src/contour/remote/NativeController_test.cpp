@@ -4573,6 +4573,33 @@ TEST_CASE("a window's move and rename of a workspace reach the daemon and come b
     CHECK(workspaceOf(controller, first).label.empty());
 }
 
+TEST_CASE("a window titles a tab of a workspace it does not show, and the directory follows",
+          "[attach][controller][directory][sidebar]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
+
+    CHECK(controller.requestRemoteTabTitle(second.session.value, "logs")
+          == contour::session::RemoteRouting::Routed);
+    CHECK(waitUntil([&] {
+        auto const& workspace = workspaceOf(controller, second.id);
+        return !workspace.tabs.empty() && workspace.tabs.front().title == "logs";
+    }));
+
+    // An empty title returns the tab to its automatic one.
+    CHECK(controller.requestRemoteTabTitle(second.session.value, "")
+          == contour::session::RemoteRouting::Routed);
+    CHECK(waitUntil([&] { return workspaceOf(controller, second.id).tabs.front().title.empty(); }));
+}
+
 TEST_CASE("the directory states a workspace's place in the daemon's count, tabless ones included",
           "[attach][controller][directory]")
 {

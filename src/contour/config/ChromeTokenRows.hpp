@@ -402,6 +402,10 @@ namespace detail
         label(2),                                          // SidebarSecondaryInk
         separator(),                                       // SidebarDivider
         statusMarkSource(StatusColorRole::Running),        // SidebarAccentPill
+        // While the keyboard is elsewhere a source list's selection is unemphasized: the kit's quiet fill
+        // and the primary label, not the accent (NSColor.unemphasizedSelectedContentBackgroundColor).
+        fill(3),  // SidebarSelectionFillInactive
+        label(1), // SidebarSelectionInkInactive
     };
 
     /// The Windows 11 row's colours: the native ones, with Fluent's own tooltip (#F9F9F9 / #2C2C2C).
@@ -428,6 +432,8 @@ namespace detail
         colors[static_cast<size_t>(ChromeColorRole::TooltipText)] = tone(0x000000, 87, 0xFFFFFF, 92);
         colors[static_cast<size_t>(ChromeColorRole::TooltipTextSecondary)] = tone(0x000000, 55, 0xFFFFFF, 55);
         colors[static_cast<size_t>(ChromeColorRole::TooltipEdge)] = tone(0x000000, 12, 0xFFFFFF, 10);
+        // libadwaita's sidebar selection is a neutral fill, focused or not (the shared quiet pair; the
+        // decision is window::SidebarSelection's), the accent living in the focus ring.
         return colors;
     }();
 
@@ -598,7 +604,8 @@ namespace detail
                                                 .gitGap = 6,
                                                 .footerHeight = 32,
                                                 .selectionRadius = 6,
-                                                .accentPillWidth = 0 };
+                                                .accentPillWidth = 0,
+                                                .hoverCardWidth = 280 };
 
     /// The workspace sidebar on the Fluent row: a navigation pane, its selection marked by an accent pill.
     inline constexpr SidebarTokens FluentSidebar { .width = 240,
@@ -611,9 +618,12 @@ namespace detail
                                                    .gitGap = 6,
                                                    .footerHeight = 40,
                                                    .selectionRadius = 4,
-                                                   .accentPillWidth = 3 };
+                                                   .accentPillWidth = 3,
+                                                   .hoverCardWidth = 320 };
 
-    /// The workspace sidebar on the ContourLinux row: its selection a solid accent fill.
+    /// The workspace sidebar on the ContourLinux row: its selection a neutral fill (the label's ink at low
+    /// alpha), inset and rounded as libadwaita's sidebars draw it, and as the row's own command palette does
+    /// (radii.control); keyboard focus adds the accent ring, never an accent fill (window::SidebarSelection).
     inline constexpr SidebarTokens LinuxSidebar { .width = 240,
                                                   .minWidth = 160,
                                                   .maxWidth = 480,
@@ -623,8 +633,9 @@ namespace detail
                                                   .glyph = 16,
                                                   .gitGap = 6,
                                                   .footerHeight = 40,
-                                                  .selectionRadius = 0,
-                                                  .accentPillWidth = 0 };
+                                                  .selectionRadius = 8,
+                                                  .accentPillWidth = 0,
+                                                  .hoverCardWidth = 320 };
 
     /// The workspace sidebar on the Terminal row, in cells: a tree of whole rows.
     inline constexpr SidebarTokens TerminalSidebar { .width = 28,
@@ -637,7 +648,8 @@ namespace detail
                                                      .gitGap = 1,
                                                      .footerHeight = 1,
                                                      .selectionRadius = 0,
-                                                     .accentPillWidth = 0 };
+                                                     .accentPillWidth = 0,
+                                                     .hoverCardWidth = 40 };
 
     inline constexpr ChromeTokenRow MacRow {
         .size = { .titleBar = 38,
@@ -1344,7 +1356,10 @@ namespace detail
                     schemeColor(SchemeSlot::BarSelectionText), // SidebarSelectionInk
                     schemeOnBar(SchemeSlot::Secondary),        // SidebarSecondaryInk
                     schemeColor(SchemeSlot::Secondary),        // SidebarDivider
-                    detail::noColor() },                       // SidebarAccentPill
+                    detail::noColor(),                         // SidebarAccentPill
+                    // A run of cells keeps its inverse selection whether or not the keyboard is in it.
+                    schemeColor(SchemeSlot::BarSelection),       // SidebarSelectionFillInactive
+                    schemeColor(SchemeSlot::BarSelectionText) }, // SidebarSelectionInkInactive
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),

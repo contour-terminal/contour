@@ -206,6 +206,77 @@ TEST_CASE("a refused workspace selection drops the sidebar action that waited fo
     }
 }
 
+TEST_CASE("a sidebar menu's Mark seen, Move and Rename act on a background row without showing it",
+          "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto const window =
+        contour::test::ScopedController { app.manager(), contour::config::MenuPresentation::InScene };
+    std::ignore = contour::test::createSessionTabs(app.manager(), *window, 1);
+
+    // A background workspace whose second tab's pane finished a command nobody has seen.
+    auto source = ScriptedSource {};
+    auto const shown = window->directorySource()->directory().selected.value_or(1);
+    source.listed.selected = shown;
+    auto there = DirectoryWorkspace { .id = 777,
+                                      .label = "there",
+                                      .tabs = { tabHolding(2, { 22 }), tabHolding(3, { 33 }) } };
+    there.tabs[1].panes[0].finished = vthost::proto::FinishedCommand { .exitCode = 0 };
+    there.tabs[1].panes[0].finishedSerial = 1;
+    source.listed.workspaces = {
+        DirectoryWorkspace { .id = shown, .label = "here", .tabs = { tabHolding(1, { 11 }) } },
+        std::move(there),
+    };
+    window->setDirectorySource(&source);
+    auto const workspaceRow = [&] {
+        window->sidebar().refreshNow();
+        auto const at = window->sidebar().rowIndexOf(
+            { .kind = SidebarRowKind::Workspace, .workspace = 777, .tab = 0, .pane = {} });
+        REQUIRE(at >= 0);
+        return at;
+    };
+    auto const urgencyOfThere = [&] {
+        return window->sidebar().rows().at(static_cast<std::size_t>(workspaceRow())).urgency;
+    };
+    REQUIRE(urgencyOfThere() == contour::window::Urgency::DoneUnseen);
+
+    SECTION("Mark seen on the workspace row marks the pane in its background tab")
+    {
+        window->sidebar().openContextMenu(workspaceRow(), QPointF {});
+        auto const markSeen = actionIdOf(window->sidebarContextMenuModel(), "Mark Seen");
+        REQUIRE(markSeen.has_value());
+        window->triggerSidebarContextMenuAction(*markSeen);
+
+        CHECK(source.selected.empty()); // the window stayed where it was
+        CHECK_FALSE(window->rowActionPending());
+        CHECK(urgencyOfThere() == contour::window::Urgency::Idle);
+    }
+    SECTION("Rename… opens the editor on that row")
+    {
+        auto renames = QSignalSpy { &*window, &contour::window::WindowController::sidebarRowRenameRequested };
+        auto const row = tabRowOf(*window, 3);
+        window->sidebar().openContextMenu(row, QPointF {});
+        auto const rename = actionIdOf(window->sidebarContextMenuModel(), "Rename…");
+        REQUIRE(rename.has_value());
+        window->triggerSidebarContextMenuAction(*rename);
+
+        CHECK(source.selected.empty());
+        CHECK_FALSE(window->rowActionPending());
+        REQUIRE(renames.count() == 1);
+        CHECK(renames.at(0).at(0).toInt() == row);
+    }
+    SECTION("Move Up asks for the move, and nothing is selected")
+    {
+        window->sidebar().openContextMenu(workspaceRow(), QPointF {});
+        auto const moveUp = actionIdOf(window->sidebarContextMenuModel(), "Move Up");
+        REQUIRE(moveUp.has_value());
+        window->triggerSidebarContextMenuAction(*moveUp);
+
+        CHECK(source.selected.empty());
+        CHECK_FALSE(window->rowActionPending());
+    }
+}
+
 TEST_CASE("the displayed tab is the one holding the active pane, whatever id the source gives it",
           "[contour][sidebar][controller]")
 {
@@ -412,4 +483,45 @@ TEST_CASE("a Terminal-row sidebar width is remembered in cells, not pixels", "[c
     contour::geometry::rememberSidebarUnits(prefs, LengthUnit::Pixel, 300);
     CHECK(prefs.widthPx == 300);
     CHECK(prefs.widthCells == 30);
+}
+
+TEST_CASE("a sidebar menu's Close Tab… asks first and closes the row it was opened on only once confirmed",
+          "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto const window =
+        contour::test::ScopedController { app.manager(), contour::config::MenuPresentation::InScene };
+    auto const made = contour::test::createSessionTabs(app.manager(), *window, 3);
+    REQUIRE(window->count() == 3);
+
+    auto asked =
+        QSignalSpy { &*window, &contour::window::WindowController::sidebarCloseConfirmationRequested };
+    window->sidebar().openContextMenu(tabRowOf(*window, made.tabs[0].value), QPointF { 3, 4 });
+    auto const close = actionIdOf(window->sidebarContextMenuModel(), "Close Tab…");
+    REQUIRE(close.has_value());
+    window->triggerSidebarContextMenuAction(*close);
+
+    // It asks, though nothing runs in the tab, and the tab lives on.
+    auto const closedSession = [&](std::size_t index) {
+        auto const* session = app.manager().sessionForId(made.sessions[index]);
+        REQUIRE(session != nullptr);
+        return session->terminal().device().isClosed();
+    };
+    REQUIRE(asked.count() == 1);
+    CHECK(asked.front().at(0).toInt() == static_cast<int>(contour::window::CloseKind::Tab));
+    CHECK(asked.front().at(2).toULongLong() == made.tabs[0].value);
+    CHECK(window->count() == 3);
+    CHECK_FALSE(closedSession(0));
+
+    // The destructive answer ends the tab the menu was opened on, not the one the window shows.
+    auto const wording = window->closeConfirmation(
+        static_cast<int>(contour::window::CloseKind::Tab), 0, made.tabs[0].value, "t", {});
+    CHECK(wording.value("acceptText").toString() == "Close Tab");
+    window->confirmClose(static_cast<int>(contour::window::CloseKind::Tab),
+                         asked.front().at(1).toULongLong(),
+                         made.tabs[0].value,
+                         0);
+    CHECK(closedSession(0));
+    CHECK_FALSE(closedSession(1));
+    CHECK_FALSE(closedSession(2));
 }

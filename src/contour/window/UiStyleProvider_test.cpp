@@ -3045,21 +3045,26 @@ TEST_CASE("sidebar selection ink reaches 4.5:1 on its fill on every row (resolve
             qobject_cast<contour::window::ChromeColorTokens const*>(groupOf(provider, "colors"));
         REQUIRE(colors != nullptr);
         auto const& row = contour::config::ChromeTokenRows[static_cast<size_t>(style)];
-        auto const& fillSource = row.colors[static_cast<size_t>(ChromeColorRole::SidebarSelectionFill)];
-        auto const& inkSource = row.colors[static_cast<size_t>(ChromeColorRole::SidebarSelectionInk)];
-        for (auto const scheme: { Qt::ColorScheme::Light, Qt::ColorScheme::Dark })
-        {
-            CAPTURE(static_cast<int>(style), static_cast<int>(scheme));
-            // What the fill sits on: the sidebar's own fill, itself over the window.
-            auto const window = scheme == Qt::ColorScheme::Light ? vtbackend::RGBColor { 0xEC, 0xEC, 0xEC }
-                                                                 : vtbackend::RGBColor { 0x1E, 0x1E, 0x1E };
-            auto const ground = compositeOver(
-                colors->resolve(row.colors[static_cast<size_t>(ChromeColorRole::SidebarFill)], scheme),
-                window);
-            auto const fill = compositeOver(colors->resolve(fillSource, scheme), ground);
-            auto const ink = compositeOver(colors->resolve(inkSource, scheme), fill);
-            CHECK(vtbackend::contrastRatio(ink, fill) >= vtbackend::MinimumTextContrast);
-        }
+        for (auto const& [fillRole, inkRole]:
+             { std::pair { ChromeColorRole::SidebarSelectionFill, ChromeColorRole::SidebarSelectionInk },
+               std::pair { ChromeColorRole::SidebarSelectionFillInactive,
+                           ChromeColorRole::SidebarSelectionInkInactive } })
+            for (auto const scheme: { Qt::ColorScheme::Light, Qt::ColorScheme::Dark })
+            {
+                auto const& fillSource = row.colors[static_cast<size_t>(fillRole)];
+                auto const& inkSource = row.colors[static_cast<size_t>(inkRole)];
+                CAPTURE(static_cast<int>(style), static_cast<int>(scheme), static_cast<int>(fillRole));
+                // What the fill sits on: the sidebar's own fill, itself over the window.
+                auto const window = scheme == Qt::ColorScheme::Light
+                                        ? vtbackend::RGBColor { 0xEC, 0xEC, 0xEC }
+                                        : vtbackend::RGBColor { 0x1E, 0x1E, 0x1E };
+                auto const ground = compositeOver(
+                    colors->resolve(row.colors[static_cast<size_t>(ChromeColorRole::SidebarFill)], scheme),
+                    window);
+                auto const fill = compositeOver(colors->resolve(fillSource, scheme), ground);
+                auto const ink = compositeOver(colors->resolve(inkSource, scheme), fill);
+                CHECK(vtbackend::contrastRatio(ink, fill) >= vtbackend::MinimumTextContrast);
+            }
     }
 }
 
@@ -3085,5 +3090,62 @@ TEST_CASE("UiStyleProvider resolves a tooltip's tone colours and edge", "[contou
         auto const other = contour::window::UiStyleProvider(contour::window::chromeInputsFor(style, font));
         CAPTURE(static_cast<int>(style));
         CHECK(other.tooltipEdgeWidth(2.0) == Catch::Approx(1.0));
+    }
+}
+
+TEST_CASE("UiStyleProvider draws a workspace's disclosure as its row's chevron or cell glyph",
+          "[contour][uistyle][sidebar]")
+{
+    using contour::config::ChromeStyle;
+    auto const chevron =
+        QString::fromUtf8(contour::config::SidebarChevronIcon.data(),
+                          static_cast<qsizetype>(contour::config::SidebarChevronIcon.size()));
+    auto const font = QGuiApplication::font();
+    // The native rows turn a chevron icon; the Terminal row keeps its cells' glyphs (an empty icon).
+    for (auto const& [style, icon]: { std::pair { ChromeStyle::MacOS, chevron },
+                                      std::pair { ChromeStyle::Fluent, chevron },
+                                      std::pair { ChromeStyle::ContourLinux, chevron },
+                                      std::pair { ChromeStyle::Terminal, QString {} } })
+    {
+        CAPTURE(static_cast<int>(style));
+        auto const provider = contour::window::UiStyleProvider(contour::window::chromeInputsFor(style, font));
+        auto const* sidebar = groupOf(provider, "sidebar");
+        REQUIRE(sidebar != nullptr);
+        CHECK(sidebar->property("disclosureIcon").toString() == icon);
+    }
+}
+
+TEST_CASE("UiStyleProvider snaps and bounds a dragged sidebar width, and says where its title row is",
+          "[contour][uistyle][sidebar]")
+{
+    using contour::config::ChromeStyle;
+    auto const font = QGuiApplication::font();
+    for (auto const style:
+         { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+    {
+        CAPTURE(static_cast<int>(style));
+        auto inputs = contour::window::chromeInputsFor(style, font);
+        inputs.fixedFont = QFont { QStringLiteral("Contour Test Mono") };
+        auto const provider = contour::window::UiStyleProvider(inputs);
+        auto const* sidebar = groupOf(provider, "sidebar");
+        REQUIRE(sidebar != nullptr);
+        auto const minWidth = sidebar->property("minWidth").toReal();
+        auto const maxWidth = sidebar->property("maxWidth").toReal();
+        CHECK(provider.snappedSidebarWidth(0) == minWidth);
+        CHECK(provider.snappedSidebarWidth(maxWidth * 4) == maxWidth);
+        auto const metrics = provider.sidebarMetrics();
+        auto const middle = provider.snappedSidebarWidth(((minWidth + maxWidth) / 2) + 0.3);
+        CHECK(std::abs(std::remainder(middle, metrics.scale.unitPixels)) < 0.01);
+
+        // Only the header pane's header bar draws it, and only while it is on screen.
+        auto const header = style == ChromeStyle::ContourLinux;
+        CHECK(provider.sidebarTitleInHeaderBar(true) == header);
+        CHECK_FALSE(provider.sidebarTitleInHeaderBar(false));
+        auto const* type = groupOf(provider, "type");
+        REQUIRE(type != nullptr);
+        // Code is set in the fixed face the inputs name, or in the chrome's own where the chrome is cells.
+        auto const expected =
+            style == ChromeStyle::Terminal ? font.family() : QStringLiteral("Contour Test Mono");
+        CHECK(type->property("monospace").value<QFont>().family() == expected);
     }
 }

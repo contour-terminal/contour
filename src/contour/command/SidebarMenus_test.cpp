@@ -85,6 +85,9 @@ TEST_CASE("the sidebar tab menu is the tab strip's menu plus Move to Workspace",
     auto const strip = buildTabContextMenu(state.tab);
     REQUIRE(menu.size() == strip.size() + 2);
     CHECK(titles(menu).front() == titles(strip).front());
+    // Its close row says it asks.
+    CHECK(std::ranges::contains(titles(menu), "Close Tab…"));
+    CHECK_FALSE(std::ranges::contains(titles(menu), "Close Tab"));
     CHECK(titles(menu).back() == "Move to Workspace");
 
     auto const& move = menu.back();
@@ -109,7 +112,22 @@ TEST_CASE("Move to Workspace is absent when there is no other workspace", "[side
 TEST_CASE("the sidebar pane menu rows", "[sidebarmenu]")
 {
     auto const menu = buildSidebarPaneMenu(SidebarPaneMenuState {});
-    CHECK(titles(menu) == std::vector<std::string> { "Go to Pane", "Mark Seen", "", "Close Pane" });
+    CHECK(titles(menu) == std::vector<std::string> { "Go to Pane", "Mark Seen", "", "Close Pane…" });
     CHECK(std::holds_alternative<actions::GoToPane>(row(menu, "Go to Pane").action));
-    CHECK(std::holds_alternative<actions::ClosePane>(row(menu, "Close Pane").action));
+    CHECK(std::holds_alternative<actions::ClosePane>(row(menu, "Close Pane…").action));
+}
+
+TEST_CASE("every close row of the sidebar's menus ends in an ellipsis, as it always asks first",
+          "[sidebarmenu]")
+{
+    auto const workspace = buildWorkspaceMenu(WorkspaceMenuState { .position = 0, .count = 2 });
+    auto const tab = buildSidebarTabMenu(
+        SidebarTabMenuState { .tab = TabContextMenuState { .tabIndex = 0, .tabCount = 2 } });
+    auto const pane = buildSidebarPaneMenu(SidebarPaneMenuState {});
+    CHECK(std::holds_alternative<actions::CloseWorkspace>(row(workspace, "Close Workspace…").action));
+    CHECK(std::holds_alternative<actions::CloseTab>(row(tab, "Close Tab…").action));
+    CHECK(std::holds_alternative<actions::ClosePane>(row(pane, "Close Pane…").action));
+    // The tab strip's own menu keeps its plain "Close Tab".
+    CHECK(std::holds_alternative<actions::CloseTab>(
+        row(buildTabContextMenu(TabContextMenuState { .tabIndex = 0, .tabCount = 2 }), "Close Tab").action));
 }

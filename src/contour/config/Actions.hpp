@@ -224,6 +224,7 @@ struct FocusPreviousArea{};   // move keyboard focus to the previous of terminal
 struct FocusToolbar{};        // move keyboard focus to the window's toolbar
 struct ToggleSidebar{};       // show the workspace sidebar when it is hidden, hide it when it is shown
 struct FocusSidebar{};        // show the workspace sidebar if needed and move keyboard focus into it
+struct FilterWorkspaces{};    // show the workspace sidebar if needed and put the keyboard in its filter
 struct JumpToNextAttention{}; // show the next pane that needs you
 struct MarkSeen{};            // mark the active pane's output as seen
 struct RenameWorkspace{};     // rename the current workspace inline
@@ -368,6 +369,7 @@ using ActionVariant = std::variant<CancelSelection,
                                    FocusToolbar,
                                    ToggleSidebar,
                                    FocusSidebar,
+                                   FilterWorkspaces,
                                    JumpToNextAttention,
                                    MarkSeen,
                                    RenameWorkspace,
@@ -536,6 +538,7 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     MoveWorkspaceDown,
                                                     MoveTabToWorkspace,
                                                     ToggleSidebar,
+                                                    FilterWorkspaces,
                                                     JumpToNextAttention,
                                                     LaunchLayout,
                                                     SaveLayout,
@@ -870,6 +873,10 @@ namespace documentation
     };
     constexpr inline std::string_view FocusSidebar {
         "Moves keyboard focus into the workspace sidebar, showing it first when it is hidden."
+    };
+    constexpr inline std::string_view FilterWorkspaces {
+        "Opens the workspace sidebar's filter with the keyboard in it, showing the sidebar first when it is "
+        "hidden."
     };
     constexpr inline std::string_view JumpToNextAttention {
         "Shows the next pane that needs you: one that waits for input, or whose command failed."

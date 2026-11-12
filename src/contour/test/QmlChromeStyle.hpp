@@ -16,6 +16,7 @@
 #include <vtbackend/core/ColorPalette.hpp>
 
 #include <QtGui/QFont>
+#include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QPalette>
 #include <QtGui/QStyleHints>
@@ -45,6 +46,9 @@ struct ChromeSetup
     config::ChromeDensity density {}; ///< The chrome density the tokens resolve with.
     /// Whether the OS turns secure keyboard entry on: the words beside the lock. None unless a test names it.
     platform::SecureInputSupport secureInput = platform::SecureInputSupport::None;
+    /// The fixed-width face code is set in off the cell grid: the system's, as the app passes, unless a test
+    /// names one.
+    QFont fixedFont { QFontDatabase::systemFont(QFontDatabase::FixedFont) };
     /// Whether a font family is installed, for the window controls' icon font: none by default, so a test's
     /// glyphs never depend on the fonts of the machine it runs on.
     std::function<bool(std::string_view)> isFontInstalled = [](std::string_view) {
@@ -72,6 +76,7 @@ inline void installChromeStyle(QQmlEngine& engine, ChromeSetup const& setup)
     auto* provider = new contour::window::UiStyleProvider(
         contour::window::ChromeInputs { .row = setup.row,
                                         .font = setup.font,
+                                        .fixedFont = setup.fixedFont,
                                         .accessibility = setup.accessibility,
                                         .appearance = setup.appearance,
                                         .scheme = setup.scheme,

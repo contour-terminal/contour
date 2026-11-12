@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <variant>
@@ -47,6 +48,31 @@ struct MoveTab
     uint64_t toWorkspace = 0;   ///< The workspace's id.
     std::size_t toPosition = 0; ///< The position among its tabs; AppendTab for the end.
 };
+
+/// The place a dragged item ends at, from the place it is dropped before.
+/// @param from Where it is now.
+/// @param insertBefore The place it is dropped before (ReorderWorkspace::to), in the list as it is now.
+/// @return The place it ends at once it has left its own: one less when it moves down past itself.
+[[nodiscard]] constexpr std::size_t placeAfterMove(std::size_t from, std::size_t insertBefore) noexcept
+{
+    return insertBefore > from ? insertBefore - 1 : insertBefore;
+}
+
+/// The place a tab ends at among the tabs of the workspace it is dropped into.
+/// @param from Where it is now, when it is dropped into its own workspace; none from another one.
+/// @param insertBefore The place it is dropped before (MoveTab::toPosition), AppendTab for the end.
+/// @param count The destination's tabs, the dragged one included when it is its own.
+/// @return The 0-based place, as TerminalSessionManager::moveTabToWorkspace() takes it.
+[[nodiscard]] constexpr std::size_t tabPlaceAfterMove(std::optional<std::size_t> from,
+                                                      std::size_t insertBefore,
+                                                      std::size_t count) noexcept
+{
+    // Its own workspace holds it already: the last place is one short of the count.
+    auto const end = from ? std::max<std::size_t>(count, 1) - 1 : count;
+    if (insertBefore == AppendTab)
+        return end;
+    return std::min(from ? placeAfterMove(*from, insertBefore) : insertBefore, end);
+}
 
 /// The drop is not allowed here.
 struct Refuse

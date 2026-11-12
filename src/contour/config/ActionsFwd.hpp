@@ -157,6 +157,7 @@ struct FocusPreviousArea;
 struct FocusToolbar;
 struct ToggleSidebar;
 struct FocusSidebar;
+struct FilterWorkspaces;
 struct JumpToNextAttention;
 struct MarkSeen;
 struct RenameWorkspace;

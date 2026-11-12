@@ -24,8 +24,10 @@ program has something to say, a second line with the reason.
 - **Status and reason.** The status comes from agent hooks (see `contour agent setup`), from a blocked
   program, from OSC 133 shell integration (a command that finished, with its exit code) and from the bell. The
   reason is that program's own words (`waiting for approval`), or how the command ended (`exit 1 · 18s`). A
-  command a program asks permission to run (`Bash: psql $DEV_URL`) is set in the monospace face. Reason text
-  is shown as plain text, one bounded line, whatever the program sent.
+  command a program asks permission to run (`Bash: psql $DEV_URL`), or the command line of a finished one
+  (`exit 1 · make deploy`), is set in the monospace face; the words before it (`Permission · `, `exit 1 · `)
+  stay in the proportional face, on the same baseline. Reason text is shown as plain text, one bounded line,
+  whatever the program sent.
 - **Time.** A running state counts up (`4:12`), a finished one counts since it ended (`2m ago`), and a program
   that reports progress shows a percentage meter instead. The clock ticks once a second, and only while a
   visible row shows a live time. A finished command's exit status has no timestamp to measure from, so it has
@@ -38,9 +40,14 @@ program has something to say, a second line with the reason.
   tab or pane changes, when a command finishes (OSC 133;D) and every 30 seconds while a window follows the
   daemon. A window without a daemon refreshes on the same events but has no 30-second timer. The probe
   never blocks the daemon or the window.
-- **Current tab.** The tab this window displays is marked as selected: in the accent while the keyboard is
-  in the sidebar, and, on macOS, in a quiet grey while it is elsewhere, as a source list's selection is. When
-  its workspace is folded, the workspace row carries the selection instead, until it is unfolded.
+- **Current tab.** The tab this window displays is marked as selected, as the platform marks it: on macOS in
+  the accent while the keyboard is in the sidebar and in a quiet grey while it is elsewhere, as a source
+  list's selection is; on Linux a neutral fill, focused or not, with the accent focus ring on the row the
+  keyboard is on; on Windows a subtle grey fill and a rounded accent pill at the leading edge, focused or not;
+  on the Terminal style inverse video. When its workspace is folded, the workspace row carries the selection
+  instead, until it is unfolded.
+- **Failed.** A failed status is drawn as the red ❌ on the native rows, in the sidebar, the workspace chip and
+  the tab strip's badge; the Terminal style keeps a single-cell red ✕, because ❌ is two cells wide.
 
 ## Urgency
 
@@ -123,12 +130,16 @@ filter is only a view: it never changes what a drag or a rename acts on.
 - **Right-click** for the row's menu:
     - a workspace: Rename…, Mark Seen, New Tab Here, Move Up, Move Down, Close Workspace…
       (the last workspace of an in-process window cannot be closed);
-    - a tab: the tab strip's menu, plus **Move to Workspace**;
-    - a pane: Go to Pane, Mark Seen, Close Pane.
+    - a tab: the tab strip's menu (its close row reads Close Tab…), plus **Move to Workspace**;
+    - a pane: Go to Pane, Mark Seen, Close Pane….
 
-  Mark Seen, Rename…, Move Up, Move Down, Move to Workspace and Close Workspace… act on the row the menu was
-  opened on and leave the window where it is. The rest (Go to Pane, New Tab Here, Close Pane and the tab
-  strip's own commands) act on what the window shows, so the window shows that row first.
+  Mark Seen, Rename…, Move Up, Move Down and Move to Workspace act on the row the menu was opened on and
+  leave the window where it is. The rest (Go to Pane, New Tab Here and the tab strip's own commands) act on
+  what the window shows, so the window shows that row first.
+
+  The three close rows (Close Workspace…, Close Tab…, Close Pane…) always ask first, in one confirmation
+  that names what ends (the tabs and panes, and the running command where known). Cancel is the default
+  button and Escape cancels; the answer closes the row the menu was opened on.
 - **Drag** to reorder or move:
     - a workspace onto another workspace row: before it in the upper half, after it in the lower half;
     - a tab onto a tab row: before or after that tab, in its own workspace or another;

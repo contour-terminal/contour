@@ -22,7 +22,11 @@ Item {
     readonly property var look: chromeStyle.paletteRevision < 0 ? ({}) : chromeStyle.badgeLook(root.kind)
     readonly property bool known: root.kind > 0 && root.look.glyph !== undefined
     // Which of the two drawings below is the slot's.
-    readonly property bool pill: chromeStyle.layout.isPill
+    /// Whether the slot draws the look's mark (a dot, a ring, a disc) rather than the glyph as text: the Pill
+    /// tab shape's way, and the sidebar's on every row whose chrome is not cells, so its status is a shape
+    /// there whatever the tabs look like.
+    property bool shaped: chromeStyle.layout.isPill
+    readonly property bool pill: root.shaped
     readonly property color ink: root.known ? root.look.ink : "transparent"
     // The ring is Working's mark: with a progress it stands still as a dial of that many degrees.
     readonly property bool working: root.known && root.look.mark === "ring"

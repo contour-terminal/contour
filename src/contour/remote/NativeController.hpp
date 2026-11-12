@@ -513,6 +513,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
         uint64_t workspace, std::string_view label) override;
     [[nodiscard]] contour::session::RemoteRouting requestRemoteMoveWorkspace(uint64_t workspace,
                                                                              uint32_t position) override;
+    /// SessionFactory: titles the daemon's tab holding @p session (proto::EditTab), mirrored here or not.
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabTitle(uint64_t session,
+                                                                        std::string_view title) override;
     [[nodiscard]] contour::session::RemoteRouting requestRemoteCloseWorkspace(uint64_t workspace) override;
 
     /// SessionFactory: the toggle of a split's axis in a daemon-hosted window is made by the daemon, whose

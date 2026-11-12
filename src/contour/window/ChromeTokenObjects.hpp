@@ -530,12 +530,19 @@ class ChromeTypeTokens: public QObject
     Q_PROPERTY(QFont bodyMedium READ bodyMedium CONSTANT)
     Q_PROPERTY(QFont footnoteStrong READ footnoteStrong CONSTANT)
     Q_PROPERTY(QFont footnoteSemibold READ footnoteSemibold CONSTANT)
+    /// A fixed-pitch face, for text that is code (a command a program asks to run): the system's fixed font
+    /// at the body and footnote sizes, and the chrome font itself on a row whose chrome is cells. The
+    /// footnote face matches the footnote's x-height rather than its nominal size, so a command set in it
+    /// beside footnote text reads as the same size.
+    Q_PROPERTY(QFont monospace READ monospace CONSTANT)
+    Q_PROPERTY(QFont monospaceFootnote READ monospaceFootnote CONSTANT)
 
   public:
     /// @param tokens The resolved type group; a size of 0 keeps @p font's own.
     /// @param font   The chrome font every size is applied to.
+    /// @param mono   The fixed-pitch face the monospace fonts are sized from.
     /// @param parent Qt ownership.
-    ChromeTypeTokens(config::TypeTokens tokens, QFont const& font, QObject* parent);
+    ChromeTypeTokens(config::TypeTokens tokens, QFont const& font, QFont const& mono, QObject* parent);
 
     /// @return The caption font.
     [[nodiscard]] QFont const& caption() const noexcept { return _caption; }
@@ -565,6 +572,8 @@ class ChromeTypeTokens: public QObject
     [[nodiscard]] QFont const& footnoteStrong() const noexcept { return _footnoteStrong; }
     /// @return The footnote font, semibold: a command palette group's header.
     [[nodiscard]] QFont const& footnoteSemibold() const noexcept { return _footnoteSemibold; }
+    [[nodiscard]] QFont const& monospace() const noexcept { return _monospace; }
+    [[nodiscard]] QFont const& monospaceFootnote() const noexcept { return _monospaceFootnote; }
 
   private:
     QFont _caption {};
@@ -581,6 +590,8 @@ class ChromeTypeTokens: public QObject
     QFont _bodyMedium {};
     QFont _footnoteStrong {};
     QFont _footnoteSemibold {};
+    QFont _monospace {};
+    QFont _monospaceFootnote {};
 };
 
 /// Animation durations and travel, `chromeStyle.motion`.
@@ -835,12 +846,30 @@ class ChromeSidebarTokens: public QObject
     Q_PROPERTY(qreal footerHeight READ footerHeight CONSTANT)
     Q_PROPERTY(qreal selectionRadius READ selectionRadius CONSTANT)
     Q_PROPERTY(qreal accentPillWidth READ accentPillWidth CONSTANT)
+    Q_PROPERTY(qreal hoverCardWidth READ hoverCardWidth CONSTANT)
     /// How the sidebar looks: a config::SidebarLook as its underlying value, which the predicates below name.
     Q_PROPERTY(int look READ look CONSTANT)
     Q_PROPERTY(int sourceList READ sourceList CONSTANT)
     Q_PROPERTY(int navigationPane READ navigationPane CONSTANT)
     Q_PROPERTY(int headerPane READ headerPane CONSTANT)
     Q_PROPERTY(int cellTree READ cellTree CONSTANT)
+    // The look's layout traits (config::SidebarLookTraits). Bools by the QML-facing carve-out: the table's
+    // answers, which Main.qml and TitleBar.qml only follow.
+    /// Whether the sidebar takes the window's full height beside the band (SidebarSpan::BesideBand).
+    Q_PROPERTY(bool besideBand READ besideBand CONSTANT)
+    /// Whether its title row is the header bar's part above it (SidebarTitle::InHeaderBar).
+    Q_PROPERTY(bool titleInHeaderBar READ titleInHeaderBar CONSTANT)
+    /// The glyph of its one-cell dividing column; empty for a hairline.
+    Q_PROPERTY(QString dividerGlyph READ dividerGlyph CONSTANT)
+    /// Whether a row shows the band's hover and pressed fills (SidebarRowFeedback::HoverAndPressed).
+    Q_PROPERTY(bool rowFeedback READ rowFeedback CONSTANT)
+    /// Whether the new-workspace button heads the footer (SidebarAddPlace::Footer) rather than the title row.
+    Q_PROPERTY(bool addInFooter READ addInFooter CONSTANT)
+    /// Whether the title row says "Workspaces" (SidebarHeading::Named).
+    Q_PROPERTY(bool named READ named CONSTANT)
+    /// The icon a workspace row's disclosure draws, pointing down (config::SidebarChevronIcon); empty where
+    /// it draws a cell glyph instead (SidebarDisclosure::CellGlyph).
+    Q_PROPERTY(QString disclosureIcon READ disclosureIcon CONSTANT)
 
   public:
     /// @param tokens The resolved sidebar group.
@@ -884,8 +913,53 @@ class ChromeSidebarTokens: public QObject
         return _tokens.accentPillWidth * _units.horizontal;
     }
 
+    /// @return The width of a hovered row's card.
+    [[nodiscard]] qreal hoverCardWidth() const noexcept { return _tokens.hoverCardWidth * _units.horizontal; }
     /// @return How the sidebar looks, a config::SidebarLook as its underlying value.
     [[nodiscard]] int look() const noexcept { return static_cast<int>(_look); }
+    /// @return Whether the sidebar stands beside the band, the window's full height.
+    [[nodiscard]] bool besideBand() const noexcept
+    {
+        return config::sidebarLookTraits(_look).span == config::SidebarSpan::BesideBand;
+    }
+    /// @return Whether its title row is in the header bar.
+    [[nodiscard]] bool titleInHeaderBar() const noexcept
+    {
+        return config::sidebarLookTraits(_look).title == config::SidebarTitle::InHeaderBar;
+    }
+    /// @return Whether a row shows hover and pressed fills.
+    [[nodiscard]] bool rowFeedback() const noexcept
+    {
+        return config::sidebarLookTraits(_look).feedback == config::SidebarRowFeedback::HoverAndPressed;
+    }
+    /// @return Whether the new-workspace button heads the footer.
+    [[nodiscard]] bool addInFooter() const noexcept
+    {
+        return config::sidebarLookTraits(_look).add == config::SidebarAddPlace::Footer;
+    }
+    /// @return Whether the title row names the list.
+    [[nodiscard]] bool named() const noexcept
+    {
+        return config::sidebarLookTraits(_look).heading == config::SidebarHeading::Named;
+    }
+    /// @return The icon of a workspace row's disclosure; empty for a cell glyph.
+    [[nodiscard]] QString disclosureIcon() const
+    {
+        switch (config::sidebarLookTraits(_look).disclosure)
+        {
+            case config::SidebarDisclosure::CellGlyph: break;
+            case config::SidebarDisclosure::Chevron:
+                return QString::fromUtf8(config::SidebarChevronIcon.data(),
+                                         static_cast<qsizetype>(config::SidebarChevronIcon.size()));
+        }
+        return {};
+    }
+    /// @return The glyph of its dividing column; empty for a hairline.
+    [[nodiscard]] QString dividerGlyph() const
+    {
+        auto const glyph = config::sidebarLookTraits(_look).divider;
+        return QString::fromUtf8(glyph.data(), static_cast<qsizetype>(glyph.size()));
+    }
     /// @return The QML names of config::SidebarLook's enumerators.
     [[nodiscard]] static constexpr int sourceList() noexcept
     {
@@ -1351,6 +1425,8 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor sidebarSecondaryInk READ sidebarSecondaryInk NOTIFY changed)
     Q_PROPERTY(QColor sidebarDivider READ sidebarDivider NOTIFY changed)
     Q_PROPERTY(QColor sidebarAccentPill READ sidebarAccentPill NOTIFY changed)
+    Q_PROPERTY(QColor sidebarSelectionFillInactive READ sidebarSelectionFillInactive NOTIFY changed)
+    Q_PROPERTY(QColor sidebarSelectionInkInactive READ sidebarSelectionInkInactive NOTIFY changed)
 
   public:
     /// The colour sources, indexed by config::ChromeColorRole.
@@ -1509,6 +1585,14 @@ class ChromeColorTokens: public QObject
     [[nodiscard]] QColor sidebarAccentPill() const
     {
         return color(config::ChromeColorRole::SidebarAccentPill);
+    }
+    [[nodiscard]] QColor sidebarSelectionFillInactive() const
+    {
+        return color(config::ChromeColorRole::SidebarSelectionFillInactive);
+    }
+    [[nodiscard]] QColor sidebarSelectionInkInactive() const
+    {
+        return color(config::ChromeColorRole::SidebarSelectionInkInactive);
     }
 
     /// The Settings window's roles, by the palette's tone.

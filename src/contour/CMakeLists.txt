@@ -250,11 +250,17 @@ set(_header_files
     session/WindowSwitching.hpp
     window/ChromeFocus.hpp
     window/ChromeKeys.hpp
+    window/QtChromeKeys.hpp
     window/DragEndPolicy.hpp
     window/DragEndProbe.hpp
     window/DropZonePolicy.hpp
     window/DroppedText.hpp
     window/SidebarDropPolicy.hpp
+    window/SidebarSelection.hpp
+    window/CloseDialogTable.hpp
+    window/SidebarControls.hpp
+    window/SidebarToggle.hpp
+    window/PopupAnchor.hpp
     window/SidebarTree.hpp
     window/TabBarDropPolicy.hpp
     window/TabBarHitValue.hpp
@@ -506,6 +512,14 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SessionChrome.qml
         qml/TitleBar.qml
         qml/HostChip.qml
+        qml/WorkspaceChip.qml
+        qml/Breadcrumb.qml
+        qml/Sidebar.qml
+        qml/SidebarControlButton.qml
+        qml/SidebarRow.qml
+        qml/SidebarHoverCard.qml
+        qml/SidebarFooter.qml
+        qml/ConfirmClose.qml
         qml/ToolbarButton.qml
         qml/FocusRing.qml
         qml/SymbolicIcon.qml
@@ -1005,6 +1019,8 @@ if(CONTOUR_FRONTEND_GUI)
             test/Accessibility_qml_test.cpp
             test/ConnectPickerQml_test.cpp
             test/SwitcherQml_test.cpp
+            test/SidebarQml_test.cpp
+            test/SidebarFakes.hpp
             window/SwitcherRows_test.cpp
             platform/SpeechSynthesizer_test.cpp
             display/ContentScale_test.cpp
@@ -1709,6 +1725,10 @@ if(CONTOUR_TESTING)
         window/SidebarTree.cpp
         window/SidebarTree_test.cpp
         window/SidebarDropPolicy_test.cpp
+        window/SidebarSelection_test.cpp
+        window/CloseDialogTable_test.cpp
+        window/SidebarToggle_test.cpp
+        window/PopupAnchor_test.cpp
         window/ShellIntegrationOffer_test.cpp
         window/ShellInstallRows_test.cpp
         window/TaskbarAttentionTally_test.cpp

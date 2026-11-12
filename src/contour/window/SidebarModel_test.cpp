@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/test/RecordingAnnouncer.hpp>
+#include <contour/test/SidebarFakes.hpp>
+#include <contour/window/ChromeKeys.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SidebarModel.hpp>
@@ -34,80 +36,10 @@ namespace
 
 constexpr auto Epoch = std::chrono::system_clock::time_point { std::chrono::seconds { 1'000'000 } };
 
-/// A source that lists what the test sets and records what it is asked to select.
-struct FakeSource final: IWorkspaceDirectorySource
-{
-    WorkspaceDirectory listed;
-    std::vector<uint64_t> selected;
-    mutable int reads = 0; ///< How often the directory was asked for.
-
-    [[nodiscard]] WorkspaceDirectory directory() const override
-    {
-        ++reads;
-        return listed;
-    }
-    SelectResult select(uint64_t workspace) override
-    {
-        selected.push_back(workspace);
-        return SelectResult::Requested;
-    }
-};
-
-/// A window that records what the sidebar asks of it.
-struct FakeHost final: ISidebarHost
-{
-    FakeSource* source = nullptr;
-    std::optional<TabRef> displayed;
-    std::vector<PaneKey> shown;
-    std::vector<PaneKey> seen;
-    std::vector<std::pair<uint64_t, std::string>> renamed;
-    std::vector<std::pair<uint64_t, std::size_t>> movedWorkspaces;
-    std::vector<std::pair<TabRef, std::pair<uint64_t, std::size_t>>> movedTabs;
-    std::vector<SidebarRowKey> menus;
-
-    [[nodiscard]] IWorkspaceDirectorySource* directorySource() const override { return source; }
-    [[nodiscard]] std::optional<TabRef> displayedTab() const override { return displayed; }
-    void showPane(PaneKey pane) override { shown.push_back(pane); }
-    void markSeen(PaneKey pane) override { seen.push_back(pane); }
-    void renameWorkspace(uint64_t workspace, std::string const& name) override
-    {
-        renamed.emplace_back(workspace, name);
-    }
-    void moveWorkspace(uint64_t workspace, std::size_t to) override
-    {
-        movedWorkspaces.emplace_back(workspace, to);
-    }
-    void moveTab(TabRef tab, uint64_t toWorkspace, std::size_t toPosition) override
-    {
-        movedTabs.push_back({ tab, { toWorkspace, toPosition } });
-    }
-    void openContextMenu(SidebarRow const& row, QPointF /*position*/) override { menus.push_back(row.key); }
-};
-
-DirectoryPane paneOf(uint64_t key, std::string title = "shell")
-{
-    auto pane = DirectoryPane {};
-    pane.key = PaneKey { key };
-    pane.title = std::move(title);
-    return pane;
-}
-
-DirectoryWorkspace workspaceOf(uint64_t id, std::string label, std::vector<DirectoryPane> panes)
-{
-    auto workspace = DirectoryWorkspace {};
-    workspace.id = id;
-    workspace.label = std::move(label);
-    // One tab per pane, its id the pane's.
-    for (auto& pane: panes)
-    {
-        auto tab = DirectoryTab {};
-        tab.id = pane.key.value;
-        tab.label = pane.title;
-        tab.panes.push_back(std::move(pane));
-        workspace.tabs.push_back(std::move(tab));
-    }
-    return workspace;
-}
+using FakeSource = contour::test::FakeDirectorySource;
+using FakeHost = contour::test::FakeSidebarHost;
+using contour::test::directoryPaneOf;
+using contour::test::directoryWorkspaceOf;
 
 void letEventLoopRun()
 {
@@ -150,7 +82,7 @@ struct SidebarUnderTest
 
 TEST_CASE("SidebarModel: an output burst changes the model once", "[contour][sidebar]")
 {
-    auto t = SidebarUnderTest { { workspaceOf(1, "billing", { paneOf(10) }) } };
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
     REQUIRE(t.sidebar().rowCount() == 2);
     auto changed = QSignalSpy { &t.sidebar(), &QAbstractItemModel::dataChanged };
     auto structural = QSignalSpy { &t.sidebar(), &QAbstractItemModel::modelReset };
@@ -182,8 +114,9 @@ TEST_CASE("SidebarModel: an output burst changes the model once", "[contour][sid
 
 TEST_CASE("SidebarModel: a directory change keeps the selection and the collapsed set", "[contour][sidebar]")
 {
-    auto t = SidebarUnderTest { { workspaceOf(1, "billing", { paneOf(10), paneOf(11) }),
-                                  workspaceOf(2, "docs", { paneOf(20) }) } };
+    auto t =
+        SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10), directoryPaneOf(11) }),
+                             directoryWorkspaceOf(2, "docs", { directoryPaneOf(20) }) } };
     t.host.displayed = TabRef { .workspace = 2, .tab = 20 };
     t.sidebar().refreshNow();
     REQUIRE(t.sidebar().currentIndex() == 4);
@@ -205,12 +138,12 @@ TEST_CASE("SidebarModel: a directory change keeps the selection and the collapse
 
 TEST_CASE("SidebarModel: a new workspace inserts rows without a reset", "[contour][sidebar]")
 {
-    auto t = SidebarUnderTest { { workspaceOf(1, "billing", { paneOf(10) }) } };
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
     auto resets = QSignalSpy { &t.sidebar(), &QAbstractItemModel::modelReset };
     auto inserts = QSignalSpy { &t.sidebar(), &QAbstractItemModel::rowsInserted };
     auto removals = QSignalSpy { &t.sidebar(), &QAbstractItemModel::rowsRemoved };
 
-    t.source.listed.workspaces.push_back(workspaceOf(2, "docs", { paneOf(20) }));
+    t.source.listed.workspaces.push_back(directoryWorkspaceOf(2, "docs", { directoryPaneOf(20) }));
     t.sidebar().noteChanged();
     letEventLoopRun();
 
@@ -231,8 +164,8 @@ TEST_CASE("SidebarModel: a new workspace inserts rows without a reset", "[contou
 
 TEST_CASE("SidebarModel: reordering workspaces moves rows without a reset", "[contour][sidebar]")
 {
-    auto t =
-        SidebarUnderTest { { workspaceOf(1, "a", { paneOf(10) }), workspaceOf(2, "b", { paneOf(20) }) } };
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "a", { directoryPaneOf(10) }),
+                                  directoryWorkspaceOf(2, "b", { directoryPaneOf(20) }) } };
     auto resets = QSignalSpy { &t.sidebar(), &QAbstractItemModel::modelReset };
     auto moves = QSignalSpy { &t.sidebar(), &QAbstractItemModel::rowsMoved };
 
@@ -247,7 +180,7 @@ TEST_CASE("SidebarModel: reordering workspaces moves rows without a reset", "[co
 
 TEST_CASE("SidebarModel: the timer stops when no row has a live time", "[contour][sidebar]")
 {
-    auto t = SidebarUnderTest { { workspaceOf(1, "billing", { paneOf(10) }) } };
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
     t.sidebar().setPresence(SidebarPresence::Shown);
     CHECK_FALSE(t.sidebar().isTimerActive());
 
@@ -264,7 +197,7 @@ TEST_CASE("SidebarModel: the timer stops when no row has a live time", "[contour
 
 TEST_CASE("SidebarModel: the timer stops while the window is hidden", "[contour][sidebar]")
 {
-    auto t = SidebarUnderTest { { workspaceOf(1, "billing", { paneOf(10) }) } };
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
     t.source.listed.workspaces[0].tabs[0].panes[0].status = { recordOf(ProgramState::Working) };
     t.sidebar().refreshNow();
     CHECK_FALSE(t.sidebar().isTimerActive());
@@ -276,9 +209,10 @@ TEST_CASE("SidebarModel: the timer stops while the window is hidden", "[contour]
     CHECK_FALSE(t.sidebar().isTimerActive());
 }
 
-TEST_CASE("SidebarModel: a tick changes only the running times", "[contour][sidebar]")
+TEST_CASE("SidebarModel: a tick changes only the running times and the card that shows them",
+          "[contour][sidebar]")
 {
-    auto t = SidebarUnderTest { { workspaceOf(1, "billing", { paneOf(10) }) } };
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
     t.source.listed.workspaces[0].tabs[0].panes[0].status = { recordOf(ProgramState::Working, 30s) };
     t.sidebar().refreshNow();
     auto changed = QSignalSpy { &t.sidebar(), &QAbstractItemModel::dataChanged };
@@ -288,12 +222,12 @@ TEST_CASE("SidebarModel: a tick changes only the running times", "[contour][side
 
     REQUIRE(changed.count() == 1);
     auto const roles = changed.front().at(2).value<QList<int>>();
-    CHECK(roles == QList<int> { SidebarModel::TimeTextRole });
+    CHECK(roles == QList<int> { SidebarModel::HoverDetailRole, SidebarModel::TimeTextRole });
 }
 
 TEST_CASE("SidebarModel: a title change names every role the title is served in", "[contour][sidebar]")
 {
-    auto t = SidebarUnderTest { { workspaceOf(1, "billing", { paneOf(10) }) } };
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
     auto changed = QSignalSpy { &t.sidebar(), &QAbstractItemModel::dataChanged };
 
     t.source.listed.workspaces[0].label = "invoices";
@@ -310,8 +244,9 @@ TEST_CASE("SidebarModel: a title change names every role the title is served in"
 
 TEST_CASE("SidebarModel: activate selects, activates and marks seen", "[contour][sidebar]")
 {
-    auto t = SidebarUnderTest { { workspaceOf(1, "billing", { paneOf(10) }),
-                                  workspaceOf(2, "docs", { paneOf(20), paneOf(21) }) } };
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }),
+                                  directoryWorkspaceOf(
+                                      2, "docs", { directoryPaneOf(20), directoryPaneOf(21) }) } };
 
     SECTION("a workspace row selects the workspace")
     {
@@ -339,8 +274,8 @@ TEST_CASE("SidebarModel: activate selects, activates and marks seen", "[contour]
 
 TEST_CASE("SidebarModel: a background needs-you is announced politely once", "[contour][sidebar]")
 {
-    auto t = SidebarUnderTest { { workspaceOf(1, "billing", { paneOf(10) }),
-                                  workspaceOf(2, "docs", { paneOf(20) }) } };
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }),
+                                  directoryWorkspaceOf(2, "docs", { directoryPaneOf(20) }) } };
     t.sidebar().setActivity(WindowActivity::Active);
     REQUIRE(t.announcer.said.empty());
 
@@ -374,13 +309,13 @@ TEST_CASE("SidebarModel: a background needs-you is announced politely once", "[c
 
 TEST_CASE("SidebarModel: swapping the window's source is a new baseline, not news", "[contour][sidebar]")
 {
-    auto t = SidebarUnderTest { { workspaceOf(1, "billing", { paneOf(10) }) } };
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
     t.sidebar().setActivity(WindowActivity::Active);
 
     // Another daemon, already holding a pane that needs the user, in a workspace this window does not show.
     auto other = FakeSource {};
-    other.listed.workspaces = { workspaceOf(7, "ops", { paneOf(70) }),
-                                workspaceOf(8, "docs", { paneOf(80) }) };
+    other.listed.workspaces = { directoryWorkspaceOf(7, "ops", { directoryPaneOf(70) }),
+                                directoryWorkspaceOf(8, "docs", { directoryPaneOf(80) }) };
     other.listed.selected = 7;
     other.listed.workspaces[1].tabs[0].panes[0].status = { recordOf(ProgramState::Blocked) };
     t.host.source = &other;
@@ -404,7 +339,7 @@ TEST_CASE("SidebarModel: swapping the window's source is a new baseline, not new
 
 TEST_CASE("SidebarModel: rename calls the window's rename", "[contour][sidebar]")
 {
-    auto t = SidebarUnderTest { { workspaceOf(1, "billing", { paneOf(10) }) } };
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
 
     t.sidebar().rename(1, "ignored: a tab"); // not a workspace row
     CHECK(t.host.renamed.empty());
@@ -416,9 +351,9 @@ TEST_CASE("SidebarModel: rename calls the window's rename", "[contour][sidebar]"
 
 TEST_CASE("SidebarModel: a drop resolves to the window's move operations", "[contour][sidebar]")
 {
-    auto t =
-        SidebarUnderTest { { workspaceOf(1, "a", { paneOf(10) }), workspaceOf(2, "b", { paneOf(20) }) } };
-    auto const host = HostIdentity { .kind = HostKind::Process, .id = "x" };
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "a", { directoryPaneOf(10) }),
+                                  directoryWorkspaceOf(2, "b", { directoryPaneOf(20) }) } };
+    auto const host = t.host.identity;
 
     SECTION("a workspace dropped on the lower half of another goes after it")
     {
@@ -448,24 +383,104 @@ TEST_CASE("SidebarModel: a drop resolves to the window's move operations", "[con
         CHECK(t.host.movedWorkspaces.empty());
         CHECK(t.host.movedTabs.empty());
     }
+    SECTION("a drag from another host is refused, though its ids name a tab and a workspace here")
+    {
+        auto const elsewhere = std::array {
+            HostIdentity { .kind = HostKind::Process, .id = "another-process" },
+            HostIdentity { .kind = HostKind::Daemon, .id = "42" },
+        };
+        for (auto const& other: elsewhere)
+        {
+            auto pane = NodeDrag {};
+            pane.payload = DropPayload::Pane;
+            pane.host = other;
+            pane.sessions = { 10 };
+            t.sidebar().drop(2, 0.5, writeNodeDrag(pane));
+            auto workspace = NodeDrag {};
+            workspace.payload = DropPayload::Workspace;
+            workspace.host = other;
+            workspace.workspace = 1;
+            t.sidebar().drop(2, 0.8, writeNodeDrag(workspace));
+        }
+        CHECK(t.host.movedWorkspaces.empty());
+        CHECK(t.host.movedTabs.empty());
+    }
 }
 
-TEST_CASE("SidebarModel: a row's accessible name carries its kind, state and status", "[contour][sidebar]")
+TEST_CASE("SidebarModel: a row is named by its title and described by its kind and status",
+          "[contour][sidebar]")
 {
-    auto t = SidebarUnderTest { { workspaceOf(1, "billing", { paneOf(10) }) } };
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
     t.source.listed.workspaces[0].tabs[0].panes[0].status = { recordOf(ProgramState::Blocked) };
     t.sidebar().refreshNow();
 
-    CHECK(t.sidebar().index(0).data(SidebarModel::AccessibleNameRole).toString()
-          == "billing, workspace, expanded, 1 needs you");
+    // The name is what the row shows; the kind, the fold and the status are words of the description.
+    CHECK(t.sidebar().index(0).data(SidebarModel::AccessibleNameRole).toString() == "billing");
+    CHECK(t.sidebar().index(0).data(SidebarModel::AccessibleDescriptionRole).toString()
+          == "Workspace, expanded, 1 pane needs you");
+    CHECK(t.sidebar().index(0).data(Qt::AccessibleDescriptionRole)
+          == t.sidebar().index(0).data(SidebarModel::AccessibleDescriptionRole));
     CHECK(t.sidebar().footerNeedYou() == 1);
     CHECK(t.sidebar().footerWorking() == 0);
 }
 
+TEST_CASE("SidebarModel: counts take their plural form, and zeros are left out", "[contour][sidebar]")
+{
+    struct Case
+    {
+        SidebarFooter footer;
+        QString text;
+    };
+    for (auto const& [footer, text]:
+         { Case { .footer = { .needYou = 0, .working = 0 }, .text = "" },
+           Case { .footer = { .needYou = 1, .working = 0 }, .text = "1 needs you" },
+           Case { .footer = { .needYou = 2, .working = 0 }, .text = "2 need you" },
+           Case { .footer = { .needYou = 0, .working = 3 }, .text = "3 working" },
+           Case { .footer = { .needYou = 1, .working = 2 }, .text = "1 needs you · 2 working" } })
+    {
+        INFO(text.toStdString());
+        CHECK(footerTextOf(footer) == text);
+    }
+
+    auto row = SidebarRow {};
+    row.key.kind = SidebarRowKind::Tab;
+    row.leaves = { .needYou = 0, .working = 2 };
+    CHECK(accessibleDescriptionOf(row) == "Tab, 2 panes working");
+    row.leaves = {};
+    row.urgency = Urgency::Failed;
+    CHECK(accessibleDescriptionOf(row) == "Tab, failed");
+}
+
+TEST_CASE("SidebarModel: a fold that hides the displayed tab selects its workspace", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }),
+                                  directoryWorkspaceOf(2, "docs", { directoryPaneOf(20) }) } };
+    t.host.displayed = TabRef { .workspace = 2, .tab = 20 };
+    t.sidebar().refreshNow();
+    auto const displayed = t.sidebar().currentIndex();
+    REQUIRE(displayed == 3);
+    auto const workspace = parentRowOf(t.sidebar().rows(), displayed);
+    REQUIRE(workspace == 2);
+
+    t.sidebar().collapse(workspace);
+    t.sidebar().refreshNow();
+    CHECK(t.sidebar().currentIndex() == workspace);
+    CHECK(t.sidebar().index(workspace).data(SidebarModel::SelectionRole).toInt()
+          == static_cast<int>(RowSelection::ContainsSelected));
+    CHECK(t.sidebar().index(workspace).data(SidebarModel::SelectedRole).toBool() == false);
+    CHECK(t.sidebar().index(workspace).data(SidebarModel::AccessibleDescriptionRole).toString()
+          == "Workspace, collapsed, holds the current tab");
+
+    t.sidebar().expand(workspace);
+    t.sidebar().refreshNow();
+    CHECK(t.sidebar().index(workspace).data(SidebarModel::SelectionRole).toInt()
+          == static_cast<int>(RowSelection::None));
+}
+
 TEST_CASE("SidebarModel: the filter narrows the rows and leaves the footer", "[contour][sidebar]")
 {
-    auto t = SidebarUnderTest { { workspaceOf(1, "billing", { paneOf(10) }),
-                                  workspaceOf(2, "docs", { paneOf(20) }) } };
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }),
+                                  directoryWorkspaceOf(2, "docs", { directoryPaneOf(20) }) } };
     t.source.listed.workspaces[1].tabs[0].panes[0].status = { recordOf(ProgramState::Blocked) };
     t.sidebar().refreshNow();
 
@@ -479,7 +494,7 @@ TEST_CASE("SidebarModel: the filter narrows the rows and leaves the footer", "[c
 
 TEST_CASE("SidebarModel: a context menu is the window's to open", "[contour][sidebar]")
 {
-    auto t = SidebarUnderTest { { workspaceOf(1, "billing", { paneOf(10) }) } };
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
     t.sidebar().openContextMenu(1, QPointF { 4, 5 });
     REQUIRE(t.host.menus.size() == 1);
     CHECK(t.host.menus.front().kind == SidebarRowKind::Tab);
@@ -526,8 +541,8 @@ struct Walk
         {
             case 0: { // a workspace appears, anywhere in the list
                 auto const id = nextId++;
-                auto workspace = workspaceOf(
-                    id, std::format("ws{}", id), { paneOf(nextId++, std::format("p{}", nextId)) });
+                auto workspace = directoryWorkspaceOf(
+                    id, std::format("ws{}", id), { directoryPaneOf(nextId++, std::format("p{}", nextId)) });
                 workspaces().insert(workspaces().begin()
                                         + static_cast<std::ptrdiff_t>(pick(workspaces().size() + 1)),
                                     std::move(workspace));
@@ -574,7 +589,7 @@ struct Walk
                     auto const id = nextId++;
                     tab->panes.insert(tab->panes.begin()
                                           + static_cast<std::ptrdiff_t>(pick(tab->panes.size() + 1)),
-                                      paneOf(id, std::format("p{}", id)));
+                                      directoryPaneOf(id, std::format("p{}", id)));
                 }
                 break;
             }
@@ -676,4 +691,151 @@ TEST_CASE("SidebarModel: a random walk keeps the model equal to a fresh build", 
         }
         CHECK(resets.count() == 0);
     }
+}
+
+TEST_CASE("SidebarModel: the Collapse and Expand keys fold a row or move to its parent or child",
+          "[contour][sidebar]")
+{
+    auto t =
+        SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10), directoryPaneOf(11) }),
+                             directoryWorkspaceOf(2, "docs", { directoryPaneOf(20) }) } };
+    REQUIRE(t.sidebar().rowCount() == 5);
+
+    // On a tab: to its workspace, which then folds; folded, it unfolds; unfolded, the focus goes into it.
+    CHECK(t.sidebar().collapseOrParent(2) == 0);
+    CHECK(t.sidebar().collapseOrParent(0) == 0);
+    CHECK(t.sidebar().rowCount() == 3);
+    CHECK(t.sidebar().expandOrChild(0) == 0);
+    CHECK(t.sidebar().rowCount() == 5);
+    CHECK(t.sidebar().expandOrChild(0) == 1);
+    // A row with nothing to fold stays.
+    CHECK(t.sidebar().expandOrChild(1) == 1);
+}
+
+TEST_CASE("SidebarModel: the summary follows the shown workspace", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }),
+                                  directoryWorkspaceOf(2, "docs", { directoryPaneOf(20) }) } };
+    CHECK(t.sidebar().currentWorkspaceTitle() == "billing");
+    CHECK(t.sidebar().currentWorkspaceIndex() == 0);
+    CHECK_FALSE(t.sidebar().workspaceChipMarked());
+
+    auto summary = QSignalSpy { &t.sidebar(), &SidebarModel::summaryChanged };
+    t.source.listed.selected = 2;
+    t.source.listed.workspaces[0].tabs[0].panes[0].status = { recordOf(ProgramState::Blocked) };
+    t.sidebar().refreshNow();
+    CHECK(summary.count() == 1);
+    CHECK(t.sidebar().currentWorkspaceTitle() == "docs");
+    CHECK(t.sidebar().currentWorkspaceIndex() == 2);
+    CHECK(t.sidebar().otherWorkspacesUrgency() == static_cast<int>(Urgency::NeedsYou));
+    CHECK(t.sidebar().workspaceChipMarked());
+    CHECK(t.sidebar().workspaceChipGlyph() != static_cast<int>(TabBadgeKind::None));
+
+    // A filter that hides billing does not hide what it asks.
+    t.sidebar().setFilter("docs");
+    t.sidebar().refreshNow();
+    CHECK(t.sidebar().index(0).data(SidebarModel::TitleRole).toString() == "docs");
+    CHECK(t.sidebar().workspaceChipMarked());
+}
+
+TEST_CASE("SidebarModel: the hover card's reason is the whole one, the row's is cut", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
+    auto record = recordOf(ProgramState::Working);
+    record.message = std::string(MaxRowTextLength * 3, 'r');
+    t.source.listed.workspaces[0].tabs[0].panes[0].status = { record };
+    t.sidebar().refreshNow();
+
+    CHECK(t.sidebar().roleNames().value(SidebarModel::FullReasonRole) == "fullReason");
+    auto const tab = t.sidebar().index(1);
+    CHECK(tab.data(SidebarModel::ReasonRole).toString().size() == static_cast<qsizetype>(MaxRowTextLength));
+    CHECK(tab.data(SidebarModel::FullReasonRole).toString() == QString::fromStdString(record.message));
+}
+
+TEST_CASE("SidebarModel: the reason is delivered as its words and its command", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
+    auto record = recordOf(ProgramState::Blocked);
+    record.kind = vtbackend::BlockedKind::Permission;
+    record.message = "Bash: psql -h db";
+    t.source.listed.workspaces[0].tabs[0].panes[0].status = { record };
+    t.sidebar().refreshNow();
+
+    CHECK(t.sidebar().roleNames().value(SidebarModel::ReasonLabelRole) == "reasonLabel");
+    CHECK(t.sidebar().roleNames().value(SidebarModel::ReasonCommandRole) == "reasonCommand");
+    auto const tab = t.sidebar().index(1);
+    CHECK(tab.data(SidebarModel::ReasonLabelRole).toString() == "Permission · Bash: ");
+    CHECK(tab.data(SidebarModel::ReasonCommandRole).toString() == "psql -h db");
+    CHECK(tab.data(SidebarModel::ReasonRole).toString() == "Permission · Bash: psql -h db");
+    CHECK(tab.data(SidebarModel::FullReasonCommandRole).toString() == "psql -h db");
+
+    // A plain reason has no command.
+    auto done = recordOf(ProgramState::Done);
+    done.message = "All tests pass";
+    t.source.listed.workspaces[0].tabs[0].panes[0].status = { done };
+    t.sidebar().refreshNow();
+    auto const plain = t.sidebar().index(1);
+    CHECK(plain.data(SidebarModel::ReasonLabelRole).toString() == "All tests pass");
+    CHECK(plain.data(SidebarModel::ReasonCommandRole).toString().isEmpty());
+}
+
+TEST_CASE("SidebarModel: the command map names every tree command", "[contour][sidebar]")
+{
+    auto const commands = sidebarCommandMap();
+    CHECK(commands.size() == static_cast<qsizetype>(SidebarCommandNames.size()));
+    CHECK(commands.value("rename").toInt() == static_cast<int>(ChromeCommand::Rename));
+    CHECK(commands.value("filter").toInt() == static_cast<int>(ChromeCommand::Filter));
+}
+
+TEST_CASE("the footer's counts outrank its chord, which is dropped first", "[contour][sidebar][footer]")
+{
+    using contour::window::sidebarrows::FooterChord;
+    struct Case
+    {
+        FooterRoom room {};
+        FooterChord expected = FooterChord::Dropped;
+    };
+    for (auto const& [room, expected]: {
+             // Room for both, with the gap between them.
+             Case { .room = { .available = 200, .countsWidth = 100, .chordWidth = 60, .gap = 8 },
+                    .expected = FooterChord::Shown },
+             // Exactly enough.
+             Case { .room = { .available = 168, .countsWidth = 100, .chordWidth = 60, .gap = 8 },
+                    .expected = FooterChord::Shown },
+             // One pixel short: the counts keep their words, the chord goes.
+             Case { .room = { .available = 167, .countsWidth = 100, .chordWidth = 60, .gap = 8 },
+                    .expected = FooterChord::Dropped },
+             // The counts alone fill it: the chord is dropped, the counts elide only as the last resort.
+             Case { .room = { .available = 100, .countsWidth = 120, .chordWidth = 60, .gap = 8 },
+                    .expected = FooterChord::Dropped },
+             // No counts: the chord needs no gap.
+             Case { .room = { .available = 60, .countsWidth = 0, .chordWidth = 60, .gap = 8 },
+                    .expected = FooterChord::Shown },
+             Case { .room = { .available = 59, .countsWidth = 0, .chordWidth = 60, .gap = 8 },
+                    .expected = FooterChord::Dropped },
+             // No chord bound: nothing to show.
+             Case { .room = { .available = 500, .countsWidth = 100, .chordWidth = 0, .gap = 8 },
+                    .expected = FooterChord::Dropped },
+         })
+    {
+        INFO("available " << room.available << ", counts " << room.countsWidth << ", chord "
+                          << room.chordWidth << ", gap " << room.gap);
+        CHECK(footerChordFor(room) == expected);
+    }
+}
+
+TEST_CASE("the footer's counts take their shorter wording only when the full one does not fit",
+          "[contour][sidebar][footer]")
+{
+    using contour::window::sidebarrows::FooterCounts;
+    CHECK(footerCountsFor(120, 100) == FooterCounts::Full);
+    CHECK(footerCountsFor(100, 100) == FooterCounts::Full);
+    CHECK(footerCountsFor(99, 100) == FooterCounts::Compact);
+
+    auto footer = SidebarFooter { .needYou = 0, .working = 0 };
+    CHECK(footerCompactTextOf(footer).isEmpty());
+    footer = { .needYou = 1, .working = 1 };
+    CHECK(footerCompactTextOf(footer) == "1 waiting · 1 busy");
+    footer = { .needYou = 3, .working = 0 };
+    CHECK(footerCompactTextOf(footer) == "3 waiting");
 }

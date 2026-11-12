@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -97,4 +98,22 @@ TEST_CASE("SidebarDropPolicy.positions_are_real_not_visible_indices", "[sidebar]
     CHECK(describe(resolveSidebarDrop(rows, 0, 0.9, DragSubject::Workspace)) == "reorder 4");
     CHECK(describe(resolveSidebarDrop(rows, 1, 0.1, DragSubject::Tab)) == "move 20@7");
     CHECK(describe(resolveSidebarDrop(rows, 1, 0.9, DragSubject::Tab)) == "move 20@8");
+}
+
+TEST_CASE("SidebarDropPolicy.a_dropped_item_ends_where_it_was_dropped_before", "[sidebar]")
+{
+    // Down past itself it lands one place before the gap it was dropped in; up, in the gap.
+    CHECK(placeAfterMove(0, 0) == 0);
+    CHECK(placeAfterMove(0, 1) == 0);
+    CHECK(placeAfterMove(0, 3) == 2);
+    CHECK(placeAfterMove(2, 0) == 0);
+
+    // A tab from another workspace lands in the gap, or at the end.
+    CHECK(tabPlaceAfterMove(std::nullopt, 1, 3) == 1);
+    CHECK(tabPlaceAfterMove(std::nullopt, AppendTab, 3) == 3);
+    // Within its own workspace it leaves its place first.
+    CHECK(tabPlaceAfterMove(0, 2, 3) == 1);
+    CHECK(tabPlaceAfterMove(2, 0, 3) == 0);
+    CHECK(tabPlaceAfterMove(1, AppendTab, 3) == 2);
+    CHECK(tabPlaceAfterMove(1, 9, 3) == 2);
 }

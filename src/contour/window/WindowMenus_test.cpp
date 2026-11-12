@@ -754,3 +754,28 @@ TEST_CASE("activateHeaderBarItem runs the header bar's items", "[contour][window
         CHECK(window->mainMenuModel().isEmpty());
     }
 }
+
+TEST_CASE("with no sidebar toggle on screen, the pane menu offers the hidden sidebar back",
+          "[contour][windowmenus][sidebar]")
+{
+    TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    ScopedController const window { app.manager(), contour::config::MenuPresentation::InScene };
+    auto const created = createSessionTabs(app.manager(), *window, 1);
+    REQUIRE(window->sidebarVisibility() == static_cast<int>(contour::config::SidebarVisibility::Hidden));
+
+    // A band holds the toggle: the pane menu need not offer it, the title bar's menu names what it does.
+    window->setSidebarToggleHost(QStringLiteral("band"));
+    window->openContextMenu();
+    CHECK_FALSE(actionIdOf(window->contextMenuModel(), QStringLiteral("Show Sidebar")).has_value());
+    window->openTitleBarContextMenu();
+    CHECK(actionIdOf(window->titleBarContextMenuModel(), QStringLiteral("Show Sidebar")).has_value());
+
+    // No band, no toggle: the pane is all that is under the pointer, so its menu is the way back.
+    window->setSidebarToggleHost(QStringLiteral("none"));
+    window->openContextMenu();
+    auto const show = actionIdOf(window->contextMenuModel(), QStringLiteral("Show Sidebar"));
+    REQUIRE(show.has_value());
+    window->triggerContextMenuAction(*show);
+    QCoreApplication::processEvents();
+    CHECK(window->sidebarVisibility() == static_cast<int>(contour::config::SidebarVisibility::Shown));
+}

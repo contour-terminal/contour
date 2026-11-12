@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/window/AttentionJump.hpp>
+#include <contour/window/ChromeKeys.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SidebarModel.hpp>
@@ -8,8 +9,10 @@
 
 #include <QtCore/QByteArray>
 #include <QtCore/QHash>
+#include <QtCore/QStringList>
 #include <QtCore/QVariant>
 #include <QtCore/QVariantList>
+#include <QtQml/QQmlEngine>
 
 #include <algorithm>
 #include <array>
@@ -51,6 +54,20 @@ namespace
         RoleName { SidebarModel::SelectedRole, "selected" },
         RoleName { SidebarModel::TreeLinesRole, "treeLines" },
         RoleName { SidebarModel::AccessibleNameRole, "accessibleName" },
+        RoleName { SidebarModel::ProgramRole, "program" },
+        RoleName { SidebarModel::FolderRole, "folder" },
+        RoleName { SidebarModel::ReasonLabelRole, "reasonLabel" },
+        RoleName { SidebarModel::ReasonCommandRole, "reasonCommand" },
+        RoleName { SidebarModel::TreeTextRole, "treeText" },
+        RoleName { SidebarModel::MeterTextRole, "meterText" },
+        RoleName { SidebarModel::HoverDetailRole, "hoverDetail" },
+        RoleName { SidebarModel::ProgressFractionRole, "progressFraction" },
+        RoleName { SidebarModel::FullReasonRole, "fullReason" },
+        RoleName { SidebarModel::FullReasonLabelRole, "fullReasonLabel" },
+        RoleName { SidebarModel::FullReasonCommandRole, "fullReasonCommand" },
+        RoleName { SidebarModel::AccessibleDescriptionRole, "accessibleDescription" },
+        RoleName { SidebarModel::SelectionRole, "selection" },
+        RoleName { SidebarModel::TreeTextContinuedRole, "treeTextContinued" },
     };
 
     [[nodiscard]] QString qs(std::string const& text)
@@ -58,13 +75,57 @@ namespace
         return QString::fromStdString(text);
     }
 
-    [[nodiscard]] std::string_view kindWord(SidebarRowKind kind) noexcept
+    /// @return What a row of @p kind is, as a screen reader says it.
+    [[nodiscard]] QString kindWord(SidebarRowKind kind)
     {
         switch (kind)
         {
-            case SidebarRowKind::Workspace: return "workspace";
-            case SidebarRowKind::Tab: return "tab";
-            case SidebarRowKind::Pane: return "pane";
+            case SidebarRowKind::Workspace: return SidebarModel::tr("Workspace");
+            case SidebarRowKind::Tab: return SidebarModel::tr("Tab");
+            case SidebarRowKind::Pane: return SidebarModel::tr("Pane");
+        }
+        return {};
+    }
+
+    /// One count of panes, as words in the plural form @p count takes. The English source text carries both
+    /// forms, so it reads right where no translation is loaded; a translation picks its own forms by %n.
+    struct CountWords
+    {
+        char const* one;   ///< The source text for one pane.
+        char const* other; ///< The source text for any other count.
+    };
+
+    /// @return @p words for @p count, translated.
+    [[nodiscard]] QString counted(CountWords const& words, uint32_t count)
+    {
+        auto const n = static_cast<int>(count);
+        return SidebarModel::tr(count == 1 ? words.one : words.other, nullptr, n);
+    }
+
+    constexpr auto PanesNeedYou =
+        CountWords { .one = QT_TR_NOOP("%n pane needs you"), .other = QT_TR_NOOP("%n panes need you") };
+    constexpr auto PanesWorking =
+        CountWords { .one = QT_TR_NOOP("%n pane working"), .other = QT_TR_NOOP("%n panes working") };
+    constexpr auto FooterNeedYou =
+        CountWords { .one = QT_TR_NOOP("%n needs you"), .other = QT_TR_NOOP("%n need you") };
+    constexpr auto FooterWorking =
+        CountWords { .one = QT_TR_NOOP("%n working"), .other = QT_TR_NOOP("%n working") };
+    constexpr auto FooterNeedYouCompact =
+        CountWords { .one = QT_TR_NOOP("%n waiting"), .other = QT_TR_NOOP("%n waiting") };
+    constexpr auto FooterWorkingCompact =
+        CountWords { .one = QT_TR_NOOP("%n busy"), .other = QT_TR_NOOP("%n busy") };
+
+    /// @return What @p urgency says of a row, translated; empty for Idle.
+    [[nodiscard]] QString urgencyWords(Urgency urgency)
+    {
+        switch (urgency)
+        {
+            case Urgency::Idle: return {};
+            case Urgency::UnseenOutput: return SidebarModel::tr("new output");
+            case Urgency::Working: return SidebarModel::tr("working");
+            case Urgency::DoneUnseen: return SidebarModel::tr("done");
+            case Urgency::Failed: return SidebarModel::tr("failed");
+            case Urgency::NeedsYou: return SidebarModel::tr("needs you");
         }
         return {};
     }
@@ -81,22 +142,39 @@ namespace
         note(before.depth == after.depth, { SidebarModel::DepthRole });
         note(before.title == after.title,
              { SidebarModel::TitleRole, Qt::DisplayRole, Qt::AccessibleTextRole });
-        note(before.reason == after.reason, { SidebarModel::ReasonRole });
+        note(before.reason == after.reason && before.reasonLabel == after.reasonLabel
+                 && before.reasonCommand == after.reasonCommand,
+             { SidebarModel::ReasonRole, SidebarModel::ReasonLabelRole, SidebarModel::ReasonCommandRole });
+        note(before.fullReason == after.fullReason && before.fullReasonLabel == after.fullReasonLabel
+                 && before.fullReasonCommand == after.fullReasonCommand,
+             { SidebarModel::FullReasonRole,
+               SidebarModel::FullReasonLabelRole,
+               SidebarModel::FullReasonCommandRole });
+        note(before.program == after.program, { SidebarModel::ProgramRole });
+        note(before.folder == after.folder, { SidebarModel::FolderRole });
+        note(hoverDetailOf(before) == hoverDetailOf(after), { SidebarModel::HoverDetailRole });
         note(before.gitText == after.gitText, { SidebarModel::GitTextRole });
         note(before.time.text == after.time.text, { SidebarModel::TimeTextRole });
         note(before.time.kind == after.time.kind, { SidebarModel::TimeKindRole });
-        note(before.time.percent == after.time.percent, { SidebarModel::ProgressRole });
+        note(before.time.percent == after.time.percent,
+             { SidebarModel::ProgressRole, SidebarModel::MeterTextRole, SidebarModel::ProgressFractionRole });
         note(before.urgency == after.urgency, { SidebarModel::UrgencyRole });
         note(before.glyph == after.glyph, { SidebarModel::GlyphRole });
         note(before.expansion == after.expansion, { SidebarModel::ExpansionRole });
         note(before.selection == after.selection, { SidebarModel::SelectedRole });
-        note(before.lines == after.lines, { SidebarModel::TreeLinesRole });
-        // The spoken name folds in the status, the expansion and the selection; a running time is not in it.
+        note(before.lines == after.lines && before.depth == after.depth,
+             { SidebarModel::TreeLinesRole, SidebarModel::TreeTextRole });
+        note(before.selection == after.selection, { SidebarModel::SelectionRole });
+        note(before.continued == after.continued && before.depth == after.depth,
+             { SidebarModel::TreeTextContinuedRole });
+        // The spoken name is the title; the description folds in the kind and the status, not a running time.
         if (accessibleNameOf(before) != accessibleNameOf(after))
             for (auto const role: { static_cast<int>(SidebarModel::AccessibleNameRole),
                                     static_cast<int>(Qt::AccessibleTextRole) })
                 if (!roles.contains(role))
                     roles.push_back(role);
+        if (accessibleDescriptionOf(before) != accessibleDescriptionOf(after))
+            roles.push_back(SidebarModel::AccessibleDescriptionRole);
         return roles;
     }
 
@@ -139,32 +217,68 @@ namespace
     }
 } // namespace
 
+void registerSidebarQmlTypes()
+{
+    // Function-local, so the first call registers and every later one returns: the application registers
+    // once at start, the test runner once after its application object is built.
+    static auto const registered = [] {
+        qmlRegisterUncreatableMetaObject(sidebarrows::staticMetaObject,
+                                         "Contour.Terminal",
+                                         1,
+                                         0,
+                                         "SidebarRows",
+                                         QStringLiteral("SidebarRows holds enums only."));
+        return true;
+    }();
+    (void) registered;
+}
+
 QString accessibleNameOf(SidebarRow const& row)
 {
-    auto name = std::format("{}, {}", row.title, kindWord(row.key.kind));
+    return qs(row.title);
+}
+
+QString accessibleDescriptionOf(SidebarRow const& row)
+{
+    auto parts = QStringList { kindWord(row.key.kind) };
+    // The fold is a state a tree item would carry; Qt Quick's Accessible has none for it, so it is said here.
     switch (row.expansion)
     {
         case RowExpansion::None: break;
-        case RowExpansion::Collapsed: name += ", collapsed"; break;
-        case RowExpansion::Expanded: name += ", expanded"; break;
+        case RowExpansion::Collapsed: parts.push_back(SidebarModel::tr("collapsed")); break;
+        case RowExpansion::Expanded: parts.push_back(SidebarModel::tr("expanded")); break;
     }
     if (row.leaves.needYou > 0)
-        name += std::format(", {} needs you", row.leaves.needYou);
+        parts.push_back(counted(PanesNeedYou, row.leaves.needYou));
     else if (row.leaves.working > 0)
-        name += std::format(", {} working", row.leaves.working);
-    else
-        switch (row.urgency)
-        {
-            case Urgency::Failed: name += ", failed"; break;
-            case Urgency::DoneUnseen: name += ", done"; break;
-            case Urgency::UnseenOutput: name += ", new output"; break;
-            case Urgency::Idle:
-            case Urgency::Working:
-            case Urgency::NeedsYou: break;
-        }
-    if (row.selection == RowSelection::Selected)
-        name += ", current";
-    return qs(name);
+        parts.push_back(counted(PanesWorking, row.leaves.working));
+    // A row's own working or needing pane is counted above; what else it says, it says in words.
+    else if (row.urgency != Urgency::Working && row.urgency != Urgency::NeedsYou)
+        if (auto words = urgencyWords(row.urgency); !words.isEmpty())
+            parts.push_back(std::move(words));
+    if (row.selection == RowSelection::ContainsSelected)
+        parts.push_back(SidebarModel::tr("holds the current tab"));
+    return parts.join(QStringLiteral(", "));
+}
+
+QString footerTextOf(SidebarFooter const& footer)
+{
+    auto parts = QStringList {};
+    if (footer.needYou > 0)
+        parts.push_back(counted(FooterNeedYou, footer.needYou));
+    if (footer.working > 0)
+        parts.push_back(counted(FooterWorking, footer.working));
+    return parts.join(QStringLiteral(" · "));
+}
+
+QString footerCompactTextOf(SidebarFooter const& footer)
+{
+    auto parts = QStringList {};
+    if (footer.needYou > 0)
+        parts.push_back(counted(FooterNeedYouCompact, footer.needYou));
+    if (footer.working > 0)
+        parts.push_back(counted(FooterWorkingCompact, footer.working));
+    return parts.join(QStringLiteral(" · "));
 }
 
 SidebarModel::SidebarModel(ISidebarHost& host,
@@ -204,6 +318,43 @@ SidebarRow const* SidebarModel::rowAt(int row) const noexcept
     return &_rows[static_cast<std::size_t>(row)];
 }
 
+QVariantMap sidebarCommandMap()
+{
+    auto commands = QVariantMap {};
+    for (auto const& [name, command]: SidebarCommandNames)
+        commands.insert(QString::fromLatin1(name.data(), static_cast<qsizetype>(name.size())),
+                        static_cast<int>(command));
+    return commands;
+}
+
+int SidebarModel::collapseOrParent(int row)
+{
+    auto const* const shown = rowAt(row);
+    if (shown == nullptr)
+        return row;
+    if (shown->expansion == RowExpansion::Expanded)
+    {
+        collapse(row);
+        return row;
+    }
+    auto const parent = parentRowOf(_rows, row);
+    return parent >= 0 ? parent : row;
+}
+
+int SidebarModel::expandOrChild(int row)
+{
+    auto const* const shown = rowAt(row);
+    if (shown == nullptr)
+        return row;
+    switch (shown->expansion)
+    {
+        case RowExpansion::None: return row;
+        case RowExpansion::Collapsed: expand(row); return row;
+        case RowExpansion::Expanded: return parentRowOf(_rows, row + 1) == row ? row + 1 : row;
+    }
+    return row;
+}
+
 int SidebarModel::rowIndexOf(SidebarRowKey const& key) const noexcept
 {
     auto const at = std::ranges::find(_rows, key, &SidebarRow::key);
@@ -221,6 +372,7 @@ QVariant SidebarModel::data(QModelIndex const& index, int role) const
         case DepthRole: return static_cast<int>(row->depth);
         case TitleRole: return qs(row->title);
         case ReasonRole: return qs(row->reason);
+        case FullReasonRole: return qs(row->fullReason);
         case GitTextRole: return qs(row->gitText);
         case TimeTextRole: return qs(row->time.text);
         case TimeKindRole: return static_cast<int>(row->time.kind);
@@ -236,8 +388,24 @@ QVariant SidebarModel::data(QModelIndex const& index, int role) const
             return glyphs;
         }
         case AccessibleNameRole: return accessibleNameOf(*row);
+        case ProgramRole: return qs(row->program);
+        case FolderRole: return qs(row->folder);
+        case ReasonLabelRole: return qs(row->reasonLabel);
+        case ReasonCommandRole: return qs(row->reasonCommand);
+        case FullReasonLabelRole: return qs(row->fullReasonLabel);
+        case FullReasonCommandRole: return qs(row->fullReasonCommand);
+        case TreeTextRole: return qs(treeLinesText(row->lines, row->depth));
+        case MeterTextRole: return row->time.percent ? qs(meterText(*row->time.percent)) : QString {};
+        case HoverDetailRole: return qs(hoverDetailOf(*row));
+        case ProgressFractionRole:
+            return row->time.percent ? std::clamp(static_cast<double>(*row->time.percent), 0.0, 100.0) / 100.0
+                                     : 0.0;
         case Qt::DisplayRole: return qs(row->title);
         case Qt::AccessibleTextRole: return accessibleNameOf(*row);
+        case Qt::AccessibleDescriptionRole:
+        case AccessibleDescriptionRole: return accessibleDescriptionOf(*row);
+        case SelectionRole: return static_cast<int>(row->selection);
+        case TreeTextContinuedRole: return qs(treeContinuationText(*row));
         default: break;
     }
     return {};
@@ -264,7 +432,7 @@ void SidebarModel::updateTimer()
 
 void SidebarModel::noteChanged()
 {
-    if (std::exchange(_rebuildPending, true))
+    if (std::exchange(_rowsState, RowsState::Stale) == RowsState::Stale)
         return;
     QMetaObject::invokeMethod(this, &SidebarModel::refreshNow, Qt::QueuedConnection);
 }
@@ -277,52 +445,61 @@ WorkspaceDirectory SidebarModel::directory() const
 
 SidebarModel::Rebuilt SidebarModel::build(WorkspaceDirectory const& directory) const
 {
-    auto const now = _clock.now();
-    auto const displayed = _host.displayedTab();
-    auto built = Rebuilt { .rows = sidebarRows(directory, _attention, _state, now, displayed),
-                           .footer = {},
-                           .displayed = displayed };
-    // The footer counts every pane, whatever the filter hides.
-    if (_state.filter.empty())
-        built.footer = sidebarFooter(built.rows);
-    else
-    {
-        auto unfiltered = _state;
-        unfiltered.filter.clear();
-        built.footer = sidebarFooter(sidebarRows(directory, _attention, unfiltered, now, displayed));
-    }
-    return built;
+    auto const displayed = _host.displayedTab(directory);
+    auto listing = sidebarListing(directory, _attention, _state, _clock.now(), displayed);
+    // A window that follows no selection shows the workspace of the tab it displays.
+    auto current = directory.selected;
+    if (!current && displayed)
+        current = displayed->workspace;
+    // The footer and the summary count every pane and workspace, whatever the filter hides.
+    return Rebuilt { .rows = std::move(listing.rows),
+                     .footer = sidebarFooter(listing.workspaces),
+                     .summary = sidebarSummary(listing.workspaces, current),
+                     .displayed = displayed,
+                     .currentWorkspace = current };
 }
 
 void SidebarModel::refreshNow()
 {
-    _rebuildPending = false;
+    auto const unbuilt = std::exchange(_rowsState, RowsState::Current) == RowsState::Unbuilt;
     auto const current = directory();
     auto built = build(current);
     announceNewNeeds(current);
-    apply(std::move(built.rows));
+    if (unbuilt)
+        resetRows(std::move(built.rows));
+    else
+        apply(std::move(built.rows));
 
     if (std::exchange(_footer, built.footer) != built.footer)
         emit footerChanged();
     auto const index = [&] {
-        auto const at = std::ranges::find(_rows, RowSelection::Selected, &SidebarRow::selection);
+        // The displayed tab's row, or the folded workspace that holds it.
+        auto const at = std::ranges::find_if(
+            _rows, [](SidebarRow const& row) { return row.selection != RowSelection::None; });
         return at == _rows.end() ? -1 : static_cast<int>(std::distance(_rows.begin(), at));
     }();
     if (std::exchange(_currentIndex, index) != index)
         emit currentIndexChanged();
-    _built = true;
+    auto const workspaceIndex = built.currentWorkspace ? rowIndexOf({ .kind = SidebarRowKind::Workspace,
+                                                                      .workspace = *built.currentWorkspace,
+                                                                      .tab = 0,
+                                                                      .pane = {} })
+                                                       : -1;
+    auto const summaryMoved = std::exchange(_summary, built.summary) != built.summary;
+    if (std::exchange(_currentWorkspaceIndex, workspaceIndex) != workspaceIndex || summaryMoved)
+        emit summaryChanged();
     updateTimer();
+}
+
+void SidebarModel::resetRows(std::vector<SidebarRow> next)
+{
+    beginResetModel();
+    _rows = std::move(next);
+    endResetModel();
 }
 
 void SidebarModel::apply(std::vector<SidebarRow> next)
 {
-    if (!_built)
-    {
-        beginResetModel();
-        _rows = std::move(next);
-        endResetModel();
-        return;
-    }
 
     auto const gone = [&](SidebarRow const& row) {
         return std::ranges::none_of(next, [&](SidebarRow const& other) { return other.key == row.key; });
@@ -407,9 +584,10 @@ void SidebarModel::apply(std::vector<SidebarRow> next)
 void SidebarModel::announceNewNeeds(WorkspaceDirectory const& directory)
 {
     // The first build, and the first after the window's source was swapped or attached, only learn what
-    // already was: a window opening or switching daemons is not news.
+    // already was: a window opening or switching daemons is not news. No source was read before the first
+    // build, so it is one whose source differs; and one with no source lists nothing.
     auto const* const source = _host.directorySource();
-    auto const baseline = !_built || source != _source;
+    auto const baseline = source != _source;
     _source = source;
     auto urgencies = std::map<PaneKey, Urgency> {};
     for (auto const& workspace: directory.workspaces)
@@ -427,9 +605,8 @@ void SidebarModel::announceNewNeeds(WorkspaceDirectory const& directory)
                     continue;
                 auto const& title = !pane.title.empty() ? pane.title : tab.label;
                 _announcer.announce(
-                    qs(std::format("{} in {} needs you",
-                                   title,
-                                   workspace.label.empty() ? "a workspace" : workspace.label)),
+                    tr("%1 in %2 needs you")
+                        .arg(qs(title), workspace.label.empty() ? tr("a workspace") : qs(workspace.label)),
                     QAccessible::AnnouncementPoliteness::Polite);
             }
     _paneUrgency = std::move(urgencies);
@@ -506,9 +683,19 @@ void SidebarModel::collapse(int row)
 void SidebarModel::rename(int row, QString const& name)
 {
     auto const* const shown = rowAt(row);
-    if (shown == nullptr || shown->key.kind != SidebarRowKind::Workspace)
+    if (shown == nullptr)
         return;
-    _host.renameWorkspace(shown->key.workspace, name.toStdString());
+    switch (shown->key.kind)
+    {
+        case SidebarRowKind::Workspace:
+            _host.renameWorkspace(shown->key.workspace, name.toStdString());
+            break;
+        case SidebarRowKind::Tab:
+            _host.renameTab(TabRef { .workspace = shown->key.workspace, .tab = shown->key.tab },
+                            name.toStdString());
+            break;
+        case SidebarRowKind::Pane: break;
+    }
 }
 
 void SidebarModel::markSeen(int row)
@@ -539,7 +726,8 @@ void SidebarModel::setFilter(QString const& text)
 void SidebarModel::drop(int row, double y, QString const& payload)
 {
     auto const drag = parseNodeDrag(payload);
-    if (!drag)
+    // Ids are the host's own: another host's tab 3 or workspace 2 is not this one's.
+    if (!drag || drag->host != _host.hostIdentity())
         return;
     auto const current = directory();
     auto const paneKey = [&]() -> std::optional<PaneKey> {

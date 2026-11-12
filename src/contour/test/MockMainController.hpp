@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/command/MenuBarTable.hpp>
+#include <contour/command/Shortcut.hpp>
 #include <contour/config/ConfigFwd.hpp>
 #include <contour/config/TabBarMode.hpp>
 #include <contour/platform/ColorConversion.hpp>
@@ -15,6 +16,7 @@
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/QtChromeKeys.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/WindowController.hpp>
@@ -109,6 +111,8 @@ struct MainWindowScene
     snapshot::SecureDecor secure = snapshot::SecureDecor::None; ///< Which tabs wait for a password.
     /// Whether the band draws its own window controls.
     ClientFrameAffordances affordances = ClientFrameAffordances::None;
+    /// How the window's chords are spelled (shortcutText()): the row's host spelling.
+    command::ShortcutStyle shortcutStyle = command::ShortcutStyle::Text;
 };
 
 /// The client and daemon releases a drifted scene reports, as DaemonDriftModel_test assesses them.
@@ -177,6 +181,7 @@ class MockMainController: public MainWindowControllerMock
     Q_PROPERTY(int chromeFocusArea READ chromeFocusArea NOTIFY chromeFocusChanged)
     Q_PROPERTY(int focusedTabIndex READ focusedTabIndex NOTIFY chromeFocusChanged)
     Q_PROPERTY(int focusedToolbarIndex READ focusedToolbarIndex NOTIFY chromeFocusChanged)
+    Q_PROPERTY(bool sidebarHasFocus READ sidebarHasFocus NOTIFY chromeFocusChanged)
     // Mirrors WindowController's main menu: the header bar's menu button pops it (TitleBar.qml).
     Q_PROPERTY(QVariantList mainMenuModel READ mainMenuModel NOTIFY mainMenuModelChanged)
     // Mirrors WindowController's hosting notice; writable here so a test can raise it before the load.
@@ -213,6 +218,7 @@ class MockMainController: public MainWindowControllerMock
         _hostingNotice { _scene.hostingNotice }
     {
         attachedHost = _scene.hostLabel;
+        shortcutStyle = _scene.shortcutStyle;
         setHostChipState(static_cast<int>(_scene.hostChipState));
         if (_scene.drift == snapshot::SnapshotDrift::Shown)
             _drift.show(vthost::client::assessDrift(
@@ -261,6 +267,25 @@ class MockMainController: public MainWindowControllerMock
         _focusedToolbar = item;
         emit chromeFocusChanged();
     }
+    /// @return Whether the keyboard is in the sidebar's tree.
+    [[nodiscard]] bool sidebarHasFocus() const noexcept { return _chromeArea == window::ChromeArea::Sidebar; }
+    /// Mirrors WindowController::focusSidebar(): puts keyboard focus in the sidebar's tree.
+    Q_INVOKABLE void focusSidebar()
+    {
+        _chromeArea = window::ChromeArea::Sidebar;
+        _focusedTabId = -1;
+        _focusedToolbar = -1;
+        emit chromeFocusChanged();
+    }
+    /// Mirrors WindowController::renameCurrentWorkspace(): shows the sidebar when it is hidden, puts the
+    /// keyboard in it and asks for the editor.
+    void renameCurrentWorkspace()
+    {
+        if (sidebarVisibility() == static_cast<int>(config::SidebarVisibility::Hidden))
+            toggleSidebar();
+        focusSidebar();
+        emit workspaceRenameRequested();
+    }
     /// Mirrors WindowController::leaveChrome(): what a pointer press or the terminal taking focus calls.
     Q_INVOKABLE void leaveChrome()
     {
@@ -271,6 +296,8 @@ class MockMainController: public MainWindowControllerMock
         emit chromeFocusChanged();
     }
     /// Records what the window reports it shows: how Main.qml tells the controller what there is to visit.
+    /// Where Main.qml placed the sidebar's toggle; the mock has no pane menu to offer it in.
+    Q_INVOKABLE void setSidebarToggleHost(QString const& host) { reportedSidebarToggleHost = host; }
     Q_INVOKABLE void setChromePresence(bool tabsShown, int toolbarItems)
     {
         reportedTabsShown = tabsShown;
@@ -278,9 +305,11 @@ class MockMainController: public MainWindowControllerMock
     }
     /// Records a key the chrome offered, and answers as the controller does for one it handles.
     /// @return Whether the key counts as handled: true unless a test set @c chromeKeysHandled to false.
-    Q_INVOKABLE [[nodiscard]] bool chromeKey(int qtKey, int qtModifiers, QString const& /*text*/ = {})
+    Q_INVOKABLE [[nodiscard]] bool chromeKey(int qtKey, int qtModifiers, QString const& text = {})
     {
         chromeKeys.emplace_back(qtKey, qtModifiers);
+        if (mirrorsChromeKeys && _chromeArea == window::ChromeArea::Sidebar)
+            return sidebarKey(qtKey, qtModifiers, text);
         if (mirrorsChromeKeys && _chromeArea == window::ChromeArea::Tabs)
         {
             // The two keys the controller answers by changing the model, whose announcements Main.qml must
@@ -745,6 +774,8 @@ class MockMainController: public MainWindowControllerMock
     /// What setChromePresence() was last told; nothing until Main.qml reports.
     bool reportedTabsShown = false;
     int reportedToolbarItems = -1;
+    /// What setSidebarToggleHost() was last told; empty until Main.qml reports.
+    QString reportedSidebarToggleHost;
     /// The keys chromeKey() was offered, as (Qt::Key, Qt::KeyboardModifiers), oldest first.
     std::vector<std::pair<int, int>> chromeKeys;
     /// What chromeKey() answers.
@@ -778,14 +809,45 @@ class MockMainController: public MainWindowControllerMock
     void tabColorPickRequested(int /*index*/);
 
   private:
+    /// Answers a key of the sidebar's tree as the controller does, through the same key table: Escape clears
+    /// a typed filter or else leaves the chrome, a key the tree answers itself comes back as
+    /// sidebarCommandRequested().
+    bool sidebarKey(int qtKey, int qtModifiers, QString const& text)
+    {
+        auto const typed = text.size() == 1 && text.front().isPrint();
+        auto key = window::chromeKeyOf(qtKey);
+        if (key == window::ChromeKey::Other && typed)
+            key = window::ChromeKey::Printable;
+        auto const modifier = window::chromeModifierOf(Qt::KeyboardModifiers { qtModifiers });
+        auto command = window::chromeCommandFor(window::ChromeArea::Sidebar, key, modifier);
+        if (command == window::ChromeCommand::Leave && sidebarModel().isFiltered())
+            command = window::ChromeCommand::ClearFilter;
+        if (command == window::ChromeCommand::None)
+            return false;
+        if (command == window::ChromeCommand::Leave)
+            leaveChrome();
+        else
+            emit sidebarCommandRequested(static_cast<int>(command), text);
+        return true;
+    }
+
     /// The title of row @p row: "Tab n", or a title too long for any tab on row 0 under LongTitle.
     [[nodiscard]] QString title(int row) const
     {
         if (_scene.decor == snapshot::TabDecor::LongTitle && row == 0)
             return { DecorLongTitleLength, QChar(u'w') };
+        auto const id = static_cast<std::size_t>(tabIdAt(row));
+        if (id < shownWorkspaceTabTitles.size())
+            return shownWorkspaceTabTitles[id];
         return QStringLiteral("Tab %1").arg(tabIdAt(row) + 1);
     }
 
+  public:
+    /// The tabs' titles as the shown workspace's directory lists them, so the band (and the breadcrumb that
+    /// reads it) names a tab as its sidebar row does; empty keeps "Tab n".
+    std::vector<QString> shownWorkspaceTabTitles;
+
+  private:
     /// The colour of row @p row: DecorTabColor on row 0 under EveryBadge, else none (transparent).
     [[nodiscard]] QColor color(int row) const
     {

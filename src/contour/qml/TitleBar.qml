@@ -38,7 +38,9 @@ Item {
 
     /// Which bar this is: "band" (the window's own bar) or "tabs" (a bar holding only the tabs).
     property string role: "band"
-    /// What the middle holds, as UiStyleProvider::titleBand names it: "tabs", "title" or "empty".
+    /// What the middle holds, as UiStyleProvider::titleBand names it: "tabs", "title", "breadcrumb" (the
+    /// sidebar holds the tabs: `workspace › tab`), "chip+tabs" (the sidebar is hidden: the workspace chip
+    /// leads the tabs) or "empty".
     property string centre: "tabs"
     /// Whether the bar is on screen, as UiStyleProvider::titleBand names it: "hidden", "shown", "reveal"
     /// (full screen: it overlays the top rows while the pointer is at the screen edge or on it) or "pinned"
@@ -81,7 +83,7 @@ Item {
     /// The band's toolbar items that are on screen, in visual order: the host chip, the drift chip, then the
     /// new-tab button. What the toolbar's keyboard focus walks (WindowController.focusedToolbarIndex).
     readonly property var toolbarItems: {
-        const items = [hostChipSlot.item, driftSlotItem.chip, newTabSlot.item]
+        const items = [hostChipSlot.item, workspaceChipSlot.item, driftSlotItem.chip, newTabSlot.item]
         return items.filter((item) => item !== null && item.visible)
     }
     /// Whether the window's keyboard focus is in the toolbar: an item that also holds active focus rings.
@@ -126,6 +128,15 @@ Item {
     // badly wrong under `ui_style: terminal`, where those are counted in character cells. It is rounded
     // up to whole cells there, so the tabs after it stay on the cell grid.
     property real nativeControlsInset: 0
+
+    /// The width of the sidebar below a header bar that draws its title row ("Workspaces" and +, the
+    /// ContourLinux row; chromeStyle.sidebar.titleInHeaderBar): the bar's leading part spans it. 0 for none.
+    property real sidebarWidth: 0
+    /// The sidebar's toggle as UiStyleProvider::sidebarToggle answers it (Main.qml): `host` "band" puts it at
+    /// the bar's leading end, after the window's own controls, and `label` is what it says. The band's only.
+    property var sidebarToggle: ({})
+    /// Whether the middle holds the tabs, alone or behind the workspace chip.
+    readonly property bool showsTabs: root.centre === "tabs" || root.centre === "chip+tabs"
 
     // The radius of the bar's two top corners: the window's own while the bar is the window's top edge
     // under client-side decorations (WindowController.windowCornerRadius), 0 otherwise. The bottom corners
@@ -208,6 +219,11 @@ Item {
         }
     }
 
+    // The ink of the header bar's icons: the window buttons', so the items and the buttons beside them read as
+    // one set.
+    readonly property color headerInk: root.window && root.window.active ? chromeStyle.colors.windowButtonGlyph
+                                                                        : chromeStyle.colors.captionGlyphInactive
+
     // One header-bar item: a toolbar-sized button showing the item's freedesktop icon (the bundled one where
     // the theme lacks it), which asks the controller to run the item -- the main menu pops below it.
     Component {
@@ -226,9 +242,7 @@ Item {
             display: AbstractButton.IconOnly
             icon.name: headerButton.modelData.iconName
             icon.source: headerButton.modelData.bundledIcon
-            // The window buttons' ink, so the items and the buttons beside them read as one set.
-            icon.color: root.window && root.window.active ? chromeStyle.colors.windowButtonGlyph
-                                                          : chromeStyle.colors.captionGlyphInactive
+            icon.color: root.headerInk
             icon.width: chromeStyle.size.headerIcon
             icon.height: chromeStyle.size.headerIcon
             contentItem: SymbolicIcon {
@@ -284,6 +298,11 @@ Item {
     readonly property real leadingPartsWidth: barRow.anchors.leftMargin + leadingSlot.Layout.preferredWidth
                                               + leadingSeparator.Layout.preferredWidth
                                               + leadingSeparator.Layout.leftMargin + leadingSeparator.Layout.rightMargin
+                                              + sidebarToggleSlot.Layout.preferredWidth
+                                              + sidebarToggleSlot.Layout.rightMargin
+                                              + sidebarPart.Layout.preferredWidth
+                                              + workspaceChipSlot.Layout.preferredWidth
+                                              + workspaceChipSlot.Layout.leftMargin + workspaceChipSlot.Layout.rightMargin
                                               + leadingItems.Layout.preferredWidth + leadingItems.Layout.rightMargin
                                               + hostChipSlot.Layout.preferredWidth
                                               + hostChipSlot.Layout.leftMargin + hostChipSlot.Layout.rightMargin
@@ -349,6 +368,92 @@ Item {
             color: chromeStyle.colors.headerSeparator
         }
 
+        // The sidebar's toggle, at the bar's leading end after the window's own controls (beside the traffic
+        // lights on macOS, the header bar's start on ContourLinux): there whether the sidebar is shown or
+        // hidden, so a second click on the same spot undoes the first. Where a shown sidebar takes the band's
+        // leading end (beside the band), its title row holds the toggle at the same spot instead
+        // (Sidebar.qml). On the Terminal row it is whole cells wide.
+        Loader {
+            id: sidebarToggleSlot
+            objectName: "bandSidebarToggleSlot"
+            active: root.isBand && root.sidebarToggle.host === "band"
+            Layout.alignment: Qt.AlignVCenter
+            Layout.preferredWidth: active && item ? item.implicitWidth : 0
+            Layout.rightMargin: active ? chromeStyle.space.s3 : 0
+            sourceComponent: SidebarControlButton {
+                objectName: "sidebarToggle"
+                control: "toggle"
+                extent: Math.min(chromeStyle.size.toolbarButton, root.implicitHeight)
+                implicitWidth: chromeStyle.snapToCells(extent)
+                glyphColor: root.isHeader ? root.headerInk : chromeStyle.colors.tabText
+                accessibleName: root.sidebarToggle.label ?? ""
+                checkable: true
+                checked: root.sidebarToggle.shown ?? false
+                onClicked: if (root.controller && root.controller.toggleSidebar) root.controller.toggleSidebar()
+            }
+        }
+
+        // The header bar's part above the sidebar: its title, the sidebar's filter button and the button that
+        // adds a workspace -- themed symbolic icons, as the bar's own items are -- as wide as the sidebar below,
+        // less what precedes it in the bar. Its empty places are the title bar's.
+        Item {
+            id: sidebarPart
+            objectName: "headerSidebarPart"
+            readonly property bool shown: root.isHeader && root.sidebarWidth > 0
+            visible: sidebarPart.shown
+            Layout.fillHeight: true
+            Layout.preferredWidth: !sidebarPart.shown ? 0
+                : Math.max(sidebarPartRow.implicitWidth,
+                           root.sidebarWidth - barRow.anchors.leftMargin - leadingSlot.Layout.preferredWidth
+                           - leadingSeparator.Layout.preferredWidth - leadingSeparator.Layout.leftMargin
+                           - leadingSeparator.Layout.rightMargin - sidebarToggleSlot.Layout.preferredWidth
+                           - sidebarToggleSlot.Layout.rightMargin)
+
+            TitleBarGestures {
+                objectName: "headerSidebarGestures"
+                anchors.fill: parent
+                windowController: root.controller
+            }
+
+            Text {
+                objectName: "headerSidebarTitle"
+                anchors.left: parent.left
+                anchors.right: sidebarPartRow.left
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
+                text: qsTr("Workspaces")
+                font: chromeStyle.type.bodyStrong
+                color: chromeStyle.colors.tabText
+                elide: Text.ElideRight
+                Accessible.role: Accessible.Heading
+                Accessible.name: text
+            }
+
+            Row {
+                id: sidebarPartRow
+                anchors.right: parent.right
+                anchors.rightMargin: chromeStyle.space.s3
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: chromeStyle.space.s3
+
+                SidebarControlButton {
+                    objectName: "headerSidebarFilterButton"
+                    control: "filter"
+                    glyphColor: root.headerInk
+                    accessibleName: qsTr("Filter workspaces")
+                    onClicked: if (root.controller && root.controller.openSidebarFilter) root.controller.openSidebarFilter()
+                }
+
+                SidebarControlButton {
+                    objectName: "headerNewWorkspaceButton"
+                    control: "newWorkspace"
+                    glyphColor: root.headerInk
+                    accessibleName: qsTr("New workspace")
+                    onClicked: if (root.controller && root.controller.newWorkspace) root.controller.newWorkspace()
+                }
+            }
+        }
+
         // The header bar's leading items (the new-tab button).
         RowLayout {
             id: leadingItems
@@ -384,6 +489,25 @@ Item {
             }
         }
 
+        // The workspace chip, leading the tabs while the sidebar that would name the workspace is hidden. A
+        // pop-up button: it drops this window's workspaces down below itself.
+        Loader {
+            id: workspaceChipSlot
+            active: root.isBand && root.centre === "chip+tabs" && !!root.controller && !!root.controller.sidebar
+            readonly property bool shown: item !== null && item.visible
+            Layout.alignment: Qt.AlignVCenter
+            Layout.preferredWidth: shown ? item.implicitWidth : 0
+            Layout.leftMargin: shown && !hostChipSlot.shown ? root.gap : 0
+            Layout.rightMargin: shown ? root.gap : 0
+            sourceComponent: WorkspaceChip {
+                id: workspaceChip
+                sidebar: root.controller.sidebar
+                focusRingShown: activeFocus && root.toolbarHasFocus
+                onClicked: if (root.controller && root.controller.showWorkspaceDropdown)
+                    root.controller.showWorkspaceDropdown(workspaceChip.dropdownAnchor())
+            }
+        }
+
         // The tabs, while the middle holds them. A Loader, so a band showing the title holds no second
         // strip (with its own tab menu) beside the tabs bar's.
         Loader {
@@ -393,7 +517,7 @@ Item {
             // cannot hold the lock, so counting its width here would make the answer depend on itself.
             readonly property bool hostsLock: item !== null
                 && item.hostsLockWithin(root.tabRoomWithoutChip - item.fixedWidth)
-            active: root.centre === "tabs"
+            active: root.showsTabs
             Layout.fillHeight: true
             // As wide as the tabs need: the strip caps itself at availableWidth, so the drag region below
             // keeps at least its reserve.
@@ -414,7 +538,7 @@ Item {
         }
 
         // Draggable empty region: move the window, double-click to toggle maximize, right-click for the
-        // window's own context menu.
+        // window's own context menu (TitleBarGestures.qml).
         Item {
             id: dragRegion
             objectName: "dragRegion"
@@ -423,38 +547,9 @@ Item {
             // The band that always stays draggable, however many tabs there are.
             Layout.minimumWidth: chromeStyle.space.dragReserve
 
-            // Right-click opens the title bar menu. It does not fight the handlers below: both of those
-            // take the LEFT button only, which the DragHandler now says explicitly rather than leaving
-            // to a default that a future edit could quietly change.
-            TapHandler {
-                acceptedButtons: Qt.RightButton
-                // ReleaseWithinBounds rather than the default DragThreshold: a little jitter while the
-                // button is down should still open the menu, not swallow the click.
-                gesturePolicy: TapHandler.ReleaseWithinBounds
-                onTapped: if (root.controller) root.controller.openTitleBarContextMenu()
-            }
-
-            TapHandler {
-                // Routed through the controller (the only window-geometry mutator): direct
-                // QWindow show-mode calls skip its size-increment protocol.
-                onTapped: (eventPoint, button) => {
-                    if (tapCount === 2)
-                        root.controller.toggleMaximized()
-                }
-            }
-            DragHandler {
-                objectName: "titleBarDragHandler" // findChild() handle for the GUI test
-                target: null
-                acceptedButtons: Qt.LeftButton
-                // The default grabPermissions minus CanTakeOverFromItems, for the same reason as the tab
-                // drag handler in TabItem (issue #1997): the resize border's top edge zone covers the top
-                // six pixels of this region, and taking its grab asked for a window MOVE on top of the
-                // resize already under way. See TabItem.qml for why the rule belongs on the handler.
-                grabPermissions: PointerHandler.CanTakeOverFromHandlersOfDifferentType
-                                 | PointerHandler.ApprovesTakeOverByHandlersOfDifferentType
-                                 | PointerHandler.ApprovesTakeOverByItems
-                                 | PointerHandler.ApprovesCancellation
-                onActiveChanged: if (active) root.window.startSystemMove()
+            TitleBarGestures {
+                anchors.fill: parent
+                windowController: root.controller
             }
         }
 
@@ -663,6 +758,16 @@ Item {
             }
             HoverHandler { cursorShape: Qt.PointingHandCursor }
         }
+    }
+
+    // Where the user is, while the sidebar holds the tabs: `workspace › tab`, centred as the title is.
+    Breadcrumb {
+        id: breadcrumb
+        visible: root.isBand && root.centre === "breadcrumb"
+        anchors.centerIn: parent
+        room: root.titleRoom
+        workspace: root.controller && root.controller.sidebar ? root.controller.sidebar.currentWorkspaceTitle : ""
+        tab: titleRows.activeTitle
     }
 
     // One object per tab, carrying its title and whether it is active, while the band shows a title.

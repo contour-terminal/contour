@@ -1,5 +1,6 @@
 // vim:syntax=qml
-// The kit's ToolbarButton: a square glyph button in the title band, such as the band's new-tab "+".
+// The kit's ToolbarButton: a square glyph button in the title band, such as the band's new-tab "+" -- or a
+// symbolic icon in place of the glyph, where the host names one (`iconSource`), as the header bar's do.
 //
 // It takes keyboard focus where its host lets it (activeFocusOnTab), and Space or Return clicks it then;
 // focused, it wears its hover fill.
@@ -15,8 +16,18 @@ import QtQuick
 Item {
     id: root
 
-    /// The glyph the button draws.
+    /// The glyph the button draws, unless it draws an icon.
     property string glyph
+    /// The freedesktop icon to draw instead of the glyph, resolved through the theme; empty for none.
+    property string iconName
+    /// The bundled icon drawn where the theme lacks `iconName`; empty draws the glyph.
+    property string iconSource
+    /// The icon's edge.
+    property real iconSize: chromeStyle.size.headerIcon
+    /// Whether the button toggles something on and off, which it then announces as checked or not.
+    property bool checkable: false
+    /// Whether what it toggles is on.
+    property bool checked: false
     /// What assistive technology announces the button as.
     property string accessibleName
     /// What else the button does, such as what its secondary click opens; empty for nothing more.
@@ -48,6 +59,8 @@ Item {
     Accessible.role: Accessible.Button
     Accessible.name: root.accessibleName
     Accessible.description: root.accessibleDescription
+    Accessible.checkable: root.checkable
+    Accessible.checked: root.checked
     Accessible.onPressAction: root.clicked()
     Accessible.focusable: root.activeFocusOnTab || root.focusRingShown
     Accessible.focused: root.focusRingShown
@@ -70,6 +83,9 @@ Item {
         id: primary
         acceptedButtons: Qt.LeftButton
         gesturePolicy: TapHandler.ReleaseWithinBounds
+        // A button keeps a press that began on it: a title bar's drag under it (TitleBarGestures.qml) never
+        // turns that press into a window move.
+        grabPermissions: PointerHandler.TakeOverForbidden
         onTapped: root.clicked()
         // A long press is the secondary click a pointer without a second button gives; it then sends no tap.
         onLongPressed: root.secondaryClicked()
@@ -79,6 +95,7 @@ Item {
         id: secondary
         acceptedButtons: Qt.RightButton
         gesturePolicy: TapHandler.ReleaseWithinBounds
+        grabPermissions: PointerHandler.TakeOverForbidden
         onTapped: root.secondaryClicked()
     }
 
@@ -103,8 +120,17 @@ Item {
         hostRadius: background.radius
     }
 
+    SymbolicIcon {
+        objectName: "toolbarButtonIcon"
+        visible: root.iconSource !== ""
+        anchors.centerIn: parent
+        icon: ({ name: root.iconName, source: root.iconSource, color: root.glyphColor,
+                 width: root.iconSize, height: root.iconSize })
+    }
+
     Text {
         objectName: "toolbarButtonGlyph"   // findChild() handle for the GUI test
+        visible: root.iconSource === ""
         anchors.centerIn: parent
         text: root.glyph
         font: root.glyphFont

@@ -40,6 +40,7 @@
 #include <QtCore/QObject>
 #include <QtCore/QPoint>
 #include <QtCore/QPointer>
+#include <QtCore/QRect>
 #include <QtCore/QTimer>
 #include <QtGui/QColor>
 #include <QtQml/QQmlEngine>
@@ -138,6 +139,13 @@ enum class ReconnectRun : uint8_t
 {
     Idle = 0, ///< None is: a connection that fails now was not asked for from a footer.
     Running,  ///< reconnectHost() started one, and the daemon has not come back or refused yet.
+};
+
+/// Whether showPane() found the pane it was asked to show.
+enum class PaneShowing : uint8_t
+{
+    NotHeld = 0, ///< The window's displayed workspace holds no such pane; nothing changed.
+    Shown,       ///< Its tab is active and the pane focused and seen.
 };
 
 /// Why restartSession() started no new session.
@@ -401,6 +409,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param acting The session that triggered the action.
     void showSwitcher(TerminalSession const& acting);
 
+    /// Opens the switcher as the workspace chip's dropdown: hanging below the chip, listing the workspaces of
+    /// the daemon the window hosting @p acting is on, and nothing else.
+    /// @param acting The session of the window whose chip was clicked.
+    /// @param chip The chip, in screen coordinates, the gap below it included.
+    void showWorkspaceDropdown(TerminalSession const& acting, QRect chip);
+
     /// (In-process) Gives the window hosting @p acting a workspace of its own with one new tab and shows it;
     /// the workspace shown until now keeps running, hidden. Does nothing for a window a daemon serves, which
     /// has its workspaces from the daemon.
@@ -429,6 +443,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param workspace The workspace's id, as the window's directory lists it (DirectoryWorkspace::id).
     /// @param label Its new label; empty clears it.
     void renameWorkspace(window::WindowController& window, uint64_t workspace, std::string label);
+
+    /// Sets the title of the tab @p tab, whichever workspace of @p window's directory holds it, shown or not:
+    /// in its daemon for a window a daemon serves (named by a session it holds), in this process's model
+    /// otherwise. A tab the window does not list is left alone.
+    /// @param window The window the user acts in.
+    /// @param tab The tab's id, as the window's directory lists it (DirectoryTab::id).
+    /// @param title Its new title; empty returns it to its automatic one.
+    void renameTab(window::WindowController& window, uint64_t tab, std::string title);
 
     /// Moves the workspace @p workspace that @p window lists to place @p toPosition of its directory, where
     /// a daemon (or this process's model) orders it. The place is clamped.
@@ -689,8 +711,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// tab, focuses it, and counts it as seen.
     /// @param window The window's displayed workspace.
     /// @param key    The pane's key (paneKeyOf).
-    /// @return Whether the displayed workspace holds the pane; nothing changes when it does not.
-    [[nodiscard]] bool showPane(vtworkspace::WorkspaceId window, window::PaneKey key);
+    /// @return Shown, or NotHeld when the displayed workspace holds no such pane, and nothing changed.
+    [[nodiscard]] PaneShowing showPane(vtworkspace::WorkspaceId window, window::PaneKey key);
     /// Counts @p window's active pane as seen: its output, bell and finished marks clear and its
     /// program-status records up to the newest count as seen.
     /// @param window The window's displayed workspace.
@@ -1824,9 +1846,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param acting The session that triggered the action.
     /// @param prompt The list, or the "New daemon…" label prompt.
     /// @param what The action's name, for the log.
+    /// @param scope Every daemon, or the window's own alone.
+    /// @param control The control it drops down from, in screen coordinates; none centres it.
     void openSwitcherOver(TerminalSession const& acting,
                           window::SwitcherPrompt prompt,
-                          std::string_view what);
+                          std::string_view what,
+                          window::SwitcherScope scope,
+                          std::optional<QRect> control);
 
     /// Repaints the tab hosting @p session for its lock (WindowController::Roles::SecureRole), if it has one.
     void notifySecureTab(TerminalSession const& session);

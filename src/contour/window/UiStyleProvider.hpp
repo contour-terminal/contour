@@ -103,6 +103,7 @@ struct ChromeGlyphs
     QString restart;         ///< Marks the exited footer's Restart button.
     QString scrollThumb;     ///< The overlay scrollbar's thumb glyph; empty where it is a shape.
     QString drillIn;         ///< Marks a command palette row that opens a list.
+    QString breadcrumb;      ///< Parts the title band's breadcrumb.
     QString palettePrompt;   ///< Drawn before the palette's query; empty where there is none.
     QString findPrevious;    ///< The find bar's previous-match button.
     QString findNext;        ///< The find bar's next-match button.
@@ -126,6 +127,9 @@ struct ChromeInputs
 {
     config::ChromeStyle row = config::ChromeStyle::Terminal; ///< The chrome token row.
     QFont font {}; ///< The chrome font, already resolved (see resolveChromeFont).
+    /// The system's fixed-width face, which code is set in where the chrome is not cells: the composition
+    /// root reads it (QFontDatabase::systemFont(FixedFont)), a test names one of its own.
+    QFont fixedFont {};
     config::AccessibilityPreferences accessibility {}; ///< The OS accessibility choices to apply.
     platform::PlatformAppearance appearance {};        ///< What the OS publishes about its own look.
     config::ChromeSchemeColors scheme {};              ///< The terminal scheme the Terminal row paints with.
@@ -289,9 +293,12 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QString chipCloseGlyph READ chipCloseGlyph CONSTANT)
     Q_PROPERTY(QString hostDotGlyph READ hostDotGlyph CONSTANT)
     Q_PROPERTY(QString drillInGlyph READ drillInGlyph CONSTANT)
+    Q_PROPERTY(QString breadcrumbGlyph READ breadcrumbGlyph CONSTANT)
     Q_PROPERTY(QString palettePromptGlyph READ palettePromptGlyph CONSTANT)
     /// The header bar's items, one map per window::HeaderBarItems row, in enumerator order.
     Q_PROPERTY(QVariantList headerBarItems READ headerBarItems CONSTANT)
+    /// The workspace sidebar's own buttons on this row (window::SidebarControlRows), by name.
+    Q_PROPERTY(QVariantMap sidebarControls READ sidebarControls CONSTANT)
 
     // {{{ Panes (Step 2)
     /// The configured chrome density: "comfortable" or "minimal".
@@ -813,6 +820,10 @@ class UiStyleProvider: public QObject
     ///         bundledIcon }`, @c item as the enumerator's underlying value.
     [[nodiscard]] QVariantList headerBarItems() const;
 
+    /// @return The sidebar's own buttons on this row: `{ toggle, newWorkspace, filter }`, each
+    ///         `{ iconName, bundledIcon, glyph }` (window::sidebarControlFace).
+    [[nodiscard]] QVariantMap sidebarControls() const;
+
     /// The tab well's widths for @p tabCount tabs in @p available logical pixels (window::layoutTabWell).
     /// @param available The width the band leaves the well.
     /// @param tabCount  The number of tabs.
@@ -838,6 +849,49 @@ class UiStyleProvider: public QObject
     /// @param length A horizontal extent in logical pixels.
     /// @return The extent, snapped up to the width quantum.
     [[nodiscard]] Q_INVOKABLE qreal snapToCells(qreal length) const;
+
+    /// The width the workspace sidebar takes for a requested one, as a drag of its edge asks for it:
+    /// snapped to whole cells on the Terminal row and kept within the row's bounds
+    /// (geometry::sidebarUnitsOf), as WindowController::setSidebarWidth() keeps it.
+    /// @param pixels The requested width, in logical pixels.
+    /// @return The width in logical pixels.
+    [[nodiscard]] Q_INVOKABLE qreal snappedSidebarWidth(qreal pixels) const;
+
+    /// Whether the header bar draws the sidebar's title row ("Workspaces", ☰ and +): the look puts it there
+    /// (config::SidebarTitle::InHeaderBar) and the band that is the header bar is on screen. Otherwise the
+    /// sidebar's own first row holds it, so the + is never out of reach. A bool by the QML-facing carve-out:
+    /// the answer, which both bars follow.
+    /// @param bandOnScreen Whether the band rests on screen.
+    [[nodiscard]] Q_INVOKABLE bool sidebarTitleInHeaderBar(bool bandOnScreen) const;
+
+    /// Where the button that hides and shows the workspace sidebar stands, and what it says
+    /// (window::sidebarToggleOf): the band's leading end, or the sidebar's title row where the sidebar takes
+    /// that end, so the button stays at one spot whether the sidebar is shown or hidden.
+    ///
+    /// The QML-facing carve-out: an int and the names titleBand() answered; anything else answers an empty
+    /// map.
+    /// @param sidebarVisibility A config::SidebarVisibility: whether the sidebar is shown.
+    /// @param band              The band's presence, as titleBand() names it ("hidden", "shown", ...).
+    /// @param bandEdge          The band's edge, as titleBand() names it ("top" or "bottom").
+    /// @return `{ host, label, shown }`: "none", "band" or "sidebar"; "Show sidebar" or "Hide sidebar"; and
+    ///         whether the sidebar is shown, which the toggle announces as its checked state.
+    [[nodiscard]] Q_INVOKABLE QVariantMap sidebarToggle(int sidebarVisibility,
+                                                        QString const& band,
+                                                        QString const& bandEdge) const;
+
+    /// How a sidebar row wears the selection on this row's look (window::sidebarSelectionPaint): which fill,
+    /// whether the focus ring and the accent pill are drawn. QML draws what it is told.
+    ///
+    /// The QML-facing carve-out: two bools, as QML holds them (the tree has the keyboard; this row is the
+    /// current one), and the row's RowSelection as its underlying value.
+    /// @param selection  A window::RowSelection as an int; anything else is no selection.
+    /// @param treeFocused Whether the sidebar's tree has the keyboard.
+    /// @param rowFocused  Whether the keyboard is on this very row.
+    /// @return `{ fill, ring, pill }`: "none", "quiet" or "emphasized"; and whether each of the other two is
+    ///         drawn.
+    [[nodiscard]] Q_INVOKABLE QVariantMap sidebarSelection(int selection,
+                                                           bool treeFocused,
+                                                           bool rowFocused) const;
 
     /// @return The title band's height in logical pixels. @see bandHeight
     [[nodiscard]] qreal bandHeight() const noexcept;
@@ -982,6 +1036,7 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QString const& chipCloseGlyph() const noexcept { return _glyphs.chipClose; }
     [[nodiscard]] QString const& hostDotGlyph() const noexcept { return _glyphs.hostDot; }
     [[nodiscard]] QString const& drillInGlyph() const noexcept { return _glyphs.drillIn; }
+    [[nodiscard]] QString const& breadcrumbGlyph() const noexcept { return _glyphs.breadcrumb; }
     [[nodiscard]] QString const& palettePromptGlyph() const noexcept { return _glyphs.palettePrompt; }
 
     /// @p base laid over the chrome at hover strength.

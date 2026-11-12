@@ -17,6 +17,7 @@
 #include <contour/session/PaneProxy.hpp>
 #include <contour/window/ChromeFocus.hpp>
 #include <contour/window/ChromeKeys.hpp>
+#include <contour/window/CloseDialogTable.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/HeldModifierReveal.hpp>
@@ -29,6 +30,7 @@
 #include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/SidebarModel.hpp>
+#include <contour/window/SidebarToggle.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabBarDropPolicy.hpp>
@@ -228,6 +230,15 @@ class WindowController:
     Q_PROPERTY(int sidebarVisibility READ sidebarVisibility NOTIFY sidebarVisibilityChanged)
     Q_PROPERTY(int sidebarWidth READ sidebarWidth NOTIFY sidebarWidthChanged)
     Q_PROPERTY(int tabPlacement READ tabPlacement NOTIFY tabPlacementChanged)
+    /// What the workspaces this window does not show ask of the user: the most urgent of their roll-ups, an
+    /// Urgency's underlying value (SidebarModel::otherWorkspacesUrgency).
+    Q_PROPERTY(int otherWorkspacesUrgency READ otherWorkspacesUrgency NOTIFY otherWorkspacesUrgencyChanged)
+    /// Whether the keyboard is in the sidebar's tree (the chrome area is ChromeArea::Sidebar). A bool by the
+    /// QML-facing carve-out: Main.qml moves the real focus by it.
+    Q_PROPERTY(bool sidebarHasFocus READ sidebarHasFocus NOTIFY chromeFocusChanged)
+    /// The sidebar commands sidebarCommandRequested() carries, by the name QML handles each with
+    /// (`previous`, `next`, `first`, `last`, `activate`, `collapse`, `expand`, `rename`, `filter`).
+    Q_PROPERTY(QVariantMap sidebarCommands READ sidebarCommands CONSTANT)
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(QString hostingNotice READ hostingNotice NOTIFY hostingNoticeChanged)
     // The host of the window's own binding: it changes as the window is bound, and when its binding stops.
@@ -572,6 +583,10 @@ class WindowController:
     /// @param tabsShown Whether the tab well is shown.
     /// @param toolbarItems How many items the toolbar holds; 0 when it is absent.
     Q_INVOKABLE void setChromePresence(bool tabsShown, int toolbarItems);
+    /// Reports where the sidebar's toggle stands, as Main.qml placed it (UiStyleProvider::sidebarToggle): the
+    /// pane's context menu offers the hidden sidebar back while it stands nowhere.
+    /// @param host "none", "band" or "sidebar" (window::sidebarToggleHostName()); anything else is "none".
+    Q_INVOKABLE void setSidebarToggleHost(QString const& host);
     /// Offers a key press in the chrome. The key is first matched against the active session's key
     /// bindings for the three focus actions (so Ctrl+F6 cycles from inside the chrome too, and a rebound
     /// chord follows). A key in ChromeConsumedKeys is looked up in ChromeKeyRows for the focused area. Any
@@ -599,6 +614,24 @@ class WindowController:
     /// that is gone already closes nothing.
     /// @param workspace The workspace's id, as the window's directory lists it (DirectoryWorkspace::id).
     Q_INVOKABLE void confirmCloseWorkspace(quint64 workspace);
+    /// What the close confirmation says for a node (window::closeDialogText): the wording of its kind's
+    /// table row, with the count of what ends with it taken from the directory.
+    /// @param kind A window::CloseKind as an int.
+    /// @param workspace The node's workspace id.
+    /// @param tab The node's tab id; 0 for a workspace.
+    /// @param label The node's name; empty when it has none.
+    /// @param program The running program, where known; empty otherwise.
+    /// @return `{ heading, message, acceptText }`; an empty map for an unknown kind.
+    [[nodiscard]] Q_INVOKABLE QVariantMap closeConfirmation(
+        int kind, quint64 workspace, quint64 tab, QString const& label, QString const& program) const;
+    /// Closes the node the user confirmed closing, as sidebarCloseConfirmationRequested() asked. The node is
+    /// named by its ids, so a close acts on the row the menu was opened on, not on what the window shows; one
+    /// that is gone already closes nothing.
+    /// @param kind A window::CloseKind as an int.
+    /// @param workspace The node's workspace id.
+    /// @param tab The node's tab id; 0 for a workspace.
+    /// @param pane The node's pane key; 0 for a workspace or a tab.
+    Q_INVOKABLE void confirmClose(int kind, quint64 workspace, quint64 tab, quint64 pane);
     // }}}
     /// Asks the QML to open this window's "save layout as" name prompt (the keyboard/palette entry point
     /// for a nameless SaveLayout action). Emits saveLayoutRequested(); the dialog calls saveLayoutAs()
@@ -727,6 +760,11 @@ class WindowController:
     /// Opens the daemon and workspace switcher over this window: what the ShowSwitcher action does, for
     /// the host chip's click.
     Q_INVOKABLE void showSwitcher() const;
+
+    /// Opens the switcher as the workspace chip's dropdown: below the chip, listing this window's daemon's
+    /// workspaces alone (TerminalSessionManager::showWorkspaceDropdown()).
+    /// @param chip The chip in the window's scene coordinates, the gap below it included.
+    Q_INVOKABLE void showWorkspaceDropdown(QRectF const& chip) const;
     // }}}
 
     // {{{ Terminal context menu
@@ -1225,6 +1263,27 @@ class WindowController:
     /// FocusSidebar action does).
     Q_INVOKABLE void focusSidebar();
 
+    /// Opens the sidebar's filter field with the keyboard in it, showing the sidebar first when it is hidden
+    /// (sidebarFilterRequested()): what every filter button and the FilterWorkspaces action do.
+    Q_INVOKABLE void openSidebarFilter();
+
+    /// @return The other workspaces' roll-up, an Urgency's underlying value.
+    [[nodiscard]] int otherWorkspacesUrgency() const noexcept { return _sidebar->otherWorkspacesUrgency(); }
+    /// @return Whether the keyboard is in the sidebar's tree.
+    [[nodiscard]] bool sidebarHasFocus() const noexcept { return _chromeArea == window::ChromeArea::Sidebar; }
+    /// @return The commands sidebarCommandRequested() carries, by name, as window::ChromeCommand values.
+    [[nodiscard]] static QVariantMap sidebarCommands();
+
+    /// Creates a workspace and shows it in this window: the sidebar's "+" (the NewWorkspace action).
+    Q_INVOKABLE void newWorkspace() const;
+
+    /// Starts the drag of what a sidebar row names: a workspace (to reorder it), or a tab -- one of the
+    /// shown workspace's drags as beginTabDrag() does a strip tab, another workspace's is named by the
+    /// directory's pane keys, and tears off nowhere (finishNodeDrag()), having no tab here.
+    /// @param row A workspace or tab row's index in the sidebar model.
+    /// @return The drag's JSON; empty for a pane row, or a row that is gone.
+    Q_INVOKABLE [[nodiscard]] QString beginSidebarDrag(int row);
+
     // {{{ Sidebar actions whose behaviour lands with the attention ledger (Task 7) and the workspace control
     // API (Task 6). Each has its final signature and does nothing yet.
     /// Shows the next pane that needs the user (the JumpToNextAttention action): the first after the active
@@ -1248,21 +1307,47 @@ class WindowController:
     [[nodiscard]] bool rowActionPending() const noexcept { return _pendingRowAction.has_value(); }
     /// Marks the active pane as seen (the MarkSeen action).
     void markActivePaneSeen();
-    /// Renames the displayed workspace inline (the RenameWorkspace action). Wired in Task 6.
+    /// Renames the displayed workspace inline (the RenameWorkspace action): shows the sidebar, puts the
+    /// keyboard in it and opens the editor on the workspace's row; committing it calls renameWorkspace().
     void renameCurrentWorkspace();
-    /// Moves the displayed workspace one place up in the list (the MoveWorkspaceUp action). Wired in Task 6.
+    /// Moves the displayed workspace one place up in the list (the MoveWorkspaceUp action).
     void moveCurrentWorkspaceUp();
-    /// Moves the displayed workspace one place down in the list (the MoveWorkspaceDown action). Wired in
-    /// Task 6.
+    /// Moves the displayed workspace one place down in the list (the MoveWorkspaceDown action).
     void moveCurrentWorkspaceDown();
-    /// Closes the displayed workspace after asking (the CloseWorkspace action). Wired in Task 6.
+    /// Closes the displayed workspace, after asking when it may be running a program (the CloseWorkspace
+    /// action).
     void closeCurrentWorkspace();
     /// Shows the pane of the sidebar row a menu acts on and focuses it (the GoToPane action). Nothing when no
     /// sidebar row menu is acting.
     void goToSidebarPane();
-    /// Moves the active tab into another workspace (the MoveTabToWorkspace action). Wired in Task 6.
+    /// Moves the active tab to the end of another workspace (the MoveTabToWorkspace action).
     /// @param position The target workspace's 1-based place in the window's workspace list.
     void moveActiveTabToWorkspace(uint32_t position);
+
+    /// @name The workspace operations, by the ids the window's directory lists (TerminalSessionManager's).
+    /// @{
+    /// Sets the title tab @p tab shows: a tab of the shown workspace as the strip's inline rename does, any
+    /// other through TerminalSessionManager::renameTab().
+    /// @param tab The tab, as the directory names it.
+    /// @param title Its title; empty clears the one the user set.
+    void renameTab(TabRef tab, std::string const& title);
+    /// Renames workspace @p workspace.
+    /// @param workspace The workspace's id.
+    /// @param label Its new label; empty clears it.
+    void renameWorkspace(uint64_t workspace, std::string label);
+    /// Moves workspace @p workspace to place @p toPosition of the list.
+    /// @param workspace The workspace's id.
+    /// @param toPosition The 0-based place it ends at.
+    void moveWorkspace(uint64_t workspace, int toPosition);
+    /// Moves tab @p tab to place @p toPosition of workspace @p toWorkspace.
+    /// @param tab The tab's id.
+    /// @param toWorkspace The destination workspace's id.
+    /// @param toPosition The 0-based place it ends at among the destination's tabs.
+    void moveTabToWorkspace(uint64_t tab, uint64_t toWorkspace, int toPosition);
+    /// Closes workspace @p workspace, after asking when it may be running a program.
+    /// @param workspace The workspace's id.
+    void closeWorkspace(uint64_t workspace);
+    /// @}
     // }}}
 
     /// Window chrome height in logical pixels OUTSIDE the terminal content area, DECLARED by Main.qml
@@ -1497,6 +1582,17 @@ class WindowController:
     /// @param command A window::ChromeCommand as its underlying value.
     /// @param text The typed text of a filter command, else empty.
     void sidebarCommandRequested(int command, QString const& text);
+    /// The RenameWorkspace action: the sidebar edits the shown workspace's name inline, on the row
+    /// SidebarModel::currentWorkspaceIndex names.
+    void workspaceRenameRequested();
+    /// A sidebar row's menu asked to rename it (Rename… on a workspace or a tab row): the sidebar opens its
+    /// inline editor on that row, wherever the window is.
+    /// @param row The row, as SidebarModel lists it.
+    void sidebarRowRenameRequested(int row);
+    /// The sidebar opens its filter field and puts the keyboard in it (openSidebarFilter()).
+    void sidebarFilterRequested();
+    /// @see otherWorkspacesUrgency
+    void otherWorkspacesUrgencyChanged();
     /// Closing a tab may end a running program, so the window asks first; QML shows the dialog and calls
     /// confirmCloseTab() on "Close". The tab is named by its id, not its row: rows shift while the question
     /// is open.
@@ -1508,6 +1604,17 @@ class WindowController:
     /// QML withdraws the question.
     /// @param tab The tab's vtworkspace::TabId value.
     void closeTabConfirmationWithdrawn(quint64 tab);
+    /// A close from the sidebar's menu always asks first, whatever runs in the node: QML shows the one
+    /// confirmation dialog, worded by closeConfirmation(), and calls confirmClose() on the destructive
+    /// button.
+    /// @param kind A window::CloseKind as an int.
+    /// @param workspace The node's workspace id.
+    /// @param tab The node's tab id; 0 for a workspace.
+    /// @param pane The node's pane key; 0 for a workspace or a tab.
+    /// @param label The row's title.
+    /// @param program The program the row's status is about; empty when unknown.
+    void sidebarCloseConfirmationRequested(
+        int kind, quint64 workspace, quint64 tab, quint64 pane, QString const& label, QString const& program);
     /// Closing a workspace may end running programs, so the window asks first (the same question as for a
     /// tab, over every pane of the workspace); a dialog calls confirmCloseWorkspace() on "Close".
     /// @param workspace The workspace's id, as the window's directory lists it.
@@ -1620,6 +1727,18 @@ class WindowController:
 
     /// Writes the sidebar's state to the GUI state, as the next window's starting point.
     void rememberSidebar();
+
+    /// @return The id of the workspace the window shows, as its directory lists it; none without one.
+    [[nodiscard]] std::optional<uint64_t> shownWorkspaceId() const;
+    /// Moves the shown workspace @p by places in the list.
+    void moveShownWorkspaceBy(int by);
+    /// Moves the workspace @p workspace @p by places in the list; nothing past either end.
+    /// @param workspace The workspace's id, as the directory lists it.
+    void moveWorkspaceBy(uint64_t workspace, int by);
+    /// Moves tab @p tab to the end of another workspace, as MoveTabToWorkspace does.
+    /// @param tab The tab, as the directory names it.
+    /// @param position The target workspace's 1-based place in the window's workspace list.
+    void moveTabToWorkspaceAt(TabRef tab, uint32_t position);
 
     /// The sidebar's bounds changed or it moved: the window's chrome changed with it.
     void refreshSidebarChrome();
@@ -1750,11 +1869,17 @@ class WindowController:
     /// Counts the directory's entry for @p key as seen, as far as the daemon's flags go (the serials).
     void noteDirectoryPaneSeenByKey(PaneKey key);
     std::optional<PendingJump> _pendingJump; ///< The jump whose workspace is being selected.
+    /// Whether a sidebar row's action ran, or waits for the pane it needs.
+    enum class RowActionOutcome : uint8_t
+    {
+        Waiting = 0, ///< The pane it needs is not there yet; it stays pending.
+        Done,        ///< It ran.
+    };
     /// What waits for a workspace to be shown: a sidebar menu's action on one of its rows, or a move.
     struct PendingRowAction
     {
-        uint64_t workspace;        ///< The directory's id of the workspace that must be shown first.
-        std::function<bool()> run; ///< What to do once it is; false while the pane it needs is not there.
+        uint64_t workspace; ///< The directory's id of the workspace that must be shown first.
+        std::function<RowActionOutcome()> run; ///< What to do once it is.
     };
     std::optional<PendingRowAction> _pendingRowAction;
     /// The sidebar row an action is being run for, while it runs (goToSidebarPane() reads it).
@@ -1763,13 +1888,19 @@ class WindowController:
     std::optional<SidebarRowKey> _sidebarMenuRow;
     QPointF _sidebarMenuAnchor; ///< Where that menu was asked for, in window coordinates.
     /// Runs @p run once the directory shows @p workspace: now when it does, else after selecting it. A @p run
-    /// that returns false (its pane is not there yet) stays pending, as a jump does, until the layout lands;
+    /// that is Waiting (its pane is not there yet) stays pending, as a jump does, until the layout lands;
     /// showing the workspace without it ends the wait (cancelPendingJump()).
     /// @param workspace The directory's id of the workspace.
-    /// @param run What to do; true once it did.
-    void afterShowing(uint64_t workspace, std::function<bool()> run);
-    /// Runs @p action for sidebar row @p row.
+    /// @param run What to do.
+    void afterShowing(uint64_t workspace, std::function<RowActionOutcome()> run);
+    /// Runs @p action for sidebar row @p row: by the row's id, leaving the window where it is, where the
+    /// action has such a form (Mark seen, Rename, Move, Close Workspace), else on what the window shows, once
+    /// the row is shown.
     void runSidebarAction(SidebarRowKey const& row, actions::Action const& action);
+    /// Runs @p action on what the window shows, once @p row is shown (the tail of runSidebarAction()).
+    void runSidebarActionShown(SidebarRowKey const& row, actions::Action const& action);
+    /// Asks, through sidebarCloseConfirmationRequested(), whether to close the node @p key stands for.
+    void askToClose(CloseKind kind, SidebarRowKey const& key);
     /// Builds and presents the menu of sidebar row @p row.
     void openSidebarContextMenu(SidebarRow const& row, QPointF windowPosition);
     /// Tells the sidebar whether anyone can see it: it is shown, in an exposed window.
@@ -1859,10 +1990,12 @@ class WindowController:
     [[nodiscard]] bool dropChromeFocus();
     /// Keeps the focused item inside the area after the tab count or the toolbar changed.
     void clampChromeFocus();
-    /// Runs @p command on the focused area. @return Whether it was handled.
+    /// Runs @p command on the focused area.
     /// @param command What the key does in the focused area.
     /// @param text The typed text of a Filter command.
-    [[nodiscard]] bool runChromeCommand(window::ChromeCommand command, QString const& text = {});
+    /// @return Whether the area handled it.
+    [[nodiscard]] window::ChromeKeyOutcome runChromeCommand(window::ChromeCommand command,
+                                                            QString const& text = {});
     /// The actions the active session's key bindings give a key press while the chrome has focus.
     /// @return The bound actions; nullptr when nothing is bound or there is no active session.
     [[nodiscard]] actions::ActionList const* boundActionsFor(int qtKey,
@@ -1881,6 +2014,8 @@ class WindowController:
     std::optional<vtworkspace::TabId> _focusedTab;
     int _focusedToolbarIndex = -1;
     int _toolbarItemCount = 0;
+    /// Where the sidebar's toggle stands, as Main.qml last reported it (setSidebarToggleHost()).
+    window::SidebarToggleHost _sidebarToggleHost = window::SidebarToggleHost::None;
     /// Whether the tab holding the chrome focus is being removed.
     enum class FocusedTabRemoval : uint8_t
     {

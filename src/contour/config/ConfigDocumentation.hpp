@@ -1493,6 +1493,7 @@ constexpr StringLiteral InputMappingsConfig {
     "{comment} - SwitchToWorkspace Shows a workspace of this daemon here. Parameter: index (1-based).\n"
     "{comment} - ToggleSidebar     Shows or hides the workspace sidebar.\n"
     "{comment} - FocusSidebar      Moves keyboard focus into the workspace sidebar.\n"
+    "{comment} - FilterWorkspaces  Opens the workspace sidebar's filter.\n"
     "{comment} - JumpToNextAttention Shows the next pane that needs you.\n"
     "{comment} - MarkSeen          Marks the active pane's output as seen.\n"
     "{comment} - RenameWorkspace   Renames the current workspace inline.\n"

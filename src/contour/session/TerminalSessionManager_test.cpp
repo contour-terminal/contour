@@ -6112,6 +6112,12 @@ class RoutingFactory final: public contour::session::SessionFactory
         closed.push_back(workspace);
         return contour::session::RemoteRouting::Routed;
     }
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabTitle(uint64_t session,
+                                                                        std::string_view title) override
+    {
+        titled.emplace_back(session, std::string { title });
+        return contour::session::RemoteRouting::Routed;
+    }
     [[nodiscard]] contour::session::RemoteRouting requestRemoteMove(
         contour::session::RemoteMove const& move) override
     {
@@ -6121,7 +6127,8 @@ class RoutingFactory final: public contour::session::SessionFactory
 
     std::vector<std::pair<uint64_t, std::string>> renamed;
     std::vector<std::pair<uint64_t, uint32_t>> moved;
-    std::vector<uint64_t> closed; ///< The workspaces closed.
+    std::vector<uint64_t> closed;                         ///< The workspaces closed.
+    std::vector<std::pair<uint64_t, std::string>> titled; ///< The tabs titled, by a session of theirs.
     std::vector<contour::session::RemoteMove> tabMoves;
 };
 
@@ -6153,7 +6160,10 @@ class DaemonDirectorySource final: public contour::window::IWorkspaceDirectorySo
         directory.selected = 10;
         return directory;
     }
-    void select(uint64_t /*workspace*/) override {}
+    contour::window::SelectResult select(uint64_t /*workspace*/) override
+    {
+        return contour::window::SelectResult::Requested;
+    }
 };
 
 class DaemonDirectoryBinding final: public contour::session::WindowBinding
@@ -6223,6 +6233,150 @@ TEST_CASE("TerminalSessionManager: a daemon's window routes the workspace mutati
     CHECK(asked.first().at(1).toString() == QStringLiteral("build"));
     CHECK(factory.closed.empty());
     manager.confirmCloseWorkspace(*window.controller, 10);
+    CHECK(factory.closed == std::vector<uint64_t> { 10 });
+
+    manager.releaseBinding(binding);
+}
+// }}}
+
+// {{{ the sidebar's actions reach the workspace mutations
+namespace
+{
+
+/// The index of the sidebar row of @p kind naming @p workspace (and @p tab), or -1.
+[[nodiscard]] int sidebarRowOf(contour::window::SidebarModel const& sidebar,
+                               contour::window::SidebarRowKind kind,
+                               uint64_t workspace,
+                               uint64_t tab = 0)
+{
+    return sidebar.rowIndexOf({ .kind = kind, .workspace = workspace, .tab = tab, .pane = {} });
+}
+
+} // namespace
+
+TEST_CASE("TerminalSessionManager: an in-process window's sidebar reaches the workspace mutations",
+          "[manager][workspace][sidebar]")
+{
+    using contour::window::SidebarRowKind;
+    auto f = TwoWorkspaces {};
+    auto& sidebar = f.controller().sidebar();
+    auto const& model = f.manager().model();
+    sidebar.refreshNow();
+    auto const firstTabs = std::ranges::to<std::vector<uint64_t>>(
+        f.controller().directorySource()->directory().workspaces[0].tabs
+        | std::views::transform(&contour::window::DirectoryTab::id));
+    auto const secondTab = model.workspace(f.second)->tabAt(0)->id();
+    REQUIRE(firstTabs.size() == 2);
+
+    // The row's editor renames the workspace, the shown workspace's tab and the hidden workspace's tab.
+    sidebar.rename(sidebarRowOf(sidebar, SidebarRowKind::Workspace, f.second.value), "ops");
+    CHECK(f.controller().directorySource()->directory().workspaces[1].label == "ops");
+    sidebar.rename(sidebarRowOf(sidebar, SidebarRowKind::Tab, f.first.value, firstTabs[0]), "edit");
+    CHECK(model.workspace(f.first)->tabAt(0)->runtimeTitle() == std::optional<std::string> { "edit" });
+    sidebar.rename(sidebarRowOf(sidebar, SidebarRowKind::Tab, f.second.value, secondTab.value), "logs");
+    CHECK(model.workspace(f.second)->tabAt(0)->runtimeTitle() == std::optional<std::string> { "logs" });
+
+    // A workspace row drags, and drops above the first: the second leads.
+    sidebar.refreshNow();
+    auto const workspaceDrag =
+        f.controller().beginSidebarDrag(sidebarRowOf(sidebar, SidebarRowKind::Workspace, f.second.value));
+    REQUIRE_FALSE(workspaceDrag.isEmpty());
+    sidebar.drop(sidebarRowOf(sidebar, SidebarRowKind::Workspace, f.first.value), 0.1, workspaceDrag);
+    std::ignore = f.manager().endNodeDrag(&f.controller());
+    CHECK(f.listed() == std::vector { f.second.value, f.first.value });
+
+    // The shown workspace (the first) moves up again through its action.
+    f.controller().moveCurrentWorkspaceUp();
+    CHECK(f.listed() == std::vector { f.first.value, f.second.value });
+    f.controller().moveCurrentWorkspaceDown();
+    CHECK(f.listed() == std::vector { f.second.value, f.first.value });
+    f.controller().moveCurrentWorkspaceUp();
+
+    // The shown workspace's second tab drags onto the top of the other workspace's tab: it lands first there.
+    sidebar.refreshNow();
+    auto const tabDrag = f.controller().beginSidebarDrag(
+        sidebarRowOf(sidebar, SidebarRowKind::Tab, f.first.value, firstTabs[1]));
+    REQUIRE_FALSE(tabDrag.isEmpty());
+    sidebar.drop(sidebarRowOf(sidebar, SidebarRowKind::Tab, f.second.value, secondTab.value), 0.1, tabDrag);
+    std::ignore = f.manager().endNodeDrag(&f.controller());
+    REQUIRE(model.workspace(f.second)->tabCount() == 2);
+    CHECK(model.workspace(f.second)->tabAt(0)->id().value == firstTabs[1]);
+    CHECK(model.workspace(f.first)->tabCount() == 1);
+
+    // The MoveTabToWorkspace action moves the active tab to the end of the second workspace.
+    f.controller().moveActiveTabToWorkspace(2);
+    REQUIRE(model.workspace(f.second)->tabCount() == 3);
+    CHECK(model.workspace(f.second)->tabAt(2)->id().value == firstTabs[0]);
+}
+
+TEST_CASE("TerminalSessionManager: an in-process window's CloseWorkspace action closes the shown workspace",
+          "[manager][workspace][sidebar]")
+{
+    auto f = TwoWorkspaces {};
+    auto asked = QSignalSpy { &f.controller(),
+                              &contour::window::WindowController::closeWorkspaceConfirmationRequested };
+    auto const shell = f.controller().activeSession()->profile().shell.value().program;
+    for (auto& pty: f.factory->createdPtys)
+        pty->setForegroundProcessName(shell);
+
+    f.controller().closeCurrentWorkspace();
+
+    CHECK(asked.isEmpty());
+    CHECK(f.factory->createdPtys[0]->isClosed());
+    CHECK(f.factory->createdPtys[1]->isClosed());
+    CHECK_FALSE(f.factory->createdPtys[2]->isClosed());
+}
+
+TEST_CASE("TerminalSessionManager: a daemon window's sidebar routes the workspace mutations to its daemon",
+          "[manager][workspace][sidebar]")
+{
+    using contour::window::SidebarRowKind;
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = RoutingFactory {};
+    auto binding = DaemonDirectoryBinding { factory };
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, binding);
+    auto asked = QSignalSpy { window.controller,
+                              &contour::window::WindowController::closeWorkspaceConfirmationRequested };
+    auto& sidebar = window.controller->sidebar();
+    sidebar.refreshNow();
+    REQUIRE(sidebar.rowCount() == 5);
+
+    sidebar.rename(sidebarRowOf(sidebar, SidebarRowKind::Workspace, 20), "ops");
+    CHECK(factory.renamed == std::vector { std::pair<uint64_t, std::string> { 20, "ops" } });
+    // A tab of a workspace the window does not show is titled in the daemon, by a session it holds.
+    sidebar.rename(sidebarRowOf(sidebar, SidebarRowKind::Tab, 20, 200), "logs");
+    CHECK(factory.titled == std::vector { std::pair<uint64_t, std::string> { 2000, "logs" } });
+
+    // Workspace 20 dropped above 10 is moved to the place 10 holds in the daemon's count.
+    auto const workspaceDrag =
+        window.controller->beginSidebarDrag(sidebarRowOf(sidebar, SidebarRowKind::Workspace, 20));
+    REQUIRE_FALSE(workspaceDrag.isEmpty());
+    sidebar.drop(sidebarRowOf(sidebar, SidebarRowKind::Workspace, 10), 0.1, workspaceDrag);
+    std::ignore = manager.endNodeDrag(window.controller);
+    REQUIRE(factory.moved.size() == 1);
+    CHECK(factory.moved[0] == std::pair<uint64_t, uint32_t> { 20, 1 });
+
+    // A tab is named by the daemon's sessions the directory lists, and lands where it is dropped.
+    auto const tabDrag =
+        window.controller->beginSidebarDrag(sidebarRowOf(sidebar, SidebarRowKind::Tab, 10, 101));
+    REQUIRE_FALSE(tabDrag.isEmpty());
+    sidebar.drop(sidebarRowOf(sidebar, SidebarRowKind::Tab, 20, 200), 0.9, tabDrag);
+    std::ignore = manager.endNodeDrag(window.controller);
+    REQUIRE(factory.tabMoves.size() == 1);
+    CHECK(factory.tabMoves[0].sourceSessions == std::vector<uint64_t> { 1001 });
+    CHECK(factory.tabMoves[0].targetSession == 2000);
+    CHECK(factory.tabMoves[0].index == 1);
+
+    // The shown workspace (10) moves down one place, and closing it asks.
+    window.controller->moveCurrentWorkspaceDown();
+    REQUIRE(factory.moved.size() == 2);
+    CHECK(factory.moved[1] == std::pair<uint64_t, uint32_t> { 10, 3 });
+    window.controller->closeCurrentWorkspace();
+    REQUIRE(asked.count() == 1);
+    CHECK(asked.first().at(0).toULongLong() == 10);
+    window.controller->confirmCloseWorkspace(10);
     CHECK(factory.closed == std::vector<uint64_t> { 10 });
 
     manager.releaseBinding(binding);

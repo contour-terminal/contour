@@ -2055,12 +2055,12 @@ TEST_CASE("A resize-border press over the title bar does not start a window move
     auto* window = qobject_cast<QQuickWindow*>(host.get());
     REQUIRE(window != nullptr);
 
-    auto* moveHandler = host->findChild<QObject*>(QStringLiteral("titleBarDragHandler"));
-    REQUIRE(moveHandler != nullptr);
     // Read the region's real geometry rather than guessing an x: it starts after however wide the tab strip
     // and the new-tab button happen to be, and ends before the window controls.
     auto* dragRegion = host->findChild<QQuickItem*>(QStringLiteral("dragRegion"));
     REQUIRE(dragRegion != nullptr);
+    auto* moveHandler = dragRegion->findChild<QObject*>(QStringLiteral("titleBarGesturesDrag"));
+    REQUIRE(moveHandler != nullptr);
     REQUIRE(dragRegion->width() > 0);
     auto const regionCentreX =
         static_cast<int>(dragRegion->mapToScene(QPointF(0, 0)).x() + (dragRegion->width() / 2));

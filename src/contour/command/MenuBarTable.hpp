@@ -146,6 +146,9 @@ inline constexpr std::array MenuReachabilityExemptions {
     MenuReachabilityExemption { .action = "FocusSidebar",
                                 .reason = "moves keyboard focus into the window's chrome" },
     MenuReachabilityExemption {
+        .action = "FilterWorkspaces",
+        .reason = "reached from the palette, key bindings and the sidebar's filter button" },
+    MenuReachabilityExemption {
         .action = "JumpToNextAttention",
         .reason = "reached from the palette and key bindings; it needs the attention ledger" },
     MenuReachabilityExemption { .action = "MarkSeen",

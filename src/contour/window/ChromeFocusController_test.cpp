@@ -693,6 +693,29 @@ TEST_CASE("the sidebar's keys are requested of the tree, and typed text promotes
     CHECK(f.area() == ChromeArea::Terminal);
 }
 
+TEST_CASE("Escape in the sidebar's tree clears a typed filter before it leaves",
+          "[windowcontroller][chromefocus][sidebar]")
+{
+    using contour::window::ChromeCommand;
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    controller.focusSidebar();
+    controller.sidebar().setFilter("build");
+    auto spy = QSignalSpy { &controller, &contour::window::WindowController::sidebarCommandRequested };
+
+    // The first Escape is the tree's: it clears the filter, and the keyboard stays in the sidebar.
+    CHECK(f.chromeKey(Qt::Key_Escape));
+    REQUIRE(spy.count() == 1);
+    CHECK(spy.at(0).at(0).toInt() == static_cast<int>(ChromeCommand::ClearFilter));
+    CHECK(f.area() == ChromeArea::Sidebar);
+
+    // With no filter left (the tree cleared its field), the next one leaves.
+    controller.sidebar().setFilter({});
+    CHECK(f.chromeKey(Qt::Key_Escape));
+    CHECK(spy.count() == 1);
+    CHECK(f.area() == ChromeArea::Terminal);
+}
+
 TEST_CASE("an application chord is the application's while the sidebar has focus",
           "[windowcontroller][chromefocus][sidebar]")
 {

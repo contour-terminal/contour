@@ -39,6 +39,7 @@
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/SidebarControls.hpp>
 #include <contour/window/StickyHeaderPlacement.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/UiStyleProvider.hpp>
@@ -1690,8 +1691,10 @@ TEST_CASE("the header bar is the canvas's (offscreen)", "[contour][gui][qml][mai
     CHECK(separator.isVisible());
     CHECK(separator.height() == size.property("controlsSeparator").toReal());
     CHECK_FALSE(isShown(*root, QStringLiteral("leadingControlsSeparator")));
-    // The bar's leading margin.
-    CHECK(newTab.mapToItem(&titleBar, QPointF(0, 0)).x() == space.property("s4").toReal());
+    // The bar's leading margin, where the sidebar's toggle leads the header's items.
+    auto const& toggle = shown(*root, QStringLiteral("sidebarToggle"));
+    CHECK(toggle.mapToItem(&titleBar, QPointF(0, 0)).x() == space.property("s4").toReal());
+    CHECK(inOrder({ &toggle, &newTab }));
     // 1c's trailing "+" is the header's new-tab item now.
     CHECK_FALSE(isShown(*root, QStringLiteral("newTabButton")));
 
@@ -1818,6 +1821,19 @@ namespace
     }
     for (auto const& row: contour::window::HeaderBarItems)
         add(row.iconName);
+    // The sidebar's own buttons name their bundled copies by URL (qrc:/contour/icons/<name>.svg).
+    for (auto const& row: contour::window::SidebarControlRows)
+        for (auto const& face: row.faces)
+            if (auto const url = QString::fromUtf8(face.bundledIcon.data(),
+                                                   static_cast<qsizetype>(face.bundledIcon.size()));
+                !url.isEmpty() && !icons.contains(url.mid(3)))
+                icons.append(url.mid(3)); // "qrc:/contour/…" → ":/contour/…"
+    // The sidebar's disclosure chevron, which its look traits name by URL as well.
+    if (auto const chevron =
+            QString::fromUtf8(contour::config::SidebarChevronIcon.data(),
+                              static_cast<qsizetype>(contour::config::SidebarChevronIcon.size()));
+        !icons.contains(chevron.mid(3)))
+        icons.append(chevron.mid(3));
     // The secure-input lock names its icon in SecureInputLock.qml, not in a table.
     add("lock-symbolic");
     return icons;
@@ -2625,7 +2641,12 @@ TEST_CASE("joined tabs sit on the band's floor (offscreen)", "[contour][gui][qml
         CHECK(tab->height() == size.property("tab").toReal());
         CHECK(tab->mapToItem(&titleBar, QPointF(0, tab->height())).y() == titleBar.height());
     }
-    CHECK(tabs[0]->mapToItem(&titleBar, QPointF(0, 0)).x() == space.property("tabStripLeading").toReal());
+    // The tabs start the kit's inset in from what leads the band: the sidebar's toggle.
+    auto const& toggle = shown(*root, QStringLiteral("sidebarToggle"));
+    CHECK(toggle.mapToItem(&titleBar, QPointF(0, 0)).x() == 0);
+    CHECK(tabs[0]->mapToItem(&titleBar, QPointF(0, 0)).x()
+          == toggle.mapToItem(&titleBar, QPointF(toggle.width(), 0)).x() + space.property("s3").toReal()
+                 + space.property("tabStripLeading").toReal());
 
     // Top corners rounded, the bottom meeting the content.
     auto const& background = part(*tabs[0], QStringLiteral("tabBackground"));
@@ -3360,6 +3381,38 @@ TEST_CASE("the block menu opens at the anchor the controller names, not at the p
     REQUIRE(QTest::qWaitFor([&] { return menu->property("opened").toBool(); }, 2000));
     CHECK(menu->property("x").toReal() == Anchor.x());
     CHECK(menu->property("y").toReal() == Anchor.y());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a sidebar row's menu opens where the row asked, and runs what is picked (offscreen)",
+          "[contour][gui][qml][mainwindow][sidebar]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 1 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::ContourLinux));
+    showWindow(*root);
+    auto* menu = root->findChild<QObject*>(QStringLiteral("sidebarContextMenu"));
+    REQUIRE(menu != nullptr);
+    constexpr auto Anchor = QPointF { 60, 140 };
+    constexpr auto ClosePane = 7;
+
+    controller.openSidebarContextMenu(
+        QVariantList { QVariantMap { { QStringLiteral("kind"), "command" },
+                                     { QStringLiteral("title"), "Close Pane…" },
+                                     { QStringLiteral("enabled"), true },
+                                     { QStringLiteral("checkable"), false },
+                                     { QStringLiteral("checked"), false },
+                                     { QStringLiteral("actionId"), ClosePane } } },
+        2,
+        Anchor);
+    REQUIRE(QTest::qWaitFor([&] { return menu->property("opened").toBool(); }, 2000));
+    CHECK(menu->property("x").toReal() == Anchor.x());
+    CHECK(menu->property("y").toReal() == Anchor.y());
+
+    QMetaObject::invokeMethod(menu, "pick", Q_ARG(QVariant, ClosePane));
+    REQUIRE(QTest::qWaitFor([&] { return !controller.sidebarMenuPicks.empty(); }, 2000));
+    CHECK(controller.sidebarMenuPicks == std::vector<int> { ClosePane });
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
