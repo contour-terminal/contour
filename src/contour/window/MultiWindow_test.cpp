@@ -1973,6 +1973,23 @@ TEST_CASE("parseNodeDrag reads what writeNodeDrag writes, and nothing else", "[c
     pane.host = { .kind = HostKind::Process, .id = QStringLiteral("token") };
     pane.sessions = { 5 };
     CHECK(contour::window::parseNodeDrag(contour::window::writeNodeDrag(pane)) == pane);
+    auto const workspace = NodeDrag { .payload = DropPayload::Workspace,
+                                      .host = { .kind = HostKind::Daemon, .id = QStringLiteral("42") },
+                                      .window = vtworkspace::WorkspaceId { 3 },
+                                      .tabIndex = 0,
+                                      .workspace = 12,
+                                      .sessions = {} };
+    CHECK(contour::window::parseNodeDrag(contour::window::writeNodeDrag(workspace)) == workspace);
+    for (
+        auto const* const json: {
+            // A workspace names its workspace, and names no session.
+            R"({"kind":"workspace","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":[]})",
+            R"({"kind":"workspace","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"workspaceId":1,"sessions":[4]})",
+            R"({"kind":"workspace","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"workspaceId":-1,"sessions":[]})",
+            // Nothing else carries one.
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"workspaceId":1,"sessions":[4]})",
+        })
+        CHECK_FALSE(contour::window::parseNodeDrag(QString::fromUtf8(json)).has_value());
 
     auto const valid = std::string {
         R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":[4]})"

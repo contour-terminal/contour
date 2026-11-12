@@ -3663,6 +3663,9 @@ ResolvedDrag TerminalSessionManager::resolveNodeDrag(window::NodeDrag drag) cons
                                    .places = {},
                                    .layout = _layoutGeneration };
     auto const& named = resolved.drag;
+    // A workspace drag is the sidebar's: no pane, tab strip or new window takes it (every place refused).
+    if (named.payload == window::DropPayload::Workspace)
+        return resolved;
     auto const from = isOwnHost(named.host) ? window::DragHost::Own : window::DragHost::Other;
 
     // The tab showing every session the drag names: a pane names the tab it is in; a tab names all of its
@@ -3719,7 +3722,10 @@ ResolvedDrag const* TerminalSessionManager::resolveNodeDrag(QString const& nodeP
     }
     if (!_hoveredDrag || _hoveredDrag->payload != nodePayload)
     {
+        // A workspace drag is the sidebar's, not a pane's or a tab's: no pane resolves it.
         auto parsed = window::parseNodeDrag(nodePayload);
+        if (parsed && parsed->payload == window::DropPayload::Workspace)
+            parsed.reset();
         _hoveredDrag = HoveredDrag { .payload = nodePayload,
                                      .drag = parsed ? std::optional { resolveNodeDrag(std::move(*parsed)) }
                                                     : std::nullopt };

@@ -5724,7 +5724,10 @@ class StubDirectorySource final: public contour::window::IWorkspaceDirectorySour
 {
   public:
     [[nodiscard]] contour::window::WorkspaceDirectory directory() const override { return {}; }
-    void select(uint64_t /*workspace*/) override {}
+    contour::window::SelectResult select(uint64_t /*workspace*/) override
+    {
+        return contour::window::SelectResult::Requested;
+    }
 };
 
 /// A binding that has a directory source of its own, as a daemon's does.

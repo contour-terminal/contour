@@ -254,6 +254,8 @@ set(_header_files
     window/DragEndProbe.hpp
     window/DropZonePolicy.hpp
     window/DroppedText.hpp
+    window/SidebarDropPolicy.hpp
+    window/SidebarTree.hpp
     window/TabBarDropPolicy.hpp
     window/TabBarHitValue.hpp
     window/NodeDrag.hpp
@@ -278,6 +280,7 @@ set(_header_files
 # are only referenced reflectively at runtime.
 set(_core_source_files
     session/HyperlinkTooltip.cpp
+    window/SidebarTree.cpp
     window/TabLabel.cpp
 )
 # The executable entry point lives outside the object library so the test can supply its own main
@@ -1699,6 +1702,9 @@ if(CONTOUR_TESTING)
         window/TabBadge_test.cpp
         window/StatusUrgency_test.cpp
         window/AttentionJump_test.cpp
+        window/SidebarTree.cpp
+        window/SidebarTree_test.cpp
+        window/SidebarDropPolicy_test.cpp
         window/ShellIntegrationOffer_test.cpp
         window/ShellInstallRows_test.cpp
         window/TaskbarAttentionTally_test.cpp

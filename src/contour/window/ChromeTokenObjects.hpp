@@ -1954,6 +1954,7 @@ class ChromeDropPayloadNames: public QObject
     Q_PROPERTY(int text READ text CONSTANT)
     Q_PROPERTY(int tab READ tab CONSTANT)
     Q_PROPERTY(int pane READ pane CONSTANT)
+    Q_PROPERTY(int workspace READ workspace CONSTANT)
 
   public:
     /// @param parent Qt ownership.
@@ -1965,6 +1966,7 @@ class ChromeDropPayloadNames: public QObject
     [[nodiscard]] static constexpr int text() noexcept { return of(DropPayload::Text); }
     [[nodiscard]] static constexpr int tab() noexcept { return of(DropPayload::Tab); }
     [[nodiscard]] static constexpr int pane() noexcept { return of(DropPayload::Pane); }
+    [[nodiscard]] static constexpr int workspace() noexcept { return of(DropPayload::Workspace); }
 
   private:
     [[nodiscard]] static constexpr int of(DropPayload payload) noexcept { return static_cast<int>(payload); }

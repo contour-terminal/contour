@@ -1077,7 +1077,8 @@ int WindowController::dropZoneAt(session::TerminalSession const* pane,
 
     switch (inputs.payload)
     {
-        case DropPayload::None: break;
+        case DropPayload::None:
+        case DropPayload::Workspace: break; // No pane takes a workspace.
         case DropPayload::Files:
         case DropPayload::Text:
             // Typed into a pane that has ended, text would be swallowed -- or kept for the restart.

@@ -16,15 +16,16 @@ namespace contour::window
 /// What is being dragged over a pane.
 enum class DropPayload : uint8_t
 {
-    None = 0, //!< Nothing the pane understands.
-    Files,    //!< One or more files (a `text/uri-list` of file URLs).
-    Text,     //!< Plain text or a non-file URL.
-    Tab,      //!< A tab of two or more panes (`application/x-contour-node`).
-    Pane,     //!< A pane card, or a tab of a single pane.
+    None = 0,  //!< Nothing the pane understands.
+    Files,     //!< One or more files (a `text/uri-list` of file URLs).
+    Text,      //!< Plain text or a non-file URL.
+    Tab,       //!< A tab of two or more panes (`application/x-contour-node`).
+    Pane,      //!< A pane card, or a tab of a single pane.
+    Workspace, //!< A workspace row of the sidebar; no pane takes it.
 };
 
 /// Number of @c DropPayload enumerators, derived from the last one.
-inline constexpr size_t DropPayloadCount = static_cast<size_t>(DropPayload::Pane) + 1;
+inline constexpr size_t DropPayloadCount = static_cast<size_t>(DropPayload::Workspace) + 1;
 
 /// Where a dragged tab comes from, relative to the pane it hovers.
 enum class DropOrigin : uint8_t
@@ -240,7 +241,8 @@ static_assert(MoveAnnouncementRows.size() == static_cast<size_t>(MoveLanding::Ne
         case DropPayload::Tab: return row.tabText;
         case DropPayload::None:
         case DropPayload::Files:
-        case DropPayload::Text: break;
+        case DropPayload::Text:
+        case DropPayload::Workspace: break;
     }
     return {};
 }
@@ -381,7 +383,8 @@ static_assert(DropZoneRows.size() == DropZoneCount);
         case DropPayload::Pane: return dropZoneRowOf(zone).paneLabel;
         case DropPayload::None:
         case DropPayload::Files:
-        case DropPayload::Text: break;
+        case DropPayload::Text:
+        case DropPayload::Workspace: break;
     }
     return {};
 }
@@ -412,6 +415,9 @@ namespace detail
     if (in.payload == DropPayload::None || width <= 0.0 || height <= 0.0 || x < 0.0 || y < 0.0 || x >= width
         || y >= height)
         return DropZone::None;
+
+    if (in.payload == DropPayload::Workspace)
+        return DropZone::None; // A workspace is dropped on the sidebar, never on a pane.
 
     if (in.payload == DropPayload::Files || in.payload == DropPayload::Text)
         return DropZone::InsertText;

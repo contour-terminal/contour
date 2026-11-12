@@ -1811,6 +1811,7 @@ TEST_CASE("UiStyleProvider: dropZones and dropPayloads name every window::DropZo
     CHECK(evaluate("chromeStyle.dropPayloads.files").toInt() == static_cast<int>(DropPayload::Files));
     CHECK(evaluate("chromeStyle.dropPayloads.text").toInt() == static_cast<int>(DropPayload::Text));
     CHECK(evaluate("chromeStyle.dropPayloads.tab").toInt() == static_cast<int>(DropPayload::Tab));
+    CHECK(evaluate("chromeStyle.dropPayloads.workspace").toInt() == static_cast<int>(DropPayload::Workspace));
 
     // One name per zone and per payload, so a new enumerator needs a QML name too.
     auto const names = [](QMetaObject const& meta) {

@@ -16,6 +16,7 @@
 #include <span>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace contour::window
 {
@@ -38,6 +39,10 @@ namespace
                       .name = "tab",
                       .minimumSessions = 2,
                       .maximumSessions = MaxDragSessions },
+        NodeKindRow { .payload = DropPayload::Workspace,
+                      .name = "workspace",
+                      .minimumSessions = 0,
+                      .maximumSessions = 0 },
     };
 
     /// A row of the host table: a host kind and its name in the JSON.
@@ -76,6 +81,8 @@ namespace
 
     constexpr auto DragKeys =
         std::array<std::string_view, 5> { "kind", "host", "windowId", "tabIndex", "sessions" };
+    /// The one key only a workspace drag has: which workspace.
+    constexpr auto WorkspaceKey = std::string_view { "workspaceId" };
     constexpr auto HostKeys = std::array<std::string_view, 2> { "kind", "id" };
 
     [[nodiscard]] std::optional<HostIdentity> parseHost(QJsonValue const& value)
@@ -105,7 +112,7 @@ QString writeNodeDrag(NodeDrag const& drag)
     auto sessions = QJsonArray {};
     for (auto const session: drag.sessions)
         sessions.append(static_cast<double>(session));
-    auto const object = QJsonObject {
+    auto object = QJsonObject {
         { "kind", kind != NodeKinds.end() ? toQString(kind->name) : QString {} },
         { "host",
           QJsonObject { { "kind", host != HostKinds.end() ? toQString(host->name) : QString {} },
@@ -114,6 +121,8 @@ QString writeNodeDrag(NodeDrag const& drag)
         { "tabIndex", drag.tabIndex },
         { "sessions", sessions },
     };
+    if (drag.payload == DropPayload::Workspace)
+        object.insert(toQString(WorkspaceKey), static_cast<double>(drag.workspace));
     return QString::fromUtf8(QJsonDocument { object }.toJson(QJsonDocument::Compact));
 }
 
@@ -123,19 +132,27 @@ std::optional<NodeDrag> parseNodeDrag(QString const& json)
     if (!document.isObject())
         return std::nullopt;
     auto const object = document.object();
-    if (!hasExactly(object, DragKeys))
-        return std::nullopt;
 
     auto const kindValue = object.value("kind");
     if (!kindValue.isString())
         return std::nullopt;
     auto const kind = std::ranges::find_if(
         NodeKinds, [&](NodeKindRow const& row) { return kindValue.toString() == toQString(row.name); });
+    if (kind == NodeKinds.end())
+        return std::nullopt;
+    auto keys = std::vector<std::string_view> { DragKeys.begin(), DragKeys.end() };
+    auto const named = kind->payload == DropPayload::Workspace;
+    if (named)
+        keys.push_back(WorkspaceKey);
+    if (!hasExactly(object, keys))
+        return std::nullopt;
     auto const host = parseHost(object.value("host"));
     auto const window = wholeIn(object.value("windowId"), MaxExactInteger);
     auto const tabIndex = wholeIn(object.value("tabIndex"), std::numeric_limits<int>::max());
+    auto const workspace =
+        named ? wholeIn(object.value(toQString(WorkspaceKey)), MaxExactInteger) : std::optional { 0.0 };
     auto const sessionsValue = object.value("sessions");
-    if (kind == NodeKinds.end() || !host || !window || !tabIndex || !sessionsValue.isArray())
+    if (!host || !window || !tabIndex || !workspace || !sessionsValue.isArray())
         return std::nullopt;
 
     // Counted before it is read: a forged list may be of any length.
@@ -162,6 +179,7 @@ std::optional<NodeDrag> parseNodeDrag(QString const& json)
                       .host = *host,
                       .window = vtworkspace::WorkspaceId { static_cast<uint64_t>(*window) },
                       .tabIndex = static_cast<int>(*tabIndex),
+                      .workspace = static_cast<uint64_t>(*workspace),
                       .sessions = std::move(sessions) };
 }
 
