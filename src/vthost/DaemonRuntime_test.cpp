@@ -115,6 +115,25 @@ TEST_CASE("DaemonRuntime reports what it was configured with and its uptime", "[
     CHECK(runtime.census().count() == 1);
 }
 
+TEST_CASE("DaemonRuntime states the TLS fingerprint it was configured with, if any", "[vthost][runtime]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto h = RuntimeHarness {};
+    auto const statusWith = [&](std::string fingerprint) {
+        auto config = vthost::DaemonRuntimeConfig {};
+        config.tlsFingerprint = std::move(fingerprint);
+        auto runtime =
+            vthost::DaemonRuntime { std::move(config), h.host, clock, [](vthost::ShutdownCause) {} };
+        return runtime.status();
+    };
+    auto const with = statusWith("SHA256:abc");
+    REQUIRE(with.has_value());
+    CHECK(with->tlsFingerprint == std::optional<std::string> { "SHA256:abc" });
+    auto const without = statusWith("");
+    REQUIRE(without.has_value());
+    CHECK_FALSE(without->tlsFingerprint.has_value());
+}
+
 TEST_CASE("a stop request maps its reason onto a shutdown cause", "[vthost][runtime]")
 {
     auto clock = core::platform::ManualClock {};

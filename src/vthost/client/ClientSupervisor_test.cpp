@@ -72,7 +72,6 @@ class ScriptedTransport final: public vthost::ITransportFactory
     }
 
     [[nodiscard]] std::string describe() const override { return "scripted:"; }
-    [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override { return vthost::PeerTrust::Local; }
 
     /// @return How many attempts were made.
     [[nodiscard]] std::size_t calls() const noexcept { return _calls; }
@@ -617,7 +616,6 @@ class UpgradingTransport final: public vthost::ITransportFactory
     }
 
     [[nodiscard]] std::string describe() const override { return "upgrading:"; }
-    [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override { return vthost::PeerTrust::Local; }
     void holdDaemonStart(core::platform::SteadyTimePoint until) override { _absent.holdDaemonStart(until); }
 
     std::atomic<int> ensured = 0; ///< How many daemon starts the factory made. Written on its worker.

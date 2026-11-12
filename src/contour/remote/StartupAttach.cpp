@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/remote/StartupAttach.hpp>
 
+#include <QtCore/QPointer>
+
 #include <cstdlib>
 #include <utility>
 #include <variant>
@@ -21,13 +23,37 @@ StartupAttach::StartupAttach(StartupAttachSteps steps): _steps { std::move(steps
 
 void StartupAttach::start()
 {
-    _isWaiting = true;
-    QTimer::singleShot(0, this, &StartupAttach::progressed);
+    if (!_steps.prepare)
+    {
+        _phase = Phase::Waiting;
+        QTimer::singleShot(0, this, &StartupAttach::progressed);
+        return;
+    }
+    _phase = Phase::Preparing;
+    // Told back from the event loop, and only while this wait lives.
+    _steps.prepare([self = QPointer { this }](std::expected<void, std::string> started) {
+        if (self)
+            self->prepared(std::move(started));
+    });
+}
+
+void StartupAttach::prepared(std::expected<void, std::string> started)
+{
+    if (_phase != Phase::Preparing)
+        return;
+    if (!started)
+    {
+        _phase = Phase::Settled;
+        _steps.end(started.error(), EXIT_FAILURE);
+        return;
+    }
+    _phase = Phase::Waiting;
+    progressed();
 }
 
 void StartupAttach::progressed()
 {
-    if (!_isWaiting)
+    if (_phase != Phase::Waiting)
         return;
     auto const settled = _steps.look();
     if (!settled)
@@ -38,7 +64,7 @@ void StartupAttach::progressed()
         return;
     }
     _deadline.stop();
-    _isWaiting = false;
+    _phase = Phase::Settled;
     if (auto const opened = _steps.openFirstWindow(*settled); !opened)
         _steps.end(opened.error(), EXIT_FAILURE);
 }

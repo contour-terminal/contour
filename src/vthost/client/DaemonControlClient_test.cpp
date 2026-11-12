@@ -6,6 +6,7 @@
 #include <core/net/IoBackend.hpp>
 #include <core/net/Sockets.hpp>
 #include <core/net/testing/InMemoryTransport.hpp>
+#include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -23,11 +24,14 @@
 #include <vthost/AttachBudget.hpp>
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonControl.hpp>
+#include <vthost/KnownDaemons.hpp>
 #include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
+#include <vthost/client/KeySource.hpp>
+#include <vthost/testing/CountingRandom.hpp>
 #include <vthost/testing/FakeDaemonControl.hpp>
 
 namespace proto = vthost::proto;
@@ -317,10 +321,6 @@ class FailingTransport final: public vthost::ITransportFactory
     }
 
     [[nodiscard]] std::string describe() const override { return "failing"; }
-    [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override
-    {
-        return vthost::PeerTrust::Verified;
-    }
 
   private:
     vthost::TransportErrorKind _kind;
@@ -392,12 +392,18 @@ TEST_CASE("a refused TCP connection reads as not running", "[vthost][client][con
         REQUIRE(listener.has_value());
         port = (*listener)->boundPort();
     }
+    auto const files = core::platform::testing::InMemoryFileSystem {};
+    auto random = vthost::testing::CountingRandom {};
+    auto known = vthost::KnownDaemons { files, "/state/known_daemons", random };
     // Windows takes about two seconds to give up on a refused connection, retrying it first: the call's
     // timeout must outlast that, or what this reads is the timeout.
-    auto control =
-        client::makeDaemonControl(std::make_shared<vthost::TlsTransportFactory>(vthost::TcpEndpoint {
-                                      .host = "127.0.0.1", .port = port, .token = {}, .caPem = {} }),
-                                  std::chrono::seconds { 10 });
+    auto control = client::makeDaemonControl(
+        std::make_shared<vthost::TlsTransportFactory>(
+            vthost::TcpEndpoint { .host = "127.0.0.1", .port = port, .token = {}, .caPem = {} },
+            known,
+            nullptr,
+            vthost::client::ClientKeySourceProvider {}),
+        std::chrono::seconds { 10 });
     auto const status = control->status();
     REQUIRE_FALSE(status.has_value());
     INFO(status.error().toString());
@@ -410,11 +416,17 @@ TEST_CASE("a TLS setup failure is a transport error, not an absent daemon", "[vt
     auto loop = core::net::EventLoop { *backend };
     auto listener = core::net::listen(loop, "127.0.0.1", 0);
     REQUIRE(listener.has_value());
+    auto const files = core::platform::testing::InMemoryFileSystem {};
+    auto random = vthost::testing::CountingRandom {};
+    auto known = vthost::KnownDaemons { files, "/state/known_daemons", random };
     auto control = client::makeDaemonControl(
         std::make_shared<vthost::TlsTransportFactory>(vthost::TcpEndpoint { .host = "127.0.0.1",
                                                                             .port = (*listener)->boundPort(),
                                                                             .token = {},
-                                                                            .caPem = "not a certificate" }));
+                                                                            .caPem = "not a certificate" },
+                                                      known,
+                                                      nullptr,
+                                                      vthost::client::ClientKeySourceProvider {}));
     auto const status = control->status();
     REQUIRE_FALSE(status.has_value());
     INFO(status.error().toString());

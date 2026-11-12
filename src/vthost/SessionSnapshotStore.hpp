@@ -141,6 +141,12 @@ class SessionSnapshotStore
     std::filesystem::path _path;
 };
 
+/// @param label A daemon's label.
+/// @return Whether it can name a file beneath a directory: not empty, and holding none of `/`, `\`, `:`,
+///         NUL or `..`, which would leave the directory (`:` on Windows, where `C:x` replaces the whole
+///         path it is appended to) or end the name.
+[[nodiscard]] bool isFileNameLabel(std::string_view label);
+
 /// `<stateDirectory>/sessions/<label>.snapshot`.
 /// @param stateDirectory The daemon's state directory (`daemonStateDirectory(...)`, StatePath.hpp).
 /// @param label The session label.

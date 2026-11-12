@@ -12,6 +12,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/WriteQueue.hpp>
+#include <core/platform/Clock.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -26,7 +27,9 @@
 #include <vector>
 
 #include <vtcontrol/ControlError.hpp>
+#include <vthost/KnownDaemons.hpp>
 #include <vthost/Transport.hpp>
+#include <vthost/client/KeySource.hpp>
 #include <vthost/proto/Pdu.hpp>
 
 namespace vthost::client
@@ -38,10 +41,11 @@ enum class ControlFailure : uint8_t
     Unreachable = 0, ///< No connection to the daemon could be opened, or no endpoint resolved.
     Refused,         ///< The daemon refused the handshake: a version it does not speak, or a wrong token.
     Unsupported,     ///< The daemon does not offer the control API, or answered a request Unsupported.
-    Untrusted,       ///< The transport does not verify the daemon, so no request is sent over it.
-    Disconnected,    ///< The connection ended, or broke, before the answer arrived.
-    TimedOut,        ///< The daemon did not answer in time.
-    Remote,          ///< The daemon answered with an error: `ControlClientError::remote`.
+    Untrusted,       ///< The daemon is not verified (nor trusted yet), so no request is sent over it.
+    Declined,     ///< The user declined a question the connection asked first, or the attempt was given up.
+    Disconnected, ///< The connection ended, or broke, before the answer arrived.
+    TimedOut,     ///< The daemon did not answer in time.
+    Remote,       ///< The daemon answered with an error: `ControlClientError::remote`.
     /// This end's own settings cannot be used (a pinned CA that does not parse): retrying cannot help, the
     /// user must fix them first.
     Misconfigured,
@@ -93,6 +97,11 @@ class ControlClient
     /// Ends the connection: a pending call() or nextEvent() completes ControlFailure::Disconnected.
     void close() noexcept;
 
+    /// @return How long handshake() has spent signing the daemon's challenges, the one being signed
+    ///         included, on the loop's clock: the time a passphrase or an agent's confirmation takes, which
+    ///         is the user's and not the daemon's, so a deadline on the call leaves it out.
+    [[nodiscard]] std::chrono::milliseconds signingTime() const;
+
   private:
     /// @return The next frame off the connection, or why there is none.
     [[nodiscard]] core::async::Task<std::expected<proto::DecodedFrame, ControlClientError>> readFrame();
@@ -108,6 +117,9 @@ class ControlClient
     std::size_t _consumed = 0;      ///< How much of _buffer is decoded already.
     uint64_t _nextSerial = 1;       ///< The serial the next PDU is sent under.
     uint64_t _nextRequestId = 1;    ///< The id the next call carries; ids increase from 1.
+    std::chrono::milliseconds _signed = std::chrono::milliseconds::zero(); ///< Signing time of past proofs.
+    /// When the proof being made now began; nullopt while none is.
+    std::optional<core::platform::SteadyTimePoint> _signingSince = std::nullopt;
     /// Events read while a call waited, oldest first. Unbounded on purpose: what the daemon sends is bounded
     /// by its own drop-past-half-the-queue rule only while this client reads, so a long call (a `block.wait`)
     /// beside a busy subscription holds every event it read until nextEvent() takes them. A caller that
@@ -116,8 +128,9 @@ class ControlClient
 };
 
 /// Resolves a saved host's name to its transport; phase 5's saved hosts, which `vthost` cannot read.
-using SavedHostResolver =
-    std::function<std::expected<std::shared_ptr<ITransportFactory>, std::string>(std::string_view name)>;
+/// Told the `--daemon-fingerprint` the call was given, for a TLS host that has no CA; empty for none.
+using SavedHostResolver = std::function<std::expected<std::shared_ptr<ITransportFactory>, std::string>(
+    std::string_view name, std::string_view daemonFingerprint)>;
 
 /// What a control client is told about where its daemon is.
 struct ControlEndpointOptions
@@ -128,6 +141,17 @@ struct ControlEndpointOptions
     std::string label {};
     std::string token {};    ///< The token a TCP endpoint is sent.
     std::string tlsCaPem {}; ///< The CA certificate (PEM) a TCP endpoint is verified against; empty for none.
+    /// `--daemon-fingerprint`: the fingerprint a TCP endpoint without a CA must present on first contact;
+    /// empty for none, which refuses a daemon not pinned yet unless @ref pinPrompt asks.
+    std::string daemonFingerprint {};
+    /// Where a TCP endpoint's pin is kept and read; borrowed, and must outlive the transport. Null refuses
+    /// every `HOST:PORT` spec.
+    KnownDaemons* knownDaemons = nullptr;
+    /// Asks the user to pin a TCP endpoint met for the first time; null where there is no one to ask, and a
+    /// daemon not pinned yet then needs @ref daemonFingerprint.
+    std::shared_ptr<IPinPrompt> pinPrompt {};
+    /// Makes what signs a TCP endpoint's key proof on the call's own loop; empty for no key.
+    ClientKeySourceProvider keySourceProvider {};
     /// Resolves a spec that names a saved host (one holding `://`, or a bare word); empty for no saved hosts,
     /// every such spec then being a path.
     SavedHostResolver resolveSavedHost {};
@@ -146,20 +170,27 @@ struct ControlEndpointOptions
 [[nodiscard]] std::expected<std::shared_ptr<ITransportFactory>, ControlClientError> resolveControlEndpoint(
     ControlEndpointOptions const& options, core::Environment const& env);
 
-/// Connects, handshakes, calls one method and returns its reply, on a loop of its own. Refuses an
-/// Unverified transport before connecting (ControlFailure::Untrusted).
+/// Connects, handshakes, calls one method and returns its reply, on a loop of its own. A daemon that is not
+/// trusted (not pinned, and not trusted when asked) is refused before anything is sent to it
+/// (ControlFailure::Untrusted).
 /// @param transport How to reach the daemon.
 /// @param method The method name.
 /// @param params The request JSON.
 /// @param context The caller's pane id, or empty.
-/// @param timeout How long the whole call may take; none waits for as long as the daemon takes.
-/// @return The reply JSON, or why there is none.
+/// @param timeout How long the handshake and the call may take together, from the moment the transport
+///        handed out its connection: the connect is not counted, as it may wait for the user to trust a
+///        daemon. None waits for as long as the daemon takes.
+/// @param stop Gives the call up from any thread, wherever it is: the dial, a question to the user about the
+///        daemon, the handshake or the call. Its owner going away is the usual reason. A token that cannot
+///        be stopped (the default) gives nothing up.
+/// @return The reply JSON, or why there is none; ControlFailure::Declined once @p stop was requested.
 [[nodiscard]] std::expected<std::string, ControlClientError> runControlCall(
     ITransportFactory& transport,
     std::string_view method,
     std::string_view params,
     std::string_view context,
-    std::optional<std::chrono::milliseconds> timeout = std::nullopt);
+    std::optional<std::chrono::milliseconds> timeout = std::nullopt,
+    core::async::StopToken const& stop = {});
 
 /// What an event stream does after an event.
 enum class StreamStep : uint8_t
@@ -169,8 +200,8 @@ enum class StreamStep : uint8_t
 };
 
 /// Connects, handshakes, subscribes with @p subscribeParams, and hands every event to @p onEvent until it
-/// says Stop, @p stop is requested, or the connection ends; on a loop of its own. Refuses an Unverified
-/// transport before connecting (ControlFailure::Untrusted).
+/// says Stop, @p stop is requested, or the connection ends; on a loop of its own. Refuses a connection whose
+/// peer was not verified before anything is sent over it (ControlFailure::Untrusted).
 /// @param transport How to reach the daemon.
 /// @param subscribeParams The `events.subscribe` request JSON.
 /// @param context The caller's pane id, or empty.

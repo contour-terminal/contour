@@ -31,6 +31,7 @@
 #include <contour/remote/SwitchGrants.hpp>
 #include <contour/remote/SwitchHost.hpp>
 #include <contour/remote/SwitchingService.hpp>
+#include <contour/remote/WorkspaceLister.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/ExitCode.hpp>
 #include <contour/session/RestoreSummaryPolicy.hpp>
@@ -90,6 +91,7 @@
 #include <vector>
 
 #include <vthost/DaemonSpawn.hpp>
+#include <vthost/KnownDaemons.hpp>
 #include <vthost/SshTransport.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/DaemonUpgrade.hpp>
@@ -350,6 +352,11 @@ class ContourGuiApp:
     /// @param exitEventLoop How the app ends its event loop with a status. Null (the default) is
     ///                     QCoreApplication::exit; tests pass a recorder, as exiting outside a loop would end
     ///                     every event loop the rest of the suite starts.
+    /// @param bootstrapPromptFactory Makes the stand-in window for prompts asked before any terminal window
+    ///                     exists. Null (the default) makes it over the app's QML engine, once there is one;
+    ///                     tests pass one over an offscreen engine of their own.
+    /// @param startupLister Lists the daemon's workspaces for a launch that names one (`--workspace`). Null
+    ///                     (the default) is the control API's, made on first use; tests pass a scripted one.
     explicit ContourGuiApp(
         core::Environment const& env,
         std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
@@ -373,7 +380,9 @@ class ContourGuiApp:
         std::unique_ptr<platform::ApplicationRestart> applicationRestart = nullptr,
         std::unique_ptr<remote::SwitchingService> windowSwitching = nullptr,
         std::unique_ptr<session::SwitchDirectory> switchDirectory = nullptr,
-        std::function<void(int)> exitEventLoop = nullptr);
+        std::function<void(int)> exitEventLoop = nullptr,
+        window::BootstrapPromptFactory bootstrapPromptFactory = nullptr,
+        std::unique_ptr<remote::IWorkspaceLister> startupLister = nullptr);
     ~ContourGuiApp() override;
 
     /// What decides, once a dragged pane or tab no window took has ended, whether that was a drop outside
@@ -1072,17 +1081,18 @@ class ContourGuiApp:
     struct ClientRequest
     {
         ClientEngine engine = ClientEngine::Native;
-        std::string tmuxSocket; ///< `--tmux-socket`.
-        std::string socket;     ///< `--socket`; empty for `daemon.socket`.
-        std::string label;      ///< `--label`; empty when not given.
-        std::string profile;    ///< `--profile`.
-        std::string config;     ///< `--config`.
-        std::string connectTcp; ///< `--connect-tcp`; empty for the local socket.
-        std::string tlsCaPath;  ///< `--tls-ca`.
-        std::string token;      ///< `--token` or `--token-file`, resolved.
-        std::string sizePolicy; ///< `--size-policy`; empty for `daemon.size_policy`.
-        std::string logFilter;  ///< `--log`, forwarded to a daemon it starts.
-        std::string logFile;    ///< `--log-file`, likewise.
+        std::string tmuxSocket;        ///< `--tmux-socket`.
+        std::string socket;            ///< `--socket`; empty for `daemon.socket`.
+        std::string label;             ///< `--label`; empty when not given.
+        std::string profile;           ///< `--profile`.
+        std::string config;            ///< `--config`.
+        std::string connectTcp;        ///< `--connect-tcp`; empty for the local socket.
+        std::string tlsCaPath;         ///< `--tls-ca`.
+        std::string daemonFingerprint; ///< `--daemon-fingerprint`; empty for none.
+        std::string token;             ///< `--token` or `--token-file`, resolved.
+        std::string sizePolicy;        ///< `--size-policy`; empty for `daemon.size_policy`.
+        std::string logFilter;         ///< `--log`, forwarded to a daemon it starts.
+        std::string logFile;           ///< `--log-file`, likewise.
         /// `--workspace`: the one daemon workspace to show, as the control verbs name one; empty for none.
         std::string workspace;
         std::optional<cli::HostTransport>
@@ -1111,11 +1121,22 @@ class ContourGuiApp:
     /// @return The host and its transport, or the line saying why it cannot be reached as configured.
     /// @param route The window that starts the attach, where its ssh prompts are shown.
     /// @param prompting Whether the transport may ask the user anything.
+    /// @param daemonFingerprint `--daemon-fingerprint`: what a tls host without a CA must present on first
+    ///        contact; empty for none.
     [[nodiscard]] std::expected<OpenedHost, std::string> openHost(
         std::string const& configPath,
         std::string const& nameOrUrl,
         askpass::AskpassRouteId route = askpass::AnyWindow,
-        cli::SshPrompts prompting = cli::SshPrompts::Askpass);
+        cli::SshPrompts prompting = cli::SshPrompts::Askpass,
+        std::string daemonFingerprint = {});
+
+    /// @param route The window that starts the attach, where the prompt is shown.
+    /// @param prompting Whether the transport may ask the user anything.
+    /// @return What asks the user whether to trust a `tls://` daemon met for the first time: a dialog in the
+    ///         window of @p route, or the terminal while `--workspace` is resolved; null where nobody may be
+    ///         asked.
+    [[nodiscard]] std::shared_ptr<vthost::IPinPrompt> pinPromptFor(askpass::AskpassRouteId route,
+                                                                   cli::SshPrompts prompting);
 
     /// Maps an already resolved host onto its transport.
     /// @param nameOrUrl What named the host: its saved name, or its URL; the window's label.
@@ -1123,11 +1144,13 @@ class ContourGuiApp:
     /// @return The host and its transport, or why it cannot be reached as configured.
     /// @param route The window that starts the attach, where its ssh prompts are shown.
     /// @param prompting Whether the transport may ask the user anything.
+    /// @param daemonFingerprint `--daemon-fingerprint`; empty for none.
     [[nodiscard]] std::expected<OpenedHost, std::string> transportOf(
         std::string const& nameOrUrl,
         config::HostEntry host,
         askpass::AskpassRouteId route = askpass::AnyWindow,
-        cli::SshPrompts prompting = cli::SshPrompts::Askpass);
+        cli::SshPrompts prompting = cli::SshPrompts::Askpass,
+        std::string daemonFingerprint = {});
 
   private:
     /// Prepares the Connect picker's check of whether @p target answers, before it spends a window on it.
@@ -1214,6 +1237,17 @@ class ContourGuiApp:
     /// @return Nothing once connecting; the line to print otherwise.
     [[nodiscard]] std::expected<void, std::string> startNativeAttach();
 
+    /// Makes the system sleep/wake monitor a link's attach wants, once per process: a failure is remembered,
+    /// not retried, and said once.
+    void ensurePowerMonitor();
+
+    /// Lists the daemon's workspaces for a launch that names one, off the GUI thread, then resolves the name
+    /// and starts the attach that startNativeAttach() put off; the launch waits meanwhile
+    /// (StartupAttachSteps:: prepare). The listing may ask the user about the daemon, in the stand-in window
+    /// the loop serves.
+    /// @param ready Told, on the GUI thread, that the attach started or why it cannot.
+    void beginDeferredAttach(remote::StartupAttachReady ready);
+
     /// Attaches to a tmux server, as `contour client --tmux` asks, before the GUI boots.
     /// @param request What the client asked for.
     /// @return Nothing once attached; the line to print otherwise.
@@ -1241,6 +1275,28 @@ class ContourGuiApp:
     [[nodiscard]] std::expected<void, std::string> bootFirstWindow();
 
   public:
+    /// What a launch attaches to, and how its link names it.
+    struct LaunchAttach
+    {
+        std::shared_ptr<vthost::ITransportFactory> transport; ///< How to reach the daemon.
+        vthost::AttachBudget budget;                          ///< How long the attach may take.
+        std::string hostLabel; ///< The remote host, as named; empty for a local daemon, `--connect-tcp`.
+        window::DaemonLocality locality; ///< Whether the daemon runs on this machine.
+        remote::DaemonAddress address;   ///< The daemon as a window switch names it.
+        std::string workspace;           ///< `--workspace`, as given; empty for none.
+    };
+
+    /// Starts the launch's attach now, or, for one that names a workspace, puts it off until the wait lists
+    /// the daemon's workspaces (startAttachWait()). Public for the launch and for tests.
+    /// @param attach What to attach to.
+    /// @return Nothing once started or put off; why not otherwise.
+    [[nodiscard]] std::expected<void, std::string> prepareLaunchAttach(LaunchAttach attach);
+
+    /// waitForAttach() with the launch's own link as the attach, prepared first by beginDeferredAttach() for
+    /// a launch that names a workspace. Requires prepareLaunchAttach() first. Public for the launch and for
+    /// tests.
+    void startAttachWait();
+
     /// Waits for the launch's attach from the event loop and then opens the first window, or ends the launch
     /// with the reason and a failure status. Until then no terminal window exists, and the app refuses every
     /// action but Quit (@see isStartingUp()). Public for the launch and for tests, which drive it with fakes.
@@ -1252,8 +1308,15 @@ class ContourGuiApp:
     [[nodiscard]] bool isStartingUp() const noexcept { return _startupAttach && _startupAttach->isWaiting(); }
 
   private:
-    /// waitForAttach() with the launch's own link as the attach.
-    void startAttachWait();
+    /// Starts the launch's link, following @p workspace, and plans the wait for it.
+    /// @param attach What to attach to.
+    /// @param workspace The daemon's id of the workspace `--workspace` named; none for its default.
+    /// @return Nothing once started.
+    [[nodiscard]] std::expected<void, std::string> startLaunchLink(LaunchAttach attach,
+                                                                   std::optional<uint64_t> workspace);
+
+    /// Has the launch's link, once it exists, kept alive while it is waited for, and its news looked at.
+    void followStartupLink();
 
     /// What a link to a daemon is built with: this client's profile and emulation settings stated, on the
     /// app's clock, timeline and power monitor. The one place a link's configuration is made, for a launch's
@@ -1369,12 +1432,19 @@ class ContourGuiApp:
         vthost::AttachBudget budget;
     };
     std::optional<StartupAttachPlan> _startupAttachPlan;
+    /// The attach of a launch that names a workspace: it asks the daemon for its workspaces, which can need a
+    /// dialog, so it waits for the GUI (beginDeferredAttach()).
+    /// Empty for a launch that names no workspace, and once the attach it held has started.
+    std::optional<LaunchAttach> _deferredNativeAttach;
+
     /// The wait for it, from the event loop.
     std::unique_ptr<remote::StartupAttach> _startupAttach;
     /// How the launch ends when the first window could not be had, instead of the event loop's status.
     std::optional<int> _startupExitCode;
     /// Ends the event loop with a status; QCoreApplication::exit unless the app was built with another.
     std::function<void(int)> _exitEventLoop;
+    /// Makes the stand-in prompt window; null: BootstrapPrompt::create() over _qmlEngine.
+    window::BootstrapPromptFactory _bootstrapPromptFactory;
 
     /// What `contour client` asked for; empty for a plain launch. @see establishHosting
     std::optional<ClientRequest> _clientRequest;
@@ -1461,6 +1531,14 @@ class ContourGuiApp:
     vtbackend::HostIdentity _hostIdentity;
     // Likewise; borrowed.
     core::platform::FileSystem const& _fileSystem;
+    /// The daemons pinned on first use (`known_daemons`), which every tls transport this app opens checks and
+    /// adds to. Declared after _fileSystem, which it reads and writes through.
+    vthost::KnownDaemons _knownDaemons;
+    /// Lists the workspaces of the daemon a `--workspace` launch attaches to: the injected one, else made for
+    /// that listing. Declared after _knownDaemons, which its transport checks the daemon against: it is
+    /// destroyed first, and its destruction stops a listing still under way -- the dial, the question about
+    /// the daemon and the call -- before anything it borrows goes.
+    std::unique_ptr<remote::IWorkspaceLister> _startupLister;
     std::unique_ptr<platform::TaskbarProgressSink> _taskbarProgressSink;
     // The WebAssembly backend the extension runtime's engines are created from and its lanes prepared with;
     // created with the runtime (@see extensionRuntime()). Declared before _extensionRuntime, which borrows it

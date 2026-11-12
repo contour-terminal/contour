@@ -25,6 +25,7 @@
 
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonStarter.hpp>
+#include <vthost/KnownDaemons.hpp>
 #include <vthost/WorkspacePersistenceConfig.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
 #include <vthost/client/DaemonRelocation.hpp>
@@ -55,6 +56,8 @@ enum class DaemonVerb : uint8_t
     Relocate,
     /// Print what this binary reads of a live upgrade's handover, for the daemon that would exec it.
     HandoverInfo,
+    /// Forget the pinned certificate of a daemon met over TCP, so that its next contact is a first contact.
+    ForgetPin,
 };
 
 /// One row per `contour daemon` sub-verb: the command list, the dispatch and the help read this table.
@@ -93,6 +96,11 @@ inline constexpr auto DaemonSubVerbs = std::array {
         "state formats it reads -- what a daemon asks of a new release before it upgrades onto it "
         "live.",
         DaemonVerb::HandoverInfo },
+    DaemonVerbRow {
+        "forget-pin",
+        "Forgets the certificate pinned for the daemon at HOST:PORT, after that daemon was reinstalled; the "
+        "next connection to it is a first contact again.",
+        DaemonVerb::ForgetPin },
 };
 
 /// Whether `daemon stop` may end sessions without asking (`--yes`).
@@ -209,6 +217,18 @@ class LogFollower
     std::filesystem::path _file;
     std::uintmax_t _offset = 0;
 };
+
+/// `contour daemon forget-pin HOST:PORT`.
+/// @param knownDaemons Where the daemons are pinned.
+/// @param words What followed the verb: exactly one `HOST:PORT`.
+/// @param out Where the confirmation goes.
+/// @param err Where a refusal goes.
+/// @return Ok when the pin was forgotten; BadUsage for a missing or malformed daemon, or none pinned for it;
+///         Failed when the file could not be written.
+[[nodiscard]] ExitStatus daemonForgetPinVerb(vthost::KnownDaemons& knownDaemons,
+                                             std::span<std::string_view const> words,
+                                             std::ostream& out,
+                                             std::ostream& err);
 
 /// `contour daemon status`.
 /// @param control The daemon's control port.

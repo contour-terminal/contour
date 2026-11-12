@@ -46,7 +46,7 @@ Then attach in any of these ways:
   contour client --host ssh://me@homepc:2222     # an ssh URL that is not saved
   ```
 
-  An ad-hoc `tls://` URL is refused: a TLS host needs its `token_file`, so save it first.
+  An ad-hoc `tls://` URL works the same way; pass `--daemon-fingerprint SHA256:…` the first time, to pin the daemon.
 
 Attaching to a host works like launching Contour against that daemon: the window selects the workspace the
 daemon had selected last, or its first one (see

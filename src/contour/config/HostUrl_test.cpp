@@ -15,7 +15,6 @@
 using contour::config::checkHostDraft;
 using contour::config::describe;
 using contour::config::HostDraft;
-using contour::config::HostEntryError;
 using contour::config::HostField;
 using contour::config::HostFieldProblem;
 using contour::config::HostScheme;
@@ -135,17 +134,11 @@ TEST_CASE("checkHostDraft says what the loader would, under the field it is abou
               == Problems { { .field = HostField::Url,
                               .message = std::string { describe(HostUrlError::MissingScheme) } } });
     }
-    SECTION("a tls host needs a token file, even while its address is half-typed")
+    SECTION("a tls host needs nothing beyond its address: a key signs in")
     {
-        auto const tokenMissing =
-            HostFieldProblem { .field = HostField::TokenFile,
-                               .message = std::string { describe(HostEntryError::TokenRequired) } };
-        CHECK(checkHostDraft(HostDraft { .url = "tls://build-box:7297" }) == Problems { tokenMissing });
+        CHECK(checkHostDraft(HostDraft { .url = "tls://build-box:7297" }).empty());
         CHECK(checkHostDraft(HostDraft { .url = "tls://build-box" })
               == Problems { { .field = HostField::Url,
-                              .message = std::string { describe(HostUrlError::PortRequired) } },
-                            tokenMissing });
-        CHECK(checkHostDraft(HostDraft { .url = "tls://build-box:7297", .tokenFile = "build-box.token" })
-                  .empty());
+                              .message = std::string { describe(HostUrlError::PortRequired) } } });
     }
 }

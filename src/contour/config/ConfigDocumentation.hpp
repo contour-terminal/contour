@@ -1273,8 +1273,10 @@ constexpr StringLiteral HostsConfig {
     "{comment}\n"
     "{comment} Saved remote hosts that \"Attach to Host\" lists, by name. Each host has:\n"
     "{comment}   url             ssh://[user@]host[:port] or tls://host:port (required)\n"
-    "{comment}   token_file      the daemon's token file (required for tls://)\n"
-    "{comment}   tls_ca          a CA to verify the daemon's certificate against (tls://)\n"
+    "{comment}   token_file      the daemon's token file (tls://; not needed when a key signs in)\n"
+    "{comment}   tls_ca          a CA to verify the daemon's certificate against (tls://); without one the\n"
+    "{comment}                   daemon is pinned on first use, as ssh does for a host\n"
+    "{comment}   identity_file   the SSH private key that signs in (tls://), instead of the agent's keys\n"
     "{comment}   remote_command  replaces the whole remote command (ssh://)\n"
     "{comment}   profile         the profile the remote sessions are created with\n"
     "{comment}\n"
@@ -1287,6 +1289,9 @@ constexpr StringLiteral HostsConfig {
     "{comment}         url: \"tls://studio.tailnet.ts.net:7297\"\n"
     "{comment}         token_file: \"~/.config/contour/studio.token\"\n"
     "{comment}         tls_ca: \"~/.config/contour/studio-ca.pem\"\n"
+    "{comment}     workstation:\n"
+    "{comment}         url: \"tls://workstation.tailnet.ts.net:7297\"\n"
+    "{comment}         identity_file: \"~/.ssh/id_ed25519\"\n"
     "\n"
 };
 constexpr StringLiteral HostsWeb { "Saved remote hosts that \"Attach to Host\" lists." };

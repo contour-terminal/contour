@@ -43,6 +43,9 @@ struct DaemonRuntimeConfig
     /// What the user asked of the daemon's moving onto its staged copy (`contour daemon --in-place` refuses
     /// it), as its status states it: the request itself, not whether the daemon moved.
     RelocationRequest relocationRequest = RelocationRequest::Allowed;
+    /// The `SHA256:...` fingerprint of the certificate its TCP listener presents, for `daemon status`; empty
+    /// for a daemon with no TCP listener.
+    std::string tlsFingerprint {};
 };
 
 /// What a daemon needs to upgrade itself, wired by whoever builds its handover::LiveUpgrade.

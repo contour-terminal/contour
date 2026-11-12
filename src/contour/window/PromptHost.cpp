@@ -61,6 +61,7 @@ QVariantMap PromptHost::pendingPrompt() const
         { QStringLiteral("acceptAnswer"), QString::fromLatin1(row.acceptAnswer) },
         { QStringLiteral("rejectOutcome"), static_cast<int>(row.rejectOutcome) },
         { QStringLiteral("rejectAnswer"), QString::fromLatin1(row.rejectAnswer) },
+        { QStringLiteral("hint"), *row.hint != '\0' ? translated(row.hint) : QString {} },
     };
 }
 

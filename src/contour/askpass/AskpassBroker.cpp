@@ -8,7 +8,6 @@
 #include <QtCore/QDir>
 #include <QtCore/QMetaObject>
 #include <QtCore/QPointer>
-#include <QtCore/QRandomGenerator>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QThread>
 #include <QtCore/QTimer>
@@ -23,6 +22,7 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -87,16 +87,18 @@ namespace
             case AskpassPromptKind::HostKeyWarning: return "host key warning";
             case AskpassPromptKind::HostKeyUpdate: return "host key update";
             case AskpassPromptKind::Question: return "question";
+            case AskpassPromptKind::PinConfirm: return "pin confirmation";
         }
         return "?";
     }
 
-    /// @return @p byteCount random bytes from the operating system's source, as hex.
-    [[nodiscard]] QByteArray randomHex(int byteCount)
+    /// @param random Where the bytes come from.
+    /// @return @p byteCount random bytes from @p random, as hex.
+    [[nodiscard]] QByteArray randomHex(core::IRandom& random, int byteCount)
     {
         auto bytes = QByteArray(byteCount, '\0');
-        for (auto const index: std::views::iota(0, byteCount))
-            bytes[index] = static_cast<char>(QRandomGenerator::system()->bounded(256U));
+        random.fill(
+            std::as_writable_bytes(std::span { bytes.data(), static_cast<std::size_t>(bytes.size()) }));
         return bytes.toHex();
     }
 
@@ -491,12 +493,14 @@ namespace
 
 AskpassBroker::AskpassBroker(std::shared_ptr<AskpassPromptRouter> router,
                              QString executablePath,
+                             core::IRandom& random,
                              core::platform::IClock const& clock,
                              AskpassBrokerConfig config):
     _router { std::move(router) },
     _executablePath { std::move(executablePath) },
     _clock { clock },
     _config { std::move(config) },
+    _random { random },
     _worker { std::make_unique<QObject>() }
 {
     _thread.setObjectName(QStringLiteral("askpass-broker"));
@@ -507,10 +511,11 @@ AskpassBroker::AskpassBroker(std::shared_ptr<AskpassPromptRouter> router,
 
 AskpassBroker::AskpassBroker(IAskpassPromptSink& sink,
                              QString executablePath,
+                             core::IRandom& random,
                              core::platform::IClock const& clock,
                              AskpassBrokerConfig config):
     AskpassBroker(
-        std::make_shared<AskpassPromptRouter>(), std::move(executablePath), clock, std::move(config))
+        std::make_shared<AskpassPromptRouter>(), std::move(executablePath), random, clock, std::move(config))
 {
     _router->attach(AnyWindow, sink);
 }
@@ -547,8 +552,8 @@ std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> AskpassBrok
                 "cannot serve ssh's prompts: the broker's thread did not start" } };
     }
     auto state = std::make_shared<SessionState>();
-    auto nonce = randomHex(32).toStdString();
-    auto const name = QString::fromLatin1("contour-askpass-") + QString::fromLatin1(randomHex(8));
+    auto nonce = randomHex(_random, 32).toStdString();
+    auto const name = QString::fromLatin1("contour-askpass-") + QString::fromLatin1(randomHex(_random, 8));
     auto const targetText = QString::fromStdString(vthost::describeSshTarget(target));
 
     // On the broker's thread, which waits for nobody. The server listens before ssh is even started.

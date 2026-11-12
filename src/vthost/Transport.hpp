@@ -23,10 +23,16 @@
 #include <vector>
 
 #include <vthost/DaemonSpawn.hpp>
+#include <vthost/KnownDaemons.hpp>
 
 namespace core::net
 {
 class EventLoop;
+}
+
+namespace vthost::client
+{
+class IClientKeySource;
 }
 
 namespace vthost
@@ -106,14 +112,6 @@ namespace detail
     return TransportRetry::Permanent;
 }
 
-/// Whether a transport proves who is at the other end, before a client sends it a token.
-enum class PeerTrust : uint8_t
-{
-    Unverified = 0, ///< Encrypted, but the peer is not authenticated: TLS without a trust anchor.
-    Verified,       ///< The peer proved its identity: TLS against a pinned CA, or ssh's host key.
-    Local,          ///< This machine's socket, gated by its owner and permissions.
-};
-
 /// One open connection to a daemon.
 struct Connection
 {
@@ -122,6 +120,9 @@ struct Connection
     std::shared_ptr<void> lifetime;
     std::unique_ptr<core::net::ISocket> socket; ///< The ready, connected (and, over TCP, encrypted) socket.
     std::string token;                          ///< The ClientHello token; empty for unix and ssh.
+    /// What signs this client's answer to the daemon's AuthChallenge; null where the transport has none to
+    /// offer (unix and ssh are not challenged). Shared with the factory that opened the connection.
+    std::shared_ptr<client::IClientKeySource> keySource = {};
 };
 
 /// Opens connections to one daemon.
@@ -138,11 +139,6 @@ class ITransportFactory
 
     /// @return Where this factory connects to, for log lines and failure messages.
     [[nodiscard]] virtual std::string describe() const = 0;
-
-    /// @return How far the peer is trusted, known before connecting: Local for this machine's socket,
-    ///         Verified for an authenticated peer, Unverified otherwise. A control client refuses an
-    ///         Unverified transport, as an active man-in-the-middle would take its token.
-    [[nodiscard]] virtual PeerTrust peerTrust() const noexcept = 0;
 
     /// Holds back starting a daemon until @p until: the daemon announced that it replaces itself in place
     /// (DaemonUpgrading), so its absence meanwhile is a gap to wait out, and a daemon started into it would
@@ -191,9 +187,6 @@ class UnixTransportFactory final: public ITransportFactory
     /// @return `unix:<socketPath>`.
     [[nodiscard]] std::string describe() const override;
 
-    /// @return Local: the socket's owner check is the gate.
-    [[nodiscard]] PeerTrust peerTrust() const noexcept override { return PeerTrust::Local; }
-
     /// Skips @c ensureDaemon in every attempt made before @p until, on the attempt's loop clock. Any thread.
     void holdDaemonStart(core::platform::SteadyTimePoint until) override;
 
@@ -233,13 +226,27 @@ class UnixTransportFactory final: public ITransportFactory
     std::vector<EnsureWorker> _workers;
 };
 
-/// A daemon over TCP, always TLS-encrypted, authenticated by the endpoint's token.
+/// A daemon over TCP, always TLS-encrypted. It authenticates itself by a CA the endpoint pins or by the
+/// fingerprint of its certificate, pinned on first use; the client authenticates by the endpoint's token or
+/// by an SSH key.
 class TlsTransportFactory final: public ITransportFactory
 {
   public:
-    /// @param endpoint Where the daemon listens, its token, and the CA pinning its certificate (empty for
-    ///        trust on first use).
-    explicit TlsTransportFactory(TcpEndpoint endpoint);
+    /// @param endpoint Where the daemon listens, its token, the CA pinning its certificate (empty for the
+    ///        fingerprint to decide) and the fingerprint the user was told out of band, if any.
+    /// @param knownDaemons The fingerprints pinned so far, and where a new one is kept. Must outlive the
+    ///        factory.
+    /// @param pinPrompt Asks the user to pin a daemon met for the first time; null when there is no one to
+    ///        ask, which makes such a daemon acceptable only by its @c TcpEndpoint::expectedFingerprint.
+    /// @param keySourceProvider Makes, on each attempt's loop, what signs the answers to the daemon's
+    ///        AuthChallenge; empty for a client that has no key. A provider rather than a source, as a source
+    ///        holds sockets and children that belong to the loop of the attempt, which a headless verb makes
+    ///        only when it runs.
+    TlsTransportFactory(
+        TcpEndpoint endpoint,
+        KnownDaemons& knownDaemons,
+        std::shared_ptr<IPinPrompt> pinPrompt,
+        std::function<std::shared_ptr<client::IClientKeySource>(core::net::EventLoop&)> keySourceProvider);
 
     [[nodiscard]] core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> connect(
         core::net::EventLoop& loop) override;
@@ -247,18 +254,58 @@ class TlsTransportFactory final: public ITransportFactory
     /// @return `tls://host:port`.
     [[nodiscard]] std::string describe() const override;
 
-    /// @return Verified when the endpoint pins a CA, else Unverified (trust on first use encrypts only).
-    [[nodiscard]] PeerTrust peerTrust() const noexcept override
-    {
-        return _endpoint.caPem.empty() ? PeerTrust::Unverified : PeerTrust::Verified;
-    }
-
   private:
+    /// How a daemon's certificate came to be trusted.
+    enum class TrustBasis : uint8_t
+    {
+        Known = 0, ///< A CA, the fingerprint the user gave, a pin, or what the user trusted a moment ago.
+        Prompted,  ///< The user was asked, said yes, and the daemon was pinned just now.
+    };
+
+    /// One TCP connect and TLS handshake, then the decision on whom it reached.
+    struct Dialled
+    {
+        std::expected<std::unique_ptr<Connection>, TransportError> connection;
+        /// What the user was just asked about and trusted; empty when nobody was asked.
+        std::string promptedFingerprint {};
+    };
+
     /// The connect itself: a coroutine takes the loop by pointer, as its reference would outlive the call.
+    ///
+    /// A daemon the user had to be asked about is dialled a second time once it is trusted: the first
+    /// connection waited for the answer, perhaps longer than the daemon lets a connection wait to sign in,
+    /// and the second is made with the pin in place, with nothing left to ask.
     [[nodiscard]] core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> connectOn(
         core::net::EventLoop* loop);
 
+    /// Dials once.
+    /// @param loop The loop the connection runs on.
+    /// @param trusted The fingerprint the user trusted on an earlier dial of this connect, if any; kept in
+    ///        memory, so that a pin removed meanwhile (`forget-pin` from elsewhere) does not have the user
+    ///        asked again.
+    [[nodiscard]] core::async::Task<Dialled> dial(core::net::EventLoop* loop, std::string trusted);
+
+    /// The TCP connect and the TLS handshake.
+    [[nodiscard]] core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, TransportError>>
+    handshaken(core::net::EventLoop* loop);
+
+    /// Decides whether to trust the daemon whose certificate has @p fingerprint, pinning it when that is
+    /// the decision. A pin store that cannot be read refuses (Misconfigured), naming the file, and so does
+    /// one that cannot keep the pin of a daemon the user was asked about; a pin given by @c
+    /// expectedFingerprint that cannot be kept is logged, and the connection goes on, as ssh does.
+    /// @param fingerprint What the daemon presents.
+    /// @param trusted What the user trusted on an earlier dial of this connect; empty for none.
+    /// @return How it came to be trusted, else why not.
+    [[nodiscard]] core::async::Task<std::expected<TrustBasis, TransportError>> decideTrust(
+        std::string fingerprint, std::string trusted);
+
+    /// @return `host:port`, as pins are keyed.
+    [[nodiscard]] std::string hostPort() const;
+
     TcpEndpoint _endpoint;
+    KnownDaemons& _knownDaemons;
+    std::shared_ptr<IPinPrompt> _pinPrompt;
+    std::function<std::shared_ptr<client::IClientKeySource>(core::net::EventLoop&)> _keySourceProvider;
 };
 
 } // namespace vthost

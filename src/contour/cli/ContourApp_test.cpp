@@ -241,3 +241,54 @@ TEST_CASE("ContourApp: daemon --stdio refuses --listen-tcp", "[contour][cli][dae
         "contour daemon: --stdio relays to a daemon; it cannot be combined with --listen-tcp"));
     CHECK(out.text().empty());
 }
+
+namespace
+{
+
+/// Runs `contour daemon --listen-tcp 127.0.0.1:1 <extra>` against a keys file that does not exist.
+/// @param extra The options under test.
+/// @return What the run wrote to standard error; the run must have refused to start.
+std::string refusedDaemonRun(std::vector<char const*> extra)
+{
+    auto const temp = core::testing::ScopedTempDir { "contour-auth-opts" };
+    auto const socket = core::pathToUtf8(temp.path() / "s" / "control");
+    auto const keys = core::pathToUtf8(temp.path() / "authorized_keys");
+    auto app = contour::cli::ContourApp { core::defaultEnvironment() };
+    auto argv = std::vector<char const*> { "contour",      "daemon",      "--socket",          socket.c_str(),
+                                           "--listen-tcp", "127.0.0.1:1", "--authorized-keys", keys.c_str() };
+    argv.insert(argv.end(), extra.begin(), extra.end());
+    auto const out = StreamCapture { std::cout };
+    auto const err = StreamCapture { std::cerr };
+    REQUIRE(app.run(static_cast<int>(argv.size()), argv.data()) == EXIT_FAILURE);
+    return err.text();
+}
+
+} // namespace
+
+TEST_CASE("ContourApp: --listen-tcp needs a credential", "[contour][cli][daemon]")
+{
+    CHECK(refusedDaemonRun({}).contains("--listen-tcp requires --token"));
+}
+
+TEST_CASE("ContourApp: --auth keys needs a key", "[contour][cli][daemon]")
+{
+    CHECK(refusedDaemonRun({ "--auth", "keys" }).contains("--auth keys needs at least one usable key"));
+}
+
+TEST_CASE("ContourApp: --auth keys refuses --token", "[contour][cli][daemon]")
+{
+    CHECK(refusedDaemonRun({ "--auth", "keys", "--token", "x" })
+              .contains("--auth keys accepts authorized keys alone"));
+}
+
+TEST_CASE("ContourApp: --auth names its choices", "[contour][cli][daemon]")
+{
+    CHECK(refusedDaemonRun({ "--auth", "pw", "--token", "x" }).contains("any, keys"));
+}
+
+TEST_CASE("ContourApp: --auth keys is refused before any token file is read", "[contour][cli][daemon]")
+{
+    auto const err = refusedDaemonRun({ "--auth", "keys", "--access-file", "/nonexistent/access" });
+    CHECK(err.contains("--auth keys accepts authorized keys alone"));
+    CHECK_FALSE(err.contains("cannot read"));
+}

@@ -175,7 +175,7 @@ namespace
                        // a block of the user's configuration, and a trace is not a config dump.
                        return std::format(
                            "versions={} caps={} token={} settings={} role={} area={} intent={} workspace={} "
-                           "profile=\"{}\"{}{}{}",
+                           "profile=\"{}\"{}{}{}{}",
                            formatRange(value.versions),
                            formatCapabilities(value.capabilities),
                            value.token.empty() ? "no" : "yes",
@@ -195,7 +195,9 @@ namespace
                                                                                                 : "light"),
                            formatCell(value.cellPixelSize),
                            // A path names the user's files: its presence only, and only when stated.
-                           value.workingDirectory.empty() ? std::string {} : std::string { " cwd=yes" });
+                           value.workingDirectory.empty() ? std::string {} : std::string { " cwd=yes" },
+                           // The signature is never transcribed: only that one was sent.
+                           value.keyProof ? std::string { " key-proof=yes" } : std::string {});
                    } },
         TraceRow { PduType::ServerHello,
                    "ServerHello",
@@ -638,6 +640,12 @@ namespace
                                           value.notifications.empty()
                                               ? std::string {}
                                               : std::format(" notifications={}", value.notifications.size()));
+                   } },
+        TraceRow { PduType::AuthChallenge,
+                   "AuthChallenge",
+                   +[](DecodedPdu const& pdu) {
+                       // The nonce is public (it travels in the clear inside TLS) but says nothing useful.
+                       return std::format("methods={:#04b}", std::get<AuthChallenge>(pdu).methods);
                    } },
     };
 

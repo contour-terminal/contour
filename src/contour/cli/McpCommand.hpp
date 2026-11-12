@@ -18,7 +18,8 @@ namespace contour::cli
 {
 
 /// The options of `contour mcp`, beside the connection options every control verb takes.
-/// @return Five options: `--allow-all-tabs`, `--read-only`, `--daemon`, `--token-file` and `--tls-ca`.
+/// @return Six options: `--allow-all-tabs`, `--read-only`, `--daemon`, `--token-file`, `--tls-ca` and
+///         `--daemon-fingerprint`.
 [[nodiscard]] core::cli::OptionList mcpOptions();
 
 /// Builds the server's options from the command line and the environment.

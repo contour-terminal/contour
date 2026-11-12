@@ -22,6 +22,9 @@ namespace
     /// What a window says when a switch did not get there, in Attach to Host's words: {} is where, then why.
     constexpr auto SwitchFailedText = std::string_view { "Could not switch to {}: {}." };
 
+    /// What a window says when the user declined a question a switch asked: the window stays as it was.
+    constexpr auto SwitchDeclinedText = std::string_view { "Did not switch to {}: {}." };
+
     /// Why a switch whose target did not show within its deadline failed.
     constexpr auto SwitchTimedOut = std::string_view { "it did not show the workspace in time" };
 
@@ -162,8 +165,10 @@ void WindowSwitcher::request(vtworkspace::WorkspaceId window,
                       if (!self)
                           return;
                       auto& switcher = **self;
-                      if (!listed)
-                          switcher.fail(request, listed.error());
+                      if (!listed && listed.error().kind == ListFailureKind::Declined)
+                          switcher.decline(request, listed.error().reason);
+                      else if (!listed)
+                          switcher.fail(request, listed.error().reason);
                       else
                           switcher.resolveListed(std::move(request), *listed);
                   });
@@ -215,7 +220,7 @@ void WindowSwitcher::listWorkspaces(vtworkspace::WorkspaceId window,
                           return;
                       if (!listed)
                       {
-                          done(std::unexpected(listed.error()));
+                          done(std::unexpected(listed.error().reason));
                           return;
                       }
                       auto& switcher = **self;
@@ -449,6 +454,21 @@ void WindowSwitcher::fail(Request const& request, std::string const& reason)
     errorLog()("switch: {}", text);
     if (auto* const controller = _sessions.controllerDisplaying(request.window))
         controller->notices().post(window::Notice { .kind = window::NoticeKind::SwitchFailed, .text = text });
+    request.done(std::unexpected(reason));
+}
+
+void WindowSwitcher::decline(Request const& request, std::string const& reason)
+{
+    _busy.erase(request.window.value);
+    auto const text =
+        std::format(SwitchDeclinedText,
+                    session::daemonPhrase(request.address.kind, request.address.name, "this daemon"),
+                    reason);
+    // The user's own answer, not a fault: logged as the switch's other outcomes are, and said without alarm.
+    attachLog()("switch: {}", text);
+    if (auto* const controller = _sessions.controllerDisplaying(request.window))
+        controller->notices().post(
+            window::Notice { .kind = window::NoticeKind::SwitchDeclined, .text = text });
     request.done(std::unexpected(reason));
 }
 

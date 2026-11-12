@@ -8,6 +8,7 @@
 #include <contour/askpass/AskpassPromptRouter.hpp>
 #include <contour/askpass/AskpassPromptSink.hpp>
 
+#include <core/Random.hpp>
 #include <core/platform/Clock.hpp>
 
 #include <QtCore/QObject>
@@ -18,6 +19,7 @@
 #include <chrono>
 #include <cstddef>
 #include <expected>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -59,10 +61,13 @@ class AskpassBroker final: public QObject, public vthost::IAskpassBroker
     ///        window's sink has to outlive the other. Asked on the thread this object is made on, which must
     ///        run an event loop for any prompt to be asked.
     /// @param executablePath The program ssh runs as its askpass helper: this application's own.
+    /// @param random Where each session's nonce and endpoint name come from; borrowed. Called from whichever
+    ///        thread open() is.
     /// @param clock Measures how long prompts stay open; borrowed.
     /// @param config How the servers are set up.
     AskpassBroker(std::shared_ptr<AskpassPromptRouter> router,
                   QString executablePath,
+                  core::IRandom& random,
                   core::platform::IClock const& clock = core::platform::defaultSteadyClock(),
                   AskpassBrokerConfig config = {});
 
@@ -71,10 +76,13 @@ class AskpassBroker final: public QObject, public vthost::IAskpassBroker
     /// @param sink Shows the prompts; borrowed, until the broker's shutdown() or destruction. May be gone
     ///        before the broker is, once shutdown() ran.
     /// @param executablePath The program ssh runs as its askpass helper: this application's own.
+    /// @param random Where each session's nonce and endpoint name come from; borrowed. Called from whichever
+    ///        thread open() is.
     /// @param clock Measures how long prompts stay open; borrowed.
     /// @param config How the servers are set up.
     AskpassBroker(IAskpassPromptSink& sink,
                   QString executablePath,
+                  core::IRandom& random,
                   core::platform::IClock const& clock = core::platform::defaultSteadyClock(),
                   AskpassBrokerConfig config = {});
     ~AskpassBroker() override;
@@ -88,6 +96,10 @@ class AskpassBroker final: public QObject, public vthost::IAskpassBroker
     /// cancelled. GUI thread. Call before the windows' sinks go; the broker itself may outlive them, as the
     /// transport factories hold it too.
     void shutdown();
+
+    /// @return An id no prompt of this broker has, for a prompt the application asks itself (the router holds
+    ///         every prompt by its id). Any thread.
+    [[nodiscard]] AskpassPromptId nextPromptId() noexcept { return ++_lastPromptId; }
 
     /// @copydoc vthost::IAskpassBroker::open
     /// The prompts go to whichever window comes first (AnyWindow).
@@ -106,6 +118,7 @@ class AskpassBroker final: public QObject, public vthost::IAskpassBroker
     QString _executablePath;
     core::platform::IClock const& _clock;
     AskpassBrokerConfig _config;
+    core::IRandom& _random;
     /// Where the broker's life stands.
     enum class State : std::uint8_t
     {

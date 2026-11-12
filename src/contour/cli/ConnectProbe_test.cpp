@@ -181,10 +181,6 @@ class WedgedTransport final: public vthost::ITransportFactory
     }
 
     [[nodiscard]] std::string describe() const override { return "wedged"; }
-    [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override
-    {
-        return vthost::PeerTrust::Verified;
-    }
 
   private:
     /// The coroutine behind connect(), which takes the loop by pointer: a coroutine's parameters outlive

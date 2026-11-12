@@ -26,10 +26,12 @@
 #include <vector>
 
 #include <vthost/DaemonBinary.hpp>
+#include <vthost/KnownDaemons.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
 #include <vthost/handover/UpgradeError.hpp>
 #include <vthost/proto/Negotiation.hpp>
+#include <vthost/testing/CountingRandom.hpp>
 #include <vthost/testing/RecordingDurableFiles.hpp>
 #include <vthost/testing/RecordingFilePrivacy.hpp>
 
@@ -765,6 +767,16 @@ TEST_CASE("daemon upgrade names the release the daemon serves, not the one it wa
     CHECK_FALSE(out.str().contains("2.0.0"));
 }
 
+TEST_CASE("status shows the TLS fingerprint only for a daemon that has one", "[contour][cli][daemon]")
+{
+    auto status = sampleStatus();
+    CHECK_FALSE(contour::cli::formatDaemonStatus(status).contains("TLS fingerprint:"));
+    status.tlsFingerprint = "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU";
+    auto const text = contour::cli::formatDaemonStatus(status);
+    CHECK(text.contains("TLS fingerprint:"));
+    CHECK(text.contains("SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU"));
+}
+
 TEST_CASE("status names the upgrade generation and the last failed upgrade", "[contour][cli][daemon]")
 {
     auto status = sampleStatus();
@@ -922,4 +934,63 @@ TEST_CASE("daemon relocate finds the label sockets of a socket directory", "[con
     CHECK(contour::cli::daemonSocketsIn(files, "/run/c")
           == std::vector<std::filesystem::path> { "/run/c/default", "/run/c/work" });
     CHECK(contour::cli::daemonSocketsIn(files, "/run/missing").empty());
+}
+
+TEST_CASE("forget-pin removes the pin of one daemon", "[contour][cli][daemon]")
+{
+    auto files = core::platform::testing::InMemoryFileSystem {};
+    auto random = vthost::testing::CountingRandom {};
+    auto known = vthost::KnownDaemons { files, "/state/known_daemons", random };
+    REQUIRE(known.pin("studio:7297", "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU"));
+    REQUIRE(known.pin("build:7297", "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU"));
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    auto const words = std::vector<std::string_view> { "studio:7297" };
+
+    CHECK(contour::cli::daemonForgetPinVerb(known, words, out, err) == contour::cli::ExitStatus::Ok);
+    CHECK(out.str().contains("studio:7297"));
+    CHECK(known.pinOf("studio:7297") == std::nullopt);
+    CHECK(known.pinOf("build:7297").value().has_value());
+
+    // Nothing left to forget is said, not silently accepted.
+    CHECK(contour::cli::daemonForgetPinVerb(known, words, out, err) == contour::cli::ExitStatus::BadUsage);
+    CHECK(err.str().contains("no daemon is pinned for studio:7297"));
+}
+
+TEST_CASE("forget-pin finds an IPv6 daemon however its address is spelled", "[contour][cli][daemon]")
+{
+    auto files = core::platform::testing::InMemoryFileSystem {};
+    auto random = vthost::testing::CountingRandom {};
+    auto known = vthost::KnownDaemons { files, "/state/known_daemons", random };
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    constexpr auto Pin = "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU";
+
+    // As the transport pins it: bracketed.
+    REQUIRE(known.pin(vthost::pinKey("::1", 7297), Pin));
+    auto const bracketed = std::vector<std::string_view> { "[::1]:7297" };
+    CHECK(contour::cli::daemonForgetPinVerb(known, bracketed, out, err) == contour::cli::ExitStatus::Ok);
+    CHECK(out.str().contains("[::1]:7297"));
+    CHECK(known.pinOf("[::1]:7297") == std::nullopt);
+
+    REQUIRE(known.pin(vthost::pinKey("::1", 7297), Pin));
+    auto const bare = std::vector<std::string_view> { "::1:7297" };
+    CHECK(contour::cli::daemonForgetPinVerb(known, bare, out, err) == contour::cli::ExitStatus::Ok);
+    CHECK(known.pinOf("[::1]:7297") == std::nullopt);
+}
+
+TEST_CASE("forget-pin wants exactly one HOST:PORT", "[contour][cli][daemon]")
+{
+    auto files = core::platform::testing::InMemoryFileSystem {};
+    auto random = vthost::testing::CountingRandom {};
+    auto known = vthost::KnownDaemons { files, "/state/known_daemons", random };
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+
+    CHECK(contour::cli::daemonForgetPinVerb(known, {}, out, err) == contour::cli::ExitStatus::BadUsage);
+    auto const two = std::vector<std::string_view> { "a:1", "b:2" };
+    CHECK(contour::cli::daemonForgetPinVerb(known, two, out, err) == contour::cli::ExitStatus::BadUsage);
+    auto const bad = std::vector<std::string_view> { "not-a-host-port" };
+    CHECK(contour::cli::daemonForgetPinVerb(known, bad, out, err) == contour::cli::ExitStatus::BadUsage);
+    CHECK(out.str().empty());
 }

@@ -10,6 +10,8 @@
     #include <vtpty/Win32Handle.hpp>
 
     #include <format>
+    #include <fstream>
+    #include <iterator>
     #include <vector>
 
     #include <vthost/FilePrivacy.hpp>
@@ -55,6 +57,22 @@ std::expected<void, std::string> NativeFilePrivacy::restrictToOwner(std::filesys
     if (status != ERROR_SUCCESS)
         return std::unexpected(std::format("cannot restrict {}: error {}", path.string(), status));
     return {};
+}
+
+std::expected<std::string, std::string> NativeFilePrivacy::readPrivateFile(
+    std::filesystem::path const& path) const
+{
+    // Read as it is: the owner and DACL are not checked on Windows. Under %LOCALAPPDATA%, the user's alone, a
+    // file restrictToOwner() made private stays so. Under the temporary fallback (no %LOCALAPPDATA%, see
+    // StateDirectoryOrigin) another local user could have planted it, and nothing here detects that.
+    auto stream = std::ifstream { path, std::ios::binary };
+    if (!stream)
+        return std::unexpected(std::format("cannot open '{}'", path.string()));
+    auto content =
+        std::string { std::istreambuf_iterator<char> { stream }, std::istreambuf_iterator<char> {} };
+    if (stream.bad())
+        return std::unexpected(std::format("cannot read '{}'", path.string()));
+    return content;
 }
 
 } // namespace vthost

@@ -13,6 +13,7 @@
 #include <contour/cli/Hosting.hpp>
 #include <contour/cli/McpCommand.hpp>
 #include <contour/cli/ShellIntegration.hpp>
+#include <contour/cli/TerminalPinPrompt.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
 
@@ -31,6 +32,7 @@
 #include <crispy/StackTrace.hpp>
 
 #include <core/Base64.hpp>
+#include <core/Random.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/async/StopToken.hpp>
@@ -38,6 +40,7 @@
 #include <core/cli/App.hpp>
 #include <core/cli/CLI.hpp>
 #include <core/log/LogSink.hpp>
+#include <core/net/SshAgentEndpoint.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 
@@ -79,13 +82,16 @@
     #include <vthost/DaemonExtensions.hpp>
 #endif
 #include <vthost/AccessFile.hpp>
+#include <vthost/AuthorizedKeys.hpp>
 #include <vthost/CommandRunner.hpp>
 #include <vthost/Daemon.hpp>
 #include <vthost/DaemonBinary.hpp>
+#include <vthost/DaemonIdentity.hpp>
 #include <vthost/DaemonImage.hpp>
 #include <vthost/DaemonSpawn.hpp>
 #include <vthost/DaemonStarter.hpp>
 #include <vthost/FilePrivacy.hpp>
+#include <vthost/KnownDaemons.hpp>
 #include <vthost/Linger.hpp>
 #include <vthost/PlatformStreams.hpp>
 #include <vthost/ServiceControl.hpp>
@@ -98,6 +104,7 @@
 #include <vthost/Token.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
+#include <vthost/client/KeySource.hpp>
 #include <vthost/handover/HandoverMemory.hpp>
 #include <vthost/handover/ImageHandoff.hpp>
 #include <vthost/handover/ImageReceiver.hpp>
@@ -304,8 +311,9 @@ namespace
         namespace CLI = core::cli;
         using contour::cli::DaemonVerb;
 
-        // It looks in the one directory every label's socket lies in, and takes no socket or label.
-        if (verb == DaemonVerb::Relocate)
+        // It looks in the one directory every label's socket lies in, and takes no socket or label; a pin is
+        // of a TCP daemon, and has neither.
+        if (verb == DaemonVerb::Relocate || verb == DaemonVerb::ForgetPin)
             return {};
         auto options = CLI::OptionList {
             CLI::Option { "label",
@@ -353,6 +361,7 @@ namespace
             case DaemonVerb::Run:
             case DaemonVerb::Status:
             case DaemonVerb::Relocate:
+            case DaemonVerb::ForgetPin:
             case DaemonVerb::Upgrade: break;
         }
         return options;
@@ -365,7 +374,13 @@ namespace
         auto commands = core::cli::CommandList {};
         for (auto const& row: contour::cli::DaemonSubVerbs)
             commands.emplace_back(core::cli::Command {
-                .name = row.name, .helpText = row.helpText, .options = daemonVerbOptions(row.verb) });
+                .name = row.name,
+                .helpText = row.helpText,
+                .options = daemonVerbOptions(row.verb),
+                .verbatim = row.verb == contour::cli::DaemonVerb::ForgetPin
+                                ? std::optional { core::cli::Verbatim {
+                                      "HOST:PORT", "The daemon whose pin is forgotten." } }
+                                : std::nullopt });
         return commands;
     }
 
@@ -1479,7 +1494,7 @@ int ContourApp::daemonAction()
     config.defaultCellPixelSize = daemonSettings.defaultCellPixelSize;
 
     // A handed-over daemon serves no TCP at all rather than one it cannot authenticate as asked.
-    if (auto nativeTcp = nativeTcpOption())
+    if (auto nativeTcp = nativeTcpOption(daemonLabel))
         config.nativeTcp = *std::move(nativeTcp);
     else if (auto const refused =
                  failures.fail(std::format("the TCP listener is not served: {}", nativeTcp.error()));
@@ -1547,7 +1562,8 @@ int ContourApp::daemonAction()
     return vthost::runDaemon(config, std::move(handover));
 }
 
-std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string> ContourApp::nativeTcpOption()
+std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string> ContourApp::nativeTcpOption(
+    std::string_view daemonLabel)
 {
     // Opt-in TCP listener: absent unless --listen-tcp is given; always TLS-encrypted
     // (self-signed when no cert/key), token-authenticated, loopback-bound unless the
@@ -1557,14 +1573,28 @@ std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string> Conto
     {
         // Its tokens are only ever asked for over TCP: accepting the option alone would read as
         // narrowing a listener that does not exist.
-        if (!parameters().get<string>("contour.daemon.access-file").empty())
-            return std::unexpected { std::string { "--access-file needs --listen-tcp" } };
+        for (auto const option: { "access-file", "authorized-keys", "auth" })
+            if (!parameters().get<string>(std::format("contour.daemon.{}", option)).empty())
+                return std::unexpected { std::format("--{} needs --listen-tcp", option) };
         return std::nullopt;
     }
 
-    auto const hostPort = vthost::parseHostPort(listen);
+    auto const hostPort = vthost::parseListenSpec(listen);
     if (!hostPort)
         return std::unexpected { std::format("invalid --listen-tcp '{}' (expected HOST:PORT)", listen) };
+
+    // Refused before any file is read, so that the user is told what to remove rather than that a file
+    // it conflicts with cannot be read.
+    auto const auth = vthost::parseDaemonAuth(parameters().get<string>("contour.daemon.auth"));
+    if (!auth)
+        return std::unexpected { auth.error() };
+    auto const tokenOptionsGiven = static_cast<std::size_t>(
+        std::ranges::count(std::array { !parameters().get<string>("contour.daemon.token").empty(),
+                                        !parameters().get<string>("contour.daemon.token-file").empty(),
+                                        !parameters().get<string>("contour.daemon.access-file").empty() },
+                           true));
+    if (auto const refused = vthost::checkAuthOptions(*auth, tokenOptionsGiven); !refused)
+        return std::unexpected { refused.error() };
 
     auto token = vthost::resolveToken(parameters().get<string>("contour.daemon.token"),
                                       parameters().get<string>("contour.daemon.token-file"));
@@ -1583,15 +1613,44 @@ std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string> Conto
             return std::unexpected { read.error() };
         accessTokens = *std::move(read);
     }
+    // The keys that may log in by signature, beside the tokens or instead of them. A line that cannot be
+    // used is said so with its number and reason, never read with part of it ignored.
+    auto const keysOption = parameters().get<string>("contour.daemon.authorized-keys");
+    auto keysPath = config::configHome() / "authorized_keys";
+    if (!keysOption.empty())
+    {
+        auto const given = core::pathFromUtf8(keysOption);
+        if (!given)
+            return std::unexpected { std::format(
+                "--authorized-keys '{}' is not a valid path: {}", keysOption, given.error().message()) };
+        keysPath = *given;
+    }
+    auto keys = vthost::readAuthorizedKeys(core::platform::NativeFileSystem::instance(), keysPath);
+    if (!keys)
+        return std::unexpected { keys.error() };
+    for (auto const& skipped: keys->skipped)
+        errorLog()("authorized keys '{}' line {}: skipped, {}",
+                   core::pathToUtf8(keysPath),
+                   skipped.lineNumber,
+                   skipped.reason);
+
     // A token is REQUIRED here, not merely supported. On the unix socket the filesystem
-    // permissions are the gate; TCP has no such gate, so serving it without a token would
+    // permissions are the gate; TCP has no such gate, so serving it without a credential would
     // hand a full shell to anyone who can reach the port. Refusing to start is the only safe
-    // reading of `--listen-tcp` with no credential — a warning would be dismissed once and
-    // then run that way forever.
-    if (token->empty() && accessTokens.empty())
-        return std::unexpected { std::string {
-            "--listen-tcp requires --token, --token-file or a non-empty --access-file; the TCP transport "
-            "has no filesystem permissions to fall back on." } };
+    // reading of `--listen-tcp` with none -- a warning would be dismissed once and then run that way
+    // forever.
+    if (auto const checked = vthost::checkListenerCredentials(
+            vthost::ListenerCredentials { .auth = *auth,
+                                          .tokenOptionsGiven = tokenOptionsGiven,
+                                          .tokens = accessTokens.size() + (token->empty() ? 0u : 1u),
+                                          .authorizedKeys = keys->keys.size() });
+        !checked)
+        return std::unexpected { checked.error() };
+
+    auto const identityFile =
+        vthost::daemonIdentityPath(vthost::daemonStateDirectory(processEnvironment()), daemonLabel);
+    if (!identityFile)
+        return std::unexpected { std::format("the label '{}' names no TLS identity file", daemonLabel) };
 
     return vthost::NativeTcpListenerConfig {
         .host = hostPort->first,
@@ -1600,6 +1659,9 @@ std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string> Conto
         .accessTokens = std::move(accessTokens),
         .tlsCertPath = parameters().get<string>("contour.daemon.tls-cert"),
         .tlsKeyPath = parameters().get<string>("contour.daemon.tls-key"),
+        .authorizedKeys = std::move(keys->keys),
+        .auth = *auth,
+        .identityFile = *identityFile,
     };
 }
 
@@ -1749,6 +1811,62 @@ int ContourApp::agentSetupAction()
     return exitCode(ExitStatus::Ok);
 }
 
+namespace
+{
+    /// What a headless verb reaches a remote daemon with: the CLI has no window to prompt in, so ssh runs in
+    /// batch mode, a first contact with a TLS daemon needs `--daemon-fingerprint`, and the agent's keys sign
+    /// in.
+    struct RemoteDaemons
+    {
+        /// @param env Where the agent's endpoint is read from.
+        /// @param fileSystem Where pins and key files are read and written.
+        /// @param sshSearchPath The PATH ssh is looked up on; viewed, and so must outlive this.
+        /// @param attendance Whether a first contact with a `HOST:PORT` daemon may be asked about on the
+        ///        terminal (standard input and @p err).
+        /// @param err Where that question is written; borrowed.
+        RemoteDaemons(core::Environment const& env,
+                      core::platform::FileSystem& fileSystem,
+                      std::string const& sshSearchPath,
+                      TerminalAttendance attendance,
+                      std::ostream& err):
+            fileSystem(fileSystem),
+            knownDaemons(fileSystem, vthost::knownDaemonsPath(config::configHome()), core::systemRandom()),
+            pinPrompt(makeTerminalPinPrompt(attendance, core::platform::standardInput(), err)),
+            sshAgentEndpoint(core::net::defaultSshAgentEndpoint(env)),
+            spawner(vthost::makeSystemStdioSpawner(vtpty::ProgramSearch {
+                .path = sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem }))
+        {
+        }
+
+        /// @return The resolver of `--daemon NAME` and `--daemon ssh://...`.
+        [[nodiscard]] vthost::client::SavedHostResolver savedHostResolver()
+        {
+            return makeSavedHostResolver(
+                [](std::string_view nameOrUrl) { return config::resolveHost(std::string {}, nameOrUrl); },
+                fileSystem,
+                spawner,
+                SshPrompting { .broker = nullptr, .probe = std::make_shared<vthost::SshVersionProbe>() },
+                TlsTrust { .knownDaemons = &knownDaemons,
+                           .pinPrompt = pinPrompt,
+                           .daemonFingerprint = {},
+                           .sshAgentEndpoint = sshAgentEndpoint });
+        }
+
+        /// @return What signs the key proof of a `HOST:PORT` daemon: the agent's keys.
+        [[nodiscard]] vthost::client::ClientKeySourceProvider keySourceProvider() const
+        {
+            return vthost::client::makeClientKeySourceProvider(
+                sshAgentEndpoint, spawner, nullptr, fileSystem, {}, {});
+        }
+
+        core::platform::FileSystem& fileSystem;
+        vthost::KnownDaemons knownDaemons;
+        std::shared_ptr<vthost::IPinPrompt> pinPrompt; ///< Null where nobody can be asked.
+        std::string sshAgentEndpoint;
+        std::shared_ptr<vthost::IStdioSpawner> spawner;
+    };
+} // namespace
+
 int ContourApp::controlVerbAction(ControlVerb const& verb)
 {
 #ifdef _WIN32
@@ -1764,13 +1882,9 @@ int ContourApp::controlVerbAction(ControlVerb const& verb)
     // Viewed by the spawner, so it lives as long as the call.
     auto const sshSearchPath = vtpty::execSearchPath(processEnvironment().get("PATH"));
     auto& fileSystem = core::platform::NativeFileSystem::instance();
-    auto resolveSavedHost = makeSavedHostResolver(
-        [](std::string_view nameOrUrl) { return config::resolveHost(std::string {}, nameOrUrl); },
-        fileSystem,
-        vthost::makeSystemStdioSpawner(
-            vtpty::ProgramSearch { .path = sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem }),
-        // The CLI has no window to prompt in: batch mode.
-        SshPrompting { .broker = nullptr, .probe = std::make_shared<vthost::SshVersionProbe>() });
+    auto remote =
+        RemoteDaemons { processEnvironment(), fileSystem, sshSearchPath, currentTerminalAttendance(), cerr };
+    auto resolveSavedHost = remote.savedHostResolver();
     return runControlVerb(verb,
                           parameters(),
                           ControlIo { .env = processEnvironment(),
@@ -1781,7 +1895,10 @@ int ContourApp::controlVerbAction(ControlVerb const& verb)
                                       .clock = wallClock,
                                       .target = target,
                                       .stop = interrupt ? interrupt->token() : core::async::StopToken {},
-                                      .resolveSavedHost = std::move(resolveSavedHost) });
+                                      .resolveSavedHost = std::move(resolveSavedHost),
+                                      .knownDaemons = &remote.knownDaemons,
+                                      .pinPrompt = remote.pinPrompt,
+                                      .keySourceProvider = remote.keySourceProvider() });
 }
 
 int ContourApp::mcpAction()
@@ -1789,13 +1906,11 @@ int ContourApp::mcpAction()
     auto const wallClock = core::platform::SystemWallClock {};
     auto& fileSystem = core::platform::NativeFileSystem::instance();
     auto const sshSearchPath = vtpty::execSearchPath(processEnvironment().get("PATH"));
-    auto resolveSavedHost = makeSavedHostResolver(
-        [](std::string_view nameOrUrl) { return config::resolveHost(std::string {}, nameOrUrl); },
-        fileSystem,
-        vthost::makeSystemStdioSpawner(
-            vtpty::ProgramSearch { .path = sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem }),
-        // The CLI has no window to prompt in: batch mode.
-        SshPrompting { .broker = nullptr, .probe = std::make_shared<vthost::SshVersionProbe>() });
+    // Standard input carries the protocol: nobody is asked.
+    auto remote = RemoteDaemons {
+        processEnvironment(), fileSystem, sshSearchPath, TerminalAttendance::Unattended, cerr
+    };
+    auto resolveSavedHost = remote.savedHostResolver();
     // Standard output carries the protocol and nothing else; the diagnostics go to standard error.
     return runMcpCommand(parameters(),
                          ControlIo { .env = processEnvironment(),
@@ -1806,7 +1921,10 @@ int ContourApp::mcpAction()
                                      .clock = wallClock,
                                      .target = OutputTarget::Pipe,
                                      .stop = {},
-                                     .resolveSavedHost = std::move(resolveSavedHost) },
+                                     .resolveSavedHost = std::move(resolveSavedHost),
+                                     .knownDaemons = &remote.knownDaemons,
+                                     .pinPrompt = remote.pinPrompt,
+                                     .keySourceProvider = remote.keySourceProvider() },
                          CONTOUR_VERSION_STRING);
 }
 
@@ -1825,6 +1943,7 @@ namespace
             case contour::cli::DaemonVerb::Status:
             case contour::cli::DaemonVerb::Relocate:
             case contour::cli::DaemonVerb::Logs:
+            case contour::cli::DaemonVerb::ForgetPin:
             case contour::cli::DaemonVerb::HandoverInfo: break;
         }
         return vthost::client::DefaultControlTimeout;
@@ -1848,6 +1967,15 @@ int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
     // Asks no one socket: it looks at every daemon of this user, and takes no option to say which.
     if (verb == DaemonVerb::Relocate)
         return daemonRelocateAction();
+
+    // Asks no daemon either: it edits the file the client keeps its pins in.
+    if (verb == DaemonVerb::ForgetPin)
+    {
+        auto knownDaemons = vthost::KnownDaemons { core::platform::NativeFileSystem::instance(),
+                                                   vthost::knownDaemonsPath(config::configHome()),
+                                                   core::systemRandom() };
+        return exitCode(daemonForgetPinVerb(knownDaemons, parameters().verbatim, cout, cerr));
+    }
 
     // `daemon --socket X status` and `daemon status --socket X` both mean X.
     auto const label = mergeSharedOption("label",
@@ -1922,6 +2050,7 @@ int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
         }
         case DaemonVerb::Run:
         case DaemonVerb::Relocate:
+        case DaemonVerb::ForgetPin:
         case DaemonVerb::HandoverInfo: break;
     }
     return exitCode(ExitStatus::BadUsage);
@@ -2482,7 +2611,9 @@ core::cli::Command ContourApp::parameterDefinition() const
                                   CLI::Value { ""s },
                                   "Also serve the native protocol over TCP at HOST:PORT "
                                   "(opt-in; loopback e.g. 127.0.0.1:9090 by default). Always "
-                                  "TLS-encrypted and token-authenticated.",
+                                  "TLS 1.3-encrypted, with the daemon's persistent identity, whose "
+                                  "fingerprint is logged and shown by `daemon status`; clients "
+                                  "authenticate with a token or an authorized key.",
                                   "HOST:PORT" },
                     CLI::Option { "token",
                                   CLI::Value { ""s },
@@ -2507,6 +2638,21 @@ core::cli::Command ContourApp::parameterDefinition() const
                                   "lines and lines starting with `#` are ignored. The tokens are "
                                   "accepted beside --token, never instead of it, and may not repeat it.",
                                   "FILE" },
+                    CLI::Option { "authorized-keys",
+                                  CLI::Value { ""s },
+                                  "SSH public keys that may log in to the TCP listener by signing a "
+                                  "challenge, in authorized_keys format, one per line: ssh-ed25519, "
+                                  "ecdsa-sha2-nistp256 and their sk- variants. The only option read "
+                                  "is grants=\"LIST\" (as --access-file's grant list); a line with any "
+                                  "other option, or another key type, is skipped and said so. Defaults to "
+                                  "authorized_keys in the configuration directory; absent is empty.",
+                                  "FILE" },
+                    CLI::Option { "auth",
+                                  CLI::Value { ""s },
+                                  "How TCP clients authenticate: `any` (the default) accepts a token, an "
+                                  "access-file entry or an authorized key; `keys` accepts authorized keys "
+                                  "alone and refuses --token, --token-file and --access-file.",
+                                  "any|keys" },
                     CLI::Option { "tls-cert",
                                   CLI::Value { ""s },
                                   "PEM certificate for the TCP listener. When omitted (with "

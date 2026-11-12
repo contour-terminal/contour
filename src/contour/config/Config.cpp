@@ -978,14 +978,13 @@ std::expected<HostEntry, std::string> resolveHost(std::string const& configPath,
         return parseHostUrl(nameOrUrl)
             .transform_error(
                 [&](HostUrlError error) { return std::format("{}: {}", nameOrUrl, describe(error)); })
-            .and_then([](HostUrl url) -> std::expected<HostEntry, std::string> {
-                // A TCP daemon always requires a token, and only a saved host can name its file.
-                if (url.scheme == HostScheme::Tls)
-                    return std::unexpected { std::string {
-                        "a tls:// host needs a token; save it under hosts: with token_file" } };
-                return HostEntry {
-                    .url = std::move(url), .tokenFile = {}, .tlsCa = {}, .remoteCommand = {}, .profile = {}
-                };
+            .transform([](HostUrl url) {
+                return HostEntry { .url = std::move(url),
+                                   .tokenFile = {},
+                                   .tlsCa = {},
+                                   .identityFile = {},
+                                   .remoteCommand = {},
+                                   .profile = {} };
             });
 
     return tryLoadConfigFromFile(configFileNamed(configPath))
@@ -2360,7 +2359,7 @@ std::optional<HostEntry> YAMLConfigReader::parseHostNode(YAML::Node const& hostN
     };
 
     if (!hostNode.IsMap())
-        return skip("expected a map of url, token_file, tls_ca, remote_command and profile");
+        return skip("expected a map of url, token_file, tls_ca, identity_file, remote_command and profile");
     auto const urlText = scalar("url");
     if (!urlText)
         return skip("it has no url");
@@ -2372,13 +2371,10 @@ std::optional<HostEntry> YAMLConfigReader::parseHostNode(YAML::Node const& hostN
         .url = std::move(*url),
         .tokenFile = path("token_file"),
         .tlsCa = path("tls_ca"),
+        .identityFile = path("identity_file"),
         .remoteCommand = scalar("remote_command").value_or(std::string {}),
         .profile = scalar("profile").value_or(std::string {}),
     };
-    if (auto const token = checkHostToken(host.url.scheme, core::pathToUtf8(host.tokenFile)); !token)
-        return skip(describe(token.error()));
-    if (host.url.scheme == HostScheme::Tls && host.tlsCa.empty())
-        errorLog()("Host '{}' has no tls_ca: the daemon's certificate is not verified", name);
     return host;
 }
 

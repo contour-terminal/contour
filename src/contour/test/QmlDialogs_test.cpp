@@ -43,6 +43,7 @@
 #include <QtGui/QDragEnterEvent>
 #include <QtGui/QFont>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPalette>
 #include <QtGui/QTextOption>
@@ -3085,6 +3086,83 @@ TEST_CASE("AskpassDialog: a host key is shown verbatim, selectable, and defaults
     }
 }
 
+TEST_CASE("AskpassDialog: a new daemon's fingerprint is selectable, on one line, and the default is Cancel "
+          "(offscreen)",
+          "[contour][gui][qml][askpass]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto const fingerprint = QStringLiteral("SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU");
+    auto const ask = [&](AskpassHost& host) {
+        host.router->ask(contour::askpass::AnyWindow,
+                         1,
+                         AskpassPromptKind::PinConfirm,
+                         QStringLiteral("studio.example:7297"),
+                         fingerprint,
+                         [&host](AskpassReply reply) { host.replies.push_back(std::move(reply)); });
+        QCoreApplication::processEvents();
+    };
+    SECTION("the block holds the fingerprint alone, whole on one line, and the hint is ordinary text")
+    {
+        auto host = AskpassHost {};
+        ask(host);
+        REQUIRE(host.waitOpened(true));
+        auto* const verbatim = host.part(QStringLiteral("askpassVerbatim"));
+        CHECK(verbatim->property("readOnly").toBool());
+        CHECK(verbatim->property("selectByMouse").toBool());
+        CHECK(verbatim->property("text").toString() == fingerprint);
+        CHECK(verbatim->property("lineCount").toInt() == 1);
+        // No scrollbar is needed: what the block holds is no taller than the block.
+        auto* const scroll = host.part(QStringLiteral("askpassVerbatimScroll"));
+        CHECK(scroll->property("contentHeight").toReal() <= scroll->height());
+        CHECK(verbatim->width() >= verbatim->property("contentWidth").toReal());
+        CHECK(host.part(QStringLiteral("kitDialogMessage"))->property("text").toString()
+              == "Compare with `contour daemon status` on that machine.");
+        CHECK_FALSE(host.part(QStringLiteral("askpassSecret"))->isVisible());
+        CHECK(host.dialog->property("heading").toString() == "Trust the daemon at studio.example:7297?");
+        CHECK(host.part(QStringLiteral("kitDialogAccept"))->property("text").toString() == "Trust");
+        CHECK(host.part(QStringLiteral("kitDialogReject"))->property("text").toString() == "Cancel");
+    }
+    SECTION("Enter takes Cancel")
+    {
+        auto host = AskpassHost {};
+        ask(host);
+        REQUIRE(host.waitOpened(true));
+        // The default button, the one Enter takes, is Cancel.
+        CHECK(host.dialog->property("defaultButton").toInt() == 1);
+        QTest::keyClick(qobject_cast<QWindow*>(host.window.get()), Qt::Key_Return);
+        REQUIRE(host.waitOpened(false));
+        REQUIRE(host.replies.size() == 1);
+        CHECK(host.replies.front().outcome == AskpassOutcome::Cancelled);
+    }
+    SECTION("a repeat of an Enter held since before the dialog appeared answers nothing")
+    {
+        auto host = AskpassHost {};
+        ask(host);
+        REQUIRE(host.waitOpened(true));
+        // What the key that chose the row which opened this dialog sends while it is still held down.
+        auto repeat =
+            QKeyEvent { QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier, QStringLiteral("\r"), true };
+        QCoreApplication::sendEvent(qobject_cast<QWindow*>(host.window.get()), &repeat);
+        QCoreApplication::processEvents();
+        CHECK(host.opened());
+        CHECK(host.replies.empty());
+        // A key struck afresh does answer.
+        QTest::keyClick(qobject_cast<QWindow*>(host.window.get()), Qt::Key_Return);
+        REQUIRE(host.waitOpened(false));
+        REQUIRE(host.replies.size() == 1);
+    }
+    SECTION("Trust answers Answered")
+    {
+        auto host = AskpassHost {};
+        ask(host);
+        REQUIRE(host.waitOpened(true));
+        host.click(QStringLiteral("kitDialogAccept"));
+        REQUIRE(host.replies.size() == 1);
+        CHECK(host.replies.front().outcome == AskpassOutcome::Answered);
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE(
     "AskpassDialog: a question arriving over a notice starts on No, not on the Yes under the old Cancel "
     "(offscreen)",
@@ -3194,7 +3272,7 @@ TEST_CASE(
     auto prompt = std::unique_ptr<contour::window::BootstrapPrompt> {};
     // The application's wiring: a prompt that has nowhere to wait in brings the stand-in up.
     router = std::make_shared<contour::askpass::AskpassPromptRouter>(
-        [&] { prompt = contour::window::BootstrapPrompt::create(router, engine); });
+        [&] { prompt = contour::window::BootstrapPrompt::create(router, engine, {}); });
 
     router->ask(contour::askpass::AnyWindow,
                 1,
@@ -3218,6 +3296,42 @@ TEST_CASE(
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("the stand-in is a titled dialog window, and says when its last prompt is answered (offscreen)",
+          "[contour][gui][qml][askpass][bootstrap]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto replies = std::vector<AskpassReply> {};
+    auto engine = QQmlEngine {};
+    contour::test::installChromeStyle(engine, contour::test::defaultChromeSetup());
+    auto router = std::make_shared<contour::askpass::AskpassPromptRouter>();
+    auto drained = 0;
+    auto prompt = contour::window::BootstrapPrompt::create(router, engine, [&drained] { ++drained; });
+    REQUIRE(prompt != nullptr);
+    auto* const window = qobject_cast<QWindow*>(prompt->window());
+    REQUIRE(window != nullptr);
+    CHECK(window->title() == "Contour");
+
+    router->ask(contour::askpass::AnyWindow,
+                1,
+                AskpassPromptKind::PinConfirm,
+                QStringLiteral("studio.example:7297"),
+                QStringLiteral("SHA256:abc"),
+                [&replies](AskpassReply reply) { replies.push_back(std::move(reply)); });
+    QCoreApplication::processEvents();
+
+    // Named for the question, a dialog window the platform decorates, and not drained while it asks.
+    CHECK(window->title() == "Contour \u2014 Trust the daemon at studio.example:7297?");
+    CHECK(window->flags().testFlag(Qt::WindowTitleHint));
+    CHECK(window->flags().testFlag(Qt::WindowCloseButtonHint));
+    CHECK(drained == 0);
+
+    prompt->host().answerPrompt(1, static_cast<int>(AskpassOutcome::Answered), QString {});
+    REQUIRE(replies.size() == 1);
+    CHECK(replies.front().outcome == AskpassOutcome::Answered);
+    CHECK(drained == 1);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("once a window has a sink of its own the stand-in is left alone (offscreen)",
           "[contour][gui][qml][askpass][bootstrap]")
 {
@@ -3225,7 +3339,7 @@ TEST_CASE("once a window has a sink of its own the stand-in is left alone (offsc
     auto engine = QQmlEngine {};
     contour::test::installChromeStyle(engine, contour::test::defaultChromeSetup());
     auto router = std::make_shared<contour::askpass::AskpassPromptRouter>();
-    auto prompt = contour::window::BootstrapPrompt::create(router, engine);
+    auto prompt = contour::window::BootstrapPrompt::create(router, engine, {});
     REQUIRE(prompt != nullptr);
     auto* const window = qobject_cast<QWindow*>(prompt->window());
     REQUIRE(window != nullptr);
@@ -3252,7 +3366,7 @@ TEST_CASE("the stand-in's end cancels what it holds, so no prompt targets a sink
     auto engine = QQmlEngine {};
     contour::test::installChromeStyle(engine, contour::test::defaultChromeSetup());
     auto router = std::make_shared<contour::askpass::AskpassPromptRouter>();
-    auto prompt = contour::window::BootstrapPrompt::create(router, engine);
+    auto prompt = contour::window::BootstrapPrompt::create(router, engine, {});
     REQUIRE(prompt != nullptr);
     router->ask(contour::askpass::AnyWindow,
                 3,

@@ -46,6 +46,7 @@ enum class NoticeKind : uint8_t
     SwitchFailed,           ///< A window switch did not get there; the window shows what it showed.
     UpgradeFailed,          ///< The UpgradeDaemon action was refused, or the upgrade it started failed.
     WorkspaceRefused,       ///< The NewWorkspace action was refused: the window is attached to a tmux server.
+    SwitchDeclined,         ///< The user declined a question a window switch asked; nothing changed.
 };
 
 /// Where a notice is shown.
@@ -159,6 +160,12 @@ inline constexpr auto NoticeRows = std::array {
                 .duration = std::chrono::milliseconds { 6000 },
                 .action = NoticeAction::None,
                 .actionText = "" },
+    NoticeRow { .kind = NoticeKind::SwitchDeclined,
+                .surface = NoticeSurface::Toast,
+                .glyph = "",
+                .duration = std::chrono::milliseconds { 4000 },
+                .action = NoticeAction::None,
+                .actionText = "" },
 };
 
 static_assert(
@@ -169,7 +176,7 @@ static_assert(
         return true;
     }(),
     "NoticeRows must list every notice kind in enumerator order");
-static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::WorkspaceRefused) + 1U,
+static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::SwitchDeclined) + 1U,
               "NoticeRows must have a row for every notice kind");
 
 /// The row of @p kind.

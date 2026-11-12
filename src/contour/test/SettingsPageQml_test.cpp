@@ -3619,9 +3619,9 @@ TEST_CASE("a host page swaps its SSH and TLS groups with the address, and says w
     fx.settle();
     CHECK_FALSE(groupShown(fx, window::SettingsGroup::HostSsh));
     CHECK(groupShown(fx, window::SettingsGroup::HostTls));
-    CHECK(problemOf(fx, "token_file").toStdString()
-          == config::describe(config::HostEntryError::TokenRequired));
-    CHECK_FALSE(required(fx.byName("attachHostButton")).property("enabled").toBool());
+    // A tls:// host needs nothing beyond its address: a key signs in, and the daemon is pinned on first use.
+    CHECK(problemOf(fx, "token_file").isEmpty());
+    CHECK(required(fx.byName("attachHostButton")).property("enabled").toBool());
 
     // An address the loader refuses says so under it, and nothing is written.
     window.typeOver(required(fx.fieldOf("url")), "starfive:22");
@@ -3629,7 +3629,8 @@ TEST_CASE("a host page swaps its SSH and TLS groups with the address, and says w
     CHECK(problemOf(fx, "url").toStdString() == config::describe(config::HostUrlError::MissingScheme));
     fx.scheduler->fire();
     fx.settle();
-    CHECK(fx.cfg.hosts.value().at("starfive").url.scheme == config::HostScheme::Ssh);
+    // What was saved is the last address the loader takes: the tls:// one.
+    CHECK(fx.cfg.hosts.value().at("starfive").url.scheme == config::HostScheme::Tls);
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 

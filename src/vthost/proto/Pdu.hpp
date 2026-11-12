@@ -23,6 +23,7 @@
 /// std-only types): the codec is shared by the server, the attach client, and
 /// tests without dragging vtbackend into every consumer.
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -97,6 +98,7 @@ enum class PduType : uint8_t
     ReportFocus = 52,
     NotifyRole = 53,
     PaneSummary = 54,
+    AuthChallenge = 55,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -260,6 +262,21 @@ struct AttachIntent
     bool operator==(AttachIntent const&) const = default;
 };
 
+/// The largest key blob a ClientHello's proof may carry: an authenticating client is not yet trusted, so
+/// what it makes the daemon buffer, decode and hash is bounded well below a frame. Ed25519, ECDSA P-256 and
+/// their security-key forms are all a few hundred bytes.
+inline constexpr std::size_t MaxKeyProofKeyBytes = std::size_t { 16 } * 1024;
+/// The largest SSHSIG signature (armored or raw) a ClientHello's proof may carry; one is under a kilobyte.
+inline constexpr std::size_t MaxKeyProofSignatureBytes = std::size_t { 64 } * 1024;
+
+/// A client's proof that it holds an authorized SSH key, bound to one challenge and one TLS session.
+struct KeyProof
+{
+    std::vector<std::byte> publicKey = {}; ///< The key's SSH wire encoding (the blob of a `.pub` line).
+    std::string signature = {};            ///< The SSHSIG signature, namespace `contour-auth`.
+    bool operator==(KeyProof const&) const = default;
+};
+
 /// Client's first PDU: the protocol versions and capabilities it speaks, (for TCP) a preshared auth
 /// token, and optionally the emulation settings it wants the sessions it creates to have. Anything
 /// before it is a protocol error.
@@ -312,7 +329,27 @@ struct ClientHello
     /// already exists nor to a tab the client opens later. Informational like @ref cellPixelSize: a daemon
     /// predating it ignores the field.
     std::string workingDirectory = {};
+    /// The signature answering an AuthChallenge; absent when the client authenticates by token or the
+    /// daemon sent no challenge.
+    std::optional<KeyProof> keyProof = std::nullopt;
     bool operator==(ClientHello const&) const = default;
+};
+
+/// Which ways of proving itself a daemon offers a client, as a bitmask in AuthChallenge::methods.
+enum class AuthMethod : std::uint8_t
+{
+    Token = 0b01, ///< A preshared token in ClientHello::token.
+    Key = 0b10,   ///< A signature by an authorized SSH key in ClientHello::keyProof.
+};
+
+/// Server→client, sent first on a connection whose daemon authenticates by key (the TLS listener). The client
+/// signs `"contour-auth-v1" ‖ nonce ‖ channel binding` (see vthost/KeyAuth.hpp) with its SSH key and answers
+/// with a ClientHello carrying ClientHello::keyProof. A refused proof is answered with a fresh challenge.
+struct AuthChallenge
+{
+    std::array<std::byte, 32> nonce = {}; ///< Random bytes the signature must cover, fresh per challenge.
+    std::uint8_t methods = 0;             ///< The AuthMethod bits the daemon accepts.
+    bool operator==(AuthChallenge const&) const = default;
 };
 
 /// Server's answer to ClientHello: the version it agreed on (0 refuses the client), the range and
@@ -1427,6 +1464,10 @@ struct DaemonStatusReply
     /// counted). Appended after the relocation by a later version, so it is encoded only behind one: nullopt
     /// for a daemon from before it.
     std::optional<uint32_t> workspaces = std::nullopt;
+    /// The `SHA256:...` fingerprint of the certificate the daemon's TCP listener presents. Appended after the
+    /// workspace count by a later version, so it is encoded only behind one: nullopt for a daemon without a
+    /// TCP listener, or from before it.
+    std::optional<std::string> tlsFingerprint = std::nullopt;
     bool operator==(DaemonStatusReply const&) const = default;
 };
 
@@ -1851,7 +1892,8 @@ using DecodedPdu = std::variant<Invalid,
                                 SelectWorkspace,
                                 ReportFocus,
                                 NotifyRole,
-                                PaneSummary>;
+                                PaneSummary,
+                                AuthChallenge>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

@@ -12,7 +12,8 @@ namespace contour::window
 {
 
 std::unique_ptr<BootstrapPrompt> BootstrapPrompt::create(std::shared_ptr<askpass::AskpassPromptRouter> router,
-                                                         QQmlEngine& engine)
+                                                         QQmlEngine& engine,
+                                                         std::function<void()> onDrained)
 {
     // The host first: it takes the prompts that wait, and the window then shows them as it opens.
     auto prompt = std::unique_ptr<BootstrapPrompt> { new BootstrapPrompt { std::move(router) } };
@@ -28,6 +29,13 @@ std::unique_ptr<BootstrapPrompt> BootstrapPrompt::create(std::shared_ptr<askpass
     // Owned by the engine, so it goes with it, before the host it shows.
     created->setParent(&engine);
     prompt->_window = created;
+    // Told once an answer leaves nothing to show; the host is the context, so that the connection goes with
+    // it.
+    auto* const host = &prompt->_host;
+    QObject::connect(host, &PromptHost::pendingPromptChanged, host, [host, onDrained = std::move(onDrained)] {
+        if (host->pendingPrompt().isEmpty() && onDrained)
+            onDrained();
+    });
     return prompt;
 }
 

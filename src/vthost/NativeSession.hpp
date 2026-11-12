@@ -31,13 +31,17 @@
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/Primitives.hpp>
 
+#include <core/Random.hpp>
 #include <core/async/Task.hpp>
+#include <core/net/DeadlineTimer.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
+#include <core/net/ITlsContext.hpp>
 #include <core/net/WriteQueue.hpp>
 #include <core/platform/Clock.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <concepts>
 #include <coroutine>
 #include <cstddef>
@@ -62,10 +66,12 @@
 #include <vtcontrol/Events.hpp>
 #include <vthost/AccessFile.hpp>
 #include <vthost/AttachPlan.hpp>
+#include <vthost/AuthorizedKeys.hpp>
 #include <vthost/ClientCensus.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/DaemonControl.hpp>
 #include <vthost/FlushPolicy.hpp>
+#include <vthost/KeyAuth.hpp>
 #include <vthost/PduPump.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/proto/Negotiation.hpp>
@@ -75,6 +81,19 @@
 namespace vthost
 {
 
+/// How a connection authenticates by SSH key: the keys it may use, and what binds a proof to this connection.
+struct KeyAuthPolicy
+{
+    std::vector<AuthorizedKey> keys; ///< The keys that may log in, each with its grants.
+    DaemonAuth auth;                 ///< Whether a token is still accepted beside the keys.
+    /// This connection's TLS channel binding (RFC 9266), which the signed message covers.
+    std::array<std::byte, 32> channelBinding;
+    std::reference_wrapper<core::IRandom> random; ///< Where each challenge's nonce comes from.
+};
+
+// PreAuthTimeout, how long a connection on a network listener has to authenticate, lives in KeyAuth.hpp,
+// where a client that waits on it can name it too.
+
 /// What the daemon side of the handshake admits: the token, versions and capabilities it requires
 /// and offers.
 struct HandshakePolicy
@@ -83,6 +102,14 @@ struct HandshakePolicy
     /// every grant (the AF_UNIX default, where the socket's permissions are the gate). An Attach hello needs
     /// a token that grants everything.
     std::vector<AcceptedToken> acceptedTokens = {};
+    /// Key authentication, for a connection that can bind it to its TLS session; empty for a unix socket,
+    /// whose permissions are the gate, and for any endpoint without keys. Per connection, so set only by the
+    /// handler that has the connection's TLS session in hand.
+    std::optional<KeyAuthPolicy> keyAuth = std::nullopt;
+    /// The instant, on the event loop's clock, by which a hello must have been accepted; the connection is
+    /// closed at it otherwise. Empty for a unix socket, whose permissions are the gate. Per connection, as
+    /// it runs from the accept: set by the handler that knows when that was.
+    std::optional<core::platform::SteadyTimePoint> authDeadline = std::nullopt;
     /// The protocol versions this endpoint speaks; the highest one shared with the client is agreed.
     proto::VersionRange versions = proto::SupportedVersions;
     /// The optional features this endpoint offers on top of the agreed version.
@@ -678,6 +705,21 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     ///        tagged ones still unwritten — @see core::net::WriteQueue::dropTagged.
     void send(uint64_t serial, proto::DecodedPdu const& pdu, uint64_t sessionTag = 0);
 
+    /// The pre-authentication deadline passed with no hello accepted: ends the connection.
+    void preAuthExpired();
+
+    /// Sends an AuthChallenge with a fresh nonce, which the next key proof must cover.
+    /// @param keyAuth This connection's key authentication.
+    /// @param serial The serial to answer, or 0 for the opening challenge.
+    void sendKeyChallenge(KeyAuthPolicy const& keyAuth, uint64_t serial);
+
+    /// Checks a key proof against the outstanding challenge and this connection's channel binding.
+    /// @param keyAuth This connection's key authentication.
+    /// @param proof What the client sent.
+    /// @return The grants of the listed key whose signature verifies; nothing otherwise.
+    [[nodiscard]] std::optional<vtcontrol::ControlGrants> verifyKeyProof(KeyAuthPolicy const& keyAuth,
+                                                                         proto::KeyProof const& proof) const;
+
     /// Records why this connection's read loop ended.
     ///
     /// Before this existed, a client that sent a malformed frame was simply dropped, with the
@@ -1189,6 +1231,8 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// Where the connection is in its life: decided by the accepted hello's role. @see phase
     ConnectionPhase _phase = ConnectionPhase::AwaitingHello;
     vtcontrol::ControlGrants _grants = vtcontrol::ControlGrants::none(); ///< @see grants()
+    std::array<std::byte, 32> _keyNonce = {}; ///< The nonce of the AuthChallenge now outstanding.
+    std::size_t _keyAttempts = 0;             ///< Key proofs refused so far on this connection.
     /// What the handshake agreed on, the shared capabilities among it; engaged once a ClientHello was
     /// accepted.
     std::optional<proto::Negotiated> _negotiated;
@@ -1308,7 +1352,49 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     std::shared_ptr<UpgradeLink> _upgradeLink = std::make_shared<UpgradeLink>(UpgradeLink { this });
     /// Told of the daemon's upgrade from run() on. Last, so it is released before anything it delivers to.
     std::optional<UpgradeSubscription> _upgradeSubscription;
+    /// Closes the connection if no hello was accepted by HandshakePolicy::authDeadline; disarmed on accept.
+    std::optional<core::net::DeadlineTimer> _preAuthTimer;
 };
+
+/// One native client's whole lifetime, as a free coroutine (a capturing lambda coroutine would dangle its
+/// closure; the arguments live in the frame).
+/// @param loop The event loop everything runs on.
+/// @param host The session host (not owned; outlives the connection).
+/// @param id The connection's diagnostic identity.
+/// @param connection The client transport.
+/// @param services What this connection is served with; a TLS listener builds them per connection, for its
+///        key authentication is bound to the connection's own session.
+[[nodiscard]] core::async::Task<void> serveNativeClient(core::net::EventLoop* loop,
+                                                        SessionHost* host,
+                                                        ConnectionId id,
+                                                        std::unique_ptr<core::net::ISocket> connection,
+                                                        NativeSessionServices services);
+
+/// What a TLS listener authenticates by key with, fixed at startup; each connection adds its own channel
+/// binding to it.
+struct TlsKeyAuth
+{
+    std::vector<AuthorizedKey> keys;              ///< The authorized keys; none means no key authentication.
+    DaemonAuth auth = DaemonAuth::Any;            ///< Whether a token still works beside them.
+    std::reference_wrapper<core::IRandom> random; ///< Where the challenge nonces come from.
+};
+
+/// Composes a native connection handler that FIRST encrypts each accepted socket (server-side TLS), then
+/// serves the native protocol over it. Each connection has PreAuthTimeout, from its accept, to finish the TLS
+/// handshake and have its hello accepted; one that has not is closed.
+/// @param loop The event loop every connection runs on; its clock times the deadline.
+/// @param host The session host every connection serves (not owned; outlives the handler).
+/// @param tls The server-side TLS context.
+/// @param services What each native connection is served with, the TCP token among them.
+/// @param keyAuth The keys a client may log in with by signature; with none, no challenge is sent.
+/// @return The handler; refused when neither @p keyAuth holds a key nor @p services a token, as a network
+///         listener has no file permissions to fall back on and would serve anyone who connects.
+[[nodiscard]] std::expected<ConnectionHandler, std::string> makeTlsNativeHandler(
+    core::net::EventLoop& loop,
+    SessionHost& host,
+    std::shared_ptr<core::net::ITlsContext> tls,
+    NativeSessionServices services,
+    TlsKeyAuth keyAuth);
 
 /// The daemon's connection-handler factory for native-protocol clients.
 /// @param loop The event loop every connection runs on.

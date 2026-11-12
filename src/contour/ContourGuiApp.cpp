@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.hpp>
 #include <contour/Logging.hpp>
+#include <contour/askpass/AskpassPinPrompt.hpp>
 #include <contour/cli/BackgroundExecutor.hpp>
 #include <contour/cli/ClientAttach.hpp>
 #include <contour/cli/ConnectList.hpp>
@@ -98,6 +99,7 @@
 
 #include <crispy/ScopedTimer.hpp>
 
+#include <core/Random.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/cli/CLI.hpp>
@@ -121,7 +123,9 @@
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonSpawn.hpp>
 #include <vthost/DaemonStarter.hpp>
+#include <vthost/KnownDaemons.hpp>
 #include <vthost/SocketPath.hpp>
+#include <vthost/StatePath.hpp>
 #include <vthost/StdioChild.hpp>
 #include <vthost/Token.hpp>
 #include <vthost/Transport.hpp>
@@ -129,6 +133,7 @@
 #include <vthost/client/DaemonControlClient.hpp>
 #include <vthost/client/DaemonRestart.hpp>
 #include <vthost/client/DaemonUpgrade.hpp>
+#include <vthost/client/KeySource.hpp>
 #include <vthost/client/ReleaseDrift.hpp>
 #include <vthost/latency/Report.hpp>
 #if !defined(__APPLE__) && !defined(_WIN32)
@@ -466,11 +471,14 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<platform::ApplicationRestart> applicationRestart,
                              std::unique_ptr<remote::SwitchingService> windowSwitching,
                              std::unique_ptr<session::SwitchDirectory> switchDirectory,
-                             std::function<void(int)> exitEventLoop):
+                             std::function<void(int)> exitEventLoop,
+                             window::BootstrapPromptFactory bootstrapPromptFactory,
+                             std::unique_ptr<remote::IWorkspaceLister> startupLister):
     ContourApp { env },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
     _exitEventLoop { exitEventLoop ? std::move(exitEventLoop)
                                    : std::function<void(int)> { exitQtEventLoop } },
+    _bootstrapPromptFactory { std::move(bootstrapPromptFactory) },
     _sshSearchPath { vtpty::execSearchPath(env.get("PATH")) },
     _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
     _commandExecutor(cli::makeBackgroundExecutor(StatusLineCommandThreads)),
@@ -496,6 +504,10 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     // Read once, for every session, rather than by each one on the GUI thread as it is built.
     _hostIdentity(hostIdentity ? std::move(*hostIdentity) : thisMachineIdentity()),
     _fileSystem(fileSystem ? *fileSystem : core::platform::NativeFileSystem::instance()),
+    // In the config directory, as ssh keeps known_hosts: never under the state directory, which falls back
+    // to a shared temporary directory that another local user could have planted a pin in.
+    _knownDaemons(_fileSystem, vthost::knownDaemonsPath(config::configHome()), core::systemRandom()),
+    _startupLister(std::move(startupLister)),
     _taskbarProgressSink(taskbarProgress ? std::move(taskbarProgress) : platform::makeTaskbarProgressSink()),
     _titleBandMaterial(appearanceServices.titleBand()),
     _secureInput(appearanceServices.secureInput()),
@@ -1310,19 +1322,35 @@ std::expected<void, std::string> ContourGuiApp::restartLocalDaemon(std::string c
 std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::openHost(std::string const& configPath,
                                                                               std::string const& nameOrUrl,
                                                                               askpass::AskpassRouteId route,
-                                                                              cli::SshPrompts prompting)
+                                                                              cli::SshPrompts prompting,
+                                                                              std::string daemonFingerprint)
 {
     auto host = config::resolveHost(configPath, nameOrUrl);
     if (!host)
         return std::unexpected { host.error() };
-    return transportOf(nameOrUrl, *std::move(host), route, prompting);
+    return transportOf(nameOrUrl, *std::move(host), route, prompting, std::move(daemonFingerprint));
 }
 
 void ContourGuiApp::showBootstrapPrompt()
 {
-    if (_bootstrapPrompt || !_qmlEngine)
+    if (_bootstrapPrompt)
         return;
-    _bootstrapPrompt = window::BootstrapPrompt::create(_askpassRouter, *_qmlEngine);
+    // Ended once its prompts are answered, rather than kept as a hidden window: the window that carries the
+    // attach on, or the next prompt's own stand-in, takes its place.
+    auto onDrained = [this] {
+        // Not from inside the answer that drained it, and not if another prompt came in the meantime.
+        QMetaObject::invokeMethod(
+            this,
+            [this] {
+                if (_bootstrapPrompt && _bootstrapPrompt->host().pendingPrompt().isEmpty())
+                    _bootstrapPrompt.reset();
+            },
+            Qt::QueuedConnection);
+    };
+    if (_bootstrapPromptFactory)
+        _bootstrapPrompt = _bootstrapPromptFactory(_askpassRouter, std::move(onDrained));
+    else if (_qmlEngine)
+        _bootstrapPrompt = window::BootstrapPrompt::create(_askpassRouter, *_qmlEngine, std::move(onDrained));
 }
 
 void ContourGuiApp::refreshWindowAttention()
@@ -1369,16 +1397,29 @@ std::shared_ptr<askpass::AskpassBroker> const& ContourGuiApp::askpassBroker()
         auto const executable = vtpty::currentExecutablePath();
         _askpassBroker = std::make_shared<askpass::AskpassBroker>(
             _askpassRouter,
-            QString::fromStdString(executable ? core::pathToUtf8(*executable) : programPath()));
+            QString::fromStdString(executable ? core::pathToUtf8(*executable) : programPath()),
+            core::systemRandom());
     }
     return _askpassBroker;
+}
+
+std::shared_ptr<vthost::IPinPrompt> ContourGuiApp::pinPromptFor(askpass::AskpassRouteId route,
+                                                                cli::SshPrompts prompting)
+{
+    // A batch transport asks the user nothing: a probe must not put a dialog up.
+    if (prompting == cli::SshPrompts::Batch)
+        return nullptr;
+    auto const& broker = askpassBroker();
+    return std::make_shared<askpass::AskpassPinPrompt>(
+        _askpassRouter, route, *this, [broker] { return broker->nextPromptId(); });
 }
 
 std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::transportOf(
     std::string const& nameOrUrl,
     config::HostEntry host,
     askpass::AskpassRouteId route,
-    cli::SshPrompts prompting)
+    cli::SshPrompts prompting,
+    std::string daemonFingerprint)
 {
     // A saved host by its name, an ad-hoc one by its URL, canonically spelled.
     auto label = nameOrUrl.contains("://") ? config::toString(host.url) : nameOrUrl;
@@ -1392,7 +1433,11 @@ std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::transportOf
                    .broker = prompting == cli::SshPrompts::Askpass
                                  ? std::make_shared<askpass::RoutedAskpassBroker>(askpassBroker(), route)
                                  : nullptr,
-                   .probe = _sshVersionProbe })
+                   .probe = _sshVersionProbe },
+               cli::TlsTrust { .knownDaemons = &_knownDaemons,
+                               .pinPrompt = pinPromptFor(route, prompting),
+                               .daemonFingerprint = std::move(daemonFingerprint),
+                               .sshAgentEndpoint = core::net::defaultSshAgentEndpoint(processEnvironment()) })
         .transform([&](cli::HostTransport transport) {
             return OpenedHost { .entry = std::move(host), .transport = std::move(transport) };
         });
@@ -1422,6 +1467,7 @@ int ContourGuiApp::clientAction()
     request.config = parameters().get<string>("contour.client.config");
     request.connectTcp = parameters().get<string>("contour.client.connect-tcp");
     request.tlsCaPath = parameters().get<string>("contour.client.tls-ca");
+    request.daemonFingerprint = parameters().get<string>("contour.client.daemon-fingerprint");
     request.sizePolicy = parameters().get<string>("contour.client.size-policy");
     // Resolved against the daemon's workspaces once its transport is known (resolveClientWorkspace()).
     request.workspace = parameters().get<string>("contour.client.workspace");
@@ -1447,7 +1493,8 @@ int ContourGuiApp::launchClient(ClientRequest request, std::string const& host)
 {
     if (!host.empty())
     {
-        auto opened = openHost(request.config, host);
+        auto opened = openHost(
+            request.config, host, askpass::AnyWindow, cli::SshPrompts::Askpass, request.daemonFingerprint);
         if (!opened)
         {
             cerr << std::format("contour client: {}\n", opened.error());
@@ -1585,14 +1632,23 @@ namespace
         std::string const& connectTcp,
         std::string const& token,
         std::string const& tlsCaPath,
-        core::platform::FileSystem const& fileSystem)
+        std::string const& daemonFingerprint,
+        core::platform::FileSystem const& fileSystem,
+        vthost::KnownDaemons& knownDaemons,
+        std::shared_ptr<vthost::IPinPrompt> pinPrompt,
+        std::string const& sshAgentEndpoint,
+        std::shared_ptr<vthost::IStdioSpawner> const& spawner)
     {
         auto const hostPort = vthost::parseHostPort(connectTcp);
         if (!hostPort)
             return std::unexpected(
                 std::format("invalid --connect-tcp '{}' (expected HOST:PORT)", connectTcp));
         auto tcp = vthost::TcpEndpoint {
-            .host = hostPort->first, .port = hostPort->second, .token = token, .caPem = {}
+            .host = hostPort->first,
+            .port = hostPort->second,
+            .token = token,
+            .caPem = {},
+            .expectedFingerprint = daemonFingerprint,
         };
         if (!tlsCaPath.empty())
         {
@@ -1603,32 +1659,24 @@ namespace
             tcp.caPem = *std::move(caPem);
         }
         return NativeAttachTarget {
-            .transport = std::make_shared<vthost::TlsTransportFactory>(std::move(tcp)),
+            // The agent's keys sign in; there is no key file to name here.
+            .transport = std::make_shared<vthost::TlsTransportFactory>(
+                tcp,
+                knownDaemons,
+                std::move(pinPrompt),
+                vthost::client::makeClientKeySourceProvider(
+                    sshAgentEndpoint,
+                    spawner,
+                    nullptr,
+                    fileSystem,
+                    {},
+                    vthost::SshTarget { .user = {}, .host = tcp.host, .port = tcp.port })),
             .intent = cli::launchIntent(std::nullopt),
         };
     }
 
     /// How long resolving `--workspace` may ask the daemon for its workspaces.
     constexpr auto ClientWorkspaceListingTimeout = std::chrono::milliseconds { std::chrono::seconds { 10 } };
-
-    /// Resolves `contour client --workspace` against the daemon @p transport reaches, through its control API
-    /// (`workspace.list`).
-    /// @param transport The daemon.
-    /// @param spec What `--workspace` named.
-    /// @return The daemon's native id of it, or why there is none.
-    [[nodiscard]] std::expected<uint64_t, std::string> resolveClientWorkspace(
-        vthost::ITransportFactory& transport, std::string const& spec)
-    {
-        auto const answer = vthost::client::runControlCall(
-            transport, "workspace.list", "{}", "", ClientWorkspaceListingTimeout);
-        if (!answer)
-            return std::unexpected(
-                std::format("cannot list the daemon's workspaces: {}", answer.error().message));
-        return cli::decodeWorkspaceList(*answer).and_then(
-            [&spec](std::vector<vtcontrol::WorkspaceInfo> const& workspaces) {
-                return cli::resolveWorkspaceSpec(spec, workspaces);
-            });
-    }
 } // namespace
 
 namespace
@@ -1658,6 +1706,7 @@ namespace
 void ContourGuiApp::releaseHosting()
 {
     _startupAttachPlan.reset();
+    _deferredNativeAttach.reset();
     _onGuiBooted = nullptr;
     // Each stops serving its windows as it stops.
     for (auto const& link: _daemonLinks)
@@ -1667,6 +1716,34 @@ void ContourGuiApp::releaseHosting()
         // Its attach-window binder goes with its windows.
         _sessionManager.releaseBinding(_tmuxController->windowBinding());
         _tmuxController->stop();
+    }
+}
+
+void ContourGuiApp::ensurePowerMonitor()
+{
+    // A wake has the daemon probed instead of the connection given up, which would reconnect and shrink
+    // the panes to the profile's size. Without a monitor only the steady clock can tell: on macOS it
+    // counts the sleep, so the first liveness tick after it runs late and has the daemon probed; on Linux
+    // and the BSDs it stops while the system is suspended, so there is nothing to detect -- and no false
+    // loss either. A platform with no backend (a BSD, a Flatpak sandbox, a build without systemd) is
+    // expected and logged where attaching is; an OS that refused the registration is not, and is said
+    // where the user sees it. Created once per process: a failure is remembered, not retried, so either
+    // is said once.
+    if (!_powerMonitor && !_powerMonitorFailure)
+    {
+        if (auto monitor = core::platform::makeNativeSystemPowerMonitor(); monitor)
+            _powerMonitor = *std::move(monitor);
+        else
+        {
+            _powerMonitorFailure = monitor.error();
+            if (monitor.error() == core::platform::PlatformError::NotImplemented)
+                attachLog()("attach: no system sleep/wake notifications on this platform; {}",
+                            NoPowerMonitorNote);
+            else
+                errorLog()("attach: no system sleep/wake notifications ({}); {}",
+                           core::platform::toString(monitor.error()),
+                           NoPowerMonitorNote);
+        }
     }
 }
 
@@ -1695,8 +1772,22 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         };
     }
     else if (_clientRequest && !_clientRequest->connectTcp.empty())
+    {
+        // A daemon met for the first time is asked about in a dialog, and the user takes the time they take:
+        // no clock runs through the question (the transport bounds its dialling itself).
+        budget = vthost::AttachBudget::promptsOpen(budget.handshake);
         target = tcpAttachTarget(
-            _clientRequest->connectTcp, _clientRequest->token, _clientRequest->tlsCaPath, fileSystem());
+            _clientRequest->connectTcp,
+            _clientRequest->token,
+            _clientRequest->tlsCaPath,
+            _clientRequest->daemonFingerprint,
+            fileSystem(),
+            _knownDaemons,
+            pinPromptFor(askpass::AnyWindow, cli::SshPrompts::Askpass),
+            core::net::defaultSshAgentEndpoint(processEnvironment()),
+            vthost::makeSystemStdioSpawner(vtpty::ProgramSearch {
+                .path = _sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem() }));
+    }
     else
     {
         // The local daemon: its socket and size policy are the client's options, else the `daemon:` section.
@@ -1769,55 +1860,50 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     }
     if (!target)
         return std::unexpected(target.error());
-    // `--workspace` names a workspace as the control verbs do; what a connection follows is its native id.
-    if (_clientRequest && !_clientRequest->workspace.empty())
-    {
-        auto const workspace =
-            cli::requireVerifiedForWorkspaceListing(target->transport->peerTrust()).and_then([&] {
-                return resolveClientWorkspace(*target->transport, _clientRequest->workspace);
-            });
-        if (!workspace)
-            return std::unexpected(
-                std::format("--workspace '{}': {}", _clientRequest->workspace, workspace.error()));
-        target->intent = cli::launchIntent(*workspace);
-    }
+    return prepareLaunchAttach(LaunchAttach {
+        .transport = std::move(target->transport),
+        .budget = budget,
+        .hostLabel = std::move(hostLabel),
+        .locality = locality,
+        .address = std::move(address),
+        .workspace = _clientRequest ? _clientRequest->workspace : std::string {},
+    });
+}
 
-    // A wake has the daemon probed instead of the connection given up, which would reconnect and shrink the
-    // panes to the profile's size. Without a monitor only the steady clock can tell: on macOS it counts the
-    // sleep, so the first liveness tick after it runs late and has the daemon probed; on Linux and the BSDs
-    // it stops while the system is suspended, so there is nothing to detect -- and no false loss either.
-    // A platform with no backend (a BSD, a Flatpak sandbox, a build without systemd) is expected and logged
-    // where attaching is; an OS that refused the registration is not, and is said where the user sees it.
-    // Created once per process: a failure is remembered, not retried, so either is said once.
-    if (!_powerMonitor && !_powerMonitorFailure)
+std::expected<void, std::string> ContourGuiApp::prepareLaunchAttach(LaunchAttach attach)
+{
+    // `--workspace` names a workspace as the control verbs do; what a connection follows is its native id.
+    // The listing is a control call, and a daemon met for the first time is asked about in a dialog, which
+    // needs the GUI up: so such a launch lists the workspaces once the GUI has booted, as the first step of
+    // its attach wait (beginDeferredAttach()), and any other starts its link now.
+    if (!attach.workspace.empty())
     {
-        if (auto monitor = core::platform::makeNativeSystemPowerMonitor(); monitor)
-            _powerMonitor = *std::move(monitor);
-        else
-        {
-            _powerMonitorFailure = monitor.error();
-            if (monitor.error() == core::platform::PlatformError::NotImplemented)
-                attachLog()("attach: no system sleep/wake notifications on this platform; {}",
-                            NoPowerMonitorNote);
-            else
-                errorLog()("attach: no system sleep/wake notifications ({}); {}",
-                           core::platform::toString(monitor.error()),
-                           NoPowerMonitorNote);
-        }
+        _deferredNativeAttach = std::move(attach);
+        return {};
     }
+    return startLaunchLink(std::move(attach), std::nullopt);
+}
+
+std::expected<void, std::string> ContourGuiApp::startLaunchLink(LaunchAttach attach,
+                                                                std::optional<uint64_t> workspace)
+{
+    ensurePowerMonitor();
 
     // The connect, hello, first spawn and first snapshot run on the reactor while the GUI boots;
     // terminalGuiAction() waits for them through _awaitAttach just before the first window, by when booting
-    // has already spent part of the budget, and settles the hosting there.
-    // Only this link, the launch's own, states the directory contour was started in: a link a switch opens
-    // later to another daemon has no tab to open there.
-    auto config = daemonLinkConfig(
-        std::move(target->transport), target->intent, std::move(hostLabel), locality, std::move(address));
+    // has already spent part of the budget, and settles the hosting there. Only this link, the launch's own,
+    // states the directory contour was started in: a link a switch opens later to another daemon has no tab
+    // to open there.
+    auto config = daemonLinkConfig(std::move(attach.transport),
+                                   cli::launchIntent(workspace),
+                                   std::move(attach.hostLabel),
+                                   attach.locality,
+                                   std::move(attach.address));
     config.controller.workingDirectory =
         attachWorkingDirectory(parameters().get<string>("contour.terminal.working-directory"));
     // The launch's daemon is this client's to restart and upgrade when it is local: _restartDaemon and
     // _upgradeDaemon are set for it.
-    if (locality == window::DaemonLocality::Local)
+    if (attach.locality == window::DaemonLocality::Local)
         config.upkeep = window::DaemonUpkeep::ThisClient;
     auto const id = startDaemonLink(std::move(config)).id();
     // Attach mode adopts the daemon's workspaces into the windows once the first one booted, and on every
@@ -1827,8 +1913,45 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         if (auto* const link = daemonLink(id))
             link->followLayout();
     };
-    _startupAttachPlan = StartupAttachPlan { .link = id, .budget = budget };
+    // The budget runs from here, where the attach begins: a passphrase the listing asked for is not this
+    // attach's to be extended by.
+    _startupAttachPlan = StartupAttachPlan { .link = id, .budget = attach.budget.startingNow() };
     return {};
+}
+
+void ContourGuiApp::beginDeferredAttach(remote::StartupAttachReady ready)
+{
+    Require(_deferredNativeAttach.has_value());
+    if (!_startupLister)
+        _startupLister = remote::makeControlWorkspaceLister(ClientWorkspaceListingTimeout);
+    _startupLister->list(
+        remote::ListTarget { .address = _deferredNativeAttach->address,
+                             .transport = _deferredNativeAttach->transport },
+        [this, ready = std::move(ready)](remote::WorkspaceListing listed) {
+            auto deferred = std::exchange(_deferredNativeAttach, std::nullopt);
+            if (!deferred)
+                return;
+            // Said as startNativeAttach()'s caller says it: this runs later, with no caller to add the verb.
+            auto const spec = deferred->workspace;
+            auto const failed = [&spec](std::string const& why) {
+                return std::unexpected(std::format("contour client: --workspace '{}': {}", spec, why));
+            };
+            if (!listed)
+            {
+                ready(failed(std::format("cannot list the daemon's workspaces: {}", listed.error().reason)));
+                return;
+            }
+            auto const workspace = cli::resolveWorkspaceSpec(spec, *listed);
+            if (!workspace)
+            {
+                ready(failed(workspace.error()));
+                return;
+            }
+            auto started = startLaunchLink(*std::move(deferred), *workspace);
+            if (started)
+                followStartupLink();
+            ready(std::move(started));
+        });
 }
 
 std::expected<void, std::string> ContourGuiApp::settleHosting(
@@ -1943,8 +2066,8 @@ core::cli::Command ContourGuiApp::parameterDefinition() const
                               "NAME|URL" },
                 CLI::Option { "connect-tcp",
                               CLI::Value { ""s },
-                              "Connect to a TCP daemon at HOST:PORT (TLS-encrypted, "
-                              "token-authenticated) instead of the local socket.",
+                              "Connect to a TCP daemon at HOST:PORT (TLS-encrypted; signs in with "
+                              "your SSH agent's key, or the token) instead of the local socket.",
                               "HOST:PORT" },
                 CLI::Option { "token",
                               CLI::Value { ""s },
@@ -1959,9 +2082,16 @@ core::cli::Command ContourGuiApp::parameterDefinition() const
                 CLI::Option { "tls-ca",
                               CLI::Value { ""s },
                               "PEM trust anchor pinning the daemon's TLS certificate "
-                              "for --connect-tcp. Omitted = TOFU (encrypt, don't verify; "
-                              "the token authenticates).",
+                              "for --connect-tcp. Omitted, the daemon is pinned on first use: "
+                              "you are asked to trust its fingerprint, which is then kept in "
+                              "known_daemons and must not change.",
                               "FILE" },
+                CLI::Option { "daemon-fingerprint",
+                              CLI::Value { ""s },
+                              "The fingerprint a --connect-tcp or --host daemon without a CA must "
+                              "present on first contact, as `contour daemon status` prints it there; "
+                              "it is then pinned, and nobody is asked.",
+                              "SHA256:..." },
                 CLI::Option { "log",
                               CLI::Value { ""s },
                               "Enables logging for a comma (,) separated list of tags, or `all` "
@@ -3338,7 +3468,10 @@ int ContourGuiApp::terminalGuiAction()
     // needs it done, and decides whether there is a daemon to show at all. Its ssh prompts are answered in
     // the stand-in window until then, and nothing but those can start a window or reconfigure the app
     // meanwhile.
-    if (_startupAttachPlan)
+    // A launch that names a workspace lists the daemon's workspaces first, as the wait's first step: a daemon
+    // met for the first time is asked about in the stand-in window, with the engine up and nothing else able
+    // to start a window meanwhile.
+    if (_startupAttachPlan || _deferredNativeAttach)
         startAttachWait();
     else if (auto const booted = bootFirstWindow(); !booted)
     {
@@ -3928,22 +4061,24 @@ void ContourGuiApp::waitForAttach(remote::StartupAttachSteps steps)
 
 void ContourGuiApp::startAttachWait()
 {
-    Require(_startupAttachPlan.has_value());
-    auto const plan = *_startupAttachPlan;
-    // The event loop runs while the attach goes on, so a queued destroyEndedLinks() can run in it: it must
-    // leave the link that is being waited for alone.
-    _awaitedLinkId = plan.link;
+    Require(_startupAttachPlan.has_value() || _deferredNativeAttach.has_value());
+    // The plan is read when looked at, not taken now: a launch that names a workspace makes it only once the
+    // listing has answered (beginDeferredAttach()), and the wait looks at nothing before.
+    auto const linkOfPlan = [this]() -> remote::DaemonLink* {
+        return _startupAttachPlan ? daemonLink(_startupAttachPlan->link) : nullptr;
+    };
     waitForAttach(remote::StartupAttachSteps {
-        .look = [this, plan]() -> std::optional<std::expected<void, std::string>> {
-            auto* const link = daemonLink(plan.link);
+        .look = [this, linkOfPlan]() -> std::optional<std::expected<void, std::string>> {
+            auto* const link = linkOfPlan();
             if (link == nullptr)
                 return std::unexpected(std::string { "the attach was given up" });
-            return pollNativeAttach(*link, plan.budget);
+            return pollNativeAttach(*link, _startupAttachPlan->budget);
         },
-        .untilDeadline = [this, plan]() -> std::optional<std::chrono::milliseconds> {
-            auto* const link = daemonLink(plan.link);
+        .untilDeadline = [this, linkOfPlan]() -> std::optional<std::chrono::milliseconds> {
+            auto* const link = linkOfPlan();
             auto* const controller = link != nullptr ? link->liveController() : nullptr;
-            return controller != nullptr ? controller->untilAttachDeadline(plan.budget) : std::nullopt;
+            return controller != nullptr ? controller->untilAttachDeadline(_startupAttachPlan->budget)
+                                         : std::nullopt;
         },
         .openFirstWindow =
             [this](std::expected<void, std::string> attached) -> std::expected<void, std::string> {
@@ -3967,9 +4102,26 @@ void ContourGuiApp::startAttachWait()
                 _startupExitCode = exitCode;
                 _exitEventLoop(exitCode);
             },
+        .prepare =
+            _deferredNativeAttach
+                ? std::function<void(remote::StartupAttachReady)> { [this](remote::StartupAttachReady ready) {
+                      beginDeferredAttach(std::move(ready));
+                  } }
+                : nullptr,
     });
+    if (_startupAttachPlan)
+        followStartupLink();
+}
+
+void ContourGuiApp::followStartupLink()
+{
+    Require(_startupAttachPlan.has_value());
+    // The event loop runs while the attach goes on, so a queued destroyEndedLinks() can run in it: it must
+    // leave the link that is being waited for alone.
+    _awaitedLinkId = _startupAttachPlan->link;
     // What the attach has to say comes from the reactor: looked at again on each piece of news.
-    if (auto* const link = daemonLink(plan.link); link != nullptr && link->liveController() != nullptr)
+    if (auto* const link = daemonLink(_startupAttachPlan->link);
+        link != nullptr && link->liveController() != nullptr && _startupAttach)
         connect(link->liveController(),
                 &remote::NativeController::attachProgressed,
                 _startupAttach.get(),

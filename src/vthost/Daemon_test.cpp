@@ -15,7 +15,9 @@
 #include <core/net/IoBackend.hpp>
 #include <core/net/IoResult.hpp>
 #include <core/net/Sockets.hpp>
+#include <core/net/SshKeys.hpp>
 #include <core/net/Tls.hpp>
+#include <core/net/testing/SoftwareSecurityKey.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
@@ -25,6 +27,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -50,10 +53,12 @@
 
 #include <vthost/Daemon.hpp>
 #include <vthost/DaemonBinary.hpp>
+#include <vthost/DaemonIdentity.hpp>
 #include <vthost/DaemonImage.hpp>
 #include <vthost/DaemonLifecycle.hpp>
 #include <vthost/DaemonSpawn.hpp>
 #include <vthost/FilePrivacy.hpp>
+#include <vthost/KeyAuth.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
 #include <vthost/ShutdownSignals.hpp>
@@ -1073,37 +1078,91 @@ core::async::Task<void> attachUntilLayout(core::net::EventLoop* loop,
         });
 }
 
+/// How a daemon's native TCP listener answered a hello.
+enum class HelloOutcome : std::uint8_t
+{
+    NoReply = 0, ///< Nothing decodable came back: the handshake failed, or the connection was dropped.
+    Refused,     ///< A ServerHello that agrees on no version.
+    Answered,    ///< A ServerHello that agrees on a version.
+};
+
+/// The next frame @p socket delivers.
+/// @param socket The connection.
+/// @param pending Bytes read and not yet decoded; the frame returned is taken off its front.
+/// @param buffer Scratch space for reading.
+/// @return The frame, or nothing once the connection ends.
+core::async::Task<std::optional<vthost::proto::DecodedFrame>> nextFrameOf(core::net::ISocket* socket,
+                                                                          std::vector<std::byte>* pending,
+                                                                          std::vector<std::byte>* buffer)
+{
+    while (true)
+    {
+        if (auto frame = vthost::proto::decodePdu(*pending))
+        {
+            pending->erase(pending->begin(), pending->begin() + static_cast<std::ptrdiff_t>(frame->consumed));
+            co_return std::move(*frame);
+        }
+        auto const read = co_await socket->read(*buffer);
+        if (!read.has_value() || *read == 0)
+            co_return std::nullopt;
+        pending->insert(
+            pending->end(), buffer->begin(), buffer->begin() + static_cast<std::ptrdiff_t>(*read));
+    }
+}
+
+/// How a client answers a daemon's AuthChallenge: the proof over the challenge's nonce and the TLS session's
+/// channel binding.
+using KeyProver = std::function<vthost::proto::KeyProof(std::array<std::byte, 32> const& nonce,
+                                                        std::array<std::byte, 32> const& binding)>;
+
 /// A TLS client's handshake with a daemon's native TCP listener, trusting @p clientTls alone: sends an Attach
-/// hello with @p token and reports whether the daemon answered it.
+/// hello with @p token, and a key proof made by @p prove when one is given (after the daemon's challenge it
+/// answers), and reports how the daemon answered it.
 core::async::Task<void> helloOverTls(core::net::EventLoop* loop,
                                      std::uint16_t port,
                                      std::shared_ptr<core::net::ITlsContext> clientTls,
                                      std::string token,
-                                     bool* answered)
+                                     HelloOutcome* outcome,
+                                     KeyProver prove = {})
 {
     auto connected = co_await core::net::connect(loop, "127.0.0.1", port);
     REQUIRE(connected.has_value());
     auto const socket = clientTls->wrap(std::move(*connected), *loop);
     socket->setReceiveDeadline(std::chrono::seconds { 10 });
+    auto pending = std::vector<std::byte> {};
+    auto buffer = std::vector<std::byte>(4096);
+    auto hello = vthost::proto::ClientHello { .token = std::move(token),
+                                              .role = vthost::proto::ConnectionRole::Attach };
+    if (prove)
+    {
+        auto const handshaken = co_await socket->handshakeIfNeeded();
+        REQUIRE(handshaken.has_value());
+        auto const* const session = core::net::tlsSessionOf(*socket);
+        REQUIRE(session != nullptr);
+        auto const binding = session->channelBinding();
+        REQUIRE(binding.has_value());
+        auto const challenge = co_await nextFrameOf(socket.get(), &pending, &buffer);
+        if (!challenge)
+            co_return;
+        auto const* const asked = std::get_if<vthost::proto::AuthChallenge>(&challenge->pdu);
+        REQUIRE(asked != nullptr);
+        hello.keyProof = prove(asked->nonce, *binding);
+    }
     auto request = vthost::proto::Writer {};
-    vthost::proto::encodePdu(request,
-                             1,
-                             vthost::proto::ClientHello { .token = std::move(token),
-                                                          .role = vthost::proto::ConnectionRole::Attach });
+    vthost::proto::encodePdu(request, 1, hello);
     auto const bytes = std::vector<std::byte> { request.view().begin(), request.view().end() };
     if (!(co_await socket->write(bytes)).has_value())
         co_return;
-    auto pending = std::vector<std::byte> {};
-    auto buffer = std::vector<std::byte>(4096);
     while (true)
     {
-        auto const read = co_await socket->read(buffer);
-        if (!read.has_value() || *read == 0)
+        auto const frame = co_await nextFrameOf(socket.get(), &pending, &buffer);
+        if (!frame)
             co_return;
-        pending.insert(pending.end(), buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(*read));
-        if (auto frame = vthost::proto::decodePdu(pending))
+        // A refusal is a ServerHello too, one that agrees on no version; a challenge is only the daemon
+        // speaking first.
+        if (auto const* answer = std::get_if<vthost::proto::ServerHello>(&frame->pdu); answer != nullptr)
         {
-            *answered = std::holds_alternative<vthost::proto::ServerHello>(frame->pdu);
+            *outcome = answer->agreedVersion != 0 ? HelloOutcome::Answered : HelloOutcome::Refused;
             co_return;
         }
     }
@@ -1367,13 +1426,154 @@ TEST_CASE("a daemon taken over from a handover presents the TLS certificate it m
     REQUIRE(awaitAccepting(loop, d.nativePath));
     auto const pinned = core::net::makeTlsClientContext(identity->certPem);
     REQUIRE(pinned.has_value());
-    auto answered = false;
-    loop.blockOn(helloOverTls(&loop, port, *pinned, "tok", &answered));
-    CHECK(answered);
+    auto outcome = HelloOutcome::NoReply;
+    loop.blockOn(helloOverTls(&loop, port, *pinned, "tok", &outcome));
+    CHECK(outcome == HelloOutcome::Answered);
 
     d.signals->fire();
     REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
     CHECK(daemon.get() == EXIT_SUCCESS);
+}
+
+TEST_CASE("a daemon presents the persistent identity it keeps in its identity file",
+          "[vthost][daemon][handover][threading]")
+{
+    auto d = HandedOverDaemon {};
+    auto const tmp = TempDir {};
+    auto const identityFile = tmp.path / "tls" / "default.pem";
+    auto const identity = vthost::loadOrCreateDaemonIdentity(
+        core::platform::NativeFileSystem::instance(), vthost::NativeFilePrivacy::instance(), identityFile);
+    REQUIRE(identity.has_value());
+    auto port = std::uint16_t { 0 };
+    // Handed over with no identity of its own: the file's is what it presents.
+    d.image.listeners.push_back(vthost::handover::InheritedListener {
+        .name = "native-tcp", .handle = vtpty::CrossingHandle::of(rawTcpListener(port)) });
+    d.config.nativeTcp = vthost::NativeTcpListenerConfig {};
+    d.config.nativeTcp->port = port;
+    d.config.nativeTcp->token = "tok";
+    d.config.nativeTcp->identityFile = identityFile;
+    auto daemon = std::async(std::launch::async, [&d] { return vthost::runDaemon(d.config, d.image); });
+    auto const stopOnExit = StopOnExit { *d.signals };
+
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    REQUIRE(awaitAccepting(loop, d.nativePath));
+    auto const pinned = core::net::makeTlsClientContext(identity->certPem);
+    REQUIRE(pinned.has_value());
+    auto outcome = HelloOutcome::NoReply;
+    loop.blockOn(helloOverTls(&loop, port, *pinned, "tok", &outcome));
+    CHECK(outcome == HelloOutcome::Answered);
+
+    d.signals->fire();
+    REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    CHECK(daemon.get() == EXIT_SUCCESS);
+}
+
+TEST_CASE("a TCP listener with authorized keys and no token admits no hello until key proof is checked",
+          "[vthost][daemon][handover][threading]")
+{
+    auto d = HandedOverDaemon {};
+    auto const identity = core::net::generateSelfSignedCertificate({ .commonName = "contour-daemon" });
+    REQUIRE(identity.has_value());
+    auto port = std::uint16_t { 0 };
+    d.image.listeners.push_back(vthost::handover::InheritedListener {
+        .name = "native-tcp",
+        .handle = vtpty::CrossingHandle::of(rawTcpListener(port)),
+        .tlsIdentity =
+            vthost::handover::TlsIdentity { .certPem = identity->certPem, .keyPem = identity->keyPem },
+    });
+    d.config.nativeTcp = vthost::NativeTcpListenerConfig {};
+    d.config.nativeTcp->port = port;
+    d.config.nativeTcp->auth = vthost::DaemonAuth::KeysOnly;
+    d.config.nativeTcp->authorizedKeys =
+        vthost::parseAuthorizedKeys("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPsS66RFjVCGYtA7Zmou5+V/"
+                                    "Rdlp8o7aNAPp/upaw5UU ed@test\n")
+            .keys;
+    REQUIRE(d.config.nativeTcp->authorizedKeys.size() == 1);
+    auto daemon = std::async(std::launch::async, [&d] { return vthost::runDaemon(d.config, d.image); });
+    auto const stopOnExit = StopOnExit { *d.signals };
+
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    REQUIRE(awaitAccepting(loop, d.nativePath));
+    auto const pinned = core::net::makeTlsClientContext(identity->certPem);
+    REQUIRE(pinned.has_value());
+    // The empty token list would admit anyone; with keys configured it admits nobody.
+    auto outcome = HelloOutcome::NoReply;
+    loop.blockOn(helloOverTls(&loop, port, *pinned, "", &outcome));
+    CHECK(outcome == HelloOutcome::Refused);
+
+    d.signals->fire();
+    REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    CHECK(daemon.get() == EXIT_SUCCESS);
+}
+
+TEST_CASE("a TLS client that proves an authorized key over its own session is answered",
+          "[vthost][daemon][handover][threading]")
+{
+    auto d = HandedOverDaemon {};
+    auto const identity = core::net::generateSelfSignedCertificate({ .commonName = "contour-daemon" });
+    REQUIRE(identity.has_value());
+    auto device = core::net::testing::SoftwareSecurityKey::generate(core::net::SshKeyType::SkEd25519);
+    REQUIRE(device.has_value());
+    auto const keys = vthost::parseAuthorizedKeys((*device)->publicKeyLine("e2e"));
+    REQUIRE(keys.keys.size() == 1);
+    auto const& pub = keys.keys.front().key;
+
+    auto port = std::uint16_t { 0 };
+    d.image.listeners.push_back(vthost::handover::InheritedListener {
+        .name = "native-tcp",
+        .handle = vtpty::CrossingHandle::of(rawTcpListener(port)),
+        .tlsIdentity =
+            vthost::handover::TlsIdentity { .certPem = identity->certPem, .keyPem = identity->keyPem },
+    });
+    d.config.nativeTcp = vthost::NativeTcpListenerConfig {};
+    d.config.nativeTcp->port = port;
+    d.config.nativeTcp->auth = vthost::DaemonAuth::KeysOnly;
+    d.config.nativeTcp->authorizedKeys = keys.keys;
+    auto daemon = std::async(std::launch::async, [&d] { return vthost::runDaemon(d.config, d.image); });
+    auto const stopOnExit = StopOnExit { *d.signals };
+
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    REQUIRE(awaitAccepting(loop, d.nativePath));
+    auto const pinned = core::net::makeTlsClientContext(identity->certPem);
+    REQUIRE(pinned.has_value());
+
+    // What the user's agent does: sign "contour-auth-v1" || nonce || the session's own binding.
+    auto const prove = [&](std::array<std::byte, 32> const& nonce, std::array<std::byte, 32> const& binding) {
+        auto const message = vthost::keyAuthMessage(nonce, binding);
+        auto const signedData = core::net::sshsigSignedData(vthost::KeyAuthNamespace, message);
+        auto const signature = (*device)->sign(signedData, core::net::testing::UserPresence::Present, 1);
+        REQUIRE(signature.has_value());
+        return vthost::proto::KeyProof { .publicKey = pub.blob,
+                                         .signature = core::net::assembleSshsig(
+                                             pub, vthost::KeyAuthNamespace, *signature) };
+    };
+    auto outcome = HelloOutcome::NoReply;
+    loop.blockOn(helloOverTls(&loop, port, *pinned, "", &outcome, prove));
+    CHECK(outcome == HelloOutcome::Answered);
+
+    d.signals->fire();
+    REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    CHECK(daemon.get() == EXIT_SUCCESS);
+}
+
+TEST_CASE("a keys-only listener accepts no token, however configured", "[vthost][daemon]")
+{
+    auto listener = vthost::NativeTcpListenerConfig {};
+    listener.token = "tok";
+    listener.accessTokens.push_back(vthost::AcceptedToken { .token = "other" });
+    CHECK(vthost::acceptedTokensOf(listener).size() == 2);
+    listener.auth = vthost::DaemonAuth::KeysOnly;
+    CHECK(vthost::acceptedTokensOf(listener).empty());
+}
+
+TEST_CASE("the TCP listener's TLS floor is 1.3", "[vthost][daemon]")
+{
+    // core::net offers no client capped at 1.2 to drive a refusal with; the floor itself is what every
+    // context the daemon builds is given (makeNativeTcpTls), and core-cpp proves a 1.3 floor refuses 1.2.
+    CHECK(vthost::NativeTcpTlsOptions.minimumVersion == core::net::TlsVersion::Tls13);
 }
 
 TEST_CASE("a daemon that ends with its last session ends when a handover leaves it none",

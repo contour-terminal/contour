@@ -27,6 +27,7 @@ enum class HostPageRow : uint8_t
     RemoteCommand,
     TokenFile,
     TlsCa,
+    IdentityFile,
     Profile,
 };
 
@@ -81,7 +82,9 @@ inline constexpr auto HostPageRows = std::array {
     HostPageRowInfo { .row = HostPageRow::TokenFile,
                       .key = "token_file",
                       .label = "Token file",
-                      .help = "Required. The daemon's token, from contour daemon --listen-tcp.",
+                      .help =
+                          "Optional. The daemon's token, from contour daemon --listen-tcp; not needed when "
+                          "an SSH key signs in.",
                       .placeholder = {},
                       .group = SettingsGroup::HostTls,
                       .control = SettingsControl::PathField,
@@ -90,11 +93,21 @@ inline constexpr auto HostPageRows = std::array {
     HostPageRowInfo { .row = HostPageRow::TlsCa,
                       .key = "tls_ca",
                       .label = "CA certificate",
-                      .help = "Optional. Verifies the daemon's certificate against this CA.",
-                      .placeholder = "System trust",
+                      .help = "Optional. Verifies the daemon's certificate against this CA instead of "
+                              "pinning it on first use.",
+                      .placeholder = "Pinned on first use",
                       .group = SettingsGroup::HostTls,
                       .control = SettingsControl::PathField,
                       .field = config::HostField::TlsCa,
+                      .onlyFor = config::HostScheme::Tls },
+    HostPageRowInfo { .row = HostPageRow::IdentityFile,
+                      .key = "identity_file",
+                      .label = "Identity file",
+                      .help = "Optional. The SSH private key that signs in, instead of the agent's keys.",
+                      .placeholder = "SSH agent",
+                      .group = SettingsGroup::HostTls,
+                      .control = SettingsControl::PathField,
+                      .field = config::HostField::IdentityFile,
                       .onlyFor = config::HostScheme::Tls },
     HostPageRowInfo { .row = HostPageRow::Profile,
                       .key = "profile",

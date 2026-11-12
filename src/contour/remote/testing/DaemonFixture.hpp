@@ -13,6 +13,8 @@
 #include <vtpty/MockPty.hpp>
 #include <vtpty/Process.hpp>
 
+#include <core/Random.hpp>
+#include <core/Utils.hpp>
 #include <core/async/Cancellation.hpp>
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
@@ -23,6 +25,7 @@
 #include <core/net/testing/SocketDecorator.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/SystemPower.hpp>
+#include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <QtCore/QCoreApplication>
 
@@ -54,6 +57,7 @@
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/ExtensionHosting.hpp>
+#include <vthost/KnownDaemons.hpp>
 #include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/ProfileCatalog.hpp>
@@ -61,8 +65,10 @@
 #include <vthost/TappingPty.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/ClientSupervisor.hpp>
+#include <vthost/client/KeySource.hpp>
 #include <vthost/latency/StartupTimeline.hpp>
 #include <vthost/proto/Pdu.hpp>
+#include <vthost/testing/CountingRandom.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Primitives.hpp>
@@ -106,6 +112,28 @@ struct ControllerOptions
         contour::remote::NativeController::SwitchRequests::Answered;
 };
 
+/// A TLS transport to @p endpoint, trusting what the endpoint's expected fingerprint says and keeping its
+/// pins in memory, as a test has no file to keep them in.
+/// @param endpoint The daemon, as DaemonFixture::endpoint() states it.
+/// @param keySources What signs in by key; none for a client with only a token.
+/// @return The transport; it owns the pins it checks.
+[[nodiscard]] inline std::shared_ptr<vthost::TlsTransportFactory> makeTestTlsTransport(
+    vthost::TcpEndpoint endpoint, vthost::client::ClientKeySourceProvider keySources = {})
+{
+    struct Pins
+    {
+        core::platform::testing::InMemoryFileSystem files;
+        vthost::testing::CountingRandom random {};
+        vthost::KnownDaemons known { files, "/pins/known_daemons", random };
+    };
+    auto pins = std::make_shared<Pins>();
+    auto* const factory =
+        new vthost::TlsTransportFactory { std::move(endpoint), pins->known, nullptr, std::move(keySources) };
+    return std::shared_ptr<vthost::TlsTransportFactory> { factory, [pins](vthost::TlsTransportFactory* p) {
+                                                             delete p;
+                                                         } };
+}
+
 /// What a controller is built with in every test here: no attach settings of its own, on the steady clock.
 /// The one place its configuration is spelled, so a collaborator it gains is added here alone.
 /// @param endpoint The daemon to attach to, over TLS.
@@ -116,7 +144,7 @@ struct ControllerOptions
     vthost::TcpEndpoint endpoint, TestTimeline& timeline, ControllerOptions options = {})
 {
     return contour::remote::NativeController::Config {
-        .transport = std::make_shared<vthost::TlsTransportFactory>(std::move(endpoint)),
+        .transport = makeTestTlsTransport(std::move(endpoint)),
         .intent = options.intent,
         .profileName = std::string {},
         .workingDirectory = std::move(options.workingDirectory),
@@ -513,6 +541,8 @@ struct DaemonFixture
     /// releaseHeld(). Daemon thread only.
     bool holdNewAtLayout = false;
     std::uint16_t port = 0; ///< The OS-assigned loopback port the daemon listens on.
+    /// The fingerprint of the certificate the daemon presents, as a client is told it out of band.
+    std::string fingerprint;
     std::thread thread;
     bool cancelled = false; ///< Whether teardown unwound the accept loop.
     uint64_t instance = 1;  ///< Which run of the daemon @c host is; 0 states none.
@@ -552,13 +582,16 @@ struct DaemonFixture
     ///        restartHost()'s is a run with nothing to restore.
     /// @param startupLayout The tabs the host opens on construction; none by default.
     /// @param sizePolicy How the host resolves one client area from several; the latest report by default.
+    /// @param authorizedKeys The keys the daemon authenticates by (keys only, no token); none for the token
+    ///        guard @p services states. Such a daemon is served without the fixture's socket decorators.
     explicit DaemonFixture(std::shared_ptr<vthost::IExtensionHosting> extensions = {},
                            vthost::NativeSessionServices services = {},
                            uint64_t instance = 1,
                            std::shared_ptr<vthost::ProfileCatalog const> profiles = {},
                            std::optional<vthost::WorkspaceRestore> restore = std::nullopt,
                            vtworkspace::Layout startupLayout = {},
-                           vthost::ClientSizePolicy sizePolicy = vthost::ClientSizePolicy::Latest):
+                           vthost::ClientSizePolicy sizePolicy = vthost::ClientSizePolicy::Latest,
+                           std::vector<vthost::AuthorizedKey> authorizedKeys = {}):
         extensions(std::move(extensions)),
         services(std::move(services)),
         instance(instance),
@@ -577,9 +610,32 @@ struct DaemonFixture
         // which NativeClient's concurrent read+write drives.
         auto tls = core::net::makeSelfSignedServerContext();
         REQUIRE(tls.has_value());
-        native = vthost::makeNativeHandler(loop, *host, this->services);
+        {
+            auto const digest = core::fromHexString(std::string_view { (*tls)->certificateFingerprint() });
+            REQUIRE(digest.has_value());
+            REQUIRE(digest->size() == 32);
+            auto bytes = std::array<std::byte, 32> {};
+            std::ranges::transform(*digest, bytes.begin(), [](char c) { return static_cast<std::byte>(c); });
+            fingerprint = core::net::sshStyleFingerprint(bytes);
+        }
         auto const& context = *tls;
-        auto handler = [this, context](vthost::ConnectionId id, std::unique_ptr<core::net::ISocket> socket) {
+        auto const keyed = !authorizedKeys.empty();
+        if (keyed)
+            native = vthost::makeTlsNativeHandler(loop,
+                                                  *host,
+                                                  context,
+                                                  this->services,
+                                                  vthost::TlsKeyAuth { .keys = std::move(authorizedKeys),
+                                                                       .auth = vthost::DaemonAuth::KeysOnly,
+                                                                       .random = core::systemRandom() })
+                         .value();
+        else
+            native = vthost::makeNativeHandler(loop, *host, this->services);
+        auto handler = [this, context, keyed](vthost::ConnectionId id,
+                                              std::unique_ptr<core::net::ISocket> socket) {
+            // The TLS-and-keys handler wraps the socket itself.
+            if (keyed)
+                return native(std::move(id), std::move(socket));
             auto gate = std::make_unique<GatedSocket>(
                 std::make_unique<CountingSocket>(
                     std::make_unique<DroppableSocket>(context->wrap(std::move(socket), loop), live),
@@ -625,7 +681,9 @@ struct DaemonFixture
     /// The endpoint a client dials: loopback TCP + TLS (TOFU), no token.
     [[nodiscard]] vthost::TcpEndpoint endpoint() const
     {
-        return vthost::TcpEndpoint { .host = "127.0.0.1", .port = port, .token = {}, .caPem = {} };
+        return vthost::TcpEndpoint {
+            .host = "127.0.0.1", .port = port, .token = {}, .caPem = {}, .expectedFingerprint = fingerprint
+        };
     }
 
     /// Runs @p fn on the daemon's loop thread and waits for its result —

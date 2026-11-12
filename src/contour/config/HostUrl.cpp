@@ -33,12 +33,6 @@ namespace
     };
     static_assert(HostUrlErrorText.size() == std::to_underlying(HostUrlError::UserNotAllowed) + 1);
 
-    /// What the loader logs, and Settings shows, for each HostEntryError, in enumerator order.
-    constexpr auto HostEntryErrorText = std::array<std::string_view, 1> {
-        "a tls:// host needs a token_file", // TokenRequired
-    };
-    static_assert(HostEntryErrorText.size() == std::to_underlying(HostEntryError::TokenRequired) + 1);
-
     /// What a host may not contain beyond control characters, as OpenSSH >= 9.6 refuses on its own command
     /// line: an older ssh hands the name to a user's `ProxyCommand` through `%h` unchecked.
     constexpr auto UnsafeHostCharacters = std::string_view { " '`\"$\\;&<>|(){}," };
@@ -188,19 +182,6 @@ std::string_view describe(HostUrlError error) noexcept
     return HostUrlErrorText.at(std::to_underlying(error));
 }
 
-std::string_view describe(HostEntryError error) noexcept
-{
-    return HostEntryErrorText.at(std::to_underlying(error));
-}
-
-std::expected<void, HostEntryError> checkHostToken(HostScheme scheme, std::string_view tokenFile) noexcept
-{
-    // A TCP daemon always requires a token, so a saved TLS host without one could never attach.
-    if (scheme == HostScheme::Tls && tokenFile.empty())
-        return std::unexpected { HostEntryError::TokenRequired };
-    return {};
-}
-
 std::optional<HostScheme> hostSchemeOf(std::string_view url) noexcept
 {
     auto const split = splitScheme(url);
@@ -217,10 +198,6 @@ std::vector<HostFieldProblem> checkHostDraft(HostDraft const& draft)
     auto problems = std::vector<HostFieldProblem> {};
     if (auto const url = parseHostUrl(draft.url); !url)
         problems.push_back({ .field = HostField::Url, .message = std::string { describe(url.error()) } });
-    if (auto const scheme = hostSchemeOf(draft.url))
-        if (auto const token = checkHostToken(*scheme, draft.tokenFile); !token)
-            problems.push_back(
-                { .field = HostField::TokenFile, .message = std::string { describe(token.error()) } });
     return problems;
 }
 
@@ -230,6 +207,7 @@ HostDraft hostDraftOf(HostEntry const& entry)
         .url = toString(entry.url),
         .tokenFile = core::pathToUtf8(entry.tokenFile),
         .tlsCa = core::pathToUtf8(entry.tlsCa),
+        .identityFile = core::pathToUtf8(entry.identityFile),
         .remoteCommand = entry.remoteCommand,
         .profile = entry.profile,
     };

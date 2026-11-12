@@ -141,6 +141,12 @@ namespace
                                            CLI::Value { ""s },
                                            "The CA certificate (PEM) a HOST:PORT daemon is verified against.",
                                            "FILE" });
+        options.emplace_back(
+            CLI::Option { "daemon-fingerprint",
+                          CLI::Value { ""s },
+                          "The fingerprint a HOST:PORT daemon without a CA must present on first contact, as "
+                          "`contour daemon status` prints it there; it is then pinned.",
+                          "SHA256:..." });
         return options;
     }
 
@@ -1194,22 +1200,26 @@ std::unique_ptr<ControlChannel> makeTransportChannel(std::shared_ptr<vthost::ITr
 vthost::client::SavedHostResolver makeSavedHostResolver(HostLookup lookup,
                                                         core::platform::FileSystem const& fileSystem,
                                                         std::shared_ptr<vthost::IStdioSpawner> spawner,
-                                                        SshPrompting prompting)
+                                                        SshPrompting prompting,
+                                                        TlsTrust tls)
 {
-    return
-        [lookup = std::move(lookup),
-         &fileSystem,
-         spawner = std::move(spawner),
-         prompting = std::move(prompting)](
-            std::string_view spec) -> std::expected<std::shared_ptr<vthost::ITransportFactory>, std::string> {
-            return lookup(spec)
-                .and_then([&](config::HostEntry const& host) {
-                    return makeHostTransport(std::string { spec }, host, fileSystem, spawner, prompting);
-                })
-                .transform([](HostTransport transport) { return std::move(transport.factory); })
-                .transform_error(
-                    [&](std::string const& why) { return std::format("--daemon {}: {}", spec, why); });
-        };
+    return [lookup = std::move(lookup),
+            &fileSystem,
+            spawner = std::move(spawner),
+            prompting = std::move(prompting),
+            tls = std::move(tls)](std::string_view spec, std::string_view daemonFingerprint)
+               -> std::expected<std::shared_ptr<vthost::ITransportFactory>, std::string> {
+        return lookup(spec)
+            .and_then([&](config::HostEntry const& host) {
+                auto hostTls = tls;
+                hostTls.daemonFingerprint = std::string { daemonFingerprint };
+                return makeHostTransport(
+                    std::string { spec }, host, fileSystem, spawner, prompting, std::move(hostTls));
+            })
+            .transform([](HostTransport transport) { return std::move(transport.factory); })
+            .transform_error(
+                [&](std::string const& why) { return std::format("--daemon {}: {}", spec, why); });
+    };
 }
 
 ExitStatus exitStatusFor(vtcontrol::ControlErrorCode code) noexcept
@@ -1239,6 +1249,7 @@ ExitStatus exitStatusFor(ControlFailure failure) noexcept
         case ControlFailure::Refused:
         case ControlFailure::Unsupported:
         case ControlFailure::Untrusted:
+        case ControlFailure::Declined:
         case ControlFailure::TimedOut:
         case ControlFailure::Remote: break;
     }
@@ -1331,6 +1342,10 @@ std::expected<std::unique_ptr<ControlChannel>, ExitStatus> openControlChannel(CL
                                                  .label = f.text("label"),
                                                  .token = cleanToken(*token),
                                                  .tlsCaPem = *authority,
+                                                 .daemonFingerprint = f.text("daemon-fingerprint"),
+                                                 .knownDaemons = io.knownDaemons,
+                                                 .pinPrompt = io.pinPrompt,
+                                                 .keySourceProvider = io.keySourceProvider,
                                                  .resolveSavedHost = io.resolveSavedHost },
         io.env);
     if (!transport)

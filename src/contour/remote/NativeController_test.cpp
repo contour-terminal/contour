@@ -73,6 +73,7 @@
 #include <span>
 
 #include <vthost/Askpass.hpp>
+#include <vthost/AuthorizedKeys.hpp>
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/LoopDrain.hpp>
@@ -90,6 +91,7 @@
 #include <vthost/testing/FakeDaemonControl.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/FakeProfileCatalog.hpp>
+#include <vthost/testing/SoftwareKeySource.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/SessionModel.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -288,6 +290,31 @@ struct RefusingFactory final: contour::session::SessionFactory
 };
 
 } // namespace
+
+TEST_CASE("attach controller signs in by key to a keys-only daemon", "[attach][controller][keyauth]")
+{
+    // The path `contour client` and a saved tls host take: a transport that makes the key source, a
+    // controller that builds the hello from the connection it opened.
+    auto const keys = std::make_shared<vthost::testing::SoftwareKeySource>(2);
+    auto const listed = vthost::parseAuthorizedKeys(keys->authorizedLine(1) + "\n");
+    REQUIRE(listed.keys.size() == 1);
+    auto daemon =
+        DaemonFixture { {}, {}, 1, {}, std::nullopt, {}, vthost::ClientSizePolicy::Latest, listed.keys };
+    std::ignore = daemon.seedSession("signed in");
+
+    auto timeline = TestTimeline {};
+    auto config = controllerConfig(daemon.endpoint(), timeline);
+    config.transport = makeTestTlsTransport(daemon.endpoint(), [keys](core::net::EventLoop&) {
+        return std::shared_ptr<vthost::client::IClientKeySource> { keys };
+    });
+    auto const controller = std::make_unique<contour::remote::NativeController>(std::move(config));
+    auto const connected = controller->connectAndWait(10s);
+    REQUIRE(connected.has_value());
+    CHECK(controller->pendingCount() == 1);
+    // The first key was refused and the daemon's fresh challenge answered with the second.
+    CHECK(keys->signCount() == 2);
+    controller->stop();
+}
 
 TEST_CASE("attach controller mirrors a remote session over a real socket", "[attach][controller]")
 {
@@ -3639,7 +3666,7 @@ struct FollowingGui
     {
         auto owned =
             std::make_unique<contour::remote::NativeController>(contour::remote::NativeController::Config {
-                .transport = std::make_shared<vthost::TlsTransportFactory>(daemon.endpoint()),
+                .transport = contour::remote::testing::makeTestTlsTransport(daemon.endpoint()),
                 .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Select,
                                                         .workspace = followed },
                 .profileName = std::string {},
@@ -5711,11 +5738,6 @@ class FailingTransportFactory final: public vthost::ITransportFactory
 
     [[nodiscard]] std::string describe() const override { return _where; }
 
-    [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override
-    {
-        return vthost::PeerTrust::Verified;
-    }
-
   private:
     [[nodiscard]] static core::async::Task<
         std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
@@ -6279,7 +6301,6 @@ class PromptingTransport final: public vthost::ITransportFactory
     }
 
     [[nodiscard]] std::string describe() const override { return _inner->describe(); }
-    [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override { return _inner->peerTrust(); }
 
     /// @return How many connections were asked for, each a prompt that could have opened.
     [[nodiscard]] int connects() const noexcept { return _connects; }

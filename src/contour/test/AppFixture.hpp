@@ -3,16 +3,20 @@
 
 #include <contour/ContourGuiApp.hpp>
 #include <contour/command/MenuTree.hpp>
+#include <contour/remote/WorkspaceLister.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 
 #include <core/platform/NativeFileSystem.hpp>
 
+#include <QtCore/QPointer>
 #include <QtCore/QTemporaryDir>
+#include <QtQml/QQmlEngine>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <string>
@@ -22,6 +26,35 @@
 
 namespace contour::test
 {
+
+/// A workspace lister that answers when the test says: it keeps each listing asked for until answer().
+class ScriptedWorkspaceLister final: public contour::remote::IWorkspaceLister
+{
+  public:
+    /// One listing asked for.
+    struct Request
+    {
+        contour::remote::ListTarget target;     ///< The daemon.
+        contour::remote::WorkspacesListed done; ///< Told the answer.
+    };
+
+    void list(contour::remote::ListTarget target, contour::remote::WorkspacesListed done) override
+    {
+        requests.push_back(Request { .target = std::move(target), .done = std::move(done) });
+    }
+
+    /// Answers the oldest listing still waiting.
+    /// @param listing What it tells.
+    void answer(contour::remote::WorkspaceListing listing)
+    {
+        REQUIRE_FALSE(requests.empty());
+        auto request = std::move(requests.front());
+        requests.erase(requests.begin());
+        request.done(std::move(listing));
+    }
+
+    std::vector<Request> requests; ///< The listings waiting for an answer, oldest first.
+};
 
 /// Builds a ContourGuiApp whose parameters() are populated with defaults (so profileName() resolves
 /// to the default "main" profile) without running the GUI. The default-constructed config already
@@ -69,29 +102,32 @@ class TestApp
         contour::config::HostPlatform shellHost = contour::config::HostPlatform::Other):
         _environment { std::move(environment) },
         _sessionFiles { fileSystem ? fileSystem : &_fileSystem },
-        _app(_environment,
-             withTestNotifier(std::move(factory)),
-             makeRecordingLauncher(),
-             std::move(layoutStore),
-             std::move(commandHistoryStore),
-             speechOrDefault(std::move(speech)),
-             makeOutputFiles(),
-             clocks(),
-             std::move(identity),
-             _sessionFiles,
-             nullptr,
-             linkServices(),
-             std::move(taskbarProgress),
-             std::make_unique<InMemoryWindowPositionStore>(),
-             appearance,
-             core::platform::defaultSteadyClock().now(),
-             settingsWindowFactory(),
-             shellIntegrationServices(std::move(shellRcEditor), shellHost),
-             scriptedDragEndProbe(),
-             nullptr,
-             recordingWindowSwitching(),
-             fakeSwitchDirectory(),
-             [this](int status) { _exitCodes.push_back(status); })
+        _app(
+            _environment,
+            withTestNotifier(std::move(factory)),
+            makeRecordingLauncher(),
+            std::move(layoutStore),
+            std::move(commandHistoryStore),
+            speechOrDefault(std::move(speech)),
+            makeOutputFiles(),
+            clocks(),
+            std::move(identity),
+            _sessionFiles,
+            nullptr,
+            linkServices(),
+            std::move(taskbarProgress),
+            std::make_unique<InMemoryWindowPositionStore>(),
+            appearance,
+            core::platform::defaultSteadyClock().now(),
+            settingsWindowFactory(),
+            shellIntegrationServices(std::move(shellRcEditor), shellHost),
+            scriptedDragEndProbe(),
+            nullptr,
+            recordingWindowSwitching(),
+            fakeSwitchDirectory(),
+            [this](int status) { _exitCodes.push_back(status); },
+            bootstrapPromptFactory(),
+            scriptedStartupLister())
     {
         parseTerminalVerb();
     }
@@ -108,29 +144,32 @@ class TestApp
     /// @param placement Places what the app's default session factory and launcher start.
     explicit TestApp(std::shared_ptr<vtpty::ProcessPlacement> placement):
         _sessionFiles { &_fileSystem },
-        _app(_environment,
-             nullptr,
-             nullptr,
-             nullptr,
-             nullptr,
-             defaultSpeech(),
-             makeOutputFiles(),
-             clocks(),
-             testHostIdentity(),
-             _sessionFiles,
-             std::move(placement),
-             linkServices(),
-             nullptr,
-             std::make_unique<InMemoryWindowPositionStore>(),
-             contour::platform::nullAppearanceServices(),
-             core::platform::defaultSteadyClock().now(),
-             settingsWindowFactory(),
-             shellIntegrationServices(),
-             scriptedDragEndProbe(),
-             nullptr,
-             recordingWindowSwitching(),
-             fakeSwitchDirectory(),
-             [this](int status) { _exitCodes.push_back(status); })
+        _app(
+            _environment,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            defaultSpeech(),
+            makeOutputFiles(),
+            clocks(),
+            testHostIdentity(),
+            _sessionFiles,
+            std::move(placement),
+            linkServices(),
+            nullptr,
+            std::make_unique<InMemoryWindowPositionStore>(),
+            contour::platform::nullAppearanceServices(),
+            core::platform::defaultSteadyClock().now(),
+            settingsWindowFactory(),
+            shellIntegrationServices(),
+            scriptedDragEndProbe(),
+            nullptr,
+            recordingWindowSwitching(),
+            fakeSwitchDirectory(),
+            [this](int status) { _exitCodes.push_back(status); },
+            bootstrapPromptFactory(),
+            scriptedStartupLister())
     {
         parseTerminalVerb();
     }
@@ -164,29 +203,32 @@ class TestApp
     explicit TestApp(std::initializer_list<char const*> args,
                      std::unique_ptr<contour::session::SessionFactory> factory = nullptr):
         _sessionFiles { &_fileSystem },
-        _app(_environment,
-             withTestNotifier(std::move(factory)),
-             makeRecordingLauncher(),
-             nullptr,
-             nullptr,
-             defaultSpeech(),
-             makeOutputFiles(),
-             clocks(),
-             testHostIdentity(),
-             _sessionFiles,
-             nullptr,
-             linkServices(),
-             nullptr,
-             std::make_unique<InMemoryWindowPositionStore>(),
-             contour::platform::nullAppearanceServices(),
-             core::platform::defaultSteadyClock().now(),
-             settingsWindowFactory(),
-             shellIntegrationServices(),
-             scriptedDragEndProbe(),
-             nullptr,
-             recordingWindowSwitching(),
-             fakeSwitchDirectory(),
-             [this](int status) { _exitCodes.push_back(status); })
+        _app(
+            _environment,
+            withTestNotifier(std::move(factory)),
+            makeRecordingLauncher(),
+            nullptr,
+            nullptr,
+            defaultSpeech(),
+            makeOutputFiles(),
+            clocks(),
+            testHostIdentity(),
+            _sessionFiles,
+            nullptr,
+            linkServices(),
+            nullptr,
+            std::make_unique<InMemoryWindowPositionStore>(),
+            contour::platform::nullAppearanceServices(),
+            core::platform::defaultSteadyClock().now(),
+            settingsWindowFactory(),
+            shellIntegrationServices(),
+            scriptedDragEndProbe(),
+            nullptr,
+            recordingWindowSwitching(),
+            fakeSwitchDirectory(),
+            [this](int status) { _exitCodes.push_back(status); },
+            bootstrapPromptFactory(),
+            scriptedStartupLister())
     {
         std::vector<char const*> argv;
         argv.reserve(args.size() + 1);
@@ -202,6 +244,17 @@ class TestApp
     TestApp& operator=(TestApp&&) = delete;
 
     [[nodiscard]] contour::ContourGuiApp& app() noexcept { return _app; }
+
+    /// @return The host of every stand-in prompt window the app made, in order; one the app has ended since
+    ///         is null.
+    [[nodiscard]] std::vector<QPointer<contour::window::PromptHost>> const& bootstrapPromptHosts()
+        const noexcept
+    {
+        return _bootstrapHosts;
+    }
+
+    /// @return The lister the app's `--workspace` launch lists through: it answers when the test says.
+    [[nodiscard]] ScriptedWorkspaceLister& startupLister() noexcept { return *_startupLister; }
 
     /// @return The statuses the app ended its event loop with, in order; none while it is running.
     [[nodiscard]] std::vector<int> const& exitCodes() const noexcept { return _exitCodes; }
@@ -414,7 +467,37 @@ class TestApp
         };
     }
 
+    /// The lister the app's `--workspace` launch lists through. Runs in the member-initializer list, so the
+    /// raw pointer is set before _app is constructed.
+    [[nodiscard]] std::unique_ptr<contour::remote::IWorkspaceLister> scriptedStartupLister()
+    {
+        auto lister = std::make_unique<ScriptedWorkspaceLister>();
+        _startupLister = lister.get();
+        return lister;
+    }
+
+    /// Builds the app's stand-in prompt window offscreen, on an engine of the fixture's own, and records the
+    /// host of each one made (bootstrapPromptHosts()). Runs in the member-initializer list; what it returns
+    /// is called only once _app exists.
+    [[nodiscard]] contour::window::BootstrapPromptFactory bootstrapPromptFactory()
+    {
+        return [this](std::shared_ptr<contour::askpass::AskpassPromptRouter> router,
+                      std::function<void()> onDrained) {
+            if (!_promptEngine)
+            {
+                _promptEngine = std::make_unique<QQmlEngine>();
+                installChromeStyle(*_promptEngine);
+            }
+            auto prompt = contour::window::BootstrapPrompt::create(
+                std::move(router), *_promptEngine, std::move(onDrained));
+            if (prompt)
+                _bootstrapHosts.emplace_back(&prompt->host());
+            return prompt;
+        };
+    }
+
     RecordingExternalLauncher* _launcher = nullptr;
+    ScriptedWorkspaceLister* _startupLister = nullptr;
     RecordingShellRcEditor* _shellRcEditor = nullptr;
     ScriptedDragEndProbe* _dragEndProbe = nullptr;
     RecordingWindowSwitching* _switching = nullptr;
@@ -445,6 +528,11 @@ class TestApp
     /// The engine the app's Settings window is built on; see settingsWindowFactory(). Declared before _app,
     /// so the window the app owns goes before the engine it was built on.
     std::unique_ptr<QQmlEngine> _settingsEngine;
+    /// The engine the app's stand-in prompt windows are built on; see bootstrapPromptFactory(). Declared
+    /// before _app, so the windows the app owns go before the engine they were built on.
+    std::unique_ptr<QQmlEngine> _promptEngine;
+    /// The host of every stand-in the app made, in order; null once the app ended that stand-in.
+    std::vector<QPointer<contour::window::PromptHost>> _bootstrapHosts;
     /// The statuses the app ended its event loop with; declared before _app, whose exit writes it.
     std::vector<int> _exitCodes;
     contour::ContourGuiApp _app;

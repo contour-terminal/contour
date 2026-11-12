@@ -41,16 +41,25 @@ struct UnixEndpoint
     std::filesystem::path socketPath;
 };
 
-/// Reaching the daemon over TCP — ALWAYS TLS-encrypted, with @c token as the
-/// authentication (the TCP transport has no filesystem gate).
+/// Reaching the daemon over TCP — ALWAYS TLS-encrypted. The daemon is authenticated by @c caPem, else by its
+/// certificate's fingerprint (@c expectedFingerprint, or the pin on record); the client by @c token or by an
+/// SSH key (the TCP transport has no filesystem gate).
 struct TcpEndpoint
 {
     std::string host;       ///< Remote host ("127.0.0.1", a hostname).
     std::uint16_t port = 0; ///< Remote port.
     std::string token;      ///< Preshared token sent in the ClientHello.
-    /// Trust-anchor certificate (PEM) pinning the daemon's TLS cert. Empty ⇒ the
-    /// TOFU posture (encrypt but do not verify the peer; the token authenticates).
-    std::string caPem;
+    /// Trust-anchor certificate (PEM) the daemon's TLS certificate is verified against, for the host it was
+    /// issued for. Empty: the daemon is verified by its fingerprint instead -- @c expectedFingerprint, else
+    /// the pin in `known_daemons`, else the user's answer on first contact.
+    std::string caPem {};
+    /// The fingerprint (`SHA256:<base64>`) the daemon's certificate must have, as told out of band
+    /// (`--daemon-fingerprint`); empty to rely on the pin on record or to ask. Used only without a CA.
+    std::string expectedFingerprint {};
+    /// How long the TCP connect and the TLS handshake may take together. It bounds the dialling only: a
+    /// question to the user about a daemon met for the first time comes after it, takes what it takes and is
+    /// followed by a second dial, which has the same bound.
+    std::chrono::milliseconds dialTimeout = std::chrono::seconds { 5 };
 };
 
 /// Where `contour client` reaches the daemon: the local unix socket or TCP+TLS.
@@ -65,6 +74,12 @@ using AttachEndpoint = std::variant<UnixEndpoint, TcpEndpoint>;
 /// @param spec The endpoint string; the port must be a decimal in [1, 65535].
 /// @return The host and port, or nullopt if @p spec is malformed.
 [[nodiscard]] std::optional<std::pair<std::string, std::uint16_t>> parseHostPort(std::string_view spec);
+
+/// Splits where a daemon is to listen, `HOST:PORT` (or `[v6]:PORT`), as parseHostPort() does, but accepts
+/// port 0, for the system to pick a free one: where a daemon listens, not where a client dials.
+/// @param spec The listen address.
+/// @return The host and port, or nullopt if @p spec is malformed.
+[[nodiscard]] std::optional<std::pair<std::string, std::uint16_t>> parseListenSpec(std::string_view spec);
 
 /// What an auto-spawned daemon inherits from the client that spawned it.
 ///

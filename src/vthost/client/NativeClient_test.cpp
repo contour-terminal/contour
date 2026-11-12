@@ -29,6 +29,7 @@
     #include <unistd.h>
 #endif
 
+#include <core/Random.hpp>
 #include <core/async/Cancellation.hpp>
 #include <core/async/WhenAll.hpp>
 #include <core/async/WhenAny.hpp>
@@ -42,6 +43,7 @@
 #include <core/net/testing/CoroTestSupport.hpp>
 #include <core/net/testing/InMemoryTransport.hpp>
 
+#include <vthost/AuthorizedKeys.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/DaemonSpawn.hpp>
 #include <vthost/HostIdentity.hpp>
@@ -51,6 +53,7 @@
 #include <vthost/SessionHost.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/TappingPty.hpp>
+#include <vthost/client/ControlClient.hpp>
 #include <vthost/client/LayoutReconstruction.hpp>
 #include <vthost/client/NativeClient.hpp>
 #ifdef CONTOUR_EXTENSIONS
@@ -62,6 +65,7 @@
 #include <vthost/testing/PreNegotiationCodec.hpp>
 #include <vthost/testing/ScenarioGuard.hpp>
 #include <vthost/testing/ShippedCodec.hpp>
+#include <vthost/testing/SoftwareKeySource.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/Move.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -867,6 +871,23 @@ TEST_CASE("parseHostPort accepts HOST:PORT and rejects malformed input", "[vthos
     CHECK_FALSE(parseHostPort("host:0").has_value());     // port 0 is not a dialable target
     CHECK_FALSE(parseHostPort("host:70000").has_value()); // out of range
     CHECK_FALSE(parseHostPort("host:12x").has_value());   // trailing garbage
+}
+
+TEST_CASE("parseListenSpec also accepts port 0, for the system to pick one", "[vthost][attach]")
+{
+    using vthost::parseListenSpec;
+
+    auto const any = parseListenSpec("127.0.0.1:0");
+    REQUIRE(any.has_value());
+    CHECK(any->first == "127.0.0.1");
+    CHECK(any->second == 0);
+    CHECK(parseListenSpec("[::1]:0").has_value());
+    CHECK(parseListenSpec("host:9090")->second == 9090);
+    // Everything else stays refused.
+    CHECK_FALSE(parseListenSpec("no-port").has_value());
+    CHECK_FALSE(parseListenSpec("host:").has_value());
+    CHECK_FALSE(parseListenSpec("host:70000").has_value());
+    CHECK_FALSE(parseListenSpec("host:-1").has_value());
 }
 
 namespace
@@ -3500,4 +3521,425 @@ TEST_CASE("against a daemon without TabEditAcks a push is shown as it came",
     REQUIRE(layouts.size() == 2);
     CHECK(layouts.back() == layout);
     CHECK(std::ranges::any_of(seen, carries<proto::EditTab>));
+}
+
+namespace
+{
+
+/// What a client that signs in with software keys made of a daemon that authorizes one key of them.
+struct KeyLoginOutcome
+{
+    bool mirrored = false;      ///< A snapshot arrived: the daemon accepted the proof.
+    std::string refusalMessage; ///< What the client says of a refusal; empty for none.
+    std::size_t signatures = 0; ///< How many proofs were signed.
+};
+
+/// Plays one client against a TLS daemon on loopback.
+/// @param loop The loop both run on.
+/// @param server The daemon's acceptor; the client closes it when it is done.
+/// @param clientTls The client's TLS context.
+/// @param port Where the daemon listens.
+/// @param keys What the client signs with.
+/// @param outcome Where the client records what came of it.
+using KeyClient = Task<void> (*)(core::net::EventLoop* loop,
+                                 vthost::ConnectionAcceptor* server,
+                                 std::shared_ptr<core::net::ITlsContext> clientTls,
+                                 std::uint16_t port,
+                                 std::shared_ptr<vthost::testing::SoftwareKeySource> keys,
+                                 KeyLoginOutcome* outcome);
+
+/// Runs a TLS daemon that authorizes only key @p authorized of @p daemonKeys (keys only), and @p client,
+/// signing with @p clientKeys, against it.
+/// @param daemonKeys What the daemon lists a key of.
+/// @param authorized The index, among @p daemonKeys, of the one key the daemon lists.
+/// @param clientKeys What the client signs with.
+/// @param client The client to run.
+/// @param token A token the daemon accepts beside the key; empty for keys only.
+/// @return What came of it.
+[[nodiscard]] KeyLoginOutcome againstKeyDaemon(
+    vthost::testing::SoftwareKeySource const& daemonKeys,
+    std::size_t authorized,
+    std::shared_ptr<vthost::testing::SoftwareKeySource> const& clientKeys,
+    KeyClient client,
+    std::string const& token = {})
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
+    host.createTab();
+    auto const drain = vthost::LoopDrain { loop };
+
+    auto serverTls = core::net::makeSelfSignedServerContext();
+    REQUIRE(serverTls.has_value());
+    auto clientTls = core::net::makeTlsClientContext();
+    REQUIRE(clientTls.has_value());
+    auto listener = core::net::listen(loop, "127.0.0.1", 0);
+    REQUIRE(listener.has_value());
+    auto const port = (*listener)->boundPort();
+
+    auto const listed = vthost::parseAuthorizedKeys(daemonKeys.authorizedLine(authorized) + "\n");
+    REQUIRE(listed.keys.size() == 1);
+    auto handler = vthost::makeTlsNativeHandler(
+        loop,
+        host,
+        *serverTls,
+        tokenGuarded(token),
+        vthost::TlsKeyAuth { .keys = listed.keys,
+                             .auth = token.empty() ? vthost::DaemonAuth::KeysOnly : vthost::DaemonAuth::Any,
+                             .random = core::systemRandom() });
+    REQUIRE(handler);
+    auto server = vthost::ConnectionAcceptor { loop, "test", std::move(*listener), *handler };
+
+    auto outcome = KeyLoginOutcome {};
+    loop.blockOn(core::net::testing::allOf(server.serve(),
+                                           client(&loop, &server, *clientTls, port, clientKeys, &outcome)));
+    outcome.signatures = clientKeys->signCount();
+    return outcome;
+}
+
+/// An attaching client that offers @p keys.
+Task<void> attachWithKeys(core::net::EventLoop* loop,
+                          vthost::ConnectionAcceptor* server,
+                          std::shared_ptr<core::net::ITlsContext> clientTls,
+                          std::uint16_t port,
+                          std::shared_ptr<vthost::testing::SoftwareKeySource> keys,
+                          KeyLoginOutcome* outcome)
+{
+    auto connected = co_await core::net::connect(loop, "127.0.0.1", port);
+    if (connected)
+    {
+        auto client = NativeClient { *loop,
+                                     clientTls->wrap(std::move(*connected), *loop),
+                                     NativeClient::HandshakeOptions { .keySource = std::move(keys) },
+                                     vtbackend::CommandBlockStoreLimits {},
+                                     NativeClient::UpdateHandler {},
+                                     NativeClient::ImageHandler {},
+                                     NativeClient::SessionEventHandler {},
+                                     NativeClient::LayoutHandler {} };
+        auto scenario = [](core::net::EventLoop* loop, NativeClient* client) -> Task<void> {
+            co_await core::net::testing::waitUntil(
+                loop, [client] { return !client->screens().empty() || client->refusal().has_value(); });
+            client->detach();
+        }(loop, &client);
+        co_await core::async::whenAll(client.run(), std::move(scenario));
+        outcome->mirrored = !client.screens().empty();
+        outcome->refusalMessage = client.refusalMessage();
+    }
+    server->close();
+}
+
+/// An attaching client with the daemon's token and a key source it has no use for.
+Task<void> attachWithTokenAndKeys(core::net::EventLoop* loop,
+                                  vthost::ConnectionAcceptor* server,
+                                  std::shared_ptr<core::net::ITlsContext> clientTls,
+                                  std::uint16_t port,
+                                  std::shared_ptr<vthost::testing::SoftwareKeySource> keys,
+                                  KeyLoginOutcome* outcome)
+{
+    auto connected = co_await core::net::connect(loop, "127.0.0.1", port);
+    if (connected)
+    {
+        auto client =
+            NativeClient { *loop,
+                           clientTls->wrap(std::move(*connected), *loop),
+                           NativeClient::HandshakeOptions { .token = "tok", .keySource = std::move(keys) },
+                           vtbackend::CommandBlockStoreLimits {},
+                           NativeClient::UpdateHandler {},
+                           NativeClient::ImageHandler {},
+                           NativeClient::SessionEventHandler {},
+                           NativeClient::LayoutHandler {} };
+        auto scenario = [](core::net::EventLoop* loop, NativeClient* client) -> Task<void> {
+            co_await core::net::testing::waitUntil(
+                loop, [client] { return !client->screens().empty() || client->refusal().has_value(); });
+            client->detach();
+        }(loop, &client);
+        co_await core::async::whenAll(client.run(), std::move(scenario));
+        outcome->mirrored = !client.screens().empty();
+    }
+    server->close();
+}
+
+/// A control client that offers @p keys. A daemon with no control service answers an admitted control client
+/// that it does not offer the API, which is how this tells being admitted (Unsupported) from being refused.
+Task<void> controlWithKeys(core::net::EventLoop* loop,
+                           vthost::ConnectionAcceptor* server,
+                           std::shared_ptr<core::net::ITlsContext> clientTls,
+                           std::uint16_t port,
+                           std::shared_ptr<vthost::testing::SoftwareKeySource> keys,
+                           KeyLoginOutcome* outcome)
+{
+    auto connected = co_await core::net::connect(loop, "127.0.0.1", port);
+    if (connected)
+    {
+        auto connection = std::make_unique<vthost::Connection>(
+            vthost::Connection { .lifetime = {},
+                                 .socket = clientTls->wrap(std::move(*connected), *loop),
+                                 .token = {},
+                                 .keySource = std::move(keys) });
+        auto control = vthost::client::ControlClient { *loop, std::move(connection) };
+        auto const handshaken = co_await control.handshake();
+        if (!handshaken)
+            outcome->refusalMessage = handshaken.error().message;
+        outcome->mirrored =
+            !handshaken && handshaken.error().failure == vthost::client::ControlFailure::Unsupported;
+        control.close();
+    }
+    server->close();
+}
+
+} // namespace
+
+TEST_CASE("a token client meets a daemon that also has keys without an error", "[vthost][attach][keyauth]")
+{
+    // The daemon speaks first with an AuthChallenge, after this client's token hello went out: it is admitted
+    // by its token, and the late challenge is nothing to log as an error.
+    auto const capture = core::log::ScopedCapture {};
+    auto const errors = core::log::ScopedCapture { "error" };
+    auto const keys = std::make_shared<vthost::testing::SoftwareKeySource>(1);
+    auto const outcome = againstKeyDaemon(*keys, 0, keys, attachWithTokenAndKeys, "tok");
+    CHECK(outcome.mirrored);
+    CHECK(outcome.signatures == 0);
+    // Not one line at the error level, whatever it says.
+    CHECK(errors.snapshot().empty());
+    CHECK_FALSE(capture.contains("ignoring AuthChallenge"));
+    // The challenge did reach this client, after its hello, and was recognised as nothing to answer.
+    CHECK(capture.contains("sent its hello already"));
+}
+
+TEST_CASE("a client answers the daemon's challenge with the key that is authorized",
+          "[vthost][attach][keyauth]")
+{
+    auto const keys = std::make_shared<vthost::testing::SoftwareKeySource>(3);
+    auto const outcome = againstKeyDaemon(*keys, 1, keys, attachWithKeys);
+    CHECK(outcome.mirrored);
+    CHECK(outcome.refusalMessage.empty());
+    // The first key was refused, and the daemon's fresh challenge was answered with the second.
+    CHECK(outcome.signatures == 2);
+}
+
+TEST_CASE("a client offers at most five keys, and says which when the daemon refuses",
+          "[vthost][attach][keyauth]")
+{
+    auto const keys = std::make_shared<vthost::testing::SoftwareKeySource>(6);
+    auto const outcome = againstKeyDaemon(*keys, 5, keys, attachWithKeys);
+    CHECK_FALSE(outcome.mirrored);
+    CHECK(outcome.signatures == 5);
+    CHECK(outcome.refusalMessage.contains("identity_file"));
+    for (auto const index: std::views::iota(std::size_t { 0 }, std::size_t { 5 }))
+        CHECK(outcome.refusalMessage.contains(core::net::sshFingerprintOf(keys->publicKey(index))));
+    CHECK_FALSE(outcome.refusalMessage.contains(core::net::sshFingerprintOf(keys->publicKey(5))));
+}
+
+TEST_CASE("a control client signs in by key too, and says which keys it offered when refused",
+          "[vthost][attach][keyauth][control]")
+{
+    // A daemon with no control service answers an admitted control client that it does not offer the API;
+    // a refused one is told no more than a wrong token is, and the client adds what it offered.
+    auto const keys = std::make_shared<vthost::testing::SoftwareKeySource>(2);
+    auto const admitted = againstKeyDaemon(*keys, 1, keys, controlWithKeys);
+    CHECK(admitted.mirrored); // past authentication: what it lacks is the control API
+    CHECK(admitted.signatures == 2);
+
+    auto const strangers = std::make_shared<vthost::testing::SoftwareKeySource>(2);
+    auto const refused = againstKeyDaemon(*keys, 1, strangers, controlWithKeys);
+    CHECK_FALSE(refused.mirrored);
+    CHECK(refused.refusalMessage.contains("identity_file"));
+    CHECK(refused.refusalMessage.contains(core::net::sshFingerprintOf(strangers->publicKey(0))));
+}
+
+namespace
+{
+/// A key source whose signature never finishes by itself, as a passphrase dialog left open does.
+class HangingKeySource final: public vthost::client::IClientKeySource
+{
+  public:
+    explicit HangingKeySource(core::net::EventLoop& loop, vthost::testing::SoftwareKeySource const& keys):
+        _loop(loop), _key(keys.publicKey(0))
+    {
+    }
+
+    core::async::Task<std::expected<std::vector<core::net::SshPublicKey>, std::string>> candidates() override
+    {
+        co_return std::vector { _key };
+    }
+
+    core::async::Task<std::expected<std::string, std::string>> sign(
+        core::net::SshPublicKey const& /*key*/, std::span<std::byte const> /*message*/) override
+    {
+        return wait();
+    }
+
+    bool isSigning = false;    ///< The daemon's challenge arrived and the signature was asked for.
+    bool wasAbandoned = false; ///< The signature was cancelled instead of finishing.
+
+  private:
+    core::async::Task<std::expected<std::string, std::string>> wait()
+    {
+        isSigning = true;
+        try
+        {
+            co_await _loop.delay(std::chrono::hours { 1 });
+        }
+        catch (core::async::OperationCancelled const&)
+        {
+            wasAbandoned = true;
+            throw;
+        }
+        co_return std::unexpected(std::string { "never" });
+    }
+
+    core::net::EventLoop& _loop;
+    core::net::SshPublicKey _key;
+};
+
+Task<void> attachWithHangingKey(core::net::EventLoop* loop,
+                                vthost::ConnectionAcceptor* server,
+                                std::shared_ptr<core::net::ITlsContext> clientTls,
+                                std::uint16_t port,
+                                std::shared_ptr<vthost::testing::SoftwareKeySource> keys,
+                                KeyLoginOutcome* outcome)
+{
+    auto connected = co_await core::net::connect(loop, "127.0.0.1", port);
+    if (connected)
+    {
+        auto const hanging = std::make_shared<HangingKeySource>(*loop, *keys);
+        auto client = NativeClient { *loop,
+                                     clientTls->wrap(std::move(*connected), *loop),
+                                     NativeClient::HandshakeOptions { .keySource = hanging },
+                                     vtbackend::CommandBlockStoreLimits {},
+                                     NativeClient::UpdateHandler {},
+                                     NativeClient::ImageHandler {},
+                                     NativeClient::SessionEventHandler {},
+                                     NativeClient::LayoutHandler {} };
+        auto ended = false;
+        auto scenario = [](core::net::EventLoop* loop,
+                           NativeClient* client,
+                           HangingKeySource const* source) -> Task<void> {
+            co_await core::net::testing::waitUntil(loop, [source] { return source->isSigning; });
+            client->detach(); // the user closes the window while the dialog is open
+        }(loop, &client, hanging.get());
+        auto run = [](NativeClient* client, bool* ended) -> Task<void> {
+            co_await client->run();
+            *ended = true;
+        }(&client, &ended);
+        auto deadline = [](core::net::EventLoop* loop) -> Task<void> {
+            co_await loop->delay(std::chrono::seconds { 5 });
+        }(loop);
+        auto both = [](Task<void> first, Task<void> second) -> Task<void> {
+            co_await core::async::whenAll(std::move(first), std::move(second));
+        }(std::move(run), std::move(scenario));
+        std::ignore = co_await core::async::whenAny(std::move(both), std::move(deadline));
+        outcome->mirrored = ended && hanging->wasAbandoned;
+    }
+    server->close();
+}
+} // namespace
+
+namespace
+{
+/// A key source whose signatures take @c delay, as a passphrase typed into a dialog does, then are made by
+/// the software keys it wraps.
+class SlowKeySource final: public vthost::client::IClientKeySource
+{
+  public:
+    SlowKeySource(core::net::EventLoop& loop,
+                  std::shared_ptr<vthost::testing::SoftwareKeySource> keys,
+                  std::chrono::milliseconds delay):
+        _loop(loop), _keys(std::move(keys)), _delay(delay)
+    {
+    }
+
+    core::async::Task<std::expected<std::vector<core::net::SshPublicKey>, std::string>> candidates() override
+    {
+        return _keys->candidates();
+    }
+
+    core::async::Task<std::expected<std::string, std::string>> sign(
+        core::net::SshPublicKey const& key, std::span<std::byte const> message) override
+    {
+        return signLater(&_loop, _keys, _delay, key, std::vector<std::byte>(message.begin(), message.end()));
+    }
+
+  private:
+    /// Signs @p message with @p key after @p delay; by value, as it outlives the call.
+    static core::async::Task<std::expected<std::string, std::string>> signLater(
+        core::net::EventLoop* loop,
+        std::shared_ptr<vthost::testing::SoftwareKeySource> keys,
+        std::chrono::milliseconds delay,
+        core::net::SshPublicKey key,
+        std::vector<std::byte> message)
+    {
+        co_await loop->delay(delay);
+        co_return co_await keys->sign(key, message);
+    }
+
+    core::net::EventLoop& _loop;
+    std::shared_ptr<vthost::testing::SoftwareKeySource> _keys;
+    std::chrono::milliseconds _delay;
+};
+
+/// An attaching client whose handshake deadline is 300 ms and whose key takes 900 ms to sign with.
+Task<void> attachWithSlowKey(core::net::EventLoop* loop,
+                             vthost::ConnectionAcceptor* server,
+                             std::shared_ptr<core::net::ITlsContext> clientTls,
+                             std::uint16_t port,
+                             std::shared_ptr<vthost::testing::SoftwareKeySource> keys,
+                             KeyLoginOutcome* outcome)
+{
+    using namespace std::chrono_literals;
+    auto connected = co_await core::net::connect(loop, "127.0.0.1", port);
+    if (connected)
+    {
+        auto client = NativeClient { *loop,
+                                     clientTls->wrap(std::move(*connected), *loop),
+                                     NativeClient::HandshakeOptions {
+                                         .keySource = std::make_shared<SlowKeySource>(*loop, keys, 900ms) },
+                                     vtbackend::CommandBlockStoreLimits {},
+                                     NativeClient::UpdateHandler {},
+                                     NativeClient::ImageHandler {},
+                                     NativeClient::SessionEventHandler {},
+                                     NativeClient::LayoutHandler {},
+                                     NativeClient::PermissionHandler {},
+                                     vthost::client::LivenessPolicy { .idleBeforeProbe = 5s,
+                                                                      .deadAfter = 15s,
+                                                                      .handshakeDeadline = 300ms,
+                                                                      .awakeGap = 5s,
+                                                                      .wakeDeadline = 5s } };
+        auto scenario = [](core::net::EventLoop* loop, NativeClient* client) -> Task<void> {
+            co_await core::net::testing::waitUntil(loop, [client] {
+                return !client->screens().empty() || client->refusal().has_value() || client->lossReason();
+            });
+            client->detach();
+        }(loop, &client);
+        co_await core::async::whenAll(client.run(), std::move(scenario));
+        outcome->mirrored = !client.screens().empty();
+        outcome->refusalMessage = client.lossReason().value_or(client.refusalMessage());
+    }
+    server->close();
+}
+} // namespace
+
+TEST_CASE("a signature slower than the handshake deadline still signs in", "[vthost][attach][keyauth]")
+{
+    // The deadline measures the daemon's silence: from the hello, and again from the keyed hello once it is
+    // sent, never across the time the user takes to unlock the key.
+    auto const keys = std::make_shared<vthost::testing::SoftwareKeySource>(1);
+    auto const outcome = againstKeyDaemon(*keys, 0, keys, attachWithSlowKey);
+    CHECK(outcome.refusalMessage.empty());
+    CHECK(outcome.mirrored);
+    CHECK(outcome.signatures == 1);
+}
+
+TEST_CASE("run() ends when the connection does, though a signature is still being made",
+          "[vthost][attach][keyauth]")
+{
+    auto const keys = std::make_shared<vthost::testing::SoftwareKeySource>(1);
+    auto const outcome = againstKeyDaemon(*keys, 0, keys, attachWithHangingKey);
+    CHECK(outcome.mirrored); // run() returned, and the signature was abandoned
 }

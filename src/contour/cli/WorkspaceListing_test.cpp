@@ -40,12 +40,3 @@ TEST_CASE("resolveWorkspaceSpec takes what the control verbs take", "[cli][switc
     CHECK(resolveWorkspaceSpec("workspace:00000000-0000-0000-0000-00000000beef", *listed) == 9);
     CHECK_FALSE(resolveWorkspaceSpec("nope", *listed).has_value());
 }
-
-TEST_CASE("--workspace needs a pinned certificate to list the daemon's workspaces", "[cli][switch]")
-{
-    CHECK(contour::cli::requireVerifiedForWorkspaceListing(vthost::PeerTrust::Local).has_value());
-    CHECK(contour::cli::requireVerifiedForWorkspaceListing(vthost::PeerTrust::Verified).has_value());
-    auto const refused = contour::cli::requireVerifiedForWorkspaceListing(vthost::PeerTrust::Unverified);
-    REQUIRE(!refused.has_value());
-    CHECK(refused.error().contains("--tls-ca"));
-}

@@ -50,6 +50,9 @@ struct PromptKindRow
     char const* acceptAnswer; ///< What ssh is told for the accept button; a typed secret ignores it.
     askpass::AskpassOutcome rejectOutcome;
     char const* rejectAnswer;
+    /// A sentence under the heading, in the dialog's ordinary text and not the prompt's block, that says what
+    /// to do with the prompt; translated when shown. Empty: none.
+    char const* hint;
 };
 
 /// The rows, one per askpass::AskpassPromptKind, in its order.
@@ -63,6 +66,7 @@ inline constexpr auto PromptKindRows = std::array {
                     askpass::AskpassOutcome::Answered,
                     "",
                     askpass::AskpassOutcome::Cancelled,
+                    "",
                     "" },
     PromptKindRow { askpass::AskpassPromptKind::Confirm,
                     PromptKindRow::Answer::Question,
@@ -73,6 +77,7 @@ inline constexpr auto PromptKindRows = std::array {
                     askpass::AskpassOutcome::Answered,
                     "",
                     askpass::AskpassOutcome::Cancelled,
+                    "",
                     "" },
     PromptKindRow { askpass::AskpassPromptKind::Notice,
                     PromptKindRow::Answer::NoticeOnly,
@@ -83,6 +88,7 @@ inline constexpr auto PromptKindRows = std::array {
                     askpass::AskpassOutcome::Answered,
                     "",
                     askpass::AskpassOutcome::Cancelled,
+                    "",
                     "" },
     PromptKindRow { askpass::AskpassPromptKind::HostKey,
                     PromptKindRow::Answer::Question,
@@ -93,7 +99,8 @@ inline constexpr auto PromptKindRows = std::array {
                     askpass::AskpassOutcome::Answered,
                     "yes",
                     askpass::AskpassOutcome::Answered,
-                    "no" },
+                    "no",
+                    "" },
     PromptKindRow { askpass::AskpassPromptKind::HostKeyWarning,
                     PromptKindRow::Answer::Question,
                     PromptKindRow::Text::Verbatim,
@@ -103,7 +110,8 @@ inline constexpr auto PromptKindRows = std::array {
                     askpass::AskpassOutcome::Answered,
                     "yes",
                     askpass::AskpassOutcome::Answered,
-                    "no" },
+                    "no",
+                    "" },
     PromptKindRow { askpass::AskpassPromptKind::HostKeyUpdate,
                     PromptKindRow::Answer::Question,
                     PromptKindRow::Text::Verbatim,
@@ -113,7 +121,8 @@ inline constexpr auto PromptKindRows = std::array {
                     askpass::AskpassOutcome::Answered,
                     "yes",
                     askpass::AskpassOutcome::Answered,
-                    "no" },
+                    "no",
+                    "" },
     PromptKindRow { askpass::AskpassPromptKind::Question,
                     PromptKindRow::Answer::Question,
                     PromptKindRow::Text::Verbatim,
@@ -123,7 +132,23 @@ inline constexpr auto PromptKindRows = std::array {
                     askpass::AskpassOutcome::Answered,
                     "yes",
                     askpass::AskpassOutcome::Answered,
-                    "no" },
+                    "no",
+                    "" },
+    // Not ssh's: the application asks whether to pin a daemon's fingerprint. Verbatim, so that the
+    // fingerprint is selectable and compared by eye, and Cancel (the reject button, the default) answers
+    // nothing.
+    PromptKindRow {
+        askpass::AskpassPromptKind::PinConfirm,
+        PromptKindRow::Answer::Question,
+        PromptKindRow::Text::Verbatim,
+        QT_TRANSLATE_NOOP("PromptHost", "Trust the daemon at %1?"),
+        QT_TRANSLATE_NOOP("PromptHost", "Trust"),
+        QT_TRANSLATE_NOOP("PromptHost", "Cancel"),
+        askpass::AskpassOutcome::Answered,
+        "yes",
+        askpass::AskpassOutcome::Cancelled,
+        "",
+        QT_TRANSLATE_NOOP("PromptHost", "Compare with `contour daemon status` on that machine.") },
 };
 
 namespace detail
@@ -138,7 +163,7 @@ namespace detail
 } // namespace detail
 
 static_assert(detail::promptKindRowsInOrder(), "PromptKindRows must list the prompt kinds in order");
-static_assert(PromptKindRows.size() == static_cast<std::size_t>(askpass::AskpassPromptKind::Question) + 1,
+static_assert(PromptKindRows.size() == static_cast<std::size_t>(askpass::AskpassPromptKind::PinConfirm) + 1,
               "PromptKindRows must have a row for every prompt kind");
 
 /// @param kind A prompt kind.

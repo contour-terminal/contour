@@ -35,6 +35,9 @@ enum class DuringStartup : uint8_t
 ///         the app before its first window has adopted the attach.
 [[nodiscard]] DuringStartup duringStartup(actions::Action const& action) noexcept;
 
+/// Told, from the event loop, that the attach has started, or why it cannot be.
+using StartupAttachReady = std::function<void(std::expected<void, std::string> started)>;
+
 /// What the launch's attach wait reaches: the attach, and what follows it. Injected, so the wait is driven by
 /// fakes in a test.
 struct StartupAttachSteps
@@ -49,6 +52,12 @@ struct StartupAttachSteps
         openFirstWindow;
     /// The launch ends: its reason, on stderr, and its exit status.
     std::function<void(std::string const& reason, int exitCode)> end;
+    /// What comes before the attach can be looked at, asynchronously: a launch that names a workspace lists
+    /// the daemon's workspaces first, which may ask the user about the daemon, and starts its attach with the
+    /// one it names. Called once, by start(); it tells its argument, from the event loop, that the attach
+    /// started or why it cannot. The launch waits meanwhile as it waits for the attach. Empty for an attach
+    /// that started already.
+    std::function<void(StartupAttachReady ready)> prepare = nullptr;
 };
 
 /// Waits for a launch's attach to settle, then opens the first window, or ends the launch with the reason.
@@ -59,20 +68,37 @@ class StartupAttach: public QObject
     /// @param steps What the wait reaches.
     explicit StartupAttach(StartupAttachSteps steps);
 
-    /// Takes a first look at once (from the event loop), and then on every progress and at the deadline.
+    /// Prepares the attach, if there is anything to (StartupAttachSteps::prepare); then takes a first look
+    /// (from the event loop), and looks again on every progress and at the deadline.
     void start();
 
-    /// @return Whether the attach has not settled yet: no terminal window exists, and none may be started.
-    [[nodiscard]] bool isWaiting() const noexcept { return _isWaiting; }
+    /// @return Whether the attach has not settled yet, its preparation included: no terminal window exists,
+    ///         and none may be started.
+    [[nodiscard]] bool isWaiting() const noexcept
+    {
+        return _phase == Phase::Preparing || _phase == Phase::Waiting;
+    }
 
   public slots:
     /// The attach has news: looks at it again.
     void progressed();
 
   private:
+    /// Where the wait is.
+    enum class Phase : uint8_t
+    {
+        Idle = 0,  ///< Not started.
+        Preparing, ///< The attach is being prepared: nothing to look at yet.
+        Waiting,   ///< The attach goes on: looked at on its news and at its deadline.
+        Settled,   ///< The attach ended, and the first window opened or the launch ended.
+    };
+
+    /// The preparation ended: the attach is looked at now, or the launch ends with why it cannot start.
+    void prepared(std::expected<void, std::string> started);
+
     StartupAttachSteps _steps;
     QTimer _deadline;
-    bool _isWaiting = false;
+    Phase _phase = Phase::Idle;
 };
 
 } // namespace contour::remote

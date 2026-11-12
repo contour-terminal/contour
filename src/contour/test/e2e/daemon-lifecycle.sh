@@ -63,7 +63,7 @@ grep -q "lifecycle" "$OUT/bad-lifecycle.txt" \
     || fail "the --lifecycle rejection does not name the offending option"
 
 # A malformed --listen-tcp is caught before the token is even looked at.
-if timeout 10 "$CONTOUR" daemon --socket "$SOCKET" --listen-tcp 127.0.0.1:0 \
+if timeout 10 "$CONTOUR" daemon --socket "$SOCKET" --listen-tcp 127.0.0.1:99999 \
         > "$OUT/bad-hostport.txt" 2>&1; then
     fail "a malformed --listen-tcp unexpectedly started a daemon"
 fi

@@ -36,6 +36,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -123,9 +124,14 @@ class FixtureLister final: public contour::remote::IWorkspaceLister
     {
         ++listings;
         auto const found = _daemons.find(target.address.name);
-        auto listed = std::expected<std::vector<vtcontrol::WorkspaceInfo>, std::string> {};
-        if (found == _daemons.end())
-            listed = std::unexpected(std::string { "cannot connect to the daemon" });
+        auto listed = contour::remote::WorkspaceListing {};
+        if (declined.contains(target.address.name))
+            listed = std::unexpected(
+                contour::remote::ListFailure { .kind = contour::remote::ListFailureKind::Declined,
+                                               .reason = "the daemon at 127.0.0.1:1 was not trusted" });
+        else if (found == _daemons.end())
+            listed =
+                std::unexpected(contour::remote::ListFailure { .reason = "cannot connect to the daemon" });
         else
             listed = describe(*found->second);
         QMetaObject::invokeMethod(
@@ -135,6 +141,8 @@ class FixtureLister final: public contour::remote::IWorkspaceLister
     }
 
     int listings = 0; ///< How often a daemon was listed.
+    /// The daemons whose listing the user declines to trust, by label.
+    std::set<std::string> declined;
 
   private:
     [[nodiscard]] static std::vector<vtcontrol::WorkspaceInfo> describe(DaemonFixture& daemon)
@@ -807,6 +815,7 @@ TEST_CASE("WindowSwitcher: an unreachable daemon leaves the window as it was", "
             rig.request(to(DaemonAddress { .kind = SwitchDaemonKind::Host, .name = "nowhere" }));
         REQUIRE_FALSE(outcome.has_value());
         CHECK(outcome.error() == "no such daemon");
+        CHECK(rig.window->controller->notices().toastText().contains("Could not switch"));
     }
     SECTION("the daemon is listed, but its link does not connect")
     {
@@ -814,6 +823,18 @@ TEST_CASE("WindowSwitcher: an unreachable daemon leaves the window as it was", "
         auto const outcome = rig.request(to(unreachable(), "1"));
         REQUIRE_FALSE(outcome.has_value());
         CHECK(rig.host.started == 1);
+        CHECK(rig.window->controller->notices().toastText().contains("Could not switch"));
+    }
+    SECTION("the user declines to trust the daemon: said without alarm, nothing is started")
+    {
+        rig.lister->declined.insert("b");
+        auto const outcome = rig.request(to(daemonB(), "1"));
+        REQUIRE_FALSE(outcome.has_value());
+        CHECK(outcome.error() == "the daemon at 127.0.0.1:1 was not trusted");
+        CHECK(rig.host.started == 0);
+        auto const toast = rig.window->controller->notices().toastText();
+        CHECK(toast.contains("Did not switch"));
+        CHECK_FALSE(toast.contains("Could not switch"));
     }
 
     CHECK(rig.windowLink() == &rig.launchLink());
@@ -821,8 +842,6 @@ TEST_CASE("WindowSwitcher: an unreachable daemon leaves the window as it was", "
     CHECK(visibilityOn(rig.a, rig.aWorkspaces[0]) == WorkspaceVisibility::Shown);
     CHECK(rig.app.manager().sessionsOfWindow(rig.shown()).size() == before.size());
     CHECK_FALSE(rig.showsNoneOf(before));
-    // Said in the window.
-    CHECK(rig.window->controller->notices().toastText().contains("Could not switch"));
 }
 
 TEST_CASE("WindowSwitcher: a daemon lost after the connect and before the first frame changes nothing",

@@ -10,6 +10,8 @@
 #include <vtpty/Process.hpp>
 #include <vtpty/SandboxInfo.hpp>
 
+#include <core/net/Tls.hpp>
+
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -21,6 +23,7 @@
 #include <vector>
 
 #include <vthost/AccessFile.hpp>
+#include <vthost/AuthorizedKeys.hpp>
 #include <vthost/CellPixelBounds.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 // Supplies DaemonConfig::settings' default, plus DefaultSessionHistoryLineCount and
@@ -95,12 +98,26 @@ struct NativeTcpListenerConfig
     /// the TCP transport is ALWAYS encrypted.
     std::string tlsCertPath;
     std::string tlsKeyPath;
+    /// SSH public keys that may authenticate by signing a challenge, each with its grants (see
+    /// AuthorizedKeys.hpp). A hello is refused until key proof is checked, so a listener with keys and no
+    /// token serves nobody yet; @ref auth states whether tokens may stand beside them.
+    std::vector<AuthorizedKey> authorizedKeys {};
+    DaemonAuth auth = DaemonAuth::Any; ///< Whether a token also authenticates, or keys alone.
+    /// Where the daemon keeps its self-signed identity so its fingerprint survives a restart
+    /// (daemonIdentityPath()). Used when no @ref tlsCertPath is configured and no handover carried one;
+    /// empty makes an ephemeral certificate instead.
+    std::filesystem::path identityFile {};
 };
 
+/// The TLS floor of every native TCP listener: 1.3 only, as the channel binding of key authentication needs.
+inline constexpr auto NativeTcpTlsOptions =
+    core::net::TlsOptions { .minimumVersion = core::net::TlsVersion::Tls13 };
+
 /// @param listener The TCP listener's configuration.
-/// @return The tokens it accepts: its single token first, granting everything, when there is one, then the
-///         access file's in file order. A token in both would grant everything, as the first match wins,
-///         which is why parseAccessFile() refuses a line repeating the single token.
+/// @return None for a keys-only listener; otherwise the tokens it accepts: its single token first, granting
+///         everything, when there is one, then the access file's in file order. A token in both would grant
+///         everything, as the first match wins, which is why parseAccessFile() refuses a line repeating the
+///         single token.
 [[nodiscard]] std::vector<AcceptedToken> acceptedTokensOf(NativeTcpListenerConfig const& listener);
 
 /// Everything `contour daemon` needs to serve.

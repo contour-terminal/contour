@@ -755,3 +755,31 @@ TEST_CASE("pollConnected: a stalled handshake fails once its bound has passed, h
     REQUIRE_FALSE(settled->has_value());
     CHECK(settled->error() == "timed out");
 }
+
+TEST_CASE(
+    "pollConnected: the time the user spends on a prompt of the transport is not counted against the attach",
+    "[remote][mux][controller]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto controller = ConnectingController { clock };
+    auto const pause = std::make_shared<vthost::PromptPause>();
+    auto const budget = vthost::AttachBudget::promptsOpen(1s).pausedBy(pause);
+
+    // A passphrase is asked during the handshake, and the user takes a long while over it.
+    controller.noteTransportReturned();
+    CHECK_FALSE(controller.pollConnected(budget).has_value());
+    auto const session = pause->open([&clock] {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(clock.now().time_since_epoch());
+    });
+    clock.advance(10s);
+    CHECK_FALSE(controller.pollConnected(budget).has_value());
+    CHECK(controller.untilAttachDeadline(budget).has_value());
+
+    // Answered: what the prompt took is kept, and the bound that was left runs on.
+    pause->close(session, 10s);
+    CHECK(controller.untilAttachDeadline(budget) == std::optional { 1000ms });
+    clock.advance(1100ms);
+    auto const settled = controller.pollConnected(budget);
+    REQUIRE(settled.has_value());
+    CHECK_FALSE(settled->has_value());
+}
