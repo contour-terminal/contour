@@ -2142,8 +2142,10 @@ void Screen::insertChars(LineOffset lineOffset, ColumnCount columnsToInsert)
     if (!isCursorInsideHorizontalMargins())
         return;
 
+    // The room is counted in real columns. The logical column is measured from the left margin
+    // under origin mode (DECOM), which would overstate it by that margin's width.
     auto const sanitizedN =
-        std::min(*columnsToInsert, *margin().horizontal.to - *logicalCursorPosition().column + 1);
+        std::min(*columnsToInsert, *margin().horizontal.to - *realCursorPosition().column + 1);
 
     // Every cell from here to the right margin is about to move sideways, and a block cannot move
     // with them. @see eraseMulticellBlocksInRange.

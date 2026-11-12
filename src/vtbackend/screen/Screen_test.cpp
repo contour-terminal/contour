@@ -1310,6 +1310,38 @@ TEST_CASE("InsertMode.cursorRightOfTheRightMargin", "[screen]")
     CHECK(screen.realCursorPosition().column == ColumnOffset(12));
 }
 
+TEST_CASE("InsertCharacters.originModeWithALeftMargin", "[screen]")
+{
+    // Under origin mode the cursor's logical column is measured from the left margin, so it is
+    // smaller than the real one by the margin's width. The room left before the right margin is a
+    // matter of real columns: taken from the logical one, the count admits more cells than exist.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[?69h");  // DECLRMM
+    mock.writeToScreen("\033[6;20s"); // DECSLRM: margins on columns 6..20
+    mock.writeToScreen("\033[?6h");   // DECOM
+    mock.writeToScreen("\033[1;1H");
+    mock.writeToScreen("abcdefghijk");
+    mock.writeToScreen("\033[2;1H");
+    mock.writeToScreen("ABCDEFGHIJK");
+    REQUIRE(screen.renderMainPageText() == "     abcdefghijk    \n     ABCDEFGHIJK    \n");
+    mock.writeToScreen("\033[1;4H"); // logical column 4, real column 9
+    REQUIRE(screen.realCursorPosition().column == ColumnOffset(8));
+
+    SECTION("ICH")
+    {
+        mock.writeToScreen("\033[100@");
+        CHECK(screen.renderMainPageText() == "     abc            \n     ABCDEFGHIJK    \n");
+    }
+
+    SECTION("DECIC")
+    {
+        mock.writeToScreen("\033[100'}");
+        CHECK(screen.renderMainPageText() == "     abc            \n     ABC            \n");
+    }
+}
+
 TEST_CASE("InsertCharacters.Margins", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
