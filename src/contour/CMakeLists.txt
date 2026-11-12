@@ -266,6 +266,7 @@ set(_header_files
     window/SwitcherStatus.hpp
     window/SwitcherRows.hpp
     window/SwitcherKeys.hpp
+    window/SwitcherText.hpp
     window/TabBarDropPolicy.hpp
     window/TabBarHitValue.hpp
     window/NodeDrag.hpp
@@ -293,6 +294,7 @@ set(_core_source_files
     window/SidebarTree.cpp
     window/SwitcherStatus.cpp
     window/SwitcherRows.cpp
+    window/SwitcherText.cpp
     window/TabLabel.cpp
 )
 # The executable entry point lives outside the object library so the test can supply its own main
@@ -1775,6 +1777,8 @@ if(CONTOUR_TESTING)
         window/SwitcherRows.cpp
         window/SwitcherRows_test.cpp
         window/SwitcherKeys_test.cpp
+        window/SwitcherText.cpp
+        window/SwitcherText_test.cpp
         window/SidebarDropPolicy_test.cpp
         window/SidebarSelection_test.cpp
         window/CloseDialogTable_test.cpp

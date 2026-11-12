@@ -128,6 +128,9 @@ struct PaletteQuery
 /// @return The rows, in display order.
 [[nodiscard]] std::vector<PaletteEntry> listPalette(PaletteTree const& tree, PaletteQuery const& query);
 
+/// Between a footer's key hints: "↩ Run · ⎋ Close".
+inline constexpr auto HintSeparator = std::string_view { " · " };
+
 /// The verbs the footer's key hints name for one kind of row at one depth.
 struct PaletteHintRow
 {

@@ -14,9 +14,6 @@ namespace contour::command
 
 namespace
 {
-    /// Between the footer's two key hints: "↩ Run · ⎋ Close".
-    constexpr auto HintSeparator = std::string_view { " · " };
-
     /// A row of the listing before it is placed: the entry plus what it is ranked by.
     struct Candidate
     {
