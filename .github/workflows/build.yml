@@ -129,15 +129,15 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: D:\a\pace-store
-          key: pace-store-windows-full-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: pace-store-windows-full-
+          key: pace-store-windows-full-070-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: pace-store-windows-full-070-
       - name: "pace: install the release and start pace-kv on the store"
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download v0.6.0 --repo LASTRADA-Software/pace --pattern 'pace-0.6.0-Windows-AMD64.zip' --dir D:\a\pace-dl
-          Expand-Archive D:\a\pace-dl\pace-0.6.0-Windows-AMD64.zip -DestinationPath D:\a\pace
+          gh release download v0.7.0 --repo LASTRADA-Software/pace --pattern 'pace-0.7.0-Windows-AMD64.zip' --dir D:\a\pace-dl
+          Expand-Archive D:\a\pace-dl\pace-0.7.0-Windows-AMD64.zip -DestinationPath D:\a\pace
           $bin = (Get-ChildItem D:\a\pace -Recurse -Filter pace-cc.exe | Select-Object -First 1).DirectoryName
           "pace binaries: $bin"; Get-ChildItem $bin | Select-Object Name, Length
           $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -302,4 +302,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: D:\a\pace-store
-          key: pace-store-windows-full-${{ github.run_id }}-${{ github.run_attempt }}
+          key: pace-store-windows-full-070-${{ github.run_id }}-${{ github.run_attempt }}
