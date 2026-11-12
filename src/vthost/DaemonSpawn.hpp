@@ -197,6 +197,8 @@ class DaemonSpawner
     [[nodiscard]] virtual std::expected<void, std::string> spawn(std::span<std::string const> argv,
                                                                  vtpty::ProcessPlacement& placement) = 0;
 
+    /// Safe to call from several threads at once: discoveries run it off the GUI thread, more than one at a
+    /// time.
     /// @param socketPath A daemon's control socket; the native endpoint beside it is what is asked.
     /// @return Whether a daemon accepts connections there.
     [[nodiscard]] virtual DaemonPresence probe(std::filesystem::path const& socketPath) = 0;

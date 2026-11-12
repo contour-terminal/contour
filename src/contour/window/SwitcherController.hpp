@@ -194,7 +194,9 @@ class SwitcherController: public QAbstractListModel
     void cancelled();
 
   private:
-    /// Starts looking for the local daemons; the answer adds their rows unless the popup was opened again.
+    /// Looks for the local daemons for the opening under way. A discovery still running from an earlier
+    /// opening is not started again: its answer serves this opening instead. An answer adds its rows unless
+    /// the opening it serves has ended by then.
     void discoverDaemons();
 
     /// Merges @p found into the daemons listed, keeping what is known of each one already there.
@@ -228,12 +230,21 @@ class SwitcherController: public QAbstractListModel
 
     void setBusy(bool busy);
 
+    /// Whether a discovery is under way: at most one is, however often the popup is reopened.
+    enum class Discovery : uint8_t
+    {
+        Idle = 0,
+        Running,
+    };
+
     SwitcherServices _services;
     SwitcherOpening _opening;
     std::vector<SwitcherDaemon> _daemons; ///< What the list is made of, in display order.
     std::vector<SwitcherRow> _rows;
     std::vector<cli::DiscoveredDaemon> _localDaemons; ///< What discovery found; empty while it looks.
     std::uint64_t _openings = 0; ///< Counts openings; an answer for an earlier one is dropped.
+    Discovery _discoveryState = Discovery::Idle;
+    std::uint64_t _discoveryFor = 0; ///< The opening the running discovery's answer serves.
     QString _filter;
     int _current = -1;
     SwitcherSelectionOrigin _selectionOrigin = SwitcherSelectionOrigin::Opening;

@@ -839,11 +839,15 @@ namespace
     /// AF_UNIX is a Windows citizen too (10 1803+ / afunix.h), so this needs no
     /// platform split — core::net::connectUnix owns the per-OS detail (winsock
     /// initialization, the SOCKET/int handle split, the path-length check).
-    /// @param loop The reactor driving the connect (not owned).
+    ///
+    /// The connect runs on a reactor of its own, made for this one probe: a loop is driven by exactly one
+    /// thread (core::net's G1), and a probe is a blocking call any thread may make, several at once.
     /// @param path The native socket file to probe.
     /// @return True if a daemon accepted the connection.
-    [[nodiscard]] bool daemonAccepts(core::net::EventLoop& loop, std::string const& path)
+    [[nodiscard]] bool daemonAccepts(std::string const& path)
     {
+        auto const source = core::net::makeDefaultBackend();
+        auto loop = core::net::EventLoop { *source };
         return loop.blockOn(core::net::connectUnix(&loop, path)).has_value();
     }
 
@@ -912,15 +916,14 @@ namespace
 #endif
     }
 
-    /// The operating system's DaemonSpawner: one reactor serves every probe it is asked.
+    /// The operating system's DaemonSpawner. Holds no reactor: each probe drives its own, so probes may run
+    /// on several threads at once.
     class NativeDaemonSpawner final: public DaemonSpawner
     {
       public:
         /// @param environment What every daemon it spawns runs under; std::nullopt for this process's own.
         explicit NativeDaemonSpawner(std::optional<std::vector<std::string>> environment):
-            _environment { std::move(environment) },
-            _source { core::net::makeDefaultBackend() },
-            _loop { *_source }
+            _environment { std::move(environment) }
         {
         }
 
@@ -932,15 +935,12 @@ namespace
 
         [[nodiscard]] DaemonPresence probe(std::filesystem::path const& socketPath) override
         {
-            return daemonAccepts(_loop, core::pathToUtf8(nativeSocketPath(socketPath)))
-                       ? DaemonPresence::Serving
-                       : DaemonPresence::Absent;
+            return daemonAccepts(core::pathToUtf8(nativeSocketPath(socketPath))) ? DaemonPresence::Serving
+                                                                                 : DaemonPresence::Absent;
         }
 
       private:
         std::optional<std::vector<std::string>> _environment;
-        std::unique_ptr<core::net::IoBackend> _source;
-        core::net::EventLoop _loop;
     };
 
     /// Spawns @p args detached, then blocks until a daemon serves at @p socketPath.

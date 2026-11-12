@@ -119,13 +119,19 @@ void SwitcherController::open(SwitcherOpening opening)
 
 void SwitcherController::discoverDaemons()
 {
+    // A reopening (the workspace chip clicked again) while one runs takes over its answer rather than start a
+    // second: what the daemons are does not depend on the opening, and each discovery holds a worker.
+    _discoveryFor = _openings;
+    if (_discoveryState == Discovery::Running)
+        return;
+    _discoveryState = Discovery::Running;
     // Off the GUI thread: a socket that accepts and never answers holds the probe for its whole timeout. The
     // worker never touches this object; its answer is posted back, and the controller outlives its workers.
-    auto const opening = _openings;
     _jobs.run([finder = _services.discovery] { return finder->discover(); },
-              [this, opening](std::vector<cli::DiscoveredDaemon> const& found) {
-                  if (opening != _openings)
-                      return;
+              [this](std::vector<cli::DiscoveredDaemon> const& found) {
+                  _discoveryState = Discovery::Idle;
+                  if (_discoveryFor != _openings)
+                      return; // the opening it served has ended (chosen, cancelled, or a pick opened since)
                   _localDaemons = found;
                   mergeLocalDaemons(found);
               });

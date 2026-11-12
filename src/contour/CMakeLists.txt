@@ -344,6 +344,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/UiStyleProvider.hpp
         window/WindowActivation.hpp
         window/WindowControlStyleProvider.hpp
+        window/PopupParent.hpp
         window/WindowLivenessQt.hpp
         session/SessionInput.hpp
         session/SessionRole.hpp

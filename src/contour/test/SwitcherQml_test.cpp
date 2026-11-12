@@ -9,6 +9,7 @@
 // vocabulary), ActionsFwd's declarations alone read as a namespace mix-up to clang-tidy.
 #include <contour/config/Actions.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
+#include <contour/window/PopupParent.hpp>
 #include <contour/window/SwitcherController.hpp>
 
 #include <vtpty/ProcessPlacement.hpp>
@@ -24,6 +25,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -100,6 +102,87 @@ class FixedDiscovery final: public cli::IDaemonDiscovery
                  { .label = "admin", .socket = "/run/contour/admin", .workspaces = 2 } };
     }
 };
+
+/// Discovery that holds every caller until released, and counts how many it holds at once: a socket that
+/// takes its time to answer, so an opening can come and go while its discovery is under way. Called on the
+/// controller's worker threads.
+class GatedDiscovery final: public cli::IDaemonDiscovery
+{
+  public:
+    [[nodiscard]] std::vector<cli::DiscoveredDaemon> discover() override
+    {
+        auto lock = std::unique_lock { _mutex };
+        ++_calls;
+        ++_running;
+        _mostAtOnce = std::max(_mostAtOnce, _running);
+        _changed.notify_all();
+        _changed.wait(lock, [this] { return _released > 0; });
+        --_released;
+        --_running;
+        return { { .label = "admin", .socket = "/run/contour/admin", .workspaces = 2 } };
+    }
+
+    /// Lets one held discovery answer.
+    void releaseOne()
+    {
+        auto const lock = std::lock_guard { _mutex };
+        ++_released;
+        _changed.notify_all();
+    }
+
+    /// @return Whether @p count discoveries were started within three seconds.
+    [[nodiscard]] bool awaitCalls(int count)
+    {
+        auto lock = std::unique_lock { _mutex };
+        return _changed.wait_for(lock, std::chrono::seconds(3), [&] { return _calls >= count; });
+    }
+
+    [[nodiscard]] int calls() const
+    {
+        auto const lock = std::lock_guard { _mutex };
+        return _calls;
+    }
+
+    [[nodiscard]] int mostAtOnce() const
+    {
+        auto const lock = std::lock_guard { _mutex };
+        return _mostAtOnce;
+    }
+
+  private:
+    mutable std::mutex _mutex;
+    std::condition_variable _changed;
+    int _calls = 0;
+    int _running = 0;
+    int _mostAtOnce = 0;
+    int _released = 0;
+};
+
+/// The controller alone, over @p discovery and services that answer nothing: what discovery does to it.
+[[nodiscard]] std::unique_ptr<window::SwitcherController> controllerOver(
+    std::shared_ptr<cli::IDaemonDiscovery> discovery)
+{
+    return std::make_unique<window::SwitcherController>(window::SwitcherServices {
+        .discovery = std::move(discovery),
+        .savedHosts = [] { return std::vector<window::SwitcherDaemon> {}; },
+        .list = [](vtworkspace::WorkspaceId, SwitchTarget const&, window::SwitcherListed) {},
+        .request = [](vtworkspace::WorkspaceId, SwitchTarget, SwitchMode) {},
+        .startDaemon =
+            [](std::string const&) {
+                return []() -> std::expected<cli::NamedDaemonStart, std::string> {
+                    return std::unexpected { std::string { "not in this test" } };
+                };
+            },
+    });
+}
+
+/// @return Whether @p switcher lists a daemon titled @p title.
+[[nodiscard]] bool listsDaemon(window::SwitcherController const& switcher, std::string_view title)
+{
+    return std::ranges::any_of(switcher.rows(), [&](window::SwitcherRow const& row) {
+        return row.kind == window::SwitcherRowKind::Daemon && row.title == title;
+    });
+}
 
 /// A spawner that records what it starts and has the daemon serve once started: "New daemon…"'s real start
 /// (cli::startNamedDaemon) over it. Called on the controller's worker thread.
@@ -659,4 +742,85 @@ TEST_CASE("Switcher: New daemon… refuses an invalid label inline", "[contour][
     // An empty label is refused on Return too.
     fixture.switcher->submitLabel({});
     CHECK(fixture.switcher->labelError().contains("Type a label"));
+}
+
+TEST_CASE("Switcher: reopening it while it looks for daemons starts no second discovery",
+          "[contour][switcher][threading]")
+{
+    // The workspace chip clicked again and again: each click reopens the popup. One discovery serves them
+    // all, and its answer reaches the opening under way when it comes.
+    auto const discovery = std::make_shared<GatedDiscovery>();
+    auto switcher = controllerOver(discovery);
+    auto const opening = window::SwitcherOpening { .window = ThisWindow,
+                                                   .windowDaemon = labelled("default"),
+                                                   .mode = SwitchMode::Switch,
+                                                   .prompt = window::SwitcherPrompt::Browse,
+                                                   .pick = std::nullopt };
+    switcher->open(opening);
+    REQUIRE(discovery->awaitCalls(1));
+    switcher->open(opening);
+    switcher->cancel();
+    switcher->open(opening);
+    CHECK(discovery->calls() == 1);
+
+    discovery->releaseOne();
+    CHECK(waitUntil([&] { return listsDaemon(*switcher, "admin"); }));
+    CHECK(discovery->calls() == 1);
+    CHECK(discovery->mostAtOnce() == 1);
+
+    // Once it answered, the next opening looks again.
+    switcher->open(opening);
+    REQUIRE(discovery->awaitCalls(2));
+    discovery->releaseOne();
+    CHECK(waitUntil([&] { return listsDaemon(*switcher, "admin"); }));
+}
+
+TEST_CASE("Switcher: a discovery answering after the popup closed adds nothing",
+          "[contour][switcher][threading]")
+{
+    auto const discovery = std::make_shared<GatedDiscovery>();
+    auto switcher = controllerOver(discovery);
+    auto const opening = window::SwitcherOpening { .window = ThisWindow,
+                                                   .windowDaemon = labelled("default"),
+                                                   .mode = SwitchMode::Switch,
+                                                   .prompt = window::SwitcherPrompt::Browse,
+                                                   .pick = std::nullopt };
+    // Opened and closed in quick succession, the discovery under way all along.
+    for ([[maybe_unused]] auto const round: std::views::iota(0, 5))
+    {
+        switcher->open(opening);
+        switcher->cancel();
+    }
+    REQUIRE(discovery->awaitCalls(1));
+    discovery->releaseOne();
+    // The answer comes back to a closed popup: dropped, and the controller free to look again.
+    QTest::qWait(50);
+    CHECK_FALSE(listsDaemon(*switcher, "admin"));
+    CHECK(discovery->calls() == 1);
+
+    // Once the dropped answer is in, the next opening looks again -- and still only one discovery at a time.
+    CHECK(waitUntil([&] {
+        switcher->open(opening);
+        return discovery->calls() == 2;
+    }));
+    CHECK(discovery->mostAtOnce() == 1);
+
+    // Closed, then destroyed with its discovery still running: the answer reaches no controller.
+    switcher->cancel();
+    discovery->releaseOne(); // the destructor joins the worker; it must be free to answer
+    switcher.reset();
+    QTest::qWait(20);
+    CHECK(discovery->calls() == 2);
+}
+
+TEST_CASE("Switcher: a popup reopened while it has the focus stays over its window", "[contour][switcher]")
+{
+    auto terminal = QWindow {};
+    auto popup = QWindow {};
+    CHECK(window::popupParentFor(&terminal, popup) == &terminal);
+    CHECK(window::popupParentFor(nullptr, popup) == nullptr);
+
+    popup.setTransientParent(&terminal);
+    // Focused itself, the popup is not made its own parent: it keeps the one it has.
+    CHECK(window::popupParentFor(&popup, popup) == &terminal);
 }

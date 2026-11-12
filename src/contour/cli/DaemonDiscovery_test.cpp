@@ -4,8 +4,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <format>
+#include <latch>
 #include <map>
+#include <ranges>
 #include <string>
+#include <thread>
 #include <vector>
 
 using contour::cli::DiscoveredDaemon;
@@ -110,4 +114,35 @@ TEST_CASE("DaemonDiscovery.an empty or unreadable directory finds nothing", "[co
         "/nowhere", prober, twoWorkspaces, [](fs::path const&) { return std::vector<fs::path> {}; });
     CHECK(discovery->discover().empty());
     CHECK(prober.probed.empty());
+}
+
+TEST_CASE("DaemonDiscovery.two discoveries run at once through the native prober",
+          "[contour][discovery][threading]")
+{
+    // The switcher and the switch directory each discover off the GUI thread, through the one discovery
+    // the application holds. Both reach the operating system's prober at once, so its probes must not
+    // share an event loop: one driven from two threads aborts (core::net's G1) or races.
+    constexpr auto ProbesPerDiscovery = 200;
+    auto const directory = fs::temp_directory_path() / "contour-discovery-test-no-daemons";
+    auto const prober = vthost::makeNativeDaemonSpawner();
+    auto bothListing = std::latch { 2 };
+    auto const discovery =
+        makeLocalDaemonDiscovery(directory, *prober, twoWorkspaces, [&](fs::path const& dir) {
+            // Neither starts probing until both are about to: their probes overlap from the first.
+            bothListing.arrive_and_wait();
+            auto sockets = std::vector<fs::path> {};
+            for (auto const index: std::views::iota(0, ProbesPerDiscovery))
+                sockets.push_back(dir / std::format("absent-{}", index));
+            return sockets;
+        });
+
+    auto first = std::vector<DiscoveredDaemon> {};
+    auto second = std::vector<DiscoveredDaemon> {};
+    {
+        auto const one = std::jthread { [&] { first = discovery->discover(); } };
+        auto const two = std::jthread { [&] { second = discovery->discover(); } };
+    }
+    // No daemon serves in a directory that does not exist.
+    CHECK(first.empty());
+    CHECK(second.empty());
 }

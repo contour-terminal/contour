@@ -62,6 +62,7 @@
 #include <contour/window/HotkeyRefusals.hpp>
 #include <contour/window/NewDefaultsNotice.hpp>
 #include <contour/window/NoticeModel.hpp>
+#include <contour/window/PopupParent.hpp>
 #include <contour/window/PopupShadowImageProvider.hpp>
 #include <contour/window/QtSaveScheduler.hpp>
 #include <contour/window/QuickTerminalController.hpp>
@@ -4372,7 +4373,8 @@ void ContourGuiApp::openConnectPicker(PickerPresentation presentation, QScreen* 
             _connectPickerWindow->setModality(Qt::NonModal);
             break;
         case PickerPresentation::Sheet:
-            _connectPickerWindow->setTransientParent(QGuiApplication::focusWindow());
+            _connectPickerWindow->setTransientParent(
+                window::popupParentFor(QGuiApplication::focusWindow(), *_connectPickerWindow));
             _connectPickerWindow->setModality(
                 _connectPickerWindow->transientParent() != nullptr ? Qt::WindowModal : Qt::NonModal);
             break;
@@ -4509,7 +4511,8 @@ std::expected<void, std::string> ContourGuiApp::openSwitcher(window::SwitcherOpe
     }
     _switcherReturn = focusReturnPoint();
     _switcher->open(std::move(opening));
-    _switcherWindow->setTransientParent(QGuiApplication::focusWindow());
+    _switcherWindow->setTransientParent(
+        window::popupParentFor(QGuiApplication::focusWindow(), *_switcherWindow));
     _switcherWindow->setModality(_switcherWindow->transientParent() != nullptr ? Qt::WindowModal
                                                                                : Qt::NonModal);
     if (anchor != nullptr)
