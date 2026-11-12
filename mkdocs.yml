@@ -110,6 +110,7 @@ nav:
   - Features:
     - List of features: features.md
     - Persistent sessions: persistent-sessions.md
+    - Workspace sidebar: sidebar.md
     - Remote hosts: remote-hosts.md
     - Control API: control-api.md
     - Font ligatures: demo/font-ligatures.md

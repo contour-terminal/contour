@@ -78,6 +78,9 @@ Shift or moves, and the table says why.
 | Resize the pane | `Ctrl+Shift+Alt+Arrow` | `⌃⇧⌥Arrow` | |
 | Zoom the pane (`TogglePaneZoom`) | `Ctrl+Shift+Z` | `⇧⌘↩` | iTerm2's chord |
 | Toggle split orientation | `Ctrl+Shift+\` | `⌃⇧\` | |
+| Show or hide the workspace sidebar (`ToggleSidebar`) | `Ctrl+Shift+B` | `⌘\` | `native2026` only |
+| Jump to the next pane that needs you (`JumpToNextAttention`) | `Ctrl+Shift+J` | `⌘J` | `native2026` only |
+| Focus the workspace sidebar (`FocusSidebar`) | `Ctrl+Shift+D` | `⇧⌘E` | `native2026` only |
 | Find (`SearchReverse`) | `Ctrl+Shift+F` | `⌘F` | |
 | Next / previous match | `F3` / `Shift+F3` | `⌘G` / `⇧⌘G`, and `F3` / `Shift+F3` | |
 | Find the selection (`SearchSelection`) | — | `⌘E` | A macOS convention; `Ctrl+Shift+E` splits |
@@ -276,3 +279,28 @@ same release, to pick up a rebuilt binary. It asks nothing, as an upgrade keeps 
 for the local daemon this client launched on (one started with **New daemon…** is not); for a remote daemon, one a switch reached, a daemon
 too old to upgrade in place, or one newer than this client it does nothing but tell you why in a notice. It
 is not bound to a key by default.
+
+## Workspace sidebar
+
+The [workspace sidebar](../sidebar.md) is shown and started by the `native2026` defaults (`defaults_edition`),
+which also bind its chords. A configuration with `defaults_edition: classic` binds none of them. A `native2026`
+configuration written before the sidebar existed still gets them, unless it binds the same chord itself.
+
+| Action | Default (Linux / Windows) | Default (macOS) | What it does |
+| --- | --- | --- | --- |
+| `ToggleSidebar` | `Ctrl+Shift+B` | `⌘\` | Shows the sidebar when hidden, hides it when shown. |
+| `FocusSidebar` | `Ctrl+Shift+D` | `⇧⌘E` | Moves keyboard focus into the sidebar, showing it first when hidden. |
+| `FilterWorkspaces` | none | none | Opens the sidebar's filter with the keyboard in it, showing the sidebar first when hidden. |
+| `JumpToNextAttention` | `Ctrl+Shift+J` | `⌘J` | Shows the next pane that needs you: blocked or bell first, then failed, then done and not seen. |
+| `MarkSeen` | none | none | Marks the active pane's output as seen. |
+| `RenameWorkspace` | none | none | Renames the current workspace inline. |
+| `MoveWorkspaceUp`, `MoveWorkspaceDown` | none | none | Moves the current workspace one place in the sidebar's list. |
+| `CloseWorkspace` | none | none | Closes the current workspace and everything in it, after asking. The last workspace of an in-process window cannot be closed. |
+| `GoToPane` | none | none | Shows the pane a sidebar row names; a row of the pane menu. |
+| `MoveTabToWorkspace` | `index:` (1-based, required) | | Moves the current tab into the Nth workspace. |
+
+`NewWorkspace` is listed under [Switching daemons and workspaces](#switching-daemons-and-workspaces); the
+sidebar's **＋** button runs it.
+
+The settings are `sidebar: { visible, width }` and `tab_placement: sidebar | top`; see
+[the sidebar guide](../sidebar.md#configuration).

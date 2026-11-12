@@ -317,6 +317,61 @@ These live below the chrome but are part of the same design:
   PermissionMemory)` instead of two bools (`session/Permission.hpp`).
 - **Hint labels, link target pill, scrollbar** follow the "blank cells only" rule, hint labels aside.
 
+## Sidebar
+
+The workspace sidebar (user guide: [sidebar.md](../sidebar.md)) is one QML tree, `Sidebar.qml` with
+`SidebarRow.qml`, `SidebarFooter.qml` and `SidebarHoverCard.qml`, for all four rows. There are no per-platform
+forks: what differs is data.
+
+- **Tokens.** `SidebarTokens` (in `ChromeTokenGroups.hpp`, one per row in `ChromeTokenRows.hpp`) holds the
+  extents: default, minimum and maximum width, row heights, indent, glyph edge, footer height, selection
+  radius and accent-pill width. Horizontal values are pixels, or cells on the Terminal row. Colours come from
+  the `sidebar*` colour tokens. The default width is 220 px on macOS, 240 on Fluent and ContourLinux and 28
+  cells on Terminal. New QML carries no size or colour literals.
+- **`SidebarLook` per row.** `LayoutTokens::sidebar` names the look: `SourceList` (macOS, an inset rounded
+  selection), `NavigationPane` (Fluent, a subtle fill and an accent pill), `HeaderPane` (ContourLinux, a solid
+  accent fill) and `CellTree` (Terminal). `SidebarLookTraits` adds where it stands against the title band
+  (`SidebarSpan`), where its title is, the divider glyph, whether rows show hover and pressed fills
+  (`SidebarRowFeedback`: Fluent and ContourLinux), where the new-workspace button stands (`SidebarAddPlace`:
+  the footer on macOS, Fluent and Terminal, the header bar on ContourLinux) and whether the title row says
+  "Workspaces" (`SidebarHeading`: not on a macOS source list). A look is a row of that table.
+- **Its own buttons.** `window/SidebarControls.hpp` says how the toggle, the new-workspace and the filter
+  buttons are drawn per look: themed symbolic icons with bundled fallbacks in the ContourLinux header bar, bundled
+  icons on macOS and Fluent, glyphs in cells on Terminal. A Catch2 case keeps them apart from the header bar's
+  own items, so no icon means two things in one bar. `SidebarControlButton.qml` draws one.
+- **Selection.** The fill is the row's palette selection, inset and rounded as the command palette's on the same
+  row. While the keyboard is elsewhere it is `sidebarSelectionFillInactive`: macOS's unemphasized grey, the
+  active fill on the other rows. A folded workspace that holds the displayed tab carries the quiet selection
+  (`RowSelection::ContainsSelected`).
+- **Material.** The fill is solid on every row. Vibrancy and Mica behind it are a follow-up: they need
+  platform code that applies a material to a region other than the title band.
+- **The Terminal row's cell rules.** The width is a whole number of cells, a drag snaps to cells, the tree is
+  `├ └ │` (`TreeGlyph`, with `SidebarRow::continued` carrying every line on through a row's second line), the
+  divider is a one-cell `│` in one fixed column that stays the
+  same across rows, the progress meter is block characters (`progressMeter()`), amber is a glyph only, and
+  glyph fallback must not change an advance width.
+- **Decisions live in Qt-free headers, QML only draws.**
+  - `window/SidebarTree.hpp`: `sidebarRows()` flattens the directory, the seen ledger, the collapsed set, the
+    filter and the clock into rows (title, reason, time, glyph, rolled-up urgency, tree lines, real positions);
+    `sidebarFooter()` and `sidebarSummary()` give the footer counts and the chip.
+  - `window/SidebarDropPolicy.hpp`: where a drag dropped on a row goes, by subject and spot.
+  - `window/StatusUrgency.hpp`: the one urgency order, `NeedsYou > Failed > DoneUnseen > Working >
+    UnseenOutput > Idle`. `TabBadgeRules`, `BadgeRows` and the taskbar tally derive from it.
+  - `window/AttentionJump.hpp`: what a pane asks (`paneUrgency()`) and which pane a jump goes to.
+  - `window/ChromeKeys.hpp` (the sidebar's key rows, Menu and Shift+F10 among them; `QtChromeKeys.hpp` maps
+    Qt's keys onto them) and `command/SidebarMenus.hpp` (the row menus).
+  - `window/SidebarToggle.hpp`: where the toggle stands, and `sidebarRecoveryOf()`: with no toggle on screen
+    the pane's context menu offers **Show Sidebar**.
+  - `window/PopupAnchor.hpp`: where a dropdown hangs below its control; the workspace chip opens the switcher
+    there, listing the window's daemon's workspaces alone (`SwitcherScope::OneDaemon`).
+- **Accessibility.** The tree is `Accessible.Tree`, a row a `TreeItem` named by its title; its kind, its fold
+  and its status are the translated description (`accessibleDescriptionOf()`): Qt 6.11's `Accessible` has no
+  expanded state to bind.
+- **The model.** `SidebarModel` is a thin `QAbstractListModel` over those rows. It rebuilds on directory and
+  seen-state changes, never per terminal byte, and keeps one 1 Hz timer that runs only while a visible row
+  shows a live time. Reduce Motion (`motion.animates == false`) turns off the expand animation and the spinner.
+- **Tests.** Each header has a Catch2 table, and `ChromeSnapshot_test` renders the sidebar on every row.
+
 ## Testing strategy
 
 - **Pure decisions** are Catch2 tables next to the header.
