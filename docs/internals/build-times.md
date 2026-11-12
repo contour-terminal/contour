@@ -128,6 +128,10 @@ Rules, in `.github/workflows/build.yml`:
   cancelled the one still pending, which left a merge's caches hours late or missing.
 - **The full-tree clang-tidy is a workflow of its own** (`clang-tidy.yml`). Inside `Build` its three
   to five hours were how long a `master` run stayed in progress.
+- **A job no pull request runs queues behind its own previous run** (a job-level `concurrency`
+  group per ref, job and matrix leg; `scripts/check-workflows.py` requires it). With a group per
+  commit alone, consecutive pushes ran all of these side by side: on 2026-11-12 the jobs of a
+  second `master` build and of pull requests waited 40 to 90 minutes for a runner.
 - **A key no pull request restores has no cache** while the quota is tight. The Linux matrix's GCC
   legs and its arm Clang leg, the 26.04 leg of the daemon package, the Ubuntu packaging job and the
   full-tree clang-tidy all run on `master` alone.
@@ -173,12 +177,14 @@ Measured with ccache 4.9.1 (the version the Ubuntu 24.04 runner installs), compr
 The brief expected 2-3 GB; the real figure is a fifth of that, because ccache compresses and
 debug info compresses well. A CI entry is larger than the local figure, and a cap below what one
 build produces is worse than no cap: ccache evicts what the same build is about to need. So
-`max-size` sits about 1.3x above the size each job's `ccache -s` reported on 2026-11-11:
+`max-size` sits about 1.3x above the size each job's `ccache -s` reported. For Windows and macOS
+that is the size of the first build under a cap that no longer bit, on 2026-11-12: the 2.1 and
+1.1 GB of the day before were what eviction had left, not what a build produces.
 
 | Job | Key | Entry | `max-size` |
 |---|---|---:|---:|
-| Windows (MSVC) | `ccache-windows-msvc-release` | 2.1 GB | 2700 MB |
-| macOS (arm) | `ccache-macosArm-r1` | 1.1 GB | 1500 MB |
+| Windows (MSVC) | `ccache-windows-msvc-release` | 2.9 GB or more | 3800 MB |
+| macOS (arm) | `ccache-macosArm-r1` | 1.6 GB | 2100 MB |
 | Linux matrix, Clang on x86 | `ccache-ubuntu-24.04-Clang 22-...` | 0.7 GB | 900 MB |
 | Packaging for AppImage | `ccache-appimage` | 0.76 GB | 1200 MB |
 | `build_no_extensions` | `ccache-ubuntu2404-no-extensions` | 0.55 GB | 700 MB |
@@ -188,8 +194,9 @@ build produces is worse than no cap: ccache evicts what the same build is about 
 | Packaging, Ubuntu 26.04 | none | | |
 | Full-tree clang-tidy (`clang-tidy.yml`) | none | | |
 
-One generation of each is about 5.5 GB, beside roughly 1.7 GB of Qt, vcpkg, FreeBSD, apt and
-lint-tool caches: 7.2 GB of the 10 GB quota. The jobs without a cache run on `master` alone, so
+One generation of each is about 6.8 GB, beside roughly 1.7 GB of Qt, vcpkg, FreeBSD, apt and
+lint-tool caches: 8.5 GB of the 10 GB quota. Windows is 2.9 GB of that because MSVC's `/Z7` puts the
+debug information into every object file. The jobs without a cache run on `master` alone, so
 they cost no pull request anything; they get their caches back when the entries shrink.
 
 That headroom is not enough for a second generation, and there is one for a while on every
