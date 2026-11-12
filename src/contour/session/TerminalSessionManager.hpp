@@ -685,6 +685,16 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     // {{{ Tab-strip operations (window-routed; called by WindowController with its own WorkspaceId)
     void activateTab(vtworkspace::WorkspaceId window, int index);
+    /// Shows the pane a window's ledger knows as @p key in @p window's displayed workspace: activates its
+    /// tab, focuses it, and counts it as seen.
+    /// @param window The window's displayed workspace.
+    /// @param key    The pane's key (paneKeyOf).
+    /// @return Whether the displayed workspace holds the pane; nothing changes when it does not.
+    [[nodiscard]] bool showPane(vtworkspace::WorkspaceId window, window::PaneKey key);
+    /// Counts @p window's active pane as seen: its output, bell and finished marks clear and its
+    /// program-status records up to the newest count as seen.
+    /// @param window The window's displayed workspace.
+    void markActivePaneSeen(vtworkspace::WorkspaceId window);
     void moveTab(vtworkspace::WorkspaceId window, int fromIndex, int toIndex);
     /// Moves the tab at row @p fromIndex of window @p from into window @p to at row @p toIndex,
     /// transplanting it intact (its sessions survive). Drives the drag of a tab between windows.
@@ -1347,6 +1357,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// is on screen may have grown -- the active tab changed, the window was restored, a zoom ended.
     /// @param window The window whose sessions to look at.
     void markVisibleSessionsSeen(vtworkspace::WorkspaceId window);
+
+    /// Counts @p session, a pane of @p window, as seen: the window's ledger clears its marks and takes the
+    /// session's newest program-status generation as seen.
+    /// @param window  The window displaying the session's workspace.
+    /// @param session The pane's session.
+    void markPaneSeen(vtworkspace::WorkspaceId window, vtworkspace::SessionId session);
 
     /// Tells every session of @p window that its display's exposure may have changed (a window-state change).
     /// @param window The window.

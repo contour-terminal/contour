@@ -23,6 +23,7 @@
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/window/AttentionJump.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/DropZonePolicy.hpp>
@@ -686,6 +687,10 @@ void WindowController::displayWorkspace(vtworkspace::WorkspaceId workspace)
     emit activeTabIndexChanged();
     refreshActiveTabHighlight();
     refreshAllTabTitles();
+    // The workspace a jump waited for is shown now, with its panes: one it lacks is gone, and what is shown
+    // instead is not what the jump asked for.
+    completePendingJump();
+    _pendingJump.reset();
 }
 
 vtworkspace::Workspace* WindowController::window() const noexcept
@@ -3010,12 +3015,63 @@ void WindowController::focusSidebar()
 
 void WindowController::jumpToNextAttention()
 {
-    // wired in Task 7
+    if (_directorySource == nullptr)
+        return;
+    auto const directory = _directorySource->directory();
+    auto const* const active = activeSession();
+    auto const current =
+        active != nullptr ? std::optional { _manager.paneKeyOf(active->modelSessionId()) } : std::nullopt;
+    auto const target = nextAttention(directory, _attention, current);
+    _pendingJump.reset();
+    if (!target)
+        return;
+    auto const holder = std::ranges::find_if(directory.workspaces, [&](DirectoryWorkspace const& workspace) {
+        return std::ranges::any_of(workspace.tabs, [&](DirectoryTab const& tab) {
+            return std::ranges::contains(tab.panes, *target, &DirectoryPane::key);
+        });
+    });
+    if (holder == directory.workspaces.end())
+        return;
+    // Seen only once it lands: a switch that never does leaves the pane asking.
+    _pendingJump = PendingJump { .pane = *target, .workspace = holder->id };
+    if (directory.selected == holder->id)
+        completePendingJump();
+    else if (_directorySource->select(holder->id) == SelectResult::Refused)
+        _pendingJump.reset();
+}
+
+void WindowController::completePendingJump()
+{
+    if (!_pendingJump)
+        return;
+    if (!_manager.showPane(_displayed, _pendingJump->pane))
+        return;
+    // What the directory states of the pane counts as seen from here on: the jump is the user looking.
+    noteDirectoryPaneSeenByKey(_pendingJump->pane);
+    _pendingJump.reset();
+}
+
+void WindowController::noteDirectoryPaneSeenByKey(PaneKey key)
+{
+    if (_directorySource == nullptr)
+        return;
+    for (auto const& workspace: _directorySource->directory().workspaces)
+        for (auto const& tab: workspace.tabs)
+            for (auto const& pane: tab.panes)
+                if (pane.key == key)
+                    std::ignore = noteDirectoryPaneSeen(_attention, pane);
+}
+
+void WindowController::cancelPendingJump() noexcept
+{
+    _pendingJump.reset();
 }
 
 void WindowController::markActivePaneSeen()
 {
-    // wired in Task 7
+    _manager.markActivePaneSeen(_displayed);
+    if (auto const* const active = activeSession())
+        noteDirectoryPaneSeenByKey(_manager.paneKeyOf(active->modelSessionId()));
 }
 
 void WindowController::renameCurrentWorkspace()

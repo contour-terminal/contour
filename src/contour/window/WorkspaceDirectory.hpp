@@ -34,6 +34,12 @@ struct DirectoryPane
     vthost::proto::OutputActivity activity = vthost::proto::OutputActivity::None; ///< Output since seen.
     vthost::proto::PaneBell bell = vthost::proto::PaneBell::Silent;               ///< A bell since seen.
     std::optional<vthost::proto::FinishedCommand> finished; ///< The last command that finished, if known.
+    /// Which occurrence of each flag the daemon last stated, from one counter that only grows; 0 for none.
+    /// A window acknowledges a flag by remembering its serial (SessionAttention), so an old event stays seen
+    /// and a new one rings again. An in-process pane keeps them 0: its flags live in the window's ledger.
+    uint64_t activitySerial = 0; ///< Serial of the last output the daemon stated.
+    uint64_t bellSerial = 0;     ///< Serial of the last bell the daemon stated.
+    uint64_t finishedSerial = 0; ///< Serial of the last finished command the daemon stated.
     bool operator==(DirectoryPane const&) const = default;
 };
 
@@ -89,6 +95,9 @@ struct PaneStatus
     vthost::proto::OutputActivity activity = vthost::proto::OutputActivity::None;
     vthost::proto::PaneBell bell = vthost::proto::PaneBell::Silent;
     std::optional<vthost::proto::FinishedCommand> finished;
+    uint64_t activitySerial = 0; ///< @see DirectoryPane::activitySerial
+    uint64_t bellSerial = 0;     ///< @see DirectoryPane::bellSerial
+    uint64_t finishedSerial = 0; ///< @see DirectoryPane::finishedSerial
 };
 
 /// Where a directory gets the status of a pane from.
@@ -169,6 +178,9 @@ namespace detail
                 pane.activity = known->activity;
                 pane.bell = known->bell;
                 pane.finished = std::move(known->finished);
+                pane.activitySerial = known->activitySerial;
+                pane.bellSerial = known->bellSerial;
+                pane.finishedSerial = known->finishedSerial;
             }
             panes.push_back(std::move(pane));
         });

@@ -120,9 +120,13 @@ window::WorkspaceDirectory InProcessDirectory::directory() const
     return window::directoryFromLayouts(layouts, _status, meta, _owner.displayedWorkspace().value);
 }
 
-void InProcessDirectory::select(uint64_t workspace)
+window::SelectResult InProcessDirectory::select(uint64_t workspace)
 {
-    _owner.displayWorkspace(vtworkspace::WorkspaceId { workspace });
+    auto const target = vtworkspace::WorkspaceId { workspace };
+    if (!std::ranges::contains(_owner.ownedWorkspaces(), target))
+        return window::SelectResult::Refused;
+    _owner.displayWorkspace(target);
+    return window::SelectResult::Requested;
 }
 
 void InProcessDirectory::notifyChanged() const

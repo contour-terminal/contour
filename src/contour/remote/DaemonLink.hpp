@@ -236,9 +236,11 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     ///         connection.
     [[nodiscard]] window::WorkspaceDirectory directory() const override;
     /// Has its window show @p workspace of its daemon (selectWorkspace()); a refusal is logged, as the
-    /// window has no one to tell.
+    /// window has no one to tell,
+    /// and a refusal by the daemon cancels the window's pending jump (WindowController::cancelPendingJump()).
     /// @param workspace The daemon's workspace id.
-    void select(uint64_t workspace) override;
+    /// @return Refused when the selection could not be sent.
+    window::SelectResult select(uint64_t workspace) override;
     /// @return Its daemon as every link to it names it: by the name a switch gives it, or, for one no switch
     ///         can name, by its transport.
     [[nodiscard]] std::optional<uint64_t> daemonKey() const override;

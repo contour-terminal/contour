@@ -87,7 +87,8 @@ class InProcessDirectory final: public window::IWorkspaceDirectorySource
 
     /// Shows @p workspace in the window (InProcessWindow::displayWorkspace), through which it owns it.
     /// @param workspace The workspace's id.
-    void select(uint64_t workspace) override;
+    /// @return Refused for a workspace the window does not own.
+    window::SelectResult select(uint64_t workspace) override;
 
     /// Tells the window's listeners that directory() lists something else than it did.
     void notifyChanged() const;

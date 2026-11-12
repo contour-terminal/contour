@@ -3274,6 +3274,48 @@ void TerminalSessionManager::activateTab(vtworkspace::WorkspaceId window, int in
     activateModelTabByRow(window, index);
 }
 
+bool TerminalSessionManager::showPane(vtworkspace::WorkspaceId window, window::PaneKey key)
+{
+    auto const* const win = _model->workspace(window);
+    if (win == nullptr)
+        return false;
+    for (auto const row: std::views::iota(0, win->tabCount()))
+    {
+        auto* const tab = win->tabAt(row);
+        if (tab == nullptr || tab->rootPane() == nullptr)
+            continue;
+        auto const* const leaf = tab->rootPane()->walkTree(
+            [&](vtworkspace::Pane& pane) { return pane.isLeaf() && paneKeyOf(pane.session()) == key; });
+        if (leaf == nullptr)
+            continue;
+        activateModelTabByRow(window, row);
+        activatePane(tab->id(), leaf->id());
+        markPaneSeen(window, leaf->session());
+        return true;
+    }
+    return false;
+}
+
+void TerminalSessionManager::markActivePaneSeen(vtworkspace::WorkspaceId window)
+{
+    auto const* const win = _model->workspace(window);
+    auto const* const tab = win != nullptr ? win->activeTab() : nullptr;
+    if (auto const* const pane = tab != nullptr ? tab->activePane() : nullptr)
+        markPaneSeen(window, pane->session());
+}
+
+void TerminalSessionManager::markPaneSeen(vtworkspace::WorkspaceId window, vtworkspace::SessionId session)
+{
+    auto* const controller = controllerOwning(window);
+    auto const* const known = sessionForId(session);
+    if (controller == nullptr || known == nullptr)
+        return;
+    if (controller->tabAttention().noteSeen(paneKeyOf(session), statusGenerationOf(*known))
+        == window::AttentionChange::Changed)
+        refreshTabBadgeOf(session);
+    notifyDirectoriesChanged();
+}
+
 void TerminalSessionManager::moveTab(vtworkspace::WorkspaceId window, int fromIndex, int toIndex)
 {
     // fromIndex/toIndex are tab-strip rows (tab-space) of @p window. The tab order is owned by the

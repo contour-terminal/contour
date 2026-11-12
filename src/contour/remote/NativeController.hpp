@@ -1167,6 +1167,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// pushes for every session, and the fields of its PaneSummary for the panes of the workspaces this
     /// window does not select. Under _mutex.
     std::map<uint64_t, window::PaneStatus> _paneStatus;
+    /// The last serial a pane flag took (window::DirectoryPane::activitySerial), one counter for every pane
+    /// and kind so that a pane forgotten and met again cannot repeat one. Under _mutex.
+    uint64_t _flagSerial = 0;
     /// What the daemon stated of each workspace (label, control id, git state), by daemon workspace id, as
     /// WorkspaceMeta merged it. Under _mutex.
     std::map<uint64_t, window::WorkspaceMetadata> _workspaceMeta;

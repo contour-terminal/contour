@@ -13,6 +13,13 @@ namespace contour::window
 /// sources that serve one window (InProcessDirectory), which is given it once, as it is constructed.
 using DirectoryChanged = std::function<void()>;
 
+/// Whether a source took a request to show a workspace.
+enum class SelectResult : uint8_t
+{
+    Refused = 0, ///< Nothing was asked.
+    Requested,   ///< The window will show the workspace, or already does.
+};
+
 /// Where a window gets the workspaces it can list from: a daemon's, or its own process's. Both kinds of
 /// window list the same WorkspaceDirectory, so a sidebar reads one interface and never asks which it has.
 ///
@@ -33,10 +40,12 @@ class IWorkspaceDirectorySource
     ///         thread.
     [[nodiscard]] virtual WorkspaceDirectory directory() const = 0;
 
-    /// Has the window show @p workspace. Nothing for a workspace the source does not list, or one already
-    /// shown. GUI thread.
+    /// Has the window show @p workspace. GUI thread.
     /// @param workspace The workspace's id, as directory() lists it (DirectoryWorkspace::id).
-    virtual void select(uint64_t workspace) = 0;
+    /// @return Requested when the window will show it (at once in-process, once the daemon states it for a
+    ///         daemon); Refused for a workspace the source does not list, or a connection that cannot ask.
+    ///         A daemon may still refuse later; the window then keeps what it shows.
+    virtual SelectResult select(uint64_t workspace) = 0;
 };
 
 } // namespace contour::window

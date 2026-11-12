@@ -1206,9 +1206,20 @@ class WindowController:
 
     // {{{ Sidebar actions whose behaviour lands with the attention ledger (Task 7) and the workspace control
     // API (Task 6). Each has its final signature and does nothing yet.
-    /// Shows the next pane that needs the user (the JumpToNextAttention action). Wired in Task 7.
+    /// Shows the next pane that needs the user (the JumpToNextAttention action): the first after the active
+    /// pane, in sidebar order, in the most urgent of the classes nextAttention() visits. Its workspace is
+    /// selected first; a daemon's selection lands later, and the tab and pane are shown then
+    /// (completePendingJump()). Nothing when no pane asks for the user.
     void jumpToNextAttention();
-    /// Marks the active pane's output as seen (the MarkSeen action). Wired in Task 7.
+    /// Shows the pane a jump selected a workspace for, once the displayed workspace holds it, and counts it
+    /// as seen. Nothing when no jump is pending or the pane is not there (yet). Called when a daemon's layout
+    /// lands, and by displayWorkspace(), which then ends the jump either way.
+    void completePendingJump();
+    /// Forgets the jump that waits for a workspace to be shown: it was refused, or is not wanted.
+    void cancelPendingJump() noexcept;
+    /// @return Whether a jump waits for its workspace to be shown.
+    [[nodiscard]] bool jumpPending() const noexcept { return _pendingJump.has_value(); }
+    /// Marks the active pane as seen (the MarkSeen action).
     void markActivePaneSeen();
     /// Renames the displayed workspace inline (the RenameWorkspace action). Wired in Task 6.
     void renameCurrentWorkspace();
@@ -1696,6 +1707,15 @@ class WindowController:
     WindowId _windowId;
     vtworkspace::WorkspaceId _displayed;                   ///< The workspace the tab strip lists.
     IWorkspaceDirectorySource* _directorySource = nullptr; ///< @see directorySource
+    /// The pane a jump waits to show, and the directory workspace it selected for it.
+    struct PendingJump
+    {
+        PaneKey pane;       ///< The pane to show.
+        uint64_t workspace; ///< The directory's id of the workspace holding it.
+    };
+    /// Counts the directory's entry for @p key as seen, as far as the daemon's flags go (the serials).
+    void noteDirectoryPaneSeenByKey(PaneKey key);
+    std::optional<PendingJump> _pendingJump;      ///< The jump whose workspace is being selected.
     std::vector<vtworkspace::WorkspaceId> _owned; ///< Every workspace of this window; @see ownedWorkspaces
     TabAttention _attention;                      ///< This window's seen-state, by PaneKey.
     /// Shows the ssh prompts of the attaches this window started; attached to the app's router for the

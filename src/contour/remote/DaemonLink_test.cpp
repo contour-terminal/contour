@@ -1594,6 +1594,61 @@ TEST_CASE("DaemonLink: the raise holder notifies a finished command in an unsele
     CHECK(rig.host.notifier.raised.size() == 1);
 }
 
+TEST_CASE("DaemonLink: a jump to a bell in an unselected workspace shows its pane once the switch lands",
+          "[attach][link][attention]")
+{
+    auto daemon = DaemonFixture {};
+    auto const ids = seedWorkspaces(daemon, 2);
+    auto rig = LinkRig {
+        daemon.endpoint(), {}, {}, { .kind = vthost::proto::AttachIntentKind::Select, .workspace = ids[0] }
+    };
+    auto& link = *rig.link;
+    auto& manager = rig.app.manager();
+    auto const boot = contour::test::ScopedController { manager };
+    REQUIRE(pollUntilAttached(link, 10s).has_value());
+    REQUIRE(waitUntil([&] { return link.workspaceOf(boot.id) == ids[0]; }));
+    auto* const controller = manager.controllerOf(boot.windowId);
+    REQUIRE(controller != nullptr);
+
+    // The bell of a pane in the workspace the window does not show.
+    daemon.onDaemon([&] {
+        auto const pane = daemon.host->model()
+                              .workspace(vtworkspace::WorkspaceId { ids[1] })
+                              ->tabAt(0)
+                              ->rootPane()
+                              ->session();
+        daemon.host->terminal(pane)->writeToScreen("\a");
+        return 0;
+    });
+    auto belled = std::optional<contour::window::DirectoryPane> {};
+    REQUIRE(waitUntil(
+        [&] {
+            for (auto const& workspace: link.directory().workspaces)
+                if (workspace.id == ids[1])
+                    for (auto const& tab: workspace.tabs)
+                        for (auto const& pane: tab.panes)
+                            if (pane.bellSerial > 0)
+                                belled = pane;
+            return belled.has_value();
+        },
+        3000));
+
+    // The pane is not shown, and not seen, until the switch lands.
+    controller->jumpToNextAttention();
+    CHECK(controller->jumpPending());
+    CHECK(controller->tabAttention().of(belled->key).seenBellSerial == 0);
+    REQUIRE(waitUntil([&] { return displayedBy(manager, link, boot.windowId) == ids[1]; }, 3000));
+    REQUIRE(waitUntil([&] { return !controller->jumpPending(); }, 3000));
+    CHECK(controller->tabAttention().of(belled->key).seenBellSerial == belled->bellSerial);
+    auto const* const active = controller->activeSession();
+    REQUIRE(active != nullptr);
+    CHECK(manager.paneKeyOf(active->modelSessionId()) == belled->key);
+
+    // The bell is seen in this window now: nothing more to jump to.
+    controller->jumpToNextAttention();
+    CHECK_FALSE(controller->jumpPending());
+}
+
 TEST_CASE("DaemonLink: a switch back to the shown workspace while another is under way stays",
           "[attach][link][switch]")
 {

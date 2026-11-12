@@ -28,6 +28,7 @@
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/WindowController.hpp>
+#include <contour/window/WorkspaceDirectorySource.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
@@ -5319,6 +5320,117 @@ TEST_CASE("an in-process window holds two workspaces and switches between them",
     CHECK(window->displayedWorkspace() == first);
     window->displayWorkspace(contour::test::ScopedController { manager }.id);
     CHECK(window->displayedWorkspace() == first);
+}
+
+TEST_CASE("jumping to the next attention shows the pane in its workspace and marks it seen",
+          "[manager][window][workspace][attention]")
+{
+    using contour::window::BellMark;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedControllerWithOsWindow const window { manager };
+    window->bindWindow(window.osWindow.get());
+    window->createNewTab();
+    auto const first = window->displayedWorkspace();
+    auto* const hidden = sessionAtRow(manager, *window, 0);
+    REQUIRE(hidden != nullptr);
+    drainPosted();
+    auto const second = manager.createWorkspaceIn(window->windowId());
+    manager.selectWorkspace(window->windowId(), 1);
+    window->createNewTab();
+    REQUIRE(window->displayedWorkspace() == second);
+    REQUIRE(window->directorySource() != nullptr);
+
+    // Nothing asks for the user: a jump changes nothing.
+    window->jumpToNextAttention();
+    CHECK(window->displayedWorkspace() == second);
+
+    auto const key = manager.paneKeyOf(hidden->modelSessionId());
+    std::ignore = window->tabAttention().noteBell(
+        key, contour::platform::SessionVisibility::Hidden, contour::window::OutputOrigin::Live);
+    window->jumpToNextAttention();
+    CHECK(window->displayedWorkspace() == first);
+    CHECK(window->tabAttention().of(key).bell == BellMark::None);
+
+    // Mark seen clears what the active pane holds.
+    std::ignore = window->tabAttention().noteBell(
+        key, contour::platform::SessionVisibility::Hidden, contour::window::OutputOrigin::Live);
+    window->markActivePaneSeen();
+    CHECK(window->tabAttention().of(key).bell == BellMark::None);
+}
+
+namespace
+{
+/// A directory of one unselected workspace holding one pane that rang the bell; select() answers as told.
+class BellingSource final: public contour::window::IWorkspaceDirectorySource
+{
+  public:
+    explicit BellingSource(contour::window::SelectResult answer): _answer { answer } {}
+
+    [[nodiscard]] contour::window::WorkspaceDirectory directory() const override
+    {
+        auto pane = contour::window::DirectoryPane {};
+        pane.key = contour::window::PaneKey { 4242 };
+        pane.bell = vthost::proto::PaneBell::Rang;
+        pane.bellSerial = 1;
+        return { .workspaces = { { .id = 99,
+                                   .label = {},
+                                   .tabs = { { .id = 1, .title = {}, .label = {}, .panes = { pane } } } } },
+                 .selected = std::nullopt };
+    }
+
+    contour::window::SelectResult select(uint64_t workspace) override
+    {
+        selected = workspace;
+        return _answer;
+    }
+
+    std::optional<uint64_t> selected;
+
+  private:
+    contour::window::SelectResult _answer;
+};
+} // namespace
+
+TEST_CASE("a jump into an unselected workspace waits for the switch, and a refusal leaves nothing pending",
+          "[manager][window][workspace][attention]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedControllerWithOsWindow const window { manager };
+    window->bindWindow(window.osWindow.get());
+    window->createNewTab();
+    auto const other = manager.createWorkspaceIn(window->windowId());
+    auto const before = window->displayedWorkspace();
+
+    auto refusing = BellingSource { contour::window::SelectResult::Refused };
+    window->setDirectorySource(&refusing);
+    window->jumpToNextAttention();
+    CHECK(refusing.selected == std::optional<uint64_t> { 99 });
+    CHECK_FALSE(window->jumpPending());
+
+    // Asked, not landed: the jump waits, and nothing is seen yet.
+    auto waiting = BellingSource { contour::window::SelectResult::Requested };
+    window->setDirectorySource(&waiting);
+    window->jumpToNextAttention();
+    CHECK(window->jumpPending());
+    CHECK(window->displayedWorkspace() == before);
+    CHECK(window->tabAttention().of(contour::window::PaneKey { 4242 }).seenBellSerial == 0);
+
+    // Another workspace lands instead, which lacks the pane: the jump is over.
+    window->displayWorkspace(other);
+    CHECK_FALSE(window->jumpPending());
+    CHECK(window->tabAttention().of(contour::window::PaneKey { 4242 }).seenBellSerial == 0);
+
+    // A jump cancelled by the source's own refusal later. Showing another workspace gave the window the
+    // source its host lists by, so the scripted one is put back.
+    window->setDirectorySource(&waiting);
+    window->jumpToNextAttention();
+    REQUIRE(window->jumpPending());
+    window->cancelPendingJump();
+    CHECK_FALSE(window->jumpPending());
+    window->setDirectorySource(nullptr);
 }
 
 TEST_CASE("closing an in-process window ends the sessions of all its workspaces",

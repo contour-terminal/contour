@@ -7,6 +7,7 @@
 #include <contour/test/AppFixture.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/RecordingAnnouncer.hpp>
+#include <contour/window/AttentionJump.hpp>
 
 #include <vtbackend/testing/TestHelpers.hpp>
 
@@ -4721,7 +4722,9 @@ TEST_CASE("select() moves the mirrored sessions", "[attach][controller][director
     });
     REQUIRE(waitUntil(
         [&] { return paneOf(controller, second.id).activity == vthost::proto::OutputActivity::Output; }));
-
+    auto const firstSerial = paneOf(controller, second.id).activitySerial;
+    CHECK(firstSerial > 0);
+    CHECK(paneOf(controller, second.id).bellSerial == 0);
     REQUIRE(controller.select(second.id).has_value());
     REQUIRE(waitUntil([&] { return controller.selectedWorkspace() == second.id; }));
     CHECK(controller.directory().selected == std::optional<uint64_t> { second.id });
@@ -4741,6 +4744,59 @@ TEST_CASE("select() moves the mirrored sessions", "[attach][controller][director
     controller.stop();
     paneA.terminal.reset();
     paneB.terminal.reset();
+}
+
+TEST_CASE("a pane of a hidden workspace rings again for output and a bell after it was marked seen",
+          "[attach][controller][directory][attention]")
+{
+    using contour::window::Urgency;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("in the first");
+    auto const second = addWorkspace(daemon);
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
+    auto const write = [&](std::string_view text) {
+        daemon.onDaemon([&] {
+            daemon.host->terminal(second.session)->writeToScreen(text);
+            return 0;
+        });
+    };
+    auto attention = contour::window::TabAttention {};
+    auto const urgency = [&] {
+        auto const pane = paneOf(controller, second.id);
+        return contour::window::paneUrgency(pane, attention.of(pane.key));
+    };
+
+    // Output, marked seen here; the flag stays set on the daemon's side, but is old news.
+    write("\r\nfirst");
+    REQUIRE(waitUntil([&] { return paneOf(controller, second.id).activitySerial > 0; }));
+    CHECK(urgency() == Urgency::UnseenOutput);
+    std::ignore = contour::window::noteDirectoryPaneSeen(attention, paneOf(controller, second.id));
+    CHECK(urgency() == Urgency::Idle);
+
+    // The daemon marks again at most once per FlushPolicy::activityMarkInterval: more output after it is a
+    // second summary, and a new serial.
+    auto const seenSerial = paneOf(controller, second.id).activitySerial;
+    std::this_thread::sleep_for(1200ms);
+    write("\r\nsecond");
+    REQUIRE(waitUntil([&] { return paneOf(controller, second.id).activitySerial > seenSerial; }, 5000));
+    CHECK(urgency() == Urgency::UnseenOutput);
+
+    // A bell, then seen, then another bell: each is a summary of its own.
+    std::ignore = contour::window::noteDirectoryPaneSeen(attention, paneOf(controller, second.id));
+    write("\a");
+    REQUIRE(waitUntil([&] { return paneOf(controller, second.id).bellSerial > 0; }));
+    CHECK(urgency() == Urgency::NeedsYou);
+    std::ignore = contour::window::noteDirectoryPaneSeen(attention, paneOf(controller, second.id));
+    CHECK(urgency() == Urgency::Idle);
+    auto const seenBell = paneOf(controller, second.id).bellSerial;
+    write("\a");
+    REQUIRE(waitUntil([&] { return paneOf(controller, second.id).bellSerial > seenBell; }, 5000));
+    CHECK(urgency() == Urgency::NeedsYou);
+    controller.stop();
 }
 
 TEST_CASE("selecting a workspace the daemon does not have keeps the selection, and a later select works",

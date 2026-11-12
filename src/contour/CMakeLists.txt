@@ -1698,6 +1698,7 @@ if(CONTOUR_TESTING)
         window/WorkspaceDirectory_test.cpp
         window/TabBadge_test.cpp
         window/StatusUrgency_test.cpp
+        window/AttentionJump_test.cpp
         window/ShellIntegrationOffer_test.cpp
         window/ShellInstallRows_test.cpp
         window/TaskbarAttentionTally_test.cpp

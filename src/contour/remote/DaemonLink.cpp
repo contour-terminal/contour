@@ -840,10 +840,22 @@ window::WorkspaceDirectory DaemonLink::directory() const
     return _controller != nullptr ? _controller->directory() : window::WorkspaceDirectory {};
 }
 
-void DaemonLink::select(uint64_t workspace)
+window::SelectResult DaemonLink::select(uint64_t workspace)
 {
-    if (auto const selected = selectWorkspace(workspace); !selected)
+    auto const local = _shown ? std::optional { _shown->local } : std::nullopt;
+    auto const selected =
+        selectWorkspace(workspace, [this, local](std::expected<uint64_t, std::string> const& outcome) {
+            if (outcome || !local)
+                return;
+            if (auto* const controller = _sessions.controllerOwning(*local))
+                controller->cancelPendingJump();
+        });
+    if (!selected)
+    {
         errorLog()("Cannot show workspace {}: {}", workspace, selected.error());
+        return window::SelectResult::Refused;
+    }
+    return window::SelectResult::Requested;
 }
 
 unsigned DaemonLink::tabsWaitingElsewhere() const
@@ -1022,6 +1034,9 @@ void DaemonLink::applyShownLayout()
                 _sessions.model().activateTab(local, *tab);
     }
     _sessions.deliverRestoreSummaryTo(local);
+    // A jump that selected this workspace shows its pane now that the layout is here.
+    if (auto* const controller = _sessions.controllerDisplaying(local))
+        controller->completePendingJump();
 }
 
 void DaemonLink::openWindowForMovedPanes()

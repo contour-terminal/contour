@@ -1167,12 +1167,22 @@ void NativeController::onPaneSummary(vthost::proto::PaneSummary const& summary)
         status.title = *summary.title;
     if (summary.cwd)
         status.cwd = *summary.cwd;
+    // Each occurrence takes the next serial, so a window that acknowledged the old one still sees the new.
     if (summary.activity == vthost::proto::OutputActivity::Output)
+    {
         status.activity = vthost::proto::OutputActivity::Output;
+        status.activitySerial = ++_flagSerial;
+    }
     if (summary.bell == vthost::proto::PaneBell::Rang)
+    {
         status.bell = vthost::proto::PaneBell::Rang;
+        status.bellSerial = ++_flagSerial;
+    }
     if (summary.finished)
+    {
         status.finished = *summary.finished;
+        status.finishedSerial = ++_flagSerial;
+    }
     // What it raised is judged by the role as it stands now, in the order the daemon decided both: a focus
     // change on its way to the GUI thread cannot leave the raise to no window.
     if (vthost::proto::carriesRaise(summary) && _raiseRole == vthost::proto::RaiseRole::Raise)
