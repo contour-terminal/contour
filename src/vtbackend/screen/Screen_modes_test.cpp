@@ -107,6 +107,34 @@ TEST_CASE("InsertMode", "[screen]")
     }
 }
 
+TEST_CASE("AnsiMode.aNumberIsNotTakenModulo256", "[screen]")
+{
+    // AnsiMode is stored in eight bits, so a mode number converted to it before being looked up
+    // keeps only its low byte: 258 would be KAM (2), 260 IRM (4), 268 SRM (12) and 276 LNM (20).
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+
+    auto const request = [&](std::string_view sequence) -> std::string {
+        mock.mockPty().stdinBuffer().clear();
+        mock.writeToScreen(sequence);
+        mock.terminal.flushInput();
+        return mock.replyData();
+    };
+
+    mock.writeToScreen("\033[258h\033[260h\033[276h\033[51204h");
+    CHECK_FALSE(mock.terminal.isModeEnabled(AnsiMode::KeyboardAction));
+    CHECK_FALSE(mock.terminal.isModeEnabled(AnsiMode::Insert));
+    CHECK_FALSE(mock.terminal.isModeEnabled(AnsiMode::AutomaticNewLine));
+
+    // SRM is set by default, so it is the reset that would show.
+    REQUIRE(mock.terminal.isModeEnabled(AnsiMode::SendReceive));
+    mock.writeToScreen("\033[268l");
+    CHECK(mock.terminal.isModeEnabled(AnsiMode::SendReceive));
+
+    // DECRQM answers 0 (not recognized) rather than reporting the mode the number aliases.
+    CHECK(request("\033[260$p") == "\033[260;0$y");
+    CHECK(request("\033[4$p") == "\033[4;2$y");
+}
+
 TEST_CASE("LNM.VT_and_FF_honor_linefeed_mode", "[screen]")
 {
     // In linefeed mode (LNM), VT and FF -- like LF -- return the carriage after indexing.
