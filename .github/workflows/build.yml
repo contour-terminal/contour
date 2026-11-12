@@ -129,9 +129,9 @@ jobs:
       - name: ccache
         uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2.20
         with:
-          key: ccache-windows-msvc-release
+          key: ccache-exp-windows
           max-size: 2700M
-          save: ${{ github.ref == 'refs/heads/master' }}
+          save: true
           evict-old-files: job
       - name: setup environment
         shell: powershell
