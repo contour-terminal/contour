@@ -2402,7 +2402,7 @@ TEST_CASE("a drag another process started is refused, and nothing moves", "[cont
 {
     auto f = TwoWindows {};
     auto const foreign = fromAnotherHost(f.paneOf(f.left));
-    for (auto const [x, y]: { std::pair { 950.0, 250.0 }, { 500.0, 250.0 } })
+    for (auto const& [x, y]: { std::pair { 950.0, 250.0 }, { 500.0, 250.0 } })
         CHECK(zoneAt(*f.b, f.other, DropPayload::Pane, x, y, foreign) == DropZone::Refused);
     CHECK(f.b->refusalText(foreign).toStdString()
           == contour::window::refusalTextOf(MoveRefusal::OtherProcess));

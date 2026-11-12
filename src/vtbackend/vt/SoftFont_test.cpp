@@ -382,7 +382,7 @@ TEST_CASE("makeSoftFont: the error glyph at 10x20 is the reference pattern", "[S
 
 TEST_CASE("makeSoftFont: the error glyph exists at the smallest and largest cell", "[SoftFont]")
 {
-    for (auto const [width, height]: { std::pair<uint8_t, uint8_t> { 1, 1 }, { 16, 32 } })
+    for (auto const& [width, height]: { std::pair<uint8_t, uint8_t> { 1, 1 }, { 16, 32 } })
     {
         auto const font = makeSoftFont(fullCellDeclaration(), "B", { width, height, 0 }, {});
         CHECK(font.errorGlyph->coverage.size() == size_t { width } * height);
