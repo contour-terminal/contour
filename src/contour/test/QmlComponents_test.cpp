@@ -52,6 +52,7 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QStringList>
 #include <QtCore/QTextStream>
+#include <QtCore/QVariantList>
 #include <QtGui/QAccessible>
 #include <QtGui/QColor>
 #include <QtGui/QDragEnterEvent>
@@ -1983,6 +1984,45 @@ TEST_CASE("the badge slot draws each kind from the look table", "[contour][gui][
 
         CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
+}
+
+TEST_CASE("MatchedLabel escapes markup and bolds the matched characters", "[contour][qml]")
+{
+    // A name is whatever a shell or a user set, so `&`, `<` and `>` are text, never markup; the matches are
+    // UTF-16 indices, so a bold lands on the right character after a surrogate pair.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine, contour::test::defaultChromeSetup());
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/MatchedLabel.qml")));
+    INFO("errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+
+    struct Case
+    {
+        QString plainText;
+        QVariantList matches;
+        QString expected;
+    };
+    auto const cases = std::array {
+        Case { .plainText = QStringLiteral("<b>&x"),
+               .matches = { 4 },
+               .expected = QStringLiteral("&lt;b&gt;&amp;<b>x</b>") },
+        Case { .plainText = QString::fromUtf8("\xF0\x9F\x98\x80"
+                                              "ab"),
+               .matches = { 2 },
+               .expected = QString::fromUtf8("\xF0\x9F\x98\x80"
+                                             "<b>a</b>b") },
+        Case { .plainText = QStringLiteral("plain"), .matches = {}, .expected = QStringLiteral("plain") },
+    };
+    for (auto const& c: cases)
+    {
+        INFO("text: " << c.plainText.toStdString());
+        auto label = std::unique_ptr<QObject>(component.createWithInitialProperties(
+            { { QStringLiteral("plainText"), c.plainText }, { QStringLiteral("matches"), c.matches } }));
+        REQUIRE(label != nullptr);
+        CHECK(label->property("text").toString() == c.expected);
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
 TEST_CASE("the progress pulse stops under Reduce Motion (offscreen)", "[contour][gui][qml][tabbadge]")

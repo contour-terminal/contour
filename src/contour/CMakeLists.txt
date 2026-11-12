@@ -261,6 +261,7 @@ set(_header_files
     window/SidebarControls.hpp
     window/SidebarToggle.hpp
     window/PopupAnchor.hpp
+    window/Utf16Offsets.hpp
     window/SidebarTree.hpp
     window/TabBarDropPolicy.hpp
     window/TabBarHitValue.hpp
@@ -544,6 +545,10 @@ if(CONTOUR_FRONTEND_GUI)
         qml/ActionContextMenu.qml
         qml/MenuSwatchRow.qml
         qml/CommandPalette.qml
+        qml/PickerPopup.qml
+        qml/PickerGroupHeader.qml
+        qml/PickerRowSelection.qml
+        qml/MatchedLabel.qml
         qml/SaveLayoutDialog.qml
         qml/SettingsPage.qml
         qml/SettingsSidebar.qml
@@ -1768,6 +1773,7 @@ if(CONTOUR_TESTING)
         window/CloseDialogTable_test.cpp
         window/SidebarToggle_test.cpp
         window/PopupAnchor_test.cpp
+        window/Utf16Offsets_test.cpp
         window/ShellIntegrationOffer_test.cpp
         window/ShellInstallRows_test.cpp
         window/TaskbarAttentionTally_test.cpp

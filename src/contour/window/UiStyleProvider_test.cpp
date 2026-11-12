@@ -2352,6 +2352,17 @@ TEST_CASE("UiStyleProvider publishes the command palette's tokens per row", "[co
     // The margin is s7, 16 pixels: a 600 wide window leaves 568 of it.
     CHECK(mac.palettePlacement(600, 400).value(QStringLiteral("width")).toReal() == 568.0);
 
+    // Hanging from a control (window::popupBelow): under it by s1, its leading edge on the control's, and
+    // kept inside the window -- pushed in from the right edge, flipped above where there is no room below.
+    auto const gap = tokenOf(mac, "space", "s1").toReal();
+    auto const below = mac.popupBelow(QRectF(100, 10, 80, 24), 640, 300, 1280, 800);
+    CHECK(below.value(QStringLiteral("x")).toReal() == 100.0);
+    CHECK(below.value(QStringLiteral("y")).toReal() == 34.0 + gap);
+    CHECK(mac.popupBelow(QRectF(1000, 10, 80, 24), 640, 300, 1280, 800).value(QStringLiteral("x")).toReal()
+          == 640.0);
+    CHECK(mac.popupBelow(QRectF(100, 700, 80, 24), 640, 300, 1280, 800).value(QStringLiteral("y")).toReal()
+          == 700.0 - gap - 300.0);
+
     SECTION("the native surface is the kit's elevated one, and the selection the OS's own")
     {
         withWindowColor(QColor(0xF6, 0xF6, 0xF6), [&] {

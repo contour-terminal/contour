@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/command/CommandHistory.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
+#include <contour/window/Utf16Offsets.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -11,51 +12,6 @@
 
 namespace contour::window
 {
-
-namespace
-{
-    /// Translates fuzzy-match offsets from UTF-8 byte positions (what FuzzyFilter reports) to UTF-16
-    /// code-unit indices (what a QML string is indexed by). For an all-ASCII title the two coincide, but a
-    /// multibyte character shifts every later index, so without this the palette would bold the wrong
-    /// characters of a non-ASCII title (e.g. a shell-set tab title). @p title is the UTF-8 title; @p
-    /// byteOffsets are ascending byte offsets at code-point boundaries. @return the same-count ascending
-    /// UTF-16 indices; an offset past the string end (or not on a boundary) is dropped, matching the view's
-    /// prior silent handling of out-of-range indices.
-    [[nodiscard]] std::vector<int> byteOffsetsToUtf16(std::string_view title,
-                                                      std::vector<int> const& byteOffsets)
-    {
-        auto result = std::vector<int> {};
-        result.reserve(byteOffsets.size());
-
-        auto bytePos = std::size_t { 0 };
-        auto utf16Pos = 0;
-        for (auto const offset: byteOffsets)
-        {
-            if (offset < 0)
-                continue; // defensive: ignore a nonsensical offset rather than loop on it
-            auto const target = static_cast<std::size_t>(offset);
-            // Offsets are ascending, so bytePos only ever moves forward: walk to the target byte position
-            // one whole UTF-8 code point at a time, accumulating each one's UTF-16 width (2 for a code
-            // point encoded as 4 bytes, which is a surrogate pair, else 1).
-            while (bytePos < target && bytePos < title.size())
-            {
-                auto const lead = static_cast<unsigned char>(title[bytePos]);
-                auto seqLen = 1;
-                if (lead >= 0xF0)
-                    seqLen = 4;
-                else if (lead >= 0xE0)
-                    seqLen = 3;
-                else if (lead >= 0x80)
-                    seqLen = 2;
-                bytePos += static_cast<std::size_t>(seqLen);
-                utf16Pos += seqLen == 4 ? 2 : 1; // a 4-byte code point maps to a UTF-16 surrogate pair
-            }
-            if (bytePos == target)
-                result.push_back(utf16Pos);
-        }
-        return result;
-    }
-} // namespace
 
 CommandPaletteModel::CommandPaletteModel(command::CommandHistory const& history,
                                          std::vector<command::CommandSource const*> sources,

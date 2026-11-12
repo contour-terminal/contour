@@ -17,6 +17,7 @@
 #include <contour/window/TitleBandSurface.hpp>
 
 #include <QtCore/QObject>
+#include <QtCore/QRectF>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
 #include <QtCore/QVariantList>
@@ -843,6 +844,18 @@ class UiStyleProvider: public QObject
     /// @param windowHeight The window's height in logical pixels.
     /// @return `{ x, y, width, maxHeight }`.
     [[nodiscard]] Q_INVOKABLE QVariantMap palettePlacement(qreal windowWidth, qreal windowHeight) const;
+
+    /// Where a popup hanging from a control goes inside its window (window::popupBelow): under the control by
+    /// @c space.s1, its leading edge on the control's, flipped above where there is no room below, and never
+    /// past the window's edges.
+    /// @param control      The control, in the window's coordinates.
+    /// @param width        The popup's width.
+    /// @param height       The popup's height.
+    /// @param windowWidth  The window's width in logical pixels.
+    /// @param windowHeight The window's height in logical pixels.
+    /// @return `{ x, y }`: the popup's top-left in the window's coordinates.
+    [[nodiscard]] Q_INVOKABLE QVariantMap
+    popupBelow(QRectF const& control, qreal width, qreal height, qreal windowWidth, qreal windowHeight) const;
 
     /// The font the active tab's label is set in: @p base, in bold where the row sets the active tab
     /// apart by weight (config::ActiveTabWeight), because its fill can be the bar's own colour there.

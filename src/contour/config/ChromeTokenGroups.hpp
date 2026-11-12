@@ -569,6 +569,8 @@ struct SizeTokens
     int paletteRow = 0;         ///< Height of a row (vertical units).
     int paletteGroupHeader = 0; ///< Height of a group header (vertical units).
     int paletteFooter = 0;      ///< Height of the footer (vertical units).
+    /// Width the footer keeps for the row's description before its key hints (horizontal units).
+    int paletteFooterDescription = 0;
 
     // The Connect picker.
     int connectWidth = 0;  ///< Default width of the picker's window (horizontal units).

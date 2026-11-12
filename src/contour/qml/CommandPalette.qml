@@ -15,12 +15,13 @@
 // Enter on it lists its children (the model's level), Escape or Backspace in an empty field goes back.
 // The selected row's description shows in the footer, beside the key hints for what Enter and Escape do.
 //
-// Every size, colour and glyph comes from chromeStyle, so the same file draws the native rows in pixels
-// and the Terminal row in cells.
+// The frame -- surface, query row, list, footer, motion, the keyboard's hand-back -- is PickerPopup's, shared
+// with the switcher; this file is the palette's model wiring, its keys and its row. Every size, colour and
+// glyph comes from chromeStyle, so the same file draws the native rows in pixels and the Terminal row in cells.
 import QtQuick
 import QtQuick.Controls
 
-Popup {
+PickerPopup {
     id: root
 
     // The WindowController. Null-guarded EVERYWHERE below: the controller is destroyed before the QML
@@ -29,180 +30,78 @@ Popup {
     // gate in test_main.cpp turns into a failure of the whole test suite. (Same reason TabStrip.qml
     // guards its bindings.)
     required property var controller
-    // The ApplicationWindow, so closing the palette can hand keyboard focus back to the terminal.
-    required property var window
 
     // The palette's model, or null while the controller is gone.
-    readonly property var model: root.controller ? root.controller.commandPalette : null
-    // Where a row's text starts: the selection's inset from the list, then the same again inside it.
-    readonly property real textInset: chromeStyle.space.paletteInset + chromeStyle.space.paletteInset
+    readonly property var paletteModel: root.controller ? root.controller.commandPalette : null
     // Whether the palette is inside a parameterised action's level.
-    readonly property bool inLevel: root.model !== null && root.model.depth !== root.model.topDepth
+    readonly property bool inLevel: root.paletteModel !== null
+                                    && root.paletteModel.depth !== root.paletteModel.topDepth
 
-    // Where the palette goes (window::placePalette): centred, 18 % down, never past the window's margins.
-    readonly property var placement: chromeStyle.palettePlacement(root.window ? root.window.width : 0,
-                                                                  root.window ? root.window.height : 0)
+    namePrefix: "commandPalette"
+    model: root.paletteModel
+    levelTitle: root.inLevel ? root.paletteModel.levelTitle : ""
+    hintText: qsTr("Type a command or search…")
+    emptyText: qsTr("No matching commands")
+    footerDescription: root.list.currentItem ? root.list.currentItem.description : ""
+    footerHints: root.list.currentItem ? root.list.currentItem.footerHints : ""
+    fieldName: qsTr("Command")
 
-    modal: true
-    focus: true
-    padding: 0
-    // Not CloseOnEscape: Escape inside a level goes back one level (the field's handler), and the
-    // Popup's own Escape shortcut would take the key first and close the palette instead.
-    closePolicy: Popup.CloseOnPressOutside
-
-    parent: Overlay.overlay
-    x: root.placement.x
-    y: root.placement.y
-    width: root.placement.width
-    // Fits its content, up to the placement's height.
-    height: Math.min(root.placement.maxHeight, root.fixedHeight + list.contentHeight)
-
-    // Everything in the column but the list: the query row, the two rules, the empty label and the footer.
-    readonly property real fixedHeight: queryRow.height + topRule.height + empty.height + bottomRule.height
-                                        + footer.height
-
-    background: PopupSurface {
-        color: chromeStyle.colors.paletteSurface
-        radius: chromeStyle.radii.popover
-        border.color: chromeStyle.colors.paletteSeparator
-        elevation: chromeStyle.elevation.e3
+    // The model holds off its refresh while the palette is on screen; it refreshes as the palette starts to
+    // show, before the field is cleared.
+    onOpening: {
+        if (root.paletteModel)
+            root.paletteModel.shown = true;
     }
 
-    // Opens with a fade and a slight scale, ease-out; closes with a quicker fade, ease-in. Under Reduce Motion
-    // the tokens make the scale start at 1 and both durations the cross-fade's, so no branch is needed here.
-    enter: Transition {
-        NumberAnimation {
-            objectName: "commandPaletteEnterFade"
-            property: "opacity"
-            from: 0
-            to: 1
-            duration: chromeStyle.motion.standard
-            easing.type: Easing.OutCubic
-        }
-        NumberAnimation {
-            objectName: "commandPaletteEnterScale"
-            property: "scale"
-            from: chromeStyle.motion.popoverScale
-            to: 1
-            duration: chromeStyle.motion.standard
-            easing.type: Easing.OutCubic
-        }
-    }
-    exit: Transition {
-        NumberAnimation {
-            id: exitFade
-            objectName: "commandPaletteExitFade"
-            property: "opacity"
-            to: 0
-            duration: chromeStyle.motion.fast
-            easing.type: Easing.InCubic
-        }
-    }
-
-    // The exit transition's fade, for the tests: unlike the enter transition's, its animation is not a
-    // QObject child of the popup, so findChild() cannot reach it.
-    readonly property var _exitFade: exitFade
-
-    // What had the keyboard when the palette opened. A dialog or popup (the find bar, a flyout, About)
-    // gets it back on close; anything else is the terminal, which restoreTerminalFocus() reaches.
-    property Item _returnFocus: null
-
-    // Refresh + focus on every open, not just the first: the model's rows are rebuilt by the controller
-    // (open tabs change), and the filter must start empty with the caret already in it. Here, as the popup
-    // starts to show, and not in onOpened, which waits out the enter transition: keys typed at once would
-    // otherwise be lost. What had the keyboard is captured first, before the field takes it.
-    onAboutToShow: {
-        if (root.model)
-            root.model.shown = true;
-        listHover.hasPosition = false;
-        root._returnFocus = root.window ? root.window.activeFocusItem : null;
-        filterField.clear();
-        filterField.forceActiveFocus();
-        root.select(list.count > 0 ? 0 : -1);
-    }
-
-    // Where the keyboard goes back to on close: @p item, or where it has been hidden (a dialog's button gone
-    // while the palette was up) its nearest visible ancestor in the same popup or dialog. Null when there is
-    // none -- @p item was not over the overlay, or its popup has closed -- and the terminal takes it.
-    // One walk up: the first visible node is the candidate, and it counts only if the walk reaches the
-    // overlay, i.e. @p item sits inside a popup or a dialog.
-    function _handBackTarget(item) {
-        const overlay = root.Overlay.overlay;
-        let target = null;
-        for (let node = item; node; node = node.parent) {
-            if (node === overlay)
-                return target;
-            if (!target && node.visible)
-                target = node;
-        }
-        return null;
-    }
-
-    // The command the user picked, held until this popup has actually closed — see onClosed.
-    property string pendingCommandId: ""
-
-    // Whatever closed the palette — Escape, a pick, a click outside — the keyboard must go back where it
-    // was: to the dialog or popup the palette opened over, else to the terminal, or the user is left typing
-    // into nothing. Only THEN does the picked command run: a command
-    // that opens a keyboard-driven surface of its own (SetTabColor's swatch picker, SetTabTitle's rename
-    // field) takes the focus as it opens, and running it any earlier means this restore takes that focus
-    // straight back and the surface cannot be typed into at all. Same law, and the same shape, as
-    // ActionContextMenu.qml's _pendingActionId: act once the popup is genuinely gone.
-    //
-    // Qt.callLater, not a direct call: "genuinely gone" is not yet true INSIDE this handler. Qt emits
-    // closed() from within the popup's own exit transition, so a command that re-opens the palette —
-    // OpenCommandPalette, a row this palette itself always offers — would re-enter Popup.open() on top of
-    // the close that is still unwinding, and the palette would need dismissing twice. Deferring to the
-    // next event-loop turn dispatches the command with the popup's state machine at rest.
     // A palette destroyed while open (its window closing) must not leave refresh() held off for good.
     Component.onDestruction: {
-        if (root.model)
-            root.model.shown = false;
+        if (root.paletteModel)
+            root.paletteModel.shown = false;
     }
 
     // Off screen from the moment it starts to close, so an open asked for during the close refreshes.
     onAboutToHide: {
-        if (root.model)
-            root.model.shown = false;
+        if (root.paletteModel)
+            root.paletteModel.shown = false;
     }
 
-    onClosed: {
-        const target = root._handBackTarget(root._returnFocus);
-        if (target)
-            target.forceActiveFocus();
-        else if (root.window)
-            root.window.restoreTerminalFocus();
-        root._returnFocus = null;
-        const commandId = root.pendingCommandId;
-        root.pendingCommandId = ""; // cleared BEFORE dispatch: the command may re-open this palette
+    // The model re-ranks (and regroups) on every keystroke.
+    onQueryEdited: (text) => {
+        if (root.paletteModel)
+            root.paletteModel.filter = text;
+    }
+
+    // Moving the pointer moves the selection, so the mouse and the keyboard agree on what "current" means and
+    // a click can never act on a row other than the highlighted one.
+    onPointerMoved: (index) => {
+        if (index >= 0)
+            root.list.currentIndex = index;
+    }
+
+    // The picked command runs once the palette has closed and the keyboard is back (PickerPopup.closeThen).
+    // Re-checks the controller: the window can be torn down between the close and the event-loop turn that
+    // gets here.
+    onPicked: (commandId) => {
         if (commandId && root.controller)
-            Qt.callLater(root.dispatch, commandId);
-    }
-
-    // The deferred half of onClosed. Re-checks the controller: the window can be torn down between the
-    // close and the event-loop turn that gets here.
-    function dispatch(commandId) {
-        if (root.controller)
             root.controller.runCommand(commandId);
     }
 
-    // Takes the currently highlighted command and closes; onClosed above is what runs it. Reads the id
-    // off the highlighted DELEGATE rather than indexing the model by role number, so there is no magic
-    // 257 here to drift out of step with CommandPaletteModel::Roles. A null currentItem (an empty
-    // filtered list, or a row not yet realized) does nothing rather than running an arbitrary command.
+    // Takes the currently highlighted command and closes. Reads the id off the highlighted DELEGATE rather
+    // than indexing the model by role number, so there is no magic 257 here to drift out of step with
+    // CommandPaletteModel::Roles. A null currentItem (an empty filtered list, or a row not yet realized) does
+    // nothing rather than running an arbitrary command.
     function acceptCurrent() {
-        if (!list.currentItem)
+        if (!root.list.currentItem)
             return;
-        root.pendingCommandId = list.currentItem.commandId;
-        root.close();
+        root.closeThen(root.list.currentItem.commandId);
     }
 
     // What Enter and a click do: a drill-in row opens its level, any other row runs.
     function activateCurrent() {
-        if (!list.currentItem || !root.model)
+        if (!root.list.currentItem || !root.paletteModel)
             return;
-        if (list.currentItem.kind === root.model.drillInKind)
-            root.model.enter(list.currentIndex);
+        if (root.list.currentItem.kind === root.paletteModel.drillInKind)
+            root.paletteModel.enter(root.list.currentIndex);
         else
             root.acceptCurrent();
     }
@@ -210,414 +109,152 @@ Popup {
     // Escape: back one level inside one, else close.
     function stepBack() {
         if (root.inLevel)
-            root.model.back();
+            root.paletteModel.back();
         else
             root.close();
     }
 
-    // Moves the selection by @p delta rows, within the list.
-    function step(delta) {
-        if (list.count > 0)
-            root.select(Math.max(0, Math.min(list.currentIndex + delta, list.count - 1)));
-    }
-
-    // Selects @p index and keeps it in view — the arrow keys walk a 200-row level past the viewport.
-    function select(index) {
-        list.currentIndex = index;
-        if (index >= 0)
-            list.positionViewAtIndex(index, ListView.Contain);
-    }
-
-    // The group headers' font: the footnote type at Font.DemiBold, built in C++ -- a copy of the token with its
-    // weight set here would keep the token's weight.
-    readonly property font headerFont: chromeStyle.type.footnoteSemibold
-
-    // Renders a command title as StyledText with the filter's matched characters in bold, so the user
-    // sees WHY a row matched. In the row's own colour on every row, selected or not: an accent tint does
-    // not read on the light surface with the default accent.
-    //
-    // The whole string is HTML-escaped (a live tab title can contain & < >), so it is always valid
-    // StyledText. `matches` are UTF-16 code-unit indices (the model converts them from the fuzzy filter's
-    // UTF-8 byte offsets), so they line up with charAt() even when a title contains multibyte characters.
-    function highlightedTitle(text, matches) {
-        var next = 0;
-        var result = "";
-        for (var i = 0; i < text.length; ++i) {
-            var hit = matches && next < matches.length && matches[next] === i;
-            if (hit) {
-                result += "<b>";
-                ++next;
-            }
-            var c = text.charAt(i);
-            if (c === "&")
-                result += "&amp;";
-            else if (c === "<")
-                result += "&lt;";
-            else if (c === ">")
-                result += "&gt;";
-            else
-                result += c;
-            if (hit)
-                result += "</b>";
-        }
-        return result;
+    // The arrows and Ctrl+J/Ctrl+K (vim-style, accepted so Ctrl+J cannot fall through as a line feed into the
+    // filter text) move the selection; Enter activates; Escape steps back; a bare Backspace in an empty field
+    // leaves a level (with a modifier, or with text, it is the field's).
+    onKeyPressed: (event) => {
+        const control = (event.modifiers & Qt.ControlModifier) !== 0;
+        if (event.key === Qt.Key_Down || (control && event.key === Qt.Key_J))
+            root.step(1);
+        else if (event.key === Qt.Key_Up || (control && event.key === Qt.Key_K))
+            root.step(-1);
+        else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+            root.activateCurrent();
+        else if (event.key === Qt.Key_Escape)
+            root.stepBack();
+        else if (event.key === Qt.Key_Backspace && event.modifiers === Qt.NoModifier && root.field.text === ""
+                 && root.inLevel)
+            root.paletteModel.back();
+        else
+            return;
+        event.accepted = true;
     }
 
     // A level change resets the model: the field takes the model's filter FIRST (its onTextChanged selects
     // row 0), and only then the anchor — the parent's row after back() — is selected.
     Connections {
-        target: root.model
+        target: root.paletteModel
         function onLevelChanged() {
-            filterField.text = root.model.filter;
-            root.select(root.model.anchorRow < list.count ? root.model.anchorRow : -1);
+            root.field.text = root.paletteModel.filter;
+            root.select(root.paletteModel.anchorRow < root.list.count ? root.paletteModel.anchorRow : -1);
         }
         // The field shows the model's query whoever set it (a refresh, a test, the controller); setting it
         // to what it already holds changes nothing.
         function onFilterChanged() {
-            if (filterField.text !== root.model.filter)
-                filterField.text = root.model.filter;
+            if (root.field.text !== root.paletteModel.filter)
+                root.field.text = root.paletteModel.filter;
         }
     }
 
-    contentItem: Column {
-        spacing: 0
+    delegate: Item {
+        id: row
 
-        // {{{ The query row: the prompt glyph, the level chip, the field
-        Item {
-            id: queryRow
-            objectName: "commandPaletteQuery"
+        // Declared `required` so a missing role is a loud error rather than an `undefined`
+        // silently rendering as an empty label.
+        required property int index
+        required property string commandId
+        required property string title
+        required property string description
+        required property string shortcut
+        required property string groupTitle
+        required property int kind
+        required property string footerHints
+        required property var titleMatches
+
+        readonly property bool isCurrent: row.index === root.list.currentIndex
+        readonly property bool drillsIn: root.paletteModel !== null && row.kind === root.paletteModel.drillInKind
+
+        width: ListView.view.width
+        height: header.height + entry.height
+        // Where the row itself starts below its group header, for the list's hover.
+        readonly property real headerHeight: header.height
+
+        // Group header — drawn by the FIRST row of each group.
+        PickerGroupHeader {
+            id: header
             width: parent.width
-            height: chromeStyle.size.paletteField
+            namePrefix: root.namePrefix
+            title: row.groupTitle
+            textInset: root.textInset
+        }
 
-            Row {
-                id: queryLead
-                // The query starts where the rows' titles do; the prompt and the level chip sit apart from
-                // it and from each other by s4 (one cell on the Terminal row, where s2 is none).
+        // {{{ The row: title, then its shortcut or the drill-in glyph.
+        Item {
+            id: entry
+            objectName: "commandPaletteRow"
+            anchors.top: header.bottom
+            width: parent.width
+            height: chromeStyle.size.paletteRow
+
+            Accessible.role: Accessible.ListItem
+            Accessible.name: row.title
+            Accessible.description: row.drillsIn ? qsTr("Opens a list") : ""
+
+            PickerRowSelection {
+                id: selection
+                anchors.fill: parent
+                anchors.leftMargin: chromeStyle.space.paletteInset
+                anchors.rightMargin: chromeStyle.space.paletteInset
+                namePrefix: root.namePrefix
+                selected: row.isCurrent
+            }
+
+            MatchedLabel {
+                id: titleLabel
+                objectName: "commandPaletteTitle"
                 x: root.textInset
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: chromeStyle.space.s4
-
-                Label {
-                    objectName: "commandPalettePrompt"
-                    visible: chromeStyle.palettePromptGlyph !== ""
-                    text: chromeStyle.palettePromptGlyph
-                    font: chromeStyle.type.paletteInput
-                    color: chromeStyle.colors.paletteSecondaryText
-                    Accessible.ignored: true
-                }
-
-                Label {
-                    objectName: "commandPaletteLevel"
-                    visible: root.inLevel
-                    text: root.model ? root.model.levelTitle + " " + chromeStyle.drillInGlyph : ""
-                    font: chromeStyle.type.paletteInput
-                    color: chromeStyle.colors.paletteSecondaryText
-                }
-            }
-
-            TextField {
-                id: filterField
-                objectName: "commandPaletteFilter"
-                x: queryLead.x + (queryLead.width > 0 ? queryLead.width + queryLead.spacing : 0)
-                width: parent.width - x - root.textInset
-                anchors.verticalCenter: parent.verticalCenter
-                // The one editable node assistive technology sees.
-                Accessible.role: Accessible.EditableText
-                Accessible.name: qsTr("Command")
-                font: chromeStyle.type.paletteInput
-                color: chromeStyle.colors.paletteText
-                // The palette's surface is the field's: no frame of its own.
-                background: Item {}
-                padding: 0
-
-                // The hint, drawn here rather than left to the style as placeholderText: every style draws
-                // that from where the first letter will be typed, which is where the caret stands, so the
-                // caret stood on the hint's first letter. This one starts past the caret, by a hairline.
-                Label {
-                    id: filterHint
-                    objectName: "commandPaletteHint"
-                    x: filterField.cursorRectangle.x + filterField.cursorRectangle.width + chromeStyle.borderWidth
-                    width: filterField.width - filterHint.x - filterField.rightPadding
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: filterField.length === 0 && filterField.preeditText === ""
-                    text: qsTr("Type a command or search…")
-                    font: filterField.font
-                    color: chromeStyle.colors.paletteSecondaryText
-                    elide: Text.ElideRight
-                    Accessible.ignored: true
-                }
-
-                // The model re-ranks (and regroups) on every keystroke.
-                onTextChanged: {
-                    if (root.model)
-                        root.model.filter = text;
-                    root.select(list.count > 0 ? 0 : -1);
-                }
-
-                // Arrow keys move the SELECTION while the caret stays in the field, so the user never
-                // has to leave the box to pick a row.
-                Keys.onDownPressed: root.step(1)
-                Keys.onUpPressed: root.step(-1)
-                Keys.onReturnPressed: root.activateCurrent()
-                Keys.onEnterPressed: root.activateCurrent()
-                Keys.onEscapePressed: root.stepBack()
-
-                // Vim-style navigation: Ctrl+J/Ctrl+K move the selection down/up, the same as the arrow
-                // keys, accepted so Ctrl+J cannot fall through as a line feed into the filter text.
-                // Backspace in an empty field leaves a level; with text it edits the text.
-                Keys.onPressed: (event) => {
-                    if (event.modifiers & Qt.ControlModifier) {
-                        if (event.key === Qt.Key_J) {
-                            root.step(1);
-                            event.accepted = true;
-                        } else if (event.key === Qt.Key_K) {
-                            root.step(-1);
-                            event.accepted = true;
-                        }
-                    } else if (event.key === Qt.Key_Backspace && text === "" && root.inLevel) {
-                        root.model.back();
-                        event.accepted = true;
-                    }
-                }
-            }
-        }
-
-        Rectangle {
-            id: topRule
-            width: parent.width
-            height: chromeStyle.borderWidth
-            color: chromeStyle.colors.paletteSeparator
-        }
-        // }}}
-
-        // {{{ The rows
-        ListView {
-            id: list
-            objectName: "commandPaletteList"
-            width: parent.width
-            // Takes whatever the query row, the rules and the footer leave.
-            height: Math.max(0, root.height - root.fixedHeight)
-            clip: true
-            // Null-guarded: the controller dies before this tree on window close (see `controller`).
-            model: root.model
-            currentIndex: 0
-            highlightMoveDuration: 0
-            ScrollBar.vertical: ScrollBar {}
-
-            // Moving the pointer moves the selection, so the mouse and the keyboard agree on what "current"
-            // means and a click can never act on a row other than the highlighted one. One handler for the
-            // list, and only on a real move: after every model reset Qt sends a synthetic hover at the last
-            // pointer position, which would otherwise take the selection from row 0 or the anchor row.
-            HoverHandler {
-                id: listHover
-                property point lastPosition: Qt.point(-1, -1) // in the window's coordinates
-                // False until the first event since the pointer entered the list (or the palette opened):
-                // that event is where the pointer already was -- a palette opening under a resting
-                // pointer -- so it only records the position.
-                property bool hasPosition: false
-                onHoveredChanged: if (!listHover.hovered) listHover.hasPosition = false
-                onPointChanged: {
-                    // Moved is judged in the window's coordinates: the open transition scales the list under
-                    // a resting pointer, which moves it in the list's own.
-                    const scene = listHover.point.scenePosition;
-                    if (!listHover.hasPosition) {
-                        listHover.hasPosition = true;
-                        listHover.lastPosition = Qt.point(scene.x, scene.y);
-                        return;
-                    }
-                    if (scene.x === listHover.lastPosition.x && scene.y === listHover.lastPosition.y)
-                        return;
-                    listHover.lastPosition = Qt.point(scene.x, scene.y);
-                    const position = listHover.point.position;
-                    const index = list.indexAt(position.x + list.contentX, position.y + list.contentY);
-                    const item = index >= 0 ? list.itemAtIndex(index) : null;
-                    // Over a group header, nothing: only the row below it is selectable.
-                    if (item && position.y + list.contentY >= item.y + item.headerHeight)
-                        list.currentIndex = index;
-                }
-            }
-
-            delegate: Item {
-                id: row
-
-                // Declared `required` so a missing role is a loud error rather than an `undefined`
-                // silently rendering as an empty label.
-                required property int index
-                required property string commandId
-                required property string title
-                required property string description
-                required property string shortcut
-                required property string groupTitle
-                required property int kind
-                required property string footerHints
-                required property var titleMatches
-
-                readonly property bool isCurrent: row.index === list.currentIndex
-                readonly property bool drillsIn: root.model !== null && row.kind === root.model.drillInKind
-
-                width: ListView.view.width
-                height: header.height + entry.height
-                // Where the row itself starts below its group header, for the list's hover.
-                readonly property real headerHeight: header.height
-
-                // {{{ Group header — drawn by the FIRST row of each group.
-                Item {
-                    id: header
-                    objectName: "commandPaletteGroupHeader"
-                    width: parent.width
-                    height: visible ? chromeStyle.size.paletteGroupHeader : 0
-                    visible: row.groupTitle !== ""
-
-                    Accessible.role: Accessible.Heading
-                    Accessible.name: row.groupTitle
-
-                    Label {
-                        objectName: "commandPaletteGroupHeaderLabel"
-                        x: root.textInset
-                        width: parent.width - x - root.textInset
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: row.groupTitle
-                        font: root.headerFont
-                        elide: Text.ElideRight
-                        color: chromeStyle.colors.paletteSecondaryText
-                        Accessible.ignored: true
-                    }
-                }
-                // }}}
-
-                // {{{ The row: title, then its shortcut or the drill-in glyph.
-                Item {
-                    id: entry
-                    objectName: "commandPaletteRow"
-                    anchors.top: header.bottom
-                    width: parent.width
-                    height: chromeStyle.size.paletteRow
-
-                    Accessible.role: Accessible.ListItem
-                    Accessible.name: row.title
-                    Accessible.description: row.drillsIn ? qsTr("Opens a list") : ""
-
-                    readonly property color textColor: row.isCurrent ? chromeStyle.colors.paletteSelectionText
-                                                                     : chromeStyle.colors.paletteText
-                    readonly property color secondaryColor: row.isCurrent
-                                                            ? chromeStyle.colors.paletteSelectionText
-                                                            : chromeStyle.colors.paletteSecondaryText
-
-                    Rectangle {
-                        objectName: "commandPaletteSelection"
-                        anchors.fill: parent
-                        anchors.leftMargin: chromeStyle.space.paletteInset
-                        anchors.rightMargin: chromeStyle.space.paletteInset
-                        radius: chromeStyle.radii.control
-                        visible: row.isCurrent
-                        color: chromeStyle.colors.paletteSelectionFill
-                    }
-
-                    Label {
-                        id: titleLabel
-                        objectName: "commandPaletteTitle"
-                        x: root.textInset
-                        anchors.verticalCenter: parent.verticalCenter
-                        // Yields to the accessory, which never shrinks: the title is the part that can be
-                        // arbitrarily long (a shell-set tab title).
-                        width: Math.max(0, accessory.x - chromeStyle.space.s2 - x)
-                        textFormat: Text.StyledText
-                        text: root.highlightedTitle(row.title, row.titleMatches)
-                        // A right-to-left title starts at the row's leading edge like every other.
-                        horizontalAlignment: Text.AlignLeft
-                        elide: Text.ElideRight
-                        font: chromeStyle.type.body
-                        color: entry.textColor
-                    }
-
-                    Item {
-                        id: accessory
-                        objectName: "commandPaletteAccessory"
-                        x: parent.width - width - root.textInset
-                        width: row.drillsIn ? drillIn.implicitWidth : shortcutLabel.implicitWidth
-                        height: parent.height
-
-                        Label {
-                            id: shortcutLabel
-                            objectName: "commandPaletteShortcut"
-                            visible: !row.drillsIn
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: row.shortcut
-                            font: chromeStyle.type.shortcut
-                            color: entry.secondaryColor
-                        }
-
-                        Label {
-                            id: drillIn
-                            objectName: "commandPaletteDrillIn"
-                            visible: row.drillsIn
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: chromeStyle.drillInGlyph
-                            font: chromeStyle.type.body
-                            color: entry.secondaryColor
-                            Accessible.ignored: true
-                        }
-                    }
-
-                    TapHandler {
-                        onTapped: {
-                            list.currentIndex = row.index;
-                            root.activateCurrent();
-                        }
-                    }
-                }
-                // }}}
-            }
-        }
-
-        Label {
-            id: empty
-            objectName: "commandPaletteEmpty"
-            visible: list.count === 0
-            width: parent.width
-            height: visible ? chromeStyle.size.paletteRow : 0
-            leftPadding: root.textInset
-            verticalAlignment: Text.AlignVCenter
-            text: qsTr("No matching commands")
-            font: chromeStyle.type.body
-            color: chromeStyle.colors.paletteSecondaryText
-        }
-        // }}}
-
-        // {{{ The footer: the selected row's description, and what Enter and Escape do.
-        Rectangle {
-            id: bottomRule
-            width: parent.width
-            height: chromeStyle.borderWidth
-            color: chromeStyle.colors.paletteSeparator
-        }
-
-        Item {
-            id: footer
-            objectName: "commandPaletteFooter"
-            width: parent.width
-            height: chromeStyle.size.paletteFooter
-
-            Label {
-                id: footerHints
-                objectName: "commandPaletteFooterHints"
-                x: parent.width - width - root.textInset
-                anchors.verticalCenter: parent.verticalCenter
-                text: list.currentItem ? list.currentItem.footerHints : ""
-                font: chromeStyle.type.footnote
-                color: chromeStyle.colors.paletteSecondaryText
-            }
-
-            Label {
-                objectName: "commandPaletteFooterDescription"
-                x: root.textInset
-                width: Math.max(0, footerHints.x - chromeStyle.space.s4 - x)
-                anchors.verticalCenter: parent.verticalCenter
-                text: list.currentItem ? list.currentItem.description : ""
+                // Yields to the accessory, which never shrinks: the title is the part that can be
+                // arbitrarily long (a shell-set tab title).
+                width: Math.max(0, accessory.x - chromeStyle.space.s2 - x)
+                plainText: row.title
+                matches: row.titleMatches
+                // A right-to-left title starts at the row's leading edge like every other.
                 horizontalAlignment: Text.AlignLeft
                 elide: Text.ElideRight
-                font: chromeStyle.type.footnote
-                color: chromeStyle.colors.paletteSecondaryText
+                font: chromeStyle.type.body
+                color: selection.ink
+            }
+
+            Item {
+                id: accessory
+                objectName: "commandPaletteAccessory"
+                x: parent.width - width - root.textInset
+                width: row.drillsIn ? drillIn.implicitWidth : shortcutLabel.implicitWidth
+                height: parent.height
+
+                Label {
+                    id: shortcutLabel
+                    objectName: "commandPaletteShortcut"
+                    visible: !row.drillsIn
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: row.shortcut
+                    font: chromeStyle.type.shortcut
+                    color: selection.secondaryInk
+                }
+
+                Label {
+                    id: drillIn
+                    objectName: "commandPaletteDrillIn"
+                    visible: row.drillsIn
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: chromeStyle.drillInGlyph
+                    font: chromeStyle.type.body
+                    color: selection.secondaryInk
+                    Accessible.ignored: true
+                }
+            }
+
+            TapHandler {
+                onTapped: {
+                    root.list.currentIndex = row.index;
+                    root.activateCurrent();
+                }
             }
         }
         // }}}

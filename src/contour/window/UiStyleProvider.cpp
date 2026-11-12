@@ -11,6 +11,7 @@
 #include <contour/window/LinkPillPlacement.hpp>
 #include <contour/window/PalettePlacement.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/PopupAnchor.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/SecureLockPlacement.hpp>
 #include <contour/window/SidebarControls.hpp>
@@ -522,6 +523,24 @@ QVariantMap UiStyleProvider::palettePlacement(qreal windowWidth, qreal windowHei
              { QStringLiteral("y"), placement.y },
              { QStringLiteral("width"), placement.width },
              { QStringLiteral("maxHeight"), placement.maxHeight } };
+}
+
+QVariantMap UiStyleProvider::popupBelow(
+    QRectF const& control, qreal width, qreal height, qreal windowWidth, qreal windowHeight) const
+{
+    auto const rounded = [](qreal value) {
+        return static_cast<int>(std::lround(value));
+    };
+    auto const at =
+        window::popupBelow(PopupRect { .x = rounded(control.x()),
+                                       .y = rounded(control.y()),
+                                       .width = rounded(control.width()),
+                                       .height = rounded(control.height()) },
+                           rounded(width),
+                           rounded(height),
+                           rounded(_space.s1()),
+                           PopupRect { .width = rounded(windowWidth), .height = rounded(windowHeight) });
+    return { { QStringLiteral("x"), at.x }, { QStringLiteral("y"), at.y } };
 }
 
 QFont UiStyleProvider::activeTabFont(QFont const& base) const

@@ -90,6 +90,7 @@ class ChromeSizeTokens: public QObject
     Q_PROPERTY(qreal paletteRow READ paletteRow CONSTANT)
     Q_PROPERTY(qreal paletteGroupHeader READ paletteGroupHeader CONSTANT)
     Q_PROPERTY(qreal paletteFooter READ paletteFooter CONSTANT)
+    Q_PROPERTY(qreal paletteFooterDescription READ paletteFooterDescription CONSTANT)
     Q_PROPERTY(qreal connectWidth READ connectWidth CONSTANT)
     Q_PROPERTY(qreal connectHeight READ connectHeight CONSTANT)
     Q_PROPERTY(qreal connectRow READ connectRow CONSTANT)
@@ -233,6 +234,11 @@ class ChromeSizeTokens: public QObject
     }
     /// @return The height of the palette's footer in logical pixels.
     [[nodiscard]] qreal paletteFooter() const noexcept { return _tokens.paletteFooter * _units.vertical; }
+    /// @return The width the palette's footer keeps for the description, in logical pixels.
+    [[nodiscard]] qreal paletteFooterDescription() const noexcept
+    {
+        return _tokens.paletteFooterDescription * _units.horizontal;
+    }
     /// @return The Connect picker window's default width in logical pixels.
     [[nodiscard]] qreal connectWidth() const noexcept { return _tokens.connectWidth * _units.horizontal; }
     /// @return The Connect picker window's default height in logical pixels.
