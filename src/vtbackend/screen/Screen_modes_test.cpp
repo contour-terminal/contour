@@ -705,6 +705,85 @@ TEST_CASE("CTC", "[screen]")
     }
 }
 
+TEST_CASE("DECRSPS", "[screen]")
+{
+    auto const pageSize = PageSize { LineCount(4), ColumnCount(20) };
+    auto const cursorReport = [](MockTerm<vtpty::MockPty>& mock) {
+        mock.writeToScreen(DECRQPSR(1));
+        return mock.terminal.peekInput();
+    };
+
+    SECTION("restores the cursor a DECCIR reported, which then reports the same")
+    {
+        // Every field away from its default: position, bold + inverse, protection, wrap pending, G1 the
+        // special graphics invoked into GL, a 96-set in G2 invoked into GR, and an SS2 still pending.
+        auto source = MockTerm { pageSize };
+        source.writeToScreen("\033[1;7m\033[1\"q\033)0\033.A\016\033}\033[2;20HX\033N");
+        auto const report = cursorReport(source);
+        REQUIRE(report.starts_with("\033P1$u"));
+        REQUIRE(report.ends_with("\033\\"));
+        auto const payload = report.substr(5, report.size() - 7);
+        CHECK(payload == "2;20;1;I;A;J;1;2;D;B0AB");
+
+        auto target = MockTerm { pageSize };
+        target.writeToScreen(std::format("\033P1$t{}\033\\", payload));
+        CHECK(e(cursorReport(target)) == e(report));
+    }
+
+    SECTION("restores origin mode, reporting the position on the page")
+    {
+        auto target = MockTerm { pageSize };
+        target.writeToScreen("\033[2;3r\033P1$t3;4;1;@;@;A;0;2;@;BBBB\033\\");
+        CHECK(target.terminal.primaryScreen().cursor().originMode);
+        CHECK(target.terminal.primaryScreen().cursor().position
+              == CellLocation { .line = LineOffset(2), .column = ColumnOffset(3) });
+    }
+
+    SECTION("a position off the page changes nothing")
+    {
+        auto target = MockTerm { pageSize };
+        target.writeToScreen("\033[2;2H\033P1$t5;1;1;I;@;@;0;2;@;BBBB\033\\");
+        CHECK(e(cursorReport(target)) == e("\033P1$u2;2;1;@;@;@;0;2;@;BBBB\033\\"));
+    }
+
+    SECTION("a payload that cannot be read whole changes nothing")
+    {
+        auto target = MockTerm { pageSize };
+        target.writeToScreen("\033P1$t3;3;1;I;@;@;0;2;@;BBB\033\\");
+        CHECK(e(cursorReport(target)) == e("\033P1$u1;1;1;@;@;@;0;2;@;BBBB\033\\"));
+    }
+
+    SECTION("a designator Contour has no set for leaves that G-set as it was")
+    {
+        auto target = MockTerm { pageSize };
+        target.writeToScreen("\033)0\033P1$t1;1;1;@;@;@;0;2;@;B%5BB\033\\");
+        CHECK(e(cursorReport(target)) == e("\033P1$u1;1;1;@;@;@;0;2;@;B0BB\033\\"));
+    }
+
+    SECTION("restores the tab stops a DECTABSR reported")
+    {
+        auto target = MockTerm { pageSize };
+        target.writeToScreen("\033P2$t4/12\033\\");
+        CHECK_FALSE(target.terminal.tabs().isInitial());
+        target.terminal.primaryScreen().requestTabStops();
+        CHECK(e(target.terminal.peekInput()) == e("\033P2$u4/12\033\\"));
+    }
+
+    SECTION("an empty DECTABSR payload restores no stops at all")
+    {
+        auto target = MockTerm { pageSize };
+        target.writeToScreen("\033P2$t\033\\");
+        CHECK(target.terminal.tabs().within(ColumnCount(80)).empty());
+    }
+
+    SECTION("a report DECRQPSR does not hand out is not printed")
+    {
+        auto target = MockTerm { pageSize };
+        target.writeToScreen("\033P3$tHELLO\033\\");
+        CHECK(target.terminal.primaryScreen().grid().lineText(LineOffset(0)) == std::string(20, ' '));
+    }
+}
+
 TEST_CASE("DECSTR", "[screen]")
 {
     // Create a 10x3x5 grid and render a 7x5 image causing one a line-scroll by one.

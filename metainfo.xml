@@ -351,6 +351,7 @@
           <li>Adds CTC (<code>CSI Ps W</code>), which sets or clears horizontal tab stops: 0 sets one on the cursor's column, 2 clears it, 4 and 5 clear them all</li>
           <li>Fixes ConEmu <code>OSC 9;9</code> (working directory) and <code>OSC 9;12</code> (prompt start) popping up a desktop notification at every prompt: they now set the working directory as <code>OSC 7</code> does and mark a prompt as <code>OSC 133;A</code> does</li>
           <li>Adds the <code>answerback</code> profile option: the message Contour replies with when an application sends ENQ (Ctrl+E). Empty by default, so nothing is sent unless configured</li>
+          <li>Adds DECRSPS (<code>DCS Ps $ t</code>), which restores the cursor information (DECCIR) or tab stops (DECTABSR) an application saved with DECRQPSR</li>
         </ul>
       </description>
     </release>

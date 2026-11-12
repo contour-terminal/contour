@@ -23,6 +23,7 @@
 #include <vtbackend/vt/Capabilities.hpp>
 #include <vtbackend/vt/Charset.hpp>
 #include <vtbackend/vt/KittyClipboard.hpp>
+#include <vtbackend/vt/PresentationState.hpp>
 #include <vtbackend/vt/SemanticPrompt.hpp>
 #include <vtbackend/vt/Sequence.hpp>
 #include <vtbackend/vt/TextSizing.hpp>
@@ -1826,6 +1827,15 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECDLD(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECDMAC(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRSPS(Sequence const& seq);
+
+    /// Restores a DECCIR payload handed back with DECRSPS 1: on the page it names, if it can be read whole
+    /// and its position lies on the page.
+    void restoreCursorInformation(std::string_view payload);
+    /// Makes this page's cursor the one a decoded DECCIR describes.
+    void adoptCursorInformation(CursorInformation const& info);
+    /// Restores a DECTABSR payload handed back with DECRSPS 2, if it can be read whole.
+    void restoreTabStops(std::string_view payload);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECUDK(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& seq);
 

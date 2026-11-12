@@ -1550,14 +1550,9 @@ void Screen::reportCursorInformation()
     // Bit 1=Bold, Bit 2=Underline, Bit 3=Blinking, Bit 4=Inverse
     auto const& flags = cursor.graphicsRendition.flags;
     auto srendBits = 0;
-    if (flags.test(CellFlag::Bold))
-        srendBits |= 1;
-    if (flags.test(CellFlag::Underline))
-        srendBits |= 2;
-    if (flags.test(CellFlag::Blinking))
-        srendBits |= 4;
-    if (flags.test(CellFlag::Inverse))
-        srendBits |= 8;
+    for (auto const& [bit, flag]: CursorInformationRenditions)
+        if (flags.test(flag))
+            srendBits |= bit;
     auto const srend = static_cast<char>(0x40 + srendBits);
 
     // Satt: protection attribute (Bit 1 = DECSCA protection)
@@ -1568,16 +1563,16 @@ void Screen::reportCursorInformation()
     auto const& charsets = cursor.charsets;
     auto sflagBits = 0;
     if (cursor.originMode)
-        sflagBits |= 1;
+        sflagBits |= std::to_underlying(CursorInformationFlag::OriginMode);
     if (charsets.tableForNextGraphic() != charsets.selectedTable())
     {
         if (charsets.tableForNextGraphic() == CharsetTable::G2)
-            sflagBits |= 2; // SS2 active
+            sflagBits |= std::to_underlying(CursorInformationFlag::SingleShift2);
         else if (charsets.tableForNextGraphic() == CharsetTable::G3)
-            sflagBits |= 4; // SS3 active
+            sflagBits |= std::to_underlying(CursorInformationFlag::SingleShift3);
     }
     if (cursor.wrapPending)
-        sflagBits |= 8;
+        sflagBits |= std::to_underlying(CursorInformationFlag::WrapPending);
     auto const sflag = static_cast<char>(0x40 + sflagBits);
 
     // Pgl: GL charset table index (0=G0, 1=G1, 2=G2, 3=G3)
@@ -5107,15 +5102,15 @@ void Screen::executeControlCode(char controlCode)
 #endif
 
     _terminal->incrementInstructionCounter();
-        case ENQ.finalSymbol:
-            if (auto const& message = _terminal->answerback(); !message.empty())
-                reply(message);
-            break;
     switch (controlCode)
     {
         case 0x00: // NUL
             break;
         case BEL.finalSymbol: _terminal->bell(); break;
+        case ENQ.finalSymbol:
+            if (auto const& message = _terminal->answerback(); !message.empty())
+                reply(message);
+            break;
         case BS.finalSymbol: backspace(); break;
         case TAB.finalSymbol: moveCursorToNextTab(); break;
         case LF.finalSymbol: linefeed(); break;
@@ -8949,6 +8944,18 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case REGIS: _terminal->hookParser(hookReGIS(seq)); break;
         case STP: _terminal->hookParser(hookSTP(seq)); break;
         case DECRQSS: _terminal->hookParser(hookDECRQSS(seq)); break;
+        case DECRSPS:
+            // Only the two reports DECRQPSR hands out can be handed back. Any other Ps is rejected before
+            // hooking, so its payload is discarded rather than written to the screen as text.
+            switch (seq.paramOr(0, 0))
+            {
+                case std::to_underlying(PresentationStateReport::CursorInformation):
+                case std::to_underlying(PresentationStateReport::TabStops):
+                    _terminal->hookParser(hookDECRSPS(seq));
+                    break;
+                default: return ApplyResult::Invalid;
+            }
+            break;
         case DECUDK: _terminal->hookParser(hookDECUDK(seq)); break;
         case XTGETTCAP: _terminal->hookParser(hookXTGETTCAP(seq)); break;
         case GIP: _terminal->hookParser(hookGoodImageProtocol(seq)); break;
@@ -9155,6 +9162,98 @@ unique_ptr<ParserExtension> Screen::hookXTGETTCAP(Sequence const& /*seq*/)
                 requestCapability(capOpt.value());
         }
     });
+}
+
+unique_ptr<ParserExtension> Screen::hookDECRSPS(Sequence const& seq)
+{
+    auto const report = static_cast<PresentationStateReport>(seq.paramOr(0, 0));
+    return make_unique<SimpleStringCollector>([this, report](string_view payload) {
+        switch (report)
+        {
+            case PresentationStateReport::CursorInformation: restoreCursorInformation(payload); break;
+            case PresentationStateReport::TabStops: restoreTabStops(payload); break;
+        }
+    });
+}
+
+void Screen::restoreCursorInformation(std::string_view payload)
+{
+    auto const info = decodeCursorInformation(payload);
+    if (!info)
+    {
+        errorLog()("Ignoring DECRSPS cursor information: {}", toString(info.error()));
+        return;
+    }
+    // Off the page is rejected rather than clamped, as xterm does: clamping would restore a cursor the
+    // report never described.
+    if (info->line < 1 || info->line > unbox(pageSize().lines) || info->column < 1
+        || info->column > unbox(pageSize().columns) || info->page < 1)
+    {
+        errorLog()("Ignoring DECRSPS cursor information off the page: line {}, column {}, page {}",
+                   info->line,
+                   info->column,
+                   info->page);
+        return;
+    }
+    // The report names the cursor's page, which is where the rest of it is restored.
+    if (info->page != _terminal->cursorPageNumber())
+        pagePositionAbsolute(info->page);
+    _terminal->pageAt(_terminal->cursorPageIndex()).adoptCursorInformation(*info);
+}
+
+void Screen::adoptCursorInformation(CursorInformation const& info)
+{
+    auto cursor = _cursor;
+    // DECCIR reports the cursor's position on the page, not within the origin-mode margins.
+    cursor.position =
+        CellLocation { .line = LineOffset(info.line - 1), .column = ColumnOffset(info.column - 1) };
+
+    auto const setFlag = [&](CellFlag flag, bool isSet) {
+        if (isSet)
+            cursor.graphicsRendition.flags.enable(flag);
+        else
+            cursor.graphicsRendition.flags.disable(flag);
+    };
+    for (auto const& [bit, flag]: CursorInformationRenditions)
+        setFlag(flag, (info.rendition & bit) != 0);
+    setFlag(CellFlag::CharacterProtected, info.isProtected);
+
+    cursor.originMode = info.has(CursorInformationFlag::OriginMode);
+    cursor.wrapPending = info.has(CursorInformationFlag::WrapPending);
+
+    for (auto const table: { CharsetTable::G0, CharsetTable::G1, CharsetTable::G2, CharsetTable::G3 })
+    {
+        auto const& designator = info.designations[std::to_underlying(table)];
+        if (designator == "<")
+            cursor.charsets.selectUserPreferred(table, _terminal->userPreferredSupplementalSet());
+        else if (auto const charset = charsetOfDesignator(designator, info.is96Charset(table)); !charset)
+            continue; // One Contour has no map for: that G-set keeps what it holds, as in xterm.
+        else if (info.is96Charset(table))
+            cursor.charsets.select96(table, *charset);
+        else
+            cursor.charsets.select(table, *charset);
+    }
+
+    // The locking shifts first, for a locking shift into GL also ends a single shift.
+    cursor.charsets.lockingShift(info.gl);
+    cursor.charsets.lockingShiftGR(info.gr);
+    if (info.has(CursorInformationFlag::SingleShift3))
+        cursor.charsets.singleShift(CharsetTable::G3);
+    else if (info.has(CursorInformationFlag::SingleShift2))
+        cursor.charsets.singleShift(CharsetTable::G2);
+
+    restoreCursor(cursor);
+}
+
+void Screen::restoreTabStops(std::string_view payload)
+{
+    auto stops = decodeTabStops(payload);
+    if (!stops)
+    {
+        errorLog()("Ignoring DECRSPS tab stops: {}", toString(stops.error()));
+        return;
+    }
+    _terminal->tabs() = TabStops::only(*std::move(stops));
 }
 
 unique_ptr<ParserExtension> Screen::hookDECRQSS(Sequence const& /*seq*/)

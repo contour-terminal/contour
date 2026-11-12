@@ -109,6 +109,7 @@ constexpr inline auto DECREQTPARM = FunctionDocumentation {
 };
 constexpr inline auto DECRQM = FunctionDocumentation { .mnemonic = "DECRQM", .comment = "Request DEC-mode" };
 constexpr inline auto DECRQM_ANSI = FunctionDocumentation { .mnemonic = "DECRQM_ANSI", .comment = "Request ANSI-mode" }; // NOLINT
+constexpr inline auto DECRSPS = FunctionDocumentation { .mnemonic = "DECRSPS", .comment = "Restore Presentation State", .parameters = "Ps ; Pt", .description = "Restores what a presentation state report handed out: Ps 1 the cursor information of a DECCIR (position, page, rendition, protection, origin mode, single shift, pending wrap and character sets), Ps 2 the tab stops of a DECTABSR. Pt is the report's payload. A payload that cannot be read whole, or a position off the page, changes nothing; an SCS designator Contour has no character set for leaves that G-set as it was.", .notes = "VT320. See DECRQPSR, which asks for the reports.", .examples = "DCS 2 $ t 9/17/25 ST" };
 constexpr inline auto DECRQPSR = FunctionDocumentation { .mnemonic = "DECRQPSR", .comment = "Request presentation state report" };
 constexpr inline auto DECRQUPSS = FunctionDocumentation { .mnemonic = "DECRQUPSS", .comment = "Request User-Preferred Supplemental Set", .description = "Reports the current User-Preferred Supplemental Set as a DECAUPSS-shaped DCS. The reported `Ps` is the set's own size, not whatever was last sent." };
 constexpr inline auto DECSASD = FunctionDocumentation { .mnemonic = "DECSASD", .comment = "Select Active Status Display" };
@@ -638,8 +639,8 @@ namespace detail // {{{
 
 // C0
 constexpr inline auto EOT = detail::C0('\x04', "EOT", "End of Transmission");
-constexpr inline auto BEL = detail::C0('\x07', "BEL", "Bell");
 constexpr inline auto ENQ = detail::C0('\x05', "ENQ", "Enquiry; replies with the configured answerback message, if any.");
+constexpr inline auto BEL = detail::C0('\x07', "BEL", "Bell");
 constexpr inline auto BS  = detail::C0('\x08', "BS", "Backspace");
 constexpr inline auto TAB = detail::C0('\x09', "TAB", "Tab");
 constexpr inline auto LF  = detail::C0('\x0A', "LF", "Line Feed");
@@ -915,6 +916,7 @@ constexpr inline auto DECRQDE         = detail::CSI(std::nullopt, 0, 0, '"', 'v'
 constexpr inline auto DECAUPSS    = detail::DCS(std::nullopt, 0, 1, '!', 'u', VTType::VT320, documentation::DECAUPSS);
 constexpr inline auto DECDLD      = detail::DCS(std::nullopt, 0, 16, std::nullopt, '{', VTType::VT220, documentation::DECDLD);
 constexpr inline auto DECDMAC     = detail::DCS(std::nullopt, 0, 3, '!', 'z', VTType::VT420, documentation::DECDMAC);
+constexpr inline auto DECRSPS     = detail::DCS(std::nullopt, 1, 1, '$', 't', VTType::VT320, documentation::DECRSPS);
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, documentation::DECRQSS);
 constexpr inline auto DECUDK      = detail::DCS(std::nullopt, 0, 2, std::nullopt, '|', VTType::VT220, documentation::DECUDK);
 constexpr inline auto DECSIXEL    = detail::DCS(std::nullopt, 0, 3, std::nullopt, 'q', VTType::VT330, documentation::DECSIXEL);
@@ -978,9 +980,9 @@ constexpr static auto allFunctionsArray() noexcept
     auto funcs = std::array {
         // C0
         EOT,
+        ENQ,
         BEL,
         BS,
-        ENQ,
         TAB,
         LF,
         VT,
@@ -1192,6 +1194,7 @@ constexpr static auto allFunctionsArray() noexcept
         GIP,
         STP,
         DECRQSS,
+        DECRSPS,
         DECSIXEL,
         REGIS,
         XTGETTCAP,
