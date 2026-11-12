@@ -182,7 +182,10 @@ StartResult UnixPty::start()
     if (started())
         return {};
 
-    auto const handles = createUnixPty(_pageSize, _pixels);
+    auto const handles = [this] {
+        auto const _ = std::scoped_lock { _mutex };
+        return createUnixPty(_pageSize, _pixels);
+    }();
     _masterFd = crispy::FileDescriptor::fromNative(unbox<int>(handles.master));
     _masterState.store(MasterState::Open, std::memory_order_release);
     _slave = make_unique<Slave>(handles.slave);
@@ -244,6 +247,12 @@ PtySlave& UnixPty::slave() noexcept
 
 std::expected<InheritedPty, AdoptError> UnixPty::handover() const
 {
+    auto const _ = std::scoped_lock { _mutex };
+    return handoverLocked();
+}
+
+std::expected<InheritedPty, AdoptError> UnixPty::handoverLocked() const
+{
     if (!started())
         return std::unexpected(AdoptError::BadDescriptor);
     auto inherited = InheritedPty {
@@ -257,7 +266,7 @@ std::expected<InheritedPty, AdoptError> UnixPty::handover() const
 std::expected<InheritedPty, AdoptError> UnixPty::releaseHandover()
 {
     auto const _ = std::scoped_lock { _mutex };
-    auto inherited = handover();
+    auto inherited = handoverLocked();
     if (!inherited)
         return inherited;
     _readSelector.cancelRead(_masterFd);
@@ -588,18 +597,25 @@ void UnixPty::allowWrites()
 
 PageSize UnixPty::pageSize() const noexcept
 {
+    auto const _ = std::scoped_lock { _mutex };
     return _pageSize;
 }
 
 void UnixPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
 {
-    if (_masterFd < 0)
+    // Under the lock close() closes the descriptor under: the session's reader thread closes the PTY the
+    // moment its program exits, which may be while the GUI thread resizes it. Read unlocked, the descriptor
+    // could be closed between the check below and the ioctl, which then failed with EBADF -- or reached
+    // a recycled descriptor -- and threw out of a Qt event handler, ending the process.
+    auto const _ = std::scoped_lock { _mutex };
+    if (_masterFd.isClosed())
     {
         // Not started yet: remember the size rather than drop it, so start() can bake it into the
         // winsize the child is born with. Dropping it meant the child saw ws_xpixel = 0 until an
         // asynchronous SIGWINCH corrected it -- and an application that reads TIOCGWINSZ once at
-        // startup, which is what img2sixel and chafa do, never sees the correction.
-        ptyLog()("Recording pre-start terminal size: {}x{} / {}",
+        // startup, which is what img2sixel and chafa do, never sees the correction. Once closed, there
+        // is no child left to tell, and remembering it is as harmless.
+        ptyLog()("Recording terminal size while no master is open: {}x{} / {}",
                  cells.columns,
                  cells.lines,
                  pixels.value_or(ImageSize {}));
@@ -621,10 +637,19 @@ void UnixPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
         w.ws_ypixel = unbox<unsigned short>(pixels.value().height);
     }
 
+    // Not fatal: the slave side can be gone already while close() has yet to run (EIO or ENOTTY on macOS and
+    // the BSDs), and a resize runs from a GUI event handler, out of which nothing may throw. The size is
+    // kept either way, as what the PTY is meant to have.
     if (ioctl(_masterFd, TIOCSWINSZ, &w) == -1)
-        throw runtime_error { std::generic_category().message(errno) };
+        errorLog()("Could not resize the PTY (file descriptor {}) to {}x{}: {}",
+                   _masterFd.get(),
+                   cells.columns,
+                   cells.lines,
+                   std::generic_category().message(errno));
 
     _pageSize = cells;
+    if (pixels)
+        _pixels = pixels;
 }
 
 } // namespace vtpty

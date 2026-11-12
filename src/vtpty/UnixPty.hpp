@@ -112,6 +112,9 @@ class UnixPty final: public Pty
 
     [[nodiscard]] bool started() const noexcept { return _masterFd != -1; }
 
+    /// handover(), for a caller that holds _mutex already.
+    [[nodiscard]] std::expected<InheritedPty, AdoptError> handoverLocked() const;
+
     /// Writes what the PTY takes of @p data now, without waiting, under _mutex.
     /// @return How much it took; -1, with errno set, where it took nothing.
     int writeAvailable(std::string_view data);
@@ -147,8 +150,9 @@ class UnixPty final: public Pty
     PageSize _pageSize;
     std::optional<ImageSize> _pixels;
     std::unique_ptr<Slave> _slave;
-    /// Guards the master descriptor against a concurrent close(), for readers and writers alike. Never held
-    /// across a wait for the application: close() must not wait for a program that reads nothing.
+    /// Guards the master descriptor against a concurrent close(), for readers and writers alike, and the size
+    /// (_pageSize, _pixels) resizeScreen() writes from the GUI thread while others read it. Never held across
+    /// a wait for the application: close() must not wait for a program that reads nothing.
     mutable std::mutex _mutex;
     /// Admits one write at a time, from its first byte to its last, so that two never interleave.
     std::mutex _writeMutex;
