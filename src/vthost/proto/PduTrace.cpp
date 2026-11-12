@@ -634,7 +634,11 @@ namespace
         TraceRow { PduType::SelectWorkspace,
                    "SelectWorkspace",
                    +[](DecodedPdu const& pdu) {
-                       return std::format("workspace={}", std::get<SelectWorkspace>(pdu).workspace);
+                       auto const& select = std::get<SelectWorkspace>(pdu);
+                       return select.directoryFromSession ? std::format("workspace={} from={}",
+                                                                        select.workspace,
+                                                                        *select.directoryFromSession)
+                                                          : std::format("workspace={}", select.workspace);
                    } },
         TraceRow { PduType::ReportFocus,
                    "ReportFocus",

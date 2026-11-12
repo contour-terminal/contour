@@ -14,6 +14,8 @@
 #include <contour/window/WindowController.hpp>
 
 #include <core/Utils.hpp>
+#include <core/platform/FileUri.hpp>
+#include <core/platform/PathUtils.hpp>
 
 #include <QtCore/QPointer>
 #include <QtGui/QGuiApplication>
@@ -466,6 +468,50 @@ TEST_CASE("DaemonLink: a window closed while it switches to a new workspace leav
     drainGuiEvents();
     CHECK(rig.host.opened.empty());
     CHECK_FALSE(link.windowShowing(made).has_value());
+}
+
+// What NewWorkspace sends: the pane the window has active, so the daemon starts the new workspace's shell in
+// that pane's folder and names the workspace after it. A link that sent no session would leave both empty.
+TEST_CASE("DaemonLink: a new workspace starts in the folder of the window's active pane",
+          "[attach][link][switch]")
+{
+    auto const root = std::filesystem::temp_directory_path() / "contour-link-new-workspace";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root / "repo" / ".git");
+    std::filesystem::create_directories(root / "repo" / "src");
+    std::ofstream { root / "repo" / ".git" / "HEAD" } << "ref: refs/heads/main\n";
+    auto daemon = DaemonFixture {};
+    auto const ids = seedWorkspaces(daemon, 1);
+    auto rig = LinkRig { daemon.endpoint(), {}, {}, launch() };
+    auto& link = *rig.link;
+    auto& manager = rig.app.manager();
+    auto const local = contour::test::ScopedController { manager };
+    auto const boot = contour::test::ScopedController { manager };
+    REQUIRE(pollUntilAttached(link, 10s).has_value());
+    REQUIRE(link.bindPendingWindow(*boot.controller) == contour::remote::WindowAdoption::Adopted);
+    REQUIRE(waitUntil([&] { return !sessionsOf(manager, boot.id).empty(); }));
+    // The shell of the pane the window shows is in the repository's src.
+    daemon.onDaemon([&] {
+        auto const pane =
+            daemon.host->model().workspace(vtworkspace::WorkspaceId { ids[0] })->tabAt(0)->rootPane();
+        daemon.host->terminal(pane->session())
+            ->writeToScreen(std::format(
+                "\033]7;{}\033\\",
+                core::platform::fileUri(core::platform::normalizePath(root / "repo" / "src"), "localhost")));
+        return 0;
+    });
+
+    REQUIRE(link.selectWorkspace(0).has_value());
+    REQUIRE(daemon.waitUntilOnDaemon([&daemon] { return daemon.host->model().workspaceCount() == 2; }));
+
+    auto const label = daemon.onDaemon([&daemon] {
+        auto const made = daemon.host->model().workspaceAt(1)->id();
+        auto const uuid = daemon.host->objects().uuidOf(made);
+        return std::string { daemon.host->objects().labelOf(
+            vtcontrol::ObjectRef { vtcontrol::ObjectKind::Workspace, uuid.value() }) };
+    });
+    CHECK(label == "repo");
+    std::filesystem::remove_all(root);
 }
 
 TEST_CASE("DaemonLink: a closed window's workspace stays on the daemon, selected by no connection",

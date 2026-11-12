@@ -2395,7 +2395,11 @@ NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame con
         else if (select->workspace == 0)
         {
             // A workspace of its own, which the connection selects as it creates it.
-            if (auto const* created = _host.createWorkspace(spawnRequest({})))
+            // Started where the pane that asked is, as a tab made from it would be.
+            auto const from = select->directoryFromSession
+                                  ? std::optional { vtworkspace::SessionId { *select->directoryFromSession } }
+                                  : std::nullopt;
+            if (auto const* created = _host.createWorkspace(spawnRequest({}, from)))
                 selectWorkspace(created->id());
             else
                 errorLog()("{}: the workspace this client asked to select could not be created", _id);

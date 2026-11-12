@@ -377,7 +377,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param workspace The daemon workspace; 0 asks the daemon to create one and select it.
     /// @return The request's number, which its answer names (takeSelectAnswers()); why nothing was sent
     ///         otherwise: the connection is not up, or the daemon predates the selection.
-    [[nodiscard]] std::expected<uint64_t, std::string> select(uint64_t workspace);
+    /// @param directoryFrom The daemon session of the pane asking for a new workspace (@p workspace 0): the
+    ///        new workspace's first shell starts in that pane's working directory. Ignored otherwise.
+    [[nodiscard]] std::expected<uint64_t, std::string> select(
+        uint64_t workspace, std::optional<uint64_t> directoryFrom = std::nullopt);
 
     /// GUI thread. Tells the daemon whether this window has the user's focus; it decides from the reports of
     /// every attached window which one raises for a bell (raiseRole()). Stated again to every connection that

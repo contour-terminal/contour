@@ -2371,6 +2371,19 @@ TEST_CASE("the workspace select, focus, role and switch PDUs round-trip", "[vtho
         auto const select = SelectWorkspace { .workspace = workspace };
         CHECK(roundTrip(DecodedPdu { select }) == DecodedPdu { select });
     }
+    // The appended field: present, it round-trips; absent, the body is what a sender from before it wrote.
+    for (auto const from: { uint64_t { 0 }, uint64_t { 7 } })
+    {
+        auto const select = SelectWorkspace { .workspace = 0, .directoryFromSession = from };
+        CHECK(roundTrip(DecodedPdu { select }) == DecodedPdu { select });
+    }
+    {
+        auto without = Writer {};
+        auto with = Writer {};
+        encodePdu(without, 1, DecodedPdu { SelectWorkspace { .workspace = 3 } });
+        encodePdu(with, 1, DecodedPdu { SelectWorkspace { .workspace = 3, .directoryFromSession = 1 } });
+        CHECK(without.size() < with.size());
+    }
     for (auto const focus: { WindowFocus::Unfocused, WindowFocus::Focused })
     {
         auto const report = ReportFocus { .focus = focus };

@@ -501,7 +501,10 @@ class NativeClient final
     /// @return The serial it went out under, which the LayoutBatchEnd answering it names as its causeSerial
     ///         (stating the selection the daemon kept, should it have no such workspace); std::nullopt when
     ///         nothing was written, unless the daemon shares Capability::DaemonFollow.
-    std::optional<uint64_t> selectWorkspace(uint64_t workspace);
+    /// @param directoryFrom The session of the pane asking for a new workspace (@p workspace 0): the new
+    ///        workspace's first shell starts in its working directory. Ignored for any other workspace.
+    std::optional<uint64_t> selectWorkspace(uint64_t workspace,
+                                            std::optional<uint64_t> directoryFrom = std::nullopt);
 
     /// Tells the daemon whether this connection's window has the user's focus, from which it decides which
     /// window raises for a bell or a notification.

@@ -5748,3 +5748,38 @@ TEST_CASE("TerminalSessionManager: a closed window's workspace labels are forgot
 }
 
 // }}}
+
+TEST_CASE(
+    "TerminalSessionManager: an in-process new workspace starts in the given folder and is named after it",
+    "[manager][directory]")
+{
+    auto const root = std::filesystem::temp_directory_path() / "contour-new-workspace";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root / "repo" / ".git");
+    std::filesystem::create_directories(root / "repo" / "src");
+    std::ofstream { root / "repo" / ".git" / "HEAD" } << "ref: refs/heads/main\n";
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* const factory = factoryOwned.get();
+    contour::test::TestApp app { std::move(factoryOwned) };
+    auto& manager = app.manager();
+    auto const window = contour::test::ScopedController { manager };
+    auto* const acting = manager.createSessionInBackground(window.id);
+    REQUIRE(acting != nullptr);
+    factory->requestedCwds.clear();
+
+    manager.newWorkspaceStartingIn(*acting, (root / "repo" / "src").string());
+
+    auto const shown = window.controller->displayedWorkspace();
+    CHECK(shown != window.id);
+    CHECK(manager.model().workspace(shown)->tabCount() == 1);
+    REQUIRE(factory->requestedCwds.size() == 1);
+    CHECK(factory->requestedCwds[0] == std::optional { (root / "repo" / "src").string() });
+    CHECK(manager.workspaceLabels().labelOf(shown) == "repo");
+
+    // A folder that is no repository is named after itself; an unknown one names nothing.
+    manager.newWorkspaceStartingIn(*acting, (root / "elsewhere").string());
+    CHECK(manager.workspaceLabels().labelOf(window.controller->displayedWorkspace()) == "elsewhere");
+    manager.newWorkspaceStartingIn(*acting, ".");
+    CHECK(manager.workspaceLabels().labelOf(window.controller->displayedWorkspace()).empty());
+    std::filesystem::remove_all(root);
+}

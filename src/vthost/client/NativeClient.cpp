@@ -689,14 +689,16 @@ Delivery NativeClient::closePane(uint64_t session)
                                                                                     : Delivery::Unsupported;
 }
 
-std::optional<uint64_t> NativeClient::selectWorkspace(uint64_t workspace)
+std::optional<uint64_t> NativeClient::selectWorkspace(uint64_t workspace,
+                                                      std::optional<uint64_t> directoryFrom)
 {
     // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
     if (!shares(proto::Capability::DaemonFollow))
         return std::nullopt;
     // Held only once the daemon states it with the layout batch that answers (handleNotice): a workspace it
     // does not have leaves the selection as it was, and a new one (0) is named by that batch alone.
-    auto const serial = send(proto::DecodedPdu { proto::SelectWorkspace { .workspace = workspace } });
+    auto const serial = send(proto::DecodedPdu {
+        proto::SelectWorkspace { .workspace = workspace, .directoryFromSession = directoryFrom } });
     return serial != 0 ? std::optional { serial } : std::nullopt;
 }
 

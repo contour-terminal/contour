@@ -256,11 +256,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param profileName Profile to launch the session with, or std::nullopt for the app default.
     /// @param command     A command to run instead of the profile's shell, or std::nullopt.
     /// @param role        What the session's program is to the user.
+    /// @param startDirectory Where the shell starts when @p window has no active pane to inherit that from
+    ///        (a workspace made just now), as UTF-8; std::nullopt for the profile's.
     TerminalSession* createSessionInBackground(
         vtworkspace::WorkspaceId window,
         std::optional<std::string> const& profileName = std::nullopt,
         std::optional<vtpty::Process::ExecInfo> const& command = std::nullopt,
-        SessionRole role = SessionRole::Shell);
+        SessionRole role = SessionRole::Shell,
+        std::optional<std::string> startDirectory = std::nullopt);
 
     /// Creates the terminal Settings previews a profile in: a SessionRole::Preview session over a mock
     /// device, showing PreviewTranscript at PreviewPageSize, under @p config's @p profileName. It is the
@@ -403,6 +406,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// has its workspaces from the daemon.
     /// @param acting The session that triggered the action.
     void newWorkspace(TerminalSession const& acting);
+
+    /// (In-process) What newWorkspace() does once it knows where the new workspace starts: a workspace of its
+    /// own for the window hosting @p acting, shown, whose first shell starts in @p cwd and which is named
+    /// after that folder (@see vtbackend::defaultWorkspaceName) -- once, so a later cd renames nothing. A
+    /// failed first session drops the workspace again.
+    /// @param acting The session that triggered the action.
+    /// @param cwd The folder the first shell starts in, as UTF-8; empty or "." for the profile's.
+    void newWorkspaceStartingIn(TerminalSession const& acting, std::string const& cwd);
 
     /// (In-process) Labels @p workspace, which the in-process directory of its window lists
     /// (InProcessDirectory); an empty label removes it. Not for a daemon's workspace, whose label is its
@@ -1721,6 +1732,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Points @p controller at the source of the workspaces it lists: its binding's, else its own process's.
     /// @param controller The window.
     void updateDirectorySource(window::WindowController& controller) const;
+
+    /// @param directory The folder a new workspace's first pane starts in.
+    /// @return The name the workspace gets once, at creation (@see vtbackend::defaultWorkspaceName).
+    [[nodiscard]] std::string defaultWorkspaceName(std::filesystem::path const& directory);
 
     /// Drops what an in-process directory holds of @p workspace, which is gone: its label and its git state.
     /// @param workspace The workspace.

@@ -678,6 +678,15 @@ std::optional<vtworkspace::WorkspaceId> DaemonLink::windowShowing(uint64_t daemo
     return _shown->local;
 }
 
+std::optional<uint64_t> DaemonLink::activePaneSession() const
+{
+    if (!_shown)
+        return std::nullopt;
+    auto const* const controller = _sessions.controllerDisplaying(_shown->local);
+    auto* const session = controller != nullptr ? controller->activeSession() : nullptr;
+    return session != nullptr ? _controller->sessionForPty(&session->pty()) : std::nullopt;
+}
+
 std::expected<void, std::string> DaemonLink::selectWorkspace(uint64_t workspace, SwitchLanded landed)
 {
     requireGuiThread();
@@ -697,7 +706,8 @@ std::expected<void, std::string> DaemonLink::selectWorkspace(uint64_t workspace,
     // Taken before the request goes out: the controller's reactor sends it at once, and the daemon's answer
     // may settle -- the workspace it made among the layouts -- before this thread reads them.
     auto before = std::ranges::to<std::set>(_controller->settledLayouts() | std::views::keys);
-    auto const sent = _controller->select(workspace);
+    // A new workspace starts where the pane that asked is, as a tab made from it does.
+    auto const sent = _controller->select(workspace, workspace == 0 ? activePaneSession() : std::nullopt);
     if (!sent)
         return std::unexpected(sent.error());
     // Only the latest switch of the window lands.

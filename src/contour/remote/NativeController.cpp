@@ -1030,7 +1030,8 @@ std::expected<void, contour::session::ReconnectError> NativeController::reconnec
     return {};
 }
 
-std::expected<uint64_t, std::string> NativeController::select(uint64_t workspace)
+std::expected<uint64_t, std::string> NativeController::select(uint64_t workspace,
+                                                              std::optional<uint64_t> directoryFrom)
 {
     auto request = uint64_t { 0 };
     {
@@ -1043,11 +1044,11 @@ std::expected<uint64_t, std::string> NativeController::select(uint64_t workspace
     }
     // The selection is the one the daemon states with the batch that answers: a workspace it does not have
     // leaves it as it was.
-    _reactor.post([this, workspace, request] {
+    _reactor.post([this, workspace, request, directoryFrom] {
         if (_client == nullptr)
             return;
         // Answered by the batch naming it as its cause (onLayoutBatchEnd).
-        if (auto const serial = _client->selectWorkspace(workspace))
+        if (auto const serial = _client->selectWorkspace(workspace, directoryFrom))
             _selectRequests.insert_or_assign(*serial,
                                              SelectRequest { .request = request, .asked = workspace });
     });

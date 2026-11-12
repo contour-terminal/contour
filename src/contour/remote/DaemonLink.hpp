@@ -439,6 +439,10 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     ///         a window switched to it something to show. One that holds none would empty the window, which
     ///         then closes as its last pane's end closes it.
     [[nodiscard]] bool holdsTab(uint64_t daemonWorkspace) const;
+
+    /// @return The daemon session of the pane the window shown here has active, which a new workspace takes
+    ///         its starting directory from; none when the window shows none, or the pane is not bound.
+    [[nodiscard]] std::optional<uint64_t> activePaneSession() const;
     /// Applies the daemon's layout of the workspace the window displays to the window.
     void applyShownLayout();
     /// A switch selectWorkspace() started failed before it was shown: the switch is told why. No-op without a

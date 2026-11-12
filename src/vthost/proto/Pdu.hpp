@@ -1664,6 +1664,13 @@ struct SelectWorkspace
 {
     /// The daemon workspace to select; 0 asks the daemon to create one and select it.
     uint64_t workspace = 0;
+    /// The session the request comes from, which only a creation (@ref workspace 0) reads: the new
+    /// workspace's first shell starts in that session's working directory, as a tab made from that pane does.
+    /// Appended after @ref workspace, so a body without it is a sender from before the field and names none.
+    ///
+    /// Optional by omission, with no presence byte: it is written only when engaged, so a field appended
+    /// after it must make the encoder always write this one, or a decoder would read the later field as this.
+    std::optional<uint64_t> directoryFromSession = std::nullopt;
     bool operator==(SelectWorkspace const&) const = default;
 };
 

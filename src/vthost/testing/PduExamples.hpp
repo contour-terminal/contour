@@ -223,7 +223,8 @@ namespace vthost::testing
         { proto::PduType::SwitchReply,
           proto::DecodedPdu { proto::SwitchReply {
               .request = 7, .outcome = proto::SwitchOutcome::Failed, .detail = "no such host" } } },
-        { proto::PduType::SelectWorkspace, proto::DecodedPdu { proto::SelectWorkspace { .workspace = 2 } } },
+        { proto::PduType::SelectWorkspace,
+          proto::DecodedPdu { proto::SelectWorkspace { .workspace = 2, .directoryFromSession = 7 } } },
         { proto::PduType::ReportFocus,
           proto::DecodedPdu { proto::ReportFocus { .focus = proto::WindowFocus::Focused } } },
         { proto::PduType::NotifyRole,

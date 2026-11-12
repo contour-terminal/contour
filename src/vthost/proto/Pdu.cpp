@@ -1060,6 +1060,8 @@ namespace
     void encodeBody(Writer& out, SelectWorkspace const& pdu)
     {
         out.varint(pdu.workspace);
+        if (pdu.directoryFromSession)
+            out.varint(*pdu.directoryFromSession);
     }
 
     void encodeBody(Writer& out, ReportFocus const& pdu)
@@ -2305,6 +2307,13 @@ namespace
         auto error = DecodeError {};
         if (!assign(in.varint(), pdu.workspace, error))
             return std::unexpected(error);
+        if (in.remaining() != 0)
+        {
+            auto session = uint64_t { 0 };
+            if (!assign(in.varint(), session, error))
+                return std::unexpected(error);
+            pdu.directoryFromSession = session;
+        }
         return pdu;
     }
 

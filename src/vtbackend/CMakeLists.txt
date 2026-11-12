@@ -151,6 +151,7 @@ set(vtbackend_HEADERS
     screen/StatusLineBuilder.hpp
     screen/StatusLineLayout.hpp
     screen/GitHead.hpp
+    screen/WorkspaceName.hpp
     core/SteadyClockRef.hpp
     shell/StickyHeader.hpp
     core/StickyHeaderKind.hpp
@@ -274,6 +275,7 @@ set(vtbackend_SOURCES
     graphics/regis/ReGISParser.cpp
     screen/StatusLineBuilder.cpp
     screen/GitHead.cpp
+    screen/WorkspaceName.cpp
     screen/StatusLineCommandCache.cpp
     screen/StatusLineExtensions.cpp
     screen/Terminal.cpp
@@ -453,6 +455,7 @@ if(LIBTERMINAL_TESTING)
         screen/Screen_binaryInput_test.cpp
         screen/StatusLineLayout_test.cpp
         screen/GitHead_test.cpp
+        screen/WorkspaceName_test.cpp
         screen/StatusLineCommandCache_test.cpp
         core/WindowSizeStack_test.cpp
         screen/TabStops_test.cpp

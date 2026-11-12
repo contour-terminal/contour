@@ -23,6 +23,7 @@
 
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
+#include <vtbackend/screen/WorkspaceName.hpp>
 
 #include <vtpty/MockPty.hpp>
 #include <vtpty/Process.hpp>
@@ -472,7 +473,8 @@ TerminalSession* TerminalSessionManager::createSessionInBackground(
     vtworkspace::WorkspaceId window,
     std::optional<std::string> const& profileName,
     std::optional<vtpty::Process::ExecInfo> const& command,
-    SessionRole role)
+    SessionRole role,
+    std::optional<std::string> startDirectory)
 {
     // TODO: Remove dependency on app-knowledge and pass shell / terminal-size instead.
     // The GuiApp *or* (Global)Config could be made a global to be accessible from within QML.
@@ -503,7 +505,7 @@ TerminalSession* TerminalSessionManager::createSessionInBackground(
     // brand-new window (no active pane to inherit from) falls back to the profile's terminalSize.
     // (TerminalSession::workingDirectory() already extracts the filesystem path from an OSC 7 file://
     // URL on Windows — see the crash fix in that accessor — so no URL handling is needed here.)
-    std::optional<std::string> ptyPath;
+    std::optional<std::string> ptyPath = std::move(startDirectory);
     std::optional<vtbackend::PageSize> runningPageSize;
     if (auto* tab = targetWindow->activeTab())
         if (auto* current = sessionForId(tab->activePane()->session()))
@@ -1417,9 +1419,46 @@ void TerminalSessionManager::newWorkspace(TerminalSession const& acting)
         postNotice(window::workspaceRefusedNotice(), &acting);
         return;
     }
+    newWorkspaceStartingIn(acting, acting.workingDirectory());
+}
+
+void TerminalSessionManager::newWorkspaceStartingIn(TerminalSession const& acting, std::string const& cwd)
+{
+    auto* const controller = hostOf(&acting).controller;
+    if (controller == nullptr)
+        return;
+    // Started where the pane that asked is, and named after that folder -- once: a later cd renames nothing.
+    // "." is what workingDirectory() says for a session whose directory is unknown.
+    auto const known = !cwd.empty() && cwd != ".";
+    auto const directory =
+        known ? core::pathFromUtf8(cwd).value_or(std::filesystem::path {}) : std::filesystem::path {};
     auto const workspace = createWorkspaceIn(controller->windowId());
     controller->displayWorkspace(workspace);
-    createNewTab(workspace, std::nullopt);
+    if (createSessionInBackground(workspace,
+                                  std::nullopt,
+                                  std::nullopt,
+                                  SessionRole::Shell,
+                                  directory.empty() ? std::nullopt : std::optional { cwd })
+        == nullptr)
+    {
+        // No shell could be made: the window keeps the workspace it had, not an empty one.
+        managerLog()("NewWorkspace: no session could be created; dropping the new workspace.");
+        controller->dropWorkspaceIfEmpty(workspace);
+        return;
+    }
+    if (auto name = defaultWorkspaceName(directory); !name.empty())
+        setWorkspaceLabel(workspace, std::move(name));
+}
+
+std::string TerminalSessionManager::defaultWorkspaceName(std::filesystem::path const& directory)
+{
+    if (directory.empty())
+        return {};
+    // Runs on the GUI thread: the walk up to the repository root is a few stats, once per creation, which is
+    // acceptable where the creation itself spawns a process.
+    if (auto const services = _app.gitHeadServices())
+        return vtbackend::defaultWorkspaceName(services->fileSystem, directory);
+    return vtbackend::defaultWorkspaceName(vtbackend::NativeGitFileSystem { _app.fileSystem() }, directory);
 }
 
 void TerminalSessionManager::setWorkspaceLabel(vtworkspace::WorkspaceId workspace, std::string label)

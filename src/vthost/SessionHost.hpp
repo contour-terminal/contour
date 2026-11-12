@@ -1784,6 +1784,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param request A request whose commandOverride is engaged.
     void settleStartDirectory(SessionSpawnRequest& request) const;
 
+    /// @return The name a workspace made from @p request starts with: after the folder its first shell
+    ///         @p seeded starts in (@see vtbackend::defaultWorkspaceName); empty when that is unknown.
+    [[nodiscard]] std::string defaultWorkspaceLabel(SessionSpawnRequest const& request,
+                                                    vtworkspace::SessionId seeded) const;
+
     /// Destroys session @p session and forgets everything kept beside it, so no erase site can leave a
     /// stale entry behind.
     /// @param session The id of the session to drop; an unknown one is a no-op.

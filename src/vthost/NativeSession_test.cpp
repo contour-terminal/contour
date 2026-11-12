@@ -9550,3 +9550,25 @@ TEST_CASE("the first metadata carries the current git", "[vthost][native][worksp
     CHECK(announced->git == std::optional { wire });
 }
 // }}}
+
+TEST_CASE("SelectWorkspace 0 with a session starts the first pane in that session's cwd",
+          "[vthost][native][daemon-follow][cwd]")
+{
+    auto const spawned = std::make_shared<std::vector<std::filesystem::path>>();
+    auto h = NativeHarness { recordingSpawnDirectories(spawned) };
+    h.files.addDirectory(statedDirectory());
+    auto const* const tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const from = tab->activePane()->session();
+    auto* const terminal = h.host.terminal(from);
+    REQUIRE(terminal != nullptr);
+    terminal->writeToScreen(std::format("\033]7;{}\033\\", vtbackend::test::fileUrlOf(statedDirectory())));
+    spawned->clear();
+
+    std::ignore =
+        h.exchangeUntil({ followingHello(proto::AttachIntentKind::Default),
+                          proto::SelectWorkspace { .workspace = 0, .directoryFromSession = from.value } },
+                        [](auto const& got) { return layoutWorkspaces(got).size() == 2; });
+
+    CHECK(*spawned == std::vector { statedDirectory() });
+}

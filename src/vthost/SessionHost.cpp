@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/SessionHost.hpp>
 
+#include <vtbackend/screen/WorkspaceName.hpp>
+
 #include <vtpty/Process.hpp>
 
 #include <core/Assert.hpp>
@@ -1246,6 +1248,35 @@ Tab* SessionHost::createTab(SessionSpawnRequest const& request, std::optional<Se
     return tab;
 }
 
+std::string SessionHost::defaultWorkspaceLabel(SessionSpawnRequest const& request, SessionId seeded) const
+{
+    // The directory the shell was started in, as settleStartDirectory settled it: a stated or inherited one
+    // that is no directory here (a foreign path from another machine's hello) was dropped, and names nothing.
+    auto start = std::optional<std::filesystem::path> {};
+    auto const consider = [&](std::optional<std::filesystem::path> candidate) {
+        if (!start && candidate && !candidate->empty() && _fileSystem.isDirectory(*candidate))
+            start = std::move(candidate);
+    };
+    if (request.commandOverride)
+        consider(request.commandOverride->workingDirectory);
+    if (request.directoryFrom)
+        consider(workingDirectoryOf(*request.directoryFrom));
+    // Else where the profile starts a shell, which is settled and so cannot race the child's chdir the way
+    // the child's own directory can; that one is the last resort, for a host with no profiles.
+    if (!start && _profiles)
+        consider(_profiles->resolve(request.profileName).shell.workingDirectory);
+    if (!start && !_profiles)
+        consider(workingDirectoryOf(seeded));
+    if (!start)
+        return {};
+    // Runs on the calling thread: the walk up to the repository root is a few stats, once per creation, which
+    // is acceptable where the creation itself spawns a process.
+    // Where the host looks up `{Git}`, or this machine's files when it was given none.
+    if (auto const services = _git.services())
+        return vtbackend::defaultWorkspaceName(services->fileSystem, *start);
+    return vtbackend::defaultWorkspaceName(vtbackend::NativeGitFileSystem { _fileSystem }, *start);
+}
+
 vtworkspace::Workspace* SessionHost::createWorkspace(SessionSpawnRequest const& request)
 {
     auto const pane = paneUuidFor(request);
@@ -1258,9 +1289,13 @@ vtworkspace::Workspace* SessionHost::createWorkspace(SessionSpawnRequest const& 
         return nullptr;
 
     auto* workspace = &createEmptyWorkspace(newWorkspace);
+    // A restored or handed-over workspace keeps the label it had; any other is named once, after where its
+    // first shell starts, and stays so after a cd.
     if (request.presetIds)
         _objects.setLabel(ObjectRef { ObjectKind::Workspace, newWorkspace },
                           request.presetIds->workspaceLabel);
+    else if (auto name = defaultWorkspaceLabel(request, *seeded); !name.empty())
+        _objects.setLabel(ObjectRef { ObjectKind::Workspace, newWorkspace }, std::move(name));
     _stagedTab = StagedTab { .uuid = tabUuid,
                              .label = request.presetIds ? request.presetIds->tabLabel : std::string {} };
     auto* tab = _model.createTab(workspace->id());
