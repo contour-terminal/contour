@@ -613,6 +613,31 @@ TEST_CASE("send-keys writes into the target pane's PTY", "[vthost][control]")
     CHECK(mock.stdinBuffer() == "echo hi\r");
 }
 
+TEST_CASE("send-keys sends everything after -- as keys, even text that spells an option", "[vthost][control]")
+{
+    // As tmux's args_parse: the first `--` ends the options, so what follows is text to send, never
+    // a flag or a target. This is the form TmuxGateway::sendKeys itself emits.
+    auto h = ControlHarness {};
+    h.host.createTab();
+    auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
+    auto const paneId = tab->rootPane()->id().value;
+    auto const session = tab->rootPane()->session();
+
+    h.exchange({
+        std::format("send-keys -t %{} -l -- -l", paneId),
+        std::format("send-keys -t %{} -l -- --", paneId),
+        std::format("send-keys -t %{} -l -- -t", paneId),
+        std::format("send-keys -t %{} -- -H 41", paneId), // not hex mode: "-H" and "41" as keys
+        "send-keys -l -- -t %99",                         // not a target: the active pane gets it
+    });
+
+    auto* terminal = h.host.terminal(session);
+    REQUIRE(terminal != nullptr);
+    auto& tapped = dynamic_cast<vthost::TappingPty&>(terminal->device());
+    auto& mock = dynamic_cast<vtpty::MockPty&>(tapped.inner());
+    CHECK(mock.stdinBuffer() == "-l---t-H41-t%99");
+}
+
 TEST_CASE("capture-pane returns the visible text, without SGR by default", "[vthost][control]")
 {
     auto h = ControlHarness {};
