@@ -148,7 +148,8 @@ filter is only a view: it never changes what a drag or a rename acts on.
     - a pane is never a drop target or a drop, and what is dropped on a pane row is refused.
 
   Drops resolve to the real positions in the daemon, so a filter or a folded row never moves where a drop
-  lands. Moving the last tab out of a workspace closes that workspace.
+  lands. Moving the last tab out of a workspace closes that workspace, as its last tab ending does. A window
+  and a daemon keep their last workspace, so that one cannot be closed.
 - **Drag the divider** at the sidebar's right edge to resize it. The width snaps to whole cells on the Terminal
   style, stays within the style's bounds (160 to 480 px, 18 to 60 cells) and is saved when you let go.
 

@@ -133,6 +133,25 @@ enum class OperationError : uint8_t
     UnknownOperation,   ///< The operation is not one this host knows, as from a newer client.
 };
 
+/// Why the host closed no workspace.
+enum class WorkspaceCloseError : uint8_t
+{
+    UnknownWorkspace = 0, ///< No workspace of the host has that id.
+    LastWorkspace,        ///< It is the host's only workspace, which is never closed.
+};
+
+/// @param error The failure.
+/// @return A lower-case phrase for a log line.
+[[nodiscard]] constexpr std::string_view describe(WorkspaceCloseError error) noexcept
+{
+    switch (error)
+    {
+        case WorkspaceCloseError::UnknownWorkspace: return "there is no such workspace";
+        case WorkspaceCloseError::LastWorkspace: return "the last workspace cannot be closed";
+    }
+    return "unknown error";
+}
+
 /// @param error The failure.
 /// @return A lower-case phrase for a log line.
 [[nodiscard]] constexpr std::string_view describe(OperationError error) noexcept
@@ -1086,7 +1105,8 @@ class SessionHost final: public vtworkspace::ModelEvents
 
     /// @return The host's workspace (the daemon starts with exactly one): where a creation naming no
     /// workspace lands.
-    ///         One a move emptied is removed, and another workspace takes this role (@see discardWorkspace).
+    ///         One emptied (by a move, or by its last session ending) is removed unless it is the only one,
+    ///         and another workspace takes this role (@see discardWorkspace).
     [[nodiscard]] vtworkspace::WorkspaceId workspaceId() const noexcept { return _workspace; }
 
     /// @return The UUIDs and labels of this host's workspaces, tabs and panes.
@@ -1220,11 +1240,17 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return The created, empty workspace.
     [[nodiscard]] vtworkspace::Workspace& createEmptyWorkspace();
 
-    /// Removes a workspace that holds no tab -- one createEmptyWorkspace() made and nothing filled, or one a
-    /// move emptied -- forgetting its name. The host's own workspace (workspaceId()) removed, the
-    /// first workspace left becomes it, or, with none left, a new empty one.
-    /// @param workspace The workspace; one that holds a tab is left alone.
+    /// Removes a workspace that holds no tab -- one createEmptyWorkspace() made and nothing filled, one a
+    /// move emptied, or one whose last session ended -- forgetting its name. The host's own workspace
+    /// (workspaceId()) removed, the first workspace left becomes it. The host's only workspace is kept,
+    /// empty, so a creation naming no workspace, and an attach, still have somewhere to land.
+    /// @param workspace The workspace; one that holds a tab, or the only one, is left alone.
     void discardWorkspace(vtworkspace::WorkspaceId workspace);
+
+    /// Removes every workspace that holds no tab, as discardWorkspace() does, keeping the host's own when
+    /// none holds one. Run as a handover is restored: a release before this one kept a workspace whose last
+    /// session ended.
+    void discardEmptyWorkspaces();
 
     /// Counts @p client as an attached native client (`ConnectionRole::Attach`), from its handshake on.
     /// Idempotent.
@@ -1258,22 +1284,14 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///         selecting the session's workspace; nullopt when none does, or the session is in none.
     [[nodiscard]] std::optional<ConnectionId> clipboardTargetOf(vtworkspace::SessionId session) const;
 
-    /// Closes workspace @p workspace in one step: ends every session it holds now, then removes it, so it
-    /// does not stay behind as an ended, tabless entry. An unknown workspace changes nothing.
+    /// Closes workspace @p workspace in one step: ends every session it holds now, then removes it. The
+    /// host's only workspace is never closed: a creation naming no workspace, and an attach, land in it.
     /// @param workspace The workspace.
-    void closeWorkspace(vtworkspace::WorkspaceId workspace);
+    /// @return Nothing once it is gone; else why nothing changed.
+    std::expected<void, WorkspaceCloseError> closeWorkspace(vtworkspace::WorkspaceId workspace);
 
     /// @return The workspace some window selected last; nullopt when none ever did.
     [[nodiscard]] std::optional<uint64_t> lastSelectedWorkspace() const noexcept { return _lastSelected; }
-
-    /// @param workspace A workspace.
-    /// @return Whether it ended: its last session ended and left it without a tab, and none was added or
-    ///         moved there since. The model may keep it, but it is no workspace to select, unlike an empty
-    ///         one that never held a tab (createEmptyWorkspace()).
-    [[nodiscard]] bool hasEnded(vtworkspace::WorkspaceId workspace) const
-    {
-        return _endedWorkspaces.contains(workspace.value);
-    }
 
     /// @param workspace A workspace.
     /// @return Shown while some attached client selects it, else Hidden.
@@ -2305,11 +2323,6 @@ class SessionHost final: public vtworkspace::ModelEvents
                       proto::InputKind kind);
     /// The workspace some window selected last. @see noteSelected
     std::optional<uint64_t> _lastSelected;
-    /// The workspaces whose last session ended and that hold no tab since (@see hasEnded); a tab added or
-    /// moved there takes it out. Ids are not reused within a run. Not carried across a live upgrade: the new
-    /// process sees an ended workspace as an empty one, selectable again, which shows nothing worse than an
-    /// empty window.
-    std::set<uint64_t> _endedWorkspaces;
     /// Names the raise holder again, and tells the connection that gained the role and the one that lost it.
     void settleRaiseRole();
     /// The value the last focus report was stamped with. @see noteFocus

@@ -4643,9 +4643,11 @@ TEST_CASE("the metadata of a removed workspace is pruned", "[attach][controller]
         return 0;
     });
 
-    // Its layout empties (the directory lists it with no tab, as a switch leaves it out), and its metadata
-    // goes with it.
-    REQUIRE(waitUntil([&] { return workspaceOf(controller, second.id).tabs.empty(); }));
+    // Its layout empties, which takes it out of the directory, and its metadata goes with it.
+    REQUIRE(waitUntil([&] {
+        return std::ranges::none_of(controller.directory().workspaces,
+                                    [&](auto const& workspace) { return workspace.id == second.id; });
+    }));
     CHECK(waitUntil(
         [&] { return contour::remote::NativeControllerTestAccess::workspaceMetaCount(controller) == 1; }));
 }

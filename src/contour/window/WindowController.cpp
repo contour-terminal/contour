@@ -3601,11 +3601,8 @@ void WindowController::openSidebarContextMenu(SidebarRow const& row, QPointF win
     switch (row.key.kind)
     {
         case SidebarRowKind::Workspace:
-            entries = command::buildWorkspaceMenu({ .position = row.position,
-                                                    .count = directory.workspaces.size(),
-                                                    .hosting = _manager.daemonTargetOf(_displayed)
-                                                                   ? command::WorkspaceHosting::Daemon
-                                                                   : command::WorkspaceHosting::InProcess });
+            entries = command::buildWorkspaceMenu(
+                { .position = row.position, .count = directory.workspaces.size() });
             break;
         case SidebarRowKind::Tab: {
             // Every workspace but the tab's own can take it.

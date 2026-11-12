@@ -6024,6 +6024,42 @@ TEST_CASE("TerminalSessionManager: closing a workspace of idle panes closes it a
     CHECK_FALSE(f.factory->createdPtys[2]->isClosed()); // the other workspace's
 }
 
+TEST_CASE("TerminalSessionManager: closing an in-process workspace that holds no tab drops it at once",
+          "[manager][workspace]")
+{
+    auto f = TwoWorkspaces {};
+    auto asked = QSignalSpy { &f.controller(),
+                              &contour::window::WindowController::closeWorkspaceConfirmationRequested };
+    auto const empty = f.manager().createWorkspaceIn(f.controller().windowId());
+    REQUIRE(f.manager().model().workspace(empty) != nullptr);
+
+    f.manager().closeWorkspace(f.controller(), empty.value);
+
+    CHECK(asked.isEmpty());
+    CHECK(f.manager().model().workspace(empty) == nullptr);
+    CHECK(f.listed() == std::vector { f.first.value, f.second.value });
+    CHECK(std::ranges::none_of(f.factory->createdPtys, [](auto const& pty) { return pty->isClosed(); }));
+}
+
+TEST_CASE("TerminalSessionManager: an in-process workspace the window does not show goes with its last tab",
+          "[manager][workspace]")
+{
+    auto f = TwoWorkspaces {};
+    REQUIRE(f.controller().displayedWorkspace() == f.first);
+    auto const* const hidden = f.manager().model().workspace(f.second);
+    auto* const session = f.manager().sessionForId(hidden->tabAt(0)->rootPane()->session());
+    REQUIRE(session != nullptr);
+
+    // Its one pane ends, as when its shell exits.
+    session->terminate();
+    session->onClosed();
+    drainPosted();
+
+    CHECK(f.manager().model().workspace(f.second) == nullptr);
+    CHECK(f.listed() == std::vector { f.first.value });
+    CHECK(f.controller().displayedWorkspace() == f.first);
+}
+
 TEST_CASE("TerminalSessionManager: an in-process window keeps its last workspace", "[manager][workspace]")
 {
     auto owned = std::make_unique<contour::test::MockPtySessionFactory>();
@@ -6147,7 +6183,8 @@ class DaemonDirectorySource final: public contour::window::IWorkspaceDirectorySo
         };
         auto build = DirectoryWorkspace {};
         build.id = 10;
-        // The daemon holds an ended, tabless workspace ahead of these and another between them.
+        // The daemon holds a tabless workspace ahead of these and another between them (an older release kept
+        // one whose last session ended).
         build.position = 1;
         build.label = "build";
         build.tabs = { tab(100, 1000), tab(101, 1001) };

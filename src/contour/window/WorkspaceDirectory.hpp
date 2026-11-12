@@ -8,8 +8,11 @@
 
 #include <array>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
+#include <format>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <vector>
@@ -72,11 +75,23 @@ struct DirectoryWorkspace
     std::array<uint8_t, 16> controlId {}; ///< Its control-API UUID; all zero while the daemon stated none.
     std::optional<DirectoryGit> git {};   ///< Its git state; none when it is in no repository, or unknown.
     /// Its 0-based place in the daemon's model, as the daemon stated it (WorkspaceMeta::position); none until
-    /// it did. The daemon's order counts workspaces this directory does not list (an ended, tabless one), so
-    /// a workspace's place in the directory is not its place there.
+    /// it did. The daemon's order may count workspaces this directory does not list (a tabless one), so a
+    /// workspace's place in the directory need not be its place there.
     std::optional<uint32_t> position {};
     bool operator==(DirectoryWorkspace const&) const = default;
 };
+
+/// @param workspace A workspace of a directory.
+/// @param listIndex Its 0-based place in that directory.
+/// @return What a window calls it: its label, or "Workspace N" -- N its 1-based place in its host's order,
+///         as `contour ls` and `workspace.list` number it, and its place in the directory while the host
+///         stated none.
+[[nodiscard]] inline std::string workspaceTitleOf(DirectoryWorkspace const& workspace, std::size_t listIndex)
+{
+    if (!workspace.label.empty())
+        return workspace.label;
+    return std::format("Workspace {}", workspace.position.value_or(static_cast<uint32_t>(listIndex)) + 1);
+}
 
 /// Every workspace a window can list, in the daemon's order.
 struct WorkspaceDirectory

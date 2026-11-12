@@ -109,6 +109,8 @@ std::expected<void, HandoverError> SessionHost::restoreHandover(HandoverImage im
             if (auto const [workspace, tab, leaf] = _model.findSessionLeaf(session); leaf != nullptr)
                 _model.closePane(workspace->id(), tab->id(), leaf->id());
 
+    discardEmptyWorkspaces();
+
     // Each session crossed with the scrollback limit its terminal was built with, which its state restored:
     // the configuration this image loaded applies to it now, before any client sees it, as a reload would.
     replaceProfiles(_profiles);

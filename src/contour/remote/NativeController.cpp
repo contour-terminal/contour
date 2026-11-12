@@ -1141,9 +1141,12 @@ window::WorkspaceDirectory NativeController::directory() const
     // std::map keeps the keys ascending: the daemon's workspaces in the order it numbered them. The place the
     // daemon states for each workspace (it moves them) goes first; the stable sort keeps id order for a
     // daemon that states none, and for a workspace whose position has not arrived yet.
-    auto layouts =
-        std::ranges::to<std::vector>(_settledLayouts | std::views::values
-                                     | std::views::transform([](auto const& layout) { return *layout; }));
+    // A layout that holds no tab is not listed: an emptied layout is how the daemon says a workspace is gone,
+    // and the one tabless workspace it keeps (its only one, once its last session ended) has nothing to show.
+    auto layouts = std::ranges::to<std::vector>(
+        _settledLayouts | std::views::values
+        | std::views::filter([](auto const& layout) { return !layout->tabs.empty(); })
+        | std::views::transform([](auto const& layout) { return *layout; }));
     auto const positionOf = [this](vthost::proto::LayoutState const& layout) {
         auto const found = _workspaceMeta.find(layout.workspace);
         return found != _workspaceMeta.end() && found->second.position ? *found->second.position

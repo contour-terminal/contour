@@ -1329,21 +1329,32 @@ vtworkspace::Workspace& SessionHost::createEmptyWorkspace(vtcontrol::Uuid name)
 void SessionHost::discardWorkspace(WorkspaceId workspace)
 {
     auto const* found = _model.workspace(workspace);
-    if (found == nullptr || found->tabCount() != 0)
+    if (found == nullptr || found->tabCount() != 0 || _model.workspaceCount() == 1)
         return;
     _objects.forget(workspace);
     if (_workspaceGit)
         _workspaceGit->forget(workspace);
     _model.removeWorkspace(workspace);
-    // The host's own workspace is what a creation naming no workspace lands in: another takes its place, and
-    // with none left (the last one closed) an empty one is made for it, as a handover restoring no workspace
-    // does, so the next tab has somewhere to go.
-    if (workspace != _workspace)
-        return;
-    if (_model.workspaceCount() > 0)
+    // The host's own workspace is what a creation naming no workspace lands in: another takes its place. One
+    // is always left, as the only one is never removed.
+    if (workspace == _workspace)
         _workspace = _model.workspaceAt(0)->id();
-    else
-        _workspace = createEmptyWorkspace().id();
+}
+
+void SessionHost::discardEmptyWorkspaces()
+{
+    // Collected first: removing one changes the order being walked. The host's own goes last, so it is the
+    // one kept when none holds a tab.
+    auto empty = std::ranges::to<std::vector>(
+        std::views::iota(0, _model.workspaceCount())
+        | std::views::transform([this](int index) { return _model.workspaceAt(index); })
+        | std::views::filter([](vtworkspace::Workspace const* workspace) {
+              return workspace != nullptr && workspace->tabCount() == 0;
+          })
+        | std::views::transform(&vtworkspace::Workspace::id));
+    std::ranges::stable_partition(empty, [this](WorkspaceId id) { return id != _workspace; });
+    for (auto const id: empty)
+        discardWorkspace(id);
 }
 
 void SessionHost::settleSwitch(uint32_t request, proto::SwitchReply reply)
@@ -2333,11 +2344,14 @@ void SessionHost::closeSession(SessionId session)
     endSession(session, SessionEnd::Requested);
 }
 
-void SessionHost::closeWorkspace(WorkspaceId workspace)
+std::expected<void, WorkspaceCloseError> SessionHost::closeWorkspace(WorkspaceId workspace)
 {
     auto const* const found = _model.workspace(workspace);
     if (found == nullptr)
-        return;
+        return std::unexpected(WorkspaceCloseError::UnknownWorkspace);
+    // A creation naming no workspace, and an attach, need somewhere to land.
+    if (_model.workspaceCount() == 1)
+        return std::unexpected(WorkspaceCloseError::LastWorkspace);
     // Collected first: ending a session changes the trees being walked.
     auto sessions = std::vector<SessionId> {};
     for (auto const index: std::views::iota(0, found->tabCount()))
@@ -2347,9 +2361,9 @@ void SessionHost::closeWorkspace(WorkspaceId workspace)
         });
     for (auto const session: sessions)
         endSession(session, SessionEnd::Requested);
-    // Whatever the loop left (a workspace that held no tab) goes too; one that still holds a tab is kept.
-    _endedWorkspaces.erase(workspace.value);
+    // The last session ending removed it already; one that held no tab goes now.
     discardWorkspace(workspace);
+    return {};
 }
 
 std::optional<std::filesystem::path> SessionHost::workingDirectoryOf(SessionId session) const
@@ -2404,8 +2418,8 @@ void SessionHost::endSession(SessionId session, SessionEnd cause)
     {
         auto const id = workspace->id();
         _model.closePane(id, tab->id(), leaf->id());
-        if (auto const* const left = _model.workspace(id); left != nullptr && left->tabCount() == 0)
-            _endedWorkspaces.insert(id.value);
+        // A workspace ends with its last tab: it goes, unless it is the only one.
+        discardWorkspace(id);
     }
 
     auto const hadExtensions = it->second->hasExtensions();
@@ -2808,9 +2822,6 @@ void SessionHost::tabAdded(WorkspaceId workspace, TabId tab, int index)
     // A tab a move made (a pane extracted into a tab of its own) was named by no creation path; every
     // workspace was, a move's own included (MoveWorkspaceHooks).
     bindUnnamed(tab);
-    // A workspace that ended and holds a tab again (a creation naming no workspace lands in the host's own)
-    // is a workspace to select again.
-    _endedWorkspaces.erase(workspace.value);
     // Re-fitted first: the pane may come from a split and be half the size its new tab gives it.
     reprojectTab(tab);
     fanOut(&vtworkspace::ModelEvents::tabAdded, workspace, tab, index);
@@ -2847,7 +2858,6 @@ void SessionHost::tabMovedToWorkspace(WorkspaceId from, TabId tab, int fromIndex
 {
     // The tab lands in a workspace of another size: its shells are resized before observers advertise it.
     reprojectTab(tab);
-    _endedWorkspaces.erase(to.value);
     fanOut(&vtworkspace::ModelEvents::tabMovedToWorkspace, from, tab, fromIndex, to, toIndex);
 }
 

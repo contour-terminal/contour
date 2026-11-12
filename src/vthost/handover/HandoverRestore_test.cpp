@@ -432,6 +432,42 @@ TEST_CASE("a reordered daemon keeps its workspace order and its default workspac
     CHECK(live->host.workspaceId() == defaultWorkspace);
 }
 
+TEST_CASE(
+    "a workspace an older release kept empty after its last session ended is dropped as it is taken over",
+    "[vthost][handover]")
+{
+    auto old = std::make_unique<LiveHost>(catDevice);
+    REQUIRE(old->host.createTab() != nullptr);
+    auto const defaultWorkspace = old->host.workspaceId();
+    // What an older release left behind: a tabless workspace beside the one that holds a tab.
+    auto const ended = old->host.createEmptyWorkspace().id();
+    REQUIRE(old->host.model().workspaceCount() == 2);
+
+    auto const image = handOver(std::move(old));
+    auto const live = takeOver(image);
+
+    CHECK(live->host.model().workspaceCount() == 1);
+    CHECK(live->host.model().workspace(ended) == nullptr);
+    CHECK_FALSE(live->host.objects().uuidOf(ended).has_value());
+    CHECK(live->host.workspaceId() == defaultWorkspace);
+}
+
+TEST_CASE("a daemon whose every workspace is empty keeps its own one across an upgrade", "[vthost][handover]")
+{
+    auto old = std::make_unique<LiveHost>(catDevice);
+    auto const defaultWorkspace = old->host.workspaceId();
+    std::ignore = old->host.createEmptyWorkspace();
+    // The host's own workspace is not the first.
+    old->host.model().moveWorkspace(defaultWorkspace, 1);
+
+    auto const image = handOver(std::move(old));
+    auto const live = takeOver(image);
+
+    REQUIRE(live->host.model().workspaceCount() == 1);
+    CHECK(live->host.workspaceId() == defaultWorkspace);
+    CHECK(live->host.model().workspace(defaultWorkspace) != nullptr);
+}
+
 TEST_CASE("a refused workspace tree still adopts every session, each in a tab of its own",
           "[vthost][handover][threading]")
 {

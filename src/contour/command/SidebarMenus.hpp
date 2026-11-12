@@ -12,19 +12,11 @@
 namespace contour::command
 {
 
-/// Where a window's sessions run, as far as closing its last workspace is concerned.
-enum class WorkspaceHosting : std::uint8_t
-{
-    InProcess = 0, ///< In the GUI process: a window needs at least one workspace to show.
-    Daemon,        ///< On a daemon: a window can be left with none and pick one again.
-};
-
 /// The world, as a workspace row's context menu needs to see it.
 struct WorkspaceMenuState
 {
-    std::size_t position = 0;                               ///< The workspace's place in the list, 0-based.
-    std::size_t count = 1;                                  ///< How many workspaces the list holds.
-    WorkspaceHosting hosting = WorkspaceHosting::InProcess; ///< Where the window's sessions run.
+    std::size_t position = 0; ///< The workspace's place in the list, 0-based.
+    std::size_t count = 1;    ///< How many workspaces the list holds.
 };
 
 /// The workspace row's context menu for @p state.

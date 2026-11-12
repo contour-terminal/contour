@@ -5675,25 +5675,26 @@ TEST_CASE("a CreateTab's profile overrides the connection's", "[vthost][native][
     CHECK(profilesOf(h.host) == std::vector<std::string> { "build", "ops", "build" });
 }
 
-TEST_CASE("a CreateTab after the only workspace closed lands in the empty one left in its place",
+TEST_CASE("an attach after the only workspace's last tab ended lands in that workspace, kept empty",
           "[vthost][native][workspace-meta]")
 {
     auto h = NativeHarness {};
     auto const only = h.host.workspaceId();
-    h.host.closeWorkspace(only);
-    REQUIRE(h.host.model().workspace(only) == nullptr);
-    auto const replacement = h.host.workspaceId();
-    REQUIRE(replacement != only);
-    REQUIRE(h.host.model().workspace(replacement) != nullptr);
+    REQUIRE(h.host.createTab() != nullptr);
+    h.host.closeSession(h.host.model().workspace(only)->tabAt(0)->rootPane()->session());
+    // Kept, not replaced: no second empty workspace is made.
+    REQUIRE(h.host.model().workspaceCount() == 1);
+    REQUIRE(h.host.workspaceId() == only);
+    REQUIRE(h.host.model().workspace(only)->tabCount() == 0);
 
     std::ignore = h.exchangeUntil({ proto::ClientHello {}, proto::CreateTab { .session = 0 } },
-                                  [workspace = replacement.value](auto const& got) {
+                                  [workspace = only.value](auto const& got) {
                                       auto const* layout = lastLayoutOf(got, workspace);
                                       return layout != nullptr && layout->tabs.size() == 2;
                                   });
     // The attach gave the empty workspace its first tab; the CreateTab, naming no session, the second.
     CHECK(h.host.model().workspaceCount() == 1);
-    CHECK(h.host.model().workspace(replacement)->tabCount() == 2);
+    CHECK(h.host.model().workspace(only)->tabCount() == 2);
 }
 
 TEST_CASE("a client without ProfileByName keeps the session-settings path", "[vthost][native][profiles]")
@@ -8035,7 +8036,7 @@ TEST_CASE("SelectWorkspace naming no workspace keeps the selection, and one from
     {
         auto const ended = h.host.createWorkspace()->id();
         h.host.closeSession(h.host.model().workspace(ended)->tabAt(0)->rootPane()->session());
-        REQUIRE(h.host.model().workspace(ended) != nullptr); // kept, emptied
+        REQUIRE(h.host.model().workspace(ended) == nullptr); // removed with its last session
         auto const select = encodeRequest({ proto::SelectWorkspace { .workspace = ended.value } });
         auto const answered = [](std::vector<proto::DecodedFrame> const& got) {
             return std::ranges::any_of(got, [](proto::DecodedFrame const& frame) {
@@ -8138,42 +8139,28 @@ TEST_CASE("a connection whose only workspace ends selects none and creates none"
     CHECK(h.session->selectedWorkspace() == 0);
 }
 
-TEST_CASE("a workspace whose last session ended is selectable again once it holds a tab",
+TEST_CASE("the only workspace, kept empty when its last session ended, is selectable once it holds a tab",
           "[vthost][native][daemon-follow]")
 {
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
     auto const own = h.host.workspaceId();
-    auto const other = h.host.createWorkspace()->id();
-    auto const endLastSession = [&h](vtworkspace::WorkspaceId workspace) {
-        h.host.closeSession(h.host.model().workspace(workspace)->tabAt(0)->rootPane()->session());
-        REQUIRE(h.host.hasEnded(workspace));
-    };
+    h.host.closeSession(h.host.model().workspace(own)->tabAt(0)->rootPane()->session());
+    REQUIRE(h.host.model().workspaceCount() == 1);
+    REQUIRE(h.host.workspaceId() == own);
 
-    auto refilled = vtworkspace::WorkspaceId {};
-    SECTION("by a tab created naming no workspace, which lands in the host's own")
-    {
-        endLastSession(own);
-        REQUIRE(h.host.createTab() != nullptr);
-        refilled = own;
-    }
-    SECTION("by a tab moved there")
-    {
-        REQUIRE(h.host.createTab() != nullptr); // a second tab in the host's own, to move
-        endLastSession(other);
-        auto& model = h.host.model();
-        model.moveTabToWorkspace(own, model.workspace(own)->tabAt(1)->id(), other, 0);
-        refilled = other;
-    }
-    CHECK_FALSE(h.host.hasEnded(refilled));
+    // A tab created naming no workspace lands in it.
+    REQUIRE(h.host.createTab() != nullptr);
+    REQUIRE(h.host.model().workspace(own)->tabCount() == 1);
+    auto const other = h.host.createWorkspace()->id();
 
     // Selected: the batch answering the request states it.
-    auto const select = encodeRequest({ proto::SelectWorkspace { .workspace = refilled.value } });
+    auto const select = encodeRequest({ proto::SelectWorkspace { .workspace = own.value } });
     std::ignore = h.exchangeUntil(
-        { daemonFollowHello(proto::AttachIntentKind::Select, refilled == own ? other.value : own.value) },
-        [&](auto const& got) { return batchEndSelects(got, refilled.value); },
+        { daemonFollowHello(proto::AttachIntentKind::Select, other.value) },
+        [&](auto const& got) { return batchEndSelects(got, own.value); },
         sendOnce(&h, &select, [&] { return snapshotRunCount(h.received) >= 1; }));
-    CHECK(h.session->selectedWorkspace() == refilled.value);
+    CHECK(h.session->selectedWorkspace() == own.value);
 }
 
 TEST_CASE("an attach selecting a workspace whose last session ended selects as a launch does",
@@ -8184,7 +8171,7 @@ TEST_CASE("an attach selecting a workspace whose last session ended selects as a
     auto const first = h.host.workspaceId().value;
     auto const ended = h.host.createWorkspace()->id();
     h.host.closeSession(h.host.model().workspace(ended)->tabAt(0)->rootPane()->session());
-    REQUIRE(h.host.model().workspace(ended) != nullptr); // kept, emptied
+    REQUIRE(h.host.model().workspace(ended) == nullptr); // removed with its last session
 
     std::ignore = h.exchangeUntil({ daemonFollowHello(proto::AttachIntentKind::Select, ended.value) },
                                   [](auto const& got) { return snapshotRunCount(got) >= 1; });
@@ -9448,7 +9435,6 @@ TEST_CASE("a closed workspace goes from every client, with a tab another client 
 
     CHECK(f.flush.h.host.model().workspace(vtworkspace::WorkspaceId { f.second }) == nullptr);
     CHECK(f.flush.h.host.sessionIds().size() == before - 2);
-    CHECK_FALSE(f.flush.h.host.hasEnded(vtworkspace::WorkspaceId { f.second }));
     for (auto const* client: { &one, &other })
     {
         auto const skip = client == &one ? skipOne : skipOther;
@@ -9490,6 +9476,94 @@ TEST_CASE("positions are sent again after a workspace ahead of others is removed
         if (meta.workspace == f.second && meta.position)
             told = meta.position;
     CHECK(told == std::optional<uint32_t> { 0 });
+}
+
+namespace
+{
+/// @return Whether @p client was sent @p workspace's layout emptied after its first @p skip frames.
+[[nodiscard]] bool toldEmptied(FlushClient const& client, uint64_t workspace, std::size_t skip)
+{
+    return std::ranges::any_of(client.received | std::views::drop(skip), [&](auto const& frame) {
+        auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu);
+        return layout != nullptr && layout->workspace == workspace && layout->tabs.empty();
+    });
+}
+} // namespace
+
+TEST_CASE("a workspace goes from the model and every client once its last tab ends",
+          "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& one = f.attachSelecting(f.first);
+    auto& other = f.attachSelecting(f.second);
+    f.settle();
+    auto const removed = vtworkspace::WorkspaceId { f.first };
+    auto const skipOne = one.received.size();
+    auto const skipOther = other.received.size();
+
+    // The first workspace's one pane ends: the second is the only one, and the first now.
+    f.flush.h.host.closeSession(f.inFirst);
+    f.settle();
+
+    auto& host = f.flush.h.host;
+    CHECK(host.model().workspace(removed) == nullptr);
+    CHECK_FALSE(host.objects().uuidOf(removed).has_value());
+    CHECK(host.workspaceId().value == f.second);
+    for (auto const& [client, skip]: { std::pair { &one, skipOne }, std::pair { &other, skipOther } })
+    {
+        CHECK(toldEmptied(*client, f.first, skip));
+        auto told = std::optional<uint32_t> {};
+        for (auto const& meta: MetaFixture::metasOf(*client, skip))
+            if (meta.workspace == f.second && meta.position)
+                told = meta.position;
+        CHECK(told == std::optional<uint32_t> { 0 });
+    }
+}
+
+TEST_CASE("the only workspace stays, empty, once its last tab ends", "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    // The second workspace closed first: the first is the only one.
+    REQUIRE(f.flush.h.host.closeWorkspace(vtworkspace::WorkspaceId { f.second }).has_value());
+    f.flush.h.host.closeSession(f.inFirst);
+    f.settle();
+
+    auto& host = f.flush.h.host;
+    REQUIRE(host.model().workspaceCount() == 1);
+    CHECK(host.workspaceId().value == f.first);
+    CHECK(host.model().workspace(host.workspaceId())->tabCount() == 0);
+    CHECK(host.objects().uuidOf(host.workspaceId()).has_value());
+}
+
+TEST_CASE("the only workspace is never closed", "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& host = f.flush.h.host;
+    REQUIRE(host.closeWorkspace(vtworkspace::WorkspaceId { f.second }).has_value());
+
+    auto const refused = host.closeWorkspace(vtworkspace::WorkspaceId { f.first });
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error() == vthost::WorkspaceCloseError::LastWorkspace);
+    CHECK(host.model().workspace(vtworkspace::WorkspaceId { f.first }) != nullptr);
+    CHECK(host.sessionIds().size() == 1); // its tab runs on
+}
+
+TEST_CASE("a workspace that holds no tab is closed, and every client told",
+          "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& client = f.attachSelecting(f.first);
+    f.settle();
+    auto const empty = f.flush.h.host.createEmptyWorkspace().id().value;
+    f.settle();
+    auto const skip = client.received.size();
+
+    NativeSessionFlushTester::serveWorkspaceVerb(*client.session,
+                                                 proto::CloseWorkspace { .workspace = empty });
+    f.settle();
+
+    CHECK(f.flush.h.host.model().workspace(vtworkspace::WorkspaceId { empty }) == nullptr);
+    CHECK(toldEmptied(client, empty, skip));
 }
 
 TEST_CASE("a client's label for a workspace is every client's", "[vthost][native][workspace-meta]")

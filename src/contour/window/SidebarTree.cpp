@@ -432,8 +432,7 @@ SidebarListing sidebarListing(WorkspaceDirectory const& directory,
         auto row = SidebarRow {};
         row.key = { .kind = SidebarRowKind::Workspace, .workspace = workspace.id, .tab = 0, .pane = {} };
         row.position = static_cast<std::size_t>(position);
-        row.title =
-            workspace.label.empty() ? std::format("Workspace {}", position + 1) : sanitized(workspace.label);
+        row.title = sanitized(workspaceTitleOf(workspace, static_cast<std::size_t>(position)));
         if (workspace.git)
             row.gitText = gitTextOf(*workspace.git);
         auto const best = mostUrgent(leaves);

@@ -25,10 +25,10 @@ namespace
         return state.position + 1 < state.count;
     }
 
-    /// A window that runs its sessions in-process keeps its last workspace.
+    /// A window keeps its last workspace, as a daemon keeps its own last one.
     bool canClose(WorkspaceMenuState const& state) noexcept
     {
-        return state.hosting == WorkspaceHosting::Daemon || state.count > 1;
+        return state.count > 1;
     }
 
     [[nodiscard]] std::span<WorkspaceTable::Row const> workspaceMenuTemplate()

@@ -802,3 +802,15 @@ TEST_CASE("SidebarTree.hover_detail_joins_what_it_has", "[sidebar]")
     CHECK(hoverDetailOf(tabRowOf(rows)) == "app · /src · 0:42");
     CHECK(hoverDetailOf(rows.front()).empty());
 }
+
+TEST_CASE("SidebarTree.unlabelled_workspace_is_numbered_as_its_host_numbers_it", "[sidebar]")
+{
+    // The daemon counts a workspace the list leaves out: the row says what `contour ls` says.
+    auto workspace = workspaceOf(9, {}, { tabOf(1, "t", { paneOf(1) }) });
+    workspace.position = 2;
+    auto const rows =
+        rowsOf(directoryOf({ workspaceOf(8, "ops", { tabOf(2, "u", { paneOf(2) }) }), workspace }));
+    REQUIRE(rows.size() == 4);
+    CHECK(rows[0].title == "ops");
+    CHECK(rows[2].title == "Workspace 3");
+}

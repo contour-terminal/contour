@@ -1661,8 +1661,9 @@ void TerminalSessionManager::closeWorkspace(window::WindowController& window, ui
     {
         auto const* const source = window.directorySource();
         auto const directory = source != nullptr ? source->directory() : window::WorkspaceDirectory {};
+        // The daemon keeps its last workspace, as an in-process window keeps its own.
         auto const* const listed = findWorkspace(directory, workspace);
-        if (listed == nullptr)
+        if (listed == nullptr || directory.workspaces.size() < 2)
             return;
         label = listed->label;
         // A daemon's pane runs a program this process cannot name: it may be running vim.
@@ -1710,6 +1711,12 @@ void TerminalSessionManager::confirmCloseWorkspace(window::WindowController& win
     auto const* const held = _model->workspace(id);
     if (held == nullptr || !ownsWorkspace(window, id) || ownsOneWorkspaceOnly(window))
         return;
+    // One that holds no tab has no session whose end would drop it.
+    if (held->empty())
+    {
+        window.dropWorkspaceIfEmpty(id);
+        return;
+    }
     // As closing every tab does: each session ends, and the model drops the emptied workspace.
     terminateSessions(sessionsInWorkspace(*held), SessionEnd::Destroy);
 }

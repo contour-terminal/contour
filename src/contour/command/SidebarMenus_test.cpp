@@ -59,19 +59,13 @@ TEST_CASE("move up and move down grey out at the ends of the list", "[sidebarmen
     CHECK(row(last, "Move Down").availability == RowAvailability::Disabled);
 }
 
-TEST_CASE("close is disabled for the last workspace in-process", "[sidebarmenu]")
+TEST_CASE("close is disabled for the last workspace", "[sidebarmenu]")
 {
-    auto const inProcess = buildWorkspaceMenu(
-        WorkspaceMenuState { .position = 0, .count = 1, .hosting = WorkspaceHosting::InProcess });
-    CHECK(row(inProcess, "Close Workspace…").availability == RowAvailability::Disabled);
+    auto const last = buildWorkspaceMenu(WorkspaceMenuState { .position = 0, .count = 1 });
+    CHECK(row(last, "Close Workspace…").availability == RowAvailability::Disabled);
 
-    auto const several = buildWorkspaceMenu(
-        WorkspaceMenuState { .position = 0, .count = 2, .hosting = WorkspaceHosting::InProcess });
+    auto const several = buildWorkspaceMenu(WorkspaceMenuState { .position = 0, .count = 2 });
     CHECK(row(several, "Close Workspace…").availability == RowAvailability::Enabled);
-
-    auto const daemon = buildWorkspaceMenu(
-        WorkspaceMenuState { .position = 0, .count = 1, .hosting = WorkspaceHosting::Daemon });
-    CHECK(row(daemon, "Close Workspace…").availability == RowAvailability::Enabled);
 }
 
 TEST_CASE("the sidebar tab menu is the tab strip's menu plus Move to Workspace", "[sidebarmenu]")

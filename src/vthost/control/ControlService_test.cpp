@@ -1056,7 +1056,6 @@ TEST_CASE("workspace.close ends what the workspace holds and removes it", "[vtho
                 h.service, h.context, vtcontrol::CloseWorkspaceRequest { .workspace = created->workspace })
                 .has_value());
         CHECK(workspaceOrderOf(h) == std::vector { first });
-        CHECK_FALSE(h.host.hasEnded(second)); // gone, not left behind as an ended entry
         CHECK(h.host.sessionIds().size() == 1);
     }
     SECTION("a workspace nobody has is not found")
@@ -1082,30 +1081,54 @@ TEST_CASE("workspace.close ends what the workspace holds and removes it", "[vtho
     }
 }
 
-TEST_CASE("workspace.close of the only workspace leaves an empty one a tab.create can fill",
-          "[vthost][control][write]")
+TEST_CASE("workspace.close of the only workspace is refused", "[vthost][control][write]")
 {
     auto h = ControlHarness {};
     std::ignore = h.openTab();
     auto const only = h.host.workspaceId();
-    auto const onlyId = workspaceIdOf(h, only);
-    REQUIRE(callSync<vtcontrol::EmptyReply>(
-                h.service, h.context, vtcontrol::CloseWorkspaceRequest { .workspace = onlyId })
-                .has_value());
-    REQUIRE(h.host.model().workspace(only) == nullptr);
-    // The host's own workspace is a new, empty one, not the removed one.
-    REQUIRE(h.host.model().workspaceCount() == 1);
-    auto const replacement = h.host.workspaceId();
-    CHECK(replacement != only);
-    REQUIRE(h.host.model().workspace(replacement) != nullptr);
-    CHECK(h.host.model().workspace(replacement)->tabCount() == 0);
+    auto const refused = callSync<vtcontrol::EmptyReply>(
+        h.service, h.context, vtcontrol::CloseWorkspaceRequest { .workspace = workspaceIdOf(h, only) });
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error().code == ControlErrorCode::Unsupported);
+    // Nothing changed: the workspace and its tab are there still.
+    CHECK(h.host.model().workspaceCount() == 1);
+    CHECK(h.host.workspaceId() == only);
+    CHECK(h.host.model().workspace(only)->tabCount() == 1);
+}
 
-    // A tab naming no workspace lands in it.
+TEST_CASE("workspace.close of a workspace that holds no tab removes it", "[vthost][control][write]")
+{
+    auto h = ControlHarness {};
+    std::ignore = h.openTab();
+    auto const first = h.host.workspaceId().value;
+    auto const empty = h.host.createEmptyWorkspace().id();
+    REQUIRE(
+        callSync<vtcontrol::EmptyReply>(
+            h.service, h.context, vtcontrol::CloseWorkspaceRequest { .workspace = workspaceIdOf(h, empty) })
+            .has_value());
+    CHECK(workspaceOrderOf(h) == std::vector { first });
+}
+
+TEST_CASE("workspace.list no longer lists a workspace whose last tab ended", "[vthost][control]")
+{
+    auto h = ControlHarness {};
+    std::ignore = h.openTab();
+    auto const first = h.host.workspaceId();
     auto const created =
-        callSync<vtcontrol::CreateTabReply>(h.service, h.context, vtcontrol::CreateTabRequest {});
+        callSync<vtcontrol::CreateWorkspaceReply>(h.service, h.context, vtcontrol::CreateWorkspaceRequest {});
     REQUIRE(created.has_value());
-    CHECK(created->workspace == workspaceIdOf(h, replacement));
-    CHECK(h.host.model().workspace(replacement)->tabCount() == 1);
+    auto const second = h.host.model().workspaceAt(1)->id();
+    auto const kept = workspaceIdOf(h, second);
+
+    // The first workspace's one pane ends.
+    h.host.closeSession(h.host.model().workspace(first)->tabAt(0)->rootPane()->session());
+
+    auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
+    REQUIRE(list.has_value());
+    REQUIRE(list->workspaces.size() == 1);
+    CHECK(list->workspaces[0].id == kept);
+    CHECK(list->workspaces[0].position == 1);
+    CHECK(h.host.workspaceId() == second);
 }
 
 TEST_CASE("tab.move moves a tab into a workspace, or within its own", "[vthost][control][write]")

@@ -874,14 +874,33 @@ void ControlService::handle(vtcontrol::CallContext& context,
     }));
 }
 
+namespace
+{
+    /// @return How the control API reports @p error.
+    [[nodiscard]] ControlError controlErrorOf(WorkspaceCloseError error)
+    {
+        auto const code = [error] {
+            switch (error)
+            {
+                case WorkspaceCloseError::UnknownWorkspace: return ControlErrorCode::NotFound;
+                case WorkspaceCloseError::LastWorkspace: return ControlErrorCode::Unsupported;
+            }
+            return ControlErrorCode::Failed;
+        }();
+        return ControlError { .code = code, .message = std::string { describe(error) }, .candidates = {} };
+    }
+} // namespace
+
 void ControlService::handle(vtcontrol::CallContext& context,
                             vtcontrol::CloseWorkspaceRequest const& request,
                             vtcontrol::Completion<vtcontrol::EmptyReply> done)
 {
-    // In one step, as a window's close is: what the workspace holds now ends, and the workspace goes.
-    done(resolveWorkspace(context, request.workspace).transform([&](WorkspaceId workspace) {
-        _host.closeWorkspace(workspace);
-        return vtcontrol::EmptyReply {};
+    // In one step, as a window's close is: what the workspace holds now ends, and the workspace goes. The
+    // only one is not closed.
+    done(resolveWorkspace(context, request.workspace).and_then([&](WorkspaceId workspace) {
+        return _host.closeWorkspace(workspace)
+            .transform([] { return vtcontrol::EmptyReply {}; })
+            .transform_error(controlErrorOf);
     }));
 }
 

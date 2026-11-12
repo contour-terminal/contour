@@ -75,7 +75,8 @@ TEST_CASE("a split tab lists its panes depth-first", "[contour][directory]")
 TEST_CASE("a workspace's label, control id and git state come from the metadata lookup, else empty",
           "[contour][directory]")
 {
-    auto const layouts = std::vector { layoutOf(1, {}), layoutOf(2, {}) };
+    auto const layouts = std::vector { layoutOf(1, { proto::WireTab { .tabId = 1, .root = leaf(1) } }),
+                                       layoutOf(2, { proto::WireTab { .tabId = 2, .root = leaf(2) } }) };
     auto metadata = TableMeta {};
     auto const git =
         DirectoryGit { .branch = "main", .kind = vtbackend::GitHeadKind::Branch, .ahead = 1, .behind = {} };
@@ -131,4 +132,24 @@ TEST_CASE("the selection is carried", "[contour][directory]")
     CHECK(directoryFromLayouts(layouts, TableStatus {}, TableMeta {}, 4).selected == 4);
     CHECK_FALSE(
         directoryFromLayouts(layouts, TableStatus {}, TableMeta {}, std::nullopt).selected.has_value());
+}
+
+TEST_CASE("a workspace's title is its label, else its host's 1-based number for it", "[contour][directory]")
+{
+    auto workspace = DirectoryWorkspace {};
+    SECTION("its host stated its place: numbered as `contour ls` numbers it, not by its place in the list")
+    {
+        workspace.position = 2;
+        CHECK(workspaceTitleOf(workspace, 1) == "Workspace 3");
+    }
+    SECTION("its host stated none: its place in the list")
+    {
+        CHECK(workspaceTitleOf(workspace, 1) == "Workspace 2");
+    }
+    SECTION("a label wins")
+    {
+        workspace.label = "ops";
+        workspace.position = 2;
+        CHECK(workspaceTitleOf(workspace, 1) == "ops");
+    }
 }

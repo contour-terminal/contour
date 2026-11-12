@@ -318,7 +318,13 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
         std::function<void(vtworkspace::TabId)> onTabChange; ///< A change within one tab.
         std::function<void()> onWorkspaceOrderChange;        ///< A workspace moved in the workspace order.
         void workspaceMoved(vtworkspace::WorkspaceId, int, int) override { onWorkspaceOrderChange(); }
-        void workspaceRemoved(vtworkspace::WorkspaceId, int) override { onWorkspaceOrderChange(); }
+        /// A removed workspace is pushed emptied, which is how a client learns it is gone: one that held no
+        /// tab any more fired no tab event to say so.
+        void workspaceRemoved(vtworkspace::WorkspaceId workspace, int) override
+        {
+            onWorkspaceChange(workspace);
+            onWorkspaceOrderChange();
+        }
         void tabAdded(vtworkspace::WorkspaceId workspace, vtworkspace::TabId, int) override
         {
             onWorkspaceChange(workspace);

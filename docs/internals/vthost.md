@@ -405,7 +405,14 @@ is the daemon's id and `toPosition` the 0-based place, which `SessionModel::move
 workspace is a logged no-op. The model's `workspaceMoved` event makes every connection send the new positions.
 **`CloseWorkspace`** (tag 59, same gate) closes a workspace in one step: `SessionHost::closeWorkspace` ends every
 session the workspace holds at that moment, a tab another client added a moment ago included, and removes the
-workspace, so it does not linger as an ended, tabless entry. An unknown workspace is a logged no-op.
+workspace. The daemon's only workspace is never closed, and an unknown workspace is a logged no-op.
+
+A workspace ends with its last tab: once its tab count drops to zero (its last session ended, its last tab
+moved away), `SessionHost::discardWorkspace` removes it from the model, the object registry and so from the
+next snapshot, and every connection is pushed its layout emptied and the new positions. The one exception is
+the daemon's only workspace, kept empty as the one a creation naming no workspace, and an attach, land in. A
+client lists no workspace whose layout is empty. A handover drops the tabless workspaces an older release
+kept the same way.
 **`SetWorkspaceLabel`** (tag 58, same gate) sets a workspace's label through the object registry, so every
 window hears it as a `WorkspaceMeta` delta and every control subscriber as `workspace.labelChanged`. Neither
 has a reply.

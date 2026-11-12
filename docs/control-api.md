@@ -42,7 +42,7 @@ pane.
 | `contour label OBJECT LABEL` | Labels a workspace, tab or pane (`contour label pane:018f logs`); an empty label clears it. |
 | `contour workspace new [--cwd DIR] [--label L]` | Opens a workspace with one tab and prints its id. The shell starts in `--cwd`, and the workspace is named after that folder (its repository's, inside one) unless `--label` names it. |
 | `contour workspace rename WORKSPACE LABEL` | Renames a workspace, which `object.setLabel` does too; an empty label clears it. Every window listing it shows the new name. |
-| `contour workspace close WORKSPACE` | Closes a workspace with all its tabs and panes, and ends their shells. Whatever it holds at that moment goes, in one step, and the workspace is removed. |
+| `contour workspace close WORKSPACE` | Closes a workspace with all its tabs and panes, and ends their shells. Whatever it holds at that moment goes, in one step, and the workspace is removed. The daemon's last workspace cannot be closed. |
 | `contour workspace move --to N WORKSPACE` | Moves a workspace to position `N` of the workspace order, counted from 1 as `contour ls` lists them; a position past the end puts it last. |
 | `contour tab move [--workspace W] --to N TAB` | Moves a tab to position `N` of a workspace, counted from 1: another workspace to take it there, its own to reorder it. Its panes keep running, and a workspace left without tabs is closed. Without `--workspace`, the calling pane's workspace. |
 | `contour block list [--pane P] [--limit N]` | Lists a pane's recent command blocks, newest first: `id  exit  duration  command`. |

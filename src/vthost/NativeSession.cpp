@@ -992,6 +992,14 @@ void NativeSession::layoutChanged(vtworkspace::WorkspaceId workspace)
 {
     if (!batchesLayouts())
     {
+        // A whole push names only the workspaces the model holds: a removed one is told emptied first.
+        if (_phase == ConnectionPhase::Viewing && !_closed && workspace != vtworkspace::WorkspaceId {}
+            && _host.model().workspace(workspace) == nullptr)
+        {
+            auto emptied = proto::LayoutState {};
+            emptied.workspace = workspace.value;
+            sendLayout(std::move(emptied));
+        }
         pushLayout();
         return;
     }
@@ -2425,11 +2433,9 @@ NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame con
             refuse(frame);
             return TabVerb::Served;
         }
-        // A workspace whose last session ended is gone, though the model may keep it: selected, it would read
-        // as one the connection never held a tab of, which it would keep showing empty.
+        // A workspace whose last session ended is gone from the model: a select of it names nothing.
         auto const asked = vtworkspace::WorkspaceId { select->workspace };
-        auto const known =
-            select->workspace != 0 && _host.model().workspace(asked) != nullptr && !_host.hasEnded(asked);
+        auto const known = select->workspace != 0 && _host.model().workspace(asked) != nullptr;
         if (known)
             selectWorkspace(asked);
         else if (select->workspace == 0)
@@ -2481,10 +2487,8 @@ NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame con
             return TabVerb::Served;
         }
         // Whatever the workspace holds now, in this one step: a tab another client added a moment ago too.
-        if (_host.model().workspace(vtworkspace::WorkspaceId { close->workspace }) == nullptr)
-            errorLog()("{}: ignoring {}: there is no such workspace", _id, proto::describe(frame.pdu));
-        else
-            _host.closeWorkspace(vtworkspace::WorkspaceId { close->workspace });
+        if (auto const closed = _host.closeWorkspace(vtworkspace::WorkspaceId { close->workspace }); !closed)
+            errorLog()("{}: not closing workspace {}: {}", _id, close->workspace, describe(closed.error()));
         return TabVerb::Served;
     }
     if (auto const* set = std::get_if<proto::SetWorkspaceLabel>(&frame.pdu))
@@ -3124,11 +3128,10 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
                                                                                 : WorkingDirectoryStated::Yes,
                                    .instance = _host.instance(),
                                    .lastSelected = _host.lastSelectedWorkspace() };
-    // A workspace whose last session ended is not listed: a Select naming it is then a launch's choice, as a
-    // SelectWorkspace of it is refused (serveWorkspaceVerb), and the connection never lands on it empty.
+    // A workspace whose last session ended is gone, unless it was the only one: that one is listed as a fresh
+    // daemon's empty one is, which a launch gives its first tab.
     for (auto const i: std::views::iota(0, model.workspaceCount()))
-        if (auto const* workspace = model.workspaceAt(i);
-            workspace != nullptr && !_host.hasEnded(workspace->id()))
+        if (auto const* workspace = model.workspaceAt(i); workspace != nullptr)
             context.workspaces.push_back(
                 WorkspaceSummary { .id = workspace->id().value, .tabCount = workspace->tabCount() });
     std::ranges::sort(context.workspaces, {}, &WorkspaceSummary::id);
