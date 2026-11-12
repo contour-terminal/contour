@@ -119,11 +119,14 @@ TEST_CASE("a window says its notices only while accessibility_announcements allo
         return announcer;
     };
     auto const* backing = manager.model().createWorkspace();
-    auto controller =
-        contour::window::WindowController { manager,       contour::window::WindowId { 9000 },
-                                            backing->id(), contour::config::MenuPresentation::InScene,
-                                            std::nullopt,  core::platform::defaultSteadyClock(),
-                                            recording };
+    auto controller = contour::window::WindowController { manager,
+                                                          contour::window::WindowId { 9000 },
+                                                          backing->id(),
+                                                          contour::config::MenuPresentation::InScene,
+                                                          std::nullopt,
+                                                          core::platform::defaultSteadyClock(),
+                                                          core::platform::defaultSystemWallClock(),
+                                                          recording };
     REQUIRE(said != nullptr);
     using contour::window::Notice;
     using contour::window::NoticeKind;

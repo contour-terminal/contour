@@ -13,9 +13,18 @@
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/WindowController.hpp>
 
+#include <QtCore/QPointF>
+#include <QtCore/QVariantList>
+#include <QtCore/QVariantMap>
+#include <QtGui/QWindow>
+#include <QtQuick/QQuickWindow>
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <optional>
+#include <ranges>
+#include <vector>
 
 #include <QtTest/QSignalSpy>
 
@@ -41,7 +50,223 @@ void useNativeSidebarDefaults(contour::test::TestApp& app)
     return static_cast<int>(visibility);
 }
 
+using contour::window::DirectoryPane;
+using contour::window::DirectoryTab;
+using contour::window::DirectoryWorkspace;
+using contour::window::IWorkspaceDirectorySource;
+using contour::window::PaneKey;
+using contour::window::SelectResult;
+using contour::window::SidebarPresence;
+using contour::window::SidebarRowKind;
+using contour::window::WorkspaceDirectory;
+
+/// A directory a test scripts, with ids of its own as a daemon's are, and answers it chooses.
+struct ScriptedSource final: IWorkspaceDirectorySource
+{
+    WorkspaceDirectory listed;
+    SelectResult answer = SelectResult::Requested;
+    std::vector<uint64_t> selected;
+
+    [[nodiscard]] WorkspaceDirectory directory() const override { return listed; }
+    SelectResult select(uint64_t workspace) override
+    {
+        selected.push_back(workspace);
+        return answer;
+    }
+};
+
+[[nodiscard]] DirectoryTab tabHolding(uint64_t id, std::vector<uint64_t> const& panes)
+{
+    auto tab = DirectoryTab {};
+    tab.id = id;
+    tab.title = "t";
+    tab.label = "t";
+    for (auto const key: panes)
+    {
+        auto pane = DirectoryPane {};
+        pane.key = PaneKey { key };
+        pane.title = "shell";
+        tab.panes.push_back(std::move(pane));
+    }
+    return tab;
+}
+
+/// The model row of the tab with @p tab among @p window's sidebar rows.
+[[nodiscard]] int tabRowOf(contour::window::WindowController& window, uint64_t tab)
+{
+    window.sidebar().refreshNow();
+    auto const& rows = window.sidebar().rows();
+    auto const at = std::ranges::find_if(
+        rows, [&](auto const& row) { return row.key.kind == SidebarRowKind::Tab && row.key.tab == tab; });
+    REQUIRE(at != rows.end());
+    return static_cast<int>(std::distance(rows.begin(), at));
+}
+
+[[nodiscard]] std::optional<int> actionIdOf(QVariantList const& rows, QString const& title)
+{
+    for (auto const& value: rows)
+    {
+        auto const row = value.toMap();
+        if (row["kind"].toString() == "command" && row["title"].toString() == title)
+            return row["actionId"].toInt();
+        if (auto const nested = actionIdOf(row["children"].toList(), title))
+            return nested;
+    }
+    return std::nullopt;
+}
+
 } // namespace
+
+TEST_CASE("a sidebar menu on a row that is not current acts on that row", "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto const window =
+        contour::test::ScopedController { app.manager(), contour::config::MenuPresentation::InScene };
+    auto const made = contour::test::createSessionTabs(app.manager(), *window, 3);
+    REQUIRE(window->count() == 3);
+
+    // The window shows the third tab; the menu is opened on the first.
+    window->sidebar().openContextMenu(tabRowOf(*window, made.tabs[0].value), QPointF { 3, 4 });
+    auto const closeOthers = actionIdOf(window->sidebarContextMenuModel(), "Close Other Tabs");
+    REQUIRE(closeOthers.has_value());
+    window->triggerSidebarContextMenuAction(*closeOthers);
+
+    REQUIRE(window->count() == 1);
+    CHECK(app.manager().model().findTab(made.tabs[0]) != nullptr);
+    CHECK(app.manager().model().findTab(made.tabs[2]) == nullptr);
+}
+
+TEST_CASE("a sidebar action whose pane is not there waits and never runs on the active one",
+          "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto const window =
+        contour::test::ScopedController { app.manager(), contour::config::MenuPresentation::InScene };
+    std::ignore = contour::test::createSessionTabs(app.manager(), *window, 2);
+
+    // The directory lists two tabs whose panes this window has no session for.
+    auto source = ScriptedSource {};
+    auto const shown = window->directorySource()->directory().selected;
+    REQUIRE(shown.has_value());
+    source.listed.selected = shown;
+    source.listed.workspaces = { DirectoryWorkspace {
+        .id = *shown, .label = "w", .tabs = { tabHolding(901, { 9001 }), tabHolding(902, { 9002 }) } } };
+    window->setDirectorySource(&source);
+
+    window->sidebar().openContextMenu(tabRowOf(*window, 901), QPointF {});
+    auto const closeOthers = actionIdOf(window->sidebarContextMenuModel(), "Close Other Tabs");
+    REQUIRE(closeOthers.has_value());
+    window->triggerSidebarContextMenuAction(*closeOthers);
+
+    CHECK(window->count() == 2); // nothing ran against the active tab
+    CHECK(window->rowActionPending());
+
+    window->cancelPendingJump();
+    CHECK_FALSE(window->rowActionPending());
+}
+
+TEST_CASE("a refused workspace selection drops the sidebar action that waited for it",
+          "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto const window =
+        contour::test::ScopedController { app.manager(), contour::config::MenuPresentation::InScene };
+    std::ignore = contour::test::createSessionTabs(app.manager(), *window, 2);
+
+    auto source = ScriptedSource {};
+    auto const shown = window->directorySource()->directory().selected.value_or(1);
+    source.listed.selected = shown;
+    source.listed.workspaces = {
+        DirectoryWorkspace { .id = shown, .label = "here", .tabs = { tabHolding(1, { 11 }) } },
+        DirectoryWorkspace {
+            .id = 777, .label = "there", .tabs = { tabHolding(2, { 22 }), tabHolding(3, { 33 }) } }
+    };
+    window->setDirectorySource(&source);
+
+    window->sidebar().openContextMenu(tabRowOf(*window, 2), QPointF {});
+    auto const closeOthers = actionIdOf(window->sidebarContextMenuModel(), "Close Other Tabs");
+    REQUIRE(closeOthers.has_value());
+
+    SECTION("refused: nothing waits")
+    {
+        source.answer = SelectResult::Refused;
+        window->triggerSidebarContextMenuAction(*closeOthers);
+        CHECK(source.selected == std::vector<uint64_t> { 777 });
+        CHECK_FALSE(window->rowActionPending());
+        CHECK(window->count() == 2);
+    }
+    SECTION("requested: it waits for the workspace, and a refusal later cancels it")
+    {
+        window->triggerSidebarContextMenuAction(*closeOthers);
+        CHECK(source.selected == std::vector<uint64_t> { 777 });
+        CHECK(window->rowActionPending());
+        window->cancelPendingJump();
+        CHECK_FALSE(window->rowActionPending());
+        CHECK(window->count() == 2);
+    }
+}
+
+TEST_CASE("the displayed tab is the one holding the active pane, whatever id the source gives it",
+          "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto const window =
+        contour::test::ScopedController { app.manager(), contour::config::MenuPresentation::InScene };
+    std::ignore = contour::test::createSessionTabs(app.manager(), *window, 2);
+
+    SECTION("in-process: the window's own source")
+    {
+        window->sidebar().refreshNow();
+        REQUIRE(window->sidebar().currentIndex() >= 0);
+        auto const& row =
+            window->sidebar().rows()[static_cast<std::size_t>(window->sidebar().currentIndex())];
+        CHECK(row.key.kind == SidebarRowKind::Tab);
+        CHECK(row.key.tab
+              == app.manager().model().workspace(window->displayedWorkspace())->activeTab()->id().value);
+    }
+    SECTION("a daemon's source: its tab ids are its own")
+    {
+        auto const active = app.manager().paneKeyOf(window->activeSession()->modelSessionId());
+        auto source = ScriptedSource {};
+        auto const shown = window->directorySource()->directory().selected.value_or(1);
+        source.listed.selected = shown;
+        source.listed.workspaces = { DirectoryWorkspace {
+            .id = shown,
+            .label = "d",
+            .tabs = { tabHolding(5001, { 1 }), tabHolding(5002, { active.value }) } } };
+        window->setDirectorySource(&source);
+        window->sidebar().refreshNow();
+        REQUIRE(window->sidebar().currentIndex() >= 0);
+        auto const& row =
+            window->sidebar().rows()[static_cast<std::size_t>(window->sidebar().currentIndex())];
+        CHECK(row.key.tab == 5002);
+    }
+}
+
+TEST_CASE("the sidebar is told whether anyone can see it", "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto window = contour::test::ScopedControllerWithOsWindow { app.manager() };
+    window->bindWindow(window.osWindow.get());
+    REQUIRE(window->sidebarVisibility() == static_cast<int>(SidebarVisibility::Hidden));
+    CHECK(window->sidebar().presence() == SidebarPresence::Hidden);
+
+    // Shown in a window that is not on screen: nobody sees it.
+    window->toggleSidebar();
+    CHECK(window->sidebar().presence() == SidebarPresence::Hidden);
+
+    window.osWindow->show();
+    CHECK(window->sidebar().presence() == SidebarPresence::Shown);
+
+    window.osWindow->showMinimized();
+    CHECK(window->sidebar().presence() == SidebarPresence::Hidden);
+
+    window.osWindow->showNormal();
+    CHECK(window->sidebar().presence() == SidebarPresence::Shown);
+
+    window->toggleSidebar();
+    CHECK(window->sidebar().presence() == SidebarPresence::Hidden);
+}
 
 TEST_CASE("a window starts with the configured sidebar when nothing was chosen",
           "[contour][sidebar][controller]")

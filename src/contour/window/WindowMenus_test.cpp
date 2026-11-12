@@ -439,6 +439,24 @@ TEST_CASE("a native block menu is anchored where it was asked for", "[contour][w
           == contour::command::ContextMenuEntryKind::Header);
 }
 
+TEST_CASE("a native sidebar menu opens at its row, as the menu key asks", "[contour][windowmenus][sidebar]")
+{
+    auto native = NativeMenuApp {};
+    REQUIRE(native.presenter != nullptr);
+    ScopedController const window { native.app.manager(), contour::config::MenuPresentation::Native };
+    auto const created = createSessionTabs(native.app.manager(), *window, 1);
+    auto& sidebar = window->sidebar();
+    sidebar.refreshNow();
+    REQUIRE(sidebar.rowCount() > 0);
+
+    // The menu key opens it at the row, wherever the pointer is: macOS would put it at the pointer.
+    sidebar.openContextMenu(0, QPointF { 12, 80 });
+    QCoreApplication::sendPostedEvents();
+
+    REQUIRE(native.presenter->anchors.size() == 1);
+    CHECK(native.presenter->anchors.front().position == std::optional { QPointF { 12, 80 } });
+}
+
 TEST_CASE("a pick after the pane closed does nothing", "[contour][windowmenus][blockmenu]")
 {
     auto native = NativeMenuApp {};

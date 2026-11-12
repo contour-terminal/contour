@@ -26,6 +26,16 @@ namespace
         return state.tabCount > 1;
     }
 
+    bool isSidebarShown(TitleBarContextMenuState const& state) noexcept
+    {
+        return state.sidebar == config::SidebarVisibility::Shown;
+    }
+
+    bool isSidebarHidden(TitleBarContextMenuState const& state) noexcept
+    {
+        return !isSidebarShown(state);
+    }
+
     bool hasProfiles(TitleBarContextMenuState const& state) noexcept
     {
         return !state.profileNames.empty();
@@ -56,6 +66,9 @@ namespace
                                return buildTabBarMenu(
                                    { .visibility = s.tabBarVisibility, .position = s.tabBarPosition });
                            }),
+            // Named for what picking it does, as the toggle in the band is.
+            Table::command(ToggleSidebar {}, "Show Sidebar").shownWhen(isSidebarHidden),
+            Table::command(ToggleSidebar {}, "Hide Sidebar").shownWhen(isSidebarShown),
 
             Table::separator(),
 

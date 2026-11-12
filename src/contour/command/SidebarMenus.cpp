@@ -36,7 +36,7 @@ namespace
 
         static auto const rows = std::array {
             WorkspaceTable::command(RenameWorkspace {}, "Rename…"),
-            WorkspaceTable::command(MarkSeen {}, "Mark seen"),
+            WorkspaceTable::command(MarkSeen {}, "Mark Seen"),
             WorkspaceTable::command(CreateNewTab {}, "New Tab Here"),
 
             WorkspaceTable::separator(),
@@ -89,7 +89,7 @@ namespace
 
         static auto const rows = std::array {
             PaneTable::command(GoToPane {}, "Go to Pane"),
-            PaneTable::command(MarkSeen {}, "Mark seen"),
+            PaneTable::command(MarkSeen {}, "Mark Seen"),
 
             PaneTable::separator(),
 

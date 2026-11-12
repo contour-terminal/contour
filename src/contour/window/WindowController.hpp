@@ -28,6 +28,7 @@
 #include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
+#include <contour/window/SidebarModel.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabBarDropPolicy.hpp>
@@ -107,10 +108,11 @@ enum class MenuSurface : uint8_t
     Tab,      ///< A tab's menu; acts on the tab it was opened over.
     NewTab,   ///< The new-tab button's profile menu; acts on the active session.
     MainMenu, ///< The header bar's main menu: the menu bar's menus; acts on the active session.
+    Sidebar,  ///< A sidebar row's menu (workspace, tab or pane); acts on the row it was opened over.
 };
 
 /// How many MenuSurface values there are.
-inline constexpr std::size_t MenuSurfaceCount = static_cast<std::size_t>(MenuSurface::MainMenu) + 1;
+inline constexpr std::size_t MenuSurfaceCount = static_cast<std::size_t>(MenuSurface::Sidebar) + 1;
 
 /// @return The production NoticeAnnouncerFactory: Qt's accessibility announcements (platform::QtAnnouncer).
 [[nodiscard]] NoticeAnnouncerFactory qtNoticeAnnouncer();
@@ -159,6 +161,10 @@ class WindowController:
     Q_PROPERTY(contour::window::CommandPaletteModel* commandPalette READ commandPalette CONSTANT)
     // This window's notices: the toast and the banner (never null; owned by this controller).
     Q_PROPERTY(contour::window::NoticeModel* notices READ noticesForQml CONSTANT)
+    /// The workspace sidebar's rows (SidebarModel).
+    Q_PROPERTY(QObject* sidebar READ sidebarForQml CONSTANT)
+    Q_PROPERTY(QVariantList sidebarContextMenuModel READ sidebarContextMenuModel NOTIFY
+                   sidebarContextMenuModelChanged)
     Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
     Q_PROPERTY(QVariantList titleBarContextMenuModel READ titleBarContextMenuModel NOTIFY
                    titleBarContextMenuModelChanged)
@@ -282,6 +288,7 @@ class WindowController:
     /// @param initialPosition The first window's remembered location, or where a window opened for a dropped
     ///                 pane or tab goes; absent for other windows.
     /// @param clock    What the held-modifier reveal measures its hold against.
+    /// @param wallClock What the sidebar's running times are measured against.
     /// @param noticeAnnouncer Builds what the window's notices are said through; the window says them only
     ///                 while `accessibility_announcements` allows.
     /// @param role     What the window is for; fixed for its life.
@@ -291,6 +298,7 @@ class WindowController:
                      config::MenuPresentation menuPresentation,
                      std::optional<WindowPosition> initialPosition = std::nullopt,
                      core::platform::IClock const& clock = core::platform::defaultSteadyClock(),
+                     core::platform::IWallClock const& wallClock = core::platform::defaultSystemWallClock(),
                      NoticeAnnouncerFactory const& noticeAnnouncer = qtNoticeAnnouncer(),
                      WindowRole role = WindowRole::Normal);
     ~WindowController() override;
@@ -761,6 +769,19 @@ class WindowController:
 
     /// The new-tab menu's rows: one per profile.
     [[nodiscard]] QVariantList newTabMenuModel() const { return menu(MenuSurface::NewTab).model; }
+    /// @return The sidebar row menu's rows, for QML.
+    [[nodiscard]] QVariantList sidebarContextMenuModel() const { return menu(MenuSurface::Sidebar).model; }
+    /// Runs the sidebar row menu's action @p actionId against the row the menu was opened over: a row that
+    /// is not the displayed one is shown first, so the action never lands on another.
+    /// @param actionId The row's `actionId`.
+    Q_INVOKABLE void triggerSidebarContextMenuAction(int actionId);
+    /// @return The sidebar model, for QML.
+    [[nodiscard]] QObject* sidebarForQml() noexcept { return _sidebar.get(); }
+    /// @return The sidebar model.
+    [[nodiscard]] SidebarModel& sidebar() noexcept { return *_sidebar; }
+    /// Says the sidebar's rows may be stale (a seen-state changed); they are rebuilt once per event-loop
+    /// turn.
+    void noteSidebarChanged();
 
     /// The main menu's rows: one submenu per menu-bar menu (command::buildMenuBar), in MenuBarMenu order.
     [[nodiscard]] QVariantList mainMenuModel() const { return menu(MenuSurface::MainMenu).model; }
@@ -1211,6 +1232,10 @@ class WindowController:
     /// selected first; a daemon's selection lands later, and the tab and pane are shown then
     /// (completePendingJump()). Nothing when no pane asks for the user.
     void jumpToNextAttention();
+    /// Shows @p target wherever it is: its workspace is selected first (a daemon's selection lands later, and
+    /// the tab and pane are shown then), and it is counted as seen once shown. Replaces a pending jump.
+    /// @param target The pane to show.
+    void jumpToPane(PaneKey target);
     /// Shows the pane a jump selected a workspace for, once the displayed workspace holds it, and counts it
     /// as seen. Nothing when no jump is pending or the pane is not there (yet). Called when a daemon's layout
     /// lands, and by displayWorkspace(), which then ends the jump either way.
@@ -1219,6 +1244,8 @@ class WindowController:
     void cancelPendingJump() noexcept;
     /// @return Whether a jump waits for its workspace to be shown.
     [[nodiscard]] bool jumpPending() const noexcept { return _pendingJump.has_value(); }
+    /// @return Whether a sidebar action waits for a workspace to be shown, or for its pane to appear in it.
+    [[nodiscard]] bool rowActionPending() const noexcept { return _pendingRowAction.has_value(); }
     /// Marks the active pane as seen (the MarkSeen action).
     void markActivePaneSeen();
     /// Renames the displayed workspace inline (the RenameWorkspace action). Wired in Task 6.
@@ -1230,7 +1257,8 @@ class WindowController:
     void moveCurrentWorkspaceDown();
     /// Closes the displayed workspace after asking (the CloseWorkspace action). Wired in Task 6.
     void closeCurrentWorkspace();
-    /// Shows the pane a sidebar row names and focuses it (the GoToPane action). Wired with the sidebar tree.
+    /// Shows the pane of the sidebar row a menu acts on and focuses it (the GoToPane action). Nothing when no
+    /// sidebar row menu is acting.
     void goToSidebarPane();
     /// Moves the active tab into another workspace (the MoveTabToWorkspace action). Wired in Task 6.
     /// @param position The target workspace's 1-based place in the window's workspace list.
@@ -1443,6 +1471,12 @@ class WindowController:
     void mainMenuModelChanged();
     /// Requests that this window pop its main menu in the scene.
     void mainMenuRequested();
+    /// The sidebar row menu's rows changed. Emitted before sidebarContextMenuRequested().
+    void sidebarContextMenuModelChanged();
+    /// Requests that this window pop the sidebar row menu in the scene, at the row it was opened over.
+    /// @param row The row's index in the sidebar model.
+    /// @param windowPosition Where the pointer was, in window coordinates.
+    void sidebarContextMenuRequested(int row, QPointF windowPosition);
     void windowCornerRadiusChanged();
     void multimediaReadyChanged();
     void activeTabRootPaneChanged();
@@ -1715,7 +1749,34 @@ class WindowController:
     };
     /// Counts the directory's entry for @p key as seen, as far as the daemon's flags go (the serials).
     void noteDirectoryPaneSeenByKey(PaneKey key);
-    std::optional<PendingJump> _pendingJump;      ///< The jump whose workspace is being selected.
+    std::optional<PendingJump> _pendingJump; ///< The jump whose workspace is being selected.
+    /// What waits for a workspace to be shown: a sidebar menu's action on one of its rows, or a move.
+    struct PendingRowAction
+    {
+        uint64_t workspace;        ///< The directory's id of the workspace that must be shown first.
+        std::function<bool()> run; ///< What to do once it is; false while the pane it needs is not there.
+    };
+    std::optional<PendingRowAction> _pendingRowAction;
+    /// The sidebar row an action is being run for, while it runs (goToSidebarPane() reads it).
+    std::optional<SidebarRowKey> _sidebarActionRow;
+    /// The row the sidebar's menu was last opened over.
+    std::optional<SidebarRowKey> _sidebarMenuRow;
+    QPointF _sidebarMenuAnchor; ///< Where that menu was asked for, in window coordinates.
+    /// Runs @p run once the directory shows @p workspace: now when it does, else after selecting it. A @p run
+    /// that returns false (its pane is not there yet) stays pending, as a jump does, until the layout lands;
+    /// showing the workspace without it ends the wait (cancelPendingJump()).
+    /// @param workspace The directory's id of the workspace.
+    /// @param run What to do; true once it did.
+    void afterShowing(uint64_t workspace, std::function<bool()> run);
+    /// Runs @p action for sidebar row @p row.
+    void runSidebarAction(SidebarRowKey const& row, actions::Action const& action);
+    /// Builds and presents the menu of sidebar row @p row.
+    void openSidebarContextMenu(SidebarRow const& row, QPointF windowPosition);
+    /// Tells the sidebar whether anyone can see it: it is shown, in an exposed window.
+    void refreshSidebarPresence();
+    class SidebarHost;
+    /// Builds the sidebar and its host, once the window exists.
+    void initSidebar();
     std::vector<vtworkspace::WorkspaceId> _owned; ///< Every workspace of this window; @see ownedWorkspaces
     TabAttention _attention;                      ///< This window's seen-state, by PaneKey.
     /// Shows the ssh prompts of the attaches this window started; attached to the app's router for the
@@ -1760,6 +1821,7 @@ class WindowController:
     {
         QPointer<session::TerminalSession> session {}; ///< The pane menu's session; null once it has died.
         std::optional<vtworkspace::TabId> tab {};      ///< The tab menu's tab.
+        std::optional<SidebarRowKey> sidebarRow {};    ///< The sidebar menu's row.
     };
 
     /// The targets the menus last opened were pinned to.
@@ -1916,6 +1978,7 @@ class WindowController:
     HeaderReveal _headerReveal = HeaderReveal::None;
     // The reveal modifier's hold, fed by eventFilter() and measured against _clock.
     core::platform::IClock const& _clock;
+    core::platform::IWallClock const& _wallClock; ///< What the sidebar's times are measured against.
     HeldModifierReveal _heldModifier;
     // Fires when a hold that is still armed reaches its delay, for refreshHeaderReveal() to show the
     // headers then: nothing else would ask while the modifier is merely held.
@@ -1930,6 +1993,9 @@ class WindowController:
     std::unique_ptr<platform::Announcer> _noticeAnnouncer;
     // This window's toast and banner, timed by _clock.
     NoticeModel _notices;
+    // The sidebar's window-facing half and its model; the model is declared last, as it uses the rest.
+    std::unique_ptr<SidebarHost> _sidebarHost;
+    std::unique_ptr<SidebarModel> _sidebar;
 
     // Carries beginMoveRows()'s result from onTabAboutToBeMoved() to onTabMoved().
     bool _tabMoveInProgress = false;

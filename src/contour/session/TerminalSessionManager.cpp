@@ -328,6 +328,7 @@ window::WindowController* TerminalSessionManager::createWindowController(
                                                     menuPresentation,
                                                     initialPosition,
                                                     core::platform::defaultSteadyClock(),
+                                                    core::platform::defaultSystemWallClock(),
                                                     noticeAnnouncer,
                                                     role);
     QQmlEngine::setObjectOwnership(controller, QQmlEngine::CppOwnership);
@@ -2964,10 +2965,13 @@ void TerminalSessionManager::refreshTabBadge(vtworkspace::Tab const& tab)
 {
     scheduleTaskbarProgress(); // the waiting-tab count follows the badges
     if (auto* c = controllerDisplaying(_model->workspaceOfTab(tab.id())))
+    {
+        c->noteSidebarChanged(); // a seen-state changed: the sidebar's rows follow, once per event-loop turn
         c->notifyTabRowChanged(tab.id(),
                                { window::WindowController::Roles::BadgeRole,
                                  window::WindowController::Roles::BadgeTextRole,
                                  window::WindowController::Roles::BadgeProgressRole });
+    }
 }
 
 void TerminalSessionManager::noteInputEchoChanged(TerminalSession const& session)

@@ -26,6 +26,8 @@ struct TitleBarContextMenuState
     /// been changed since startup must show what it is actually doing.
     config::TabBarVisibility tabBarVisibility = config::TabBarVisibility::Always;
     config::TabBarPosition tabBarPosition = config::TabBarPosition::Top;
+    /// Whether the workspace sidebar is shown, which names the row that toggles it.
+    config::SidebarVisibility sidebar = config::SidebarVisibility::Hidden;
 
     std::string activeProfile {};             ///< The profile the active session runs under.
     std::vector<std::string> profileNames {}; ///< Every configured profile, in a stable order.

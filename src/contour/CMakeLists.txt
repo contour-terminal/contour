@@ -333,6 +333,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/TerminalSessionManager.hpp
         window/ChromeStyleHost.hpp
         window/NoticeModel.hpp
+        window/SidebarModel.hpp
         window/NoticeQueue.hpp
         window/ToastPlacement.hpp
         window/SaveLayoutCheck.hpp
@@ -408,6 +409,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/Permission.cpp
         session/PermissionPrompt.cpp
         window/NoticeModel.cpp
+        window/SidebarModel.cpp
         window/QuickTerminalController.cpp
         session/TerminalSession.cpp
         session/TerminalSessionKeyInput.cpp
@@ -1028,6 +1030,7 @@ if(CONTOUR_FRONTEND_GUI)
             session/Permission_test.cpp
             session/PermissionPrompt_test.cpp
             window/NoticeModel_test.cpp
+            window/SidebarModel_test.cpp
             test/MainWindowControllerMock.hpp
             test/MockMainController.hpp
             test/QmlMocks.hpp

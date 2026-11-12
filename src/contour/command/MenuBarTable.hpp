@@ -98,10 +98,11 @@ struct MenuBarState
     std::vector<std::string> tabTitles {}; ///< One per tab, in order.
     config::TabBarVisibility tabBarVisibility = config::TabBarVisibility::Always; ///< Mode in force.
     config::TabBarPosition tabBarPosition = config::TabBarPosition::Top;          ///< Placement in force.
-    std::string activeProfile {};                             ///< The active pane's profile.
-    std::vector<std::string> profileNames {};                 ///< Configured profiles, sorted.
-    std::vector<std::string> hostNames {};                    ///< Saved hosts, sorted.
-    std::vector<std::string> layoutNames {};                  ///< Saved layouts, sorted.
+    config::SidebarVisibility sidebar = config::SidebarVisibility::Hidden; ///< Whether the sidebar shows.
+    std::string activeProfile {};                                          ///< The active pane's profile.
+    std::vector<std::string> profileNames {};                              ///< Configured profiles, sorted.
+    std::vector<std::string> hostNames {};                                 ///< Saved hosts, sorted.
+    std::vector<std::string> layoutNames {};                               ///< Saved layouts, sorted.
     DaemonSwitching switching = DaemonSwitching::Unavailable; ///< Whether the window has a daemon to switch.
     /// The palette's "Switch to daemon" commands for this window (the SwitchToDaemon ones of
     /// DaemonCommandSource): every other local daemon and saved host. One source, so the menu and the palette

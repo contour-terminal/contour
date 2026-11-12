@@ -39,9 +39,9 @@ TEST_CASE("workspace menu rows", "[sidebarmenu]")
     auto const menu = buildWorkspaceMenu(WorkspaceMenuState { .position = 1, .count = 3 });
     CHECK(titles(menu)
           == std::vector<std::string> {
-              "Rename…", "Mark seen", "New Tab Here", "", "Move Up", "Move Down", "", "Close Workspace…" });
+              "Rename…", "Mark Seen", "New Tab Here", "", "Move Up", "Move Down", "", "Close Workspace…" });
     CHECK(std::holds_alternative<actions::RenameWorkspace>(row(menu, "Rename…").action));
-    CHECK(std::holds_alternative<actions::MarkSeen>(row(menu, "Mark seen").action));
+    CHECK(std::holds_alternative<actions::MarkSeen>(row(menu, "Mark Seen").action));
     CHECK(std::holds_alternative<actions::CreateNewTab>(row(menu, "New Tab Here").action));
     CHECK(std::holds_alternative<actions::CloseWorkspace>(row(menu, "Close Workspace…").action));
     for (auto const& entry: menu)
@@ -109,7 +109,7 @@ TEST_CASE("Move to Workspace is absent when there is no other workspace", "[side
 TEST_CASE("the sidebar pane menu rows", "[sidebarmenu]")
 {
     auto const menu = buildSidebarPaneMenu(SidebarPaneMenuState {});
-    CHECK(titles(menu) == std::vector<std::string> { "Go to Pane", "Mark seen", "", "Close Pane" });
+    CHECK(titles(menu) == std::vector<std::string> { "Go to Pane", "Mark Seen", "", "Close Pane" });
     CHECK(std::holds_alternative<actions::GoToPane>(row(menu, "Go to Pane").action));
     CHECK(std::holds_alternative<actions::ClosePane>(row(menu, "Close Pane").action));
 }

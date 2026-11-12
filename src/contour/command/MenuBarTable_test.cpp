@@ -315,6 +315,26 @@ TEST_CASE("menuBar.mouseForwardingMirrorsThePane", "[menubar]")
     CHECK(find(buildMenuBar(MenuBarState {}), "Mouse Forwarding")->availability == RowAvailability::Disabled);
 }
 
+TEST_CASE("menuBar.sidebarRowIsNamedForWhatItDoes", "[menubar]")
+{
+    auto state = fullState();
+    auto const titlesOf = [&](config::SidebarVisibility visibility) {
+        state.sidebar = visibility;
+        auto const bar = buildMenuBar(state);
+        auto const* view = find(bar, "View");
+        REQUIRE(view != nullptr);
+        return std::pair { find(view->children, "Show Sidebar") != nullptr,
+                           find(view->children, "Hide Sidebar") != nullptr };
+    };
+
+    // macOS apps flip the row's title rather than tick "Show Sidebar".
+    CHECK(titlesOf(config::SidebarVisibility::Shown) == std::pair { false, true });
+    CHECK(titlesOf(config::SidebarVisibility::Hidden) == std::pair { true, false });
+    state.sidebar = config::SidebarVisibility::Shown;
+    auto const bar = buildMenuBar(state);
+    CHECK(find(find(bar, "View")->children, "Hide Sidebar")->check == RowCheck::None);
+}
+
 TEST_CASE("menuBar.windowRowsNeedAWindow", "[menubar]")
 {
     auto const bare = buildMenuBar(MenuBarState {});
