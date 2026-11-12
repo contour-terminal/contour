@@ -392,9 +392,14 @@ layout push would revert a local flip; against an older daemon it keeps the loca
 `Capability::WorkspaceFollow`) names a daemon workspace to show in addition to the ones already followed; `0`
 asks the daemon to create a new workspace, which the connection claims. The daemon pushes that workspace's
 `LayoutState` and its sessions' screens. `ReleaseWorkspace` (tag 47, same gate) stops showing one and states
-why, as a `WorkspaceRelease`: `Closed` (the window closed; the workspace is left) or `SwitchedAway` (the
-window moved on; the workspace stays hidden). The daemon keeps the last reason per workspace until a client
-follows it again. `SwitchRequest` (tag 48, server→client, gated on `Capability::WorkspaceSwitch`) asks the
+why, as a `WorkspaceRelease`: `Closed` (the client stopped showing it without the user closing it -- a
+hand-over, a given-up switch; the workspace is left), `SwitchedAway` (the window moved on; the workspace stays
+hidden) or `WindowClosed` (the user closed the window). A `WindowClosed` release while the daemon shows another
+workspace to some client ends the workspace and every session in it (`SessionHost::endWorkspace`); the last
+workspace shown is left instead, recorded as `Closed`. A daemon predating `WindowClosed` decodes it as `Closed`,
+the weaker reading, so a newer GUI against it detaches as before. The daemon keeps the last reason per
+workspace until a client follows it again; a client going away without a release leaves what only it showed
+with a `Closed` record, as does a restore for every workspace it brings back that was not hidden. `SwitchRequest` (tag 48, server→client, gated on `Capability::WorkspaceSwitch`) asks the
 client to switch the window showing a workspace, named by its id, to a `SwitchTargetWire`: a daemon (`Same`, a
 local `Label`, or a saved `Host`) and a workspace spec the client resolves against the target daemon, empty to
 let it decide; appended after it, `answerWithinMs` says how long the daemon waits for the reply
@@ -411,8 +416,9 @@ capability has the PDU refused as one this daemon does not know (`Unsupported`).
 `LayoutState` of a workspace the connection follows arrived; it is sent once per follow, again after a release
 and a new follow.
 
-The GUI keeps one connection per window: the launch connection follows every left workspace, and for each one
-beyond the first the process starts a link of its own that follows only that workspace and opens its own window,
+The GUI keeps one connection per window: the launch connection follows the left workspace it is given (one,
+see the attach plan below), and for each further one -- a reconnect's, a workspace pushed later -- the process
+starts a link of its own that follows only that workspace and opens its own window,
 after which the launch connection releases it (`Closed`). A switch to another daemon likewise starts a link on
 the destination, hands the window over once its first layout settles, and releases the old workspace
 `SwitchedAway` on the old connection.
@@ -1044,16 +1050,17 @@ for it may be gone by then.
 
 **One link per window.** A link serves one OS window, over a connection of its own. A launch attaches with
 `Launch` (a saved host and `--connect-tcp` alike; `--workspace W` with `Workspaces{W}`), and the daemon names
-the left workspaces it now follows. The first adopts the boot window; each further one -- and any workspace
+the workspaces it now follows -- for a launch, the one left last. The first adopts the boot window; each further one -- and any workspace
 pushed later, as a New Window asks the daemon for one -- is handed to a link of its own
 (`IDaemonLinkHost::startHandOverLink`, intent `Workspaces{id}`), which opens its window as its connection
 shows the workspace and reports back (`handOverSettled` → `DaemonLink::completeHandOver`). Only then does the
 first link release the workspace (`ReleaseWorkspace(Closed)`), so it is followed by one of the two connections
 throughout: a launch started meanwhile finds it shown and does not take it. A hand-over link that fails to
 connect leaves the workspace on the first link, which shows it in a second window of its own with a notice;
-so does a daemon without `Capability::WorkspaceFollow`. Closing a window releases its workspace as `Closed`
-(`WindowBinding::windowClosed`), leaving it *left* for the next launch; one a move emptied stays followed, as
-the daemon may fill it again.
+so does a daemon without `Capability::WorkspaceFollow`. Closing a window releases its workspace as
+`WindowClosed` (`WindowBinding::windowClosed`): the daemon ends it while it shows another workspace, and leaves
+it *left* for the next launch otherwise; one a move emptied stays followed, as the daemon may fill it again.
+Quitting releases nothing, so every window's workspace is left.
 
 What a reconnect or the return from a live upgrade follows is what the window shows now:
 `NativeController::follow()` and `release()` send the PDUs and record the change, and every later
@@ -1145,7 +1152,8 @@ creates:
 
 | Intent | Follows | Creates |
 | --- | --- | --- |
-| `AllWorkspaces` (no capability: every client before intents), `Launch` | the workspaces with a tab that are *left* (see below), wherever else clients are attached | the first tab, on a daemon with no tab at all; a workspace of its own when every workspace is shown or hidden; for a `Launch` with a working directory stated, a tab in the first workspace followed otherwise |
+| `AllWorkspaces` (no capability: every client before intents) | the workspaces with a tab that are *left* (see below), wherever else clients are attached | the first tab, on a daemon with no tab at all; a workspace of its own when every workspace is shown or hidden |
+| `Launch` | the workspace with a tab that is *left* and was left last (`SessionHost::leftAt`; never left in this run counts as earliest, the highest id breaking a tie), wherever else clients are attached | as `AllWorkspaces`; and for a working directory stated, a tab in the workspace followed otherwise |
 | `NewWorkspace` | a new workspace of its own | that workspace |
 | `Workspaces` | the listed workspaces that exist (possibly none) | nothing |
 | `Resume` | the listed workspaces that survive, holding a tab; none surviving, as `Launch` | as `Launch` when none survive |
@@ -1173,8 +1181,8 @@ again in the switcher or by a Resume.
 A workspace made for the connection (`NewWorkspace`, `FollowWorkspace 0`) and never shown to it is hidden
 the same way, so a switch to `+new` on another daemon that gave up before the first layout leaves the
 workspace it made put away -- as the same daemon's given-up switch does -- not left for the next launch. A
-launch brings back the left workspaces only: a second machine attaching gets the ones nobody shows, and a
-workspace a user switched away from stays away. The state rides in the workspace snapshot, and in the live
+launch brings back one left workspace only: a second machine attaching gets one nobody shows, a workspace a
+user switched away from stays away, and however many workspaces were left, a launch opens one window. The state rides in the workspace snapshot, and in the live
 upgrade's handover image (`HandoverImage::releases`), so a hidden workspace is still hidden after a restart or a
 live upgrade; one that was shown comes back left, its clients having gone with the daemon. The primary viewer
 takes up no unclaimed workspace another connection follows, so a workspace another window switched to shows

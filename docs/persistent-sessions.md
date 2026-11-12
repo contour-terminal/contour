@@ -78,10 +78,17 @@ Which one you get depends on *what* you close:
 
 | What you close | What happens to the shell |
 | --- | --- |
-| The window (its close button, or quitting Contour) | **Detach.** It keeps running; the next `contour client` shows it again |
+| The **last** window showing the daemon (its close button, or your window manager's close) | **Detach.** It keeps running; the next launch shows it again |
+| Quitting Contour, or losing the connection | **Detach**, every window's sessions alike |
+| Any **other** window, while another window still shows the daemon | **Ends**, together with every tab and pane in it |
 | A **pane** — *Close Pane* in the right-click menu, or the `ClosePane` action | **Ends.** That session is closed on the daemon and does not come back |
 | A **tab** — its ✕, or the `CloseTab` action | **Ends**, together with every pane in it |
 | Typing `exit` in the shell | **Ends**, as always — the shell decided |
+
+Closing one of several windows is tidying up, not leaving: had it detached, its shells would come back
+with every later launch. Only what was on screen when you closed the last window — or quit — is kept for
+next time. Want a window's shells kept while other windows stay open? Switch it away to another workspace
+instead of closing it (see [Shown, hidden and left workspaces](#shown-hidden-and-left-workspaces)).
 
 This is the same split tmux draws between detaching a client and `kill-pane`, and it works the same
 for a local session as for one hosted by a daemon: a pane you end is ended everywhere, including for
@@ -185,11 +192,15 @@ contour --daemon-mode required     # this launch only: fail rather than fall bac
 
 ### What a launch opens
 
-A launch brings back the workspaces of the daemon that nobody shows, one window each. A workspace that
-another window already shows is not mirrored: a second machine attaching to a daemon gets the
-workspaces the first one left, not a copy of what the first one is looking at. When every workspace is
-shown or hidden (see below), the launch opens one new workspace in one new window. A fresh daemon gets its
-first tab in the first window, as before.
+A launch opens one window. It brings back the `left` workspace of the daemon that was left last (see
+below); any other left workspace waits for the next launch, or for the
+[switcher](#switching-a-window). A workspace that another window already shows is not mirrored: a second
+machine attaching to a daemon gets a workspace the first one left, not a copy of what the first one is
+looking at. When no workspace is left — every one is shown or hidden — the launch opens one new workspace in
+its window. A fresh daemon gets its first tab in the first window, as before.
+
+So with a key bound to "start `contour`", pressing it again after closing the window brings that window
+back; pressing it while a window is open opens a second window with a workspace of its own.
 
 A launch that names a program (`-e`, or a command after the options) runs it in the window's own process
 under `auto`; under `required` it ends before any window, since a daemon session runs the host's profile.
@@ -257,11 +268,13 @@ The daemon keeps one of three states per workspace:
 | State | Meaning | Does a launch bring it back? |
 | --- | --- | --- |
 | `shown` | A window shows it right now. | No: that window already has it. |
-| `left` | No window shows it: its window was closed, or its machine went away. | Yes. |
+| `left` | No window shows it: its window was the last one closed, Contour quit, or its machine went away. | Yes, the one left last. |
 | `hidden` | A window was switched away from it, and none shows it since. | No. |
 
-Closing a window, or losing its connection, leaves the workspace `left`, so reopening Contour finds your
-sessions where you left them. Switching a window away from a workspace hides it instead: you moved on
+Closing the last window, quitting, or losing the connection leaves the workspace `left`, so reopening
+Contour finds your sessions where you left them; closing a window while another still shows the daemon ends
+its workspace instead (see [Detaching versus ending a session](#detaching-versus-ending-a-session)). A
+daemon restarted from its snapshot brings every workspace back `left`, except the hidden ones. Switching a window away from a workspace hides it instead: you moved on
 on purpose, so the next launch does not drag it back. A hidden workspace keeps running and keeps its state,
 also across a daemon restart and a [live upgrade](#live-upgrade); show it again by switching to it
 (`contour ls --json` reports each workspace's state as `visibility`, see the

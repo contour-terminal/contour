@@ -145,7 +145,7 @@ no input recorded, a workspace shown by one window switches that one; by several
 `ambiguous` and lists them (`native#3`); by none, as `notFound` ("no client shows workspace ...").
 
 `workspace.list` tells what a switch can act on. Each workspace carries `visibility` (`shown`: a window shows
-it; `left`: none does, and a launch brings it back; `hidden`: a window switched away from it, and a launch
+it; `left`: none does, and a launch brings it back -- the one left last, when several are; `hidden`: a window switched away from it, and a launch
 leaves it alone), `clients` (how many windows show it) and `native` (the daemon's own id for it, in decimal,
 which a window follows it by).
 
