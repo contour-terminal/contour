@@ -227,6 +227,36 @@ def check_release_writers(jobs: dict[str, Any]) -> list[str]:
     return findings
 
 
+def check_master_only_jobs_queue(jobs: dict[str, Any]) -> list[str]:
+    """Returns the findings for the jobs of one workflow that no pull request runs and that do not queue
+    behind their own previous run: each needs a job-level concurrency group of its own per ref (and per
+    matrix leg), without cancel-in-progress. Jobs gated on a release tag alone are exempt."""
+    findings: list[str] = []
+    for job_id, job in jobs.items():
+        condition = _condition(job)
+        if not _skipped_on_pull_requests(condition) or _gated_on_release_tag(condition):
+            continue
+        concurrency = job.get("concurrency")
+        settings = concurrency if isinstance(concurrency, dict) else {"group": concurrency or ""}
+        group = str(settings.get("group", ""))
+        # What the group must name, with what goes wrong without it. Data, so that a further
+        # requirement is one more row.
+        requirements = (
+            ("github.ref", True, "or a release tag's job would queue behind master's"),
+            (job_id, True, "or it would queue behind other jobs"),
+            ("strategy.job-index", "matrix" in job.get("strategy", {}), "or its matrix legs would queue behind each other"),
+        )
+        missing = [f"`{text}` ({why})" for text, required, why in requirements if required and text not in group]
+        if missing:
+            findings.append(
+                f"{job_id}: no pull request runs it, so its `concurrency.group` must name {', '.join(missing)}; "
+                "without a group of its own it overlaps with the same job of the previous push"
+            )
+        elif str(settings.get("cancel-in-progress", False)).lower() != "false":
+            findings.append(f"{job_id}: `cancel-in-progress` must be off, or a push would cancel the running job")
+    return findings
+
+
 def check_llvm_versions(versions: dict[str, str]) -> list[str]:
     """Returns a finding when the workflow files that set a workflow-level `LLVM_VERSION` disagree.
     `versions` maps each such file's name to its value; a file that does not set it is absent."""
@@ -298,6 +328,7 @@ def check_workflow_files(workflows: list[Any]) -> int:
             *check_required_contexts(jobs),
             *check_release_writers(jobs),
             *check_prune_covers_savers(jobs),
+            *check_master_only_jobs_queue(jobs),
         ]:
             findings.append(f"{path.name}: {finding}")
         llvm_version = (document.get("env") or {}).get("LLVM_VERSION")
@@ -390,6 +421,32 @@ _FIXTURE_SAVERS_UNPRUNED = {"windows": {"steps": [_CCACHE_STEP]}, "linux": {"ste
 _FIXTURE_NO_SAVERS = {"lint": {"steps": [{"run": "true"}]}}
 
 
+_QUEUED = {"group": "${{ github.ref }}-freebsd", "cancel-in-progress": False}
+_FIXTURE_MASTER_ONLY_QUEUED = {
+    "freebsd": {**_SKIPPED_ON_PRS, "concurrency": _QUEUED},
+    "packaging": {
+        **_SKIPPED_ON_PRS,
+        "strategy": {"matrix": {"os_version": ["26.04"]}},
+        "concurrency": {"group": "${{ github.ref }}-packaging-${{ strategy.job-index }}"},
+    },
+    "windows": {"steps": []},
+    "do_release": {"if": RELEASE_TAG_CONDITION, "steps": []},
+}
+_FIXTURE_MASTER_ONLY_UNQUEUED = {"freebsd": dict(_SKIPPED_ON_PRS)}
+_FIXTURE_MASTER_ONLY_SHARED_GROUP = {"freebsd": {**_SKIPPED_ON_PRS, "concurrency": {"group": "${{ github.ref }}"}}}
+_FIXTURE_MASTER_ONLY_REFLESS = {"freebsd": {**_SKIPPED_ON_PRS, "concurrency": {"group": "freebsd"}}}
+_FIXTURE_MASTER_ONLY_LEGS_SHARE = {
+    "packaging": {
+        **_SKIPPED_ON_PRS,
+        "strategy": {"matrix": {"os_version": ["24.04", "26.04"]}},
+        "concurrency": {"group": "${{ github.ref }}-packaging"},
+    }
+}
+_FIXTURE_MASTER_ONLY_CANCELS = {
+    "freebsd": {**_SKIPPED_ON_PRS, "concurrency": {**_QUEUED, "cancel-in-progress": True}}
+}
+
+
 def self_test() -> int:
     cases = (
         ("success-only gate over a PR-skipped need fires", check_required_contexts, _FIXTURE_BROKEN, 2),
@@ -425,6 +482,32 @@ def self_test() -> int:
         ("a cache-saving job the prune does not wait for fires", check_prune_covers_savers, _FIXTURE_PRUNE_MISSES, 1),
         ("cache-saving jobs without a prune job fire", check_prune_covers_savers, _FIXTURE_SAVERS_UNPRUNED, 1),
         ("a workflow that saves no compiler cache passes", check_prune_covers_savers, _FIXTURE_NO_SAVERS, 0),
+        ("master-only jobs queueing per ref, job and leg pass", check_master_only_jobs_queue, _FIXTURE_MASTER_ONLY_QUEUED, 0),
+        ("a master-only job without a concurrency group fires", check_master_only_jobs_queue, _FIXTURE_MASTER_ONLY_UNQUEUED, 1),
+        (
+            "a master-only job sharing one group with other jobs fires",
+            check_master_only_jobs_queue,
+            _FIXTURE_MASTER_ONLY_SHARED_GROUP,
+            1,
+        ),
+        (
+            "a master-only job whose group ignores the ref fires",
+            check_master_only_jobs_queue,
+            _FIXTURE_MASTER_ONLY_REFLESS,
+            1,
+        ),
+        (
+            "master-only matrix legs sharing one group fire",
+            check_master_only_jobs_queue,
+            _FIXTURE_MASTER_ONLY_LEGS_SHARE,
+            1,
+        ),
+        (
+            "a master-only job cancelling its running predecessor fires",
+            check_master_only_jobs_queue,
+            _FIXTURE_MASTER_ONLY_CANCELS,
+            1,
+        ),
         ("one workflow setting LLVM_VERSION passes", check_llvm_versions, {"build.yml": "22"}, 0),
         (
             "two workflows agreeing on LLVM_VERSION pass",

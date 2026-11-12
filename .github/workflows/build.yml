@@ -33,6 +33,9 @@ on:
 concurrency:
   # A master run has a group of its own: it is never cancelled and never waits behind the previous
   # push's run, because it is the one that saves the compiler caches every pull request restores.
+  # The jobs no pull request runs do wait, each behind its own previous run (their job-level
+  # `concurrency`, which scripts/check-workflows.py requires): consecutive pushes would otherwise run
+  # all of them side by side and leave pull requests waiting for a runner.
   # (One group for all of master queued each run behind the last, and a third push cancelled the one
   # still pending -- so a merge's caches arrived hours late or not at all.)
   group: build-${{ github.ref == 'refs/heads/master' && github.sha || github.ref }}
@@ -456,6 +459,9 @@ jobs:
   # requests (the PR description states it).
   test_daemon_package_swap:
     if: github.event_name != 'pull_request'
+    concurrency:
+      group: ${{ github.ref }}-test_daemon_package_swap
+      cancel-in-progress: false
     name: "Ubuntu Linux (contour / contour-daemon swap)"
     runs-on: ubuntu-24.04
     needs:
@@ -590,6 +596,9 @@ jobs:
     name: "Prune superseded compiler caches"
     # Whatever the jobs concluded with: a failed job saved its cache too, and pruning is idempotent.
     if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+    concurrency:
+      group: ${{ github.ref }}-prune_compiler_caches
+      cancel-in-progress: false
     needs:
       - build_no_extensions
       - macOSArm
@@ -695,6 +704,9 @@ jobs:
   # {{{ StaticBuild
   staticBuild:
     if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+    concurrency:
+      group: ${{ github.ref }}-staticBuild
+      cancel-in-progress: false
     name: "Static build"
     runs-on: ubuntu-latest
     steps:
@@ -748,6 +760,9 @@ jobs:
   # already builds the GUI-less configuration on every one.
   package_for_Fedora:
     if: github.event_name != 'pull_request'
+    concurrency:
+      group: ${{ github.ref }}-package_for_Fedora-${{ strategy.job-index }}
+      cancel-in-progress: false
     name: "Fedora ${{ matrix.os_version }} (contour and contour-daemon RPMs)"
     strategy:
       fail-fast: false
@@ -902,6 +917,9 @@ jobs:
   # {{{ FreeBSD
   freebsd:
     if: github.event_name != 'pull_request'
+    concurrency:
+      group: ${{ github.ref }}-freebsd
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     # Unversioned deliberately: the VM's release is whatever vmactions/freebsd-vm defaults to, which
     # has moved on to 15.1-RELEASE. This job was named "FreeBSD 13" long after that stopped being
@@ -1111,7 +1129,7 @@ jobs:
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: ccache-macosArm-r1
-          max-size: 1500M
+          max-size: 2100M
           save: ${{ github.ref == 'refs/heads/master' }}
           evict-old-files: job
       - name: Install Qt
@@ -1511,7 +1529,7 @@ jobs:
         uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2.20
         with:
           key: ccache-windows-msvc-release
-          max-size: 2700M
+          max-size: 3800M
           save: ${{ github.ref == 'refs/heads/master' }}
           evict-old-files: job
       - name: setup environment
@@ -2034,6 +2052,13 @@ jobs:
   # }}}
   # {{{ Ubuntu 24.04 CC matrix
   ubuntu_2404_cc_matrix:
+    # Each leg queues behind its own previous run on the same ref. Three of the four legs run on master
+    # alone and take over an hour; without this, the legs of consecutive pushes ran side by side and
+    # pull requests waited for a runner. The pull-request leg (Clang on x86) queues too: a newer push's
+    # leg replaces one still pending, so the newest commit always saves the cache.
+    concurrency:
+      group: ${{ github.ref }}-ubuntu_2404_cc_matrix-${{ strategy.job-index }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:
@@ -2532,6 +2557,9 @@ jobs:
   # {{{ Ubuntu 24.04
   package_for_Ubuntu:
     if: github.event_name != 'pull_request'
+    concurrency:
+      group: ${{ github.ref }}-package_for_Ubuntu-${{ strategy.job-index }}
+      cancel-in-progress: false
     name: "Packaging for Ubuntu ${{ matrix.os_version }}"
     strategy:
       fail-fast: false
@@ -2635,6 +2663,9 @@ jobs:
   # {{{ Ubuntu 24.04: test via valgrind
   test_ubuntu2404_valgrind:
     if: github.event_name != 'pull_request'
+    concurrency:
+      group: ${{ github.ref }}-test_ubuntu2404_valgrind
+      cancel-in-progress: false
     name: "Run tests via valgrind"
     runs-on: ubuntu-24.04
     needs: [ubuntu_2404_cc_matrix]
@@ -2694,6 +2725,9 @@ jobs:
   # {{{ Ubuntu 24.04: VT conformance (esctest gates, vttest is advisory)
   test_ubuntu2404_conformance:
     if: github.event_name != 'pull_request'
+    concurrency:
+      group: ${{ github.ref }}-test_ubuntu2404_conformance
+      cancel-in-progress: false
     name: "Run VT conformance suites"
     runs-on: ubuntu-24.04
     needs: [ubuntu_2404_cc_matrix]
@@ -2754,6 +2788,9 @@ jobs:
   # {{{ Ubuntu 24.04: Test bench-headless
   test_ubuntu2404_bench_headless:
     if: github.event_name != 'pull_request'
+    concurrency:
+      group: ${{ github.ref }}-test_ubuntu2404_bench_headless-${{ strategy.job-index }}
+      cancel-in-progress: false
     strategy:
       matrix:
         test_case:
@@ -2789,6 +2826,9 @@ jobs:
   # {{{ Latency trend: in-process vs daemon, recorded on every platform, never gating
   latency_trend:
     if: github.event_name != 'pull_request'
+    concurrency:
+      group: ${{ github.ref }}-latency_trend-${{ strategy.job-index }}
+      cancel-in-progress: false
     # Records, never gates: a shared runner is too noisy to hold a 1 ms budget to, and the gate is a
     # reproducible local run (docs/internals/latency.md). What this gives is the trend -- a regression
     # shows up as a step in the artifacts across commits. continue-on-error keeps a leg that cannot
@@ -3026,6 +3066,9 @@ jobs:
   # {{{ GUI: test: contour quick shell exit
   test_quick_exit:
     if: github.event_name != 'pull_request'
+    concurrency:
+      group: ${{ github.ref }}-test_quick_exit-${{ strategy.job-index }}
+      cancel-in-progress: false
     name: "GUI: Quick Shell Exit"
     needs: [package_for_Ubuntu]
     strategy:
@@ -3095,6 +3138,9 @@ jobs:
   # {{{ GUI: external test: notcurses
   test_notcurses:
     if: github.event_name != 'pull_request'
+    concurrency:
+      group: ${{ github.ref }}-test_notcurses-${{ strategy.job-index }}
+      cancel-in-progress: false
     name: "GUI: notcurses-demo ${{ matrix.name }}"
     # Must match the OS the consumed .deb targets (26.04): a 26.04-built package links Qt 6.10 and a
     # newer libstdc++ than a 24.04 runner provides, so running it there fails with GLIBCXX/Qt-version
@@ -3214,6 +3260,9 @@ jobs:
   # {{{ Check Ubuntu package
   check_package_ubuntu:
     if: github.event_name != 'pull_request'
+    concurrency:
+      group: ${{ github.ref }}-check_package_ubuntu-${{ strategy.job-index }}
+      cancel-in-progress: false
     name: "Check packages for Ubuntu "
     strategy:
       fail-fast: false
