@@ -129,8 +129,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: D:\a\pace-store
-          key: pace-store-windows-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: pace-store-windows-
+          key: pace-store-windows-full-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: pace-store-windows-full-
       - name: "pace: install the release and start pace-kv on the store"
         shell: pwsh
         env:
@@ -284,7 +284,7 @@ jobs:
       - name: "Build"
         shell: pwsh
         run: |
-          cmake --build --preset ${{ env.CMAKE_PRESET }} --target vtbackend vthost
+          cmake --build --preset ${{ env.CMAKE_PRESET }}
       - name: "pace: statistics, then stop pace-kv"
         if: always()
         shell: pwsh
@@ -302,4 +302,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: D:\a\pace-store
-          key: pace-store-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          key: pace-store-windows-full-${{ github.run_id }}-${{ github.run_attempt }}
