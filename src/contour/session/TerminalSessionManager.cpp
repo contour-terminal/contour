@@ -62,6 +62,34 @@ namespace contour::session
 
 namespace
 {
+    /// What an in-process window knows of a pane, read from its session: the title and working directory it
+    /// shows, and the program-status records its terminal holds. Unseen output, bells and finished commands
+    /// are the window's own ledger's (window::TabAttention), not the directory's, in-process.
+    class SessionPaneStatus final: public window::PaneStatusLookup
+    {
+      public:
+        explicit SessionPaneStatus(TerminalSessionManager const& manager): _manager { manager } {}
+
+        [[nodiscard]] std::optional<window::PaneStatus> statusOf(window::PaneKey pane) const override
+        {
+            // An in-process pane's key is its session's id (TerminalSessionManager::paneKeyOf).
+            auto const* const session = _manager.sessionForId(vtworkspace::SessionId { pane.value });
+            if (session == nullptr)
+                return std::nullopt;
+            auto status = window::PaneStatus {};
+            status.title = session->resolvedWindowTitle();
+            status.cwd = session->displayWorkingDirectory();
+            // The lock the parser thread holds while it changes the records.
+            auto const& terminal = session->terminal();
+            auto const _ = std::lock_guard { terminal };
+            status.status = window::resolvedRecords(terminal.programStatus());
+            return status;
+        }
+
+      private:
+        TerminalSessionManager const& _manager;
+    };
+
     /// The working directory a new pane asks for: the one its command names, where it names one -- a
     /// file_opener pane works where its file is -- else the one inherited from the pane it opens beside.
     /// @param command What the pane runs instead of a shell, if anything.
@@ -105,6 +133,16 @@ TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app,
     _configFileWatcher {},
     _configReloadTimer {}
 {
+    _paneStatus = std::make_unique<SessionPaneStatus>(*this);
+    if (auto const services = _app.workspaceGitServices())
+        _gitTracker = std::make_unique<vthost::WorkspaceGitTracker>(
+            services->probe,
+            services->executor,
+            // Through the app: the probe's thread outlives this manager, the app outlives the thread.
+            [&app = _app](std::function<void()> job) { app.postToGui(std::move(job)); },
+            [this](vtworkspace::WorkspaceId, std::optional<vthost::GitInfo> const&) {
+                notifyDirectoriesChanged();
+            });
     _taskbarProgressTimer.setSingleShot(true);
     connect(&_taskbarProgressTimer, &QTimer::timeout, this, &TerminalSessionManager::refreshTaskbarProgress);
     // Long enough to take in every notification of one save, short enough to read as immediate.
@@ -291,6 +329,11 @@ window::WindowController* TerminalSessionManager::createWindowController(
                                                     role);
     QQmlEngine::setObjectOwnership(controller, QQmlEngine::CppOwnership);
     _controllersByWindow[windowId] = controller;
+    _inProcessDirectories[windowId] = std::make_unique<InProcessDirectory>(
+        *_model, *controller, *_paneStatus, _workspaceLabels, _gitTracker.get(), [controller] {
+            emit controller->workspaceDirectoryChanged();
+        });
+    updateDirectorySource(*controller);
     // A freshly spawned window is the one the user is looking at. Seeding ownership here (rather than
     // waiting for the first Qt focus-in) is what lets the very first tab be focused at creation, and
     // makes a tab switch notify the shell even before the window has ever been clicked.
@@ -344,6 +387,8 @@ void TerminalSessionManager::windowDisplayChanged(window::WindowController& cont
                                                   vtworkspace::WorkspaceId previous)
 {
     auto const now = controller.displayedWorkspace();
+    // The workspace shown now may be another host's: the window lists what its host lists.
+    updateDirectorySource(controller);
     if (_focusedWindow == previous)
         _focusedWindow = now;
     if (_lastFocusedWindow == previous)
@@ -555,6 +600,10 @@ TerminalSession* TerminalSessionManager::createBackingSession(
     session->setModelSessionId(sessionId);
 
     connect(session, &TerminalSession::sessionClosed, [this, session]() { removeSession(*session); });
+    connect(session, &TerminalSession::displayWorkingDirectoryChanged, this, [this, session] {
+        refreshGitOfSession(session->modelSessionId());
+        notifyDirectoriesChanged();
+    });
     watchConfigFile();
 
     // Nor is it QML's to collect: QQmlEngine took sessions it was handed for garbage at random times, while
@@ -755,6 +804,7 @@ bool TerminalSessionManager::raises(TerminalSession const& session) const
 void TerminalSessionManager::forgetWorkspace(vtworkspace::WorkspaceId workspace)
 {
     std::erase(_emptiedWindows, workspace);
+    forgetDirectoryState(workspace);
     // The window stays: focus follows it to what it displays now (windowDisplayChanged), and a binding it
     // still holds through its displayed workspace goes on serving it.
     if (_focusedWindow == workspace)
@@ -832,7 +882,27 @@ void TerminalSessionManager::releaseBinding(WindowBinding const& binding)
 void TerminalSessionManager::notifyHostBindingChanged(vtworkspace::WorkspaceId window) const
 {
     if (auto* const controller = controllerDisplaying(window))
+    {
+        updateDirectorySource(*controller);
         controller->notifyHostBindingChanged();
+    }
+}
+
+void TerminalSessionManager::updateDirectorySource(window::WindowController& controller) const
+{
+    // The binding's source where it has one, else the window's own process's.
+    auto* source = static_cast<window::IWorkspaceDirectorySource*>(nullptr);
+    if (auto* const binding = mutableBindingOf(controller.displayedWorkspace()))
+        source = binding->directorySource();
+    if (source == nullptr)
+        if (auto const own = _inProcessDirectories.find(controller.windowId());
+            own != _inProcessDirectories.end())
+            source = own->second.get();
+    if (source == controller.directorySource())
+        return;
+    controller.setDirectorySource(source);
+    // What the window lists is another's now.
+    emit controller.workspaceDirectoryChanged();
 }
 
 std::string_view TerminalSessionManager::hostLabelOf(vtworkspace::WorkspaceId window) const noexcept
@@ -1350,6 +1420,66 @@ void TerminalSessionManager::newWorkspace(TerminalSession const& acting)
     auto const workspace = createWorkspaceIn(controller->windowId());
     controller->displayWorkspace(workspace);
     createNewTab(workspace, std::nullopt);
+}
+
+void TerminalSessionManager::setWorkspaceLabel(vtworkspace::WorkspaceId workspace, std::string label)
+{
+    _workspaceLabels.set(workspace, std::move(label));
+    notifyDirectoriesChanged();
+}
+
+void TerminalSessionManager::forgetDirectoryState(vtworkspace::WorkspaceId workspace)
+{
+    _workspaceLabels.forget(workspace);
+    if (_gitTracker)
+        _gitTracker->forget(workspace);
+}
+
+void TerminalSessionManager::notifyWorkspaceDirectoryChanged(WindowBinding const& binding) const
+{
+    for (auto const window: windowsBoundTo(binding))
+        if (auto* const controller = controllerDisplaying(window))
+            emit controller->workspaceDirectoryChanged();
+}
+
+void TerminalSessionManager::notifyDirectoriesChanged() const
+{
+    for (auto const& directory: _inProcessDirectories | std::views::values)
+        directory->notifyChanged();
+}
+
+void TerminalSessionManager::refreshWorkspaceGit(vtworkspace::WorkspaceId workspace)
+{
+    if (!_gitTracker)
+        return;
+    // A window a daemon serves lists its daemon's git state; the daemon tracks it, and on its timer.
+    auto const* const owner = controllerOwning(workspace);
+    if (owner == nullptr || bindingOf(owner->displayedWorkspace()) != nullptr)
+        return;
+    auto const* const activeTab =
+        _model->workspace(workspace) != nullptr ? _model->workspace(workspace)->activeTab() : nullptr;
+    auto const* const activePane = activeTab != nullptr ? activeTab->activePane() : nullptr;
+    auto const* const session = activePane != nullptr ? sessionForId(activePane->session()) : nullptr;
+    if (session == nullptr)
+        return;
+    // What the shell reported (OSC 7, OSC 3008), where that is on this machine: it follows a `cd`. Else the
+    // directory of the session's process; "." is what workingDirectory() says for a session whose directory
+    // cannot be told (an ssh session).
+    auto cwd = std::string {};
+    if (auto const reported = session->resolveWorkingDirectory(vtbackend::CwdPurpose::OpenLocally))
+        cwd = reported->path;
+    else
+        cwd = session->workingDirectory();
+    if (cwd.empty() || cwd == ".")
+        return;
+    _gitTracker->refresh(workspace, std::filesystem::path { std::move(cwd) });
+}
+
+void TerminalSessionManager::refreshGitOfSession(vtworkspace::SessionId session)
+{
+    auto const [workspace, tab, pane] = _model->findSessionLeaf(session);
+    if (workspace != nullptr && tab == workspace->activeTab() && pane == tab->activePane())
+        refreshWorkspaceGit(workspace->id());
 }
 
 void TerminalSessionManager::requestSwitch(TerminalSession const& acting,
@@ -1973,6 +2103,14 @@ void TerminalSessionManager::removeWindowController(window::WindowId windowId)
     auto const workspace =
         controller != nullptr ? controller->displayedWorkspace() : vtworkspace::WorkspaceId {};
     _controllersByWindow.erase(it);
+    if (controller != nullptr)
+    {
+        controller->setDirectorySource(nullptr);
+        // What the window's workspaces carried goes with it, as it does for one it drops.
+        for (auto const owned: controller->ownedWorkspaces())
+            forgetDirectoryState(owned);
+    }
+    _inProcessDirectories.erase(windowId);
     _focusOrder.erase(windowId);
     _app.refreshWindowAttention();
     _taskbarProgressSink.removeWindow(windowId.value);
@@ -2190,6 +2328,7 @@ void TerminalSessionManager::tabAboutToBeAdded(vtworkspace::WorkspaceId window, 
 void TerminalSessionManager::tabAdded(vtworkspace::WorkspaceId window, vtworkspace::TabId id, int index)
 {
     layoutChanged();
+    notifyDirectoriesChanged();
     if (auto* c = controllerDisplaying(window))
         c->onTabAdded(index);
     if (auto* tab = _model->findTab(id))
@@ -2207,6 +2346,7 @@ void TerminalSessionManager::tabAboutToBeRemoved(vtworkspace::WorkspaceId window
 void TerminalSessionManager::tabClosed(vtworkspace::WorkspaceId window, vtworkspace::TabId tab, int)
 {
     layoutChanged();
+    notifyDirectoriesChanged();
     _paneActivations.erase(tab.value);
     if (auto* c = controllerDisplaying(window))
         c->onTabClosed();
@@ -2268,11 +2408,14 @@ void TerminalSessionManager::activeTabChanged(vtworkspace::WorkspaceId window, v
     // The tab now in front is seen, which clears its badge's marks.
     markVisibleSessionsSeen(window);
     reportTabPresentation(tab);
+    refreshWorkspaceGit(window);
+    notifyDirectoriesChanged();
 }
 
 void TerminalSessionManager::paneSplit(vtworkspace::TabId tab, vtworkspace::PaneId, vtworkspace::PaneId)
 {
     layoutChanged();
+    notifyDirectoriesChanged();
     if (auto* c = controllerDisplaying(_model->workspaceOfTab(tab)))
     {
         c->notifyTabRowChanged(
@@ -2285,6 +2428,7 @@ void TerminalSessionManager::paneSplit(vtworkspace::TabId tab, vtworkspace::Pane
 void TerminalSessionManager::paneClosed(vtworkspace::TabId tab, vtworkspace::PaneId, vtworkspace::PaneId)
 {
     layoutChanged();
+    notifyDirectoriesChanged();
     if (auto* c = controllerDisplaying(_model->workspaceOfTab(tab)))
     {
         c->notifyTabRowChanged(
@@ -2309,6 +2453,8 @@ void TerminalSessionManager::activePaneChanged(vtworkspace::TabId tab, vtworkspa
         syncFocusForWindow(c);
     }
     reportTabPresentation(tab);
+    refreshWorkspaceGit(_model->workspaceOfTab(tab));
+    notifyDirectoriesChanged();
 }
 
 void TerminalSessionManager::paneRatioChanged(vtworkspace::TabId tab,
@@ -2452,6 +2598,7 @@ void TerminalSessionManager::tabTitleChanged(vtworkspace::TabId tab)
     // (Stage 4 moves this fan-out onto the controllers); otherwise a renamed tab keeps its old name in
     // the status line until an unrelated event next refreshes it.
     updateStatusLine();
+    notifyDirectoriesChanged();
     if (auto* c = controllerDisplaying(_model->workspaceOfTab(tab)))
         c->notifyTabRowChanged(
             tab,
@@ -2519,6 +2666,7 @@ void TerminalSessionManager::refreshTabBadgeForSession(vtworkspace::SessionId se
                 std::ignore = ledger->noteSeen(paneKeyOf(session), statusGenerationOf(*s));
     }
     refreshTabBadgeOf(session);
+    notifyDirectoriesChanged();
 }
 
 uint64_t TerminalSessionManager::statusGenerationOf(TerminalSession const& session)
@@ -2650,6 +2798,8 @@ void TerminalSessionManager::noteCommandFinished(TerminalSession const& session,
     // mark a session the ledger has forgotten.
     if (sessionForId(session.modelSessionId()) != &session)
         return;
+    // OSC 133;D: the command may have changed the branch (a checkout, a pull, a commit).
+    refreshGitOfSession(session.modelSessionId());
     auto* const ledger = ledgerOf(session.modelSessionId());
     if (ledger == nullptr)
         managerLog()("No window ledger for session {}: its finished command is not marked.",

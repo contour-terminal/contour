@@ -12,6 +12,7 @@
 #include <contour/platform/TitleBandMaterial.hpp>
 #include <contour/platform/WindowResizeGrid.hpp>
 #include <contour/platform/WindowShadowController.hpp>
+#include <contour/session/InProcessDirectory.hpp>
 #include <contour/session/NodeDragSession.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/window/ChromeFocus.hpp>
@@ -37,6 +38,7 @@
 #include <contour/window/WindowId.hpp>
 #include <contour/window/WindowPositionStore.hpp>
 #include <contour/window/WindowRole.hpp>
+#include <contour/window/WorkspaceDirectorySource.hpp>
 
 #include <vtbackend/core/Color.hpp>
 
@@ -143,7 +145,8 @@ class WindowController:
     public QAbstractListModel,
     public command::TabTitleProvider,
     public command::DaemonRowsProvider,
-    public display::WindowHost
+    public display::WindowHost,
+    public session::InProcessWindow
 {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY countChanged)
@@ -294,11 +297,11 @@ class WindowController:
     [[nodiscard]] WindowId windowId() const noexcept { return _windowId; }
 
     /// @return The workspace whose tabs the tab strip lists and whose active tab fills the window.
-    [[nodiscard]] vtworkspace::WorkspaceId displayedWorkspace() const noexcept { return _displayed; }
+    [[nodiscard]] vtworkspace::WorkspaceId displayedWorkspace() const noexcept override { return _displayed; }
 
     /// @return Every workspace this window owns, in the order it took them; the displayed one is among them.
     ///         Sessions of the others keep running while hidden.
-    [[nodiscard]] std::span<vtworkspace::WorkspaceId const> ownedWorkspaces() const noexcept
+    [[nodiscard]] std::span<vtworkspace::WorkspaceId const> ownedWorkspaces() const noexcept override
     {
         return _owned;
     }
@@ -307,7 +310,17 @@ class WindowController:
     /// tab model announces a reset. A workspace this window does not own, and the one already shown, change
     /// nothing.
     /// @param workspace The owned workspace to show.
-    void displayWorkspace(vtworkspace::WorkspaceId workspace);
+    void displayWorkspace(vtworkspace::WorkspaceId workspace) override;
+
+    /// @return Where this window lists the workspaces it can show: its binding's (a daemon's) or its own
+    ///         process's; null while it has none.
+    [[nodiscard]] IWorkspaceDirectorySource* directorySource() const noexcept { return _directorySource; }
+
+    /// Points the window at the source of the workspaces it lists. A rebinding seam, not configuration: a
+    /// window moves between a daemon's workspaces and its own process's as it is bound, which the manager
+    /// follows (TerminalSessionManager::bindWindow).
+    /// @param source The source; borrowed, and it must outlive its use here, or be replaced first.
+    void setDirectorySource(IWorkspaceDirectorySource* source) noexcept { _directorySource = source; }
 
     /// When @p workspace is one of several this window owns and holds no tab, ends it: the window shows the
     /// next owned one first, if it was showing this, and the manager forgets the workspace
@@ -1388,6 +1401,10 @@ class WindowController:
     void hostingNoticeChanged();
     /// @see hostLabel
     void hostLabelChanged();
+    /// What the window's directorySource() lists changed, or the source is another. Raised for both kinds of
+    /// window: by the session manager for an in-process source (InProcessDirectory), and by the window's link
+    /// for a daemon's, whenever the connection's directory changes. Not coalesced: one per change.
+    void workspaceDirectoryChanged();
     /// @see hostChipState
     void hostChipStateChanged();
     /// @see requestNotification.
@@ -1579,7 +1596,8 @@ class WindowController:
 
     session::TerminalSessionManager& _manager;
     WindowId _windowId;
-    vtworkspace::WorkspaceId _displayed;          ///< The workspace the tab strip lists.
+    vtworkspace::WorkspaceId _displayed;                   ///< The workspace the tab strip lists.
+    IWorkspaceDirectorySource* _directorySource = nullptr; ///< @see directorySource
     std::vector<vtworkspace::WorkspaceId> _owned; ///< Every workspace of this window; @see ownedWorkspaces
     TabAttention _attention;                      ///< This window's seen-state, by PaneKey.
     /// Shows the ssh prompts of the attaches this window started; attached to the app's router for the

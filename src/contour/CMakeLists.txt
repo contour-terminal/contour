@@ -725,6 +725,18 @@ target_link_libraries(contour_block_tooltip PUBLIC vtbackend)
 target_include_directories(contour_block_tooltip PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 # }}}
 
+# {{{ contour_inprocess_directory: the workspace directory of a window whose sessions run in this process
+# Qt-free, and tested in contour_test, for the reason contour_block_tooltip is.
+add_library(contour_inprocess_directory STATIC
+    session/InProcessDirectory.cpp
+    session/InProcessDirectory.hpp
+    window/WorkspaceDirectory.hpp
+    window/WorkspaceDirectorySource.hpp
+)
+target_link_libraries(contour_inprocess_directory PUBLIC vthost vtworkspace)
+target_include_directories(contour_inprocess_directory PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+# }}}
+
 # {{{ contour_local_file: what following a hyperlink to a file on this machine does with it
 # Qt-free, and tested in contour_test, for the reason contour_block_tooltip is.
 add_library(contour_local_file STATIC
@@ -869,6 +881,7 @@ target_link_libraries(contour_core
     contour::tracy
     contour_block_tooltip
     contour_command
+    contour_inprocess_directory
     contour_askpass
     contour_command_output
     contour_cli
@@ -961,6 +974,7 @@ if(CONTOUR_FRONTEND_GUI)
             remote/DaemonSwitchDirectory_test.cpp
             remote/SwitchGuard_test.cpp
             remote/SwitchPlan_test.cpp
+            remote/DirectorySource_test.cpp
             platform/AppearanceSources_test.cpp
             platform/WindowsAppearanceSources_test.cpp
             platform/WindowsSettings_test.cpp
@@ -1639,6 +1653,7 @@ if(CONTOUR_TESTING)
         session/ScreenshotFile_test.cpp
         session/CommandOutputFiles_test.cpp
         session/CommandBlockTooltip_test.cpp
+        session/InProcessDirectory_test.cpp
         session/LocalFileAction_test.cpp
         session/EndReason_test.cpp
         platform/CaptionHitTest_test.cpp
@@ -1707,6 +1722,7 @@ if(CONTOUR_TESTING)
         contour_askpass
         contour_block_tooltip
         contour_command
+        contour_inprocess_directory
         contour_command_output
         contour_cli
         contour_local_file

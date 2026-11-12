@@ -433,6 +433,7 @@ void DaemonLink::connectController()
                 return;
             raiseElsewhere();
             _sessions.refreshTaskbarAttention();
+            _sessions.notifyWorkspaceDirectoryChanged(*this);
         },
         Qt::QueuedConnection);
     QObject::connect(
@@ -822,6 +823,17 @@ void DaemonLink::reportFocus(vthost::proto::WindowFocus focus)
 vthost::proto::RaiseRole DaemonLink::raiseRole() const noexcept
 {
     return _controller != nullptr ? _controller->raiseRole() : vthost::proto::RaiseRole::Raise;
+}
+
+window::WorkspaceDirectory DaemonLink::directory() const
+{
+    return _controller != nullptr ? _controller->directory() : window::WorkspaceDirectory {};
+}
+
+void DaemonLink::select(uint64_t workspace)
+{
+    if (auto const selected = selectWorkspace(workspace); !selected)
+        errorLog()("Cannot show workspace {}: {}", workspace, selected.error());
 }
 
 unsigned DaemonLink::tabsWaitingElsewhere() const

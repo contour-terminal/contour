@@ -94,6 +94,7 @@
 #include <vthost/KnownDaemons.hpp>
 #include <vthost/SshTransport.hpp>
 #include <vthost/Transport.hpp>
+#include <vthost/WorkspaceGit.hpp>
 #include <vthost/client/DaemonUpgrade.hpp>
 #include <vthost/latency/KeystrokeProbe.hpp>
 #include <vthost/latency/StartupTimeline.hpp>
@@ -280,6 +281,13 @@ using ProgramReachablePredicate = bool (*)(std::string_view);
                                                       ProgramReachablePredicate isReachable,
                                                       vtpty::ProgramHost host);
 
+/// Where the git probe of the in-process windows came from.
+enum class GitProbeSource : uint8_t
+{
+    Native = 0, ///< Built over this machine's disk and `git`.
+    Injected,   ///< Handed in by a test.
+};
+
 /// Extends ContourApp with terminal GUI capability.
 class ContourGuiApp:
     public QObject,
@@ -357,6 +365,8 @@ class ContourGuiApp:
     ///                     tests pass one over an offscreen engine of their own.
     /// @param startupLister Lists the daemon's workspaces for a launch that names one (`--workspace`). Null
     ///                     (the default) is the control API's, made on first use; tests pass a scripted one.
+    /// @param workspaceGitProbe Reads the git state of the in-process windows' workspaces. Null (the default)
+    ///                     is the native probe over this machine's disk and `git`; tests pass a scripted one.
     explicit ContourGuiApp(
         core::Environment const& env,
         std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
@@ -382,7 +392,8 @@ class ContourGuiApp:
         std::unique_ptr<session::SwitchDirectory> switchDirectory = nullptr,
         std::function<void(int)> exitEventLoop = nullptr,
         window::BootstrapPromptFactory bootstrapPromptFactory = nullptr,
-        std::unique_ptr<remote::IWorkspaceLister> startupLister = nullptr);
+        std::unique_ptr<remote::IWorkspaceLister> startupLister = nullptr,
+        std::unique_ptr<vthost::IGitStatusProbe> workspaceGitProbe = nullptr);
     ~ContourGuiApp() override;
 
     /// What decides, once a dragged pane or tab no window took has ended, whether that was a drop outside
@@ -650,6 +661,19 @@ class ContourGuiApp:
     /// @return References valid for the app's lifetime; nullopt for an app given a filesystem other than this
     ///         machine's, so that its `{Git}` reads nothing.
     [[nodiscard]] std::optional<vtbackend::GitHeadServices> gitHeadServices() noexcept;
+
+    /// @return What the in-process windows track their workspaces' git state with: a probe over this
+    ///         machine's disk and `git` (or the one a test injected) and a thread of its own, so that a slow
+    ///         `git` never delays the link probes and `{Git}` lookups of _linkProbeExecutor. Absent where
+    ///         gitHeadServices() is, for the same reason, unless a test injected a probe. The probe outlives
+    ///         the thread.
+    [[nodiscard]] std::optional<vthost::WorkspaceGitServices> workspaceGitServices() noexcept;
+
+    /// Hands @p job to the GUI thread, queued. For work that finishes on another thread and must not touch
+    /// the session manager from there. The app outlives that thread's executor (_workspaceGitExecutor), so a
+    /// worker posting at exit posts to a live object, which drops what it never ran.
+    /// @param job What to run; callable from any thread.
+    void postToGui(std::function<void()> job);
 
     [[nodiscard]] std::chrono::seconds earlyExitThreshold() const;
 
@@ -1486,11 +1510,22 @@ class ContourGuiApp:
     /// What every session's `{Git}` lookups read: this machine's files, through fileSystem(). Declared before
     /// _linkProbeExecutor, which runs those lookups, so it outlives every lookup the executor joins.
     vtbackend::NativeGitFileSystem _gitFileSystem;
+    /// Whether _gitProbe is one a test handed in, which is used whatever files the app reads. Before it.
+    GitProbeSource _gitProbeSource;
+    /// Runs `git` for a workspace's ahead and behind counts, and the probe built over it and _gitFileSystem.
+    /// Declared before _workspaceGitExecutor, whose thread runs the probe: the executor is joined first.
+    std::unique_ptr<vthost::CommandRunner> _gitCommands;
+    std::unique_ptr<vthost::IGitStatusProbe> _gitProbe;
     /// The one thread every session's path probes run on. Its jobs reach only the filesystem, the clock and a
     /// terminal's redraw request (atomics, and a session's mutex-guarded notify target), which is why it may
     /// be drained and joined while sessions, never destroyed in production, live on. A probe blocked on a
     /// hung mount delays that join.
     core::async::ThreadPoolExecutor _linkProbeExecutor;
+    /// The one thread the in-process windows' git probes run on (workspaceGitServices()). Its own, not
+    /// _linkProbeExecutor's: `git` may take seconds, and hover-link detection and `{Git}` share that thread.
+    /// Declared before _sessionManager and so destroyed (and joined) after it, which is why what a probe
+    /// posts goes to the app (postToGui()) and not to the manager.
+    core::async::ThreadPoolExecutor _workspaceGitExecutor;
     /// The link detection services a test handed in; absent, linkDetectionServices() assembles the app's own.
     std::optional<vtbackend::LinkDetectionServices> _injectedLinkServices;
     // Shared by every session's keyboard platform, which holds it by reference; @see keyboardLayout() and

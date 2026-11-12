@@ -99,6 +99,7 @@
 
 #include <crispy/ScopedTimer.hpp>
 
+#include <core/Environment.hpp>
 #include <core/Random.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
@@ -234,6 +235,8 @@ namespace
     /// Worker threads every session's path probes run on: one, so that a probe blocked on a hung mount stalls
     /// only the other probes.
     constexpr auto LinkProbeThreads = std::size_t { 1 };
+    /// One, so that probes of several workspaces queue rather than start a `git` each.
+    constexpr auto GitProbeThreads = std::size_t { 1 };
 
     /// How long a window switch waits for the target daemon to list its workspaces: an ssh connect's worth.
     constexpr auto SwitchListingTimeout = std::chrono::milliseconds { std::chrono::seconds { 15 } };
@@ -473,7 +476,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<session::SwitchDirectory> switchDirectory,
                              std::function<void(int)> exitEventLoop,
                              window::BootstrapPromptFactory bootstrapPromptFactory,
-                             std::unique_ptr<remote::IWorkspaceLister> startupLister):
+                             std::unique_ptr<remote::IWorkspaceLister> startupLister,
+                             std::unique_ptr<vthost::IGitStatusProbe> workspaceGitProbe):
     ContourApp { env },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
     _exitEventLoop { exitEventLoop ? std::move(exitEventLoop)
@@ -484,7 +488,12 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _commandExecutor(cli::makeBackgroundExecutor(StatusLineCommandThreads)),
     _processPlacement(processPlacement ? std::move(processPlacement) : vtpty::makeDefaultProcessPlacement()),
     _gitFileSystem(fileSystem ? *fileSystem : core::platform::NativeFileSystem::instance()),
+    _gitProbeSource(workspaceGitProbe ? GitProbeSource::Injected : GitProbeSource::Native),
+    _gitCommands(vthost::makeNativeCommandRunner(vthost::gitProbeEnvironment(core::defaultEnvironment()))),
+    _gitProbe(workspaceGitProbe ? std::move(workspaceGitProbe)
+                                : vthost::makeGitStatusProbe(_gitFileSystem, *_gitCommands)),
     _linkProbeExecutor(cli::makeBackgroundExecutor(LinkProbeThreads)),
+    _workspaceGitExecutor(cli::makeBackgroundExecutor(GitProbeThreads)),
     _injectedLinkServices { std::move(linkServices) },
     _sessionFactory(sessionFactory ? std::move(sessionFactory)
                                    : std::make_unique<session::AppSessionFactory>(*this, _processPlacement)),
@@ -619,6 +628,21 @@ std::optional<vtbackend::GitHeadServices> ContourGuiApp::gitHeadServices() noexc
     if (&_fileSystem != &core::platform::NativeFileSystem::instance())
         return std::nullopt;
     return vtbackend::GitHeadServices { .executor = _linkProbeExecutor, .fileSystem = _gitFileSystem };
+}
+
+std::optional<vthost::WorkspaceGitServices> ContourGuiApp::workspaceGitServices() noexcept
+{
+    // As gitHeadServices(): a test's injected files are not to be paired with this machine's disk; a probe a
+    // test injected reads none.
+    if (_gitProbeSource == GitProbeSource::Native
+        && &_fileSystem != &core::platform::NativeFileSystem::instance())
+        return std::nullopt;
+    return vthost::WorkspaceGitServices { .probe = *_gitProbe, .executor = _workspaceGitExecutor };
+}
+
+void ContourGuiApp::postToGui(std::function<void()> job)
+{
+    QMetaObject::invokeMethod(this, std::move(job), Qt::QueuedConnection);
 }
 
 ContourGuiApp::~ContourGuiApp()

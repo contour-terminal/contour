@@ -12,6 +12,7 @@
 #include <contour/platform/ShellRcEditor.hpp>
 #include <contour/platform/TaskbarProgressRouter.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
+#include <contour/session/InProcessDirectory.hpp>
 #include <contour/session/NodeDragSession.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/SessionRole.hpp>
@@ -60,6 +61,7 @@
 #include <vector>
 
 #include <vthost/RestoredCounts.hpp>
+#include <vthost/WorkspaceGit.hpp>
 #include <vtworkspace/ModelEvents.hpp>
 #include <vtworkspace/Move.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -401,6 +403,22 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// has its workspaces from the daemon.
     /// @param acting The session that triggered the action.
     void newWorkspace(TerminalSession const& acting);
+
+    /// (In-process) Labels @p workspace, which the in-process directory of its window lists
+    /// (InProcessDirectory); an empty label removes it. Not for a daemon's workspace, whose label is its
+    /// daemon's.
+    /// @param workspace The workspace.
+    /// @param label Its label.
+    void setWorkspaceLabel(vtworkspace::WorkspaceId workspace, std::string label);
+
+    /// @return The labels of the in-process workspaces.
+    [[nodiscard]] WorkspaceLabels const& workspaceLabels() const noexcept { return _workspaceLabels; }
+
+    /// Tells the windows bound to @p binding that what its directory lists changed
+    /// (window::WindowController::workspaceDirectoryChanged), as a daemon's connection announces it. GUI
+    /// thread.
+    /// @param binding The binding whose directory changed.
+    void notifyWorkspaceDirectoryChanged(WindowBinding const& binding) const;
 
     /// Asks for a label (the switcher popup's label prompt), starts a new local daemon under it, and opens a
     /// new window on it, for the window hosting @p acting.
@@ -1700,6 +1718,27 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     void contextMenuRequested(TerminalSession* acting);
 
   private:
+    /// Points @p controller at the source of the workspaces it lists: its binding's, else its own process's.
+    /// @param controller The window.
+    void updateDirectorySource(window::WindowController& controller) const;
+
+    /// Drops what an in-process directory holds of @p workspace, which is gone: its label and its git state.
+    /// @param workspace The workspace.
+    void forgetDirectoryState(vtworkspace::WorkspaceId workspace);
+
+    /// Tells every in-process window that what its directory lists changed.
+    void notifyDirectoriesChanged() const;
+
+    /// Looks the git state of @p workspace up again, for the directory of its active pane. There is no timer
+    /// behind it, unlike a daemon's: an in-process workspace is refreshed when its active pane's working
+    /// directory changes, when its active tab or pane does, and when a command finishes (OSC 133;D).
+    /// @param workspace The workspace.
+    void refreshWorkspaceGit(vtworkspace::WorkspaceId workspace);
+
+    /// refreshWorkspaceGit() for the workspace of @p session, if the session is its active pane's.
+    /// @param session A session.
+    void refreshGitOfSession(vtworkspace::SessionId session);
+
     /// Opens the switcher popup over the window hosting @p acting, showing @p prompt; a logged no-op for a
     /// window with no daemon behind it.
     /// @param acting The session that triggered the action.
@@ -2251,6 +2290,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     // row/signal emission to the controller for the event's window. Owned via QQmlEngine CppOwnership.
     std::unordered_map<window::WindowId, window::WindowController*> _controllersByWindow;
     uint64_t _nextWindowId = 1; ///< The next WindowId to mint.
+    // What an in-process window lists of its workspaces (InProcessDirectory): their labels, the status of
+    // their panes' sessions and their git state, which one tracker looks up for every window. The directories
+    // come last, so that they go before what they read.
+    WorkspaceLabels _workspaceLabels;
+    std::unique_ptr<window::PaneStatusLookup> _paneStatus;
+    std::unique_ptr<vthost::WorkspaceGitTracker> _gitTracker; ///< Null where git is not tracked.
+    std::unordered_map<window::WindowId, std::unique_ptr<InProcessDirectory>> _inProcessDirectories;
     /// What the next createWindowController() window is for. @see stageWindowRole
     window::WindowRole _stagedRole = window::WindowRole::Normal;
     // Registry mapping a vtworkspace session id to the Qt TerminalSession that backs it. The reverse

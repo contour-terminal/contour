@@ -66,6 +66,7 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <ranges>
 #include <sstream>
 #include <string>
@@ -5553,6 +5554,197 @@ TEST_CASE("tearing a tab off to a new window carries its unseen mark", "[manager
 
     CHECK(source->tabAttention().of(key) == contour::window::SessionAttention {});
     CHECK(target->tabAttention().of(key).activity == TabActivity::UnseenOutput);
+}
+
+// }}}
+
+// {{{ In-process workspace directory: git triggers and the directory source
+
+namespace
+{
+
+/// Records every directory it was asked about, on the app's git thread, and knows none.
+class RecordingGitProbe final: public vthost::IGitStatusProbe
+{
+  public:
+    [[nodiscard]] std::optional<vthost::GitInfo> probe(std::filesystem::path const& cwd) const override
+    {
+        auto const guard = std::scoped_lock { _mutex };
+        _asked.push_back(cwd.string());
+        return std::nullopt;
+    }
+
+    /// @return Every directory asked about so far, in order.
+    [[nodiscard]] std::vector<std::string> asked() const
+    {
+        auto const guard = std::scoped_lock { _mutex };
+        return _asked;
+    }
+
+    /// @param path A directory.
+    /// @return How often it was asked about.
+    [[nodiscard]] long askedAbout(std::string const& path) const
+    {
+        auto const all = asked();
+        return std::ranges::count(all, path);
+    }
+
+  private:
+    mutable std::mutex _mutex;
+    mutable std::vector<std::string> _asked;
+};
+
+/// Lets the app's git thread and what it posted run until @p done, or a few seconds pass.
+template <typename Done>
+[[nodiscard]] bool settleUntil(Done const& done)
+{
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 500))
+    {
+        if (done())
+            return true;
+        QTest::qWait(10);
+    }
+    return done();
+}
+
+/// The directory source a test's binding offers.
+class StubDirectorySource final: public contour::window::IWorkspaceDirectorySource
+{
+  public:
+    [[nodiscard]] contour::window::WorkspaceDirectory directory() const override { return {}; }
+    void select(uint64_t /*workspace*/) override {}
+};
+
+/// A binding that has a directory source of its own, as a daemon's does.
+class SourceBinding final: public contour::session::WindowBinding
+{
+  public:
+    explicit SourceBinding(contour::session::SessionFactory& factory): _factory(factory) {}
+    [[nodiscard]] contour::session::SessionFactory& sessions() noexcept override { return _factory; }
+    [[nodiscard]] std::string_view hostLabel() const noexcept override { return {}; }
+    [[nodiscard]] contour::window::DaemonDriftModel* daemonDrift() noexcept override { return nullptr; }
+    [[nodiscard]] contour::window::IWorkspaceDirectorySource* directorySource() noexcept override
+    {
+        return &source;
+    }
+    void windowClosed(vtworkspace::WorkspaceId /*window*/) override {}
+    void lastWindowReleased() override {}
+
+    StubDirectorySource source;
+
+  private:
+    contour::session::SessionFactory& _factory;
+};
+
+} // namespace
+
+TEST_CASE("TerminalSessionManager: an in-process workspace's git state is looked up on its triggers",
+          "[manager][git][directory]")
+{
+    auto probeOwner = std::make_unique<RecordingGitProbe>();
+    auto const* const probe = probeOwner.get();
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>(),
+                                 nullptr,
+                                 nullptr,
+                                 nullptr,
+                                 contour::test::TestApp::testHostIdentity(),
+                                 nullptr,
+                                 {},
+                                 nullptr,
+                                 contour::platform::nullAppearanceServices(),
+                                 nullptr,
+                                 contour::config::HostPlatform::Other,
+                                 std::move(probeOwner) };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const first = window->activeSession();
+    REQUIRE(first != nullptr);
+    drainPosted();
+    auto const workspace = window->displayedWorkspace();
+    auto const firstTab = manager.model().workspace(workspace)->activeTab()->id();
+
+    // The working directory of the active pane changes.
+    reportWorkingDirectory(*first, "file://localhost/tmp/a");
+    REQUIRE(settleUntil([&] { return probe->askedAbout("/tmp/a") == 1; }));
+
+    // A tab in front changes.
+    window->createNewTab();
+    auto* const second = window->activeSession();
+    REQUIRE(second != nullptr);
+    drainPosted();
+    reportWorkingDirectory(*second, "file://localhost/tmp/b");
+    REQUIRE(settleUntil([&] { return probe->askedAbout("/tmp/b") == 1; }));
+    manager.model().activateTab(workspace, firstTab);
+    REQUIRE(settleUntil([&] { return probe->askedAbout("/tmp/a") == 2; }));
+
+    // The active pane changes: a split's new pane has a directory of its own, and focus goes back.
+    auto const firstPane = manager.model().findTab(firstTab)->activePane()->id();
+    manager.splitActivePane(/*vertical*/ true, first);
+    drainPosted();
+    auto* const split = window->activeSession();
+    REQUIRE(split != nullptr);
+    REQUIRE(split != first);
+    drainPosted();
+    reportWorkingDirectory(*split, "file://localhost/tmp/c");
+    REQUIRE(settleUntil([&] { return probe->askedAbout("/tmp/c") >= 1; }));
+    manager.model().setActivePane(firstTab, firstPane);
+    REQUIRE(settleUntil([&] { return probe->askedAbout("/tmp/a") == 3; }));
+
+    // Secure input echo (a password prompt) is no command finishing.
+    manager.noteInputEchoChanged(*first);
+    QTest::qWait(150);
+    CHECK(probe->askedAbout("/tmp/a") == 3);
+
+    // A command finishing (OSC 133;D) is.
+    manager.noteCommandFinished(*first, vtbackend::CommandEnding::Succeeded);
+    CHECK(settleUntil([&] { return probe->askedAbout("/tmp/a") == 4; }));
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: a window lists its binding's workspaces, else its own",
+          "[manager][directory]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::MockPtySessionFactory factory;
+    auto binding = SourceBinding { factory };
+    contour::test::ScopedController const window { manager };
+    auto const changed =
+        QSignalSpy { window.controller, &contour::window::WindowController::workspaceDirectoryChanged };
+
+    auto* const own = window->directorySource();
+    REQUIRE(own != nullptr);
+    CHECK(own != &binding.source);
+
+    // Bound, it lists the binding's, and is told the source is another.
+    manager.bindWindow(window.id, binding);
+    CHECK(window->directorySource() == &binding.source);
+    CHECK(changed.count() == 1);
+
+    // A daemon's connection announcing a change reaches the windows bound to it, once each.
+    manager.notifyWorkspaceDirectoryChanged(binding);
+    CHECK(changed.count() == 2);
+
+    // Its binding gone, the window lists its own again.
+    manager.releaseBinding(binding);
+    CHECK(window->directorySource() == own);
+    CHECK(changed.count() == 3);
+}
+
+TEST_CASE("TerminalSessionManager: a closed window's workspace labels are forgotten", "[manager][directory]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto const window = std::make_unique<contour::test::ScopedController>(manager);
+    auto const workspace = window->id;
+    manager.setWorkspaceLabel(workspace, "scratch");
+    REQUIRE(window->controller->directorySource()->directory().workspaces.at(0).label == "scratch");
+
+    auto const* const labels = &manager.workspaceLabels();
+    manager.removeWindowController(window->windowId);
+    CHECK(labels->labelOf(workspace).empty());
 }
 
 // }}}

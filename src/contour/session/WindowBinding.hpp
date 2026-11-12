@@ -4,6 +4,7 @@
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/WindowSwitching.hpp>
 #include <contour/window/DaemonDriftChoice.hpp>
+#include <contour/window/WorkspaceDirectorySource.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -112,6 +113,11 @@ class WindowBinding
     /// @return How many tabs wait for the user in the daemon's workspaces the window bound here does not
     ///         display; none for a binding with no daemon, whose window displays all it has. GUI thread.
     [[nodiscard]] virtual unsigned tabsWaitingElsewhere() const { return 0; }
+
+    /// @return Where a window bound here lists the workspaces it can show, which a binding with a daemon (or
+    ///         other host of workspaces) states; null for a binding with none, whose window lists its own
+    ///         process's (InProcessDirectory). The binding owns it. GUI thread.
+    [[nodiscard]] virtual window::IWorkspaceDirectorySource* directorySource() noexcept { return nullptr; }
 
     /// @return What every binding to the same daemon shares, so that a count over windows takes that daemon
     ///         once; none for a binding with no daemon. GUI thread.
