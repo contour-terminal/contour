@@ -200,8 +200,8 @@ that is the size of the first build under a cap that no longer bit, on 2026-11-1
 | Full-tree clang-tidy (`clang-tidy.yml`) | none | | |
 
 One generation of each is about 6.8 GB, beside roughly 1.7 GB of Qt, vcpkg, FreeBSD, apt and
-lint-tool caches: 8.5 GB of the 10 GB quota. Windows is 2.9 GB of that because MSVC's `/Z7` puts the
-debug information into every object file. The jobs without a cache run on `master` alone, so
+lint-tool caches: 8.5 GB of the 10 GB quota. Windows was 2.9 GB of that while CI built `RelWithDebInfo`, because MSVC's `/Z7`
+puts the debug information into every object file; a `Release` build has none, and the figure is to be measured again. The jobs without a cache run on `master` alone, so
 they cost no pull request anything; they get their caches back when the entries shrink.
 
 That headroom is not enough for a second generation, and there is one for a while on every

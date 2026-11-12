@@ -52,6 +52,9 @@ BINARY_REQUIREMENTS: dict[str, list[tuple[str, str]]] = {
         ("BIND_NOW", r"\(BIND_NOW\)|\(FLAGS\).*\bBIND_NOW\b|\(FLAGS_1\).*\bNOW\b"),
         ("__stack_chk_fail", r"__stack_chk_fail"),
     ],
+    # No rows: every Mach-O row was about debug symbols, which are no longer produced. The compile
+    # database checks cover macOS.
+    "macho": [],
 }
 
 def normalize(path: str) -> str:
@@ -139,8 +142,6 @@ def binary_problems(fmt: str, outputs: dict[str, str]) -> list[str]:
 
     `outputs` holds the probe output under the key "binary". A format without rows (macho) has no problems.
     """
-    if fmt == "macho":
-        return []
     if fmt not in BINARY_REQUIREMENTS:
         return [f"unknown binary format {fmt!r}"]
     text = outputs.get("binary", "")

@@ -1493,7 +1493,7 @@ jobs:
           path: out/.tools
           key: lint-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/check-workflows.py', 'scripts/check-spelling.py') }}
       # ccache, not sccache: cmake/CompileCache.cmake picks the ccache on PATH, and with it forces
-      # /Z7 (debug info inside the .obj) in place of /Zi, which no launcher can cache. The action
+      # /Z7 (debug info inside the .obj) in place of /Zi, which no launcher can cache, wherever a build has debug info. The action
       # installs ccache 4.9 and sets compiler_check=content on Windows, where the compiler's mtime
       # follows the image's install time. The statistics step at the end names the binary CMake used
       # and the cache directory it read, so a mismatch with the restored one shows in the log.

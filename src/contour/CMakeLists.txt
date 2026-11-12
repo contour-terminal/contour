@@ -2334,6 +2334,10 @@ else()
         # see https://cmake.org/cmake/help/v3.6/module/CPackDeb.html#variable:CPACK_DEBIAN_PACKAGE_DEPENDS
         set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/contour-terminal/contour/")
         set(CPACK_DEB_COMPONENT_INSTALL ON)
+        # Strip what goes into the package. CPackDeb strips only while it splits a -dbgsym package off,
+        # and none is built any more; without this the .deb would ship the full symbol table. It applies
+        # to CPack's own install tree, so the binaries the tests run keep their symbols.
+        set(CPACK_STRIP_FILES ON)
         set(CPACK_COMPONENTS_ALL "contour")
 
         if(CONTOUR_FRONTEND_GUI)

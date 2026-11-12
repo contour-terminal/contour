@@ -27,8 +27,8 @@ cmake --preset clang-release -DCONTOUR_PRODUCTION_BUILD=ON
 Only Contour's own targets get the flags: the module is included after the dependencies (vcpkg ports, Qt, CPM's
 `_deps`, `vendor/core-cpp`) are added and before `src/` and `examples/`. The hardening flags are the rows of one table
 in `cmake/ProductionBuild.cmake`, each verified with a compiler or linker flag check; a flag the toolchain rejects is a
-configuration error, not a silent omission. `/Ob2` comes from the small per-platform table above it, and the
-link-time optimization options are CMake's own for the toolchain.
+configuration error, not a silent omission. `/Ob2` is CMake's own for a `Release` build, as are the
+link-time optimization options for the toolchain.
 
 | Platform | Flags | What they buy |
 |---|---|---|
