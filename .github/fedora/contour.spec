@@ -4,6 +4,10 @@
 
 # No debuginfo or debugsource subpackages: nothing publishes them, and generating them costs build time.
 %global debug_package %{nil}
+# Nor debug information in the objects, then: Fedora's flags carry -g, and with optimization on, GCC 16's
+# variable tracking takes 13 GB and two and a half minutes for src/contour/config/Actions.cpp alone
+# (3 GB and 17 seconds without) -- more than a 16 GB build machine has left beside three other compilers.
+%global optflags %{optflags} -g0
 
 # Get contour version
 %{!?_version: %define _version %{getenv:CONTOUR_VERSION} }
