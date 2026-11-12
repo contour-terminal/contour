@@ -31,6 +31,11 @@ enum class ConsoleHost : uint8_t
     OnPath,
 };
 
+/// @return How many bytes a write to @p pipe, a pipe end open for reading its own attributes as well as for
+///         writing, takes now without waiting for the reader; 0 while it is full, or where that cannot be
+///         told. What ConPty sizes its writes to the pseudoconsole by.
+[[nodiscard]] std::size_t writableWithoutWaiting(HANDLE pipe) noexcept;
+
 /// ConPty implementation for newer Windows 10 versions.
 class ConPty final: public Pty
 {
