@@ -165,8 +165,8 @@ class GatedDiscovery final: public cli::IDaemonDiscovery
     return std::make_unique<window::SwitcherController>(window::SwitcherServices {
         .discovery = std::move(discovery),
         .savedHosts = [] { return std::vector<window::SwitcherDaemon> {}; },
-        .list = [](vtworkspace::WorkspaceId, SwitchTarget const&, window::SwitcherListed) {},
-        .request = [](vtworkspace::WorkspaceId, SwitchTarget, SwitchMode) {},
+        .list = [](vtworkspace::WorkspaceId, SwitchTarget const&, window::SwitcherListed const&) {},
+        .request = [](vtworkspace::WorkspaceId, SwitchTarget const&, SwitchMode) {},
         .startDaemon =
             [](std::string const&) {
                 return []() -> std::expected<cli::NamedDaemonStart, std::string> {
@@ -499,6 +499,48 @@ TEST_CASE("Switcher: it opens on the first daemon that is not the window's own",
     fixture.switcher->toggle(ownIndex);
     CHECK(fixture.switcher->rows()[static_cast<std::size_t>(fixture.switcher->currentIndex())].title
           == "default");
+}
+
+TEST_CASE("Switcher: clicking a daemon's disclosure expands it and switches nothing",
+          "[contour][switcher][qml]")
+{
+    auto fixture = SwitcherFixture {};
+    fixture.open();
+    QSignalSpy const finished { fixture.switcher.get(), &window::SwitcherController::finished };
+    auto const rows = fixture.switcher->rows();
+    auto const admin = std::ranges::find_if(rows, [](auto const& row) {
+        return row.kind == window::SwitcherRowKind::Daemon && row.title == "admin";
+    });
+    REQUIRE(admin != rows.end());
+    REQUIRE(admin->expansion == window::SwitcherExpansion::Collapsed);
+
+    // The disclosure on the "admin" row, as the user clicks it: the row's own tap chooses the row.
+    auto const titles = fixture.all("switcherTitle");
+    auto const adminTitle = std::ranges::find_if(titles, [](QQuickItem const* item) {
+        return item->property("text").toString() == QStringLiteral("admin");
+    });
+    REQUIRE(adminTitle != titles.end());
+    auto const disclosures = fixture.all("switcherDisclosure");
+    auto const found = std::ranges::find_if(disclosures, [&](QQuickItem const* item) {
+        return item->isVisible() && item->parentItem()->isAncestorOf(*adminTitle);
+    });
+    REQUIRE(found != disclosures.end());
+    auto const* disclosure = *found;
+    QTest::mouseClick(
+        fixture.window.get(),
+        Qt::LeftButton,
+        Qt::NoModifier,
+        disclosure->mapToScene(QPointF { disclosure->width() / 2, disclosure->height() / 2 }).toPoint());
+    QCoreApplication::processEvents();
+
+    CHECK(fixture.requested.empty());
+    CHECK(finished.count() == 0);
+    auto const after = fixture.switcher->rows();
+    auto const expanded = std::ranges::find_if(after, [](auto const& row) {
+        return row.kind == window::SwitcherRowKind::Daemon && row.title == "admin";
+    });
+    REQUIRE(expanded != after.end());
+    CHECK(expanded->expansion == window::SwitcherExpansion::Expanded);
 }
 
 TEST_CASE("Switcher: a pointer at rest does not take the selection, a pointer that moves does",
