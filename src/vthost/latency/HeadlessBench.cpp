@@ -24,6 +24,7 @@
 #include <optional>
 #include <ostream>
 #include <ranges>
+#include <set>
 #include <string>
 #include <utility>
 #include <variant>
@@ -72,6 +73,8 @@ namespace
     constexpr auto MaxFloodRequests = std::size_t { 5 };
     /// How long the daemon has to serve after it was started.
     constexpr auto DaemonReadyTimeout = 10s;
+    /// How often TabLoad::EverySecond opens a tab.
+    constexpr auto TabInterval = 1s;
     /// How long a quit byte has to reach the daemon before the client hangs up.
     constexpr auto QuitFlushGrace = 20ms;
 
@@ -81,8 +84,9 @@ namespace
         std::string failure;       ///< Why the launch failed; empty if it did not.
         SteadyDuration startup {}; ///< Launch to first prompt.
         std::vector<SteadyDuration> keystrokes;
-        double mibPerSecond = 0.0;    ///< Flood only.
-        double deltasPerSecond = 0.0; ///< Flood on the daemon only.
+        std::vector<SteadyDuration> tabStartups; ///< TabLoad::EverySecond only: tab requested to its prompt.
+        double mibPerSecond = 0.0;               ///< Flood only.
+        double deltasPerSecond = 0.0;            ///< Flood on the daemon only.
     };
 
     [[nodiscard]] ProbePlan keyPlan(std::size_t keys)
@@ -318,6 +322,47 @@ namespace
             static_cast<double>(run.deltas) / std::chrono::duration<double>(elapsed).count();
     }
 
+    /// Asks the mixed child of @p session to flood, once it shows its prompt, until its output shows.
+    /// @return Whether the flood started (the failure is set when not).
+    [[nodiscard]] core::async::Task<bool> requestFlood(core::net::EventLoop* loopPtr,
+                                                       client::NativeClient* clientPtr,
+                                                       uint64_t session,
+                                                       DaemonRun* runPtr)
+    {
+        // Pointers in the signature, as a coroutine's parameters must not be references; all outlive it.
+        auto& loop = *loopPtr;
+        auto& client = *clientPtr;
+        auto& run = *runPtr;
+        auto const& clock = core::platform::defaultSteadyClock();
+        auto const deadline = clock.now() + DaemonReadyTimeout;
+        // The child writes its prompt once it has set its terminal up; what was sent before that is lost.
+        auto const textOf = [&] {
+            return client.screens().at(session).viewportText();
+        };
+        co_await repeatUntil(
+            &loop, [&] { return textOf().contains(PromptMark) || clock.now() > deadline; }, KeyPoll);
+        if (!textOf().contains(PromptMark))
+        {
+            run.outcome.failure = "the flooding pane showed no prompt";
+            co_return false;
+        }
+        auto const started = [&] {
+            return textOf().find_first_not_of(" >\r\n\t") != std::string::npos;
+        };
+        run.floodStartedAt = clock.now();
+        for ([[maybe_unused]] auto const attempt: std::views::iota(std::size_t { 0 }, MaxFloodRequests))
+        {
+            client.sendInput(session, oneByte(FloodRequestByte), proto::InputKind::Keyboard);
+            auto const sentAt = clock.now();
+            co_await repeatUntil(
+                &loop, [&] { return started() || clock.now() > sentAt + FloodRequestRetry; }, KeyPoll);
+            if (started())
+                co_return true;
+        }
+        run.outcome.failure = "the flood never started";
+        co_return false;
+    }
+
     /// Splits the typing pane and starts the flood in the new one.
     /// @return The flooding session; nullopt if the daemon showed no pane in time (the failure is set).
     [[nodiscard]] core::async::Task<std::optional<uint64_t>> startFloodedPane(core::net::EventLoop* loopPtr,
@@ -352,32 +397,80 @@ namespace
             run.outcome.failure = "the second pane never showed";
             co_return std::nullopt;
         }
-        // The child writes its prompt once it has set its terminal up; what was sent before that is lost.
-        auto const textOf = [&] {
-            return client.screens().at(*flooding).viewportText();
-        };
-        co_await repeatUntil(
-            &loop, [&] { return textOf().contains(PromptMark) || clock.now() > deadline; }, KeyPoll);
-        if (!textOf().contains(PromptMark))
-        {
-            run.outcome.failure = "the second pane showed no prompt";
+        if (!co_await requestFlood(&loop, &client, *flooding, &run))
             co_return std::nullopt;
-        }
-        auto const started = [&] {
-            return textOf().find_first_not_of(" >\r\n\t") != std::string::npos;
-        };
-        run.floodStartedAt = clock.now();
-        for ([[maybe_unused]] auto const attempt: std::views::iota(std::size_t { 0 }, MaxFloodRequests))
+        co_return flooding;
+    }
+
+    /// Floods the first pane and opens a tab beside it every TabInterval until the flood ends, timing each
+    /// tab from its request to its prompt; then quits every child and hangs up.
+    [[nodiscard]] core::async::Task<void> driveNewTabs(core::net::EventLoop* loopPtr,
+                                                       client::NativeClient* clientPtr,
+                                                       HeadlessOptions const* optionsPtr,
+                                                       DaemonRun* runPtr)
+    {
+        // Pointers in the signature, as a coroutine's parameters must not be references; all outlive it.
+        auto& loop = *loopPtr;
+        auto& client = *clientPtr;
+        auto const& options = *optionsPtr;
+        auto& run = *runPtr;
+        auto const& clock = core::platform::defaultSteadyClock();
+        auto const ready = run.launchedAt + DaemonReadyTimeout;
+        co_await repeatUntil(
+            &loop, [&] { return run.typingSession.has_value() || clock.now() > ready; }, KeyPoll);
+        if (!run.typingSession)
         {
-            client.sendInput(*flooding, oneByte(FloodRequestByte), proto::InputKind::Keyboard);
-            auto const sentAt = clock.now();
-            co_await repeatUntil(
-                &loop, [&] { return started() || clock.now() > sentAt + FloodRequestRetry; }, KeyPoll);
-            if (started())
-                co_return flooding;
+            run.outcome.failure = "the first pane never showed";
+            client.detach();
+            co_return;
         }
-        run.outcome.failure = "the flood never started";
-        co_return std::nullopt;
+        auto const flooding = *run.typingSession;
+        if (co_await requestFlood(&loop, &client, flooding, &run))
+        {
+            auto const deadline = run.floodStartedAt + options.floodDuration + FloodGrace;
+            while (!run.floodByteCount && clock.now() < deadline)
+            {
+                auto const requestedAt = clock.now();
+                auto const known = std::ranges::to<std::set<uint64_t>>(std::views::keys(client.screens()));
+                client.createTab(flooding, {});
+                auto opened = std::optional<uint64_t> {};
+                co_await repeatUntil(
+                    &loop,
+                    [&] {
+                        for (auto const& [id, screen]: client.screens())
+                            if (!known.contains(id) && screen.viewportText().contains(PromptMark))
+                                opened = id;
+                        observeFlood(client, flooding, run);
+                        return opened.has_value() || clock.now() > requestedAt + DaemonReadyTimeout;
+                    },
+                    KeyPoll);
+                if (!opened)
+                {
+                    run.outcome.failure = "a new tab showed no prompt";
+                    break;
+                }
+                run.outcome.tabStartups.push_back(clock.now() - requestedAt);
+                co_await repeatUntil(
+                    &loop,
+                    [&] {
+                        observeFlood(client, flooding, run);
+                        return run.floodByteCount.has_value() || clock.now() >= requestedAt + TabInterval;
+                    },
+                    FloodPoll);
+            }
+            if (run.outcome.failure.empty() && !run.floodByteCount)
+                run.outcome.failure = "the flood never ended";
+            if (run.floodByteCount)
+            {
+                auto const elapsed = run.floodEndedAt - run.floodStartedAt;
+                run.outcome.mibPerSecond = mibPerSecond(*run.floodByteCount, elapsed);
+            }
+        }
+        // Each child ends on it, which ends its session.
+        for (auto const id: std::views::keys(client.screens()))
+            client.sendInput(id, oneByte(QuitByte), proto::InputKind::Keyboard);
+        co_await loop.delay(QuitFlushGrace);
+        client.detach();
     }
 
     /// Types the keys the probe asks for into @p session, then quits the child and hangs up.
@@ -394,6 +487,11 @@ namespace
         auto& probe = *probePtr;
         auto& run = *runPtr;
         auto const& clock = core::platform::defaultSteadyClock();
+        if (options.tabs == TabLoad::EverySecond)
+        {
+            co_await driveNewTabs(&loop, &client, &options, &run);
+            co_return;
+        }
         auto const sessionOf = [&]() -> std::optional<uint64_t> {
             if (client.screens().empty())
                 return std::nullopt;
@@ -519,6 +617,7 @@ namespace
     {
         std::vector<SteadyDuration> startup;
         std::vector<SteadyDuration> keystroke;
+        std::vector<SteadyDuration> tabStartup;
         std::vector<double> mibPerSecond;
         std::vector<double> deltasPerSecond;
 
@@ -527,6 +626,7 @@ namespace
         {
             startup.push_back(outcome.startup);
             keystroke.insert(keystroke.end(), outcome.keystrokes.begin(), outcome.keystrokes.end());
+            tabStartup.insert(tabStartup.end(), outcome.tabStartups.begin(), outcome.tabStartups.end());
             mibPerSecond.push_back(outcome.mibPerSecond);
             if (outcome.deltasPerSecond > 0.0)
                 deltasPerSecond.push_back(outcome.deltasPerSecond);
@@ -579,7 +679,15 @@ int runHeadlessBench(HeadlessOptions const& options, std::ostream& out, std::ost
         return EXIT_FAILURE;
     }
 
+    auto const tabs = options.tabs == TabLoad::EverySecond;
+    if (tabs && (!options.workload.empty() || options.keystrokeLoad != KeystrokeLoad::Idle))
+    {
+        err << "bench-latency: `tabs` opens tabs while a pane floods; it takes no workload and no `mixed`\n";
+        return EXIT_FAILURE;
+    }
+    // Both run the daemon leg alone: the in-process leg has no tabs to open and no second pane.
     auto const mixed = options.keystrokeLoad == KeystrokeLoad::FloodedPane;
+    auto const daemonOnly = mixed || tabs;
     if (mixed && !options.workload.empty())
     {
         err << "bench-latency: `mixed` types keys while a pane floods; it takes no workload\n";
@@ -587,7 +695,8 @@ int runHeadlessBench(HeadlessOptions const& options, std::ostream& out, std::ost
     }
 
     // The keys are typed while the flood lasts: all of them, or the figures describe an idle terminal.
-    if (auto const typing = MaxKeyGap * (WarmupKeys + options.keys); mixed && typing >= options.floodDuration)
+    if (auto const typing = MaxKeyGap * (WarmupKeys + options.keys);
+        options.keystrokeLoad == KeystrokeLoad::FloodedPane && typing >= options.floodDuration)
     {
         err << std::format(
             "bench-latency: `keys {}` take up to {} ms to type, which does not fit in `seconds "
@@ -621,7 +730,7 @@ int runHeadlessBench(HeadlessOptions const& options, std::ostream& out, std::ost
         serveArguments.insert(
             serveArguments.end(),
             { "flood", options.workload, "seconds", std::to_string(options.floodDuration.count()) });
-    if (mixed)
+    if (daemonOnly)
         serveArguments.insert(serveArguments.end(),
                               { "mixed",
                                 "flood",
@@ -660,7 +769,7 @@ int runHeadlessBench(HeadlessOptions const& options, std::ostream& out, std::ost
                     failed = true;
                 }
             }
-            else if (!mixed)
+            else if (!daemonOnly)
                 failed |= !take(runInProcessLeg(*self, options), "in-process", inProcess, err);
         }
         if (failed)
@@ -676,7 +785,14 @@ int runHeadlessBench(HeadlessOptions const& options, std::ostream& out, std::ost
         return EXIT_FAILURE;
 
     auto report = BenchReport {};
-    if (mixed)
+    if (tabs)
+    {
+        report.series = { MetricSeries {
+            .metric = "tab-startup", .mode = "daemon", .samples = viaDaemon.tabStartup } };
+        report.scalars = { ScalarSeries {
+            .metric = "flood-mibps", .mode = "daemon", .values = viaDaemon.mibPerSecond } };
+    }
+    else if (mixed)
     {
         report.series = { MetricSeries {
             .metric = "keystroke", .mode = "daemon", .samples = viaDaemon.keystroke } };

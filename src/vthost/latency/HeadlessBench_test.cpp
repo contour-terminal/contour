@@ -67,6 +67,35 @@ TEST_CASE("mixed mode reports keystrokes under a flood", "[vthost][latency]")
     CHECK(flood[1] > 0.0);
 }
 
+TEST_CASE("tabs mode times each tab opened during a flood", "[vthost][latency]")
+{
+    auto const options = HeadlessOptions {
+        .runs = 1,
+        .keys = 20,
+        .workload = {},
+        .keystrokeLoad = KeystrokeLoad::Idle,
+        .floodDuration = 3s,
+        .tabs = TabLoad::EverySecond,
+        .executable = std::filesystem::path { BENCH_LATENCY_EXECUTABLE },
+        .record = std::nullopt,
+    };
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+
+    auto const exitCode = runHeadlessBench(options, out, err);
+    INFO(err.str());
+    INFO(out.str());
+    REQUIRE(exitCode == EXIT_SUCCESS);
+
+    // A tab a second over a three-second flood: two at least, whatever the flood's tail.
+    auto const tabs = daemonRowOf(out.str(), "tab-startup");
+    REQUIRE_FALSE(tabs.empty());
+    CHECK(tabs.front() >= 2);
+    auto const flood = daemonRowOf(out.str(), "flood-mibps");
+    REQUIRE(flood.size() >= 2);
+    CHECK(flood[1] > 0.0);
+}
+
 TEST_CASE("mixed mode refuses keys that do not fit in the flood", "[vthost][latency]")
 {
     auto const options = HeadlessOptions {

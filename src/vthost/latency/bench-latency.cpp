@@ -99,6 +99,10 @@ class BenchLatency final: public core::cli::App
                           .v = CLI::Value { false },
                           .helpText = "Types keys into one pane while a second pane floods `ascii` for "
                                       "`seconds`; reports keystroke latency and the flood's MiB/s." },
+            CLI::Option { .name = "tabs",
+                          .v = CLI::Value { false },
+                          .helpText = "Opens a tab every second while a pane floods `ascii` for `seconds`; "
+                                      "reports each tab's time to its prompt and the flood's MiB/s." },
             recordOption,
         };
         // The three flags are CLI-boundary booleans; runE2eBench() receives them as enums.
@@ -213,6 +217,9 @@ class BenchLatency final: public core::cli::App
                                      ? vthost::latency::KeystrokeLoad::FloodedPane
                                      : vthost::latency::KeystrokeLoad::Idle,
                 .floodDuration = std::chrono::seconds(parameters().uint("bench-latency.headless.seconds")),
+                .tabs = parameters().boolean("bench-latency.headless.tabs")
+                            ? vthost::latency::TabLoad::EverySecond
+                            : vthost::latency::TabLoad::None,
                 .executable = std::nullopt,
                 .record = recordPath(parameters().str("bench-latency.headless.record")),
             },

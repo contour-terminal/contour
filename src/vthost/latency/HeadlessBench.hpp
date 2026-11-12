@@ -24,6 +24,14 @@ enum class KeystrokeLoad : uint8_t
     FloodedPane, ///< A second pane of the same daemon floods MixedFloodWorkload meanwhile.
 };
 
+/// Whether a headless run opens tabs while it runs.
+enum class TabLoad : uint8_t
+{
+    None = 0,    ///< No tab is opened.
+    EverySecond, ///< No keys: a pane floods MixedFloodWorkload, a tab is opened every second meanwhile, and
+                 ///< the run reports each tab's time from its request to its prompt.
+};
+
 /// The Workloads row the flooded pane of a KeystrokeLoad::FloodedPane run writes.
 inline constexpr std::string_view MixedFloodWorkload = "ascii";
 
@@ -38,6 +46,7 @@ struct HeadlessOptions
     /// reports the daemon's keystroke latency and the flood's MiB/s; it excludes @ref workload.
     KeystrokeLoad keystrokeLoad = KeystrokeLoad::Idle;
     std::chrono::seconds floodDuration { 3 }; ///< How long a flood lasts.
+    TabLoad tabs = TabLoad::None;             ///< Whether tabs are opened during a flood; excludes the rest.
     /// The executable whose `echo-child` and `serve` verbs the legs run; the running one if absent.
     std::optional<std::filesystem::path> executable;
     std::optional<std::filesystem::path> record; ///< Where to write the TSV record.
