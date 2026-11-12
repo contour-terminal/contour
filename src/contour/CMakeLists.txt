@@ -264,6 +264,7 @@ set(_header_files
     window/Utf16Offsets.hpp
     window/SidebarTree.hpp
     window/SwitcherStatus.hpp
+    window/SwitcherRows.hpp
     window/TabBarDropPolicy.hpp
     window/TabBarHitValue.hpp
     window/NodeDrag.hpp
@@ -290,6 +291,7 @@ set(_core_source_files
     session/HyperlinkTooltip.cpp
     window/SidebarTree.cpp
     window/SwitcherStatus.cpp
+    window/SwitcherRows.cpp
     window/TabLabel.cpp
 )
 # The executable entry point lives outside the object library so the test can supply its own main
@@ -330,7 +332,6 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsBackdrop.hpp
         window/ConnectPickerController.hpp
         window/SwitcherController.hpp
-        window/SwitcherRows.hpp
         window/SettingsWindowHost.hpp
         session/PreviewTranscript.hpp
         session/PastePreview.hpp
@@ -414,7 +415,6 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsPreview.cpp
         window/ConnectPickerController.cpp
         window/SwitcherController.cpp
-        window/SwitcherRows.cpp
         window/SettingsWindowHost.cpp
         session/Permission.cpp
         session/PermissionPrompt.cpp
@@ -1030,7 +1030,6 @@ if(CONTOUR_FRONTEND_GUI)
             test/SwitcherQml_test.cpp
             test/SidebarQml_test.cpp
             test/SidebarFakes.hpp
-            window/SwitcherRows_test.cpp
             platform/SpeechSynthesizer_test.cpp
             display/ContentScale_test.cpp
             display/InGridVisualsRendering_test.cpp
@@ -1772,6 +1771,8 @@ if(CONTOUR_TESTING)
         window/SidebarTree_test.cpp
         window/SwitcherStatus.cpp
         window/SwitcherStatus_test.cpp
+        window/SwitcherRows.cpp
+        window/SwitcherRows_test.cpp
         window/SidebarDropPolicy_test.cpp
         window/SidebarSelection_test.cpp
         window/CloseDialogTable_test.cpp
