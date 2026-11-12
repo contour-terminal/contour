@@ -66,6 +66,9 @@ env:
   # version for both: a launcher and a daemon of different wire versions refuse every exchange. It is part
   # of the store's cache key, so a bump starts from an empty store.
   PACE_VERSION: "0.7.0"
+  # The SHA-256 of that release's pace-<version>-Windows-AMD64.zip, checked before it is unpacked. Bumped
+  # together with PACE_VERSION: a digest that does not match makes the Windows job build without Pace.
+  PACE_WINDOWS_ZIP_SHA256: "3c76e2771ff9aed970a57fbacdb2dbd15f05f0606599d9b899944212255277d5"
   # The one place where a step or script learns that it builds a release; jobs use the same condition
   # in their `if:` (docs/internals/releasing.md).
   CONTOUR_BUILD_CHANNEL: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'prerelease' }}
@@ -1193,9 +1196,13 @@ jobs:
           # shipping a .dmg that cannot launch. Configuring also triggers the vcpkg
           # manifest install, which builds those dylibs against that same target.
           #
+          # USE_COMPILER_CACHE=OFF: this job has no cache, and a ccache found on the runner would be an empty
+          # one on every run.
+          #
           # Attempted twice, for the upstream download failures documented at macOSArm's copy.
           configure() {
             cmake --preset macos-package \
+                  -DUSE_COMPILER_CACHE=OFF \
                   -DCODE_SIGN_CERTIFICATE_ID="${{ steps.set_vars.outputs.CODE_SIGN_CERTIFICATE_ID }}" \
                   -DCONTOUR_MACOS_NOTARIZE="${{ steps.set_vars.outputs.NOTARIZE }}" \
                   -DCONTOUR_MACOS_STAPLE_APP="${{ steps.set_vars.outputs.STAPLE_APP }}"
@@ -1330,8 +1337,9 @@ jobs:
   windows:
     name: "Windows"
     runs-on: windows-latest
-    # About twice what a cold build takes, rather than GitHub's 360-minute default.
-    timeout-minutes: 150
+    # A cold store -- the first master run, every PACE_VERSION bump, an evicted entry -- compiles all of
+    # the tree: 127.7 minutes on the first run. That plus room, rather than GitHub's 360-minute default.
+    timeout-minutes: 200
     permissions:
       contents: read
       # vcpkg's binary cache is a NuGet feed on GitHub Packages.
@@ -1356,13 +1364,16 @@ jobs:
       # hit 99 % where ccache hit 0.5 to 2 % at full size (docs/internals/build-times.md). Restored by every
       # run, saved by master pushes alone, under a key per run that the prune job keeps one generation of.
       # A Pace step that fails does not fail the job: without the cache the build is slower, not wrong.
+      # Each has five minutes, since continue-on-error does not end a step that hangs.
       - name: "pace: restore the store"
+        timeout-minutes: 5
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ runner.temp }}\pace-store
           key: pace-store-windows-msvc-ci-${{ env.PACE_VERSION }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: pace-store-windows-msvc-ci-${{ env.PACE_VERSION }}-
       - name: "pace: install, and start pace-kv on the store"
+        timeout-minutes: 5
         continue-on-error: true
         shell: pwsh
         env:
@@ -1373,15 +1384,24 @@ jobs:
           $store = Join-Path $env:RUNNER_TEMP 'pace-store'
           gh release download "v$env:PACE_VERSION" --repo LASTRADA-Software/pace --pattern "pace-$env:PACE_VERSION-Windows-AMD64.zip" --dir $download
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Expand-Archive (Join-Path $download "pace-$env:PACE_VERSION-Windows-AMD64.zip") -DestinationPath $install
+          $zip = Join-Path $download "pace-$env:PACE_VERSION-Windows-AMD64.zip"
+          $digest = (Get-FileHash -Algorithm SHA256 $zip).Hash
+          if ($digest -ne $env:PACE_WINDOWS_ZIP_SHA256) {
+            Write-Output "::warning::$zip has SHA-256 $digest, not the pinned $env:PACE_WINDOWS_ZIP_SHA256; building without Pace"
+            exit 0
+          }
+          Expand-Archive $zip -DestinationPath $install
           $bin = (Get-ChildItem $install -Recurse -Filter pace-cc.exe | Select-Object -First 1).DirectoryName
           $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           New-Item -ItemType Directory -Force $store | Out-Null
           Get-ChildItem $store | Select-Object Name, Length
           # cmd owns the redirection, as real file handles the daemon inherits: redirected through
           # Start-Process they are pipes PowerShell reads, which break when this step's shell exits and take
-          # pace-kv with them. The cap is above what one plain build stores.
-          $line = "`"$bin\pace-kv.exe`" --storage=$store\contour-windows.cow --storage-shards=1 --storage-max-disk=4g > $env:RUNNER_TEMP\pace-kv.out 2> $env:RUNNER_TEMP\pace-kv.err"
+          # pace-kv with them. One plain build stores 335 MB, and Pace evicts only at the disk cap, so 1 GB holds
+          # the tree with room while two generations stay small beside the 10 GB Actions quota. The memory tier
+          # is capped too: it defaulted to about 4 GB of a runner whose compiles peak at 4.6 GiB, and the
+          # store is on disk anyway.
+          $line = "`"$bin\pace-kv.exe`" --storage=$store\contour-windows.cow --storage-shards=1 --storage-max-disk=1g --max-memory=1g > $env:RUNNER_TEMP\pace-kv.out 2> $env:RUNNER_TEMP\pace-kv.err"
           Start-Process -FilePath cmd.exe -ArgumentList '/c', $line -WindowStyle Hidden
           foreach ($attempt in 1..30) {
             if ((Test-NetConnection 127.0.0.1 -Port 6674 -WarningAction SilentlyContinue).TcpTestSucceeded) { "pace-kv answers after $attempt attempt(s)"; break }
@@ -1406,9 +1426,14 @@ jobs:
       # again, in a fresh tree, while it still says it is not using pace-cc. Neither fails the job: a cache
       # problem must not fail a required check, it only makes the build slower.
       - name: "pace: probe until a compile is served"
+        timeout-minutes: 5
         continue-on-error: true
         shell: pwsh
         run: |
+          if (-not (Get-Command pace-cc -ErrorAction SilentlyContinue)) {
+            Write-Output "::warning::pace-cc is not installed; the build runs without its cache"
+            exit 0
+          }
           $probe = Join-Path $env:RUNNER_TEMP 'pace-probe'
           New-Item -ItemType Directory -Force $probe | Out-Null
           Set-Location $probe
@@ -1417,7 +1442,7 @@ jobs:
           $env:PACE_BINARY_DIR = $probe
           $env:PACE_VERBOSE = "1"
           $env:PACE_NO_STATS = "1"
-          $env:PACE_TIMEOUT = "30s"
+          $env:PACE_TIMEOUT = "10s"
           $served = $false
           foreach ($attempt in 1..12) {
             $text = (& pace-cc cl /nologo /c ready.cpp /Foready.obj 2>&1 | Out-String)
@@ -1437,6 +1462,8 @@ jobs:
           foreach ($attempt in 1..3) {
             cmake --preset $env:CMAKE_PRESET 2>&1 | Tee-Object -FilePath $log
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            # Without pace-cc there is nothing to configure again for.
+            if (-not (Get-Command pace-cc -ErrorAction SilentlyContinue)) { break }
             if (-not (Select-String -Path $log -Pattern 'Not using pace-cc' -Quiet)) { break }
             if ($attempt -lt 3) {
               Write-Output "configure attempt $attempt did not select pace-cc; configuring again in a fresh tree"
@@ -1456,9 +1483,13 @@ jobs:
       # pace-kv is stopped before its store is saved. It has no clean stop on Windows but a console
       # Ctrl-C, which a detached process does not receive (docs/operations/known-limitations.md of Pace),
       # so it is given time to write out what its default `--storage-durability=batched` still holds and
-      # then killed; the trial lost nothing that way.
+      # then killed; the trial lost nothing that way. The step says whether pace-kv was still running: a
+      # daemon that refused its store (a damaged file) exits at once, and saving that same file again would
+      # hand it to every later run.
       - name: "pace: statistics, then stop pace-kv"
+        id: pace_stop
         if: ${{ !cancelled() }}
+        timeout-minutes: 5
         continue-on-error: true
         shell: pwsh
         run: |
@@ -1468,14 +1499,17 @@ jobs:
           $hits = if ($stats -match 'hits\s*:\s*(\d+)\s*\(([^)]*)\)') { "$($Matches[1]) ($($Matches[2]))" } else { '?' }
           "pace-cc: $hits hits of $compiles compiles" >> $env:GITHUB_STEP_SUMMARY
           Start-Sleep -Seconds 20
-          Get-Process pace-kv -ErrorAction SilentlyContinue | Stop-Process -Force
+          $daemon = Get-Process pace-kv -ErrorAction SilentlyContinue
+          "alive=$(if ($daemon) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
+          $daemon | Stop-Process -Force
           Start-Sleep -Seconds 2
           Get-ChildItem (Join-Path $env:RUNNER_TEMP 'pace-store') -ErrorAction SilentlyContinue | Select-Object Name, Length
           Get-Content (Join-Path $env:RUNNER_TEMP 'pace-kv.err') -Tail 15 -ErrorAction SilentlyContinue
           # A low hit rate is reported, never a failure.
           exit 0
       - name: "pace: save the store"
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+        if: ${{ !cancelled() && steps.pace_stop.outputs.alive == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+        timeout-minutes: 5
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ runner.temp }}\pace-store
@@ -1550,8 +1584,10 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: "Generate build files"
         shell: pwsh
+        # Without a launcher: the runner image's ccache would otherwise be picked up as a cache that is
+        # empty on every run.
         run: |
-          cmake --preset $env:CMAKE_PRESET
+          cmake --preset $env:CMAKE_PRESET -DUSE_COMPILER_CACHE=OFF
         env:
           VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
       - name: "Build"

@@ -120,10 +120,18 @@ Rules, in `.github/workflows/build.yml`:
   configuration on every event, so the entry a `master` run saves is the one the next pull request
   restores; no job switches its configuration by event. The production builds (`windows_package`,
   `macos_package`) have no cache at all: their objects carry link-time-optimization code that no
-  pull request compiles, and an entry of them was 3 GB.
-- **`evict-old-files: job`** drops every cached object the saving job did not touch, so an entry is
-  one working set -- the current tree -- and does not accumulate dead objects up to `max-size`.
-- **Keys are stable**: one per job, the action appends the timestamp.
+  pull request compiles, and an entry of them was 3 GB. They configure with `-DUSE_COMPILER_CACHE=OFF`,
+  so the ccache of the runner image is not picked up as a cache that is empty on every run.
+- **`evict-old-files: job`** drops every cached object the saving ccache job did not touch, so an
+  entry is one working set -- the current tree -- and does not accumulate dead objects up to
+  `max-size`. The Pace store has no such pass: `pace-kv` evicts only when the store reaches
+  `--storage-max-disk`, so the cap is what bounds it, set at about three times one plain build.
+- **Keys are stable**: one per job. The ccache action appends a timestamp to it; the Pace store's key
+  is spelled out in the workflow as `pace-store-windows-msvc-ci-<PACE_VERSION>-<run id>-<run attempt>`,
+  and restored by the prefix up to the version.
+- **The Pace store is saved only if `pace-kv` was still running** when the job stopped it. A daemon
+  that refused its store (a damaged file) has exited by then, and saving the same file again would
+  hand it to every later run.
 - **Hit-defeating inputs are neutralised workflow-wide**: `CCACHE_BASEDIR` (the checkout),
   `CCACHE_NOHASHDIR`, and `CCACHE_SLOPPINESS=include_file_mtime,include_file_ctime`. There is no
   `pch_defines` because there is no PCH.
@@ -224,8 +232,8 @@ that is the size of the first build under a cap that no longer bit, on 2026-11-1
 
 | Job | Key | Entry | `max-size` |
 |---|---|---:|---:|
-| Windows (MSVC), `pace-cc` | `pace-store-windows-msvc-ci-<Pace version>-<run>` | to be measured | 4 GB (`--storage-max-disk`) |
-| macOS (arm) | `ccache-macosArm-ci` | to be measured | 1500 MB |
+| Windows (MSVC), `pace-cc` | `pace-store-windows-msvc-ci-<Pace version>-<run>` | 335 MB | 1 GB (`--storage-max-disk`) |
+| macOS (arm) | `ccache-macosArm-ci` | 0.2 GB | 1500 MB |
 | Linux matrix, Clang on x86 | `ccache-ubuntu-24.04-Clang 22-...` | 0.7 GB | 900 MB |
 | Packaging for AppImage | `ccache-appimage` | 0.76 GB | 1200 MB |
 | `build_no_extensions` | `ccache-ubuntu2404-no-extensions` | 0.55 GB | 700 MB |
@@ -240,8 +248,9 @@ With the production builds' entries the Windows and macOS rows were 2.9 and 1.6 
 for one generation of each key, beside roughly 1.7 GB of Qt, vcpkg, FreeBSD, apt and lint-tool
 caches: 8.5 GB of the 10 GB quota. The production builds have no entry any more; the plain
 configuration's objects carry no link-time-optimization code, and a `Release` build has no debug
-information, so both rows are expected to shrink and are to be measured from the first `master` run
-after the split. The Pace store of the production build in the trial was 3.2 GB. The jobs without a
+information, so both rows shrink. The Pace store held 335 MB after one full plain build, where the
+production build's store in the trial was 3.2 GB, and the macOS entry held 0.2 GB where the
+production build's held 1.6 GB. The jobs without a
 cache run on `master` alone, so they cost no pull request anything; they get their caches back when
 the entries shrink.
 
@@ -265,7 +274,9 @@ the 4 minutes of compiles hit 99 %.
 
 The job installs the Pace release named by `PACE_VERSION` at the top of `build.yml` (launcher and
 daemon come from the one archive, and must be one version: a wire-version mismatch refuses every
-exchange), restores the store, and starts `pace-kv` on it through `cmd.exe`, which owns its output
+exchange) and checks the archive against the SHA-256 pinned beside it (`PACE_WINDOWS_ZIP_SHA256`;
+a mismatch builds without Pace), restores the store, and starts `pace-kv` on it, with its memory tier
+capped at 1 GB, through `cmd.exe`, which owns its output
 redirection: started by PowerShell with redirected output it died when the step's shell exited. It
 then waits until a compile is served, because `cmake/CompileCache.cmake` takes `pace-cc` only when its
 own two-second probe of the daemon succeeds and otherwise falls back to the uncached ccache of the
@@ -275,7 +286,13 @@ steps fails the job: without the cache the build is slower, not wrong. After the
 `pace-cc --show-stats`, writes the hits and compiles into the job summary, and stops `pace-kv` before
 the store is saved. `pace-kv` has no clean stop on Windows but a console Ctrl-C, which a detached
 process does not receive, so it is given 20 seconds to write out what its default
-`--storage-durability=batched` holds and then killed; the trial lost nothing that way.
+`--storage-durability=batched` holds and then killed; the trial lost nothing that way. Every Pace
+step has five minutes, since `continue-on-error` does not end a step that hangs.
+
+A cold store costs about two hours: the first plain run compiled all 1502 translation units (a
+median of 14.6 s each) in a build step of 110 minutes, and the job took 127.7. That recurs on the
+first `master` run after a `PACE_VERSION` bump and after GitHub evicts the entry, so the job may run
+200 minutes.
 
 Whenever a launcher is in use under MSVC, `cmake/CompileCache.cmake` sets
 `CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded` with `CMAKE_POLICY_DEFAULT_CMP0141=NEW` -- `/Z7`

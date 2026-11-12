@@ -67,8 +67,9 @@ runs:
       # [pwsh]: contour_test does not run the POSIX shells on Windows at all.
       #
       # ShellIntegrationShells.profileLine runs the very line the one-click install appends to a profile,
-      # which asks contour.exe for the script through a pipe: Release builds the GUI-subsystem
-      # contour.exe a user installs, so this is where that pipe is proved. Run outside ctest, it learns
+      # which asks contour.exe for the script through a pipe: this is the contour.exe a user installs (a
+      # console-subsystem executable, `WIN32_EXECUTABLE OFF`, whose manifest keeps a desktop launch from
+      # opening a console), so this is where that pipe is proved. Run outside ctest, it learns
       # the binary from CONTOUR_BINARY here, and SKIPs -- failing this step -- without it.
       shell: pwsh
       env:
