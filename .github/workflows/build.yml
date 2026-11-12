@@ -2203,6 +2203,14 @@ jobs:
           # a cache entry of the same name passed here -- so -DCMAKE_JOB_POOL_LINK=link defines a
           # pool nothing binds to, and rules.ninja still reads "contour_link_pool / depth = 2".
           test "${CC_NAME}" = "gcc" && CMAKE_EXE_LINKER_FLAGS="$CMAKE_EXE_LINKER_FLAGS -Wl,--no-keep-memory"
+          # Debug info for valgrind's line numbers, on the one leg whose build it reads: test_ubuntu2404_valgrind
+          # takes the test binaries of the GCC x86 leg, which only master builds. Not on the leg a pull request
+          # builds: the same flag there would give that leg's compiler cache different keys per event, and
+          # every pull request would miss what master saved.
+          if [[ "${{ matrix.runner }}" = "ubuntu-24.04" && "${CC_NAME}" = "gcc" ]]; then
+              CMAKE_C_FLAGS="$CMAKE_C_FLAGS -g"
+              CMAKE_CXX_FLAGS="$CMAKE_CXX_FLAGS -g"
+          fi
           if [[ "${CC_NAME}" = "clang" ]]; then
               CC_EXE="clang++"
               # CMAKE_CXX_FLAGS="-stdlib=libc++"
@@ -2215,6 +2223,7 @@ jobs:
               -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
               -DCMAKE_CXX_STANDARD=${{ matrix.cxx }} \
               -DCMAKE_CXX_COMPILER="${CC_EXE}-${CC_VER}" \
+              -DCMAKE_C_FLAGS="${CMAKE_C_FLAGS}" \
               -DCMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS}" \
               -DCMAKE_EXE_LINKER_FLAGS="${CMAKE_EXE_LINKER_FLAGS}" \
               -DCMAKE_INSTALL_PREFIX="/usr" \
