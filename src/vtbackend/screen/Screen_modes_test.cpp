@@ -647,6 +647,64 @@ TEST_CASE("DECST8C", "[screen]")
     }
 }
 
+TEST_CASE("CTC", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(35) } };
+    auto& screen = mock.terminal.primaryScreen();
+    auto const tabStopReport = [&]() {
+        screen.requestTabStops();
+        return e(mock.terminal.peekInput());
+    };
+    screen.moveCursorToColumn(ColumnOffset(3));
+
+    SECTION("0 sets a stop on the cursor's column")
+    {
+        mock.writeToScreen("\033[0W");
+        CHECK(tabStopReport() == e("\033P2$u1/4/9/17/25/33\033\\"));
+    }
+
+    SECTION("an omitted parameter sets a stop on the cursor's column")
+    {
+        mock.writeToScreen("\033[W");
+        CHECK(tabStopReport() == e("\033P2$u1/4/9/17/25/33\033\\"));
+    }
+
+    SECTION("2 clears the stop on the cursor's column")
+    {
+        screen.moveCursorToColumn(ColumnOffset(8));
+        mock.writeToScreen("\033[2W");
+        CHECK(tabStopReport() == e("\033P2$u1/17/25/33\033\\"));
+    }
+
+    SECTION("5 clears every stop")
+    {
+        mock.writeToScreen("\033[5W");
+        CHECK(tabStopReport() == e("\033P2$u\033\\"));
+        CHECK(!mock.terminal.tabs().isInitial());
+    }
+
+    SECTION("4 clears every stop, the active line's being all of them")
+    {
+        mock.writeToScreen("\033[4W");
+        CHECK(tabStopReport() == e("\033P2$u\033\\"));
+    }
+
+    SECTION("applies its parameters in turn")
+    {
+        mock.writeToScreen("\033[5;0W");
+        CHECK(tabStopReport() == e("\033P2$u4\033\\"));
+    }
+
+    SECTION("a line tab stop leaves the stops as they were")
+    {
+        for (auto const* const sequence: { "\033[1W", "\033[3W", "\033[6W", "\033[0;3W", "\033[7W" })
+        {
+            mock.writeToScreen(sequence);
+            CHECK(mock.terminal.tabs().isInitial());
+        }
+    }
+}
+
 TEST_CASE("DECSTR", "[screen]")
 {
     // Create a 10x3x5 grid and render a 7x5 image causing one a line-scroll by one.

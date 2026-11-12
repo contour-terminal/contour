@@ -123,6 +123,21 @@ enum class HorizontalTabClear : uint8_t
     UnderCursor,
 };
 
+/// CTC - Cursor Tabulation Control
+///
+/// The horizontal tab-stop operations one CTC parameter names.
+enum class CursorTabulationControl : uint8_t
+{
+    /// Ps = 0 (default): set a stop on the cursor's column.
+    SetUnderCursor,
+
+    /// Ps = 2: clear the stop on the cursor's column.
+    ClearUnderCursor,
+
+    /// Ps = 4 or 5: clear every stop.
+    ClearAll,
+};
+
 /// Input: CSI 16 t
 ///
 ///  Input: CSI 14 t (for text area size)
@@ -677,6 +692,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void backspace();                                  // BS
     void horizontalTabClear(HorizontalTabClear which); // TBC
     void horizontalTabSet();                           // HTS
+    /// Sets or clears horizontal tab stops (CTC).
+    /// @param operation The operation one CTC parameter names.
+    void cursorTabulationControl(CursorTabulationControl operation);
     /// Returns the tab stops to one every 8 columns, those beyond the page included (DECST8C).
     void resetTabStops();
 

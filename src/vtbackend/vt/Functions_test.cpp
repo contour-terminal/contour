@@ -308,6 +308,17 @@ TEST_CASE("Functions.CSI_DECST8C", "[Functions]")
     CHECK(*f == DECST8C);
 }
 
+TEST_CASE("Functions.CSI_CTC", "[Functions]")
+{
+    // CTC is CSI with final='W' and no leader, beside DECST8C's '?' leader and EPA's ESC W.
+    SupportedSequences const availableSequences;
+    auto const* f = vtbackend::select(
+        { .category = FunctionCategory::CSI, .leader = 0, .argc = 2, .intermediate = 0, .finalSymbol = 'W' },
+        availableSequences.activeSequences());
+    REQUIRE(f);
+    CHECK(*f == CTC);
+}
+
 namespace
 {
 /// Every selector that names a known definition: each one's own category, leader, intermediate and

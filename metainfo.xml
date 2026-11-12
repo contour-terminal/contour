@@ -348,6 +348,7 @@
           <li>Release packages are built with link-time optimization and each platform's exploit mitigations (Control Flow Guard and CET shadow-stack compatibility on Windows; on Linux the build now sets position-independent executables, full RELRO, the stack protector and fortified C library calls itself instead of relying on the compiler's defaults), and the Windows and macOS debug symbols are published beside them (#2250)</li>
           <li>Adds closing a tab with a middle click on it, as in a browser</li>
           <li>Adds DECST8C (<code>CSI ? 5 W</code>), which resets the horizontal tab stops to one every 8 columns</li>
+          <li>Adds CTC (<code>CSI Ps W</code>), which sets or clears horizontal tab stops: 0 sets one on the cursor's column, 2 clears it, 4 and 5 clear them all</li>
         </ul>
       </description>
     </release>

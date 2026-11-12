@@ -2446,6 +2446,18 @@ void Screen::horizontalTabClear(HorizontalTabClear which)
     }
 }
 
+void Screen::cursorTabulationControl(CursorTabulationControl operation)
+{
+    switch (operation)
+    {
+        case CursorTabulationControl::SetUnderCursor: horizontalTabSet(); break;
+        case CursorTabulationControl::ClearUnderCursor:
+            horizontalTabClear(HorizontalTabClear::UnderCursor);
+            break;
+        case CursorTabulationControl::ClearAll: horizontalTabClear(HorizontalTabClear::AllTabs); break;
+    }
+}
+
 void Screen::resetTabStops()
 {
     _terminal->tabs().reset();
@@ -4295,6 +4307,44 @@ namespace impl
                 case 3: screen.horizontalTabClear(HorizontalTabClear::AllTabs); break;
                 default: return ApplyResult::Invalid;
             }
+            return ApplyResult::Ok;
+        }
+
+        /// Maps one CTC parameter to the tab-stop operation it names.
+        /// @return The operation, or nothing for the line (vertical) tab stops and unknown values.
+        [[nodiscard]] std::optional<CursorTabulationControl> cursorTabulationControl(unsigned ps) noexcept
+        {
+            switch (ps)
+            {
+                case 0: return CursorTabulationControl::SetUnderCursor;
+                case 2: return CursorTabulationControl::ClearUnderCursor;
+                // Stops are shared by every line (ECMA-48 TSM single), so the active line's are all of them.
+                case 4:
+                case 5: return CursorTabulationControl::ClearAll;
+                default: return std::nullopt;
+            }
+        }
+
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
+        ApplyResult CTC(Sequence const& seq, Screen& screen)
+        {
+            if (seq.parameterCount() == 0)
+            {
+                screen.cursorTabulationControl(CursorTabulationControl::SetUnderCursor);
+                return ApplyResult::Ok;
+            }
+
+            // Every parameter is checked before any is applied, so a bad one leaves the stops as they were.
+            auto operations = std::vector<CursorTabulationControl> {};
+            for (auto const index: std::views::iota(size_t { 0 }, seq.parameterCount()))
+            {
+                auto const operation = cursorTabulationControl(seq.param<unsigned>(index));
+                if (!operation)
+                    return ApplyResult::Invalid;
+                operations.push_back(*operation);
+            }
+            for (auto const operation: operations)
+                screen.cursorTabulationControl(operation);
             return ApplyResult::Ok;
         }
 
@@ -8570,6 +8620,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SR: scrollRight(seq.paramOr<ColumnCount>(0, ColumnCount(1))); break;
         case SU: scrollUp(seq.paramPositiveOr<LineCount>(0, LineCount(1))); break;
         case TBC: return impl::TBC(seq, *this);
+        case CTC: return impl::CTC(seq, *this);
         case VPA: moveCursorToLine(seq.paramPositiveOr<LineOffset>(0, LineOffset { 1 }) - 1); break;
         case VPR: moveCursorDown(seq.paramPositiveOr<LineCount>(0, LineCount { 1 })); break;
         case WINMANIP: return impl::WINDOWMANIP(seq, *_terminal);

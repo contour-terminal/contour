@@ -66,6 +66,7 @@ constexpr inline auto CSIUENHCE = FunctionDocumentation { .mnemonic = "CSIUENHCE
 constexpr inline auto CSIUENTER = FunctionDocumentation { .mnemonic = "CSIUENTER", .comment = "Enter Extended keyboard mode" };
 constexpr inline auto CSIULEAVE = FunctionDocumentation { .mnemonic = "CSIULEAVE", .comment = "Leave Extended keyboard mode" };
 constexpr inline auto CSIUQUERY = FunctionDocumentation { .mnemonic = "CSIUQUERY", .comment = "Query Extended keyboard mode" };
+constexpr inline auto CTC = FunctionDocumentation { .mnemonic = "CTC", .comment = "Cursor Tabulation Control", .parameters = "Ps ; ...", .description = "Sets or clears horizontal tab stops, applying each Ps in turn: 0 (or omitted) = set a stop on the cursor's column, 2 = clear the stop on the cursor's column, 4 or 5 = clear every stop. Tab stops are shared by all lines (ECMA-48 TSM single), so 4 -- the stops of the active line -- clears them all as 5 does. The line (vertical) tab stops 1, 3 and 6 are not supported.", .notes = "ECMA-48. See also HTS, TBC and DECST8C.", .examples = "CSI 2 W" };
 constexpr inline auto CUB = FunctionDocumentation { .mnemonic = "CUB", .comment = "Move cursor backward" };
 constexpr inline auto CUD = FunctionDocumentation { .mnemonic = "CUD", .comment = "Move cursor down" };
 constexpr inline auto CUF = FunctionDocumentation { .mnemonic = "CUF", .comment = "Move cursor forward" };
@@ -775,6 +776,7 @@ constexpr inline auto CHA         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto CHT         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'I', VTType::VT100, documentation::CHT);
 constexpr inline auto CNL         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'E', VTType::VT100, documentation::CNL);
 constexpr inline auto CPL         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'F', VTType::VT100, documentation::CPL);
+constexpr inline auto CTC         = detail::CSI(std::nullopt, 0, ArgsMax, std::nullopt, 'W', VTType::VT100, documentation::CTC);
 constexpr inline auto CSIUENHCE   = detail::CSI('=', 0, 2, std::nullopt, 'u', VTExtension::Unknown, documentation::CSIUENHCE);
 constexpr inline auto CSIUENTER   = detail::CSI('>', 0, 1, std::nullopt, 'u', VTExtension::Unknown, documentation::CSIUENTER);
 constexpr inline auto CSIULEAVE   = detail::CSI('<', 0, 1, std::nullopt, 'u', VTExtension::Unknown, documentation::CSIULEAVE);
@@ -1072,6 +1074,7 @@ constexpr static auto allFunctionsArray() noexcept
         CBT,
         CHA,
         CHT,
+        CTC,
         CNL,
         CPL,
         CUB,
