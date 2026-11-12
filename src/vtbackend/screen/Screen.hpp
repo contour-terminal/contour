@@ -116,10 +116,10 @@ enum class LineFeedTarget : uint8_t
 /// This control function clears tab stops.
 enum class HorizontalTabClear : uint8_t
 {
-    /// Ps = 0 (default)
+    /// Ps = 3
     AllTabs,
 
-    /// Ps = 3
+    /// Ps = 0 (default)
     UnderCursor,
 };
 
