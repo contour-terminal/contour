@@ -1686,6 +1686,7 @@ if(CONTOUR_TESTING)
         command/MenuTree_test.cpp
         command/Shortcut_test.cpp
         command/SidebarMenus_test.cpp
+        command/SwitcherMenus_test.cpp
         command/TabMenus_test.cpp
         command/TitleBarContextMenu_test.cpp
         cli/AgentHookConfig_test.cpp
