@@ -143,15 +143,16 @@ jobs:
           $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           New-Item -ItemType Directory -Force D:\a\pace-store | Out-Null
           Get-ChildItem D:\a\pace-store | Select-Object Name, Length
-          $kv = Start-Process -FilePath "$bin\pace-kv.exe" -PassThru -WindowStyle Hidden `
-            -ArgumentList '--storage=D:\a\pace-store\contour-windows.cow','--storage-shards=1','--storage-max-disk=6g' `
-            -RedirectStandardOutput D:\a\pace-kv.out -RedirectStandardError D:\a\pace-kv.err
-          "pace-kv pid $($kv.Id)"; $kv.Id | Out-File D:\a\pace-kv.pid
+          # cmd owns the redirection, as real file handles the daemon inherits: redirected through
+          # Start-Process they are pipes PowerShell reads, and they break when this step's shell exits.
+          $line = "`"$bin\pace-kv.exe`" --storage=D:\a\pace-store\contour-windows.cow --storage-shards=1 --storage-max-disk=6g > D:\a\pace-kv.out 2> D:\a\pace-kv.err"
+          Start-Process -FilePath cmd.exe -ArgumentList '/c', $line -WindowStyle Hidden
           foreach ($attempt in 1..30) {
             if ((Test-NetConnection 127.0.0.1 -Port 6674 -WarningAction SilentlyContinue).TcpTestSucceeded) { "pace-kv answers after $attempt attempt(s)"; break }
             Start-Sleep -Seconds 2
           }
           & "$bin\pace-cc.exe" --version
+          Get-Process pace-kv | Select-Object Id, StartTime
       - name: setup environment
         shell: powershell
         id: set_vars
@@ -254,6 +255,9 @@ jobs:
           "int ready() { return 0; }" | Out-File -Encoding ascii ready.cpp
           $env:PACE_SOURCE_DIR = "D:\a\pace-probe"; $env:PACE_BINARY_DIR = "D:\a\pace-probe"
           $env:PACE_VERBOSE = "1"; $env:PACE_NO_STATS = "1"; $env:PACE_TIMEOUT = "30s"
+          "pace-kv alive at the start of this step:"; Get-Process pace-kv -ErrorAction SilentlyContinue | Select-Object Id, StartTime
+          "port 6674 open: $((Test-NetConnection 127.0.0.1 -Port 6674 -WarningAction SilentlyContinue).TcpTestSucceeded)"
+          Get-Content D:\a\pace-kv.err -Tail 5 -ErrorAction SilentlyContinue
           $served = $false
           foreach ($attempt in 1..12) {
             $started = Get-Date
@@ -288,7 +292,8 @@ jobs:
           Select-String -Path out/build/$env:CMAKE_PRESET/CMakeCache.txt -Pattern 'COMPILER_LAUNCHER|PACE_' | ForEach-Object { $_.Line }
           pace-cc --show-stats
           Start-Sleep -Seconds 20
-          Stop-Process -Id (Get-Content D:\a\pace-kv.pid) -Force -ErrorAction SilentlyContinue
+          "pace-kv alive before stopping:"; Get-Process pace-kv -ErrorAction SilentlyContinue | Select-Object Id, StartTime
+          Get-Process pace-kv -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep -Seconds 2
           Get-ChildItem D:\a\pace-store | Select-Object Name, Length
           "--- pace-kv stderr (tail)"; Get-Content D:\a\pace-kv.err -Tail 15 -ErrorAction SilentlyContinue
