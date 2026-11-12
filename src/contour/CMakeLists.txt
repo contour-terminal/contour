@@ -1135,8 +1135,8 @@ if(CONTOUR_FRONTEND_GUI)
         endif()
 
         # The suite's heavyweight sources: every one whose compile peaks at 3 GB or more with GCC at -O2 -g, the flags
-        # of CI's RelWithDebInfo builds, as the compiler's peak resident set compiling each source alone. Measured
-        # with GCC 16.2.1 on 2026-10-30, over every source of src/contour: those listed here peak at 3.0 to 4.0 GB,
+        # of CI's former RelWithDebInfo builds (they build Release, -O3, now), as the compiler's peak resident set
+        # compiling each source alone. Measured with GCC 16.2.1 on 2026-10-30, over every source of src/contour: those listed here peak at 3.0 to 4.0 GB,
         # every other test source at 2.9 GB or less. TerminalSessionExtensions_test (2.9 GB) stays for the guest paths
         # only this library defines. The line was 2 GB until the window and session headers alone took a source that
         # includes them to 2.5 GB, which put 45 sources in the pool and made it the build's serial tail. One at a
@@ -2333,7 +2333,6 @@ else()
         # Generator: Debian
         # see https://cmake.org/cmake/help/v3.6/module/CPackDeb.html#variable:CPACK_DEBIAN_PACKAGE_DEPENDS
         set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/contour-terminal/contour/")
-        set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
         set(CPACK_DEB_COMPONENT_INSTALL ON)
         set(CPACK_COMPONENTS_ALL "contour")
 
@@ -2437,21 +2436,13 @@ if(WIN32)
 endif()
 
 if(UNIX)
-    # CPackDeb is broken. If no components are used, it does not create a ddeb...
+    # The component names the .deb: with CPACK_DEB_COMPONENT_INSTALL, the package is
+    # <name>-<version>-Linux-contour.deb, the name the workflow renames from.
     cpack_add_component(contour
         DISPLAY_NAME "${CPACK_PACKAGE_NAME}"
         REQUIRED
     )
 endif()
-
-# debug_symbols (the PDB, the dSYM) is published beside the packages, never inside one. EXCLUDE_FROM_ALL
-# only keeps a component out of an unnamed install: CPack installs every component it lists by name, and
-# without a list of its own it lists them all. So name the components of the package here, for every
-# generator; scripts/check-production-build.py checks the generated CPackConfig.cmake.
-if(NOT DEFINED CPACK_COMPONENTS_ALL)
-    get_cmake_property(CPACK_COMPONENTS_ALL COMPONENTS)
-endif()
-list(REMOVE_ITEM CPACK_COMPONENTS_ALL debug_symbols)
 
 include(CPack)
 

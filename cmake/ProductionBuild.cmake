@@ -18,37 +18,13 @@ include(CheckCXXCompilerFlag)
 include(CheckIPOSupported)
 include(CheckLinkerFlag)
 
-## Registers the check of a production build's main binary and the install rules of its debug symbols;
-## a no-op unless CONTOUR_PRODUCTION_BUILD is ON. The symbols go into the install component
-## `debug_symbols`, which is EXCLUDE_FROM_ALL and kept out of every CPack component list (see
-## src/contour/CMakeLists.txt), so no package carries it: CI installs it on its own
-## (`--component debug_symbols`) and publishes it beside the package.
+## Registers the check of a production build's main binary; a no-op unless CONTOUR_PRODUCTION_BUILD is ON.
 ## Call it once: the check is registered as the test `check_production_build`, the name CI selects.
-## @param target The executable target whose linked binary and symbols the check and the install read.
+## @param target The executable target whose linked binary the check reads.
 function(contour_production_executable target)
     if(NOT CONTOUR_PRODUCTION_BUILD)
         return()
     endif()
-    set(_symbols "")
-    if(CONTOUR_PRODUCTION_SYMBOLS STREQUAL "pdb")
-        set(_symbols "$<TARGET_PDB_FILE:${target}>")
-        install(FILES "${_symbols}" DESTINATION . COMPONENT debug_symbols EXCLUDE_FROM_ALL)
-    elseif(CONTOUR_PRODUCTION_SYMBOLS STREQUAL "dsym")
-        # dsymutil reads the DWARF from the objects, and ThinLTO deletes its temporary ones at link time:
-        # keep them beside the binary so the dSYM is not empty.
-        set(_symbols "${CMAKE_CURRENT_BINARY_DIR}/${target}.dSYM")
-        set(_lto_objects "${CMAKE_CURRENT_BINARY_DIR}/${target}.lto")
-        file(MAKE_DIRECTORY "${_lto_objects}")
-        target_link_options(${target} PRIVATE "LINKER:-object_path_lto,${_lto_objects}")
-        find_program(CONTOUR_DSYMUTIL dsymutil REQUIRED)
-        add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND "${CONTOUR_DSYMUTIL}" "$<TARGET_FILE:${target}>" -o "${_symbols}"
-            COMMENT "Extracting the debug symbols of ${target}"
-            VERBATIM)
-        install(DIRECTORY "${_symbols}" DESTINATION . COMPONENT debug_symbols EXCLUDE_FROM_ALL)
-    endif()
-    # Symbols "none" (Linux): CPack's .ddeb and Fedora's -debuginfo split them, and the check's
-    # .debug_info row proves LTO kept them.
     if(NOT CONTOUR_TESTING)
         return()
     endif()
@@ -61,9 +37,6 @@ function(contour_production_executable target)
         "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/check-production-build.py"
         --manifest "${PROJECT_BINARY_DIR}/production-build.json"
         --binary "$<TARGET_FILE:${target}>")
-    if(_symbols)
-        list(APPEND _command --symbols "${_symbols}")
-    endif()
     add_test(NAME check_production_build COMMAND ${_command})
     set_tests_properties(check_production_build PROPERTIES LABELS production)
 endfunction()
@@ -74,15 +47,14 @@ endif()
 
 # --- the platform table --------------------------------------------------------------------------
 
-# <platform key>|<binary format>|<symbols>|<probe tool>|<compile flag the build type lacks>|<flag it replaces>;
-# "-" for none.
-# symbols: pdb (a PDB beside the binary), dsym (a dSYM bundle made from it), none (the distribution's
-# packaging splits them). The probe tool is what scripts/check-production-build.py runs on the binary.
-# RelWithDebInfo inlines only __inline functions (/Ob1); Release's /Ob2 inlines anything suitable.
+# <platform key>|<binary format>|<probe tool>; "-" for no probe. The probe tool is what
+# scripts/check-production-build.py runs on the binary. A Mach-O binary has no probe: its only checked
+# properties were its debug symbols, which no build produces any more, so macOS is checked through the
+# compile database alone.
 set(_contour_platforms
-    "msvc|pe|pdb|dumpbin|/Ob2|/Ob1"
-    "linux|elf|none|readelf|-|-"
-    "macos|macho|dsym|dwarfdump|-|-")
+    "msvc|pe|dumpbin"
+    "linux|elf|readelf"
+    "macos|macho|-")
 
 set(_contour_keys "")
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
@@ -104,14 +76,7 @@ foreach(_row IN LISTS _contour_platforms)
     list(GET _fields 0 _key)
     if(_key IN_LIST _contour_keys)
         list(GET _fields 1 _contour_format)
-        list(GET _fields 2 CONTOUR_PRODUCTION_SYMBOLS)
-        list(GET _fields 3 _contour_probe)
-        list(GET _fields 4 _contour_added_flag)
-        list(GET _fields 5 _contour_replaced_flag)
-        if(_contour_replaced_flag STREQUAL "-")
-            set(_contour_added_flag "")
-            set(_contour_replaced_flag "")
-        endif()
+        list(GET _fields 2 _contour_probe)
     endif()
 endforeach()
 
@@ -127,14 +92,6 @@ if("macos" IN_LIST _contour_keys)
     # CMake applies the IPO option to the C and C++ sources only; the Objective-C and Objective-C++ ones
     # (src/text_shaper/CoreTextLocator.mm, ...) would otherwise stay out of the link-time optimization.
     add_compile_options("$<$<COMPILE_LANGUAGE:OBJC,OBJCXX>:${CMAKE_CXX_COMPILE_OPTIONS_IPO}>")
-endif()
-
-# --- the build type's own flags ------------------------------------------------------------------
-
-if(_contour_replaced_flag)
-    foreach(_var CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-        string(REPLACE "${_contour_replaced_flag}" "${_contour_added_flag}" ${_var} "${${_var}}")
-    endforeach()
 endif()
 
 # --- the flag table ------------------------------------------------------------------------------
@@ -196,11 +153,15 @@ endforeach()
 
 # --- the manifest scripts/check-production-build.py reads ----------------------------------------
 
-list(APPEND _contour_compile_flags ${CMAKE_CXX_COMPILE_OPTIONS_IPO} ${_contour_added_flag})
-get_filename_component(_contour_linker_dir "${CMAKE_LINKER}" DIRECTORY)
-get_filename_component(_contour_readelf_dir "${CMAKE_READELF}" DIRECTORY)
-find_program(CONTOUR_PRODUCTION_PROBE ${_contour_probe}
-    HINTS "${_contour_linker_dir}" "${_contour_readelf_dir}" REQUIRED)
+list(APPEND _contour_compile_flags ${CMAKE_CXX_COMPILE_OPTIONS_IPO})
+set(_contour_tool "")
+if(NOT _contour_probe STREQUAL "-")
+    get_filename_component(_contour_linker_dir "${CMAKE_LINKER}" DIRECTORY)
+    get_filename_component(_contour_readelf_dir "${CMAKE_READELF}" DIRECTORY)
+    find_program(CONTOUR_PRODUCTION_PROBE ${_contour_probe}
+        HINTS "${_contour_linker_dir}" "${_contour_readelf_dir}" REQUIRED)
+    file(TO_CMAKE_PATH "${CONTOUR_PRODUCTION_PROBE}" _contour_tool)
+endif()
 
 ## Renders a list as a JSON array of strings.
 function(_contour_json_array out)
@@ -218,9 +179,7 @@ set(_contour_first_party_dirs src examples)
 
 file(TO_CMAKE_PATH "${PROJECT_SOURCE_DIR}" _contour_source_dir)
 file(TO_CMAKE_PATH "${PROJECT_BINARY_DIR}" _contour_binary_dir)
-file(TO_CMAKE_PATH "${CONTOUR_PRODUCTION_PROBE}" _contour_tool)
 _contour_json_array(_contour_compile_json ${_contour_compile_flags})
-_contour_json_array(_contour_replaced_json ${_contour_replaced_flag})
 
 set(_contour_manifest "{}")
 string(JSON _contour_manifest SET "${_contour_manifest}" format "\"${_contour_format}\"")
@@ -230,8 +189,9 @@ _contour_json_array(_contour_first_party_json ${_contour_first_party_dirs})
 string(JSON _contour_manifest SET "${_contour_manifest}" first_party_dirs "${_contour_first_party_json}")
 string(JSON _contour_manifest SET "${_contour_manifest}" third_party_dirs "[\"_deps\",\"vendor\"]")
 string(JSON _contour_manifest SET "${_contour_manifest}" compile_flags "${_contour_compile_json}")
-string(JSON _contour_manifest SET "${_contour_manifest}" replaced_flags "${_contour_replaced_json}")
-string(JSON _contour_manifest SET "${_contour_manifest}" tool "\"${_contour_tool}\"")
+if(_contour_tool)
+    string(JSON _contour_manifest SET "${_contour_manifest}" tool "\"${_contour_tool}\"")
+endif()
 file(WRITE "${PROJECT_BINARY_DIR}/production-build.json" "${_contour_manifest}\n")
 
 # --- no first-party shared or module library -----------------------------------------------------
