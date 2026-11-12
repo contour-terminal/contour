@@ -118,6 +118,47 @@ Rules, in `.github/workflows/build.yml`:
   `CCACHE_NOHASHDIR`, and `CCACHE_SLOPPINESS=include_file_mtime,include_file_ctime`. There is no
   `pch_defines` because there is no PCH.
 - **The tidy-diff job has no cache.** It builds generated headers only and compiles nothing.
+- **One generation per key.** The action saves a new entry per run and deletes none, so on `master`
+  the job `prune_compiler_caches` waits for every job that saves one and then
+  `scripts/prune-cache-generations.py` deletes each ccache key's entries but the newest. Nothing
+  else in the cache store is touched. `scripts/check-workflows.py` fails when a job that saves a
+  cache is missing from the prune job's `needs`.
+- **A `master` run has a concurrency group per commit**, so it starts at once and is never
+  cancelled. With one group for the branch each run queued behind the last and a third push
+  cancelled the one still pending, which left a merge's caches hours late or missing.
+- **The full-tree clang-tidy is a workflow of its own** (`clang-tidy.yml`). Inside `Build` its three
+  to five hours were how long a `master` run stayed in progress.
+- **A key no pull request restores has no cache** while the quota is tight. The Linux matrix's GCC
+  legs and its arm Clang leg, the 26.04 leg of the daemon package, the Ubuntu packaging job and the
+  full-tree clang-tidy all run on `master` alone.
+
+### Why the cache missed in November 2026
+
+On 2026-11-11 a pull request took about two hours again. `ccache -s` from pull-request runs
+43010602755 and 42991625301 and `master` runs 42989124457 and 43087533177:
+
+| Job | Hit rate, pull requests | Hit rate, `master` | Cache size / `max-size` | Cleanups per run |
+|---|---:|---:|---:|---:|
+| Windows | 1.3-1.7 % | 2.1-2.6 % | 2.0-2.1 GB / 1.5 GB (136-138 %) | 1075-1164 |
+| macOS | 3.0-3.8 % | 5.2-5.6 % | 1.1 GB / 0.8 GB (135-140 %) | 971-1035 |
+| Linux Clang 22 | 52 % | 82 % | 0.7 GB / 0.7 GB (101 %) | 62-192 |
+| `contour-daemon` package, 24.04 | 68 % | 91 % | 0.4 GB / 0.5 GB (81 %) | 0-35 |
+
+- **Windows and macOS recompiled nearly everything on every run, `master` included**, although
+  the entry was restored and minutes old. Only these two jobs sat far over `max-size`. The daemon
+  package is a production build as well, sat under its cap and hit 91 %, so link-time optimization
+  as such does not defeat the cache. Over-cap eviction is the leading explanation and not a proven
+  one: 2 % is lower than eviction alone obviously accounts for. The caps were raised above the
+  working sets; the hit rates of the runs after that decide it.
+- **`master` did not seed reliably.** Its runs were serialised behind a clang-tidy job of 178 to
+  293 minutes; of ten completed runs five were cancelled and five failed. Branch protection is
+  strict, so a pull request builds on a `master` newer than the commit its cache came from, which
+  is the gap between 82 % and 52 % on Linux.
+- **Generations piled up.** Two entries each of Windows and macOS were 6.2 GB of the 10 GB quota;
+  pull requests kept the older one recently used, so GitHub evicted other keys instead
+  (`ccache-appimage` in three runs of three, Linux Clang and the daemon package in one).
+- Link-time optimization itself (the production build on Windows, macOS, AppImage and the daemon
+  package) cost roughly 20 of 103 build minutes on Windows and 10 of 97 on macOS.
 
 ### Sizes
 
@@ -130,28 +171,36 @@ Measured with ccache 4.9.1 (the version the Ubuntu 24.04 runner installs), compr
 | GCC 16.2, `gcc-release` | 780 of ~1290 before a `-Werror=bidi-chars` stop in `ExtensionConsent_test.cpp` | 0.53 GB, about 0.9 GB extrapolated to the full tree |
 
 The brief expected 2-3 GB; the real figure is a fifth of that, because ccache compresses and
-debug info compresses well. `max-size` is about 1.3x the tree:
+debug info compresses well. A CI entry is larger than the local figure, and a cap below what one
+build produces is worse than no cap: ccache evicts what the same build is about to need. So
+`max-size` sits about 1.3x above the size each job's `ccache -s` reported on 2026-11-11:
 
-| Job | Key | `max-size` |
-|---|---|---:|
-| Linux matrix, Clang (x86, arm) | `ccache-<runner>-Clang 22-...` | 700 MB each |
-| Linux matrix, GCC (x86, arm) | `ccache-<runner>-GCC 15-...` | 1200 MB each |
-| Packaging, Ubuntu 26.04 | `ccache-ubuntu-26.04` | 1200 MB |
-| `check_clang_tidy` (push/merge group) | `ccache-ubuntu2404-clang-tidy` | 700 MB |
-| `build_no_extensions` | `ccache-ubuntu2404-no-extensions` | 700 MB |
-| `package_daemon_for_Ubuntu` (24.04; also 26.04 off pull requests) | `ccache-ubuntu<rel>-headless` | 500 MB each |
-| macOS (arm) | `ccache-macosArm-r1` | 800 MB |
-| Windows (MSVC) | `ccache-windows-msvc-release` | 1500 MB |
+| Job | Key | Entry | `max-size` |
+|---|---|---:|---:|
+| Windows (MSVC) | `ccache-windows-msvc-release` | 2.1 GB | 2700 MB |
+| macOS (arm) | `ccache-macosArm-r1` | 1.1 GB | 1500 MB |
+| Linux matrix, Clang on x86 | `ccache-ubuntu-24.04-Clang 22-...` | 0.7 GB | 900 MB |
+| Packaging for AppImage | `ccache-appimage` | 0.76 GB | 1200 MB |
+| `build_no_extensions` | `ccache-ubuntu2404-no-extensions` | 0.55 GB | 700 MB |
+| `package_daemon_for_Ubuntu`, 24.04 | `ccache-ubuntu24.04-headless` | 0.33 GB | 500 MB |
+| Linux matrix: GCC (x86, arm), Clang on arm | none | | |
+| `package_daemon_for_Ubuntu`, 26.04 | none | | |
+| Packaging, Ubuntu 26.04 | none | | |
+| Full-tree clang-tidy (`clang-tidy.yml`) | none | | |
 
-The caps sum to 9.7 GB (counting both 500 MB entries of the daemon package job, 24.04 and 26.04); the entries should settle near 70 % of that, about 6.8 GB, beside roughly
-1.5 GB of Qt, vcpkg, FreeBSD and apt caches. That is inside the 10 GB quota with little to spare: a
-second `master` push before the first generation is evicted costs the oldest entries first. The guard
-jobs (`package_daemon_for_Ubuntu`, `build_no_extensions`, tidy) were not turned into read-only restorers of the
-Linux Clang key as the plan suggested: they compile with a different preset, so their command lines
-differ and a restored Clang-matrix entry would hit almost nothing. If eviction churn shows, drop the
-tidy cache first -- it caches compiles only, and the tidy runs themselves are not cacheable.
-The Windows and GCC figures are estimates, not measurements; revisit them from the first `master` run's
-`ccache -s`.
+One generation of each is about 5.5 GB, beside roughly 1.7 GB of Qt, vcpkg, FreeBSD, apt and
+lint-tool caches: 7.2 GB of the 10 GB quota. The jobs without a cache run on `master` alone, so
+they cost no pull request anything; they get their caches back when the entries shrink.
+
+That headroom is not enough for a second generation, and there is one for a while on every
+`master` build: from the moment a job saves its new entry until the prune job has run. In that
+window the store is over the quota and GitHub evicts whatever was read least recently, which has
+been the FreeBSD image and the apt and lint-tool caches rather than a compiler cache -- a slower
+`master` job, not a slower pull request. Smaller entries are what closes the window.
+
+The guard jobs (`package_daemon_for_Ubuntu`, `build_no_extensions`) are not read-only restorers of
+the Linux Clang key: they compile with a different preset, so their command lines differ and a
+restored Clang-matrix entry would hit almost nothing.
 
 ### Windows
 
@@ -170,8 +219,8 @@ A pull request runs the platform builds and tests -- `Windows`, `macOSArm` (buil
 signing, no packaging) and one Linux leg (Clang 22 on x86, built with `-Werror`) -- plus the guard
 builds, the lint jobs and clang-tidy on the changed lines. Master pushes and the merge queue run
 the rest: the other three compiler legs, packaging, valgrind, conformance, bench-headless,
-notcurses, FreeBSD and the full-tree clang-tidy. A release tag runs everything a master push runs,
-FreeBSD and the full-tree clang-tidy included; the static build runs on master pushes and release
+notcurses and FreeBSD, and the full-tree clang-tidy in its own workflow (`clang-tidy.yml`). A release
+tag runs everything a master push runs, FreeBSD and the full-tree clang-tidy included; the static build runs on master pushes and release
 tags, never in the merge queue.
 
 The daemon packages are the two exceptions in kind. `package_daemon_for_Ubuntu` (the Qt-free
@@ -184,8 +233,8 @@ rawhide never blocks a release.
 A required status check is never gated off pull requests. `tests matrix` and
 `Ubuntu Linux 24.04 post-check` always run and treat a skipped dependency as passed (a failed or
 cancelled one still fails them). `scripts/check-workflows.py` enforces both rules, and its
-`--self-test` pins them against fixtures. A master run is never cancelled by the next push
-(`cancel-in-progress` is off on master), so it finishes and saves the compiler cache.
+`--self-test` pins them against fixtures. A master run is never cancelled and never queued behind
+another (its concurrency group is its own commit), so it finishes and saves the compiler cache.
 
 ## Results
 
