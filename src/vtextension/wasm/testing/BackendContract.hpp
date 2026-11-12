@@ -592,6 +592,24 @@ void callsExport()
     CHECK(context.calls().empty());
 }
 
+/// A WASI reactor's `_initialize` has run exactly once when instantiate() returns.
+template <typename T>
+void instantiateInitializesReactor()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, vtextension::testing::WasiReactorModule);
+    auto context = RecordingHostContext {};
+    auto const instance = instantiate(*module, context);
+
+    auto count = std::array<uint32_t, 1> {};
+    REQUIRE(instance->call(functionOf(*instance, "initializations"), count).has_value());
+    CHECK(count[0] == 1);
+    auto argv = std::array<uint32_t, 2> { 0, 0 };
+    CHECK(instance->call(functionOf(*instance, "load"), argv).has_value());
+}
+
 /// A memory view lies inside the memory, or there is none.
 template <typename T>
 void memoryViewIsBoundsChecked()
@@ -954,6 +972,7 @@ void wasiStdioGoesNowhere()
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                     \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)                 \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instantiateInitializesReactor)        \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryViewIsBoundsChecked)            \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)        \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArgumentsInOrder) \

@@ -15,7 +15,8 @@ struct ExtensionLimits
     /// How long one render or update call may run before the watchdog terminates it.
     std::chrono::milliseconds callDeadline { 50 };
 
-    /// How long instantiation plus the extension's load call may run.
+    /// How long the extension's load call may run. Instantiation, a WASI reactor's `_initialize`
+    /// included, runs under none: a pre-existing gap a follow-up will close.
     std::chrono::milliseconds loadDeadline { 500 };
 
     /// The cap on one instance's linear memory, fixed at instantiation.

@@ -296,11 +296,10 @@ std::expected<void, ExtensionError> Instance::instantiate()
                          .realloc = *realloc,
                          .postLoad = lookup("cabi_post_load"),
                          .postUpdate = lookup("cabi_post_update"),
-                         .postRender = lookup("cabi_post_render"),
-                         .initialize = lookup("_initialize") };
-    if (!_exports.initialize)
-        return {};
-    return guarded(_limits.loadDeadline, [&] { return callExport(*_exports.initialize, {}); });
+                         .postRender = lookup("cabi_post_render") };
+    // A WASI reactor's `_initialize` already ran, inside the backend's instantiate(): calling it again
+    // would run it twice, which wasi-libc's traps on (IWasmModule::instantiate).
+    return {};
 }
 
 WatchToken Instance::watchToken() noexcept

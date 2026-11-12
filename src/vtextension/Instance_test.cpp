@@ -405,6 +405,43 @@ TEST_CASE("CompiledExtension.wasi", "[vtextension]")
           == ExtensionError::WorldMismatch);
     CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::WasiPathOpenModule)))
           == ExtensionError::WorldMismatch);
+    // A WASI module's `_initialize` must take and return nothing; the runtime's loader refuses any other
+    // before the world check sees it.
+    CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::WasiReactorInitializerSignatureModule)))
+          == ExtensionError::InvalidComponent);
+}
+
+TEST_CASE("Instance.wasiReactor", "[vtextension]")
+{
+    // A WASI reactor's `_initialize` runs once, while instantiating; the instance does not run it again,
+    // which wasi-libc's traps on: every Rust guest built with Rust 1.100 or newer is such a reactor.
+    SECTION("a reactor is initialized exactly once, before load")
+    {
+        auto guest = RunningGuest(toModule(vtextension::testing::WasiReactorModule));
+        CHECK(guest.loadAndRender({}).empty());
+        CHECK(guest.instance().update(TimerFired {}).value() == RenderRequest::None);
+        CHECK_FALSE(guest.instance().fault().has_value());
+    }
+    SECTION("a module that imports WASI but exports no _initialize needs none")
+    {
+        auto guest = RunningGuest(toModule(vtextension::testing::WasiAllowedModule));
+        CHECK(guest.loadAndRender({}).empty());
+        CHECK_FALSE(guest.instance().fault().has_value());
+    }
+    SECTION("a reactor whose _initialize traps is not instantiated")
+    {
+        // It traps inside the backend's instantiation, which reports no more than that it failed.
+        auto const backend = wasm::makeDefaultBackend();
+        auto const engine = Engine::create(*backend, ExtensionLimits {});
+        REQUIRE(engine.has_value());
+        auto const compiled =
+            CompiledExtension::load(**engine, toModule(vtextension::testing::WasiReactorTrappingModule));
+        REQUIRE(compiled.has_value());
+        auto services = vtextension::testing::FakeHostServices {};
+        auto clock = core::platform::ManualClock {};
+        CHECK(errorOf(Instance::create(**engine, **compiled, services, clock, ExtensionLimits {}))
+              == ExtensionError::InvalidComponent);
+    }
 }
 
 TEST_CASE("Instance.realloc", "[vtextension]")
