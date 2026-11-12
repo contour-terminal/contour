@@ -246,10 +246,35 @@ jobs:
         # @see the same step on Linux: the bundled extensions and the test guests are Rust.
         shell: bash
         run: ./scripts/install-rust-wasm.sh
+      - name: "pace: probe until a compile is served"
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force D:\a\pace-probe | Out-Null
+          Set-Location D:\a\pace-probe
+          "int ready() { return 0; }" | Out-File -Encoding ascii ready.cpp
+          $env:PACE_SOURCE_DIR = "D:\a\pace-probe"; $env:PACE_BINARY_DIR = "D:\a\pace-probe"
+          $env:PACE_VERBOSE = "1"; $env:PACE_NO_STATS = "1"; $env:PACE_TIMEOUT = "30s"
+          $served = $false
+          foreach ($attempt in 1..12) {
+            $started = Get-Date
+            $text = (& pace-cc cl /nologo /c ready.cpp /Foready.obj 2>&1 | Out-String)
+            "attempt ${attempt}: exit $LASTEXITCODE after $([int]((Get-Date) - $started).TotalMilliseconds) ms"; $text
+            if ($text -match 'pace-cc: (HIT|MISS) key=') { $served = $true; break }
+            Start-Sleep -Seconds 5
+          }
+          if (-not $served) { Write-Host "::warning::pace-cc never reported HIT or MISS in the probe" }
+          exit 0
       - name: "Generate build files"
         shell: pwsh
         run: |
-          cmake --preset ${{ env.CMAKE_PRESET }}
+          foreach ($attempt in 1..3) {
+            cmake --preset ${{ env.CMAKE_PRESET }} 2>&1 | Tee-Object -FilePath D:\a\configure.log
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if (-not (Select-String -Path D:\a\configure.log -Pattern 'Not using pace-cc' -Quiet)) { break }
+            Write-Host "::warning::configure attempt $attempt did not select pace-cc"
+            if ($attempt -lt 3) { Remove-Item -Recurse -Force out/build/$env:CMAKE_PRESET; Start-Sleep -Seconds 5 }
+          }
+          Select-String -Path D:\a\configure.log -Pattern '\[cache\]' | ForEach-Object { $_.Line }
         env:
           VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
       - name: "Build"
