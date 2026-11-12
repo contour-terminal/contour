@@ -102,6 +102,45 @@ TEST_CASE("closing an SSH session wakes the pre-login reader", "[ssh][threading]
     CHECK_FALSE(reader.get());
 }
 
+TEST_CASE("closing an SSH session wakes a reader that waits without a timeout", "[ssh][threading]")
+{
+    // A reader parked in read() with no timeout, as the terminal's reader thread is when the tab is closed.
+    auto session = vtpty::SshSession { refusingHost("user"), {} };
+
+    SECTION("after a failed connection whose message has been read")
+    {
+        // Nothing listens on port 1, so the connection is refused.
+        std::ignore = session.start();
+        auto buffers = crispy::BufferObjectPool<char> { 4096 };
+        auto storage = buffers.allocateBufferObject();
+        while (session.read(*storage, std::chrono::milliseconds { 0 }, 4096).has_value())
+        {
+            // Drain the injected text.
+        }
+    }
+
+    SECTION("before the session has left its initial state")
+    {
+    }
+
+    auto waiting = std::promise<void> {};
+    auto entered = waiting.get_future();
+    auto reader = std::async(std::launch::async, [&] {
+        auto buffers = crispy::BufferObjectPool<char> { 4096 };
+        auto storage = buffers.allocateBufferObject();
+        waiting.set_value();
+        return session.read(*storage, std::nullopt, 4096).has_value();
+    });
+    entered.wait();
+    session.close();
+
+    auto const status = reader.wait_for(std::chrono::seconds { 5 });
+    if (status != std::future_status::ready)
+        session.wakeupReader(); // Should close() stop waking it: fail the check below, do not hang.
+    CHECK(status == std::future_status::ready);
+    CHECK_FALSE(reader.get());
+}
+
 TEST_CASE("SSH injected text is read no further than the buffer's free space", "[ssh]")
 {
     // The user name is echoed in the "Starting SSH session" text start() injects, so a long one makes
