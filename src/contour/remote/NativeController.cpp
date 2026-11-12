@@ -2112,26 +2112,12 @@ void NativeController::forgetBinding(uint64_t session, uint64_t serial)
     auto const lock = std::lock_guard { _mutex };
     --_livePtys;
     auto const binding = _bindings.find(session);
-    // A detached binding's pty: the session id, if bound at all, is a new session's now.
+    // A detached binding's pty, or one released as its pane was detached: the session id, if bound at all, is
+    // another pane's.
     if (binding == _bindings.end() || binding->second.serial != serial)
         return;
-    _bindings.erase(binding);
+    dropBinding(binding);
     _inputEchoes.erase(session); // a session id is never reused within a run
-    // The pane is gone: its grid must not keep contributing to a composed client area, and the
-    // sent-size bookkeeping for it is meaningless (a session id is never reused).
-    {
-        auto const geometryLock = std::lock_guard { _geometryMutex };
-        _paneSizes.erase(session);
-        _paneSerials.erase(session);
-        _lastReportedPaneSizes.erase(session);
-        // The anchor is the third thing this pane owned: it selects WHICH tab the client area is
-        // composed from, and a session id is never reused, so once the pane is gone the anchor can
-        // only ever miss. Left set, a flush already queued when this ran would compose the fallback
-        // tab while still believing it had anchored — reporting a client area for a window the user
-        // never touched, which the daemon answers by re-projecting every pane of every workspace.
-        if (_geometryAnchor == session)
-            _geometryAnchor.reset();
-    }
     // Tombstone while the connection lives, so a remote session that outlives its local pane cannot
     // resurrect it through a later delta. Whether that session should also be ENDED on the daemon is
     // NOT knowable here — a pty is destroyed by a pane close, a window close, an app quit and a lost
@@ -2140,6 +2126,36 @@ void NativeController::forgetBinding(uint64_t session, uint64_t serial)
     // window destroy the user's shells.
     if (_stopPhase == StopPhase::Running)
         _closedSessions.insert(session);
+}
+
+void NativeController::releaseRemoteSession(vtpty::Pty const* pty)
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto const binding =
+        std::ranges::find_if(_bindings, [pty](auto const& entry) { return entry.second.pty == pty; });
+    // The pty stays counted live until it is destroyed, when unbind() finds no binding of its serial to
+    // forget.
+    if (binding != _bindings.end())
+        dropBinding(binding);
+}
+
+void NativeController::dropBinding(std::unordered_map<uint64_t, Binding>::iterator binding)
+{
+    auto const session = binding->first;
+    _bindings.erase(binding);
+    // The pane is gone: its grid must not keep contributing to a composed client area, and the
+    // sent-size bookkeeping for it is meaningless (a pane's binding is never bound again).
+    auto const geometryLock = std::lock_guard { _geometryMutex };
+    _paneSizes.erase(session);
+    _paneSerials.erase(session);
+    _lastReportedPaneSizes.erase(session);
+    // The anchor is the third thing this pane owned: it selects WHICH tab the client area is
+    // composed from, and once the pane is gone the anchor can only ever miss. Left set, a flush already
+    // queued when this ran would compose the fallback tab while still believing it had anchored —
+    // reporting a client area for a window the user never touched, which the daemon answers by
+    // re-projecting every pane of every workspace.
+    if (_geometryAnchor == session)
+        _geometryAnchor.reset();
 }
 
 void NativeController::closeAllBindings()

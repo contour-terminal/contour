@@ -5161,6 +5161,39 @@ TEST_CASE("a pane closed while reconnecting is closed on the daemon once it answ
     pane.terminal.reset();
 }
 
+TEST_CASE("a pane detached while its session runs on lets the session go, to be shown again",
+          "[attach][controller]")
+{
+    // A pane goes while its daemon session runs on -- its window switched to another workspace, or a move
+    // took it to a workspace the window does not show -- and the session may be shown again over this
+    // connection: let go of at once, it is neither bound nor tombstoned, before or after the pane's pty goes.
+    // A pane that ends without that is tombstoned, so a delta of its session cannot bring it back.
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("detached");
+    std::ignore = daemon.seedSession("ended");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.pendingCount() == 2; }));
+    auto detachedPane = std::make_unique<MirrorPane>(controller, controller.createPty(std::nullopt));
+    auto endedPane = std::make_unique<MirrorPane>(controller, controller.createPty(std::nullopt));
+    auto const detached = controller.sessionForPty(&detachedPane->pty());
+    auto const ended = controller.sessionForPty(&endedPane->pty());
+    REQUIRE(detached.has_value());
+    REQUIRE(ended.has_value());
+    REQUIRE(controller.isClaimed(*detached));
+
+    controller.releaseRemoteSession(&detachedPane->pty());
+    CHECK_FALSE(controller.isClaimed(*detached));
+    detachedPane.reset();
+    endedPane.reset();
+    REQUIRE(waitUntil([&] { return !controller.bindsPanes(); }));
+    CHECK_FALSE(controller.isClaimed(*detached));
+    CHECK(controller.isClaimed(*ended));
+    controller.stop();
+}
+
 TEST_CASE("what a pane raised is judged by the raise role it arrived under", "[attach][controller][raise]")
 {
     using vthost::proto::RaiseRole;

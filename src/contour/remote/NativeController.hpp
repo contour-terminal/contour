@@ -608,6 +608,14 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// `unbind()`, which merely forgets a binding and cannot tell why the pty went away.
     void requestRemoteClose(vtpty::Pty const* pty) override;
 
+    /// SessionFactory: the pane backed by @p pty is detached while its daemon session runs on -- its window
+    /// switched to another workspace, or its workspace's layout no longer names it, as a move took it to
+    /// another -- so the binding goes now, and, unlike the pty's own end (unbind()), leaves no tombstone. A
+    /// session still bound, or tombstoned, is not realized again, and the pane's session may be destroyed
+    /// only after a switch back, or the switch that follows the move, has realized the workspace that holds
+    /// it. GUI thread; takes _mutex. A pty that is not one of this controller's is left alone.
+    void releaseRemoteSession(vtpty::Pty const* pty) override;
+
     /// SessionFactory: every pane's terminal mirrors one the daemon hosts, so an operation on the engine is
     /// sent there (proto::PerformOperation) and the mirror follows through its deltas. A pty that is not
     /// bound to a daemon session runs it here; without a connection every operation is Unreachable.
@@ -955,6 +963,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// unbind() under _mutex: the pty is counted gone whether or not its binding is still there to forget.
     void forgetBinding(uint64_t session, uint64_t serial);
+
+    /// Drops @p binding and what its pane owned of the composed geometry. Under _mutex.
+    void dropBinding(std::unordered_map<uint64_t, Binding>::iterator binding);
 
     /// @return Whether @p session is bound, by the binding @p serial names. Takes _mutex.
     [[nodiscard]] bool isBinding(uint64_t session, uint64_t serial) const;

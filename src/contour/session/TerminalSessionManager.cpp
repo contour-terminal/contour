@@ -4239,6 +4239,19 @@ void TerminalSessionManager::authorRemoteEnd(TerminalSession* session)
         factoryOf(*session).requestRemoteClose(&session->terminal().device());
 }
 
+void TerminalSessionManager::endRemotely(TerminalSession* session, SessionEnd end)
+{
+    if (session == nullptr)
+        return;
+    switch (end)
+    {
+        case SessionEnd::Destroy: authorRemoteEnd(session); break;
+        case SessionEnd::Detach:
+            factoryOf(*session).releaseRemoteSession(&session->terminal().device());
+            break;
+    }
+}
+
 void TerminalSessionManager::authorRemoteEnds(std::span<TerminalSession* const> sessions)
 {
     for (auto* session: sessions)
@@ -4255,12 +4268,13 @@ void TerminalSessionManager::terminateSessions(std::span<TerminalSession* const>
     // session and its shell process).
     //
     // A Destroy also has to be authored UPSTREAM for a session this process does not own: a
-    // daemon-hosted one outlives its pty, so closing the local view is not closing the session.
+    // daemon-hosted one outlives its pty, so closing the local view is not closing the session. A Detach
+    // lets go of it there instead (endRemotely()).
     // Every end is authored before the first terminate(): each session must still hold the pty the remote
     // factory identifies it by, and still sit in its tab, whose window names the factory -- terminating the
     // tab's last pane takes the tab, and possibly the window and the link serving it, away.
-    if (end == SessionEnd::Destroy)
-        authorRemoteEnds(sessions);
+    for (auto* session: sessions)
+        endRemotely(session, end);
     for (auto* session: sessions)
         session->terminate();
 }
@@ -4606,11 +4620,11 @@ void TerminalSessionManager::closeActivePane(TerminalSession* acting, SessionEnd
     if (active == nullptr)
         return;
     auto const sessionId = active->session();
-    // On Destroy, a daemon-hosted session must be closed upstream too, or it lingers there with no view.
+    // On Destroy, a daemon-hosted session must be closed upstream too, or it lingers there with no view; on
+    // Detach it is let go of, to be shown again (endRemotely()).
     // Authored before the model pane closes: a tab's only pane takes the tab with it, and with the tab goes
     // the window that names the host to tell (and its pty, which identifies the session there, goes later).
-    if (end == SessionEnd::Destroy)
-        authorRemoteEnd(sessionForId(sessionId));
+    endRemotely(sessionForId(sessionId), end);
     // Close the model pane FIRST, then terminate the backing session. terminate() fires
     // sessionClosed -> removeSession, but by then the leaf is already gone from the model, so
     // removeSession's findLeaf() returns nullptr and it does not close the pane a second time — it

@@ -474,6 +474,16 @@ class SessionFactory
     /// @param pty The pty backing the session to end.
     virtual void requestRemoteClose(vtpty::Pty const* /*pty*/) {}
 
+    /// Attach mode: lets go of the remote session the pane backed by @p pty mirrors, as only the pane goes
+    /// and the session runs on (SessionEnd::Detach): a window's switch leaves it, or the window's layout no
+    /// longer names it, as it moved to a workspace the window does not show. The session may be shown again
+    /// over this very connection -- a switch back, or a move the window follows -- so it is let go now: not
+    /// when the pty is destroyed, which may be after it is shown again, and with nothing left behind that
+    /// keeps it from being shown. Called ONLY where only the view goes; requestRemoteClose() is the end. A
+    /// local factory does nothing -- a local pane's session ends with its pty.
+    /// @param pty The pty backing the pane detached.
+    virtual void releaseRemoteSession(vtpty::Pty const* /*pty*/) {}
+
     /// Decides where an operation on the engine of the session backed by @p pty runs, and sends it to the
     /// remote end when that is where it runs.
     ///

@@ -99,9 +99,11 @@ enum class SessionEnd : uint8_t
     /// The user ended these sessions for good (a pane or tab close). A daemon-hosted session is
     /// closed upstream too, via SessionFactory::requestRemoteClose, so it does not linger headless.
     Destroy,
-    /// Only the local view goes away (a window close, an app quit, a lost connection). A
-    /// daemon-hosted session keeps running and returns on the next attach — that is the whole point
-    /// of daemon mode, so nothing is authored upstream here.
+    /// Only the local view goes away (a window close, an app quit, a lost connection, a window's switch
+    /// to another workspace, a pane its window's layout no longer names). A daemon-hosted session keeps
+    /// running and returns on the next attach — that is the whole point of daemon mode, so nothing is
+    /// authored upstream here. It is let go of, though (SessionFactory::releaseRemoteSession): it may
+    /// return over the very connection it was shown through.
     Detach,
 };
 
@@ -2110,6 +2112,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// its pty, and the teardown that follows destroys it.
     /// @param session The session being ended for good.
     void authorRemoteEnd(TerminalSession* session);
+
+    /// Tells the factory of @p session that the session ends as @p end says: authorRemoteEnd() for a
+    /// Destroy, SessionFactory::releaseRemoteSession() for a Detach. Under the same rule as
+    /// authorRemoteEnd(): while @p session holds its pty and sits in its tab.
+    /// @param session The session whose pane goes; none is a no-op.
+    /// @param end Why it goes.
+    void endRemotely(TerminalSession* session, SessionEnd end);
 
     /// authorRemoteEnd() for each of @p sessions. Must run while each still sits in its tab: the window
     /// holding the tab names the host to tell (@see factoryOf), so a caller about to close those tabs in the
