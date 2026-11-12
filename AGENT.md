@@ -411,6 +411,7 @@ variable is unset, clone the trees first (they are not vendored into this repo).
 
 # Workflow
 
+- For any UI work (chrome, QML, popups, menus, the sidebar), load and follow [`.agent/rules/ui-ux.md`](.agent/rules/ui-ux.md).
 - When done with the code changes, run the `/simplify` command and avoid code duplication.
 - Zero-warning policy is non-negotiable: the build must be clean under `-Werror` (see above).
 - Ensure changes are covered by tests and run them (`ctest --preset=clang-asan`).
