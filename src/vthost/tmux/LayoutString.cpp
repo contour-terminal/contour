@@ -9,6 +9,7 @@
 #include <ranges>
 
 #include <vtcontrol/Json.hpp>
+#include <vthost/proto/Wire.hpp>
 #include <vtworkspace/PaneLayout.hpp>
 
 namespace vthost::tmux
@@ -176,6 +177,8 @@ namespace
                     auto const id = number();
                     if (!id)
                         return std::unexpected("expected pane id");
+                    if (*id < 0)
+                        return std::unexpected("negative pane id");
                     if (peek() == 'x')
                     {
                         pos = saved;
@@ -353,11 +356,37 @@ namespace
         return toLayout(*document.layout);
     }
 
+    /// Holds @p node's own geometry to what a grid can be: each extent within
+    /// `1..proto::MaxGridExtent`, each offset within `0..proto::MaxGridExtent`.
+    ///
+    /// The extents become grids (TmuxClientModel builds a pane of exactly a leaf's shape), and the
+    /// partition rule alone does not keep them sane: a single-leaf root is not partitioned at all,
+    /// and negative children can sum to their parent. The bound is the one the native protocol
+    /// holds the same quantity to, so neither transport can steer a client into a grid the other
+    /// would refuse.
+    [[nodiscard]] std::expected<void, std::string> checkBounds(ParsedLayout const& node)
+    {
+        constexpr auto MaxExtent = static_cast<int>(proto::MaxGridExtent);
+        auto const extentInRange = [](int extent) {
+            return extent >= 1 && extent <= MaxExtent;
+        };
+        auto const offsetInRange = [](int offset) {
+            return offset >= 0 && offset <= MaxExtent;
+        };
+        if (!extentInRange(node.width) || !extentInRange(node.height))
+            return std::unexpected("layout extent out of range");
+        if (!offsetInRange(node.x) || !offsetInRange(node.y))
+            return std::unexpected("layout offset out of range");
+        return {};
+    }
+
     /// Mirrors tmux's layout_check: children partition the parent exactly along
     /// the split axis (one divider cell between neighbours) and match it on the
-    /// cross axis.
+    /// cross axis. Every node's geometry is also held to checkBounds().
     [[nodiscard]] std::expected<void, std::string> check(ParsedLayout const& node)
     {
+        if (auto bounded = checkBounds(node); !bounded)
+            return bounded;
         if (node.kind == ParsedLayout::Kind::Leaf)
             return {};
 
