@@ -36,7 +36,8 @@ namespace
     };
 
     /// The function exports the host calls. A post-return function exists only for an export whose
-    /// result owns memory, and a module that is a WASI reactor exports its initializer.
+    /// result owns memory, and a module that is a WASI reactor exports its initializer, which the
+    /// backend runs while instantiating (wasm::IWasmModule::instantiate).
     constexpr auto ExportShapes = std::array {
         ExportShape { .name = "load", .parameters = 2, .results = 1, .presence = Presence::Required },
         ExportShape { .name = "update", .parameters = 5, .results = 1, .presence = Presence::Required },
@@ -134,8 +135,9 @@ std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> CompiledExtens
     if (!manifest && manifest.error() != ExtensionError::ManifestMissing)
         return std::unexpected(manifest.error());
 
-    // A start function would run during instantiation, which no deadline guards: the world has none,
-    // and initialization belongs in a WASI reactor's `_initialize`, which is called under one.
+    // A start function would run during instantiation, which no deadline guards: the world has none.
+    // A WASI reactor's `_initialize` runs there too (IWasmModule::instantiate), and is accepted, since
+    // every Rust guest from 1.100 on exports one: a pre-existing gap a follow-up will close.
     if (startsItself || !importsAreProvided(**module) || !exportsMatch(**module))
         return std::unexpected(ExtensionError::WorldMismatch);
 
