@@ -151,7 +151,7 @@ if(CRISPY_TESTING)
     # only ever compiled through the UNIX-gated UnixPty. The test likewise only builds off Windows,
     # where MSVC would otherwise choke on the unavailable fd_set type.
     if(NOT WIN32)
-        target_sources(crispy_test PRIVATE ReadSelector_test.cpp)
+        target_sources(crispy_test PRIVATE FileDescriptor_test.cpp ReadSelector_test.cpp)
     endif()
     target_link_libraries(crispy_test Catch2::Catch2 crispy::core core::testing contour::tracy contour_test_trace)
     add_test(NAME crispy_test COMMAND $<TARGET_FILE:crispy_test>)
