@@ -5335,24 +5335,26 @@ Task<void> growSecondWorkspace(TwoClientHarness* h,
 
 } // namespace
 
-TEST_CASE("a lone Launch client follows every workspace", "[vthost][native][attach-intent]")
+TEST_CASE("a lone Launch client follows one workspace, the one left last", "[vthost][native][attach-intent]")
 {
+    // One launch, one window: the other workspace waits for the next launch, or the switcher -- and the
+    // launch, primary viewer though it is, does not take it up as a workspace nobody claims.
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
     auto const* second = h.host.createWorkspace();
     REQUIRE(second != nullptr);
-    auto const workspaces = std::vector<uint64_t> { h.host.workspaceId().value, second->id().value };
+    h.host.noteWorkspaceReleased(second->id(), proto::WorkspaceRelease::Closed);
+    h.host.noteWorkspaceReleased(h.host.workspaceId(), proto::WorkspaceRelease::Closed);
+    auto const workspace = h.host.workspaceId().value;
 
     auto const received = h.exchangeUntil({ intentHello(proto::AttachIntentKind::Launch) },
-                                          [](auto const& got) { return snapshotRunCount(got) >= 2; });
+                                          [](auto const& got) { return snapshotRunCount(got) >= 1; });
 
     auto const* hello = serverHelloOf(received);
     REQUIRE(hello != nullptr);
-    CHECK(hello->followedWorkspaces == workspaces);
-    CHECK(layoutWorkspaces(received) == std::set<uint64_t>(workspaces.begin(), workspaces.end()));
-    auto expected = sessionsOf(h.host, workspaces[0]);
-    expected.merge(sessionsOf(h.host, workspaces[1]));
-    CHECK(snapshotSessions(received) == expected);
+    CHECK(hello->followedWorkspaces == std::vector<uint64_t> { workspace });
+    CHECK(layoutWorkspaces(received) == std::set<uint64_t> { workspace });
+    CHECK(snapshotSessions(received) == sessionsOf(h.host, workspace));
 }
 
 TEST_CASE("two Launch clients split the workspaces between them", "[vthost][native][attach-intent]")

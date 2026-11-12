@@ -674,6 +674,141 @@ TEST_CASE("a workspace made for a window that drops before it was shown is hidde
     }
 }
 
+TEST_CASE("a window closed while another window shows the daemon ends its workspace and every session in it",
+          "[vthost][host][visibility][window-closed]")
+{
+    using vthost::WorkspaceVisibility;
+    using vthost::proto::WorkspaceRelease;
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const kept = h.host.workspaceId();
+    auto* const closing = h.host.createWorkspace();
+    REQUIRE(closing != nullptr);
+    auto const closed = closing->id();
+    h.host.splitActivePane(closing->activeTab()->id(), SplitState::Vertical, 0.5);
+    REQUIRE(h.host.sessionCount() == 3);
+
+    auto first = ShowingClient {};
+    auto second = ShowingClient {};
+    first.shown.insert(kept.value);
+    second.shown.insert(closed.value);
+    h.host.noteClientAttached(&first);
+    h.host.noteClientAttached(&second);
+
+    second.shown.clear();
+    h.host.noteWorkspaceReleased(closed, WorkspaceRelease::WindowClosed);
+
+    // Both of its panes' sessions end and the workspace goes: no later launch brings it back.
+    CHECK(h.host.sessionCount() == 1);
+    CHECK(h.host.model().workspace(closed) == nullptr);
+    CHECK_FALSE(h.host.lastRelease(closed).has_value());
+    CHECK(h.host.leftAt(closed) == 0);
+    CHECK(h.host.visibility(kept) == WorkspaceVisibility::Shown);
+    h.host.noteClientDetached(&second);
+    h.host.noteClientDetached(&first);
+}
+
+TEST_CASE("the last window shown closing leaves its workspace for the next launch",
+          "[vthost][host][visibility][window-closed]")
+{
+    using vthost::WorkspaceVisibility;
+    using vthost::proto::WorkspaceRelease;
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId();
+    // A second workspace no window shows does not count: it is left too, not shown.
+    REQUIRE(h.host.createWorkspace() != nullptr);
+    auto client = ShowingClient {};
+    client.shown.insert(workspace.value);
+    h.host.noteClientAttached(&client);
+
+    client.shown.clear();
+    h.host.noteWorkspaceReleased(workspace, WorkspaceRelease::WindowClosed);
+
+    CHECK(h.host.sessionCount() == 2);
+    CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Left);
+    // Recorded as the Closed every reader of a release already knows.
+    CHECK(h.host.lastRelease(workspace) == WorkspaceRelease::Closed);
+    CHECK(h.host.leftAt(workspace) > 0);
+    h.host.noteClientDetached(&client);
+}
+
+TEST_CASE("a window closed on a workspace another window still shows ends nothing",
+          "[vthost][host][visibility][window-closed]")
+{
+    using vthost::WorkspaceVisibility;
+    using vthost::proto::WorkspaceRelease;
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId();
+    auto first = ShowingClient {};
+    auto second = ShowingClient {};
+    first.shown.insert(workspace.value);
+    second.shown.insert(workspace.value);
+    h.host.noteClientAttached(&first);
+    h.host.noteClientAttached(&second);
+
+    first.shown.clear();
+    h.host.noteWorkspaceReleased(workspace, WorkspaceRelease::WindowClosed);
+
+    CHECK(h.host.sessionCount() == 1);
+    CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Shown);
+    h.host.noteClientDetached(&second);
+    h.host.noteClientDetached(&first);
+}
+
+TEST_CASE("a plain Closed release never ends a workspace, whatever else is shown",
+          "[vthost][host][visibility][window-closed]")
+{
+    // Closed is what a hand-over or a given-up switch sends: no user closed anything.
+    using vthost::WorkspaceVisibility;
+    using vthost::proto::WorkspaceRelease;
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const kept = h.host.workspaceId();
+    auto* const other = h.host.createWorkspace();
+    REQUIRE(other != nullptr);
+    auto const released = other->id();
+    auto first = ShowingClient {};
+    auto second = ShowingClient {};
+    first.shown.insert(kept.value);
+    second.shown.insert(released.value);
+    h.host.noteClientAttached(&first);
+    h.host.noteClientAttached(&second);
+
+    second.shown.clear();
+    h.host.noteWorkspaceReleased(released, WorkspaceRelease::Closed);
+
+    CHECK(h.host.sessionCount() == 2);
+    CHECK(h.host.visibility(released) == WorkspaceVisibility::Left);
+    h.host.noteClientDetached(&second);
+    h.host.noteClientDetached(&first);
+}
+
+TEST_CASE("leftAt orders the workspaces by when they were last left, by a release or a quit",
+          "[vthost][host][visibility]")
+{
+    using vthost::proto::WorkspaceRelease;
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const one = h.host.workspaceId();
+    auto* const made = h.host.createWorkspace();
+    REQUIRE(made != nullptr);
+    auto const two = made->id();
+    CHECK(h.host.leftAt(one) == 0);
+    CHECK(h.host.leftAt(two) == 0);
+
+    auto client = ShowingClient {};
+    client.shown = { one.value, two.value };
+    h.host.noteClientAttached(&client);
+    client.shown.erase(two.value);
+    h.host.noteWorkspaceReleased(two, WorkspaceRelease::Closed);
+    // The quit leaves what the client still showed, later than the release before it.
+    h.host.noteClientDetached(&client);
+    CHECK(h.host.leftAt(two) > 0);
+    CHECK(h.host.leftAt(one) > h.host.leftAt(two));
+}
+
 TEST_CASE("createTab seeds a backing session handed back by the allocator", "[vthost][host]")
 {
     auto h = HostHarness {};

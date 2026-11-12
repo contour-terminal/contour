@@ -18,6 +18,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -37,6 +38,17 @@ using vtworkspace::SplitState;
 
 namespace
 {
+/// A stand-in for an attached window that shows the workspaces it is given.
+class ShowingWindow final: public vthost::SessionStreamEvents
+{
+  public:
+    [[nodiscard]] bool follows(vtworkspace::WorkspaceId workspace) const noexcept override
+    {
+        return shown.contains(workspace.value);
+    }
+
+    std::set<uint64_t> shown {}; ///< The workspaces it shows.
+};
 
 constexpr auto DividerOf =
     RestoreDivider { .sessionEndedAt = std::chrono::local_days { std::chrono::year { 2026 } / 10 / 25 }
@@ -605,4 +617,68 @@ TEST_CASE("a workspace put away stays Hidden across a restore, a shown one comes
     REQUIRE(restored->model().workspaceCount() == 2);
     CHECK(restored->visibility(restored->model().workspaceAt(0)->id()) == WorkspaceVisibility::Left);
     CHECK(restored->visibility(restored->model().workspaceAt(1)->id()) == WorkspaceVisibility::Hidden);
+}
+
+TEST_CASE("restored workspaces come back left by a client that went away, in the order they are restored",
+          "[vthost][snapshot][restore][visibility]")
+{
+    // Recorded as a Closed release, so that the primary viewer a launch makes does not take up every one of
+    // them beside the one the launch brings back; stamped, so that the launch brings back the last.
+    auto h = RestoreHarness {};
+    auto source = h.makeHost({});
+    REQUIRE(source->createTab() != nullptr);
+    REQUIRE(source->createWorkspace() != nullptr);
+    REQUIRE(source->createWorkspace() != nullptr);
+
+    auto const captured = captureWorkspace(*source, { .scrollback = ScrollbackPersistence::Off }, Now);
+    auto decoded = decodeSnapshot(encodeSnapshot(captured));
+    REQUIRE(decoded.has_value());
+    auto const restored = h.restore(WorkspaceRestore { .snapshot = decoded->snapshot });
+
+    REQUIRE(restored->model().workspaceCount() == 3);
+    auto const idAt = [&](int index) {
+        return restored->model().workspaceAt(index)->id();
+    };
+    for (auto const index: std::views::iota(0, 3))
+    {
+        CHECK(restored->visibility(idAt(index)) == WorkspaceVisibility::Left);
+        CHECK(restored->lastRelease(idAt(index)) == vthost::proto::WorkspaceRelease::Closed);
+    }
+    CHECK(restored->leftAt(idAt(0)) < restored->leftAt(idAt(1)));
+    CHECK(restored->leftAt(idAt(1)) < restored->leftAt(idAt(2)));
+    for (auto const index: std::views::iota(0, 3))
+        CHECK(restored->shownBeforeRestart(idAt(index)) == vthost::ShownBeforeRestart::No);
+}
+
+TEST_CASE("a restored workspace a window showed is the one left last, until a window shows it again",
+          "[vthost][snapshot][restore][visibility]")
+{
+    auto h = RestoreHarness {};
+    auto source = h.makeHost({});
+    REQUIRE(source->createTab() != nullptr);
+    auto const shownId = source->workspaceId();
+    REQUIRE(source->createWorkspace() != nullptr);
+    auto window = ShowingWindow {};
+    window.shown.insert(shownId.value);
+    source->noteClientAttached(&window);
+
+    auto const captured = captureWorkspace(*source, { .scrollback = ScrollbackPersistence::Off }, Now);
+    source->noteClientDetached(&window);
+    auto decoded = decodeSnapshot(encodeSnapshot(captured));
+    REQUIRE(decoded.has_value());
+    auto const restored = h.restore(WorkspaceRestore { .snapshot = decoded->snapshot });
+
+    REQUIRE(restored->model().workspaceCount() == 2);
+    auto const shown = restored->model().workspaceAt(0)->id();
+    auto const left = restored->model().workspaceAt(1)->id();
+    CHECK(restored->shownBeforeRestart(shown) == vthost::ShownBeforeRestart::Yes);
+    CHECK(restored->shownBeforeRestart(left) == vthost::ShownBeforeRestart::No);
+    CHECK(restored->leftAt(shown) > restored->leftAt(left));
+
+    auto again = ShowingWindow {};
+    again.shown.insert(shown.value);
+    restored->noteClientAttached(&again);
+    restored->noteWorkspaceFollowed(shown, &again);
+    CHECK(restored->shownBeforeRestart(shown) == vthost::ShownBeforeRestart::No);
+    restored->noteClientDetached(&again);
 }

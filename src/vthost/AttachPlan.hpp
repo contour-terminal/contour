@@ -21,8 +21,14 @@ struct WorkspaceSummary
 {
     uint64_t id = 0;  ///< The workspace's id.
     int tabCount = 0; ///< How many tabs it holds; zero for a workspace nothing has been created in yet.
-    /// Whether a client shows it, or put it away. A launch brings back only the Left ones.
+    /// Whether a client shows it, or put it away. A launch brings back only a Left one.
     WorkspaceVisibility visibility = WorkspaceVisibility::Left;
+    /// When it was last left, larger being more recent; 0 for never in this run (SessionHost::leftAt). Of the
+    /// Left workspaces, a launch brings back the one left last, the highest id breaking a tie.
+    uint64_t leftAt = 0;
+    /// Whether its window went with the previous run: a Resume that finds none of its own workspaces takes
+    /// every such one back, as the windows of that run reconnect, rather than the one a launch takes.
+    ShownBeforeRestart shownBeforeRestart = ShownBeforeRestart::No;
 };
 
 /// Whether the attaching connection's hello names the directory the session it creates starts in

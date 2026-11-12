@@ -22,8 +22,10 @@ using Ids = std::vector<uint64_t>;
 
 } // namespace
 
-TEST_CASE("AllWorkspaces follows every Left workspace with tabs", "[vthost][attach-plan]")
+TEST_CASE("AllWorkspaces follows every Left workspace with tabs, where a Launch takes one",
+          "[vthost][attach-plan]")
 {
+    // A client predating intents shows every workspace, and a reconnect of one keeps doing so.
     CHECK(planAttach({ .kind = AttachIntentKind::AllWorkspaces }, twoWorkspaces())
           == AttachPlan { .follow = { 1, 3 }, .creation = AttachCreation::None });
 }
@@ -49,21 +51,44 @@ TEST_CASE("an attach to an empty daemon creates the first tab", "[vthost][attach
           == AttachPlan { .follow = { 1 }, .creation = AttachCreation::FirstTabInPrimary });
 }
 
-TEST_CASE("a Launch takes the Left workspaces and leaves the shown and hidden ones alone",
+TEST_CASE("a Launch takes a Left workspace and leaves the shown and hidden ones alone",
           "[vthost][attach-plan]")
 {
     CHECK(planAttach({ .kind = AttachIntentKind::Launch }, twoWorkspaces())
-          == AttachPlan { .follow = { 1, 3 }, .creation = AttachCreation::None });
+          == AttachPlan { .follow = { 3 }, .creation = AttachCreation::None });
 
     auto const mixed = AttachContext { .primaryWorkspace = 1,
                                        .workspaces = { { 1, 1, WorkspaceVisibility::Left },
-                                                       { 2, 1, WorkspaceVisibility::Hidden },
+                                                       { 2, 1, WorkspaceVisibility::Hidden, 9 },
                                                        { 3, 1, WorkspaceVisibility::Left } } };
-    CHECK(planAttach({ .kind = AttachIntentKind::Launch }, mixed).follow == Ids { 1, 3 });
+    CHECK(planAttach({ .kind = AttachIntentKind::Launch }, mixed).follow == Ids { 3 });
     CHECK(planAttach({ .kind = AttachIntentKind::AllWorkspaces }, mixed).follow == Ids { 1, 3 });
 }
 
-TEST_CASE("a Launch follows the Left workspaces whatever other clients are attached", "[vthost][attach-plan]")
+TEST_CASE("a Launch brings back only the workspace left last, however many are Left", "[vthost][attach-plan]")
+{
+    // Ten windows closed over time must not come back as ten windows: one launch, one window.
+    auto const left = AttachContext { .primaryWorkspace = 1,
+                                      .workspaces = { { 1, 1, WorkspaceVisibility::Left, 4 },
+                                                      { 2, 3, WorkspaceVisibility::Left, 7 },
+                                                      { 3, 1, WorkspaceVisibility::Left, 2 },
+                                                      { 4, 1, WorkspaceVisibility::Shown, 9 } } };
+    CHECK(planAttach({ .kind = AttachIntentKind::Launch }, left)
+          == AttachPlan { .follow = { 2 }, .creation = AttachCreation::None });
+
+    // Never left in this run -- restored from a snapshot -- counts as left before any that was, and of
+    // those, the newest workspace wins.
+    auto const restored = AttachContext { .primaryWorkspace = 1,
+                                          .workspaces = { { 1, 1, WorkspaceVisibility::Left, 0 },
+                                                          { 2, 1, WorkspaceVisibility::Left, 0 },
+                                                          { 3, 1, WorkspaceVisibility::Left, 0 } } };
+    CHECK(planAttach({ .kind = AttachIntentKind::Launch }, restored).follow == Ids { 3 });
+    auto once = restored;
+    once.workspaces[0].leftAt = 1;
+    CHECK(planAttach({ .kind = AttachIntentKind::Launch }, once).follow == Ids { 1 });
+}
+
+TEST_CASE("a Launch follows a Left workspace whatever other clients are attached", "[vthost][attach-plan]")
 {
     auto const context = AttachContext { .otherClients = 1,
                                          .primaryWorkspace = 1,
@@ -72,7 +97,7 @@ TEST_CASE("a Launch follows the Left workspaces whatever other clients are attac
                                                          { 3, 1, WorkspaceVisibility::Left },
                                                          { 4, 1, WorkspaceVisibility::Shown } } };
     CHECK(planAttach({ .kind = AttachIntentKind::Launch }, context)
-          == AttachPlan { .follow = { 1, 3 }, .creation = AttachCreation::None });
+          == AttachPlan { .follow = { 3 }, .creation = AttachCreation::None });
 }
 
 TEST_CASE("a Launch with nothing Left creates a workspace of its own", "[vthost][attach-plan]")
@@ -128,7 +153,7 @@ TEST_CASE("Resume does not take an empty workspace for a survivor", "[vthost][at
 TEST_CASE("Resume with no surviving workspace falls back to Launch", "[vthost][attach-plan]")
 {
     CHECK(planAttach({ .kind = AttachIntentKind::Resume, .workspaces = { 99 } }, twoWorkspaces()).follow
-          == Ids { 1, 3 });
+          == Ids { 3 });
     auto busy = twoWorkspaces();
     busy.otherClients = 2;
     for (auto& workspace: busy.workspaces)
@@ -137,13 +162,34 @@ TEST_CASE("Resume with no surviving workspace falls back to Launch", "[vthost][a
           == AttachCreation::NewWorkspace);
 }
 
+TEST_CASE("a Resume across a restart takes back every workspace whose window went with it",
+          "[vthost][attach-plan]")
+{
+    // Two windows were open when the daemon restarted, a third workspace had been left before: the windows
+    // reconnecting get theirs back, both, and the one left before waits as it did.
+    auto const restarted =
+        AttachContext { .primaryWorkspace = 1,
+                        .workspaces = { { 1, 1, WorkspaceVisibility::Left, 1, ShownBeforeRestart::No },
+                                        { 2, 1, WorkspaceVisibility::Left, 2, ShownBeforeRestart::Yes },
+                                        { 3, 2, WorkspaceVisibility::Left, 3, ShownBeforeRestart::Yes } } };
+    CHECK(planAttach({ .kind = AttachIntentKind::Resume, .workspaces = { 7 } }, restarted)
+          == AttachPlan { .follow = { 2, 3 }, .creation = AttachCreation::None });
+    // A fresh launch still opens one window.
+    CHECK(planAttach({ .kind = AttachIntentKind::Launch }, restarted).follow == Ids { 3 });
+    // None whose window went with the restart: a Resume is a launch.
+    auto quiet = restarted;
+    for (auto& workspace: quiet.workspaces)
+        workspace.shownBeforeRestart = ShownBeforeRestart::No;
+    CHECK(planAttach({ .kind = AttachIntentKind::Resume, .workspaces = { 7 } }, quiet).follow == Ids { 3 });
+}
+
 TEST_CASE("a Launch naming a directory opens a tab in the first workspace it brings back",
           "[vthost][attach-plan][cwd]")
 {
     auto stated = twoWorkspaces();
     stated.workingDirectory = WorkingDirectoryStated::Yes;
     CHECK(planAttach({ .kind = AttachIntentKind::Launch }, stated)
-          == AttachPlan { .follow = { 1, 3 }, .creation = AttachCreation::TabInFirstFollowed });
+          == AttachPlan { .follow = { 3 }, .creation = AttachCreation::TabInFirstFollowed });
 }
 
 TEST_CASE("a Launch naming a directory creates what it would without one, when it creates anything",

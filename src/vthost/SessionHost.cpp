@@ -991,13 +991,22 @@ SessionHost::RealizedRestore SessionHost::realizeRestoredWorkspace(WorkspaceRest
         realized.panes += inWorkspace.panes;
         if (inWorkspace.tabs > 0)
         {
-            // A workspace put away stays put away; one a client showed was left by that client's end.
-            if (workspace.visibility == WorkspaceVisibility::Hidden)
-                noteWorkspaceReleased(id, proto::WorkspaceRelease::SwitchedAway);
+            // A workspace put away stays put away; one a client showed was left by that client's end -- and
+            // is recorded so, which keeps the primary viewer from taking up every one of them besides the one
+            // a launch brings back.
+            noteWorkspaceReleased(id,
+                                  workspace.visibility == WorkspaceVisibility::Hidden
+                                      ? proto::WorkspaceRelease::SwitchedAway
+                                      : proto::WorkspaceRelease::Closed);
+            if (workspace.visibility == WorkspaceVisibility::Shown)
+                _shownBeforeRestart.insert(id.value);
             realized.workspaces.push_back(
                 RestoredWorkspace { .workspace = id.value, .tabs = inWorkspace.tabs });
         }
     }
+    // Those a window showed when the last run ended were left last of all, so a launch takes one of them.
+    for (auto const shown: _shownBeforeRestart)
+        noteLeft(WorkspaceId { shown });
     sessionLog()("restore: {} pane(s) of a snapshot of {} workspace(s) came back",
                  realized.panes,
                  restore.snapshot.workspaces.size());
@@ -1284,6 +1293,8 @@ void SessionHost::discardWorkspace(WorkspaceId workspace)
         return;
     _workspaceCreators.erase(workspace.value);
     _lastReleases.erase(workspace.value);
+    _leftAt.erase(workspace.value);
+    _shownBeforeRestart.erase(workspace.value);
     std::erase_if(_unshownFollows,
                   [workspace](UnshownFollow const& follow) { return follow.workspace == workspace.value; });
     _objects.forget(workspace);
@@ -1348,6 +1359,16 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client)
             proto::SwitchReply { .outcome = proto::SwitchOutcome::Failed, .detail = "the window went away" });
     if (_primaryViewer == client)
         _primaryViewer = nullptr;
+    // What it showed and no other window does is left now, most recently of all: its client went away, a
+    // Closed release (unless a put-back follow left it hidden), so the primary viewer does not take it up.
+    for (auto const index: std::views::iota(0, _model.workspaceCount()))
+        if (auto const* workspace = _model.workspaceAt(index); workspace != nullptr
+                                                               && client->follows(workspace->id())
+                                                               && !followedByAttachedClient(workspace->id()))
+        {
+            _lastReleases.try_emplace(workspace->id().value, proto::WorkspaceRelease::Closed);
+            noteLeft(workspace->id());
+        }
     // Still claimed, by nobody present: a workspace a GUI left behind waits for the next launch that takes
     // every workspace, rather than appearing in another GUI. The address is forgotten, so a connection
     // constructed where this one was is not taken for its creator. Windows gone from the model go too.
@@ -1390,9 +1411,68 @@ void SessionHost::noteWorkspaceReleased(WorkspaceId workspace, proto::WorkspaceR
     // Only the last window showing it decides: while another still follows it, a window switching away
     // does not hide it, and the other quitting later leaves it, as quitting does.
     if (followedByAttachedClient(workspace))
+    {
         _lastReleases.erase(workspace.value);
-    else
-        _lastReleases.insert_or_assign(workspace.value, reason);
+        return;
+    }
+    // A window the user closed while another window still shows this daemon was put away for good: left, it
+    // would come back with every later launch. Only the last workspace shown outlives its window.
+    if (reason == proto::WorkspaceRelease::WindowClosed && anotherWorkspaceShown(workspace))
+    {
+        endWorkspace(workspace);
+        return;
+    }
+    _lastReleases.insert_or_assign(
+        workspace.value,
+        reason == proto::WorkspaceRelease::WindowClosed ? proto::WorkspaceRelease::Closed : reason);
+    noteLeft(workspace);
+}
+
+bool SessionHost::anotherWorkspaceShown(WorkspaceId workspace) const
+{
+    return std::ranges::any_of(std::views::iota(0, _model.workspaceCount()), [&](int index) {
+        auto const* other = _model.workspaceAt(index);
+        return other != nullptr && other->id() != workspace && followedByAttachedClient(other->id());
+    });
+}
+
+void SessionHost::endWorkspace(WorkspaceId workspace)
+{
+    auto const* found = _model.workspace(workspace);
+    if (found == nullptr)
+        return;
+    auto const sessions = sessionsShownBy(*found);
+    sessionLog()("workspace {}: its window closed while another is shown; ending its {} session(s)",
+                 workspace.value,
+                 sessions.size());
+    for (auto const session: sessions)
+        closeSession(session);
+    discardWorkspace(workspace);
+}
+
+std::vector<SessionId> SessionHost::sessionsShownBy(vtworkspace::Workspace const& workspace)
+{
+    auto sessions = std::vector<SessionId> {};
+    for (auto const tabIndex: std::views::iota(0, workspace.tabCount()))
+        if (auto const* tab = workspace.tabAt(tabIndex))
+            std::ranges::copy(tab->leafSessions(), std::back_inserter(sessions));
+    return sessions;
+}
+
+void SessionHost::noteLeft(WorkspaceId workspace)
+{
+    _leftAt.insert_or_assign(workspace.value, ++_leftClock);
+}
+
+ShownBeforeRestart SessionHost::shownBeforeRestart(WorkspaceId workspace) const noexcept
+{
+    return _shownBeforeRestart.contains(workspace.value) ? ShownBeforeRestart::Yes : ShownBeforeRestart::No;
+}
+
+uint64_t SessionHost::leftAt(WorkspaceId workspace) const noexcept
+{
+    auto const found = _leftAt.find(workspace.value);
+    return found != _leftAt.end() ? found->second : 0;
 }
 
 std::optional<proto::WorkspaceRelease> SessionHost::releaseUntilShown(
@@ -1409,6 +1489,8 @@ std::optional<proto::WorkspaceRelease> SessionHost::releaseUntilShown(
 
 void SessionHost::noteWorkspaceFollowed(WorkspaceId workspace, SessionStreamEvents const* follower)
 {
+    // Its window is back, or another one shows it: no reconnect has to find it any more.
+    _shownBeforeRestart.erase(workspace.value);
     auto const release = releaseUntilShown(workspace, follower).or_else([&] {
         // Another unshown follow took the record first: this follower holds it as well, so that whichever of
         // them goes last, unshown, puts it back.

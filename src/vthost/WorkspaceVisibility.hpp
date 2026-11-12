@@ -23,6 +23,14 @@ enum class WorkspaceVisibility : uint8_t
     Hidden,   ///< A client switched away from it and none shows it since: a launch leaves it alone.
 };
 
+/// Whether a window showed a restored workspace when the daemon's previous run ended (SessionSnapshot's
+/// visibility), and none has shown it since.
+enum class ShownBeforeRestart : uint8_t
+{
+    No = 0,  ///< Not restored, left before the restart, or shown again since.
+    Yes = 1, ///< Its window went with the previous run, and a reconnect of that window takes it back.
+};
+
 /// Decides a workspace's visibility.
 ///
 /// Shown if any client follows it; else Hidden if the last release was SwitchedAway; else Left. A follow

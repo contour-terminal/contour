@@ -309,16 +309,6 @@ namespace
                 out.insert(out.end(), found->second.begin(), found->second.end());
     }
 
-    /// @return The session of every pane @p workspace shows, tab by tab.
-    [[nodiscard]] std::vector<SessionId> sessionsShownBy(vtworkspace::Workspace const& workspace)
-    {
-        auto sessions = std::vector<SessionId> {};
-        for (auto const tabIndex: std::views::iota(0, workspace.tabCount()))
-            if (auto const* tab = workspace.tabAt(tabIndex))
-                std::ranges::copy(tab->leafSessions(), std::back_inserter(sessions));
-        return sessions;
-    }
-
 } // namespace
 
 NativeSession::NativeSession(core::net::EventLoop& loop,
@@ -805,13 +795,13 @@ void NativeSession::refreshFollowedWorkspaces()
 
 void NativeSession::requestWorkspaceSnapshots(vtworkspace::Workspace& workspace)
 {
-    for (auto const session: sessionsShownBy(workspace))
+    for (auto const session: SessionHost::sessionsShownBy(workspace))
         requestSnapshot(session);
 }
 
 void NativeSession::requestArrivedSnapshots(vtworkspace::Workspace& workspace)
 {
-    for (auto const session: sessionsShownBy(workspace))
+    for (auto const session: SessionHost::sessionsShownBy(workspace))
         if (!_followed.contains(session.value) && _sessionsAtLastLayout.contains(session.value)
             && !snapshotPending(session))
             requestSnapshot(session);
@@ -823,7 +813,7 @@ void NativeSession::noteModelSessions()
     _sessionsAtLastLayout.clear();
     for (auto const i: std::views::iota(0, model.workspaceCount()))
         if (auto const* workspace = model.workspaceAt(i))
-            for (auto const session: sessionsShownBy(*workspace))
+            for (auto const session: SessionHost::sessionsShownBy(*workspace))
                 _sessionsAtLastLayout.insert(session.value);
 }
 
@@ -2663,7 +2653,9 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
             context.workspaces.push_back(
                 WorkspaceSummary { .id = workspace->id().value,
                                    .tabCount = workspace->tabCount(),
-                                   .visibility = _host.visibility(workspace->id()) });
+                                   .visibility = _host.visibility(workspace->id()),
+                                   .leftAt = _host.leftAt(workspace->id()),
+                                   .shownBeforeRestart = _host.shownBeforeRestart(workspace->id()) });
     std::ranges::sort(context.workspaces, {}, &WorkspaceSummary::id);
 
     auto const plan = planAttach(intent, context);

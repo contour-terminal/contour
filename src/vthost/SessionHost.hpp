@@ -50,6 +50,7 @@
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -1237,6 +1238,8 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Records why the last client showing @p workspace stopped: a client that releases a workspace it was
     /// shown tells the host, which keeps the reason until some client follows the workspace again. A release
     /// while another attached client still follows it is not the last one and forgets any reason recorded.
+    /// A WindowClosed release while another workspace is shown ends @p workspace and its sessions
+    /// (endWorkspace); otherwise it is recorded as Closed. A workspace this leaves gets a newer leftAt().
     /// @param workspace The workspace released.
     /// @param reason Why it was released.
     void noteWorkspaceReleased(vtworkspace::WorkspaceId workspace, proto::WorkspaceRelease reason);
@@ -1268,6 +1271,22 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param workspace A workspace.
     /// @return Whether an attached client follows it.
     [[nodiscard]] bool followedByAttachedClient(vtworkspace::WorkspaceId workspace) const;
+
+    /// @param workspace A workspace.
+    /// @return Whether a window showed it when the daemon's previous run ended, and none has shown it since
+    ///         -- what a window reconnecting across a restart takes back (planAttach's Resume).
+    [[nodiscard]] ShownBeforeRestart shownBeforeRestart(vtworkspace::WorkspaceId workspace) const noexcept;
+
+    /// @param workspace A workspace.
+    /// @return The session of every pane @p workspace shows, tab by tab.
+    [[nodiscard]] static std::vector<vtworkspace::SessionId> sessionsShownBy(
+        vtworkspace::Workspace const& workspace);
+
+    /// @param workspace A workspace.
+    /// @return When it was last left, as a count that only grows -- the larger, the more recent; 0 when it
+    ///         was never left in this run of the daemon (a restored workspace, say). A launch brings back the
+    ///         workspace left last (planAttach).
+    [[nodiscard]] uint64_t leftAt(vtworkspace::WorkspaceId workspace) const noexcept;
 
     /// @param workspace A workspace.
     /// @return Why it was last released, nullopt when never, or when a client followed it since.
@@ -2276,6 +2295,25 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Puts back the releases @p client's unshown follows set aside, and forgets those follows.
     /// @param client A client detaching.
     void restoreUnshownFollows(SessionStreamEvents const* client);
+
+    /// @param workspace A workspace.
+    /// @return Whether an attached client follows some other workspace than @p workspace.
+    [[nodiscard]] bool anotherWorkspaceShown(vtworkspace::WorkspaceId workspace) const;
+
+    /// Ends every session of @p workspace, as closing each pane would, and removes the emptied workspace.
+    /// @param workspace The workspace whose window the user closed.
+    void endWorkspace(vtworkspace::WorkspaceId workspace);
+
+    /// Stamps @p workspace as left now. @see leftAt
+    void noteLeft(vtworkspace::WorkspaceId workspace);
+
+    /// When each workspace was last left. @see leftAt
+    std::unordered_map<uint64_t, uint64_t> _leftAt;
+    /// The restored workspaces a window showed when the last run ended, until one is shown again. @see
+    /// shownBeforeRestart
+    std::unordered_set<uint64_t> _shownBeforeRestart;
+    /// The last stamp _leftAt handed out.
+    uint64_t _leftClock = 0;
 
     /// Why each workspace was last released by a client, until one follows it again. @see lastRelease
     std::unordered_map<uint64_t, proto::WorkspaceRelease> _lastReleases;

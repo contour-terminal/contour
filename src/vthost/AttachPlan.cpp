@@ -2,7 +2,9 @@
 #include <vthost/AttachPlan.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <ranges>
+#include <utility>
 
 namespace vthost
 {
@@ -43,18 +45,35 @@ namespace
         return { .follow = {}, .creation = AttachCreation::NewWorkspace };
     }
 
-    /// What a launch brings back: the workspaces with tabs that are Left, wherever else clients are attached.
-    /// A daemon with no tab at all gets its first one in the primary workspace; one whose workspaces are all
-    /// shown or hidden gets a workspace of its own.
-    [[nodiscard]] AttachPlan takeLeft(AttachContext const& context)
+    /// Which of the Left workspaces takeLeft() brings back.
+    enum class LeftTaken : uint8_t
     {
-        auto follow = std::ranges::to<std::vector>(
-            context.workspaces | std::views::filter([](WorkspaceSummary const& workspace) {
-                return workspace.tabCount > 0 && workspace.visibility == WorkspaceVisibility::Left;
-            })
-            | std::views::transform(&WorkspaceSummary::id));
-        if (!follow.empty())
-            return { .follow = std::move(follow), .creation = AttachCreation::None };
+        /// The one left last: a launch opens one window however many workspaces wait, the others being the
+        /// next launches', or the switcher's.
+        Latest = 0,
+        /// Every one: what a client predating attach intents, which shows every workspace, follows.
+        Every = 1,
+    };
+
+    /// What a launch brings back: Left workspaces with tabs, as @p taken says, wherever else clients are
+    /// attached. A daemon with no tab at all gets its first one in the primary workspace; one whose
+    /// workspaces are all shown or hidden gets a workspace of its own.
+    [[nodiscard]] AttachPlan takeLeft(AttachContext const& context, LeftTaken taken)
+    {
+        auto left = context.workspaces | std::views::filter([](WorkspaceSummary const& workspace) {
+                        return workspace.tabCount > 0 && workspace.visibility == WorkspaceVisibility::Left;
+                    });
+        if (!std::ranges::empty(left))
+        {
+            if (taken == LeftTaken::Every)
+                return { .follow = std::ranges::to<std::vector>(
+                             left | std::views::transform(&WorkspaceSummary::id)),
+                         .creation = AttachCreation::None };
+            auto const latest = std::ranges::max(left, {}, [](WorkspaceSummary const& workspace) {
+                return std::pair { workspace.leftAt, workspace.id };
+            });
+            return { .follow = { latest.id }, .creation = AttachCreation::None };
+        }
         if (workspacesWithTabs(context).empty())
             return { .follow = { context.primaryWorkspace }, .creation = AttachCreation::FirstTabInPrimary };
         return newWorkspace();
@@ -64,7 +83,7 @@ namespace
     /// is brought back leaves it nothing to create.
     [[nodiscard]] AttachPlan launch(AttachContext const& context)
     {
-        auto plan = takeLeft(context);
+        auto plan = takeLeft(context, LeftTaken::Latest);
         if (plan.creation == AttachCreation::None && context.workingDirectory == WorkingDirectoryStated::Yes)
             plan.creation = AttachCreation::TabInFirstFollowed;
         return plan;
@@ -75,7 +94,7 @@ AttachPlan planAttach(proto::AttachIntent const& intent, AttachContext const& co
 {
     switch (intent.kind)
     {
-        case proto::AttachIntentKind::AllWorkspaces: return takeLeft(context);
+        case proto::AttachIntentKind::AllWorkspaces: return takeLeft(context, LeftTaken::Every);
         case proto::AttachIntentKind::Launch: return launch(context);
         case proto::AttachIntentKind::NewWorkspace: return newWorkspace();
         case proto::AttachIntentKind::Workspaces:
@@ -90,7 +109,19 @@ AttachPlan planAttach(proto::AttachIntent const& intent, AttachContext const& co
                 workspacesWithTabs(context)
                 | std::views::filter([&](uint64_t id) { return std::ranges::contains(named, id); }));
             if (follow.empty())
+            {
+                // Its workspaces are gone with a restart: the windows that run showed take back what they
+                // showed, all of them, where a launch would take one.
+                auto restored = std::ranges::to<std::vector>(
+                    context.workspaces | std::views::filter([](WorkspaceSummary const& workspace) {
+                        return workspace.tabCount > 0 && workspace.visibility == WorkspaceVisibility::Left
+                               && workspace.shownBeforeRestart == ShownBeforeRestart::Yes;
+                    })
+                    | std::views::transform(&WorkspaceSummary::id));
+                if (!restored.empty())
+                    return { .follow = std::move(restored), .creation = AttachCreation::None };
                 return launch(context);
+            }
             return { .follow = std::move(follow), .creation = AttachCreation::None };
         }
     }
