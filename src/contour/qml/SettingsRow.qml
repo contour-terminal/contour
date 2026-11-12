@@ -102,8 +102,8 @@ Item {
         anchors.fill: parent
         anchors.leftMargin: chromeStyle.settings.rowPadding
         anchors.rightMargin: chromeStyle.settings.rowPadding
-        anchors.topMargin: root._stacked ? root._textInset / 2 : 0
-        anchors.bottomMargin: root._stacked ? root._textInset / 2 : 0
+        anchors.topMargin: root._stacked ? chromeStyle.space.s3 : 0
+        anchors.bottomMargin: root._stacked ? chromeStyle.space.s3 : 0
         columns: root._stacked ? 1 : 3
         columnSpacing: chromeStyle.space.s6
         rowSpacing: chromeStyle.space.s4
@@ -395,7 +395,7 @@ Item {
                     required property string modelData
                     Layout.fillWidth: true
                     Label {
-                        Layout.preferredWidth: editor.width / 4
+                        Layout.preferredWidth: chromeStyle.settings.stepperField * root._textFieldWidths
                         Layout.minimumWidth: 0
                         text: modelData
                         textFormat: Text.PlainText
@@ -442,14 +442,14 @@ Item {
                     objectName: "settingsEnvironmentName"
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
-                    Layout.preferredWidth: 1
+                    Layout.preferredWidth: chromeStyle.settings.stepperField
                     placeholderText: qsTr("Name, e.g. TERM")
                     Accessible.name: qsTr("Variable name")
                 }
                 ScrollView {
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
-                    Layout.preferredWidth: 1
+                    Layout.preferredWidth: chromeStyle.settings.stepperField
                     Layout.preferredHeight: nameInput.implicitHeight
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                     ScrollBar.vertical.policy: ScrollBar.AlwaysOff
