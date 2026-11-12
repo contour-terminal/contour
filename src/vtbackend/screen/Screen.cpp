@@ -6249,19 +6249,19 @@ void Screen::processKittyGraphics(std::string_view body)
     // exact bound for inflating one: a bomb is refused after a few KiB instead of being inflated
     // and then found to be the wrong size. A PNG states its own size only once decoded, so it is
     // bounded by what the quota still has room for instead. Declared dimensions are attacker-chosen,
-    // though, so they bound an inflate only when they are sane: an overflowing or over-quota size is
-    // refused before a single byte is inflated.
-    auto const expected = static_cast<size_t>(command.pixelWidth) * command.pixelHeight
-                          * bytesPerPixel(command.transmissionFormat());
-    if (command.compression != Compression::None && format != ImageFormat::PNG
-        && !boundedRawBytes(command.pixelWidth,
-                            command.pixelHeight,
-                            bytesPerPixel(command.transmissionFormat()),
-                            _settings->kittyImageStorageQuota))
+    // though, so they are trusted only when they are sane: an overflowing or over-quota size is
+    // refused before a single byte is inflated -- and before an uncompressed payload is compared
+    // with it, since a product that wrapped compares equal to a payload it has nothing to do with.
+    auto const bounded = boundedRawBytes(command.pixelWidth,
+                                         command.pixelHeight,
+                                         bytesPerPixel(command.transmissionFormat()),
+                                         _settings->kittyImageStorageQuota);
+    if (format != ImageFormat::PNG && !bounded)
     {
         replyKittyGraphics(command, "EINVAL:image dimensions too large");
         return;
     }
+    auto const expected = bounded.value_or(0);
     // Everything stored except this id's image and frames, which a re-transmission replaces.
     auto const storedByOthers = storedKittyBytes() - storedKittyBytesOf(command.imageId);
     auto const quota = _settings->kittyImageStorageQuota;
@@ -6660,6 +6660,14 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     if (command.format && toImageFormat(*command.format) != base.format())
     {
         replyKittyGraphics(command, "EINVAL:frame format does not match the image");
+        return;
+    }
+
+    // Everything below indexes the frame by the image's geometry, so that geometry has to be what
+    // the buffer actually holds -- checked here rather than assumed of whoever stored the image.
+    if (!isConsistentPixmap(base.format(), base.size(), base.data().size()))
+    {
+        replyKittyGraphics(command, "EINVAL:frame does not match the image geometry");
         return;
     }
 

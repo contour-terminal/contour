@@ -321,6 +321,26 @@ TEST_CASE("KittyGraphics.mismatched_payload_size_is_refused", "[kitty]")
     CHECK_FALSE(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment());
 }
 
+TEST_CASE("KittyGraphics.dimensions_whose_byte_size_wraps_are_refused", "[kitty]")
+{
+    // 2147549185 x 2147418113 is 2^62 + 1 pixels, so four bytes each wraps size_t to exactly 4: the
+    // one-pixel payload below "matches" a geometry of some 2^62 pixels unless the product is checked.
+    auto mock = KittyTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    auto const onePixel = core::base64::encode("\xFF\xFF\xFF\xFF"sv);
+
+    mock.writeToScreen(std::format("\033_Ga=t,f=32,i=1,s=2147549185,v=2147418113;{}\033\\", onePixel));
+
+    CHECK(mock.terminal.peekInput().contains("EINVAL"));
+    CHECK_FALSE(mock.terminal.peekInput().contains("OK"));
+
+    // Nothing was stored, so there is no image for a frame to be composited into -- with the image
+    // stored, this command wrote its payload 4000 bytes past a 4-byte buffer.
+    mock.discardPendingReplies();
+    mock.writeToScreen(std::format("\033_Ga=f,i=1,r=1,X=1,x=1000,y=0,s=1,v=1;{}\033\\", onePixel));
+
+    CHECK(mock.terminal.peekInput().contains("ENOENT"));
+}
+
 TEST_CASE("KittyGraphics.unsupported_media_are_refused_not_ignored", "[kitty]")
 {
     // Reading a path the application names would let it point the terminal at any file the user can
