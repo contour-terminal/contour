@@ -572,11 +572,13 @@ TEST_CASE("DaemonLink: a daemon restarted with a restore keeps a window for ever
         return showing(daemon, ids[0]) == 1 && showing(daemon, ids[1]) == 1 && showing(daemon, ids[2]) == 1;
     }));
 
-    // The launch's window closes: its workspace is left, and the other two windows go on.
+    // The launch's window closes while the other two windows go on: its workspace ends with it.
     auto const bootPanes = watchedSessionsOf(manager, boot->id);
     boot->controller->closeWindow();
     endClosedSessions(bootPanes);
     REQUIRE(daemon.waitUntilOnDaemon([&] { return showing(daemon, ids[0]) == 0; }));
+    CHECK(daemon.waitUntilOnDaemon(
+        [&] { return daemon.host->model().workspace(vtworkspace::WorkspaceId { ids[0] }) == nullptr; }));
     drainGuiEvents();
 
     // The daemon restarts and restores the two workspaces still shown, numbered anew: the first of them is 1
@@ -585,8 +587,7 @@ TEST_CASE("DaemonLink: a daemon restarted with a restore keeps a window for ever
         return vthost::captureWorkspace(
             *daemon.host, { .scrollback = vthost::ScrollbackPersistence::Off }, std::chrono::sys_seconds {});
     });
-    REQUIRE(snapshot.workspaces.size() == 3);
-    snapshot.workspaces.erase(snapshot.workspaces.begin());
+    REQUIRE(snapshot.workspaces.size() == 2);
     daemon.restore = vthost::WorkspaceRestore { .snapshot = std::move(snapshot) };
     daemon.restartHost();
 

@@ -775,7 +775,8 @@ void DaemonLink::windowClosed(vtworkspace::WorkspaceId window)
     if (layout == nullptr || layout->tabs.empty())
         return;
     // The mapping goes with the closed window in the next reconcile; the workspace is not pushed any more.
-    if (auto released = _controller->release(mapped->first, vthost::proto::WorkspaceRelease::Closed);
+    // WindowClosed, not Closed: the user closed it, so the daemon ends it while it shows another workspace.
+    if (auto released = _controller->release(mapped->first, vthost::proto::WorkspaceRelease::WindowClosed);
         !released)
         attachLog()("attach: the daemon is not told window {} closed: {}", window.value, released.error());
 }

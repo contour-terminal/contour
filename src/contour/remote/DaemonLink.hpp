@@ -211,7 +211,8 @@ class DaemonLink final: public session::WindowBinding
     void lastWindowReleased() override;
 
     /// One of its windows closed: the daemon workspace it showed is released
-    /// (proto::WorkspaceRelease::Closed), and stays left for a later launch to bring back. A workspace a move
+    /// (proto::WorkspaceRelease::WindowClosed). The daemon ends it while another of its workspaces is shown,
+    /// and otherwise leaves it for a later launch to bring back. A workspace a move
     /// emptied is kept followed, as the daemon may fill it again. No-op once given up or stopped, and against
     /// a daemon without Capability::WorkspaceFollow.
     /// @param window The closed window.
