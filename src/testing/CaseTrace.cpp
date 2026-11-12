@@ -13,6 +13,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -38,6 +39,14 @@ class CaseTraceListener final: public Catch::EventListenerBase
     {
         _caseStarted = std::chrono::steady_clock::now();
         write(contour::testing::CaseTraceEvent::CaseStarting, testInfo.name);
+    }
+
+    void testCasePartialStarting(Catch::TestCaseInfo const& /*testInfo*/, std::uint64_t partNumber) override
+    {
+        // The first run is the case's own start; a later one is told apart, or a hang in a case with sections
+        // could lie in the end of one run as well as in the start of the next.
+        if (partNumber > 0)
+            write(contour::testing::CaseTraceEvent::RunStarting, std::to_string(partNumber + 1));
     }
 
     void sectionStarting(Catch::SectionInfo const& sectionInfo) override

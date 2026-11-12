@@ -29,6 +29,7 @@ TEST_CASE("the case trace names each case and section as it starts", "[testing][
 {
     using namespace std::chrono_literals;
     CHECK(caseTraceLine(CaseTraceEvent::CaseStarting, "a case", 0, 0ms) == "[trace] case: a case");
+    CHECK(caseTraceLine(CaseTraceEvent::RunStarting, "2", 0, 0ms) == "[trace]   run: 2");
     CHECK(caseTraceLine(CaseTraceEvent::SectionStarting, "outer", 1, 0ms) == "[trace]   section: outer");
     CHECK(caseTraceLine(CaseTraceEvent::SectionStarting, "inner", 2, 0ms) == "[trace]     section: inner");
     CHECK(caseTraceLine(CaseTraceEvent::CaseEnded, "a case", 0, 42ms) == "[trace] ended: a case (42 ms)");

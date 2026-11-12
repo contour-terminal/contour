@@ -35,13 +35,14 @@ inline constexpr auto CaseTraceVariable = std::string_view { "CONTOUR_TEST_TRACE
 /// What one line of the trace reports.
 enum class CaseTraceEvent : uint8_t
 {
-    CaseStarting,    ///< A test case starts (once per run of it: a case with sections runs once per leaf).
+    CaseStarting,    ///< A test case starts: once, however many times its sections have it run.
+    RunStarting,     ///< A later run of it starts: a case with sections runs once per leaf section.
     SectionStarting, ///< A section within it starts.
     CaseEnded,       ///< The test case ended.
 };
 
 /// @param event What happened.
-/// @param name The test case's name, or the section's.
+/// @param name The test case's name, or the section's; for CaseTraceEvent::RunStarting, which run it is.
 /// @param depth How deep a section is nested in its test case, from 1; ignored for the case's own events.
 /// @param elapsed How long the case ran; read for CaseTraceEvent::CaseEnded only.
 /// @return The trace line, without its newline.
@@ -53,6 +54,7 @@ enum class CaseTraceEvent : uint8_t
     switch (event)
     {
         case CaseTraceEvent::CaseStarting: return std::format("[trace] case: {}", name);
+        case CaseTraceEvent::RunStarting: return std::format("[trace]   run: {}", name);
         case CaseTraceEvent::SectionStarting:
             return std::format("[trace] {:>{}}section: {}", "", 2 * depth, name);
         case CaseTraceEvent::CaseEnded:
