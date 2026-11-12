@@ -1,0 +1,126 @@
+name: Clang-tidy
+
+# clang-tidy over the whole tree. A workflow of its own, not a job of build.yml: it takes three to
+# five hours, and inside the Build workflow that is how long a master run stayed "in progress" -- with
+# every later push's run, and the compiler caches it saves for pull requests, queued behind it. Pull
+# requests run build.yml's `check_clang_tidy_diff` instead: the same checks on the lines they changed.
+# No compiler cache here: clang-tidy's own work is not cacheable, and the quota is spent on the keys
+# pull requests restore (docs/internals/build-times.md, "The compiler cache").
+on:
+  merge_group:
+  push:
+    paths-ignore:
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/*.yml'
+      - 'LICENSE.txt'
+      - 'mkdocs.yml'
+      - '*.md'
+      - '*.sh'
+    branches:
+      - master
+    # Only full release tags, as in build.yml: nothing exempts a release from the full-tree run.
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+# Read-only: this workflow publishes nothing, and it runs installers it does not control for hours.
+permissions:
+  contents: read
+
+concurrency:
+  group: clang-tidy-${{ github.ref }}
+  # A master commit the next push superseded is not worth hours of a runner; a release tag's run is
+  # never cancelled.
+  cancel-in-progress: ${{ github.ref == 'refs/heads/master' }}
+
+env:
+  # The same toolchain as build.yml, which holds the other copy; scripts/check-workflows.py fails when
+  # the two differ.
+  LLVM_VERSION: "22"
+  # As in build.yml: scripts/ci-set-vars.sh reads it.
+  CONTOUR_BUILD_CHANNEL: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'prerelease' }}
+
+jobs:
+
+  check_clang_tidy:
+    name: "Check clang-tidy"
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: "update APT database"
+      run: sudo ./scripts/apt-update.sh
+    - name: Installing xmllint for ci-set-vars
+      run: sudo apt -qy install libxml2-utils
+    - name: set environment variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "install dependencies"
+      run: sudo env QTVER=6 ./scripts/install-deps.sh
+    - name: "Post-fix embedded dependency permissions."
+      run: sudo find _deps/sources -exec chown $UID {} \;
+    # Ubuntu 24.04's distro Qt (6.4.2) lacks the Qt6::GuiPrivate CMake package the RHI renderer needs;
+    # install a modern Qt6 over it (see the build matrix job for the same rationale).
+    #
+    # Pinned to 6.11.1 rather than tracking 6.11.*: 6.11.2's Linux AARCH64 qttools archive is
+    # corrupt where it is published, so unpacking it dies with
+    # `zipfile.BadZipFile: Bad offset for central directory` and takes the whole install with it.
+    # Every arm64 job started failing the moment 6.11.2 appeared, while yesterday's runs on 6.11.1
+    # were green and today's x86_64 runs on 6.11.2 still are -- only the AARCH64 archive is bad.
+    # Raise this once a later 6.11 publishes an archive that unpacks. See the retry below for why
+    # re-running does not help here.
+    #
+    # Attempted twice all the same: aqtinstall pulls each archive from whichever mirror
+    # download.qt.io redirects it to, so a mirror that serves a truncated file is a verdict on the
+    # mirror, not on the commit under test, and re-resolving the redirect usually lands elsewhere.
+    # It buys nothing against a corrupt *upstream* archive -- both attempts fetched the bad qttools
+    # from two different mirrors -- which is what the pin above is for. Only a repeated failure
+    # fails the job.
+    - name: "Install Qt (GuiPrivate-capable)"
+      id: install_qt
+      continue-on-error: true
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: "6.11.1"
+        modules: qtmultimedia qt5compat qtshadertools qtspeech
+    - name: "Install Qt (GuiPrivate-capable) -- retry past a bad mirror"
+      if: steps.install_qt.outcome == 'failure'
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: "6.11.1"
+        modules: qtmultimedia qt5compat qtshadertools qtspeech
+    - name: Install clang
+      run: |
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh ${LLVM_VERSION}
+        sudo apt-get install clang-tidy-${LLVM_VERSION}
+    # Catches stale/misspelled option keys and removed config directives in seconds,
+    # rather than letting them silently no-op through a full tidy build.
+    - name: "Verify clang-tidy configuration"
+      run: CLANG_TIDY=clang-tidy-${LLVM_VERSION} ./scripts/check-clang-tidy-config.sh
+    # CONTOUR_EXTENSIONS_BUNDLED is on by default, and its configuration fails without cargo and the
+    # wasm32-wasip1 target: the bundled status-line extensions, and the test guests, are Rust.
+    - name: "install Rust (wasm32-wasip1)"
+      run: ./scripts/install-rust-wasm.sh
+    # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs: a
+    # unicode.org outage used to fail the configure step of every job at once.
+    - name: "Unicode database"
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: _ucd
+        key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
+    - name: "cmake"
+      run: |
+        cmake \
+              --preset clang-debug \
+              -B build \
+              -G Ninja \
+              -D CONTOUR_WAYLAND=OFF \
+              -D LIBUNICODE_UCD_BASE_DIR="$PWD/_ucd" \
+              -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}" \
+              -D ENABLE_TIDY=ON \
+              -D CLANG_TIDY_EXE=/usr/bin/clang-tidy-${LLVM_VERSION}
+    - name: "build"
+      run: cmake --build build
