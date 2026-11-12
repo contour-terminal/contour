@@ -874,6 +874,16 @@ TEST_CASE("SidebarModel: the reason is delivered as its words and its command", 
     auto const plain = t.sidebar().index(1);
     CHECK(plain.data(SidebarModel::ReasonLabelRole).toString() == "All tests pass");
     CHECK(plain.data(SidebarModel::ReasonCommandRole).toString().isEmpty());
+
+    // The sidebar always draws a command, so a failed command's separator is drawn with its words.
+    t.source.listed.workspaces[0].tabs[0].panes[0].status = {};
+    t.source.listed.workspaces[0].tabs[0].panes[0].finished =
+        vthost::proto::FinishedCommand { .exitCode = 1, .durationMs = std::nullopt, .commandLine = "make" };
+    t.source.listed.workspaces[0].tabs[0].panes[0].finishedSerial = 1;
+    t.sidebar().refreshNow();
+    auto const failed = t.sidebar().index(1);
+    CHECK(failed.data(SidebarModel::ReasonLabelRole).toString() == "exit 1 · ");
+    CHECK(failed.data(SidebarModel::ReasonCommandRole).toString() == "make");
 }
 
 TEST_CASE("SidebarModel: the command map names every tree command", "[contour][sidebar]")

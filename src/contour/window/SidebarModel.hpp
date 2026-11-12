@@ -353,7 +353,7 @@ class SidebarModel: public QAbstractListModel
         AccessibleNameRole,          ///< Kind, state and status as text, for a screen reader.
         ProgramRole,                 ///< The program the reason is about; empty when unknown.
         FolderRole,                  ///< The pane's working directory; empty when unknown.
-        ReasonLabelRole,             ///< The reason's words, set proportional (SidebarRow::reasonLabel).
+        ReasonLabelRole,             ///< The reason's words and its separator, set proportional.
         ReasonCommandRole,           ///< The reason's command, set monospace; empty for a plain reason.
         TreeTextRole,                ///< The Terminal look's connectors as text (treeLinesText()).
         MeterTextRole,         ///< The Terminal look's block meter (meterText()), empty without progress.

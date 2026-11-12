@@ -100,11 +100,14 @@ enum class TreeGlyph : uint8_t
 /// monospace face after them. A plain reason (`All tests pass`) is all label.
 struct ReasonParts
 {
-    std::string label;   ///< The words, with their separator when a command follows (`Permission · `).
-    std::string command; ///< The command the words are about; empty for a plain reason.
+    std::string label;     ///< The words (`exit 1 · 2s`, `Permission · Bash: `).
+    std::string separator; ///< Between the words and the command, and gone with it: ` · `, or empty.
+    std::string command;   ///< The command the words are about; empty for a plain reason.
 
     /// @return The reason as one line, label then command.
-    [[nodiscard]] std::string joined() const { return label + command; }
+    [[nodiscard]] std::string joined() const { return label + separator + command; }
+
+    bool operator==(ReasonParts const&) const = default;
 };
 
 /// The connectors of a row: column @c i belongs to depth @c i+1. A row of depth @c d fills columns 0..d-1:
@@ -134,6 +137,7 @@ struct SidebarRow
     std::string title;                           ///< The name; plain text.
     std::string reason;                          ///< The second line; empty when there is nothing to say.
     std::string reasonLabel;                     ///< Its words (the proportional part).
+    std::string reasonSeparator;                 ///< Between the words and the command; empty for none.
     std::string reasonCommand;                   ///< Its command (the monospace part); often empty.
     std::string fullReason;                      ///< The hover card's reason: whole, to MaxFullReasonLength.
     std::string fullReasonLabel;                 ///< Its words.
@@ -313,6 +317,12 @@ inline constexpr int MeterCells = 5;
 /// @return The meter.
 [[nodiscard]] std::string meterText(int percent);
 
+/// A workspace's git state as a row shows it: the branch, then how far it is ahead of and behind its upstream
+/// where that is not zero (`feat/billing ↑2 ↓1`).
+/// @param git The git state.
+/// @return The text, the branch sanitized to plain text.
+[[nodiscard]] std::string gitTextOf(DirectoryGit const& git);
+
 /// Time spent in a state.
 /// @param elapsed How long; below zero reads as zero.
 /// @return `0:42`, `4:12` or `1:02:03`.
@@ -322,5 +332,49 @@ inline constexpr int MeterCells = 5;
 /// @param elapsed How long ago; below zero reads as zero.
 /// @return `now` (under 10 s), `42s ago`, `2m ago`, `3h ago` or `2d ago`.
 [[nodiscard]] std::string formatRelative(std::chrono::seconds elapsed);
+
+/// Between the words of a reason and what follows them: `exit 1 · 18s`, `Permission · Bash: `.
+inline constexpr std::string_view LabelSeparator = " · ";
+
+/// Text from outside, made fit for a row's line: no controls, no invisible or bidi formatting, at most
+/// MaxRowTextLength characters.
+/// @param text The text.
+/// @return The text as a row may show it.
+[[nodiscard]] std::string rowTextOf(std::string_view text);
+
+/// What a program-status record says it is doing or waits for: the reason a row shows of it. A permission
+/// asks for a command the program wants to run, which is the reason's command part; whatever leads it, the
+/// kind and the tool that would run it (`Permission · Bash: `), is its label.
+/// @param record The record that decides the row.
+/// @param kind The badge it earned.
+/// @param maxLength The most characters the reason holds.
+/// @return The reason, sanitized.
+[[nodiscard]] ReasonParts statusReasonOf(vtbackend::ProgramStatusRecord const& record,
+                                         BadgeKind kind,
+                                         std::size_t maxLength);
+
+/// How a status's time is kept: its progress while working or blocked when it reports one, else the time
+/// spent while working or blocked, else the time since.
+/// @param progress The percent done the record reports, if any.
+/// @param kind The badge it earned.
+/// @return Progress, Live or Relative.
+[[nodiscard]] TimeKind statusTimeKind(std::optional<uint8_t> progress, BadgeKind kind) noexcept;
+
+/// A row's time, formatted.
+/// @param kind How it is kept (statusTimeKind).
+/// @param since When the status began or ended; none when unknown.
+/// @param progress The percent done, for Progress.
+/// @param now The wall clock.
+/// @return `42%`, `4:12`, `2m ago`; empty for None, or for Live and Relative without @p since.
+[[nodiscard]] TimeText formatTimeText(TimeKind kind,
+                                      std::optional<std::chrono::system_clock::time_point> since,
+                                      std::optional<uint8_t> progress,
+                                      std::chrono::system_clock::time_point now);
+
+/// What a finished command says of itself: `exit 1 · 18s`, or `exit 1 · 18s · ` and the command line as its
+/// command part when it is known.
+/// @param finished The command.
+/// @return The reason, the command line sanitized.
+[[nodiscard]] ReasonParts finishedText(vthost::proto::FinishedCommand const& finished);
 
 } // namespace contour::window

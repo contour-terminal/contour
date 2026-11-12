@@ -146,6 +146,7 @@ namespace
         note(before.title == after.title,
              { SidebarModel::TitleRole, Qt::DisplayRole, Qt::AccessibleTextRole });
         note(before.reason == after.reason && before.reasonLabel == after.reasonLabel
+                 && before.reasonSeparator == after.reasonSeparator
                  && before.reasonCommand == after.reasonCommand,
              { SidebarModel::ReasonRole, SidebarModel::ReasonLabelRole, SidebarModel::ReasonCommandRole });
         note(before.fullReason == after.fullReason && before.fullReasonLabel == after.fullReasonLabel
@@ -382,7 +383,8 @@ QVariant SidebarModel::data(QModelIndex const& index, int role) const
         case AccessibleNameRole: return accessibleNameOf(*row);
         case ProgramRole: return qs(row->program);
         case FolderRole: return qs(row->folder);
-        case ReasonLabelRole: return qs(row->reasonLabel);
+        // The sidebar always draws the command (elided), so the separator is drawn with the words.
+        case ReasonLabelRole: return qs(row->reasonLabel + row->reasonSeparator);
         case ReasonCommandRole: return qs(row->reasonCommand);
         case FullReasonLabelRole: return qs(row->fullReasonLabel);
         case FullReasonCommandRole: return qs(row->fullReasonCommand);

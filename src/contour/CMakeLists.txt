@@ -263,6 +263,7 @@ set(_header_files
     window/PopupAnchor.hpp
     window/Utf16Offsets.hpp
     window/SidebarTree.hpp
+    window/SwitcherStatus.hpp
     window/TabBarDropPolicy.hpp
     window/TabBarHitValue.hpp
     window/NodeDrag.hpp
@@ -288,6 +289,7 @@ set(_header_files
 set(_core_source_files
     session/HyperlinkTooltip.cpp
     window/SidebarTree.cpp
+    window/SwitcherStatus.cpp
     window/TabLabel.cpp
 )
 # The executable entry point lives outside the object library so the test can supply its own main
@@ -1768,6 +1770,8 @@ if(CONTOUR_TESTING)
         window/AttentionJump_test.cpp
         window/SidebarTree.cpp
         window/SidebarTree_test.cpp
+        window/SwitcherStatus.cpp
+        window/SwitcherStatus_test.cpp
         window/SidebarDropPolicy_test.cpp
         window/SidebarSelection_test.cpp
         window/CloseDialogTable_test.cpp

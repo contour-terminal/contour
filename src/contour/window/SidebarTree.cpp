@@ -46,8 +46,6 @@ namespace
         BlockedLabel { .kind = vtbackend::BlockedKind::Auth, .label = "Sign-in" },
     };
 
-    constexpr std::string_view LabelSeparator = " · ";
-
     /// The badge look a status badge kind is drawn as.
     constexpr TabBadgeKind glyphOf(BadgeKind kind) noexcept
     {
@@ -82,12 +80,6 @@ namespace
     std::string sanitizedTo(std::string_view text, std::size_t maxLength)
     {
         return elided(disarmInvisibleFormatting(text), maxLength);
-    }
-
-    /// Text from outside, made fit for a row's line (sanitizedTo() MaxRowTextLength).
-    std::string sanitized(std::string_view text)
-    {
-        return sanitizedTo(text, MaxRowTextLength);
     }
 
     /// The record that decides a pane's badge, as badgeFor() picks it.
@@ -128,77 +120,26 @@ namespace
         return end + Separator.size();
     }
 
-    /// What @p record says it is doing or waits for, at most @p maxLength characters. A permission asks for a
-    /// command the program wants to run, which is the reason's command part; whatever leads it, the kind and
-    /// the tool that would run it (`Permission · Bash: `), is its label.
-    ReasonParts reasonOf(vtbackend::ProgramStatusRecord const& record, BadgeKind kind, std::size_t maxLength)
-    {
-        auto text = sanitizedTo(record.message.empty() ? record.title : record.message, maxLength);
-        if (kind != BadgeKind::Blocked)
-            return { .label = std::move(text), .command = {} };
-        auto const label = std::ranges::find(BlockedLabels, record.kind, &BlockedLabel::kind)->label;
-        if (label.empty())
-            return { .label = std::move(text), .command = {} };
-        auto const lead = text.empty() ? std::string { label } : std::format("{}{}", label, LabelSeparator);
-        if (record.kind == vtbackend::BlockedKind::Permission && !record.message.empty() && !text.empty())
-        {
-            auto const prefix = toolPrefixLength(text);
-            auto const tool =
-                prefix < text.size() ? prefix : std::size_t { 0 }; // A tool with no command stays one.
-            auto const withTool = lead + text.substr(0, tool);
-            auto const room = withTool.size() < maxLength ? maxLength - withTool.size() : std::size_t { 1 };
-            return { .label = withTool, .command = elided(std::string_view { text }.substr(tool), room) };
-        }
-        return { .label = elided(text.empty() ? lead : lead + text, maxLength), .command = {} };
-    }
-
-    TimeText timeOf(vtbackend::ProgramStatusRecord const& record,
-                    BadgeKind kind,
-                    std::chrono::system_clock::time_point now)
-    {
-        if (record.progress && (kind == BadgeKind::Working || kind == BadgeKind::Blocked))
-            return { .kind = TimeKind::Progress,
-                     .text = std::format("{}%", *record.progress),
-                     .percent = record.progress };
-        if (record.since == std::chrono::system_clock::time_point {})
-            return {};
-        auto const elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - record.since);
-        auto const live = kind == BadgeKind::Working || kind == BadgeKind::Blocked;
-        return { .kind = live ? TimeKind::Live : TimeKind::Relative,
-                 .text = live ? formatLive(elapsed) : formatRelative(elapsed),
-                 .percent = std::nullopt };
-    }
-
-    /// `exit 1 · 18s`, or `exit 1 · 18s · ` and the command line as its command part when it is known.
-    ReasonParts finishedText(vthost::proto::FinishedCommand const& finished)
-    {
-        auto text =
-            finished.exitCode ? std::format("exit {}", *finished.exitCode) : std::string { "finished" };
-        if (finished.durationMs)
-            text += std::format("{}{}",
-                                LabelSeparator,
-                                vtbackend::formatCommandDuration(std::chrono::milliseconds {
-                                    static_cast<int64_t>(*finished.durationMs) }));
-        if (finished.commandLine.empty())
-            return { .label = std::move(text), .command = {} };
-        return { .label = text + std::string { LabelSeparator }, .command = sanitized(finished.commandLine) };
-    }
-
     LeafStatus leafOf(DirectoryPane const& pane,
                       SessionAttention const& attention,
                       std::chrono::system_clock::time_point now)
     {
         auto leaf = LeafStatus {};
         leaf.urgency = paneUrgency(pane, attention);
-        leaf.folder = sanitized(pane.cwd);
+        leaf.folder = rowTextOf(pane.cwd);
         auto const winner = winnerOf(pane.status, attention.seenStatusGeneration);
         if (winner.record && urgencyOf(winner.kind, StatusSeen::Unseen) == leaf.urgency)
         {
             leaf.glyph = glyphOf(winner.kind);
-            leaf.reason = reasonOf(*winner.record, winner.kind, MaxRowTextLength);
-            leaf.fullReason = reasonOf(*winner.record, winner.kind, MaxFullReasonLength);
-            leaf.program = sanitized(winner.record->app);
-            leaf.time = timeOf(*winner.record, winner.kind, now);
+            leaf.reason = statusReasonOf(*winner.record, winner.kind, MaxRowTextLength);
+            leaf.fullReason = statusReasonOf(*winner.record, winner.kind, MaxFullReasonLength);
+            leaf.program = rowTextOf(winner.record->app);
+            leaf.time = formatTimeText(statusTimeKind(winner.record->progress, winner.kind),
+                                       winner.record->since == std::chrono::system_clock::time_point {}
+                                           ? std::nullopt
+                                           : std::optional { winner.record->since },
+                                       winner.record->progress,
+                                       now);
             return leaf;
         }
         leaf.glyph = glyphOf(leaf.urgency);
@@ -242,23 +183,15 @@ namespace
         row.glyph = leaf.glyph;
         row.reason = leaf.reason.joined();
         row.reasonLabel = leaf.reason.label;
+        row.reasonSeparator = leaf.reason.separator;
         row.reasonCommand = leaf.reason.command;
         row.fullReason = leaf.fullReason.joined();
-        row.fullReasonLabel = leaf.fullReason.label;
+        // The hover card never lets its command go, so the separator stays with the words there.
+        row.fullReasonLabel = leaf.fullReason.label + leaf.fullReason.separator;
         row.fullReasonCommand = leaf.fullReason.command;
         row.program = leaf.program;
         row.folder = leaf.folder;
         row.time = leaf.time;
-    }
-
-    std::string gitTextOf(DirectoryGit const& git)
-    {
-        auto text = sanitized(git.branch);
-        if (git.ahead && *git.ahead != 0)
-            text += std::format(" ↑{}", *git.ahead);
-        if (git.behind && *git.behind != 0)
-            text += std::format(" ↓{}", *git.behind);
-        return text;
     }
 
     char asciiLower(char c) noexcept
@@ -312,7 +245,7 @@ namespace
         row.depth = 1;
         row.position = position;
         auto const& fallbackTitle = tab.panes.empty() ? std::string {} : tab.panes.front().title;
-        row.title = sanitized(!tab.label.empty() ? tab.label : fallbackTitle);
+        row.title = rowTextOf(!tab.label.empty() ? tab.label : fallbackTitle);
         if (row.title.empty())
             row.title = "Terminal";
         row.selection = selection;
@@ -335,7 +268,7 @@ namespace
                 paneRow.depth = 2;
                 paneRow.position = panePosition;
                 auto const& named = !pane.title.empty() ? pane.title : pane.cwd;
-                paneRow.title = sanitized(named);
+                paneRow.title = rowTextOf(named);
                 if (paneRow.title.empty())
                     paneRow.title = std::format("Pane {}", panePosition + 1);
                 adopt(paneRow, leaf);
@@ -396,6 +329,16 @@ namespace
 
 } // namespace
 
+std::string gitTextOf(DirectoryGit const& git)
+{
+    auto text = rowTextOf(git.branch);
+    if (git.ahead && *git.ahead != 0)
+        text += std::format(" ↑{}", *git.ahead);
+    if (git.behind && *git.behind != 0)
+        text += std::format(" ↓{}", *git.behind);
+    return text;
+}
+
 SidebarListing sidebarListing(WorkspaceDirectory const& directory,
                               TabAttention const& attention,
                               SidebarState const& state,
@@ -432,7 +375,7 @@ SidebarListing sidebarListing(WorkspaceDirectory const& directory,
         auto row = SidebarRow {};
         row.key = { .kind = SidebarRowKind::Workspace, .workspace = workspace.id, .tab = 0, .pane = {} };
         row.position = static_cast<std::size_t>(position);
-        row.title = sanitized(workspaceTitleOf(workspace, static_cast<std::size_t>(position)));
+        row.title = rowTextOf(workspaceTitleOf(workspace, static_cast<std::size_t>(position)));
         if (workspace.git)
             row.gitText = gitTextOf(*workspace.git);
         auto const best = mostUrgent(leaves);
@@ -602,6 +545,74 @@ std::string formatRelative(std::chrono::seconds elapsed)
     if (clamped < chrono::hours { 24 })
         return std::format("{}h ago", chrono::duration_cast<chrono::hours>(clamped).count());
     return std::format("{}d ago", chrono::duration_cast<chrono::hours>(clamped).count() / 24);
+}
+
+std::string rowTextOf(std::string_view text)
+{
+    return sanitizedTo(text, MaxRowTextLength);
+}
+
+ReasonParts statusReasonOf(vtbackend::ProgramStatusRecord const& record,
+                           BadgeKind kind,
+                           std::size_t maxLength)
+{
+    auto text = sanitizedTo(record.message.empty() ? record.title : record.message, maxLength);
+    if (kind != BadgeKind::Blocked)
+        return { .label = std::move(text), .separator = {}, .command = {} };
+    auto const label = std::ranges::find(BlockedLabels, record.kind, &BlockedLabel::kind)->label;
+    if (label.empty())
+        return { .label = std::move(text), .separator = {}, .command = {} };
+    auto const lead = text.empty() ? std::string { label } : std::format("{}{}", label, LabelSeparator);
+    if (record.kind == vtbackend::BlockedKind::Permission && !record.message.empty() && !text.empty())
+    {
+        auto const prefix = toolPrefixLength(text);
+        auto const tool =
+            prefix < text.size() ? prefix : std::size_t { 0 }; // A tool with no command stays one.
+        auto const withTool = lead + text.substr(0, tool);
+        auto const room = withTool.size() < maxLength ? maxLength - withTool.size() : std::size_t { 1 };
+        return { .label = withTool,
+                 .separator = {},
+                 .command = elided(std::string_view { text }.substr(tool), room) };
+    }
+    return { .label = elided(text.empty() ? lead : lead + text, maxLength), .separator = {}, .command = {} };
+}
+
+TimeKind statusTimeKind(std::optional<uint8_t> progress, BadgeKind kind) noexcept
+{
+    auto const live = kind == BadgeKind::Working || kind == BadgeKind::Blocked;
+    if (progress && live)
+        return TimeKind::Progress;
+    return live ? TimeKind::Live : TimeKind::Relative;
+}
+
+TimeText formatTimeText(TimeKind kind,
+                        std::optional<std::chrono::system_clock::time_point> since,
+                        std::optional<uint8_t> progress,
+                        std::chrono::system_clock::time_point now)
+{
+    if (kind == TimeKind::Progress && progress)
+        return { .kind = TimeKind::Progress, .text = std::format("{}%", *progress), .percent = progress };
+    if (kind == TimeKind::None || kind == TimeKind::Progress || !since)
+        return {};
+    auto const elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - *since);
+    return { .kind = kind,
+             .text = kind == TimeKind::Live ? formatLive(elapsed) : formatRelative(elapsed),
+             .percent = std::nullopt };
+}
+
+ReasonParts finishedText(vthost::proto::FinishedCommand const& finished)
+{
+    auto text = finished.exitCode ? std::format("exit {}", *finished.exitCode) : std::string { "finished" };
+    if (finished.durationMs)
+        text += std::format("{}{}",
+                            LabelSeparator,
+                            vtbackend::formatCommandDuration(
+                                std::chrono::milliseconds { static_cast<int64_t>(*finished.durationMs) }));
+    if (finished.commandLine.empty())
+        return { .label = std::move(text), .separator = {}, .command = {} };
+    return { .label = std::move(text),
+             .separator = std::string { LabelSeparator },
+             .command = rowTextOf(finished.commandLine) };
 }
 
 } // namespace contour::window

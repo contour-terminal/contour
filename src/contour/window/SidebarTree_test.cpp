@@ -315,13 +315,26 @@ TEST_CASE("SidebarTree.a_failed_command_with_its_line_splits_into_words_and_comm
                                                      .commandLine = "make deploy" };
     pane.finishedSerial = 1;
     auto const rows = rowsOf(directoryOf({ workspaceOf(1, "w", { tabOf(1, "t", { pane }) }) }));
-    CHECK(tabRowOf(rows).reasonLabel == "exit 1 · ");
+    // The separator travels with the command: where a narrow picker drops the command, the words end clean.
+    CHECK(tabRowOf(rows).reasonLabel == "exit 1");
+    CHECK(tabRowOf(rows).reasonSeparator == " · ");
     CHECK(tabRowOf(rows).reasonCommand == "make deploy");
     CHECK(tabRowOf(rows).reason == "exit 1 · make deploy");
+    CHECK(tabRowOf(rows).fullReasonLabel == "exit 1 · ");
+
+    // No command, no separator.
+    auto alone = paneOf(1, "p");
+    alone.finished =
+        vthost::proto::FinishedCommand { .exitCode = 1, .durationMs = std::nullopt, .commandLine = {} };
+    alone.finishedSerial = 1;
+    auto const bare = rowsOf(directoryOf({ workspaceOf(1, "w", { tabOf(1, "t", { alone }) }) }));
+    CHECK(tabRowOf(bare).reasonLabel == "exit 1");
+    CHECK(tabRowOf(bare).reasonSeparator.empty());
 
     // A plain reason is all words.
     auto const plain = rowsOf(oneTabWith(recordOf(ProgramState::Done, "All tests pass")));
     CHECK(tabRowOf(plain).reasonLabel == "All tests pass");
+    CHECK(tabRowOf(plain).reasonSeparator.empty());
     CHECK(tabRowOf(plain).reasonCommand.empty());
 }
 
