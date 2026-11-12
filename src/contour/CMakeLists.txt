@@ -360,6 +360,7 @@ if(CONTOUR_FRONTEND_GUI)
         display/PciIds.hpp
         display/SysfsGpuInventory.hpp
         geometry/CellRectangle.hpp
+        geometry/SidebarGeometry.hpp
         geometry/WindowGeometry.hpp
         askpass/AskpassBroker.hpp
         askpass/AskpassPromptRouter.hpp
@@ -1115,6 +1116,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/TabListModel_test.cpp
             window/CaptionController_test.cpp
             window/TitleBandController_test.cpp
+            window/SidebarController_test.cpp
             window/UiStyleProvider_test.cpp
             window/WindowSizing_test.cpp
         )
@@ -1599,6 +1601,7 @@ if(CONTOUR_TESTING)
         config/PtyReadBufferSize_test.cpp
         config/ScrollBarMode_test.cpp
         config/TabBarMode_test.cpp
+        geometry/SidebarGeometry_test.cpp
         config/UiStyle_test.cpp
         config/WindowControlStyle_test.cpp
         test/ChromeSnapshotPlan_test.cpp

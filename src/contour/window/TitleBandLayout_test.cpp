@@ -12,7 +12,9 @@
 
 using namespace contour::window;
 using contour::config::ChromeDensity;
+using contour::config::SidebarVisibility;
 using contour::config::TabBarPosition;
+using contour::config::TabPlacement;
 using contour::config::TabShape;
 
 namespace
@@ -363,7 +365,7 @@ TEST_CASE("titleBand.names", "[titleband]")
 {
     constexpr auto PresenceNames = std::array { "hidden", "shown", "reveal", "pinned" };
     constexpr auto EdgeNames = std::array { "top", "bottom" };
-    constexpr auto CentreNames = std::array { "empty", "tabs", "title" };
+    constexpr auto CentreNames = std::array { "empty", "tabs", "title", "breadcrumb", "chip+tabs" };
     REQUIRE(PresenceNames.size() == BarPresenceCount);
     REQUIRE(EdgeNames.size() == BarEdgeCount);
     REQUIRE(CentreNames.size() == BarCentreCount);
@@ -373,4 +375,85 @@ TEST_CASE("titleBand.names", "[titleband]")
         CHECK(barEdgeName(BarEdge(i)) == EdgeNames[i]);
     for (auto const i: std::views::iota(size_t { 0 }, BarCentreCount))
         CHECK(barCentreName(BarCentre(i)) == CentreNames[i]);
+}
+
+TEST_CASE("sidebar shown + sidebar placement: no strip, breadcrumb centre", "[titleband][sidebar]")
+{
+    // Whatever the shape, the frame, the gate or the edge: the sidebar holds the tabs.
+    detail::forEachTitleBandInput([](TitleBandInputs const& inputs) {
+        if (inputs.placement != TabPlacement::Sidebar || inputs.sidebar != SidebarVisibility::Shown
+            || inputs.mode != Windowed)
+            return;
+        INFO("shape " << int(inputs.shape) << ", frame " << int(inputs.frame) << ", gate "
+                      << int(inputs.strip) << ", position " << int(inputs.position) << ", notice "
+                      << int(inputs.notice));
+        auto const band = resolveTitleBand(inputs);
+        CHECK(band
+              == TitleBand { BarPresence::Shown, BarEdge::Top, BarCentre::Breadcrumb, BarPresence::Hidden });
+        CHECK(barCentreName(band.centre) == "breadcrumb");
+    });
+}
+
+TEST_CASE("sidebar shown + top placement: strip", "[titleband][sidebar]")
+{
+    // The sidebar alone moves nothing: with the tabs on top the band is what it always was.
+    detail::forEachTitleBandInput([](TitleBandInputs inputs) {
+        if (inputs.placement != TabPlacement::Top || inputs.sidebar != SidebarVisibility::Shown)
+            return;
+        auto hidden = inputs;
+        hidden.sidebar = SidebarVisibility::Hidden;
+        CHECK(resolveTitleBand(inputs) == resolveTitleBand(hidden));
+    });
+    auto const flat = TitleBandInputs { .shape = Flat,
+                                        .frame = ClientBand,
+                                        .mode = Windowed,
+                                        .strip = GateShown,
+                                        .position = Top,
+                                        .placement = TabPlacement::Top,
+                                        .sidebar = SidebarVisibility::Shown };
+    CHECK(resolveTitleBand(flat)
+          == TitleBand { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden });
+}
+
+TEST_CASE("sidebar hidden: chip+tabs", "[titleband][sidebar]")
+{
+    // The tabs belong in the sidebar, which is away: the band takes them in behind the workspace chip.
+    for (auto const shape: { Pill, Flat, Joined })
+        for (auto const frame: { ClientBand, NativeFrame })
+        {
+            auto const inputs = TitleBandInputs { .shape = shape,
+                                                  .frame = frame,
+                                                  .mode = Windowed,
+                                                  .strip = GateShown,
+                                                  .position = Top,
+                                                  .placement = TabPlacement::Sidebar,
+                                                  .sidebar = SidebarVisibility::Hidden };
+            auto const band = resolveTitleBand(inputs);
+            CHECK(band
+                  == TitleBand {
+                      BarPresence::Shown, BarEdge::Top, BarCentre::ChipAndTabs, BarPresence::Hidden });
+            CHECK(barCentreName(band.centre) == "chip+tabs");
+        }
+}
+
+TEST_CASE("sidebar hidden: chip+tabs follow tab_bar_position", "[titleband][sidebar]")
+{
+    auto const inputs = TitleBandInputs { .shape = Flat,
+                                          .frame = ClientBand,
+                                          .mode = Windowed,
+                                          .strip = GateShown,
+                                          .position = Bottom,
+                                          .placement = TabPlacement::Sidebar,
+                                          .sidebar = SidebarVisibility::Hidden };
+    CHECK(resolveTitleBand(inputs)
+          == TitleBand { BarPresence::Shown, BarEdge::Bottom, BarCentre::ChipAndTabs, BarPresence::Hidden });
+}
+
+TEST_CASE("every band centre has a name that names it", "[titleband][sidebar]")
+{
+    for (auto const index: std::views::iota(size_t { 0 }, BarCentreCount))
+    {
+        auto const centre = static_cast<BarCentre>(index);
+        CHECK(barCentreNamed(barCentreName(centre)) == centre);
+    }
 }

@@ -1876,7 +1876,8 @@ TEST_CASE("chromeTokens.focusRingTokens", "[chrometokens]")
     CHECK(SettingsColorRoleEnd == static_cast<size_t>(ChromeColorRole::WindowButtonFill));
     CHECK(static_cast<size_t>(ChromeColorRole::HeaderSeparator) + 1
           == static_cast<size_t>(ChromeColorRole::TooltipFill));
-    CHECK(static_cast<size_t>(ChromeColorRole::TooltipEdge) + 1 == ChromeColorRoleCount);
+    CHECK(static_cast<size_t>(ChromeColorRole::TooltipEdge) + 1 == SidebarColorRoleBegin);
+    CHECK(SidebarColorRoleEnd == ChromeColorRoleCount);
 
     // Native: a ring that marks on the window and no fill. Terminal: no ring, the bar's selection as fill.
     auto const none = contour::config::detail::noColor();
@@ -2457,6 +2458,130 @@ TEST_CASE("chromeTokens.settingsTextReadsOnTheNativeRows", "[chrometokens]")
                   == ColorSourceKind::PaletteHighlight);
             CHECK(row.colors[static_cast<size_t>(SettingsSelectionText)].kind
                   == ColorSourceKind::PaletteHighlightedText);
+        }
+    }
+}
+
+TEST_CASE("every chrome row has sidebar tokens", "[chrometokens][sidebar]")
+{
+    using namespace contour::config;
+    // Checked at compile time: a row added without them, or with bounds that cannot hold its own width,
+    // does not build.
+    static_assert(std::ranges::all_of(ChromeTokenRows, [](ChromeTokenRow const& row) {
+        auto const& sidebar = row.sidebar;
+        return sidebar.width > 0 && sidebar.minWidth > 0 && sidebar.minWidth <= sidebar.width
+               && sidebar.width <= sidebar.maxWidth && sidebar.rowHeight > 0
+               && sidebar.twoLineRowHeight > sidebar.rowHeight && sidebar.indent > 0 && sidebar.glyph > 0
+               && sidebar.gitGap > 0 && sidebar.footerHeight > 0;
+    }));
+    CHECK(ChromeTokenRows.size() == contour::config::detail::ChromeStyleCount);
+}
+
+TEST_CASE("sidebar tokens per row", "[chrometokens][sidebar]")
+{
+    using namespace contour::config;
+    struct Expected
+    {
+        ChromeStyle style;
+        int rowHeight;
+        int twoLineRowHeight;
+        int indent;
+        SidebarLook look;
+        int width; ///< Ruling Q3: the default width, and the bounds it is clamped to.
+        int minWidth;
+        int maxWidth;
+    };
+    for (auto const& expected:
+         { Expected { ChromeStyle::MacOS, 24, 38, 16, SidebarLook::SourceList, 220, 160, 480 },
+           Expected { ChromeStyle::Fluent, 32, 48, 16, SidebarLook::NavigationPane, 240, 160, 480 },
+           Expected { ChromeStyle::ContourLinux, 32, 48, 16, SidebarLook::HeaderPane, 240, 160, 480 },
+           Expected { ChromeStyle::Terminal, 1, 2, 2, SidebarLook::CellTree, 28, 18, 60 } })
+    {
+        CAPTURE(static_cast<int>(expected.style));
+        auto const& row = ChromeTokenRows[static_cast<size_t>(expected.style)];
+        CHECK(row.sidebar.width == expected.width);
+        CHECK(row.sidebar.minWidth == expected.minWidth);
+        CHECK(row.sidebar.maxWidth == expected.maxWidth);
+        CHECK(row.sidebar.rowHeight == expected.rowHeight);
+        CHECK(row.sidebar.twoLineRowHeight == expected.twoLineRowHeight);
+        CHECK(row.sidebar.indent == expected.indent);
+        CHECK(row.layout.sidebar == expected.look);
+    }
+    // The selection's shape: macOS an inset rounded rectangle, Fluent an accent pill with a smaller radius.
+    CHECK(ChromeTokenRows[static_cast<size_t>(ChromeStyle::MacOS)].sidebar.selectionRadius == 6);
+    CHECK(ChromeTokenRows[static_cast<size_t>(ChromeStyle::Fluent)].sidebar.accentPillWidth == 3);
+    CHECK(ChromeTokenRows[static_cast<size_t>(ChromeStyle::Fluent)].sidebar.selectionRadius == 4);
+}
+
+TEST_CASE("the sidebar's colour roles are one family", "[chrometokens][sidebar]")
+{
+    using namespace contour::config;
+    CHECK(SidebarColorRoleEnd - SidebarColorRoleBegin == 6);
+    CHECK(SidebarColorRoleEnd == ChromeColorRoleCount);
+}
+
+TEST_CASE("sidebar selection ink reaches 4.5:1 on its fill on every row", "[chrometokens][sidebar]")
+{
+    using namespace contour::config;
+    using enum ChromeColorRole;
+    auto const preferences = std::array {
+        AccessibilityPreferences {},
+        AccessibilityPreferences { .motion = MotionPreference::Full,
+                                   .transparency = TransparencyPreference::Allowed,
+                                   .contrast = ContrastPreference::Increased },
+    };
+
+    SECTION("the native rows, over the kit's surfaces and a typical OS window")
+    {
+        auto const grounds = std::array {
+            NativeGround { .color = RGBColor(SurfaceColors[1].light), .dark = false },
+            NativeGround { .color = 0xECECEC_rgb, .dark = false },
+            NativeGround { .color = RGBColor(SurfaceColors[1].dark), .dark = true },
+            NativeGround { .color = 0x1E1E1E_rgb, .dark = true },
+        };
+        for (auto const style: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+            for (auto const& preference: preferences)
+            {
+                auto const row = resolveChromeTokens(style, preference);
+                auto const& fill = row.colors[static_cast<size_t>(SidebarSelectionFill)];
+                auto const& ink = row.colors[static_cast<size_t>(SidebarSelectionInk)];
+                CAPTURE(static_cast<int>(style));
+                if (fill.kind == ColorSourceKind::PaletteHighlight)
+                {
+                    // The OS's own pair: the row's part is to name it as a pair. The ratio of what it
+                    // resolves to is measured on real colours in UiStyleProvider_test.
+                    CHECK(ink.kind == ColorSourceKind::PaletteHighlightedText);
+                    continue;
+                }
+                for (auto const& ground: grounds)
+                {
+                    CAPTURE(ground.dark);
+                    auto const filled = nativeInkOver(fill, ground);
+                    auto const text =
+                        nativeInkOver(ink, NativeGround { .color = filled, .dark = ground.dark });
+                    CHECK(contrastRatio(text, filled) >= MinimumTextContrast);
+                }
+            }
+    }
+
+    SECTION("the Terminal row, on every bundled scheme")
+    {
+        for (auto const& preference: preferences)
+        {
+            auto const row = resolveChromeTokens(ChromeStyle::Terminal, preference);
+            auto const& fill = row.colors[static_cast<size_t>(SidebarSelectionFill)];
+            auto const& ink = row.colors[static_cast<size_t>(SidebarSelectionInk)];
+            REQUIRE(fill.kind == ColorSourceKind::Scheme);
+            REQUIRE(ink.kind == ColorSourceKind::Scheme);
+            for (auto const name: defaultColorPaletteNames())
+            {
+                INFO("scheme: " << name);
+                auto palette = ColorPalette {};
+                REQUIRE(defaultColorPalettes(name, palette));
+                auto const colors = chromeSchemeColorsOf(palette);
+                CHECK(contrastRatio(slotIn(colors, ink.slot), slotIn(colors, fill.slot))
+                      >= MinimumTextContrast);
+            }
         }
     }
 }

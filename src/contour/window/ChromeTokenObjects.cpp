@@ -131,6 +131,14 @@ ChromeSettingsTokens::ChromeSettingsTokens(config::SettingsTokens tokens, Chrome
 {
 }
 
+ChromeSidebarTokens::ChromeSidebarTokens(config::SidebarTokens tokens,
+                                         config::SidebarLook look,
+                                         ChromeUnits units,
+                                         QObject* parent):
+    QObject { parent }, _tokens { tokens }, _look { look }, _units { units }
+{
+}
+
 ChromeSettingsTraits::ChromeSettingsTraits(config::SettingsLayout layout, QObject* parent):
     QObject { parent }, _traits { config::settingsLayoutTraits(layout) }
 {

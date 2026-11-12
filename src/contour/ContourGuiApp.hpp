@@ -948,6 +948,12 @@ class ContourGuiApp:
     /// @return The band.
     [[nodiscard]] window::TitleBand titleBandOf(window::TitleBandInputs const& inputs) const;
 
+    /// The workspace sidebar's bounds for the chrome row, and what one unit of them is in logical pixels: the
+    /// published provider's (UiStyleProvider::sidebarMetrics) once the GUI built it; before that (and in a
+    /// headless test) the resolved row's tokens, a unit being one pixel, since there is no cell to measure.
+    /// @return The metrics.
+    [[nodiscard]] geometry::SidebarMetrics sidebarMetrics() const;
+
     /// The font locator a renderer is to use. The native one is backed with the Nerd Fonts symbols font that
     /// ships with the application, so glyphs of Nerd Fonts render whatever font the profile chooses; the
     /// mock one, which tests select, is left exactly as it is.

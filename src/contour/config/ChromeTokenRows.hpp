@@ -392,6 +392,16 @@ namespace detail
         tone(0x000000, 85, 0xFFFFFF, 88),   // TooltipText
         label(3),                           // TooltipTextSecondary: 45 / 50 %
         tone(0x000000, 18, 0xFFFFFF, 14),   // TooltipEdge
+        // The workspace sidebar: the kit's secondary surface, as the Settings sidebar is, and the OS's
+        // selected-row pair under its selected row, which ContourLinux and macOS take as they are (the
+        // accent made legible, legibleHighlight). The pill is a mark in the accent, drawn only where
+        // the row's look has one.
+        surface(2),                                        // SidebarFill
+        sourceOf(ColorSourceKind::PaletteHighlight),       // SidebarSelectionFill
+        sourceOf(ColorSourceKind::PaletteHighlightedText), // SidebarSelectionInk
+        label(2),                                          // SidebarSecondaryInk
+        separator(),                                       // SidebarDivider
+        statusMarkSource(StatusColorRole::Running),        // SidebarAccentPill
     };
 
     /// The Windows 11 row's colours: the native ones, with Fluent's own tooltip (#F9F9F9 / #2C2C2C).
@@ -401,6 +411,10 @@ namespace detail
         colors[static_cast<size_t>(ChromeColorRole::TooltipText)] = tone(0x000000, 90, 0xFFFFFF, 100);
         colors[static_cast<size_t>(ChromeColorRole::TooltipTextSecondary)] = tone(0x000000, 55, 0xFFFFFF, 60);
         colors[static_cast<size_t>(ChromeColorRole::TooltipEdge)] = tone(0x000000, 6, 0xFFFFFF, 8);
+        // A navigation pane's selected row is a subtle wash in the primary label's ink, marked by the accent
+        // pill beside it, rather than the accent filled.
+        colors[static_cast<size_t>(ChromeColorRole::SidebarSelectionFill)] = fill(3);
+        colors[static_cast<size_t>(ChromeColorRole::SidebarSelectionInk)] = label(1);
         return colors;
     }();
 
@@ -573,6 +587,58 @@ namespace detail
                                                        .groupTitleType = 0,
                                                        .pageTitleType = 0 };
 
+    /// The workspace sidebar on the macOS row: a source list, its selection an inset rounded rectangle.
+    inline constexpr SidebarTokens MacSidebar { .width = 220,
+                                                .minWidth = 160,
+                                                .maxWidth = 480,
+                                                .rowHeight = 24,
+                                                .twoLineRowHeight = 38,
+                                                .indent = 16,
+                                                .glyph = 16,
+                                                .gitGap = 6,
+                                                .footerHeight = 32,
+                                                .selectionRadius = 6,
+                                                .accentPillWidth = 0 };
+
+    /// The workspace sidebar on the Fluent row: a navigation pane, its selection marked by an accent pill.
+    inline constexpr SidebarTokens FluentSidebar { .width = 240,
+                                                   .minWidth = 160,
+                                                   .maxWidth = 480,
+                                                   .rowHeight = 32,
+                                                   .twoLineRowHeight = 48,
+                                                   .indent = 16,
+                                                   .glyph = 16,
+                                                   .gitGap = 6,
+                                                   .footerHeight = 40,
+                                                   .selectionRadius = 4,
+                                                   .accentPillWidth = 3 };
+
+    /// The workspace sidebar on the ContourLinux row: its selection a solid accent fill.
+    inline constexpr SidebarTokens LinuxSidebar { .width = 240,
+                                                  .minWidth = 160,
+                                                  .maxWidth = 480,
+                                                  .rowHeight = 32,
+                                                  .twoLineRowHeight = 48,
+                                                  .indent = 16,
+                                                  .glyph = 16,
+                                                  .gitGap = 6,
+                                                  .footerHeight = 40,
+                                                  .selectionRadius = 0,
+                                                  .accentPillWidth = 0 };
+
+    /// The workspace sidebar on the Terminal row, in cells: a tree of whole rows.
+    inline constexpr SidebarTokens TerminalSidebar { .width = 28,
+                                                     .minWidth = 18,
+                                                     .maxWidth = 60,
+                                                     .rowHeight = 1,
+                                                     .twoLineRowHeight = 2,
+                                                     .indent = 2,
+                                                     .glyph = 1,
+                                                     .gitGap = 1,
+                                                     .footerHeight = 1,
+                                                     .selectionRadius = 0,
+                                                     .accentPillWidth = 0 };
+
     inline constexpr ChromeTokenRow MacRow {
         .size = { .titleBar = 38,
                   .tabWell = 28,
@@ -700,7 +766,8 @@ namespace detail
                     .findBar = FindBarHost::Overlay,
                     .blockColumn = vtbackend::BlockColumnForm::Rail,
                     .settings = SettingsLayout::InsetGrouped,
-                    .headerBar = HeaderBarArrangement::Band },
+                    .headerBar = HeaderBarArrangement::Band,
+                    .sidebar = SidebarLook::SourceList },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
@@ -708,6 +775,7 @@ namespace detail
         .minimal = NativeMinimal,
         .blockChips = NativeBlockChips,
         .settings = MacSettings,
+        .sidebar = MacSidebar,
     };
 
     inline constexpr ChromeTokenRow FluentRow {
@@ -837,7 +905,8 @@ namespace detail
                     .findBar = FindBarHost::Overlay,
                     .blockColumn = vtbackend::BlockColumnForm::Rail,
                     .settings = SettingsLayout::Cards,
-                    .headerBar = HeaderBarArrangement::Band },
+                    .headerBar = HeaderBarArrangement::Band,
+                    .sidebar = SidebarLook::NavigationPane },
         .tint = { .tabPercent = 20 },
         .colors = FluentColors,
         .statusInk = NativeStatusInk,
@@ -845,6 +914,7 @@ namespace detail
         .minimal = NativeMinimal,
         .blockChips = NativeBlockChips,
         .settings = FluentSettings,
+        .sidebar = FluentSidebar,
     };
 
     inline constexpr ChromeTokenRow LinuxRow {
@@ -975,7 +1045,8 @@ namespace detail
                     .settings = SettingsLayout::BoxedList,
                     .headerBar = HeaderBarArrangement::Unified,
                     // The header bar's own close icon, as its window buttons and items draw theirs.
-                    .tabClose = TabCloseMark::SymbolicIcon },
+                    .tabClose = TabCloseMark::SymbolicIcon,
+                    .sidebar = SidebarLook::HeaderPane },
         .tint = { .tabPercent = 20 },
         .colors = LinuxColors,
         .statusInk = NativeStatusInk,
@@ -983,6 +1054,7 @@ namespace detail
         .minimal = NativeMinimal,
         .blockChips = NativeBlockChips,
         .settings = LinuxSettings,
+        .sidebar = LinuxSidebar,
     };
 
     inline constexpr ElevationLevel TerminalShadow {
@@ -1148,7 +1220,8 @@ namespace detail
                     .findBar = FindBarHost::PaneHeaderRow,
                     .blockColumn = vtbackend::BlockColumnForm::Glyphs,
                     .settings = SettingsLayout::Cells,
-                    .headerBar = HeaderBarArrangement::Band },
+                    .headerBar = HeaderBarArrangement::Band,
+                    .sidebar = SidebarLook::CellTree },
         // No tint: a tab's colour is its leading "▌" cell (UiStyleTokens::tabColorGlyph).
         .tint = { .tabPercent = 0 },
         // The banner's mark in the scheme's warning hue where that reads on the bar, else the bar's ink; the
@@ -1260,8 +1333,18 @@ namespace detail
                     detail::sourceOf(ColorSourceKind::PaletteWindow),     // TooltipFill
                     detail::sourceOf(ColorSourceKind::PaletteWindowText), // TooltipText
                     ChromeColorSource { .kind = ColorSourceKind::PaletteWindowText,
-                                        .alphaPercent = 60 },        // TooltipTextSecondary
-                    detail::sourceOf(ColorSourceKind::PaletteMid) }, // TooltipEdge
+                                        .alphaPercent = 60 },      // TooltipTextSecondary
+                    detail::sourceOf(ColorSourceKind::PaletteMid), // TooltipEdge
+                    // The sidebar is a bar-coloured block, like the Settings window: its selected row must
+                    // also stand off the bar (BarSelection), its secondary line is ANSI 8 where that reads
+                    // on the bar, else the bar's ink; a cell has no rule thicker than the scheme's ANSI 8,
+                    // and no pill.
+                    schemeColor(SchemeSlot::Bar),              // SidebarFill
+                    schemeColor(SchemeSlot::BarSelection),     // SidebarSelectionFill
+                    schemeColor(SchemeSlot::BarSelectionText), // SidebarSelectionInk
+                    schemeOnBar(SchemeSlot::Secondary),        // SidebarSecondaryInk
+                    schemeColor(SchemeSlot::Secondary),        // SidebarDivider
+                    detail::noColor() },                       // SidebarAccentPill
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),
@@ -1275,6 +1358,7 @@ namespace detail
                      .paneInset = 0,
                      .paneCardRadius = 0 },
         .settings = TerminalSettings,
+        .sidebar = TerminalSidebar,
     };
 } // namespace detail
 

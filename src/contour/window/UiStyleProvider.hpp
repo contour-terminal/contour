@@ -5,6 +5,7 @@
 #include <contour/config/ChromeDensity.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/UiStyle.hpp>
+#include <contour/geometry/SidebarGeometry.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
 #include <contour/platform/SecureInput.hpp>
 #include <contour/window/ChromeTokenObjects.hpp>
@@ -262,6 +263,8 @@ class UiStyleProvider: public QObject
     /// The Settings window's extents and type, and the traits of its layout.
     Q_PROPERTY(QObject* settings READ settings CONSTANT)
     Q_PROPERTY(QObject* settingsTraits READ settingsTraits CONSTANT)
+    /// The workspace sidebar's extents: widths, row heights, indent and the selection's shape.
+    Q_PROPERTY(QObject* sidebar READ sidebar CONSTANT)
     /// The chrome colour roles. The object is CONSTANT; its own properties notify.
     Q_PROPERTY(QObject* colors READ colors CONSTANT)
 
@@ -359,6 +362,15 @@ class UiStyleProvider: public QObject
 
     /// What one token unit is, in logical pixels: a chrome cell on the Terminal row, one pixel elsewhere.
     [[nodiscard]] ChromeUnits const& units() const noexcept { return _units; }
+
+    /// @return The workspace sidebar's bounds in the row's own units, and what one unit is in logical
+    ///         pixels: what a window decides its sidebar's width, and with it Chrome::width, against.
+    [[nodiscard]] geometry::SidebarMetrics sidebarMetrics() const noexcept
+    {
+        return geometry::SidebarMetrics {
+            .tokens = _groups.sidebar, .scale = { .unit = _tokens.unit, .unitPixels = _units.horizontal }
+        };
+    }
 
     /// How many times the application palette has changed since this provider was built.
     /// @see paletteRevisionChanged
@@ -737,9 +749,17 @@ class UiStyleProvider: public QObject
     /// @param hostChipState A window::HostChipState: what the host chip shows, which a remote window's
     ///                      band carries whatever the gate says while it is not Connected
     ///                      (window::hostNoticeOf).
+    /// @param placement     A config::TabPlacement: where the window's tabs live.
+    /// @param sidebar       A config::SidebarVisibility: whether the workspace sidebar is shown.
     /// @return `{ band, bandEdge, centre, tabBar }` as their names.
-    [[nodiscard]] Q_INVOKABLE QVariantMap titleBand(
-        int frame, int mode, int strip, int position, QString const& hostLabel, int hostChipState) const;
+    [[nodiscard]] Q_INVOKABLE QVariantMap titleBand(int frame,
+                                                    int mode,
+                                                    int strip,
+                                                    int position,
+                                                    QString const& hostLabel,
+                                                    int hostChipState,
+                                                    int placement,
+                                                    int sidebar) const;
 
     /// The chrome row's side of the band decision: this provider's tab shape and density.
     /// @return The row window::resolveTitleBand(TitleBandRow const&, TitleBandInputs) takes.
@@ -946,6 +966,7 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QObject* layout() noexcept { return &_layout; }
     [[nodiscard]] QObject* tint() noexcept { return &_tint; }
     [[nodiscard]] QObject* settings() noexcept { return &_settings; }
+    [[nodiscard]] QObject* sidebar() noexcept { return &_sidebar; }
     [[nodiscard]] QObject* settingsTraits() noexcept { return &_settingsTraits; }
     [[nodiscard]] QObject* colors() noexcept { return &_colors; }
 
@@ -1047,6 +1068,7 @@ class UiStyleProvider: public QObject
     ChromeLayoutTokens _layout;
     ChromeTintTokens _tint;
     ChromeSettingsTokens _settings;
+    ChromeSidebarTokens _sidebar;
     ChromeSettingsTraits _settingsTraits;
     ChromeColorTokens _colors;
     QStringList _paneHeaderActionNames;    ///< PaneHeaderActions' accessible names, built once.

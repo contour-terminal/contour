@@ -64,7 +64,8 @@ inline constexpr int ResizeBorderThickness = 6;
 /// deltas — such measurements are transiently wrong during relayout and structurally wrong in splits.
 struct Chrome
 {
-    int width = 0;  ///< Horizontal chrome (structurally 0 in the current layout).
+    int width =
+        0; ///< Horizontal chrome: the workspace sidebar's width while shown (see SidebarGeometry.hpp).
     int height = 0; ///< Vertical chrome (title/tab bar height; 0 when hidden).
 };
 

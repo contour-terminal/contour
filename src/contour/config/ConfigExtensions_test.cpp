@@ -2158,6 +2158,88 @@ TEST_CASE("Config: loadConfigFromFile creates the file when it does not exist", 
     CHECK(config.profile(config.defaultProfileName.value()) != nullptr);
 }
 
+TEST_CASE("Classic edition hides the sidebar and keeps tabs on top", "[config][sidebar]")
+{
+    using contour::config::SidebarVisibility;
+    using contour::config::TabPlacement;
+    QTemporaryDir dir;
+    auto const config = contour::config::loadConfigFromFile(writeConfig(dir, PartialConfigWithoutEdition));
+    CHECK(config.sidebar.value().visibility == SidebarVisibility::Hidden);
+    CHECK_FALSE(config.sidebar.value().width.has_value());
+    CHECK(config.tabPlacement.value() == TabPlacement::Top);
+}
+
+TEST_CASE("Native2026 shows the sidebar with sidebar placement", "[config][sidebar]")
+{
+    using contour::config::SidebarVisibility;
+    using contour::config::TabPlacement;
+    auto const config = contour::config::Config {};
+    CHECK(config.sidebar.value().visibility == SidebarVisibility::Shown);
+    CHECK(config.tabPlacement.value() == TabPlacement::Sidebar);
+}
+
+TEST_CASE("the sidebar and the tab placement are read from the file", "[config][sidebar]")
+{
+    using contour::config::SidebarVisibility;
+    using contour::config::TabPlacement;
+
+    SECTION("each value is read, and a key not named leaves its sibling alone")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+tab_placement: top
+sidebar:
+    visible: false
+    width: 300
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        CHECK(config.tabPlacement.value() == TabPlacement::Top);
+        CHECK(config.sidebar.value().visibility == SidebarVisibility::Hidden);
+        CHECK(config.sidebar.value().width == 300);
+    }
+
+    SECTION("a file stating one key keeps the edition's default for the other")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+sidebar:
+    width: 260
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        CHECK(config.sidebar.value().visibility == SidebarVisibility::Shown);
+        CHECK(config.sidebar.value().width == 260);
+    }
+
+    SECTION("a width that is no positive number is refused, null is the style's own width")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+sidebar:
+    width: -4
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        CHECK_FALSE(config.sidebar.value().width.has_value());
+        auto const reset = loadFromYaml(dir, R"(
+default_profile: main
+sidebar:
+    width: null
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        CHECK_FALSE(reset.sidebar.value().width.has_value());
+    }
+}
+
 TEST_CASE("Config.firstLaunchDefaults", "[config]")
 {
     SECTION("a plain Config is the newest edition")

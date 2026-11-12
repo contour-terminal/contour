@@ -391,6 +391,23 @@ struct FoldingConfig
     }
 };
 
+/// The workspace sidebar's configured starting state (`sidebar:`).
+///
+/// A default, not the last word: what the user last chose is kept in the GUI state (GuiState::sidebar),
+/// and wins over this where there is one. `visible` is spelled as the YAML boolean it is, converted at the
+/// boundary -- Config's documented carve-out in AGENT.md -- into a purpose-named enum.
+struct SidebarConfig
+{
+    /// Whether the sidebar starts shown. The edition decides unless the file says.
+    SidebarVisibility visibility { SidebarVisibility::Hidden };
+
+    /// The sidebar's starting width, in the chrome row's units (pixels; cells on the Terminal row), clamped
+    /// to the row's bounds where it is used. None takes the row's own width.
+    std::optional<int> width {};
+
+    bool operator==(SidebarConfig const&) const = default;
+};
+
 /// The gutter left of the grid: what its block column shows, its line numbers and its timestamps.
 ///
 /// GLOBAL for FoldingConfig's reason: it describes how the user reads output, not how one shell writes
@@ -928,10 +945,12 @@ struct EditionDefaults
     /// The color scheme a dark system uses. When it equals @ref lightColorScheme the profile names one
     /// scheme (`colors: <name>`) rather than a dark/light pair.
     std::string_view darkColorScheme;
-    std::string_view lightColorScheme; ///< The color scheme a light system uses.
-    TabBarVisibility tabBarVisibility; ///< When the window's tab strip is shown.
-    GuiTheme theme;                    ///< Which palette the window chrome follows.
-    ChromeDensity chromeDensity;       ///< How much room the window chrome takes.
+    std::string_view lightColorScheme;   ///< The color scheme a light system uses.
+    TabBarVisibility tabBarVisibility;   ///< When the window's tab strip is shown.
+    SidebarVisibility sidebarVisibility; ///< Whether the workspace sidebar starts shown (`sidebar.visible`).
+    TabPlacement tabPlacement;           ///< Where the tabs live (`tab_placement`).
+    GuiTheme theme;                      ///< Which palette the window chrome follows.
+    ChromeDensity chromeDensity;         ///< How much room the window chrome takes.
     /// Whether hovering a link shows its target without the follow modifier held
     /// (`hyperlink_hover_tooltip`). A `bool` because the YAML key it seeds is one: Config's documented
     /// carve-out; the session converts it at the boundary.
@@ -1220,6 +1239,12 @@ struct Config
     ConfigEntry<TabBarVisibility, documentation::TabBarVisibility> tabBarVisibility {
         editionDefaults(defaultsEdition).tabBarVisibility
     };
+    // Where the tabs live and whether the sidebar starts shown belong to the window, as the tab bar does.
+    ConfigEntry<TabPlacement, documentation::TabPlacement> tabPlacement {
+        editionDefaults(defaultsEdition).tabPlacement
+    };
+    ConfigEntry<SidebarConfig, documentation::Sidebar> sidebar { SidebarConfig {
+        .visibility = editionDefaults(defaultsEdition).sidebarVisibility } };
     ConfigEntry<bool, documentation::GuiConfigLocked> guiConfigLocked { false };
     ConfigEntry<contour::config::GuiTheme, documentation::Theme> theme {
         editionDefaults(defaultsEdition).theme

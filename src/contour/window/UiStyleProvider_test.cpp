@@ -1231,36 +1231,47 @@ TEST_CASE("UiStyleProvider: badgeLook, hostChipLook, titleBand and tabWellLayout
     CHECK(mac.isHostChipShown(QStringLiteral("home")));
     CHECK_FALSE(mac.isHostChipShown({}));
 
-    auto const macBand = mac.titleBand(0, 0, 0, 0, {}, 0);
+    auto const macBand = mac.titleBand(0, 0, 0, 0, {}, 0, 0, 0);
     CHECK(macBand.value("band").toString() == QStringLiteral("shown"));
     CHECK(macBand.value("bandEdge").toString() == QStringLiteral("top"));
     CHECK(macBand.value("centre").toString() == QStringLiteral("title"));
     CHECK(macBand.value("tabBar").toString() == QStringLiteral("hidden"));
     auto const contourLinux = UiStyleProvider(chromeInputsFor(ChromeStyle::ContourLinux, font));
-    CHECK(contourLinux.titleBand(0, 0, 0, 0, {}, 0).value("band").toString() == QStringLiteral("hidden"));
-    CHECK(contourLinux.titleBand(0, 0, 1, 0, {}, 0).value("centre").toString() == QStringLiteral("tabs"));
-    CHECK(mac.titleBand(0, 1, 1, 0, {}, 0).value("band").toString() == QStringLiteral("reveal"));
-    CHECK(mac.titleBand(2, 0, 0, 0, {}, 0).isEmpty());
-    CHECK(mac.titleBand(0, 0, 0, -1, {}, 0).isEmpty());
+    CHECK(contourLinux.titleBand(0, 0, 0, 0, {}, 0, 0, 0).value("band").toString()
+          == QStringLiteral("hidden"));
+    CHECK(contourLinux.titleBand(0, 0, 1, 0, {}, 0, 0, 0).value("centre").toString()
+          == QStringLiteral("tabs"));
+    CHECK(mac.titleBand(0, 1, 1, 0, {}, 0, 0, 0).value("band").toString() == QStringLiteral("reveal"));
+    CHECK(mac.titleBand(2, 0, 0, 0, {}, 0, 0, 0).isEmpty());
+    CHECK(mac.titleBand(0, 0, 0, -1, {}, 0, 0, 0).isEmpty());
     // A remote window whose connection is not up shows the strip whatever the gate says; a local one, or a
     // connected one, does not.
     constexpr auto Reconnecting = static_cast<int>(contour::window::HostChipState::Reconnecting);
     constexpr auto Disconnected = static_cast<int>(contour::window::HostChipState::Disconnected);
-    CHECK(contourLinux.titleBand(0, 0, 0, 0, QStringLiteral("home"), Reconnecting).value("band").toString()
+    CHECK(contourLinux.titleBand(0, 0, 0, 0, QStringLiteral("home"), Reconnecting, 0, 0)
+              .value("band")
+              .toString()
           == QStringLiteral("shown"));
-    CHECK(
-        contourLinux.titleBand(0, 0, 0, 1, QStringLiteral("home"), Disconnected).value("bandEdge").toString()
-        == QStringLiteral("bottom"));
-    CHECK(contourLinux.titleBand(0, 0, 0, 0, QStringLiteral("home"), 0).value("band").toString()
+    CHECK(contourLinux.titleBand(0, 0, 0, 1, QStringLiteral("home"), Disconnected, 0, 0)
+              .value("bandEdge")
+              .toString()
+          == QStringLiteral("bottom"));
+    CHECK(contourLinux.titleBand(0, 0, 0, 0, QStringLiteral("home"), 0, 0, 0).value("band").toString()
           == QStringLiteral("hidden"));
-    CHECK(contourLinux.titleBand(0, 0, 0, 0, {}, Disconnected).value("band").toString()
+    CHECK(contourLinux.titleBand(0, 0, 0, 0, {}, Disconnected, 0, 0).value("band").toString()
           == QStringLiteral("hidden"));
-    CHECK(contourLinux.titleBand(0, 0, 0, 0, {}, static_cast<int>(contour::window::HostChipStateCount))
+    CHECK(contourLinux.titleBand(0, 0, 0, 0, {}, static_cast<int>(contour::window::HostChipStateCount), 0, 0)
               .isEmpty());
     // Fluent's joined band always shows, holding its one tab (R-j).
     auto const fluent = UiStyleProvider(chromeInputsFor(ChromeStyle::Fluent, font));
-    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0).value("band").toString() == QStringLiteral("shown"));
-    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0).value("centre").toString() == QStringLiteral("tabs"));
+    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0, 0, 0).value("band").toString() == QStringLiteral("shown"));
+    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0, 0, 0).value("centre").toString() == QStringLiteral("tabs"));
+
+    // The workspace sidebar: it holds the tabs, so the band shows a breadcrumb; hidden, the band takes them.
+    CHECK(mac.titleBand(0, 0, 1, 0, {}, 0, 1, 1).value("centre").toString() == QStringLiteral("breadcrumb"));
+    CHECK(mac.titleBand(0, 0, 1, 0, {}, 0, 1, 0).value("centre").toString() == QStringLiteral("chip+tabs"));
+    CHECK(mac.titleBand(0, 0, 1, 0, {}, 0, 2, 0).isEmpty());
+    CHECK(mac.titleBand(0, 0, 1, 0, {}, 0, 0, 2).isEmpty());
 
     auto const crowded = mac.tabWellLayout(300, 12);
     CHECK(crowded.value("scrolls").toBool());
@@ -2252,7 +2263,7 @@ TEST_CASE("UiStyleProvider: Minimal's band, from the provider", "[contour][uisty
     CHECK(mac.titleBandTokens(BarCentre::Empty).height == 32);
     CHECK(mac.titleBandTokens(BarCentre::Empty).density == ChromeDensity::Minimal);
     CHECK(mac.titleBandTokens(BarCentre::Tabs).height == mac.bandHeight());
-    CHECK(mac.titleBand(0, 0, 0, 0, {}, 0).value("centre").toString() == QStringLiteral("empty"));
+    CHECK(mac.titleBand(0, 0, 0, 0, {}, 0, 0, 0).value("centre").toString() == QStringLiteral("empty"));
     auto const macComfortable =
         UiStyleProvider(densityInputs(ChromeStyle::MacOS, ChromeDensity::Comfortable));
     CHECK(macComfortable.titleBandOf(oneTab).centre == BarCentre::Title);
@@ -3001,6 +3012,53 @@ TEST_CASE("UiStyleProvider publishes the Settings window's tokens per row", "[co
     {
         CAPTURE(role);
         CHECK(colors->property(role).isValid());
+    }
+}
+
+namespace
+{
+/// @return @p top laid over the opaque @p ground, by @p top's alpha, as the sRGB colour a viewer sees.
+[[nodiscard]] vtbackend::RGBColor compositeOver(QColor top, vtbackend::RGBColor ground)
+{
+    auto const alpha = static_cast<double>(top.alphaF());
+    auto const mix = [alpha](int over, uint8_t under) {
+        return static_cast<uint8_t>(std::lround((alpha * over) + ((1.0 - alpha) * under)));
+    };
+    return vtbackend::RGBColor { mix(top.red(), ground.red),
+                                 mix(top.green(), ground.green),
+                                 mix(top.blue(), ground.blue) };
+}
+} // namespace
+
+TEST_CASE("sidebar selection ink reaches 4.5:1 on its fill on every row (resolved colours)",
+          "[contour][uistyle][sidebar]")
+{
+    using contour::config::ChromeColorRole;
+    using contour::config::ChromeStyle;
+    auto const font = QGuiApplication::font();
+    for (auto const style:
+         { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+    {
+        auto const provider = contour::window::UiStyleProvider(contour::window::chromeInputsFor(style, font));
+        auto const* colors =
+            qobject_cast<contour::window::ChromeColorTokens const*>(groupOf(provider, "colors"));
+        REQUIRE(colors != nullptr);
+        auto const& row = contour::config::ChromeTokenRows[static_cast<size_t>(style)];
+        auto const& fillSource = row.colors[static_cast<size_t>(ChromeColorRole::SidebarSelectionFill)];
+        auto const& inkSource = row.colors[static_cast<size_t>(ChromeColorRole::SidebarSelectionInk)];
+        for (auto const scheme: { Qt::ColorScheme::Light, Qt::ColorScheme::Dark })
+        {
+            CAPTURE(static_cast<int>(style), static_cast<int>(scheme));
+            // What the fill sits on: the sidebar's own fill, itself over the window.
+            auto const window = scheme == Qt::ColorScheme::Light ? vtbackend::RGBColor { 0xEC, 0xEC, 0xEC }
+                                                                 : vtbackend::RGBColor { 0x1E, 0x1E, 0x1E };
+            auto const ground = compositeOver(
+                colors->resolve(row.colors[static_cast<size_t>(ChromeColorRole::SidebarFill)], scheme),
+                window);
+            auto const fill = compositeOver(colors->resolve(fillSource, scheme), ground);
+            auto const ink = compositeOver(colors->resolve(inkSource, scheme), fill);
+            CHECK(vtbackend::contrastRatio(ink, fill) >= vtbackend::MinimumTextContrast);
+        }
     }
 }
 

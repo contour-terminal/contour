@@ -278,6 +278,14 @@ enum class ChromeColorRole : uint8_t
     TooltipText,          //!< A tooltip's label, and the first line of a multi-line one.
     TooltipTextSecondary, //!< A tooltip's shortcut, and the lines after the first.
     TooltipEdge,          //!< A tooltip's hairline edge; none where the box is drawn in cells.
+
+    // The workspace sidebar.
+    SidebarFill,          //!< The sidebar's fill.
+    SidebarSelectionFill, //!< The selected row's fill.
+    SidebarSelectionInk,  //!< The selected row's label and glyph.
+    SidebarSecondaryInk,  //!< A row's secondary line: its directory, its git state.
+    SidebarDivider,       //!< The rule between the sidebar and the content, and above its footer.
+    SidebarAccentPill,    //!< The accent mark beside the selected row; none where the fill alone marks it.
 };
 
 /// Where a chrome colour comes from.
@@ -381,7 +389,7 @@ inline constexpr std::array SchemeMarkChains {
 };
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
-inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::TooltipEdge) + 1;
+inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::SidebarAccentPill) + 1;
 
 // Each family of colour roles is counted by its own two ends, End - Begin, never from a neighbour's End: a
 // family added between two others then shifts no count.
@@ -417,6 +425,11 @@ inline constexpr size_t FocusColorRoleEnd = static_cast<size_t>(ChromeColorRole:
 inline constexpr size_t SettingsColorRoleBegin = static_cast<size_t>(ChromeColorRole::SettingsSidebarFill);
 /// One past the last Settings window colour role.
 inline constexpr size_t SettingsColorRoleEnd = static_cast<size_t>(ChromeColorRole::PreviewFrame) + 1;
+
+/// The first workspace sidebar colour role.
+inline constexpr size_t SidebarColorRoleBegin = static_cast<size_t>(ChromeColorRole::SidebarFill);
+/// One past the last workspace sidebar colour role.
+inline constexpr size_t SidebarColorRoleEnd = static_cast<size_t>(ChromeColorRole::SidebarAccentPill) + 1;
 
 /// One chrome colour: a source kind plus the field that kind reads.
 struct ChromeColorSource
@@ -890,6 +903,34 @@ struct SettingsTokens
     [[nodiscard]] bool operator==(SettingsTokens const&) const = default;
 };
 
+/// How the workspace sidebar looks; the row's @c layout.sidebar.
+enum class SidebarLook : uint8_t
+{
+    SourceList = 0, //!< An inset rounded selection on a translucent source list (macOS).
+    NavigationPane, //!< A subtle selection fill with an accent pill at its edge (Fluent).
+    HeaderPane,     //!< A solid accent selection under a header bar (ContourLinux).
+    CellTree,       //!< A tree of whole cell rows, the selection a run of cells (the Terminal style).
+};
+
+/// The workspace sidebar's extents, in the units of the row: logical pixels, and cells on the Terminal row.
+/// Widths, edges, gaps and radii are in horizontal units, heights in vertical ones.
+struct SidebarTokens
+{
+    int width = 0;            ///< The sidebar's default width.
+    int minWidth = 0;         ///< The narrowest it may be dragged to.
+    int maxWidth = 0;         ///< The widest it may be dragged to.
+    int rowHeight = 0;        ///< A one-line row's height.
+    int twoLineRowHeight = 0; ///< A two-line row's height.
+    int indent = 0;           ///< What a tab row is indented by beneath its workspace.
+    int glyph = 0;            ///< A row's glyph, its edge.
+    int gitGap = 0;           ///< The gap between a row's directory and its git state.
+    int footerHeight = 0;     ///< The footer's height.
+    int selectionRadius = 0;  ///< The selected row's corner radius; 0 squares it off.
+    int accentPillWidth = 0;  ///< The accent pill's width; 0 draws none.
+
+    [[nodiscard]] bool operator==(SidebarTokens const&) const = default;
+};
+
 /// Layout choices that differ per style.
 struct LayoutTokens
 {
@@ -907,6 +948,7 @@ struct LayoutTokens
     SettingsLayout settings = SettingsLayout::InsetGrouped;      ///< How the Settings window is laid out.
     HeaderBarArrangement headerBar = HeaderBarArrangement::Band; ///< How the window's top row is arranged.
     TabCloseMark tabClose = TabCloseMark::Glyph;                 ///< What a tab's close button shows.
+    SidebarLook sidebar = SidebarLook::SourceList;               ///< How the workspace sidebar looks.
 
     [[nodiscard]] bool operator==(LayoutTokens const&) const = default;
 };
@@ -981,6 +1023,7 @@ struct ChromeTokenRow
     MinimalDensityTokens minimal {}; ///< The extents the Minimal density replaces.
     BlockChipTokens blockChips {};   ///< The native rows' block chips and rail marks.
     SettingsTokens settings {};      ///< The Settings window's extents and type.
+    SidebarTokens sidebar {};        ///< The workspace sidebar's extents.
 };
 
 /// The WCAG AA ratio chrome text must reach against what it sits on: the terminal's own, one entity, so a

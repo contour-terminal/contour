@@ -215,6 +215,13 @@ class WindowController:
     Q_PROPERTY(int tabBarPosition READ tabBarPosition NOTIFY tabBarPositionChanged)
     Q_PROPERTY(int tabBarVisibility READ tabBarVisibility NOTIFY tabBarVisibilityChanged)
     Q_PROPERTY(bool tabBarShouldShow READ tabBarShouldShow NOTIFY tabBarShouldShowChanged)
+    // The workspace sidebar, which Main.qml lays out at the window's left edge. `sidebarVisibility` is a
+    // config::SidebarVisibility's underlying value (0 = Hidden, 1 = Shown); `sidebarWidth` is the width it
+    // takes in logical pixels, 0 while hidden -- the horizontal chrome the window declares (chrome()).
+    // `tabPlacement` is a config::TabPlacement's (0 = Top, 1 = Sidebar).
+    Q_PROPERTY(int sidebarVisibility READ sidebarVisibility NOTIFY sidebarVisibilityChanged)
+    Q_PROPERTY(int sidebarWidth READ sidebarWidth NOTIFY sidebarWidthChanged)
+    Q_PROPERTY(int tabPlacement READ tabPlacement NOTIFY tabPlacementChanged)
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(QString hostingNotice READ hostingNotice NOTIFY hostingNoticeChanged)
     // The host of the window's own binding: it changes as the window is bound, and when its binding stops.
@@ -1072,6 +1079,12 @@ class WindowController:
     /// @param visibility The configured tab_bar_visibility value.
     void applyTabBarFromConfig(config::TabBarPosition position, config::TabBarVisibility visibility);
 
+    /// Re-applies the configured tab placement (`tab_placement`) to this window. Placement is configuration
+    /// only -- never remembered as a last-used choice -- so a reload, which is how the Settings row's commit
+    /// reaches an open window, is its one way to change.
+    /// @param placement The configured tab_placement value.
+    void applyTabPlacementFromConfig(config::TabPlacement placement);
+
     /// Sets this window's tab strip visibility mode at runtime.
     ///
     /// A view toggle, in the same spirit as toggleTitleBar(): it applies to THIS window for as long as
@@ -1165,6 +1178,27 @@ class WindowController:
     /// default size (never leaves the user windowless) when no metrics are available.
     /// Called from Main.qml's Component.onCompleted, after the first tab was created.
     Q_INVOKABLE void showInitial();
+
+    /// @return Whether the workspace sidebar is shown, a config::SidebarVisibility as its underlying value.
+    [[nodiscard]] int sidebarVisibility() const noexcept { return static_cast<int>(_sidebarVisibility); }
+
+    /// @return The workspace sidebar's width in logical pixels, 0 while it is hidden: the horizontal chrome
+    ///         this window declares (see chrome()).
+    [[nodiscard]] int sidebarWidth() const;
+
+    /// @return Where the tabs live, a config::TabPlacement as its underlying value.
+    [[nodiscard]] int tabPlacement() const noexcept { return static_cast<int>(_tabPlacement); }
+
+    /// Sets the workspace sidebar's width, as dragging its edge does. Call it when the drag is released, not
+    /// on every move: each distinct width is written to the GUI state. The width is kept within the chrome
+    /// row's bounds, on the Terminal row snapped to whole cells, and remembered (GuiState::sidebar) as the
+    /// width the next window starts at. Takes effect at once, shown or not.
+    /// @param width The requested width in logical pixels.
+    Q_INVOKABLE void setSidebarWidth(int width);
+
+    /// Shows the workspace sidebar when it is hidden, and hides it when it is shown, and remembers the
+    /// choice (GuiState::sidebar) as the visibility the next window starts with.
+    Q_INVOKABLE void toggleSidebar();
 
     /// Window chrome height in logical pixels OUTSIDE the terminal content area, DECLARED by Main.qml
     /// (bound to the title bar's effective height: 0 when hidden). Geometry math must never measure
@@ -1409,6 +1443,12 @@ class WindowController:
     /// activeStickyHeader() may have changed: the active session did, or its header.
     void activeStickyHeaderChanged();
     void chromeHeightChanged();
+    /// @see sidebarVisibility
+    void sidebarVisibilityChanged();
+    /// @see sidebarWidth
+    void sidebarWidthChanged();
+    /// @see tabPlacement
+    void tabPlacementChanged();
     /// @see hostingNotice
     void hostingNoticeChanged();
     /// @see hostLabel
@@ -1490,8 +1530,22 @@ class WindowController:
     /// @return The window to operate on, or nullptr when none exists.
     [[nodiscard]] QQuickWindow* osWindowFor(session::DisplaySurface& requester) noexcept;
 
-    /// The declared chrome as the geometry module's type (width is structurally 0 in this layout).
-    [[nodiscard]] geometry::Chrome chrome() const noexcept { return { .width = 0, .height = _chromeHeight }; }
+    /// The declared chrome as the geometry module's type: the workspace sidebar's width, and the height
+    /// Main.qml declares.
+    [[nodiscard]] geometry::Chrome chrome() const
+    {
+        return { .width = sidebarWidth(), .height = _chromeHeight };
+    }
+
+    /// Takes the sidebar's starting state: what the user last chose (GuiState::sidebar) where there is
+    /// any, else the configuration's. Once, at construction.
+    void restoreSidebar();
+
+    /// Writes the sidebar's state to the GUI state, as the next window's starting point.
+    void rememberSidebar();
+
+    /// The sidebar's bounds changed or it moved: the window's chrome changed with it.
+    void refreshSidebarChrome();
 
     /// Current physical row grid, absent when disabled or more than one pane is visible.
     [[nodiscard]] std::optional<geometry::RowResizeGrid> rowResizeGrid() const;
@@ -1878,6 +1932,13 @@ class WindowController:
     bool _tabBarPositionSeeded = false;
     config::TabBarVisibility _tabBarVisibility = config::TabBarVisibility::Always;
     bool _tabBarVisibilitySeeded = false;
+
+    // The workspace sidebar: whether it is shown, its width in the chrome row's units (restoreSidebar() takes
+    // it; pixels or cells, as the row counts) and where the tabs live. The last two do not change over a
+    // window's life yet: a configuration reload re-applies neither, as `ui_style` does not either.
+    config::SidebarVisibility _sidebarVisibility = config::SidebarVisibility::Hidden;
+    int _sidebarUnits = 0;
+    config::TabPlacement _tabPlacement = config::TabPlacement::Top;
 
     // Declared title-bar chrome height in logical px (written by Main.qml's binding).
     int _chromeHeight = 0;

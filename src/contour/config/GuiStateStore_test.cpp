@@ -308,3 +308,49 @@ TEST_CASE(
     REQUIRE(store.update([](GuiState& state) { state.lastConnectTarget = "daemon"; }).has_value());
     CHECK(fileSystem.readFile(stateFile()).value().contains("last_color_preference: sepia")); // kept
 }
+
+TEST_CASE("GuiState sidebar prefs round-trip", "[config][guistate][sidebar]")
+{
+    using contour::config::SidebarPrefs;
+    using contour::config::SidebarVisibility;
+
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    auto store = FileGuiStateStore { fileSystem, configDir() };
+    auto const state = GuiState {
+        .sidebar = SidebarPrefs { .visibility = SidebarVisibility::Shown, .widthPx = 260, .widthCells = 30 }
+    };
+    REQUIRE(store.save(state).has_value());
+    auto const loaded = FileGuiStateStore { fileSystem, configDir() }.load();
+    REQUIRE(loaded.has_value());
+    CHECK(*loaded == state);
+
+    SECTION("a width never set stays none, and prefs cleared leave no key behind")
+    {
+        auto const hidden = GuiState { .sidebar = SidebarPrefs { .visibility = SidebarVisibility::Hidden,
+                                                                 .widthPx = std::nullopt,
+                                                                 .widthCells = 24 } };
+        REQUIRE(store.save(hidden).has_value());
+        CHECK(store.load().value() == hidden);
+        REQUIRE(store.save(GuiState {}).has_value());
+        CHECK_FALSE(store.load().value().sidebar.has_value());
+    }
+}
+
+TEST_CASE("GuiState sidebar prefs read what they can", "[config][guistate][sidebar]")
+{
+    using contour::config::SidebarVisibility;
+
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    writeStateFile(fileSystem,
+                   "sidebar:\n"
+                   "    visibility: shown\n"
+                   "    width_px: -3\n"
+                   "    width_cells: many\n"
+                   "    placement: sidebar\n");
+    auto const loaded = FileGuiStateStore { fileSystem, configDir() }.load();
+    REQUIRE(loaded.has_value());
+    REQUIRE(loaded->sidebar.has_value());
+    CHECK(loaded->sidebar->visibility == SidebarVisibility::Shown);
+    CHECK_FALSE(loaded->sidebar->widthPx.has_value());
+    CHECK_FALSE(loaded->sidebar->widthCells.has_value());
+}

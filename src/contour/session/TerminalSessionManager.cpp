@@ -2056,6 +2056,7 @@ std::expected<void, std::string> TerminalSessionManager::reloadAllSessions()
             // nothing until restart. A reload is the one moment the configured value must win.
             controller->applyTabBarFromConfig(_app.config().tabBarPosition.value(),
                                               _app.config().tabBarVisibility.value());
+            controller->applyTabPlacementFromConfig(_app.config().tabPlacement.value());
             if (rowSnappingChanged)
                 if (auto* session = controller->activeSession(); session != nullptr)
                     if (auto* display = session->display(); display != nullptr)

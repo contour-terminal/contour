@@ -2540,6 +2540,15 @@ window::TitleBandTokens ContourGuiApp::titleBandTokens(window::BarCentre centre)
     };
 }
 
+geometry::SidebarMetrics ContourGuiApp::sidebarMetrics() const
+{
+    if (_chromeStyleHost)
+        return _chromeStyleHost->provider().sidebarMetrics();
+    return geometry::SidebarMetrics { .tokens = resolvedChromeTokens().sidebar,
+                                      .scale = { .unit = config::uiStyleTokens(_chromeStyle).unit,
+                                                 .unitPixels = 1.0 } };
+}
+
 window::TitleBand ContourGuiApp::titleBandOf(window::TitleBandInputs const& inputs) const
 {
     if (_chromeStyleHost)

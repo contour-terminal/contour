@@ -7,9 +7,11 @@
 #include <contour/command/TitleBarContextMenu.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/GuiStateStore.hpp>
 #include <contour/config/HostUrl.hpp>
 #include <contour/display/Logging.hpp>
 #include <contour/display/TerminalDisplay.hpp>
+#include <contour/geometry/SidebarGeometry.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
 #include <contour/input/KeyMapping.hpp>
 #include <contour/input/MouseMapping.hpp>
@@ -133,6 +135,8 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
                   }
               } }
 {
+    restoreSidebar();
+    connect(this, &WindowController::sidebarWidthChanged, this, &WindowController::refreshSidebarChrome);
     _headerRevealTimer.setSingleShot(true);
     // A coarse timer may fire early, which would only re-arm it; the reveal is due when it is due.
     _headerRevealTimer.setTimerType(Qt::PreciseTimer);
@@ -2111,6 +2115,16 @@ void WindowController::applyTabBarFromConfig(config::TabBarPosition position,
     refreshWindowShadow();
 }
 
+void WindowController::applyTabPlacementFromConfig(config::TabPlacement placement)
+{
+    if (_tabPlacement == placement)
+        return;
+    _tabPlacement = placement;
+    emit tabPlacementChanged();
+    // The band's centre follows where the tabs live.
+    refreshTitleBand();
+}
+
 void WindowController::seedTabBarPosition(config::TabBarPosition position)
 {
     // First-write-wins, mirroring seedTitleBarVisible: the seed arrives on every session rebind, but
@@ -2437,6 +2451,8 @@ TitleBand WindowController::titleBand() const
         .position = _tabBarPosition,
         .notice = hostNoticeOf(hostChipPresence(_manager.chromeLabelOf(_displayed)),
                                hostChipStateOf(_manager.hostConnection(_displayed))),
+        .placement = _tabPlacement,
+        .sidebar = _sidebarVisibility,
     });
 }
 
@@ -2894,6 +2910,76 @@ void WindowController::setChromeHeight(int height)
         updateSizeHintsFor(*_activeDisplay, HintApplyMode::RespectWindowState);
 }
 
+int WindowController::sidebarWidth() const
+{
+    auto const metrics = _manager.app().sidebarMetrics();
+    return geometry::sidebarWidthPixels(_sidebarVisibility, _sidebarUnits, metrics.tokens, metrics.scale);
+}
+
+void WindowController::restoreSidebar()
+{
+    auto& app = _manager.app();
+    auto const& config = app.config();
+    auto const metrics = app.sidebarMetrics();
+    _sidebarVisibility = config.sidebar.value().visibility;
+    _tabPlacement = config.tabPlacement.value();
+    _sidebarUnits = config.sidebar.value().width.value_or(metrics.tokens.width);
+
+    // What the user last chose wins over the configured defaults.
+    if (auto const state = app.guiState()->load(); state && state->sidebar)
+    {
+        auto const& prefs = *state->sidebar;
+        _sidebarVisibility = prefs.visibility;
+        if (auto const remembered = geometry::rememberedSidebarUnits(prefs, metrics.scale.unit))
+            _sidebarUnits = *remembered;
+    }
+    _sidebarUnits = geometry::clampSidebarUnits(_sidebarUnits, metrics.tokens);
+}
+
+void WindowController::rememberSidebar()
+{
+    auto const metrics = _manager.app().sidebarMetrics();
+    auto const visibility = _sidebarVisibility;
+    auto const units = _sidebarUnits;
+    if (auto const saved = _manager.app().guiState()->update([&](config::GuiState& state) {
+            auto prefs = state.sidebar.value_or(config::SidebarPrefs {});
+            prefs.visibility = visibility;
+            geometry::rememberSidebarUnits(prefs, metrics.scale.unit, units);
+            state.sidebar = prefs;
+        });
+        !saved)
+        errorLog()("Could not remember the sidebar: {}.", config::describe(saved.error()));
+}
+
+void WindowController::setSidebarWidth(int width)
+{
+    auto const metrics = _manager.app().sidebarMetrics();
+    auto const units = geometry::sidebarUnitsOf(width, metrics.tokens, metrics.scale);
+    if (units == _sidebarUnits)
+        return;
+    _sidebarUnits = units;
+    rememberSidebar();
+    emit sidebarWidthChanged();
+}
+
+void WindowController::toggleSidebar()
+{
+    _sidebarVisibility = _sidebarVisibility == config::SidebarVisibility::Shown
+                             ? config::SidebarVisibility::Hidden
+                             : config::SidebarVisibility::Shown;
+    rememberSidebar();
+    emit sidebarVisibilityChanged();
+    // Hiding takes the width away and showing gives it back: Main.qml's `sidebarWidth` binding follows.
+    emit sidebarWidthChanged();
+}
+
+void WindowController::refreshSidebarChrome()
+{
+    refreshTitleBand();
+    if (_activeDisplay != nullptr)
+        updateSizeHintsFor(*_activeDisplay, HintApplyMode::RespectWindowState);
+}
+
 void WindowController::updateSizeHintsFor(session::DisplaySurface& requester, HintApplyMode mode)
 {
     auto* osWindow = osWindowFor(requester);
@@ -3173,7 +3259,7 @@ bool WindowController::applyContentDrivenResize(session::DisplaySurface& request
     // mixed-DPR monitor boundary, whose DevicePixelRatioChange must NOT answer with another resize.
     // The flag covers the synchronous effects; the queued reset re-arms after the event settles.
     _inContentDrivenResize = true;
-    osWindow->resize(content.width, content.height + _chromeHeight);
+    osWindow->resize(content.width + chrome().width, content.height + _chromeHeight);
     platform::postToObject(this, [this]() { _inContentDrivenResize = false; });
     return true;
 }

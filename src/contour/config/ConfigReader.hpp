@@ -430,6 +430,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, FoldingConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, GutterConfig& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, SidebarConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, OscContextConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, CommandBlocksConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarConfig& where);
@@ -920,6 +921,12 @@ struct Writer
                       v.lineNumberWidth,
                       v.timestamps,
                       SingleQuoted { v.timestampFormat });
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, SidebarConfig const& v)
+    {
+        return format(
+            doc, v.visibility == SidebarVisibility::Shown, v.width ? std::to_string(*v.width) : "null");
     }
 
     [[nodiscard]] std::string format(std::string_view doc, OscContextConfig const& v)

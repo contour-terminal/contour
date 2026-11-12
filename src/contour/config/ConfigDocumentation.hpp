@@ -319,6 +319,28 @@ constexpr StringLiteral TabBarVisibilityConfig {
     "\n"
 };
 
+constexpr StringLiteral TabPlacementConfig {
+    "{comment} Where the window's tabs live (ignore-case):\n"
+    "{comment}   Top     = in the tab strip (the classic default).\n"
+    "{comment}   Sidebar = as rows of the workspace sidebar, under their workspace (the native2026\n"
+    "{comment}             default).\n"
+    "tab_placement: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral SidebarConfig {
+    "sidebar:\n"
+    "    {comment} Whether the workspace sidebar starts shown: false for the classic defaults, true\n"
+    "    {comment} for the native2026 ones. What you last chose in a window is remembered and wins over\n"
+    "    {comment} this.\n"
+    "    visible: {}\n"
+    "    {comment} The sidebar's starting width, in logical pixels (in cells under ui_style: terminal),\n"
+    "    {comment} kept within the bounds of the chrome style. Omit this setting or use null for the\n"
+    "    {comment} style's own width.\n"
+    "    width: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral UiStyleConfig {
     "{comment} How the application's own chrome -- tab strip, title bar, menus, popups and the\n"
     "{comment} settings page -- is painted (ignore-case). This selects a shape, not a color: both\n"
@@ -2651,6 +2673,34 @@ constexpr StringLiteral TabBarPositionWeb {
     "\n"
 };
 
+constexpr StringLiteral TabPlacementWeb {
+    "\n"
+    "Selects where the window's tabs live. Valid values (ignore-case):\n"
+    "\n"
+    "- `Top` — the tabs are in the tab strip, at the edge `tab_bar_position` names. This is the `classic` "
+    "default.\n"
+    "- `Sidebar` — the tabs are rows of the workspace sidebar, under their workspace, and the tab strip "
+    "gives way to a breadcrumb. This is the `native2026` default.\n"
+    "\n"
+};
+
+constexpr StringLiteral SidebarWeb {
+    "configuration controls the workspace sidebar: the list of workspaces, and with "
+    "[`tab_placement`](#tab_placement) `Sidebar` their tabs, at the window's left edge.\n"
+    "``` yaml\n"
+    "sidebar:\n"
+    "  visible: true\n"
+    "  width: null\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==visible== Whether the sidebar starts shown. This is `false` for the "
+    "`classic` defaults and `true` for the `native2026` ones. What you last chose in a window is "
+    "remembered, and wins over this. <br/>\n"
+    ":octicons-horizontal-rule-16: ==width== The sidebar's starting width in logical pixels, or in cells "
+    "under `ui_style: terminal`, kept within the bounds of the chrome style; a width dragged in a window is "
+    "remembered likewise. Omit it or use `null` for the style's own width. <br/>\n"
+    "\n"
+};
+
 constexpr StringLiteral UiStyleWeb {
     "\n"
     "Selects how the application's own chrome is painted: the tab strip and title bar, and the "
@@ -3768,6 +3818,14 @@ struct Text<TabBarPosition>: DocumentationEntry<TabBarPositionConfig, TabBarPosi
 };
 template <>
 struct Text<TabBarVisibility>: DocumentationEntry<TabBarVisibilityConfig, TabBarVisibilityWeb>
+{
+};
+template <>
+struct Text<TabPlacement>: DocumentationEntry<TabPlacementConfig, TabPlacementWeb>
+{
+};
+template <>
+struct Text<Sidebar>: DocumentationEntry<SidebarConfig, SidebarWeb>
 {
 };
 template <>

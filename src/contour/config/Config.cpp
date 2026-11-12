@@ -145,6 +145,8 @@ namespace
             .darkColorScheme = "default",
             .lightColorScheme = "default",
             .tabBarVisibility = TabBarVisibility::Always,
+            .sidebarVisibility = SidebarVisibility::Hidden,
+            .tabPlacement = TabPlacement::Top,
             .theme = GuiTheme::System,
             .chromeDensity = ChromeDensity::Comfortable,
             .hyperlinkHoverTooltip = true,
@@ -172,6 +174,8 @@ namespace
             .darkColorScheme = "contour-dark",
             .lightColorScheme = "contour-light",
             .tabBarVisibility = TabBarVisibility::Always,
+            .sidebarVisibility = SidebarVisibility::Shown,
+            .tabPlacement = TabPlacement::Sidebar,
             .theme = GuiTheme::Terminal,
             .chromeDensity = ChromeDensity::Comfortable,
             .hyperlinkHoverTooltip = false,
@@ -1896,6 +1900,8 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("notification_close_timeout", c.notificationCloseTimeout);
         loadFromEntry("tab_bar_position", c.tabBarPosition);
         loadFromEntry("tab_bar_visibility", c.tabBarVisibility);
+        loadFromEntry("tab_placement", c.tabPlacement);
+        loadFromEntry("sidebar", c.sidebar);
         loadFromEntry("text_scaling_method", c.textScalingMethod);
         loadFromEntry("grapheme_clustering", c.graphemeClustering);
         loadFromEntry("gui_config_locked", c.guiConfigLocked);
@@ -3304,6 +3310,36 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadGuarded(child, "auto_collapse_on_new_command", where.autoCollapseOnNewCommand);
         loadGuarded(child, "on_jump_into_fold", where.onJumpIntoFold);
     }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, SidebarConfig& where)
+{
+    // Only the children present are written: an override of one key must leave its siblings as they were.
+    auto const child = node[entry];
+    if (!child)
+        return;
+
+    if (child["visible"])
+    {
+        auto visible = where.visibility == SidebarVisibility::Shown;
+        loadGuarded(child, "visible", visible);
+        where.visibility = visible ? SidebarVisibility::Shown : SidebarVisibility::Hidden;
+    }
+
+    // Validated rather than trusted: a width of nothing or less is a typo, and taken as written would
+    // collapse the sidebar to nothing while it reads as shown. The upper bound is the row's, applied where
+    // the width is used. Null says "the row's own width".
+    if (auto const width = child["width"]; width && !width.IsNull())
+    {
+        auto value = 0;
+        loadGuarded(child, "width", value);
+        if (value > 0)
+            where.width = value;
+        else
+            errorLog()("sidebar.width must be positive, not {}; keeping the previous setting.", value);
+    }
+    else if (width)
+        where.width.reset();
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, GutterConfig& where)

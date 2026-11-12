@@ -120,13 +120,16 @@ ThemedWindow
     // is in full screen, the tab-bar gate, the configured edge and the host chip, whose interrupted
     // connection shows the band whatever the gate says. The ints are the enumerators' underlying values:
     // WindowFrame { ClientBand, NativeFrame }, WindowMode { Windowed, FullScreen }, TabStripGate { Hidden,
-    // Shown }, TabBarPosition { Top, Bottom } and HostChipState. Main.qml is the only caller.
+    // Shown }, TabBarPosition { Top, Bottom }, HostChipState, TabPlacement { Top, Sidebar } and
+    // SidebarVisibility { Hidden, Shown }. Main.qml is the only caller.
     readonly property var band: chromeStyle.titleBand(appWindow.bandFrame,
                                                       appWindow.bandMode,
                                                       appWindow.tabBarShouldShow ? 1 : 0,
                                                       appWindow.tabBarPosition,
                                                       (appWindow.win && appWindow.win.hostLabel) || "",
-                                                      (appWindow.win && appWindow.win.hostChipState) || 0)
+                                                      (appWindow.win && appWindow.win.hostChipState) || 0,
+                                                      (appWindow.win && appWindow.win.tabPlacement) || 0,
+                                                      (appWindow.win && appWindow.win.sidebarVisibility) || 0)
 
     // Whether a full-screen band should be revealed: while the pointer is on the reveal edge -- which,
     // once revealed, grows to the band's resting rectangle, so a band still sliding in is not lost to a

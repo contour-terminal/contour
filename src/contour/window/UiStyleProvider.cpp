@@ -294,6 +294,7 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _layout { _groups.layout, this },
     _tint { _groups.tint, this },
     _settings { _groups.settings, _units, this },
+    _sidebar { _groups.sidebar, _groups.layout.sidebar, _units, this },
     _settingsTraits { _groups.layout.settings, this },
     _colors { _groups.colors, _inputs.scheme, _groups.contrast.separatorPercent, *this },
     _paneHeaderActionNames { paneHeaderActionTexts(&PaneHeaderActionRow::accessibleName) },
@@ -402,12 +403,19 @@ bool UiStyleProvider::isHostChipShown(QString const& hostLabel) const
     return hostChipPresence(hostLabel.toStdString()) == HostChipPresence::Shown;
 }
 
-QVariantMap UiStyleProvider::titleBand(
-    int frame, int mode, int strip, int position, QString const& hostLabel, int hostChipState) const
+QVariantMap UiStyleProvider::titleBand(int frame,
+                                       int mode,
+                                       int strip,
+                                       int position,
+                                       QString const& hostLabel,
+                                       int hostChipState,
+                                       int placement,
+                                       int sidebar) const
 {
     if (!inRange(frame, WindowFrameCount) || !inRange(mode, WindowModeCount)
         || !inRange(strip, TabStripGateCount) || !inRange(position, config::TabBarPositionCount)
-        || !inRange(hostChipState, HostChipStateCount))
+        || !inRange(hostChipState, HostChipStateCount) || !inRange(placement, config::TabPlacementCount)
+        || !inRange(sidebar, config::SidebarVisibilityCount))
         return {};
     auto const band =
         titleBandOf(TitleBandInputs { .frame = static_cast<WindowFrame>(frame),
@@ -415,7 +423,9 @@ QVariantMap UiStyleProvider::titleBand(
                                       .strip = static_cast<TabStripGate>(strip),
                                       .position = static_cast<config::TabBarPosition>(position),
                                       .notice = hostNoticeOf(hostChipPresence(hostLabel.toStdString()),
-                                                             static_cast<HostChipState>(hostChipState)) });
+                                                             static_cast<HostChipState>(hostChipState)),
+                                      .placement = static_cast<config::TabPlacement>(placement),
+                                      .sidebar = static_cast<config::SidebarVisibility>(sidebar) });
     return { { QStringLiteral("band"), nameOf(barPresenceName(band.band)) },
              { QStringLiteral("bandEdge"), nameOf(barEdgeName(band.bandEdge)) },
              { QStringLiteral("centre"), nameOf(barCentreName(band.centre)) },

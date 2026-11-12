@@ -819,6 +819,97 @@ class ChromeTintTokens: public QObject
     config::TintTokens _tokens {};
 };
 
+/// The workspace sidebar's extents, `chromeStyle.sidebar`. Widths, edges, gaps and radii are in horizontal
+/// units, heights in vertical ones, all as logical pixels.
+class ChromeSidebarTokens: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(qreal width READ width CONSTANT)
+    Q_PROPERTY(qreal minWidth READ minWidth CONSTANT)
+    Q_PROPERTY(qreal maxWidth READ maxWidth CONSTANT)
+    Q_PROPERTY(qreal rowHeight READ rowHeight CONSTANT)
+    Q_PROPERTY(qreal twoLineRowHeight READ twoLineRowHeight CONSTANT)
+    Q_PROPERTY(qreal indent READ indent CONSTANT)
+    Q_PROPERTY(qreal glyph READ glyph CONSTANT)
+    Q_PROPERTY(qreal gitGap READ gitGap CONSTANT)
+    Q_PROPERTY(qreal footerHeight READ footerHeight CONSTANT)
+    Q_PROPERTY(qreal selectionRadius READ selectionRadius CONSTANT)
+    Q_PROPERTY(qreal accentPillWidth READ accentPillWidth CONSTANT)
+    /// How the sidebar looks: a config::SidebarLook as its underlying value, which the predicates below name.
+    Q_PROPERTY(int look READ look CONSTANT)
+    Q_PROPERTY(int sourceList READ sourceList CONSTANT)
+    Q_PROPERTY(int navigationPane READ navigationPane CONSTANT)
+    Q_PROPERTY(int headerPane READ headerPane CONSTANT)
+    Q_PROPERTY(int cellTree READ cellTree CONSTANT)
+
+  public:
+    /// @param tokens The resolved sidebar group.
+    /// @param look   How the row's sidebar looks.
+    /// @param units  What one unit of an extent is.
+    /// @param parent Qt ownership.
+    ChromeSidebarTokens(config::SidebarTokens tokens,
+                        config::SidebarLook look,
+                        ChromeUnits units,
+                        QObject* parent);
+
+    /// @return The sidebar's default width.
+    [[nodiscard]] qreal width() const noexcept { return _tokens.width * _units.horizontal; }
+    /// @return The narrowest it may be dragged to.
+    [[nodiscard]] qreal minWidth() const noexcept { return _tokens.minWidth * _units.horizontal; }
+    /// @return The widest it may be dragged to.
+    [[nodiscard]] qreal maxWidth() const noexcept { return _tokens.maxWidth * _units.horizontal; }
+    /// @return A one-line row's height.
+    [[nodiscard]] qreal rowHeight() const noexcept { return _tokens.rowHeight * _units.vertical; }
+    /// @return A two-line row's height.
+    [[nodiscard]] qreal twoLineRowHeight() const noexcept
+    {
+        return _tokens.twoLineRowHeight * _units.vertical;
+    }
+    /// @return What a tab row is indented by beneath its workspace.
+    [[nodiscard]] qreal indent() const noexcept { return _tokens.indent * _units.horizontal; }
+    /// @return A row's glyph, its edge.
+    [[nodiscard]] qreal glyph() const noexcept { return _tokens.glyph * _units.horizontal; }
+    /// @return The gap between a row's directory and its git state.
+    [[nodiscard]] qreal gitGap() const noexcept { return _tokens.gitGap * _units.horizontal; }
+    /// @return The footer's height.
+    [[nodiscard]] qreal footerHeight() const noexcept { return _tokens.footerHeight * _units.vertical; }
+    /// @return The selected row's corner radius; 0 squares it off.
+    [[nodiscard]] qreal selectionRadius() const noexcept
+    {
+        return _tokens.selectionRadius * _units.horizontal;
+    }
+    /// @return The accent pill's width; 0 draws none.
+    [[nodiscard]] qreal accentPillWidth() const noexcept
+    {
+        return _tokens.accentPillWidth * _units.horizontal;
+    }
+
+    /// @return How the sidebar looks, a config::SidebarLook as its underlying value.
+    [[nodiscard]] int look() const noexcept { return static_cast<int>(_look); }
+    /// @return The QML names of config::SidebarLook's enumerators.
+    [[nodiscard]] static constexpr int sourceList() noexcept
+    {
+        return static_cast<int>(config::SidebarLook::SourceList);
+    }
+    [[nodiscard]] static constexpr int navigationPane() noexcept
+    {
+        return static_cast<int>(config::SidebarLook::NavigationPane);
+    }
+    [[nodiscard]] static constexpr int headerPane() noexcept
+    {
+        return static_cast<int>(config::SidebarLook::HeaderPane);
+    }
+    [[nodiscard]] static constexpr int cellTree() noexcept
+    {
+        return static_cast<int>(config::SidebarLook::CellTree);
+    }
+
+  private:
+    config::SidebarTokens _tokens {};
+    config::SidebarLook _look = config::SidebarLook::SourceList;
+    ChromeUnits _units {};
+};
+
 /// The Settings window's extents and type, `chromeStyle.settings`. Widths, edges and radii are in
 /// horizontal units, heights and gaps in vertical ones; a type size is in logical pixels, 0 for the chrome
 /// font's own.
@@ -1254,6 +1345,12 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor tooltipText READ tooltipText NOTIFY changed)
     Q_PROPERTY(QColor tooltipTextSecondary READ tooltipTextSecondary NOTIFY changed)
     Q_PROPERTY(QColor tooltipEdge READ tooltipEdge NOTIFY changed)
+    Q_PROPERTY(QColor sidebarFill READ sidebarFill NOTIFY changed)
+    Q_PROPERTY(QColor sidebarSelectionFill READ sidebarSelectionFill NOTIFY changed)
+    Q_PROPERTY(QColor sidebarSelectionInk READ sidebarSelectionInk NOTIFY changed)
+    Q_PROPERTY(QColor sidebarSecondaryInk READ sidebarSecondaryInk NOTIFY changed)
+    Q_PROPERTY(QColor sidebarDivider READ sidebarDivider NOTIFY changed)
+    Q_PROPERTY(QColor sidebarAccentPill READ sidebarAccentPill NOTIFY changed)
 
   public:
     /// The colour sources, indexed by config::ChromeColorRole.
@@ -1393,6 +1490,26 @@ class ChromeColorTokens: public QObject
         return color(config::ChromeColorRole::TooltipTextSecondary);
     }
     [[nodiscard]] QColor tooltipEdge() const { return color(config::ChromeColorRole::TooltipEdge); }
+
+    /// The workspace sidebar's roles, by the palette's tone.
+    [[nodiscard]] QColor sidebarFill() const { return color(config::ChromeColorRole::SidebarFill); }
+    [[nodiscard]] QColor sidebarSelectionFill() const
+    {
+        return color(config::ChromeColorRole::SidebarSelectionFill);
+    }
+    [[nodiscard]] QColor sidebarSelectionInk() const
+    {
+        return color(config::ChromeColorRole::SidebarSelectionInk);
+    }
+    [[nodiscard]] QColor sidebarSecondaryInk() const
+    {
+        return color(config::ChromeColorRole::SidebarSecondaryInk);
+    }
+    [[nodiscard]] QColor sidebarDivider() const { return color(config::ChromeColorRole::SidebarDivider); }
+    [[nodiscard]] QColor sidebarAccentPill() const
+    {
+        return color(config::ChromeColorRole::SidebarAccentPill);
+    }
 
     /// The Settings window's roles, by the palette's tone.
     [[nodiscard]] QColor settingsSidebarFill() const
