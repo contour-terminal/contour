@@ -55,8 +55,8 @@ TEST_CASE("Option as Alt is per side", "[input][platform][mac]")
 {
     for (auto const setting: { OptionAsAlt::Off, OptionAsAlt::Left, OptionAsAlt::Right, OptionAsAlt::Both })
     {
-        for (auto const [side, bits]: { std::pair { OptionKeySide::Left, MacLeftOption },
-                                        std::pair { OptionKeySide::Right, MacRightOption } })
+        for (auto const& [side, bits]: { std::pair { OptionKeySide::Left, MacLeftOption },
+                                         std::pair { OptionKeySide::Right, MacRightOption } })
         {
             INFO("setting " << static_cast<int>(setting) << ", side " << static_cast<int>(side));
             auto const event =

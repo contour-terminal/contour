@@ -2635,7 +2635,7 @@ TEST_CASE("Grid.resize.enforcesFiniteHistoryCapacity", "[grid][history][reflow]"
 
     auto cursors = std::array { CellLocation { LineOffset(2), ColumnOffset(0) },
                                 CellLocation { LineOffset(1), ColumnOffset(60) } };
-    for (auto const [rows, columns]: { std::pair { 3, 20 }, { 3, 80 }, { 5, 10 }, { 5, 80 }, { 2, 20 } })
+    for (auto const& [rows, columns]: { std::pair { 3, 20 }, { 3, 80 }, { 5, 10 }, { 5, 80 }, { 2, 20 } })
     {
         CAPTURE(capacity, guaranteed, rows, columns);
         // Start each resize with identical content: previously evicted text cannot be recovered.

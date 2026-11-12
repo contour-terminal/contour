@@ -45,7 +45,7 @@ if(CMAKE_GENERATOR MATCHES "Ninja")
     set(CMAKE_JOB_POOL_LINK contour_link_pool)
 endif()
 
-# The same for a handful of COMPILE steps: the test sources a recent GCC needs 3 to 4 GB for at -O2 -g. Two of
+# The same for a handful of COMPILE steps: the test sources a recent GCC needed 3 to 4 GB for at -O2 -g (measured before CI moved to Release). Two of
 # them compiling at once, beside the other jobs, ran the 16 GB arm64 GCC runner out of memory. They compile in a pool of
 # their own, one at a time by default, while every other source still uses every core;
 # src/contour/CMakeLists.txt names them, and how they were chosen.
@@ -73,7 +73,13 @@ include(CompileCache)
 include(ClangTidy)
 
 if(NOT WIN32 AND NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Choose the build mode." FORCE)
+    # A production build is a Release build (cmake/ProductionBuildRefusals.cmake), so asking for one
+    # without naming a build type gets that one rather than a refusal.
+    if(CONTOUR_PRODUCTION_BUILD)
+        set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the build mode." FORCE)
+    else()
+        set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Choose the build mode." FORCE)
+    endif()
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release MinSizeRel RelWithDebInfo)
 endif()
 

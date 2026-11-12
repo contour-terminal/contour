@@ -95,9 +95,9 @@
         },
         {
             "name": "msvc-release",
-            "displayName": "x64 (MSVC) RelWithDebInfo",
+            "displayName": "x64 (MSVC) Release",
             "configurePreset": "msvc-release",
-            "configuration": "RelWithDebInfo"
+            "configuration": "Release"
         },
         {
             "name": "clangcl-debug",
@@ -107,9 +107,9 @@
         },
         {
             "name": "clangcl-release",
-            "displayName": "x64 (ClangCL) RelWithDebInfo",
+            "displayName": "x64 (ClangCL) Release",
             "configurePreset": "clangcl-release",
-            "configuration": "RelWithDebInfo"
+            "configuration": "Release"
         }
     ],
     "testPresets": [
@@ -142,14 +142,14 @@
         {
             "name": "msvc-release",
             "configurations": [
-                "RelWithDebInfo"
+                "Release"
             ],
             "configurePreset": "msvc-release"
         },
         {
             "name": "msvc-release-user",
             "configurations": [
-                "RelWithDebInfo"
+                "Release"
             ],
             "configurePreset": "msvc-release",
             "generators": [

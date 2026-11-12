@@ -114,8 +114,8 @@ _T1 = "2026-11-11T11:15:14.983Z"
 _T2 = "2026-11-11T15:34:44.248Z"
 _T3 = "2026-11-11T19:02:01.500Z"
 _WINDOWS = "ccache-ccache-windows-msvc-release"
-_X86 = "ccache-ccache-ubuntu-24.04-Clang 22-23-RelWithDebInfo-6"
-_ARM = "ccache-ccache-ubuntu-24.04-arm-Clang 22-23-RelWithDebInfo-6"
+_X86 = "ccache-ccache-ubuntu-24.04-Clang 22-23-Release-6"
+_ARM = "ccache-ccache-ubuntu-24.04-arm-Clang 22-23-Release-6"
 
 
 def _generation(entry_id: int, name: str, stamp: str, ref: str = _MASTER) -> CacheEntry:

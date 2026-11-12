@@ -63,6 +63,11 @@ def select(patterns: Sequence[str], names: Iterable[str]) -> Selection:
     return Selection(files, [n for n in names if n not in claimed], problems)
 
 
+# The spellings of a separately published debug-symbol package: Ubuntu's -dbgsym .ddeb, Fedora's -debuginfo and
+# -debugsource, the Windows PDB zip and the macOS dSYM zip. No build produces one any more.
+_SYMBOL_PACKAGE = re.compile(r"dbgsym|\.ddeb$|debuginfo|debugsource|-pdb\.|dSYM")
+
+
 def pattern_problems(patterns: Sequence[str]) -> list[str]:
     """Returns what is wrong with the pattern list itself, including rows that could claim the same file."""
     if not patterns:
@@ -71,6 +76,8 @@ def pattern_problems(patterns: Sequence[str]) -> list[str]:
     for index, pattern in enumerate(patterns):
         if pattern in patterns[:index]:
             problems.append(f"duplicate pattern {pattern}")
+        elif _SYMBOL_PACKAGE.search(pattern):
+            problems.append(f"pattern {pattern} names a debug-symbol package, which no build produces")
         elif pattern.count(VERSION_WILDCARD) != 1:
             problems.append(f"pattern {pattern} must contain {VERSION_WILDCARD} exactly once")
     if problems:
@@ -140,7 +147,6 @@ _WIN_ZIP = "contour-[0-9]*-win64.zip"
 _WIN_MSI = "contour-[0-9]*-win64.msi"
 _GUI_DEB = "contour-[0-9]*-ubuntu26.04-amd64.deb"
 _RAWHIDE = f"contour-{_VERSION}-fedorarawhide-x86_64.rpm"
-_PDB = f"contour-{_VERSION}-win64-pdb.zip"
 _USER_MSI = f"contour-{_VERSION}-win64-user.msi"
 
 # (description, patterns, names, expected files, expected unclaimed, expected problems)
@@ -173,11 +179,11 @@ _SELECT_CASES: list[tuple[str, list[str], list[str], list[str], list[str], list[
         [f"no file matches {_GUI_DEB}"],
     ),
     (
-        "pdb zip and user msi are not claimed by the win64 patterns",
+        "the user msi is not claimed by the win64 patterns",
         _PATTERNS,
-        [*_names(), _PDB, _USER_MSI],
+        [*_names(), _USER_MSI],
         _names(),
-        [_PDB, _USER_MSI],
+        [_USER_MSI],
         [],
     ),
     ("a rawhide rpm is unclaimed, not a problem", _PATTERNS, [*_names(), _RAWHIDE], _names(), [_RAWHIDE], []),
@@ -197,19 +203,22 @@ _SAMPLE_UPLOADS = """
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
       - uses: actions/upload-artifact@v4
         with:
-          name: "contour-${{ steps.set_vars.outputs.version }}-win64-pdb.zip"
-      - uses: actions/upload-artifact@v4
-        with:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
       - uses: actions/upload-artifact@v4
         with:
           name: chrome-snapshots
 """
 
+_SAMPLE_PDB_UPLOAD = """
+      - uses: actions/upload-artifact@v4
+        with:
+          name: "contour-${{ steps.set_vars.outputs.version }}-win64-pdb.zip"
+"""
+
 # (description, patterns, workflow text, expected number of problems)
 _UPLOAD_CASES: list[tuple[str, list[str], str, int]] = [
-    ("every uploaded package has a row", ["contour-[0-9]*-win64.zip", "contour-[0-9]*-win64-pdb.zip"], _SAMPLE_UPLOADS, 0),
-    ("an uploaded symbol archive without a row", ["contour-[0-9]*-win64.zip"], _SAMPLE_UPLOADS, 1),
+    ("every uploaded package has a row", ["contour-[0-9]*-win64.zip"], _SAMPLE_UPLOADS, 0),
+    ("an uploaded symbol archive without a row", ["contour-[0-9]*-win64.zip"], _SAMPLE_UPLOADS + _SAMPLE_PDB_UPLOAD, 1),
     ("no upload names are found in an empty workflow", ["contour-[0-9]*-win64.zip"], "", 0),
 ]
 
@@ -221,6 +230,11 @@ _PATTERN_CASES: list[tuple[str, list[str], int]] = [
     ("a pattern with two version wildcards", ["a-[0-9]*-[0-9]*.msi"], 1),
     ("rows that can claim the same file", ["a-[0-9]*-win64.zip", "a-[0-9]*-portable-win64.zip"], 1),
     ("well-formed, disjoint patterns", _PATTERNS, 0),
+    ("a Windows PDB zip row", ["a-[0-9]*-win64.zip", "a-[0-9]*-win64-pdb.zip"], 1),
+    ("a macOS dSYM zip row", ["a-[0-9]*-macOS-arm.dmg", "a-[0-9]*-macOS-arm-dSYM.zip"], 1),
+    ("an Ubuntu dbgsym .ddeb row", ["a-[0-9]*-amd64.deb", "a-dbgsym-[0-9]*-amd64.ddeb"], 1),
+    ("a Fedora debuginfo rpm row", ["a-[0-9]*-x86_64.rpm", "a-debuginfo-[0-9]*-x86_64.rpm"], 1),
+    ("a Fedora debugsource rpm row", ["a-[0-9]*-x86_64.rpm", "a-debugsource-[0-9]*-x86_64.rpm"], 1),
 ]
 
 

@@ -237,8 +237,8 @@ jobs:
   #
   # Deliberately NOT installing a modern Qt over the distro one: relying on Ubuntu's Qt 6.4.2
   # proves the headless build needs nothing beyond Qt6::Core -- no Qt6::GuiPrivate, no Qt Quick.
-  # Clang only, since this gates a build configuration and not a toolchain. RelWithDebInfo rather than
-  # Debug, because the product is a package: it is what a user installs, and what carries a -dbgsym.
+  # Clang only, since this gates a build configuration and not a toolchain. Release rather than
+  # Debug, because the product is a package: it is what a user installs.
   package_daemon_for_Ubuntu:
     name: "Ubuntu Linux (contour-daemon package, ${{ matrix.os_version }})"
     # 24.04 is the oldest release the package is built for and runs on every pull request. 26.04 is the
@@ -374,13 +374,13 @@ jobs:
           test -f "$RUNNER_TEMP/contour-headless/share/contour/extensions/$extension.wasm"
         done
     # The package files are found by glob and counted rather than named: CPack derives the file name
-    # (contour-daemon_<version>_<arch>.deb, and the debug-info package beside it), and a name guessed
-    # here would be a second place to keep in step with it. Exactly one of each, or the step says which.
+    # (contour-daemon_<version>_<arch>.deb), and a name guessed here would be a second place to keep in
+    # step with it. Exactly one, or the step says which.
     - name: "CPack: Creating DEB package"
       run: |
         set -eu
         # -G DEB: nothing on Linux sets CPACK_GENERATOR (the GUI job gets DEB from the gcc-release
-        # package preset), and without it cpack builds tarballs. It also writes the -dbgsym .ddeb.
+        # package preset), and without it cpack builds tarballs.
         cpack -G DEB -B build --config build/CPackConfig.cmake
         ls -la build
         pick() {
@@ -396,9 +396,7 @@ jobs:
           printf '%s\n' "$matches"
         }
         deb=$(pick 'contour-daemon*.deb' 'contour-daemon .deb')
-        ddeb=$(pick 'contour-daemon*.ddeb' 'contour-daemon debug-info .ddeb')
         mv -v "$deb" "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${OS_VERSION}-amd64.deb"
-        mv -v "$ddeb" "contour-daemon-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${OS_VERSION}-amd64.ddeb"
     - name: "Inspect the package"
       run: |
         set -eu
@@ -440,9 +438,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
-        path: |
-          contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb
-          contour-daemon-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb
+        path: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb
         if-no-files-found: error
         retention-days: 7
 
@@ -755,7 +751,7 @@ jobs:
   # EPEL for yaml-cpp and libutempter), and a job that can never be run by hand first -- the EL10 package
   # set is unverified -- would be a guess committed to CI. Revisit with a machine to try it on.
   #
-  # Two full RelWithDebInfo builds per leg, so like the other packaging it runs on master pushes, in the
+  # Two full Release builds per leg, so like the other packaging it runs on master pushes, in the
   # merge queue and on release tags, not on ordinary pull requests: the Ubuntu daemon job
   # already builds the GUI-less configuration on every one.
   package_for_Fedora:
@@ -821,9 +817,9 @@ jobs:
         docker cp contour-rpm:/app/rpmbuild/RPMS/x86_64/. rpms/
         docker rm contour-rpm
         ls -la rpms
-    # The built files are renamed to <name>-<VERSION_STRING>-fedora<release>-x86_64.rpm (and the
-    # -debuginfo/-debugsource beside each): the release tag is in the name because the dist tag of
-    # rawhide is not known in advance, and the VERSION_STRING because that is what the .deb carries.
+    # The built files are renamed to <name>-<VERSION_STRING>-fedora<release>-x86_64.rpm: the release tag
+    # is in the name because the dist tag of rawhide is not known in advance, and the VERSION_STRING
+    # because that is what the .deb carries.
     - name: "Name the packages"
       run: |
         set -eux
@@ -834,8 +830,8 @@ jobs:
           stem="${base%%-"${VERSION}"-1.*}"
           mv -v "$rpm" "${stem}-${VERSION_STRING}-fedora${OS_VERSION}-x86_64.rpm"
         done
-        # Exactly the six packages: contour and contour-daemon, each with its debuginfo and debugsource.
-        test "$(find . -maxdepth 1 -name "contour-*-fedora${OS_VERSION}-x86_64.rpm" | wc -l)" -eq 6
+        # Exactly the two packages, contour and contour-daemon: the spec builds no debuginfo or debugsource.
+        test "$(find . -maxdepth 1 -name "contour-*-fedora${OS_VERSION}-x86_64.rpm" | wc -l)" -eq 2
         ls -la ./*.rpm
     # What the packages say about themselves, read inside a Fedora container (it has rpm; the Ubuntu
     # runner does not). The daemon must name no Qt and ship no desktop files; the GUI package must still
@@ -897,20 +893,14 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm"
-        path: |
-          contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
-          contour-debuginfo-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
-          contour-debugsource-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
+        path: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
         if-no-files-found: error
         retention-days: 7
     - name: "Uploading Fedora RPM package: contour-daemon"
       uses: actions/upload-artifact@v4
       with:
         name: "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm"
-        path: |
-          contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
-          contour-daemon-debuginfo-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
-          contour-daemon-debugsource-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
+        path: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
         if-no-files-found: error
         retention-days: 7
   # }}}
@@ -1459,24 +1449,6 @@ jobs:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm.dmg"
           path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm.dmg"
           retention-days: 7
-      # The debug symbols of the production build are not in the image; they are published beside it, so a
-      # crash report from a release can be symbolicated.
-      - name: "Collect the debug symbols"
-        if: steps.set_vars.outputs.PACKAGE_IMAGE == 'true'
-        run: |
-          set -euo pipefail
-          cmake --install out/macos-package --component debug_symbols --prefix symbols
-          test -d symbols/contour.dSYM
-          ditto -c -k --keepParent symbols/contour.dSYM "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm-dSYM.zip"
-      - name: "upload to artifact store (dSYM)"
-        if: steps.set_vars.outputs.PACKAGE_IMAGE == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm-dSYM.zip"
-          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm-dSYM.zip"
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
   # }}}
   # {{{ Windows
   windows:
@@ -1521,7 +1493,7 @@ jobs:
           path: out/.tools
           key: lint-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/check-workflows.py', 'scripts/check-spelling.py') }}
       # ccache, not sccache: cmake/CompileCache.cmake picks the ccache on PATH, and with it forces
-      # /Z7 (debug info inside the .obj) in place of /Zi, which no launcher can cache. The action
+      # /Z7 (debug info inside the .obj) in place of /Zi, which no launcher can cache, wherever a build has debug info. The action
       # installs ccache 4.9 and sets compiler_check=content on Windows, where the compiler's mtime
       # follows the image's install time. The statistics step at the end names the binary CMake used
       # and the cache directory it read, so a mismatch with the restored one shows in the log.
@@ -1654,7 +1626,7 @@ jobs:
         env:
           CONTOUR_TEST_TRACE: "1"
         run: |
-          ctest --preset ${{ env.CMAKE_PRESET }} --build-config RelWithDebInfo -j $env:NUMBER_OF_PROCESSORS
+          ctest --preset ${{ env.CMAKE_PRESET }} --build-config Release -j $env:NUMBER_OF_PROCESSORS
       - name: "verify the AF_UNIX tests actually ran"
         # Windows is the ONLY validation the daemon's Windows transport gets -- nobody develops it
         # on a Windows box. The AF_UNIX cases self-skip where the platform has no AF_UNIX, and a
@@ -1700,7 +1672,7 @@ jobs:
         # [pwsh]: contour_test does not run the POSIX shells on Windows at all.
         #
         # ShellIntegrationShells.profileLine runs the very line the one-click install appends to a profile,
-        # which asks contour.exe for the script through a pipe: RelWithDebInfo builds the GUI-subsystem
+        # which asks contour.exe for the script through a pipe: Release builds the GUI-subsystem
         # contour.exe a user installs, so this is where that pipe is proved. Run outside ctest, it learns
         # the binary from CONTOUR_BINARY here, and SKIPs -- failing this step -- without it.
         shell: pwsh
@@ -2029,26 +2001,6 @@ jobs:
           path: ${{ runner.temp }}/msi-*
           if-no-files-found: ignore
           retention-days: 7
-      # The PDBs of the production build are not in the MSI or the zip; they are published beside them.
-      - name: "Collect the debug symbols"
-        if: github.event_name != 'pull_request'
-        shell: pwsh
-        run: |
-          cmake --install out/build/${{ env.CMAKE_PRESET }} --component debug_symbols --prefix symbols
-          if (-not (Test-Path symbols/contour.pdb)) {
-            Write-Host "::error::the debug_symbols component installed no contour.pdb"
-            exit 1
-          }
-          Compress-Archive -Path symbols/* -DestinationPath "contour-${{ steps.set_vars.outputs.version }}-win64-pdb.zip"
-      - name: "Uploading PDB zip to artifact store"
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: "contour-${{ steps.set_vars.outputs.version }}-win64-pdb.zip"
-          path: "contour-${{ steps.set_vars.outputs.version }}-win64-pdb.zip"
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
   # }}}
   # {{{ Ubuntu 24.04 CC matrix
   ubuntu_2404_cc_matrix:
@@ -2071,7 +2023,7 @@ jobs:
         # requests, which have no consumers but keep the steps exercised.
         # The arm Clang leg is OFF too: it runs on master only, so nothing proves it builds clean with
         # -Werror before merge, whereas the x86 Clang leg is proven by every pull request.
-        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"ON","artifacts":true}]' || '[{"runner":"ubuntu-24.04","compiler":"GCC 15","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":true},{"runner":"ubuntu-24.04-arm","compiler":"GCC 15","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":false},{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"ON","artifacts":false},{"runner":"ubuntu-24.04-arm","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":false}]') }}
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"ON","artifacts":true}]' || '[{"runner":"ubuntu-24.04","compiler":"GCC 15","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":true},{"runner":"ubuntu-24.04-arm","compiler":"GCC 15","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":false},{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"ON","artifacts":false},{"runner":"ubuntu-24.04-arm","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":false}]') }}
     name: "${{ matrix.runner }} (${{ matrix.compiler }}, C++${{ matrix.cxx }}, Qt${{ matrix.qt_version }})"
     runs-on: ${{ matrix.runner }}
     env:
@@ -2243,7 +2195,7 @@ jobs:
           CC_VER=$( echo "${{ matrix.compiler }}" | awk '{ print $2; }')
           test "${{ matrix.compiler }}" = "GCC 8"  && EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DPEDANTIC_COMPILER_WERROR=ON"
           test "${CC_NAME}" = "gcc" && CC_EXE="g++"
-          # AArch64 GCC + RelWithDebInfo debug info is what fills the runner; --no-keep-memory
+          # The link of AArch64 GCC objects is what fills the runner; --no-keep-memory
           # tells ld to re-read symbol tables rather than hold them, trading time for RAM.
           #
           # The link cap below is spelled CONTOUR_LINK_JOBS and not CMAKE_JOB_POOL_LINK on
@@ -2251,6 +2203,14 @@ jobs:
           # a cache entry of the same name passed here -- so -DCMAKE_JOB_POOL_LINK=link defines a
           # pool nothing binds to, and rules.ninja still reads "contour_link_pool / depth = 2".
           test "${CC_NAME}" = "gcc" && CMAKE_EXE_LINKER_FLAGS="$CMAKE_EXE_LINKER_FLAGS -Wl,--no-keep-memory"
+          # Debug info for valgrind's line numbers, on the one leg whose build it reads: test_ubuntu2404_valgrind
+          # takes the test binaries of the GCC x86 leg, which only master builds. Not on the leg a pull request
+          # builds: the same flag there would give that leg's compiler cache different keys per event, and
+          # every pull request would miss what master saved.
+          if [[ "${{ matrix.runner }}" = "ubuntu-24.04" && "${CC_NAME}" = "gcc" ]]; then
+              CMAKE_C_FLAGS="$CMAKE_C_FLAGS -g"
+              CMAKE_CXX_FLAGS="$CMAKE_CXX_FLAGS -g"
+          fi
           if [[ "${CC_NAME}" = "clang" ]]; then
               CC_EXE="clang++"
               # CMAKE_CXX_FLAGS="-stdlib=libc++"
@@ -2263,6 +2223,7 @@ jobs:
               -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
               -DCMAKE_CXX_STANDARD=${{ matrix.cxx }} \
               -DCMAKE_CXX_COMPILER="${CC_EXE}-${CC_VER}" \
+              -DCMAKE_C_FLAGS="${CMAKE_C_FLAGS}" \
               -DCMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS}" \
               -DCMAKE_EXE_LINKER_FLAGS="${CMAKE_EXE_LINKER_FLAGS}" \
               -DCMAKE_INSTALL_PREFIX="/usr" \
@@ -2609,7 +2570,6 @@ jobs:
           EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS"
           EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_PACKAGE_TERMINFO=OFF"
           BUILD_DIR="build" \
-            CMAKE_BUILD_TYPE=RelWithDebInfo \
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
                                -DCMAKE_CXX_STANDARD=$CMAKE_CXX_STANDARD \
                                -DCMAKE_INSTALL_PREFIX="/usr" \
@@ -2637,21 +2597,16 @@ jobs:
           OS_VERSION=${OS_OVERRIDE/./_}
           mv -v "./out/gcc-release/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour.deb" \
                 "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
-          mv -v "./out/gcc-release/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour-dbgsym.ddeb" \
-                "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
-          path: |
-            contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb
-            contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb
+          path: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb
           if-no-files-found: error
           retention-days: 7
       - name: "Attempt installing the created .deb"
         run: |
           sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
-          sudo dpkg --install "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
       - name: "Verify installation"
         run: |
           contour version

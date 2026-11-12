@@ -29,14 +29,14 @@ version — Tracy's capture protocol is version-specific.
 ## Building a profiling tree
 
 ```bash
-cmake --preset clang-release -B out/clang-tracy \
+cmake --preset clang-profile -B out/clang-tracy \
     -DCONTOUR_TRACY=ON -DCONTOUR_TRACY_TOOLS=ON
 cmake --build out/clang-tracy -j4
 ```
 
 **Do not profile the default preset.** `clang-asan` is Debug plus AddressSanitizer and
-UndefinedBehaviorSanitizer; its timings say nothing about release behaviour. `clang-release` is
-`RelWithDebInfo`, which keeps the symbols Tracy needs.
+UndefinedBehaviorSanitizer; its timings say nothing about release behaviour. `clang-profile` is
+`RelWithDebInfo`, which keeps the symbols Tracy needs; `clang-release` is `Release` and has none.
 
 The tools are not part of `all` — build them by name:
 

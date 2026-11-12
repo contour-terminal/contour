@@ -55,7 +55,7 @@ command -v ccache >/dev/null && launcher=(-DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
 ucd=()
 [[ -n "${UCD_BASE_DIR:-}" ]] && ucd=(-DLIBUNICODE_UCD_BASE_DIR="$UCD_BASE_DIR")
 cmake -S "$ROOT" -B "$BUILD_DIR/build" -G Ninja \
-    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER="$CC" \
     -DCMAKE_CXX_COMPILER="$CXX" \
     "${launcher[@]}" \

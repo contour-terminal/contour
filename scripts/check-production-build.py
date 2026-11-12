@@ -7,10 +7,10 @@ a toolchain that ignores it) or leak into a dependency, and the binary is the on
 certain. This gate reads two things the build leaves behind:
 
 * `compile_commands.json`: every first-party translation unit carries each flag in the manifest's
-  `compile_flags` and none of its `replaced_flags`; no third-party translation unit carries a
-  `compile_flags` token.
-* the linked binary: the PE load-config / ELF dynamic section / Mach-O UUIDs show the hardening and
-  the debug information are really there, found by one probe command per format.
+  `compile_flags`; no third-party translation unit carries one.
+* the linked binary: the PE load-config / ELF dynamic section shows the hardening is really there, found
+  by one probe command per format. A Mach-O binary has no row (its only ones were about debug symbols,
+  which no build publishes any more), so on macOS only the compile database is checked.
 
 The check proves the compile flags and the binary's properties; it does not prove that a link-only flag
 (/OPT:REF, /OPT:ICF, -Wl,--as-needed, -Wl,-dead_strip) reached the linker, because link options are not in the
@@ -35,8 +35,6 @@ SOURCE_SUFFIXES = (".c", ".cc", ".cpp", ".cxx", ".mm")
 # the binary directory, like the manifest's third_party_dirs. A row is added only with a reason.
 EXEMPT: list[tuple[str, str, str]] = []
 
-MIN_DWARF_BYTES = 1024 * 1024
-
 # format -> (description, regex) requirements against the probe output.
 BINARY_REQUIREMENTS: dict[str, list[tuple[str, str]]] = {
     "pe": [
@@ -46,7 +44,6 @@ BINARY_REQUIREMENTS: dict[str, list[tuple[str, str]]] = {
         ("Dynamic base", r"Dynamic base"),
         ("NX compatible", r"NX compatible"),
         ("High Entropy Virtual Addresses", r"High Entropy Virtual Addresses"),
-        ("a PDB reference (RSDS)", r"RSDS,.*\.pdb"),
     ],
     "elf": [
         ("Type DYN", r"Type:\s+DYN"),
@@ -54,12 +51,11 @@ BINARY_REQUIREMENTS: dict[str, list[tuple[str, str]]] = {
         ("GNU_RELRO", r"GNU_RELRO"),
         ("BIND_NOW", r"\(BIND_NOW\)|\(FLAGS\).*\bBIND_NOW\b|\(FLAGS_1\).*\bNOW\b"),
         ("__stack_chk_fail", r"__stack_chk_fail"),
-        (".debug_info", r"\.debug_info\b"),
     ],
+    # No rows: every Mach-O row was about debug symbols, which are no longer produced. The compile
+    # database checks cover macOS.
+    "macho": [],
 }
-
-UUID_PATTERN = re.compile(r"UUID: ([0-9A-F-]{36})")
-
 
 def normalize(path: str) -> str:
     """Forward slashes, case-folded on Windows, so manifest and compile database paths compare."""
@@ -106,7 +102,6 @@ def compile_command_problems(entries: list[dict], manifest: dict) -> list[str]:
 def check_compile_commands(entries: list[dict], manifest: dict) -> tuple[list[str], int, int]:
     """Returns the problems of the compile database and its first-party and third-party translation unit counts."""
     wanted = manifest["compile_flags"]
-    replaced = manifest["replaced_flags"]
     first = third = 0
     # (what is wrong, flag) -> [translation unit count, first offender]: a whole tree missing one flag
     # is one finding, not one line per translation unit.
@@ -128,9 +123,6 @@ def check_compile_commands(entries: list[dict], manifest: dict) -> tuple[list[st
             for flag in wanted:
                 if flag not in tokens:
                     note("first-party translation units lack", flag, entry["file"])
-            for flag in replaced:
-                if flag in tokens:
-                    note("first-party translation units still carry", flag, entry["file"])
         else:
             third += 1
             exempt = {flag for prefix, flag, _ in EXEMPT if is_under_roots(path, [prefix], manifest)}
@@ -145,62 +137,33 @@ def check_compile_commands(entries: list[dict], manifest: dict) -> tuple[list[st
     return problems, first, third
 
 
-def cpack_problems(config: str) -> list[str]:
-    """Returns the problems of a generated CPackConfig.cmake: the debug symbols must not ride in a package.
+def binary_problems(fmt: str, outputs: dict[str, str]) -> list[str]:
+    """Returns one message per hardening requirement the binary misses.
 
-    The symbols are the install component `debug_symbols`; EXCLUDE_FROM_ALL keeps it out of an unnamed install
-    only, while CPack installs every component named in CPACK_COMPONENTS_ALL (all of them, when the project
-    names none), so the list must exist and must not name it.
+    `outputs` holds the probe output under the key "binary". A format without rows (macho) has no problems.
     """
-    match = re.search(r'^set\(CPACK_COMPONENTS_ALL "([^"]*)"\)', config, re.MULTILINE)
-    if match is None:
-        return ["CPackConfig.cmake sets no CPACK_COMPONENTS_ALL, so CPack packages every install component, debug_symbols included"]
-    if "debug_symbols" in match.group(1).split(";"):
-        return [f'CPACK_COMPONENTS_ALL "{match.group(1)}" names debug_symbols, so a package would carry the debug symbols']
-    return []
-
-
-def binary_problems(fmt: str, outputs: dict[str, str], symbols_size: int | None) -> list[str]:
-    """Returns one message per hardening or symbol requirement the binary misses.
-
-    `outputs` holds the probe output: key "binary" for pe and elf; "binary" and "symbols" (the
-    `dwarfdump --uuid` output of each) for macho. `symbols_size` is the size in bytes of the dSYM's
-    DWARF file (macho only).
-    """
-    if fmt in BINARY_REQUIREMENTS:
-        text = outputs.get("binary", "")
-        return [f"{fmt} binary lacks {what}" for what, pattern in BINARY_REQUIREMENTS[fmt]
-                if not re.search(pattern, text)]
-    if fmt != "macho":
+    if fmt not in BINARY_REQUIREMENTS:
         return [f"unknown binary format {fmt!r}"]
-    problems: list[str] = []
-    binary_uuids = set(UUID_PATTERN.findall(outputs.get("binary", "")))
-    symbol_uuids = set(UUID_PATTERN.findall(outputs.get("symbols", "")))
-    if not binary_uuids:
-        problems.append("macho binary lists no UUID")
-    elif binary_uuids != symbol_uuids:
-        problems.append(f"macho dSYM UUIDs {sorted(symbol_uuids)} differ from the binary's {sorted(binary_uuids)}")
-    if symbols_size is None or symbols_size <= MIN_DWARF_BYTES:
-        problems.append(f"macho dSYM DWARF file is {symbols_size} bytes, expected more than {MIN_DWARF_BYTES}")
-    return problems
+    text = outputs.get("binary", "")
+    return [f"{fmt} binary lacks {what}" for what, pattern in BINARY_REQUIREMENTS[fmt]
+            if not re.search(pattern, text)]
 
 
 def self_test() -> int:
     manifest = {
         "format": "pe", "source_dir": "/w/contour", "binary_dir": "/w/contour/out/b",
         "first_party_dirs": ["src", "examples"], "third_party_dirs": ["_deps", "vendor"],
-        "compile_flags": ["/GL", "/guard:cf"], "replaced_flags": ["/Ob1"], "tool": "/x/dumpbin",
+        "compile_flags": ["/GL", "/guard:cf"], "tool": "/x/dumpbin",
     }
 
     def tu(file: str, *flags: str) -> dict:
         return {"directory": "/w/contour/out/b", "file": file, "command": "cl " + " ".join(flags) + " /c " + file}
 
-    own = tu("/w/contour/src/a.cpp", "/GL", "/guard:cf", "/Ob2")
+    own = tu("/w/contour/src/a.cpp", "/GL", "/guard:cf")
     dep = tu("/w/contour/out/b/_deps/x/b.cpp", "/O2")
     compile_cases = {
         "all flags, clean dependency": ([own, dep], 0),
         "first-party without /GL": ([tu("/w/contour/src/a.cpp", "/guard:cf"), dep], 1),
-        "first-party still /Ob1": ([tu("/w/contour/src/a.cpp", "/GL", "/guard:cf", "/Ob1"), dep], 1),
         "third-party with /guard:cf": ([own, tu("/w/contour/vendor/c.cpp", "/guard:cf")], 1),
         "no third-party entry": ([own], 1),
         "generated moc source": ([tu("/w/contour/out/b/src/contour/x_autogen/mocs_compilation.cpp", "/GL", "/guard:cf"),
@@ -209,46 +172,34 @@ def self_test() -> int:
         "resource file skipped": ([own, dep, tu("/w/contour/src/a.rc")], 0),
     }
     pe = ("CF instrumented\nFID table present\nCET compatible\nDynamic base\nNX compatible\n"
-          "High Entropy Virtual Addresses\n  RSDS, 1, 2, C:\\x\\contour.pdb\n")
+          "High Entropy Virtual Addresses\n")
     elf = ("Type:  DYN (Position-Independent Executable file)\n"
            " 0x000000000000001e (FLAGS)  BIND_NOW\n 0x000000006ffffffb (FLAGS_1) Flags: PIE\n"
-           " GNU_RELRO 0x0\n 1: UND __stack_chk_fail\n [28] .debug_info PROGBITS\n")
-    uuid_a, uuid_b = "UUID: " + "A" * 8 + "-" + "B" * 4 + "-" + "C" * 4 + "-" + "D" * 4 + "-" + "E" * 12, \
-        "UUID: " + "1" * 8 + "-" + "2" * 4 + "-" + "3" * 4 + "-" + "4" * 4 + "-" + "5" * 12
-    big = 2 * 1024 * 1024
+           " GNU_RELRO 0x0\n 1: UND __stack_chk_fail\n [28] .text PROGBITS\n")
     binary_cases = {
-        "pe complete": ("pe", {"binary": pe}, None, 0),
-        "pe without CET": ("pe", {"binary": pe.replace("CET compatible\n", "")}, None, 1),
-        "pe without CFG": ("pe", {"binary": pe.replace("CF instrumented\n", "")}, None, 1),
-        "elf complete": ("elf", {"binary": elf}, None, 0),
-        "elf FLAGS_1 without PIE": ("elf", {"binary": elf.replace("Flags: PIE", "Flags:")}, None, 1),
-        "elf without RELRO": ("elf", {"binary": elf.replace("GNU_RELRO", "GNU_STACK")}, None, 1),
-        "elf without debug info": ("elf", {"binary": elf.replace(".debug_info", ".text")}, None, 1),
-        "macho complete": ("macho", {"binary": uuid_a, "symbols": uuid_a}, big, 0),
-        "macho UUIDs differ": ("macho", {"binary": uuid_a, "symbols": uuid_b}, big, 1),
-        "macho DWARF too small": ("macho", {"binary": uuid_a, "symbols": uuid_a}, 1000, 1),
+        "pe complete, without a PDB reference": ("pe", {"binary": pe}, 0),
+        "pe without CET": ("pe", {"binary": pe.replace("CET compatible\n", "")}, 1),
+        "pe without CFG": ("pe", {"binary": pe.replace("CF instrumented\n", "")}, 1),
+        "elf complete, without .debug_info": ("elf", {"binary": elf}, 0),
+        "elf FLAGS_1 without PIE": ("elf", {"binary": elf.replace("Flags: PIE", "Flags:")}, 1),
+        "elf without RELRO": ("elf", {"binary": elf.replace("GNU_RELRO", "GNU_STACK")}, 1),
+        "macho has no binary rows": ("macho", {}, 0),
+        "unknown format": ("coff", {}, 1),
     }
     failed = []
     for name, (entries, expected) in compile_cases.items():
         got = compile_command_problems(entries, manifest)
         if len(got) != expected:
             failed.append((name, got))
-    for name, (fmt, outputs, size, expected) in binary_cases.items():
-        got = binary_problems(fmt, outputs, size)
+    for name, (fmt, outputs, expected) in binary_cases.items():
+        got = binary_problems(fmt, outputs)
         if len(got) != expected:
             failed.append((name, got))
-    for name, config, expected in (
-        ("cpack list without the symbols", 'set(CPACK_COMPONENTS_ALL "Unspecified;contour")', 0),
-        ("cpack list naming the symbols", 'set(CPACK_COMPONENTS_ALL "contour;debug_symbols")', 1),
-        ("cpack without a list", 'set(CPACK_PACKAGE_NAME "x")', 1),
-    ):
-        if len(cpack_problems(config)) != expected:
-            failed.append((name, cpack_problems(config)))
     # Every row of the binary tables must be able to fail alone: drop the lines that evidence one row.
     for fmt, text in (("pe", pe), ("elf", elf)):
         for what, pattern in BINARY_REQUIREMENTS[fmt]:
             broken = "\n".join(line for line in text.splitlines() if not re.search(pattern, line))
-            got = binary_problems(fmt, {"binary": broken}, None)
+            got = binary_problems(fmt, {"binary": broken})
             if got != [f"{fmt} binary lacks {what}"]:
                 failed.append((f"{fmt} row {what}", got))
     own_only = compile_command_problems([own], manifest)
@@ -282,22 +233,14 @@ def run_probe(command: list[str]) -> str:
     return result.stdout
 
 
-def check_binary(manifest: dict, binary: Path, symbols: Path | None) -> list[str]:
-    fmt, tool = manifest["format"], manifest["tool"]
+def check_binary(manifest: dict, binary: Path) -> list[str]:
+    fmt = manifest["format"]
     if fmt == "pe":
-        if symbols is None or not symbols.exists():
-            return [f"--symbols {symbols} does not exist; a pe build must produce its PDB"]
-        return binary_problems(fmt, {"binary": run_probe([tool, "/headers", "/loadconfig", str(binary)])}, None)
+        return binary_problems(fmt, {"binary": run_probe([manifest["tool"], "/headers", "/loadconfig", str(binary)])})
     if fmt == "elf":
-        probe = [tool, "-h", "-l", "-d", "-S", "-W", "--dyn-syms", str(binary)]
-        return binary_problems(fmt, {"binary": run_probe(probe)}, None)
-    if symbols is None:
-        return ["--symbols is required for a macho build"]
-    dwarf = symbols / "Contents" / "Resources" / "DWARF" / binary.name
-    size = dwarf.stat().st_size if dwarf.exists() else None
-    outputs = {"binary": run_probe([tool, "--uuid", str(binary)]),
-               "symbols": run_probe([tool, "--uuid", str(symbols)])}
-    return binary_problems(fmt, outputs, size)
+        probe = [manifest["tool"], "-h", "-l", "-d", "-S", "-W", "--dyn-syms", str(binary)]
+        return binary_problems(fmt, {"binary": run_probe(probe)})
+    return binary_problems(fmt, {})
 
 
 def main() -> int:
@@ -305,7 +248,6 @@ def main() -> int:
     parser.add_argument("--self-test", action="store_true", help="check the rules against inline fixtures")
     parser.add_argument("--manifest", type=Path, help="JSON manifest written by the build")
     parser.add_argument("--binary", type=Path, help="the linked main binary")
-    parser.add_argument("--symbols", type=Path, help="its PDB (pe) or dSYM bundle (macho)")
     args = parser.parse_args()
     if args.self_test:
         return self_test()
@@ -316,10 +258,7 @@ def main() -> int:
         database = Path(manifest["binary_dir"]) / "compile_commands.json"
         entries = json.loads(database.read_text(encoding="utf-8"))
         problems, first, third = check_compile_commands(entries, manifest)
-        problems += check_binary(manifest, args.binary, args.symbols)
-        cpack_config = Path(manifest["binary_dir"]) / "CPackConfig.cmake"
-        problems += cpack_problems(cpack_config.read_text(encoding="utf-8")) if cpack_config.exists() else [
-            f"{cpack_config} does not exist"]
+        problems += check_binary(manifest, args.binary)
     except (RuntimeError, OSError, ValueError, KeyError) as error:
         print(f"check-production-build: {type(error).__name__}: {error}", file=sys.stderr)
         return 1

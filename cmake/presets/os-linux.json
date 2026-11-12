@@ -78,6 +78,26 @@
             }
         },
         {
+            "name": "clang-profile",
+            "displayName": "Clang RelWithDebInfo (profiling)",
+            "description": "Release plus debug info, for profiling and debugging an optimized build; no production flags",
+            "inherits": [
+                "contour-common"
+            ],
+            "generator": "Ninja",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            },
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_INSTALL_PREFIX": "/usr/local"
+            }
+        },
+        {
             "name": "clang-asan",
             "displayName": "Clang Debug + ASan/UBSan",
             "inherits": "clang-debug",
@@ -110,7 +130,7 @@
         },
         {
             "name": "gcc-release",
-            "displayName": "GCC - RelWithDebInfo",
+            "displayName": "GCC - Release",
             "configurePreset": "gcc-release"
         },
         {
@@ -120,8 +140,13 @@
         },
         {
             "name": "clang-release",
-            "displayName": "Clang - RelWithDebInfo",
+            "displayName": "Clang - Release",
             "configurePreset": "clang-release"
+        },
+        {
+            "name": "clang-profile",
+            "displayName": "Clang - RelWithDebInfo (profiling)",
+            "configurePreset": "clang-profile"
         },
         {
             "name": "clang-asan",
@@ -143,6 +168,17 @@
         {
             "name": "clang-debug",
             "configurePreset": "clang-debug",
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": true
+            }
+        },
+        {
+            "name": "clang-profile",
+            "configurePreset": "clang-profile",
             "output": {
                 "outputOnFailure": true
             },

@@ -2,6 +2,9 @@
 # https://docs.fedoraproject.org/en-US/packaging-guidelines/CMake/#_notes
 %undefine __cmake_in_source_build
 
+# No debuginfo or debugsource subpackages: nothing publishes them, and generating them costs build time.
+%global debug_package %{nil}
+
 # Get contour version
 %{!?_version: %define _version %{getenv:CONTOUR_VERSION} }
 
@@ -117,7 +120,7 @@ cmake . \
     -DCONTOUR_PACKAGE_TERMINFO=OFF \
     -DCONTOUR_LINK_JOBS=1 \
 %endif
-    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DPEDANTIC_COMPILER=ON \
     -DPEDANTIC_COMPILER_WERROR=ON \

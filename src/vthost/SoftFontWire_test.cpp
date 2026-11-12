@@ -135,7 +135,7 @@ TEST_CASE("a wire set that DECDLD could not have produced is refused", "[vthost]
     CHECK(refused(font, Error::Glyph));
     font = good;
     font.glyphs.clear();
-    for (auto const [width, height]: { std::pair<uint8_t, uint8_t> { 17, 10 }, { 10, 33 }, { 0, 0 } })
+    for (auto const& [width, height]: { std::pair<uint8_t, uint8_t> { 17, 10 }, { 10, 33 }, { 0, 0 } })
     {
         font.fullWidth = width;
         font.fullHeight = height;

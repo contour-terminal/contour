@@ -109,12 +109,6 @@ and then use the following command to install:
 sudo dpkg -i ~/Downloads/contour-0.3.12.262-UBUNTU_VERSION-ARCH.deb
 ```
 
-If you want to provide feedback in case of any crashes, also install the debug symbols (`.ddeb`-file), e.g.:
-
-```sh
-sudo dpkg -i ~/Downloads/contour-0.3.12.262-UBUNTU_VERSION-ARCH.ddeb
-```
-
 ## AppImage
 
 Every release also carries `contour-VERSION-x86_64.AppImage`, a single file that bundles Qt 6.11 (which
@@ -165,7 +159,6 @@ sudo dnf install ./contour-daemon-[0-9]*-fedora44-x86_64.rpm     # Fedora 44
 ```
 
 CentOS and RHEL (EL9, EL10) packages are not provided yet.
-The release also carries `-debuginfo`/`-debugsource` RPMs and a `-dbgsym` `.ddeb`, which the patterns above skip.
 The RPM packages come without the bundled status-line extensions; the `.deb` ships them.
 
 `contour-daemon` and the GUI package `contour` conflict, and `contour` already includes the daemon, so a desktop

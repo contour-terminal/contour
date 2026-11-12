@@ -3,13 +3,13 @@
 set -ex
 
 BUILD_DIR=${BUILD_DIR:-build}
-CMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-RelWithDebInfo}"
+# The preset decides the build type (gcc-release is a production Release build; gcc-debug is Debug).
+CMAKE_PRESET="${CMAKE_PRESET:-gcc-release}"
 
 prepare_build_ubuntu()
 {
    cmake \
-       --preset gcc-release \
-       -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
+       --preset "${CMAKE_PRESET}" \
       ${EXTRA_CMAKE_FLAGS}
 }
 

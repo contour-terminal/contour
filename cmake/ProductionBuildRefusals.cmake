@@ -4,9 +4,9 @@
 # Included from the top-level CMakeLists.txt only when CONTOUR_PRODUCTION_BUILD is ON, once the variables
 # it reads are decided. The flags themselves are applied by ProductionBuild.cmake.
 
-if(NOT CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-    message(FATAL_ERROR "CONTOUR_PRODUCTION_BUILD=ON needs CMAKE_BUILD_TYPE=RelWithDebInfo, "
-        "but it is '${CMAKE_BUILD_TYPE}': the packages are RelWithDebInfo builds, and so are the binaries CI tests.")
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+    message(FATAL_ERROR "CONTOUR_PRODUCTION_BUILD=ON needs CMAKE_BUILD_TYPE=Release, "
+        "but it is '${CMAKE_BUILD_TYPE}': the packages are Release builds, and so are the binaries CI tests.")
 endif()
 if(NOT CONTOUR_SANITIZE STREQUAL "OFF")
     message(FATAL_ERROR "CONTOUR_PRODUCTION_BUILD=ON cannot be combined with CONTOUR_SANITIZE=${CONTOUR_SANITIZE}: "

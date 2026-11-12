@@ -83,7 +83,7 @@ TEST_CASE("dropZone.cornersPickTheNearerEdge", "[dropzone]")
 TEST_CASE("dropZone.filesAndTextNeverSplit", "[dropzone]")
 {
     for (auto const payload: { DropPayload::Files, DropPayload::Text })
-        for (auto const [x, y]:
+        for (auto const& [x, y]:
              { std::pair { 50.0, 250.0 }, { 950.0, 250.0 }, { 500.0, 10.0 }, { 500.0, 250.0 } })
             CHECK(resolveDropZone({ .payload = payload,
                                     .pane = Pane,
@@ -95,7 +95,7 @@ TEST_CASE("dropZone.filesAndTextNeverSplit", "[dropzone]")
 TEST_CASE("dropZone.ownTabPassesThrough", "[dropzone]")
 {
     // Review Focus 3.
-    for (auto const [x, y]:
+    for (auto const& [x, y]:
          { std::pair { 100.0, 250.0 }, { 950.0, 250.0 }, { 500.0, 50.0 }, { 500.0, 250.0 } })
     {
         auto own = tab(x, y);
@@ -171,7 +171,7 @@ TEST_CASE("dropZone.paneInTheMiddleSwaps", "[dropzone]")
 
 TEST_CASE("dropZone.paneOverItselfIsANoOp", "[dropzone]")
 {
-    for (auto const [x, y]:
+    for (auto const& [x, y]:
          { std::pair { 100.0, 250.0 }, { 950.0, 250.0 }, { 500.0, 50.0 }, { 500.0, 250.0 } })
     {
         auto own = pane(x, y);
@@ -204,7 +204,7 @@ TEST_CASE("dropZone.refusalWinsOverEveryZoneForMoves", "[dropzone]")
          { MoveRefusal::OtherProcess, MoveRefusal::OtherHost, MoveRefusal::OldDaemon, MoveRefusal::Tmux })
         for (auto const payload: { DropPayload::Pane, DropPayload::Tab })
             for (auto const origin: { DropOrigin::OtherTab, DropOrigin::OwnTab, DropOrigin::OwnPane })
-                for (auto const [x, y]:
+                for (auto const& [x, y]:
                      { std::pair { 100.0, 250.0 }, { 950.0, 250.0 }, { 500.0, 50.0 }, { 500.0, 250.0 } })
                 {
                     auto in = pane(x, y);
