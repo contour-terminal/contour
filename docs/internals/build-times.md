@@ -156,7 +156,7 @@ Rules, in `.github/workflows/build.yml`:
   second `master` build and of pull requests waited 40 to 90 minutes for a runner.
 - **A key no pull request restores has no cache** while the quota is tight. The Linux matrix's GCC
   legs and its arm Clang leg, the 26.04 leg of the daemon package, the Ubuntu packaging job, the
-  Windows and macOS package jobs and the full-tree clang-tidy all run on `master` alone.
+  Windows and macOS package jobs run on `master` alone, and the full-tree clang-tidy nightly.
 
 ### Why the cache missed in November 2026
 
