@@ -1,37 +1,33 @@
 name: Clang-tidy
 
-# clang-tidy over the whole tree. A workflow of its own, not a job of build.yml: it takes three to
-# five hours, and inside the Build workflow that is how long a master run stayed "in progress" -- with
-# every later push's run, and the compiler caches it saves for pull requests, queued behind it. Pull
-# requests run build.yml's `check_clang_tidy_diff` instead: the same checks on the lines they changed.
-# No compiler cache here: clang-tidy's own work is not cacheable, and the quota is spent on the keys
-# pull requests restore (docs/internals/build-times.md, "The compiler cache").
+# clang-tidy over the whole tree, once a night and on every release tag. Pull requests run build.yml's
+# `check_clang_tidy_diff` instead: the same checks on the lines they changed. Not on every push to
+# master: the run takes three to five hours of a runner, the next push superseded it before it could
+# finish, and the free runners it held are the ones pull requests wait for.
+#
+# Nobody watches a scheduled run, so the `report` job keeps one issue that says whether the last
+# night failed (scripts/report-nightly-failure.py): opened on the first failure, closed by the next
+# night that passes. No compiler cache here: clang-tidy's own work is not cacheable, and the quota is
+# spent on the keys pull requests restore (docs/internals/build-times.md, "The compiler cache").
 on:
-  merge_group:
+  schedule:
+    # 01:23 UTC: off the hour, when scheduled runs start late, and after the European working day.
+    - cron: '23 1 * * *'
+  workflow_dispatch:
   push:
-    paths-ignore:
-      - 'docs/**'
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/*.yml'
-      - 'LICENSE.txt'
-      - 'mkdocs.yml'
-      - '*.md'
-      - '*.sh'
-    branches:
-      - master
     # Only full release tags, as in build.yml: nothing exempts a release from the full-tree run.
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
 
 # Read-only: this workflow publishes nothing, and it runs installers it does not control for hours.
+# The report job widens its own token to what an issue needs.
 permissions:
   contents: read
 
 concurrency:
+  # One run per ref at a time, and none is cancelled: a night's run and a release tag's both finish.
   group: clang-tidy-${{ github.ref }}
-  # A master commit the next push superseded is not worth hours of a runner; a release tag's run is
-  # never cancelled.
-  cancel-in-progress: ${{ github.ref == 'refs/heads/master' }}
+  cancel-in-progress: false
 
 env:
   # The same toolchain as build.yml, which holds the other copy; scripts/check-workflows.py fails when
@@ -124,3 +120,25 @@ jobs:
               -D CLANG_TIDY_EXE=/usr/bin/clang-tidy-${LLVM_VERSION}
     - name: "build"
       run: cmake --build build
+
+  # A scheduled run has no pull request to turn red. This keeps the one issue that stands for
+  # "the nightly is failing": opened on a failed night, commented on while it stays red, closed by
+  # the next night that passes. With the NIGHTLY_ASSIGN_TOKEN secret (a user's token; the workflow's
+  # own may not assign the Copilot coding agent) a new issue is handed to Copilot.
+  report:
+    name: "Report the nightly result"
+    if: ${{ always() && github.event_name == 'schedule' }}
+    needs: check_clang_tidy
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: "open, update or close the nightly's issue"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY_ASSIGN_TOKEN: ${{ secrets.NIGHTLY_ASSIGN_TOKEN }}
+          OUTCOME: ${{ needs.check_clang_tidy.result == 'success' && 'success' || 'failure' }}
+        run: python3 scripts/report-nightly-failure.py --repo "${GITHUB_REPOSITORY}" --workflow "Clang-tidy" --run-id "${GITHUB_RUN_ID}" --outcome "${OUTCOME}"

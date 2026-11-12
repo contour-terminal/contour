@@ -130,8 +130,11 @@ Rules, in `.github/workflows/build.yml`:
 - **A `master` run has a concurrency group per commit**, so it starts at once and is never
   cancelled. With one group for the branch each run queued behind the last and a third push
   cancelled the one still pending, which left a merge's caches hours late or missing.
-- **The full-tree clang-tidy is a workflow of its own** (`clang-tidy.yml`). Inside `Build` its three
-  to five hours were how long a `master` run stayed in progress.
+- **The full-tree clang-tidy runs once a night** (`clang-tidy.yml`, also on release tags and on
+  demand), not on every push: it takes three to five hours of a runner, and the free runners it
+  held are the ones pull requests wait for. Pull requests lint the lines they change. What this
+  gives up: a finding on a line the change did not touch is reported the next morning, not at
+  the merge.
 - **A job no pull request runs queues behind its own previous run** (a job-level `concurrency`
   group per ref, job and matrix leg; `scripts/check-workflows.py` requires it). With a group per
   commit alone, consecutive pushes ran all of these side by side: on 2026-11-12 the jobs of a
@@ -231,8 +234,8 @@ A pull request runs the platform builds and tests -- `Windows`, `macOSArm` (buil
 signing, no packaging) and one Linux leg (Clang 22 on x86, built with `-Werror`) -- plus the guard
 builds, the lint jobs and clang-tidy on the changed lines. Master pushes and the merge queue run
 the rest: the other three compiler legs, packaging, valgrind, conformance, bench-headless,
-notcurses and FreeBSD, and the full-tree clang-tidy in its own workflow (`clang-tidy.yml`). A release
-tag runs everything a master push runs, FreeBSD and the full-tree clang-tidy included; the static build runs on master pushes and release
+notcurses and FreeBSD. The full-tree clang-tidy runs nightly (below). A release
+tag runs everything a master push runs, and the full-tree clang-tidy as well; the static build runs on master pushes and release
 tags, never in the merge queue.
 
 The daemon packages are the two exceptions in kind. `package_daemon_for_Ubuntu` (the Qt-free
@@ -247,6 +250,24 @@ A required status check is never gated off pull requests. `tests matrix` and
 cancelled one still fails them). `scripts/check-workflows.py` enforces both rules, and its
 `--self-test` pins them against fixtures. A master run is never cancelled and never queued behind
 another (its concurrency group is its own commit), so it finishes and saves the compiler cache.
+
+## Nightly runs
+
+A scheduled run has no pull request to turn red, so each nightly workflow ends in a `report` job
+that runs `scripts/report-nightly-failure.py`. It keeps one issue per workflow, labelled
+`ci-nightly` and titled "Nightly <workflow> is failing":
+
+| Last night | Issue open? | What happens |
+|---|---|---|
+| failed | no | the issue is opened, with the failed jobs and the end of their logs |
+| failed | yes | a comment is added |
+| passed | yes | the issue is closed |
+| passed | no | nothing |
+
+So GitHub's own issue notification is the alert, and an open `ci-nightly` issue always means
+"still failing". With the repository secret `NIGHTLY_ASSIGN_TOKEN` set to a user's token that may
+assign issues, a newly opened issue is assigned to the Copilot coding agent; the workflow's own
+token is not allowed to do that. Without the secret the issue is simply left unassigned.
 
 ## Results
 

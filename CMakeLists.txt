@@ -275,6 +275,10 @@ if(CONTOUR_TESTING)
         # stays, nothing but a ccache entry is touched), against inline fixtures; no network.
         contour_add_lint_gate(prune_cache_generations_selftest prune-cache-generations.py --self-test)
 
+        # What a nightly run's outcome does to the issue that stands for it (open, comment, close), and what
+        # the issue says, against inline fixtures; no network.
+        contour_add_lint_gate(report_nightly_failure_selftest report-nightly-failure.py --self-test)
+
         # The Windows installer's WiX patch file fails only at `cpack` time on a Windows runner, after a
         # full build; the rule CPack enforces (each fragment Id once) is checked here on every platform.
         contour_add_lint_gate(check_wix_patch check-wix-patch.py)
