@@ -1033,13 +1033,26 @@ TEST_CASE("ConPty.interruptWritesEndsAWriteThePseudoconsoleDoesNotRead", "[vtpty
             != FALSE);
     auto const consoleHost = vtpty::UniqueHandle { duplicate };
 
+    // Unchecked: the console host may have ended with the program by then, and it is resumed twice where the
+    // test runs to its end.
+    auto const resumeConsoleHost = [&consoleHost] {
+        std::ignore = schedule(consoleHost.get(), Scheduling::Running);
+    };
+    auto const flood = std::string(4 * 1024 * 1024, 'x');
+    auto result = std::future<std::pair<int, int>> {};
+
     // A console host that reads nothing more: the pipe fills, and the write waits.
     REQUIRE(schedule(consoleHost.get(), Scheduling::Suspended) == 0);
-    // Unchecked: the console host may have ended with the program by then.
-    auto const resume =
-        gsl::finally([&consoleHost] { std::ignore = schedule(consoleHost.get(), Scheduling::Running); });
-    auto const flood = std::string(4 * 1024 * 1024, 'x');
-    auto result = std::async(std::launch::async, [&] {
+    // Declared after the future, so that it runs before the future is destroyed: that waits for the write,
+    // which a suspended console host would never let end. A check that fails while the write waits must fail
+    // the test, not hang it. The write ends once the pseudoconsole is closed under it, with its output no
+    // longer read and its console host running: the host ends, and the pipe breaks.
+    auto const release = gsl::finally([&] {
+        resumeConsoleHost();
+        pty.allowWrites();
+        pty.close();
+    });
+    result = std::async(std::launch::async, [&] {
         auto const written = pty.write(flood);
         return std::pair { written, errno };
     });
@@ -1066,6 +1079,9 @@ TEST_CASE("ConPty.interruptWritesEndsAWriteThePseudoconsoleDoesNotRead", "[vtpty
         CHECK(pty.write("\r\n") == 2);
     }
 
+    // Running again before the program is ended and waited for: past the checks, nothing waits on a console
+    // host that cannot run.
+    resumeConsoleHost();
     process.terminate(vtpty::Process::TerminationHint::Normal);
     std::ignore = process.wait();
 }
