@@ -188,6 +188,7 @@ class WorkspacePersistence final: public vtworkspace::ModelEvents, public Sessio
                   vtworkspace::TabId tab,
                   int fromIndex,
                   int toIndex) override;
+    void workspaceMoved(vtworkspace::WorkspaceId workspace, int fromIndex, int toIndex) override;
     void tabMovedToWorkspace(vtworkspace::WorkspaceId from,
                              vtworkspace::TabId tab,
                              int fromIndex,

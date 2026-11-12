@@ -422,6 +422,47 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param label Its label.
     void setWorkspaceLabel(vtworkspace::WorkspaceId workspace, std::string label);
 
+    /// Renames the workspace @p workspace that @p window lists: in its daemon for a window a daemon serves
+    /// (the daemon's WorkspaceMeta then reaches every window), in this process otherwise. A workspace the
+    /// window does not own is left alone.
+    /// @param window The window the user acts in.
+    /// @param workspace The workspace's id, as the window's directory lists it (DirectoryWorkspace::id).
+    /// @param label Its new label; empty clears it.
+    void renameWorkspace(window::WindowController& window, uint64_t workspace, std::string label);
+
+    /// Moves the workspace @p workspace that @p window lists to place @p toPosition of its directory, where
+    /// a daemon (or this process's model) orders it. The place is clamped.
+    /// @param window The window the user acts in.
+    /// @param workspace The workspace's id, as the window's directory lists it.
+    /// @param toPosition The 0-based place in the directory.
+    void moveWorkspace(window::WindowController& window, uint64_t workspace, int toPosition);
+
+    /// Moves the tab @p tab, whichever workspace of @p window's directory holds it, to place @p toPosition
+    /// of the workspace @p toWorkspace; none of its sessions closes. A tab of another host's, or into another
+    /// host's workspace, stays where it is.
+    /// @param window The window the user acts in.
+    /// @param tab The tab's id, as the window's directory lists it (DirectoryTab::id).
+    /// @param toWorkspace The destination workspace's id, as the directory lists it.
+    /// @param toPosition The 0-based place among the destination's tabs.
+    void moveTabToWorkspace(window::WindowController& window,
+                            uint64_t tab,
+                            uint64_t toWorkspace,
+                            int toPosition);
+
+    /// Closes the workspace @p workspace that @p window lists, with all its tabs and panes. A workspace that
+    /// may be running a program is asked about first, as a tab is: the window raises
+    /// closeWorkspaceConfirmationRequested(), and confirmCloseWorkspace() closes it. An in-process window's
+    /// last workspace is kept: closing it would leave the window with nothing to show.
+    /// @param window The window the user acts in.
+    /// @param workspace The workspace's id, as the window's directory lists it.
+    void closeWorkspace(window::WindowController& window, uint64_t workspace);
+
+    /// Closes the workspace @p workspace that @p window lists without asking: the answer to
+    /// closeWorkspaceConfirmationRequested(). One that is gone already closes nothing.
+    /// @param window The window the user acts in.
+    /// @param workspace The workspace's id, as the window's directory lists it.
+    void confirmCloseWorkspace(window::WindowController& window, uint64_t workspace);
+
     /// @return The labels of the in-process workspaces.
     [[nodiscard]] WorkspaceLabels const& workspaceLabels() const noexcept { return _workspaceLabels; }
 
@@ -1677,6 +1718,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
                   vtworkspace::TabId tab,
                   int fromIndex,
                   int toIndex) override;
+    void workspaceMoved(vtworkspace::WorkspaceId workspace, int fromIndex, int toIndex) override;
     void tabAboutToBeMovedToWorkspace(vtworkspace::WorkspaceId from,
                                       int fromIndex,
                                       vtworkspace::WorkspaceId to,
@@ -1969,6 +2011,22 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param tab The tab whose pane sessions to gather.
     /// @return The backing sessions, in pane-tree order.
     [[nodiscard]] std::vector<TerminalSession*> sessionsInTab(vtworkspace::Tab* tab) const;
+
+    /// @return The sessions of every pane of every tab of @p workspace, in tab order.
+    [[nodiscard]] std::vector<TerminalSession*> sessionsInWorkspace(
+        vtworkspace::Workspace const& workspace) const;
+
+    /// @return Whether @p window lists the workspaces of a daemon (or another host), whose labels, order and
+    ///         tabs that host owns, rather than its own process's.
+    [[nodiscard]] bool listsRemotely(window::WindowController const& window) const noexcept;
+
+    /// @return Whether @p window owns one workspace or none: an in-process window keeps its last one, so
+    ///         closeWorkspace() and confirmCloseWorkspace() refuse to close it.
+    [[nodiscard]] static bool ownsOneWorkspaceOnly(window::WindowController const& window);
+
+    /// @return Whether @p window holds @p workspace among the workspaces it owns.
+    [[nodiscard]] static bool ownsWorkspace(window::WindowController const& window,
+                                            vtworkspace::WorkspaceId workspace) noexcept;
 
     /// Gathers the backing sessions of every tab in @p window matching @p predicate, in row order.
     /// Shared by the bulk-close operations (closeOtherTabs / closeTabsToRight), which snapshot the doomed

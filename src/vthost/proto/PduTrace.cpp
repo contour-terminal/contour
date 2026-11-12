@@ -677,10 +677,30 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<WorkspaceMeta>(pdu);
                        // The label and the branch are told by presence only: both are the user's words.
-                       return std::format("workspace={}{}{}",
+                       return std::format("workspace={}{}{}{}",
                                           value.workspace,
+                                          value.position ? std::format(" position={}", *value.position)
+                                                         : std::string {},
                                           formatPresence("label", value.label),
                                           formatGit(value.git));
+                   } },
+        TraceRow { PduType::MoveWorkspace,
+                   "MoveWorkspace",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<MoveWorkspace>(pdu);
+                       return std::format("workspace={} to={}", value.workspace, value.toPosition);
+                   } },
+        TraceRow { PduType::CloseWorkspace,
+                   "CloseWorkspace",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("workspace={}", std::get<CloseWorkspace>(pdu).workspace);
+                   } },
+        TraceRow { PduType::SetWorkspaceLabel,
+                   "SetWorkspaceLabel",
+                   +[](DecodedPdu const& pdu) {
+                       // The label is the user's words: told by its length only.
+                       auto const& value = std::get<SetWorkspaceLabel>(pdu);
+                       return std::format("workspace={} label={} bytes", value.workspace, value.label.size());
                    } },
     };
 

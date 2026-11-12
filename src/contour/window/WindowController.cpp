@@ -1757,6 +1757,11 @@ void WindowController::confirmCloseTab(quint64 tab)
 }
 // }}}
 
+void WindowController::confirmCloseWorkspace(quint64 workspace)
+{
+    _manager.confirmCloseWorkspace(*this, workspace);
+}
+
 void WindowController::closeTabAtIndex(int index)
 {
     _manager.closeTabAtIndex(_displayed, index);

@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <format>
+#include <limits>
 #include <ranges>
 #include <utility>
 
@@ -1137,10 +1138,19 @@ namespace
 window::WorkspaceDirectory NativeController::directory() const
 {
     auto const lock = std::lock_guard { _mutex };
-    // std::map keeps the keys ascending: the daemon's workspaces in the order it numbered them.
-    auto const layouts =
+    // std::map keeps the keys ascending: the daemon's workspaces in the order it numbered them. The place the
+    // daemon states for each workspace (it moves them) goes first; the stable sort keeps id order for a
+    // daemon that states none, and for a workspace whose position has not arrived yet.
+    auto layouts =
         std::ranges::to<std::vector>(_settledLayouts | std::views::values
                                      | std::views::transform([](auto const& layout) { return *layout; }));
+    auto const positionOf = [this](vthost::proto::LayoutState const& layout) {
+        auto const found = _workspaceMeta.find(layout.workspace);
+        return found != _workspaceMeta.end() && found->second.position ? *found->second.position
+                                                                       : std::numeric_limits<uint32_t>::max();
+    };
+    std::ranges::stable_sort(layouts,
+                             [&](auto const& a, auto const& b) { return positionOf(a) < positionOf(b); });
     return window::directoryFromLayouts(layouts,
                                         StoreLookup { _paneStatus },
                                         MetaLookup { _workspaceMeta },
@@ -1184,6 +1194,8 @@ void NativeController::onWorkspaceMeta(vthost::proto::WorkspaceMeta const& meta)
         stated.label = *meta.label;
     if (meta.git)
         stated.git = directoryGitOf(*meta.git);
+    if (meta.position)
+        stated.position = meta.position;
     scheduleStatusFlush();
 }
 
@@ -1465,6 +1477,64 @@ contour::session::RemoteRouting NativeController::requestRemoteMove(contour::ses
         // Routed, so the manager waits for it: told now, it waits no longer, and the user learns why nothing
         // moved.
         emit moveRefused(MoveNotSent, 0, request);
+    });
+    return contour::session::RemoteRouting::Routed;
+}
+
+contour::session::RemoteRouting NativeController::requestRemoteRenameWorkspace(uint64_t workspace,
+                                                                               std::string_view label)
+{
+    auto const agreed = negotiated();
+    if (!agreed || !agreed->shared.contains(vthost::proto::Capability::WorkspaceMeta))
+        return contour::session::RemoteRouting::Refused;
+    // The client's send verbs must run on the reactor thread that owns it.
+    _reactor.post([this, workspace, label = std::string { label }]() mutable {
+        if (_client != nullptr)
+            std::ignore = _client->setWorkspaceLabel(workspace, std::move(label));
+    });
+    return contour::session::RemoteRouting::Routed;
+}
+
+contour::session::RemoteRouting NativeController::requestRemoteMoveWorkspace(uint64_t workspace,
+                                                                             uint32_t position)
+{
+    auto const agreed = negotiated();
+    if (!agreed || !agreed->shared.contains(vthost::proto::Capability::WorkspaceMeta))
+        return contour::session::RemoteRouting::Refused;
+    _reactor.post([this, workspace, position] {
+        if (_client != nullptr)
+            std::ignore = _client->moveWorkspace(workspace, position);
+    });
+    return contour::session::RemoteRouting::Routed;
+}
+
+contour::session::RemoteRouting NativeController::requestRemoteCloseWorkspace(uint64_t workspace)
+{
+    auto const agreed = negotiated();
+    if (!isConnected() || !agreed || !agreed->shared.contains(vthost::proto::Capability::WorkspaceMeta))
+        return contour::session::RemoteRouting::Refused;
+    {
+        // Tombstoned before the close goes out, as requestRemoteClose() does: the daemon ends the sessions
+        // later, and their in-flight deltas must not re-adopt a pane the user just ended.
+        auto const lock = std::lock_guard { _mutex };
+        if (auto const layout = _layouts.find(workspace); layout != _layouts.end())
+        {
+            auto const tombstone = [&](auto const& self, vthost::proto::WirePane const& pane) -> void {
+                if (pane.isSplit())
+                {
+                    for (auto const& child: pane.children)
+                        self(self, child);
+                    return;
+                }
+                _closedSessions.insert(pane.session);
+            };
+            for (auto const& tab: layout->second->tabs)
+                tombstone(tombstone, tab.root);
+        }
+    }
+    _reactor.post([this, workspace] {
+        if (_client != nullptr)
+            std::ignore = _client->closeWorkspace(workspace);
     });
     return contour::session::RemoteRouting::Routed;
 }

@@ -65,6 +65,10 @@ struct DirectoryWorkspace
     std::vector<DirectoryTab> tabs;
     std::array<uint8_t, 16> controlId {}; ///< Its control-API UUID; all zero while the daemon stated none.
     std::optional<DirectoryGit> git {};   ///< Its git state; none when it is in no repository, or unknown.
+    /// Its 0-based place in the daemon's model, as the daemon stated it (WorkspaceMeta::position); none until
+    /// it did. The daemon's order counts workspaces this directory does not list (an ended, tabless one), so
+    /// a workspace's place in the directory is not its place there.
+    std::optional<uint32_t> position {};
     bool operator==(DirectoryWorkspace const&) const = default;
 };
 
@@ -109,6 +113,9 @@ struct WorkspaceMetadata
     std::string label;                    ///< Its label; empty when it has none.
     std::array<uint8_t, 16> controlId {}; ///< Its control-API UUID; all zero when unknown.
     std::optional<DirectoryGit> git {};   ///< Its git state; none when it is in no repository, or unknown.
+    /// Its 0-based place in the daemon's workspace order, once the daemon stated it; a directory lists the
+    /// workspaces by it, those without one after the rest in id order.
+    std::optional<uint32_t> position {};
     bool operator==(WorkspaceMetadata const&) const = default;
 };
 
@@ -191,6 +198,7 @@ namespace detail
         workspace.label = std::move(stated.label);
         workspace.controlId = stated.controlId;
         workspace.git = std::move(stated.git);
+        workspace.position = stated.position;
         workspace.tabs.reserve(layout.tabs.size());
         for (auto const& wireTab: layout.tabs)
         {

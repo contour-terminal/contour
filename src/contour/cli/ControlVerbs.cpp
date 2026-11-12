@@ -483,6 +483,74 @@ namespace
                                                                   .label = std::string { words[1] } });
     }
 
+    [[nodiscard]] Params buildWorkspaceNew(CLI::FlagStore const& flags)
+    {
+        auto const f = VerbFlags { flags, "workspace.new" };
+        return vtcontrol::encodeJson(
+            vtcontrol::CreateWorkspaceRequest { .cwd = f.text("cwd"), .label = f.text("label") });
+    }
+
+    [[nodiscard]] Params buildWorkspaceRename(CLI::FlagStore const& flags)
+    {
+        auto const& words = VerbFlags { flags, "workspace.rename" }.words();
+        if (words.size() != 2)
+            return std::unexpected(
+                "workspace rename takes a WORKSPACE and a LABEL (an empty one clears it)"s);
+        return vtcontrol::encodeJson(vtcontrol::RenameWorkspaceRequest {
+            .workspace = std::string { words[0] }, .label = std::string { words[1] } });
+    }
+
+    /// @param verb The verb whose `--to` is read, for the message.
+    /// @param position What `--to` was given; 0 when it was not.
+    /// @return The position, or why it is none: positions count from 1.
+    [[nodiscard]] std::expected<uint32_t, std::string> positionOf(std::string_view verb, unsigned position)
+    {
+        if (position == 0)
+            return std::unexpected(std::format("{} needs --to, a position counted from 1", verb));
+        return position;
+    }
+
+    [[nodiscard]] Params buildWorkspaceClose(CLI::FlagStore const& flags)
+    {
+        auto const& words = VerbFlags { flags, "workspace.close" }.words();
+        if (words.size() != 1)
+            return std::unexpected("workspace close takes one WORKSPACE"s);
+        return vtcontrol::encodeJson(
+            vtcontrol::CloseWorkspaceRequest { .workspace = std::string { words[0] } });
+    }
+
+    [[nodiscard]] Params buildWorkspaceMove(CLI::FlagStore const& flags)
+    {
+        auto const f = VerbFlags { flags, "workspace.move" };
+        if (f.words().size() != 1)
+            return std::unexpected("workspace move takes one WORKSPACE"s);
+        auto const position = positionOf("workspace move", f.number("to"));
+        if (!position)
+            return std::unexpected(position.error());
+        return vtcontrol::encodeJson(vtcontrol::MoveWorkspaceRequest {
+            .workspace = std::string { f.words()[0] }, .toPosition = *position });
+    }
+
+    [[nodiscard]] Params buildTabMove(CLI::FlagStore const& flags)
+    {
+        auto const f = VerbFlags { flags, "tab.move" };
+        if (f.words().size() != 1)
+            return std::unexpected("tab move takes one TAB"s);
+        auto const position = positionOf("tab move", f.number("to"));
+        if (!position)
+            return std::unexpected(position.error());
+        return vtcontrol::encodeJson(vtcontrol::MoveTabRequest { .tab = std::string { f.words()[0] },
+                                                                 .toWorkspace = f.text("workspace"),
+                                                                 .toPosition = *position });
+    }
+
+    /// Prints the id of the workspace a reply of type @p T names.
+    template <typename T>
+    void humanWorkspace(std::string_view replyJson, std::ostream& out)
+    {
+        printDecoded<T>(replyJson, out, [&](auto const& reply) { out << reply.workspace << '\n'; });
+    }
+
     /// @param host What `--to-host` was given.
     /// @return Why it cannot be a switch's destination: only a saved host's name and an `ssh://` URL can;
     ///         a window cannot ask its user for the token or CA another URL needs. Nothing when it can.
@@ -764,6 +832,79 @@ namespace
                 .verbatim =
                     CLI::Verbatim { "OBJECT LABEL", "The object, e.g. pane:logs, and its new label." },
                 .buildParams = buildLabel,
+                .printHuman = humanNothing,
+            },
+            ControlVerb {
+                .path = "workspace.new",
+                .method = "workspace.create",
+                .usage = "workspace new [--cwd DIR] [--label L]",
+                .summary = "Opens a workspace with one tab and prints its id.",
+                .options =
+                    [] {
+                        return withConnectionOptions({
+                            CLI::Option { "cwd", CLI::Value { ""s }, "Where the first pane starts.", "DIR" },
+                            CLI::Option { "label",
+                                          CLI::Value { ""s },
+                                          "Names the workspace; without it, after its folder.",
+                                          "L" },
+                        });
+                    },
+                .verbatim = std::nullopt,
+                .buildParams = buildWorkspaceNew,
+                .printHuman = humanWorkspace<vtcontrol::CreateWorkspaceReply>,
+            },
+            ControlVerb {
+                .path = "workspace.rename",
+                .method = "workspace.rename",
+                .usage = "workspace rename WORKSPACE LABEL",
+                .summary = "Renames a workspace; an empty label clears it.",
+                .options = [] { return withConnectionOptions({}); },
+                .verbatim = CLI::Verbatim { "WORKSPACE LABEL", "The workspace, and its new label." },
+                .buildParams = buildWorkspaceRename,
+                .printHuman = humanNothing,
+            },
+            ControlVerb {
+                .path = "workspace.close",
+                .method = "workspace.close",
+                .usage = "workspace close WORKSPACE",
+                .summary = "Closes a workspace with all its tabs and panes, ending their shells.",
+                .options = [] { return withConnectionOptions({}); },
+                .verbatim = CLI::Verbatim { "WORKSPACE", "The workspace to close." },
+                .buildParams = buildWorkspaceClose,
+                .printHuman = humanNothing,
+            },
+            ControlVerb {
+                .path = "workspace.move",
+                .method = "workspace.move",
+                .usage = "workspace move --to N WORKSPACE",
+                .summary = "Moves a workspace to position N of the workspace order, counted from 1.",
+                .options =
+                    [] {
+                        return withConnectionOptions({
+                            CLI::Option { "to", CLI::Value { 0U }, "The position to move to, from 1.", "N" },
+                        });
+                    },
+                .verbatim = CLI::Verbatim { "WORKSPACE", "The workspace to move." },
+                .buildParams = buildWorkspaceMove,
+                .printHuman = humanNothing,
+            },
+            ControlVerb {
+                .path = "tab.move",
+                .method = "tab.move",
+                .usage = "tab move [--workspace W] --to N TAB",
+                .summary = "Moves a tab to position N of a workspace, which may be another one.",
+                .options =
+                    [] {
+                        return withConnectionOptions({
+                            CLI::Option { "workspace",
+                                          CLI::Value { ""s },
+                                          "The workspace to move it into; without it, the caller's.",
+                                          "W" },
+                            CLI::Option { "to", CLI::Value { 0U }, "The position to move to, from 1.", "N" },
+                        });
+                    },
+                .verbatim = CLI::Verbatim { "TAB", "The tab to move." },
+                .buildParams = buildTabMove,
                 .printHuman = humanNothing,
             },
             ControlVerb {
@@ -1292,6 +1433,8 @@ std::span<ControlVerbGroup const> controlVerbGroups()
 {
     static constexpr auto Groups = std::array {
         ControlVerbGroup { "pane", "Reads panes." },
+        ControlVerbGroup { "workspace", "Opens, renames and reorders workspaces." },
+        ControlVerbGroup { "tab", "Moves tabs." },
         ControlVerbGroup { "api", "Explores and calls the control API." },
     };
     return Groups;

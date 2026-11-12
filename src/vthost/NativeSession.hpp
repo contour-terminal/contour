@@ -316,6 +316,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
         std::function<void(vtworkspace::WorkspaceId)>
             onWorkspaceChange;                               ///< A change in one workspace's tab strip.
         std::function<void(vtworkspace::TabId)> onTabChange; ///< A change within one tab.
+        std::function<void()> onWorkspaceOrderChange;        ///< A workspace moved in the workspace order.
+        void workspaceMoved(vtworkspace::WorkspaceId, int, int) override { onWorkspaceOrderChange(); }
+        void workspaceRemoved(vtworkspace::WorkspaceId, int) override { onWorkspaceOrderChange(); }
         void tabAdded(vtworkspace::WorkspaceId workspace, vtworkspace::TabId, int) override
         {
             onWorkspaceChange(workspace);
@@ -965,6 +968,15 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// Forgets the workspaces the model no longer holds, so a WorkspaceMeta delta never names one.
     void forgetRemovedWorkspaceMeta();
 
+    /// Tells the client the position (WorkspaceMeta::position) of every announced workspace whose place in
+    /// the daemon's workspace order differs from the one it was last told: after a reorder, and after a
+    /// workspace was added or removed ahead of others. A client that does not share Capability::WorkspaceMeta
+    /// is told nothing.
+    void syncWorkspacePositions();
+
+    /// @return @p workspace's 0-based place in the daemon's workspace order; 0 for one the model lacks.
+    [[nodiscard]] int positionOf(vtworkspace::WorkspaceId workspace) const;
+
     /// Sends a label delta when @p ref is a workspace this connection was told of.
     /// @param ref The object whose label changed.
     /// @param label Its label now; empty when it was cleared.
@@ -1317,9 +1329,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     std::map<uint64_t, proto::PaneSummary> _pendingSummaries;
     /// When each unmirrored pane last had its output marked, which paces the next mark.
     std::unordered_map<uint64_t, core::platform::SteadyTimePoint> _activityMarkedAt;
-    /// The workspaces whose WorkspaceMeta this connection was sent in full; a delta names only these.
-    /// @see announceWorkspaceMeta
-    std::unordered_set<uint64_t> _announcedMeta;
+    /// The workspaces whose WorkspaceMeta this connection was sent in full, each with the position the
+    /// connection was last told for it; a delta names only these. @see announceWorkspaceMeta
+    std::unordered_map<uint64_t, uint32_t> _announcedMeta;
     /// The role the daemon gave this window. @see raiseRoleChanged
     proto::RaiseRole _raiseRole = proto::RaiseRole::Quiet;
     /// Sessions whose echo state is to be read at the next flush, beside those with new output: one that took

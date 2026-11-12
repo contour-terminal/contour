@@ -2542,3 +2542,53 @@ TEST_CASE("SessionModel: the first unused session id is above every restored lea
 }
 
 // }}}
+
+TEST_CASE("SessionModel: moveWorkspace reorders and clamps", "[vtworkspace][model][workspace]")
+{
+    Fixture f;
+    auto const a = f.model.createWorkspace()->id();
+    auto const b = f.model.createWorkspace()->id();
+    auto const c = f.model.createWorkspace()->id();
+    auto const order = [&] {
+        return std::ranges::to<std::vector>(
+            std::views::iota(0, f.model.workspaceCount())
+            | std::views::transform([&](int i) { return f.model.workspaceAt(i)->id().value; }));
+    };
+    REQUIRE(order() == std::vector { a.value, b.value, c.value });
+
+    SECTION("forward")
+    {
+        f.model.moveWorkspace(a, 1);
+        CHECK(order() == std::vector { b.value, a.value, c.value });
+        CHECK(f.events.sawPrefix(std::format("workspaceMoved:{}:0>1", a.value)));
+    }
+    SECTION("backward")
+    {
+        f.model.moveWorkspace(c, 0);
+        CHECK(order() == std::vector { c.value, a.value, b.value });
+    }
+    SECTION("clamps beyond either end")
+    {
+        f.model.moveWorkspace(a, 99);
+        CHECK(order() == std::vector { b.value, c.value, a.value });
+        f.model.moveWorkspace(a, -5);
+        CHECK(order() == std::vector { a.value, b.value, c.value });
+    }
+    SECTION("to where it is, or an unknown workspace, changes and announces nothing")
+    {
+        f.model.moveWorkspace(b, 1);
+        f.model.moveWorkspace(WorkspaceId { 9999 }, 0);
+        CHECK(order() == std::vector { a.value, b.value, c.value });
+        CHECK_FALSE(f.events.sawPrefix(std::string { "workspaceMoved" }));
+    }
+}
+
+TEST_CASE("SessionModel: removing a workspace announces it with the place it had",
+          "[vtworkspace][model][workspace]")
+{
+    Fixture f;
+    std::ignore = f.model.createWorkspace();
+    auto const second = f.model.createWorkspace()->id();
+    f.model.removeWorkspace(second);
+    CHECK(f.events.sawPrefix(std::format("workspaceRemoved:{}:1", second.value)));
+}

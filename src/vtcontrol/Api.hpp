@@ -476,6 +476,64 @@ struct CloseTabRequest
     std::string tab {}; ///< The tab to close.
 };
 
+/// `workspace.create` request.
+struct CreateWorkspaceRequest
+{
+    using ApiRecordTag = void;
+
+    std::string
+        cwd {}; ///< Where the first pane starts, and what the default name comes from; empty for the default.
+    std::string label {}; ///< The workspace's label; empty names it after its folder.
+};
+
+/// `workspace.create` reply.
+struct CreateWorkspaceReply
+{
+    using ApiRecordTag = void;
+
+    std::string workspace {}; ///< The new workspace's id.
+    std::string tab {};       ///< Its first tab.
+    std::string pane {};      ///< Its first pane.
+};
+
+/// `workspace.rename` request.
+struct RenameWorkspaceRequest
+{
+    using ApiRecordTag = void;
+
+    std::string workspace {}; ///< The workspace to rename.
+    std::string label {};     ///< The new label; empty clears it.
+};
+
+/// `workspace.close` request.
+struct CloseWorkspaceRequest
+{
+    using ApiRecordTag = void;
+
+    std::string workspace {}; ///< The workspace to close, with all its tabs and panes.
+};
+
+/// `workspace.move` request.
+struct MoveWorkspaceRequest
+{
+    using ApiRecordTag = void;
+
+    std::string workspace {}; ///< The workspace to move.
+    uint32_t toPosition = 0; ///< Where it goes, counted from 1 as `position` is in `workspace.list`; clamped.
+                             ///< 0, which a missing key reads as, is refused.
+};
+
+/// `tab.move` request.
+struct MoveTabRequest
+{
+    using ApiRecordTag = void;
+
+    std::string tab {};         ///< The tab to move.
+    std::string toWorkspace {}; ///< The workspace it moves into; may be the tab's own, which reorders it.
+    uint32_t toPosition =
+        0; ///< Its place among that workspace's tabs, counted from 1; clamped. 0 (a missing key) is refused.
+};
+
 /// `workspace.switch` request: where one window should go.
 struct SwitchWorkspaceRequest
 {

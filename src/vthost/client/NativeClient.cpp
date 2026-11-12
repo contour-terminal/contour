@@ -649,6 +649,31 @@ std::optional<uint64_t> NativeClient::moveNode(proto::MoveNode const& move)
     return serial != 0 ? std::optional { serial } : std::nullopt;
 }
 
+Delivery NativeClient::moveWorkspace(uint64_t workspace, uint32_t position)
+{
+    // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
+    auto const request = proto::MoveWorkspace { .workspace = workspace, .toPosition = position };
+    if (!shares(proto::Capability::WorkspaceMeta) || send(proto::DecodedPdu { request }) == 0)
+        return Delivery::Unsupported;
+    return Delivery::Sent;
+}
+
+Delivery NativeClient::closeWorkspace(uint64_t workspace)
+{
+    auto const request = proto::CloseWorkspace { .workspace = workspace };
+    if (!shares(proto::Capability::WorkspaceMeta) || send(proto::DecodedPdu { request }) == 0)
+        return Delivery::Unsupported;
+    return Delivery::Sent;
+}
+
+Delivery NativeClient::setWorkspaceLabel(uint64_t workspace, std::string label)
+{
+    auto request = proto::SetWorkspaceLabel { .workspace = workspace, .label = std::move(label) };
+    if (!shares(proto::Capability::WorkspaceMeta) || send(proto::DecodedPdu { std::move(request) }) == 0)
+        return Delivery::Unsupported;
+    return Delivery::Sent;
+}
+
 Delivery NativeClient::setSplitOrientation(uint64_t anchorSession, vtworkspace::SplitState state)
 {
     // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.

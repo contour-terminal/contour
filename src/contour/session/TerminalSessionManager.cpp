@@ -13,6 +13,7 @@
 #include <contour/session/PreviewTranscript.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/window/ChromeKeys.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
@@ -46,6 +47,7 @@
 #include <filesystem>
 #include <format>
 #include <initializer_list>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -1467,6 +1469,218 @@ void TerminalSessionManager::setWorkspaceLabel(vtworkspace::WorkspaceId workspac
     notifyDirectoriesChanged();
 }
 
+namespace
+{
+    /// @param directory A window's directory.
+    /// @param workspace A workspace's id.
+    /// @return The workspace the directory lists under that id, or null.
+    [[nodiscard]] window::DirectoryWorkspace const* findWorkspace(window::WorkspaceDirectory const& directory,
+                                                                  uint64_t workspace)
+    {
+        auto const found =
+            std::ranges::find(directory.workspaces, workspace, &window::DirectoryWorkspace::id);
+        return found != directory.workspaces.end() ? &*found : nullptr;
+    }
+
+    /// @param tabs Tabs of a directory.
+    /// @return Every session of every pane of them.
+    [[nodiscard]] std::vector<uint64_t> sessionsOf(std::span<window::DirectoryTab const> tabs)
+    {
+        return std::ranges::to<std::vector>(
+            tabs | std::views::transform(&window::DirectoryTab::panes) | std::views::join
+            | std::views::transform([](window::DirectoryPane const& pane) { return pane.key.value; }));
+    }
+
+    /// @param model The model.
+    /// @param workspace A workspace of it.
+    /// @return Its place in the model's workspace order, or -1 for one the model lacks.
+    [[nodiscard]] int modelIndexOf(vtworkspace::SessionModel const& model, vtworkspace::WorkspaceId workspace)
+    {
+        auto const indices = std::views::iota(0, model.workspaceCount());
+        auto const found = std::ranges::find_if(indices, [&](int index) {
+            return model.workspaceAt(index) != nullptr && model.workspaceAt(index)->id() == workspace;
+        });
+        return found != indices.end() ? *found : -1;
+    }
+} // namespace
+
+bool TerminalSessionManager::listsRemotely(window::WindowController const& window) const noexcept
+{
+    auto* const binding = mutableBindingOf(window.displayedWorkspace());
+    return binding != nullptr && binding->directorySource() != nullptr;
+}
+
+bool TerminalSessionManager::ownsOneWorkspaceOnly(window::WindowController const& window)
+{
+    // Closing it would leave the window with nothing to show; a daemon's window lists its daemon's instead.
+    return window.ownedWorkspaces().size() <= 1;
+}
+
+bool TerminalSessionManager::ownsWorkspace(window::WindowController const& window,
+                                           vtworkspace::WorkspaceId workspace) noexcept
+{
+    return std::ranges::contains(window.ownedWorkspaces(), workspace);
+}
+
+void TerminalSessionManager::renameWorkspace(window::WindowController& window,
+                                             uint64_t workspace,
+                                             std::string label)
+{
+    if (listsRemotely(window))
+    {
+        // The daemon's label change comes back as the window's new directory.
+        if (factoryFor(window.displayedWorkspace()).requestRemoteRenameWorkspace(workspace, label)
+            == RemoteRouting::Refused)
+            managerLog()("The daemon cannot rename workspace {}.", workspace);
+        return;
+    }
+    if (ownsWorkspace(window, vtworkspace::WorkspaceId { workspace }))
+        setWorkspaceLabel(vtworkspace::WorkspaceId { workspace }, std::move(label));
+}
+
+void TerminalSessionManager::moveWorkspace(window::WindowController& window,
+                                           uint64_t workspace,
+                                           int toPosition)
+{
+    auto const position = std::max(toPosition, 0);
+    if (listsRemotely(window))
+    {
+        // The place asked for is a place in the directory; the daemon counts its own, with workspaces the
+        // directory does not list: it is the place of the workspace listed there.
+        auto daemonPosition = static_cast<uint32_t>(position);
+        if (auto const* const source = window.directorySource())
+        {
+            auto const listed = source->directory().workspaces;
+            if (!listed.empty())
+            {
+                auto const slot = std::min(static_cast<std::size_t>(position), listed.size() - 1);
+                daemonPosition = listed[slot].position.value_or(static_cast<uint32_t>(slot));
+            }
+        }
+        if (factoryFor(window.displayedWorkspace()).requestRemoteMoveWorkspace(workspace, daemonPosition)
+            == RemoteRouting::Refused)
+            managerLog()("The daemon cannot move workspace {}.", workspace);
+        return;
+    }
+    // The model orders every window's workspaces; the window lists its own in that order, so the place is
+    // its place among them: moved to where the owned workspace that holds it now is.
+    auto const moving = vtworkspace::WorkspaceId { workspace };
+    if (!ownsWorkspace(window, moving))
+        return;
+    auto owned = std::vector<vtworkspace::WorkspaceId> { window.ownedWorkspaces().begin(),
+                                                         window.ownedWorkspaces().end() };
+    std::ranges::sort(
+        owned, std::ranges::less {}, [&](vtworkspace::WorkspaceId id) { return modelIndexOf(*_model, id); });
+    auto const target = owned[std::min<std::size_t>(static_cast<std::size_t>(position), owned.size() - 1)];
+    _model->moveWorkspace(moving, modelIndexOf(*_model, target));
+}
+
+void TerminalSessionManager::moveTabToWorkspace(window::WindowController& window,
+                                                uint64_t tab,
+                                                uint64_t toWorkspace,
+                                                int toPosition)
+{
+    if (listsRemotely(window))
+    {
+        auto const* const source = window.directorySource();
+        if (source == nullptr)
+            return;
+        auto const directory = source->directory();
+        auto const holder =
+            std::ranges::find_if(directory.workspaces, [&](window::DirectoryWorkspace const& w) {
+                return std::ranges::contains(w.tabs, tab, &window::DirectoryTab::id);
+            });
+        auto const* const destination = findWorkspace(directory, toWorkspace);
+        if (holder == directory.workspaces.end() || destination == nullptr)
+            return;
+        auto const moving = std::ranges::find(holder->tabs, tab, &window::DirectoryTab::id);
+        auto const sources = sessionsOf(std::span { &*moving, 1 });
+        auto const targets = sessionsOf(destination->tabs);
+        // A daemon names a workspace by a session it holds: an empty one is nothing to name.
+        if (sources.empty() || targets.empty())
+            return;
+        auto const routing =
+            factoryFor(window.displayedWorkspace())
+                .requestRemoteMove(RemoteMove { .source = vtworkspace::MoveSourceKind::Tab,
+                                                .sourceSessions = sources,
+                                                .target = vtworkspace::MoveTargetKind::TabWell,
+                                                .targetSession = targets.front(),
+                                                .index = std::max(toPosition, 0),
+                                                .request = _nextRemoteMove++ });
+        if (routing == RemoteRouting::Refused)
+            managerLog()("The daemon cannot move tab {}.", tab);
+        return;
+    }
+    auto const moving = vtworkspace::TabId { tab };
+    auto const from = _model->workspaceOfTab(moving);
+    auto const to = vtworkspace::WorkspaceId { toWorkspace };
+    if (!ownsWorkspace(window, from) || !ownsWorkspace(window, to))
+        return;
+    moveTabToWorkspace(from, _model->workspace(from)->indexOf(moving), to, toPosition);
+}
+
+void TerminalSessionManager::closeWorkspace(window::WindowController& window, uint64_t workspace)
+{
+    auto activities = std::vector<window::PaneActivity> {};
+    auto program = std::string {};
+    auto label = std::string {};
+    if (listsRemotely(window))
+    {
+        auto const* const source = window.directorySource();
+        auto const directory = source != nullptr ? source->directory() : window::WorkspaceDirectory {};
+        auto const* const listed = findWorkspace(directory, workspace);
+        if (listed == nullptr)
+            return;
+        label = listed->label;
+        // A daemon's pane runs a program this process cannot name: it may be running vim.
+        activities.assign(sessionsOf(listed->tabs).size(), window::PaneActivity::Unknown);
+    }
+    else
+    {
+        auto const id = vtworkspace::WorkspaceId { workspace };
+        auto const* const held = _model->workspace(id);
+        if (held == nullptr || !ownsWorkspace(window, id) || ownsOneWorkspaceOnly(window))
+            return;
+        label = std::string { _workspaceLabels.labelOf(id) };
+        for (auto const* const session: sessionsInWorkspace(*held))
+        {
+            auto const activity = session->paneActivity();
+            activities.push_back(activity);
+            if (activity == window::PaneActivity::Running && program.empty())
+                program = session->foregroundProcessName();
+        }
+    }
+    if (window::closeConfirmationFor(activities) == window::CloseConfirmation::None)
+    {
+        confirmCloseWorkspace(window, workspace);
+        return;
+    }
+    emit window.closeWorkspaceConfirmationRequested(
+        workspace, QString::fromStdString(label), QString::fromStdString(program));
+}
+
+void TerminalSessionManager::confirmCloseWorkspace(window::WindowController& window, uint64_t workspace)
+{
+    if (listsRemotely(window))
+    {
+        auto const* const source = window.directorySource();
+        auto const directory = source != nullptr ? source->directory() : window::WorkspaceDirectory {};
+        auto const* const listed = findWorkspace(directory, workspace);
+        if (listed == nullptr)
+            return;
+        if (factoryFor(window.displayedWorkspace()).requestRemoteCloseWorkspace(workspace)
+            == RemoteRouting::Refused)
+            managerLog()("The daemon cannot close workspace {}.", workspace);
+        return;
+    }
+    auto const id = vtworkspace::WorkspaceId { workspace };
+    auto const* const held = _model->workspace(id);
+    if (held == nullptr || !ownsWorkspace(window, id) || ownsOneWorkspaceOnly(window))
+        return;
+    // As closing every tab does: each session ends, and the model drops the emptied workspace.
+    terminateSessions(sessionsInWorkspace(*held), SessionEnd::Destroy);
+}
+
 void TerminalSessionManager::forgetDirectoryState(vtworkspace::WorkspaceId workspace)
 {
     _workspaceLabels.forget(workspace);
@@ -2406,6 +2620,14 @@ void TerminalSessionManager::tabMoved(vtworkspace::WorkspaceId window, vtworkspa
 {
     if (auto* c = controllerDisplaying(window))
         c->onTabMoved();
+}
+
+void TerminalSessionManager::workspaceMoved(vtworkspace::WorkspaceId /*workspace*/,
+                                            int /*fromIndex*/,
+                                            int /*toIndex*/)
+{
+    // What an in-process window lists is in the model's order.
+    notifyDirectoriesChanged();
 }
 
 void TerminalSessionManager::tabAboutToBeMovedToWorkspace(vtworkspace::WorkspaceId from,
@@ -3885,6 +4107,15 @@ void TerminalSessionManager::closeTabAtIndex(vtworkspace::WorkspaceId window, in
     // sessions; the model collapses to the survivor on each close and tears the tab down with the
     // last pane.
     terminateSessions(sessionsInTab(tabAtRow(window, index)), SessionEnd::Destroy);
+}
+
+std::vector<TerminalSession*> TerminalSessionManager::sessionsInWorkspace(
+    vtworkspace::Workspace const& workspace) const
+{
+    auto sessions = std::vector<TerminalSession*> {};
+    for (auto const index: std::views::iota(0, workspace.tabCount()))
+        std::ranges::move(sessionsInTab(workspace.tabAt(index)), std::back_inserter(sessions));
+    return sessions;
 }
 
 std::vector<TerminalSession*> TerminalSessionManager::sessionsInTab(vtworkspace::Tab* tab) const

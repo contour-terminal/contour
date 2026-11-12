@@ -492,7 +492,7 @@ class NativeClient final
     /// @param session The session whose pane is closed.
     /// @return Sent, or Unsupported -- nothing written -- once the connection is ending or the daemon refuses
     ///         the request.
-    Delivery closePane(uint64_t session);
+    [[nodiscard]] Delivery closePane(uint64_t session);
 
     /// Has this connection select @p workspace: the daemon pushes its layout and its sessions' screens in
     /// full from then on, the other workspaces' panes as summaries only, and a reconnect resumes it.
@@ -511,7 +511,7 @@ class NativeClient final
     /// @param focus The window's focus now.
     /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares
     ///         Capability::DaemonFollow.
-    Delivery reportFocus(proto::WindowFocus focus);
+    [[nodiscard]] Delivery reportFocus(proto::WindowFocus focus);
 
     /// @return What this connection does with a bell or notification, as the daemon last stated it; Quiet
     ///         until it does.
@@ -522,7 +522,7 @@ class NativeClient final
     /// layouts pushed before the daemon served it (@see PendingTabEdits).
     /// @param edit The change.
     /// @return Sent, or Unsupported — nothing written — unless the daemon shares Capability::TabEdits.
-    Delivery editTab(proto::EditTab edit);
+    [[nodiscard]] Delivery editTab(proto::EditTab edit);
 
     /// Asks the daemon to graft a whole tab beside a pane of another tab. The daemon moves the tab's sessions
     /// into the target tab -- none is spawned or closed -- and re-pushes a LayoutState to every attached
@@ -532,9 +532,9 @@ class NativeClient final
     /// @param targetSession The session of the pane to split.
     /// @param side Which side of that pane the tab goes on.
     /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::TabMerge.
-    Delivery mergeTabIntoSplit(std::span<uint64_t const> tabSessions,
-                               uint64_t targetSession,
-                               vtworkspace::SplitSide side);
+    [[nodiscard]] Delivery mergeTabIntoSplit(std::span<uint64_t const> tabSessions,
+                                             uint64_t targetSession,
+                                             vtworkspace::SplitSide side);
 
     /// Asks the daemon to move a pane or a whole tab: beside a pane, onto one (a swap), into a workspace's
     /// tab well or into a new workspace. Nothing is spawned or closed; the daemon answers with the layout
@@ -545,12 +545,32 @@ class NativeClient final
     ///         unless the daemon shares Capability::MoveNode.
     [[nodiscard]] std::optional<uint64_t> moveNode(proto::MoveNode const& move);
 
+    /// Asks the daemon to move a workspace in its workspace order. The daemon answers every client with the
+    /// new positions (proto::WorkspaceMeta::position).
+    /// @param workspace The daemon's workspace id.
+    /// @param position The 0-based place it moves to; the daemon clamps it.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::WorkspaceMeta.
+    [[nodiscard]] Delivery moveWorkspace(uint64_t workspace, uint32_t position);
+
+    /// Asks the daemon to close a workspace in one step: it ends whatever the workspace holds at that moment
+    /// and removes the workspace.
+    /// @param workspace The daemon's workspace id.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::WorkspaceMeta.
+    [[nodiscard]] Delivery closeWorkspace(uint64_t workspace);
+
+    /// Asks the daemon to set a workspace's label. The daemon answers every client with the label
+    /// (proto::WorkspaceMeta::label).
+    /// @param workspace The daemon's workspace id.
+    /// @param label The new label; empty clears it.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::WorkspaceMeta.
+    [[nodiscard]] Delivery setWorkspaceLabel(uint64_t workspace, std::string label);
+
     /// Asks the daemon to set the axis of the split above a pane. The daemon answers with the layout push
     /// alone; a stale session is ignored there.
     /// @param anchorSession The session of a leaf inside the split to change.
     /// @param state The axis to set.
     /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::MoveNode.
-    Delivery setSplitOrientation(uint64_t anchorSession, vtworkspace::SplitState state);
+    [[nodiscard]] Delivery setSplitOrientation(uint64_t anchorSession, vtworkspace::SplitState state);
 
     /// @return Whether the daemon resolves profile names (Capability::ProfileByName shared): it then owns
     ///         what the sessions run and how they emulate, and this client names profiles instead.

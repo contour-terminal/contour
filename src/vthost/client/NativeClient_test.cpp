@@ -3133,6 +3133,71 @@ TEST_CASE("editTab is sent when the daemon shares TabEdits", "[vthost][attach][i
     CHECK(h.layouts.back().tabs.front().title == "build");
 }
 
+TEST_CASE("the workspace verbs reach the daemon when it shares WorkspaceMeta",
+          "[vthost][attach][workspace-meta]")
+{
+    auto h = IntentHarness { vthost::NativeSessionServices {},
+                             NativeClient::HandshakeOptions { .capabilities = proto::CapabilitySet::of(
+                                                                  { proto::Capability::AttachIntent,
+                                                                    proto::Capability::WorkspaceMeta }) } };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const second = h.host.createWorkspace()->id().value;
+    auto deliveries = std::vector<vthost::client::Delivery> {};
+    auto scenario = [](IntentHarness* h,
+                       uint64_t first,
+                       uint64_t second,
+                       std::vector<vthost::client::Delivery>* deliveries) -> Task<void> {
+        co_await core::net::testing::waitUntil(&h->loop, [h] { return h->layouts.size() >= 2; });
+        deliveries->push_back(h->client->moveWorkspace(second, 0));
+        co_await core::net::testing::waitUntil(
+            &h->loop, [h, second] { return h->host.model().workspaceAt(0)->id().value == second; });
+        deliveries->push_back(h->client->setWorkspaceLabel(second, "ops"));
+        co_await core::net::testing::waitUntil(&h->loop, [h, second] {
+            return h->host.objects().labelOf(vtcontrol::ObjectRef {
+                       .kind = vtcontrol::ObjectKind::Workspace,
+                       .uuid = *h->host.objects().uuidOf(vtworkspace::WorkspaceId { second }) })
+                   == "ops";
+        });
+        deliveries->push_back(h->client->closeWorkspace(first));
+        co_await core::net::testing::waitUntil(&h->loop, [h, first] {
+            return h->host.model().workspace(vtworkspace::WorkspaceId { first }) == nullptr;
+        });
+        h->client->detach();
+    }(&h, first, second, &deliveries);
+    h.drive(std::move(scenario));
+
+    CHECK(deliveries == std::vector(3, vthost::client::Delivery::Sent));
+    CHECK(h.host.model().workspaceCount() == 1);
+}
+
+TEST_CASE("the workspace verbs are Unsupported, and nothing is written, without WorkspaceMeta",
+          "[vthost][attach][workspace-meta]")
+{
+    auto h = IntentHarness { vthost::NativeSessionServices {},
+                             NativeClient::HandshakeOptions { .capabilities = thinClientCapabilities() } };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const second = h.host.createWorkspace()->id().value;
+    auto deliveries = std::vector<vthost::client::Delivery> {};
+    auto scenario = [](IntentHarness* h,
+                       uint64_t first,
+                       uint64_t second,
+                       std::vector<vthost::client::Delivery>* deliveries) -> Task<void> {
+        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+        deliveries->push_back(h->client->moveWorkspace(second, 0));
+        deliveries->push_back(h->client->setWorkspaceLabel(second, "ops"));
+        deliveries->push_back(h->client->closeWorkspace(first));
+        h->client->detach();
+        co_return;
+    }(&h, first, second, &deliveries);
+    h.drive(std::move(scenario));
+
+    CHECK(deliveries == std::vector(3, vthost::client::Delivery::Unsupported));
+    CHECK(h.host.model().workspaceCount() == 2);
+    CHECK(h.host.model().workspaceAt(0)->id().value == first);
+}
+
 namespace
 {
 

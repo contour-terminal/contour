@@ -314,6 +314,11 @@ void WorkspacePersistence::tabMoved(vtworkspace::WorkspaceId, vtworkspace::TabId
     consider(SnapshotTrigger::LayoutChanged, Origin::Event);
 }
 
+void WorkspacePersistence::workspaceMoved(vtworkspace::WorkspaceId, int, int)
+{
+    consider(SnapshotTrigger::LayoutChanged, Origin::Event);
+}
+
 void WorkspacePersistence::tabMovedToWorkspace(
     vtworkspace::WorkspaceId, vtworkspace::TabId, int, vtworkspace::WorkspaceId, int)
 {

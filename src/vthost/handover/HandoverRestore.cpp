@@ -89,7 +89,9 @@ std::expected<void, HandoverError> SessionHost::restoreHandover(HandoverImage im
         std::max(image.nextSessionId.value, vtworkspace::firstUnusedSessionId(image.tree).value),
         [](uint64_t next, HandoverSession const& session) { return std::max(next, session.id.value + 1); });
 
-    if (_model.workspaceCount() > 0)
+    if (_model.workspace(vtworkspace::WorkspaceId { image.defaultWorkspace }) != nullptr)
+        _workspace = vtworkspace::WorkspaceId { image.defaultWorkspace };
+    else if (_model.workspaceCount() > 0)
         _workspace = _model.workspaceAt(0)->id();
     else
     {

@@ -4518,6 +4518,82 @@ TEST_CASE("directory carries label and control id from WorkspaceMeta", "[attach]
     CHECK(waitUntil([&] { return workspaceOf(controller, second.id).label == "build"; }));
 }
 
+TEST_CASE("a workspace the daemon moved is listed in its new place", "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+    auto const first = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
+    REQUIRE(controller.directory().workspaces[0].id == first);
+
+    daemon.onDaemon([&] {
+        daemon.host->model().moveWorkspace(vtworkspace::WorkspaceId { second.id }, 0);
+        return 0;
+    });
+
+    CHECK(waitUntil([&] {
+        auto const directory = controller.directory();
+        return directory.workspaces.size() == 2 && directory.workspaces[0].id == second.id
+               && directory.workspaces[1].id == first;
+    }));
+}
+
+TEST_CASE("a window's move and rename of a workspace reach the daemon and come back in the directory",
+          "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+    auto const first = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
+
+    CHECK(controller.requestRemoteMoveWorkspace(second.id, 0) == contour::session::RemoteRouting::Routed);
+    CHECK(waitUntil([&] {
+        auto const directory = controller.directory();
+        return directory.workspaces.size() == 2 && directory.workspaces[0].id == second.id;
+    }));
+
+    CHECK(controller.requestRemoteRenameWorkspace(second.id, "ops")
+          == contour::session::RemoteRouting::Routed);
+    CHECK(waitUntil([&] { return workspaceOf(controller, second.id).label == "ops"; }));
+    CHECK(workspaceOf(controller, first).label.empty());
+}
+
+TEST_CASE("the directory states a workspace's place in the daemon's count, tabless ones included",
+          "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    // A workspace that holds no tab sits between the two the window lists.
+    daemon.onDaemon([&] {
+        std::ignore = daemon.host->createEmptyWorkspace();
+        return 0;
+    });
+    auto const second = addWorkspace(daemon);
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+
+    REQUIRE(waitUntil([&] { return workspaceOf(controller, second.id).position.has_value(); }));
+    CHECK(workspaceOf(controller, second.id).position == std::optional<uint32_t> { 2 });
+}
+
 TEST_CASE("the metadata of a removed workspace is pruned", "[attach][controller][directory]")
 {
     auto daemon = DaemonFixture {};

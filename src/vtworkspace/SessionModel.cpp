@@ -278,6 +278,24 @@ Workspace* SessionModel::createWorkspace()
     return _workspaces.back().get();
 }
 
+void SessionModel::moveWorkspace(WorkspaceId workspaceId, int toIndex)
+{
+    auto const it =
+        std::ranges::find_if(_workspaces, [workspaceId](auto const& w) { return w->id() == workspaceId; });
+    if (it == _workspaces.end())
+        return;
+    auto const from = static_cast<int>(it - _workspaces.begin());
+    auto const to = std::clamp(toIndex, 0, static_cast<int>(_workspaces.size()) - 1);
+    if (from == to)
+        return;
+    // A rotation moves the one element and leaves the rest in their order, without a temporary owner.
+    if (from < to)
+        std::rotate(it, it + 1, _workspaces.begin() + to + 1);
+    else
+        std::rotate(_workspaces.begin() + to, it, it + 1);
+    _events.workspaceMoved(workspaceId, from, to);
+}
+
 void SessionModel::removeWorkspace(WorkspaceId workspaceId)
 {
     auto* win = workspace(workspaceId);
@@ -288,7 +306,11 @@ void SessionModel::removeWorkspace(WorkspaceId workspaceId)
     while (!win->_tabs.empty())
         closeTabAt(*win, static_cast<int>(win->_tabs.size()) - 1);
 
+    auto const index = static_cast<int>(
+        std::ranges::find_if(_workspaces, [workspaceId](auto const& w) { return w->id() == workspaceId; })
+        - _workspaces.begin());
     std::erase_if(_workspaces, [workspaceId](auto const& w) { return w->id() == workspaceId; });
+    _events.workspaceRemoved(workspaceId, index);
 }
 
 Workspace* SessionModel::workspace(WorkspaceId id) const noexcept

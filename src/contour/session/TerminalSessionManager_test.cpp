@@ -5783,3 +5783,333 @@ TEST_CASE(
     CHECK(manager.workspaceLabels().labelOf(window.controller->displayedWorkspace()).empty());
     std::filesystem::remove_all(root);
 }
+
+// {{{ workspace mutations: rename, reorder, move a tab, close
+namespace
+{
+
+/// A window holding two in-process workspaces, the first with two tabs and the second with one.
+struct TwoWorkspaces
+{
+    contour::test::MockPtySessionFactory* factory = nullptr;
+    std::unique_ptr<contour::test::TestApp> app;
+    std::unique_ptr<contour::test::ScopedControllerWithOsWindow> window;
+    vtworkspace::WorkspaceId first;
+    vtworkspace::WorkspaceId second;
+
+    TwoWorkspaces()
+    {
+        auto owned = std::make_unique<contour::test::MockPtySessionFactory>();
+        factory = owned.get();
+        app = std::make_unique<contour::test::TestApp>(std::move(owned));
+        window = std::make_unique<contour::test::ScopedControllerWithOsWindow>(app->manager());
+        (*window)->bindWindow(window->osWindow.get());
+        (*window)->createNewTab();
+        (*window)->createNewTab();
+        first = (*window)->displayedWorkspace();
+        second = manager().createWorkspaceIn((*window)->windowId());
+        manager().selectWorkspace((*window)->windowId(), 1);
+        (*window)->createNewTab();
+        manager().selectWorkspace((*window)->windowId(), 0);
+        drainPosted();
+    }
+
+    [[nodiscard]] contour::session::TerminalSessionManager& manager() const { return app->manager(); }
+    [[nodiscard]] contour::window::WindowController& controller() const { return **window; }
+
+    /// @return The ids of the workspaces the window lists, in the order it lists them.
+    [[nodiscard]] std::vector<uint64_t> listed() const
+    {
+        return std::ranges::to<std::vector>(
+            controller().directorySource()->directory().workspaces
+            | std::views::transform(&contour::window::DirectoryWorkspace::id));
+    }
+};
+
+} // namespace
+
+TEST_CASE("TerminalSessionManager: an in-process window renames its workspaces", "[manager][workspace]")
+{
+    auto f = TwoWorkspaces {};
+    auto const changed =
+        QSignalSpy { &f.controller(), &contour::window::WindowController::workspaceDirectoryChanged };
+
+    f.manager().renameWorkspace(f.controller(), f.second.value, "ops");
+
+    auto const directory = f.controller().directorySource()->directory();
+    REQUIRE(directory.workspaces.size() == 2);
+    CHECK(directory.workspaces[1].label == "ops");
+    CHECK(changed.count() >= 1);
+
+    // An empty label clears it; a workspace the window does not own is left alone.
+    f.manager().renameWorkspace(f.controller(), f.second.value, "");
+    CHECK(f.controller().directorySource()->directory().workspaces[1].label.empty());
+    auto const stranger = contour::test::ScopedController { f.manager() };
+    f.manager().renameWorkspace(f.controller(), stranger.id.value, "nope");
+    CHECK(f.manager().workspaceLabels().labelOf(stranger.id).empty());
+}
+
+TEST_CASE("TerminalSessionManager: an in-process window reorders its workspaces", "[manager][workspace]")
+{
+    auto f = TwoWorkspaces {};
+    REQUIRE(f.listed() == std::vector { f.first.value, f.second.value });
+    auto const changed =
+        QSignalSpy { &f.controller(), &contour::window::WindowController::workspaceDirectoryChanged };
+
+    f.manager().moveWorkspace(f.controller(), f.second.value, 0);
+
+    CHECK(f.listed() == std::vector { f.second.value, f.first.value });
+    CHECK(changed.count() >= 1);
+
+    // Past the end clamps, and below the start does too.
+    f.manager().moveWorkspace(f.controller(), f.second.value, 99);
+    CHECK(f.listed() == std::vector { f.first.value, f.second.value });
+    f.manager().moveWorkspace(f.controller(), f.second.value, -3);
+    CHECK(f.listed() == std::vector { f.second.value, f.first.value });
+}
+
+TEST_CASE("TerminalSessionManager: an in-process window moves a tab into another workspace",
+          "[manager][workspace]")
+{
+    auto f = TwoWorkspaces {};
+    auto const& model = f.manager().model();
+    REQUIRE(model.workspace(f.first)->tabCount() == 2);
+    REQUIRE(model.workspace(f.second)->tabCount() == 1);
+    auto const moving = model.workspace(f.first)->tabAt(1)->id();
+
+    f.manager().moveTabToWorkspace(f.controller(), moving.value, f.second.value, 0);
+
+    CHECK(model.workspace(f.first)->tabCount() == 1);
+    REQUIRE(model.workspace(f.second)->tabCount() == 2);
+    CHECK(model.workspace(f.second)->tabAt(0)->id() == moving);
+
+    // Into a workspace the window does not own changes nothing.
+    auto const stranger = contour::test::ScopedController { f.manager() };
+    f.manager().moveTabToWorkspace(f.controller(), moving.value, stranger.id.value, 0);
+    CHECK(model.workspace(f.second)->tabCount() == 2);
+}
+
+TEST_CASE("TerminalSessionManager: closing a workspace of idle panes closes it at once",
+          "[manager][workspace]")
+{
+    auto f = TwoWorkspaces {};
+    auto asked = QSignalSpy { &f.controller(),
+                              &contour::window::WindowController::closeWorkspaceConfirmationRequested };
+    // Every pane's foreground process is its shell: known to be idle.
+    auto const shell = f.controller().activeSession()->profile().shell.value().program;
+    for (auto& pty: f.factory->createdPtys)
+        pty->setForegroundProcessName(shell);
+    REQUIRE(f.factory->createdPtys.size() == 3);
+
+    f.manager().closeWorkspace(f.controller(), f.first.value);
+
+    CHECK(asked.isEmpty());
+    CHECK(f.factory->createdPtys[0]->isClosed());
+    CHECK(f.factory->createdPtys[1]->isClosed());
+    CHECK_FALSE(f.factory->createdPtys[2]->isClosed()); // the other workspace's
+}
+
+TEST_CASE("TerminalSessionManager: an in-process window keeps its last workspace", "[manager][workspace]")
+{
+    auto owned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* const factory = owned.get();
+    auto app = contour::test::TestApp { std::move(owned) };
+    auto const window = contour::test::ScopedControllerWithOsWindow { app.manager() };
+    window->bindWindow(window.osWindow.get());
+    window->createNewTab();
+    drainPosted();
+    auto const only = window->displayedWorkspace();
+    REQUIRE(window->ownedWorkspaces().size() == 1);
+    REQUIRE(factory->createdPtys.size() == 1);
+    auto asked =
+        QSignalSpy { &*window, &contour::window::WindowController::closeWorkspaceConfirmationRequested };
+    factory->createdPtys[0]->setForegroundProcessName(
+        window->activeSession()->profile().shell.value().program);
+
+    // The keybinding and the palette reach the manager directly, not through the menu's guard.
+    app.manager().closeWorkspace(*window, only.value);
+    app.manager().confirmCloseWorkspace(*window, only.value);
+
+    CHECK(asked.isEmpty());
+    CHECK(app.manager().model().workspace(only) != nullptr);
+    CHECK_FALSE(factory->createdPtys[0]->isClosed());
+}
+
+TEST_CASE("TerminalSessionManager: closing a workspace that runs a program asks first",
+          "[manager][workspace]")
+{
+    auto f = TwoWorkspaces {};
+    auto asked = QSignalSpy { &f.controller(),
+                              &contour::window::WindowController::closeWorkspaceConfirmationRequested };
+    f.manager().setWorkspaceLabel(f.first, "build");
+    auto const shell = f.controller().activeSession()->profile().shell.value().program;
+    for (auto& pty: f.factory->createdPtys)
+        pty->setForegroundProcessName(shell);
+    f.factory->createdPtys[1]->setForegroundProcessName("make");
+
+    f.manager().closeWorkspace(f.controller(), f.first.value);
+
+    REQUIRE(asked.count() == 1);
+    CHECK(asked.first().at(0).toULongLong() == f.first.value);
+    CHECK(asked.first().at(1).toString() == QStringLiteral("build"));
+    CHECK(asked.first().at(2).toString() == QStringLiteral("make"));
+    CHECK_FALSE(f.factory->createdPtys[0]->isClosed());
+    CHECK_FALSE(f.factory->createdPtys[1]->isClosed());
+
+    f.controller().confirmCloseWorkspace(f.first.value);
+    CHECK(f.factory->createdPtys[0]->isClosed());
+    CHECK(f.factory->createdPtys[1]->isClosed());
+    CHECK_FALSE(f.factory->createdPtys[2]->isClosed());
+
+    // One that is gone asks and closes nothing.
+    f.manager().closeWorkspace(f.controller(), 987654);
+    CHECK(asked.count() == 1);
+}
+
+namespace
+{
+
+/// A daemon's end of a window's workspace mutations: records what was routed to it.
+class RoutingFactory final: public contour::session::SessionFactory
+{
+  public:
+    [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(std::optional<std::string> /*cwd*/,
+                                                        std::optional<vtbackend::PageSize> /*pageSize*/,
+                                                        std::optional<vtpty::Process::ExecInfo> /*command*/,
+                                                        std::optional<std::string> /*profile*/) override
+    {
+        return nullptr;
+    }
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteRenameWorkspace(
+        uint64_t workspace, std::string_view label) override
+    {
+        renamed.emplace_back(workspace, std::string { label });
+        return contour::session::RemoteRouting::Routed;
+    }
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteMoveWorkspace(uint64_t workspace,
+                                                                             uint32_t position) override
+    {
+        moved.emplace_back(workspace, position);
+        return contour::session::RemoteRouting::Routed;
+    }
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteCloseWorkspace(uint64_t workspace) override
+    {
+        closed.push_back(workspace);
+        return contour::session::RemoteRouting::Routed;
+    }
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteMove(
+        contour::session::RemoteMove const& move) override
+    {
+        tabMoves.push_back(move);
+        return contour::session::RemoteRouting::Routed;
+    }
+
+    std::vector<std::pair<uint64_t, std::string>> renamed;
+    std::vector<std::pair<uint64_t, uint32_t>> moved;
+    std::vector<uint64_t> closed; ///< The workspaces closed.
+    std::vector<contour::session::RemoteMove> tabMoves;
+};
+
+/// What a daemon lists: workspace 10 with tabs 100 and 101 (one pane each) and workspace 20 with tab 200.
+class DaemonDirectorySource final: public contour::window::IWorkspaceDirectorySource
+{
+  public:
+    [[nodiscard]] contour::window::WorkspaceDirectory directory() const override
+    {
+        using namespace contour::window;
+        auto const tab = [](uint64_t id, uint64_t session) {
+            auto result = DirectoryTab {};
+            result.id = id;
+            result.panes.emplace_back().key = PaneKey { session };
+            return result;
+        };
+        auto build = DirectoryWorkspace {};
+        build.id = 10;
+        // The daemon holds an ended, tabless workspace ahead of these and another between them.
+        build.position = 1;
+        build.label = "build";
+        build.tabs = { tab(100, 1000), tab(101, 1001) };
+        auto other = DirectoryWorkspace {};
+        other.id = 20;
+        other.position = 3;
+        other.tabs = { tab(200, 2000) };
+        auto directory = WorkspaceDirectory {};
+        directory.workspaces = { build, other };
+        directory.selected = 10;
+        return directory;
+    }
+    void select(uint64_t /*workspace*/) override {}
+};
+
+class DaemonDirectoryBinding final: public contour::session::WindowBinding
+{
+  public:
+    explicit DaemonDirectoryBinding(contour::session::SessionFactory& factory): _factory(factory) {}
+    [[nodiscard]] contour::session::SessionFactory& sessions() noexcept override { return _factory; }
+    [[nodiscard]] std::string_view hostLabel() const noexcept override { return {}; }
+    [[nodiscard]] contour::window::DaemonDriftModel* daemonDrift() noexcept override { return nullptr; }
+    [[nodiscard]] contour::window::IWorkspaceDirectorySource* directorySource() noexcept override
+    {
+        return &source;
+    }
+    void windowClosed(vtworkspace::WorkspaceId /*window*/) override {}
+    void lastWindowReleased() override {}
+
+    DaemonDirectorySource source;
+
+  private:
+    contour::session::SessionFactory& _factory;
+};
+
+} // namespace
+
+TEST_CASE("TerminalSessionManager: a daemon's window routes the workspace mutations to its daemon",
+          "[manager][workspace]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = RoutingFactory {};
+    auto binding = DaemonDirectoryBinding { factory };
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, binding);
+    auto asked = QSignalSpy { window.controller,
+                              &contour::window::WindowController::closeWorkspaceConfirmationRequested };
+
+    manager.renameWorkspace(*window.controller, 10, "ops");
+    REQUIRE(factory.renamed.size() == 1);
+    CHECK(factory.renamed[0] == std::pair<uint64_t, std::string> { 10, "ops" });
+
+    manager.moveWorkspace(*window.controller, 20, 0);
+    manager.moveWorkspace(*window.controller, 10, -4);
+    manager.moveWorkspace(*window.controller, 10, 99);
+    // The place is the place of the workspace listed there, in the daemon's own count.
+    REQUIRE(factory.moved.size() == 3);
+    CHECK(factory.moved[0] == std::pair<uint64_t, uint32_t> { 20, 1 });
+    CHECK(factory.moved[1] == std::pair<uint64_t, uint32_t> { 10, 1 });
+    CHECK(factory.moved[2] == std::pair<uint64_t, uint32_t> { 10, 3 });
+
+    // A tab is named, with the destination, by the sessions the daemon holds.
+    manager.moveTabToWorkspace(*window.controller, 101, 20, 3);
+    REQUIRE(factory.tabMoves.size() == 1);
+    CHECK(factory.tabMoves[0].source == vtworkspace::MoveSourceKind::Tab);
+    CHECK(factory.tabMoves[0].sourceSessions == std::vector<uint64_t> { 1001 });
+    CHECK(factory.tabMoves[0].target == vtworkspace::MoveTargetKind::TabWell);
+    CHECK(factory.tabMoves[0].targetSession == 2000);
+    CHECK(factory.tabMoves[0].index == 3);
+    // A tab or a workspace the daemon does not list is not asked about.
+    manager.moveTabToWorkspace(*window.controller, 999, 20, 0);
+    manager.moveTabToWorkspace(*window.controller, 101, 999, 0);
+    CHECK(factory.tabMoves.size() == 1);
+
+    // No program can be known there, so closing asks; the answer closes the workspace in one request.
+    manager.closeWorkspace(*window.controller, 10);
+    REQUIRE(asked.count() == 1);
+    CHECK(asked.first().at(0).toULongLong() == 10);
+    CHECK(asked.first().at(1).toString() == QStringLiteral("build"));
+    CHECK(factory.closed.empty());
+    manager.confirmCloseWorkspace(*window.controller, 10);
+    CHECK(factory.closed == std::vector<uint64_t> { 10 });
+
+    manager.releaseBinding(binding);
+}
+// }}}

@@ -767,6 +767,52 @@ TEST_CASE("every ControlVerb with a method names a catalog row", "[contour][cli]
     }
 }
 
+TEST_CASE("the workspace and tab verbs build their requests", "[contour][cli][control]")
+{
+    struct Row
+    {
+        std::string_view path;
+        std::vector<std::string_view> args;
+        std::optional<std::string> params; ///< The request JSON; none when the line is refused.
+    };
+    auto const rows = std::vector<Row> {
+        { "workspace.new",
+          { "workspace", "new", "--cwd", "/tmp", "--label", "ops" },
+          vtcontrol::encodeJson(vtcontrol::CreateWorkspaceRequest { .cwd = "/tmp", .label = "ops" }) },
+        { "workspace.new",
+          { "workspace", "new" },
+          vtcontrol::encodeJson(vtcontrol::CreateWorkspaceRequest {}) },
+        { "workspace.rename",
+          { "workspace", "rename", "build", "release" },
+          vtcontrol::encodeJson(
+              vtcontrol::RenameWorkspaceRequest { .workspace = "build", .label = "release" }) },
+        { "workspace.rename", { "workspace", "rename", "build" }, std::nullopt },
+        { "workspace.move",
+          { "workspace", "move", "--to", "2", "build" },
+          vtcontrol::encodeJson(vtcontrol::MoveWorkspaceRequest { .workspace = "build", .toPosition = 2 }) },
+        { "workspace.move", { "workspace", "move", "build" }, std::nullopt },
+        { "workspace.close",
+          { "workspace", "close", "build" },
+          vtcontrol::encodeJson(vtcontrol::CloseWorkspaceRequest { .workspace = "build" }) },
+        { "workspace.close", { "workspace", "close" }, std::nullopt },
+        { "workspace.move", { "workspace", "move", "--to", "1" }, std::nullopt },
+        { "tab.move",
+          { "tab", "move", "--workspace", "w2", "--to", "1", "logs" },
+          vtcontrol::encodeJson(
+              vtcontrol::MoveTabRequest { .tab = "logs", .toWorkspace = "w2", .toPosition = 1 }) },
+        { "tab.move", { "tab", "move", "logs", "--workspace", "w2" }, std::nullopt },
+        { "tab.move", { "tab", "move", "--to", "1" }, std::nullopt },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(row.path << " " << row.args.size());
+        auto const built = verbNamed(row.path).buildParams(parseFlags(row.args));
+        CHECK(built.has_value() == row.params.has_value());
+        if (built && row.params)
+            CHECK(*built == *row.params);
+    }
+}
+
 TEST_CASE("wait and block read build their requests", "[contour][cli][control]")
 {
     CHECK(*verbNamed("wait").buildParams(parseFlags({ "wait", "--pane", "build", "block:x/1" }))

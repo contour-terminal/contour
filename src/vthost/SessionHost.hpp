@@ -994,10 +994,11 @@ struct QuiescedHostSession
 /// moment.
 struct QuiescedHost
 {
-    vtworkspace::WorkspaceTreeState tree {};    ///< The workspaces, tabs and panes.
-    vtworkspace::ModelIdState modelIds {};      ///< The model's id counters.
-    vtworkspace::SessionId nextSessionId { 1 }; ///< The id the host mints its next session with.
-    std::vector<QuiescedHostSession> sessions;  ///< Every session still running, by id ascending.
+    vtworkspace::WorkspaceTreeState tree {};      ///< The workspaces, tabs and panes.
+    vtworkspace::ModelIdState modelIds {};        ///< The model's id counters.
+    vtworkspace::SessionId nextSessionId { 1 };   ///< The id the host mints its next session with.
+    vtworkspace::WorkspaceId defaultWorkspace {}; ///< The workspace a creation naming none lands in.
+    std::vector<QuiescedHostSession> sessions;    ///< Every session still running, by id ascending.
 };
 
 /// Why a host's sessions could not all be quiesced. Every session runs on as before.
@@ -1221,7 +1222,7 @@ class SessionHost final: public vtworkspace::ModelEvents
 
     /// Removes a workspace that holds no tab -- one createEmptyWorkspace() made and nothing filled, or one a
     /// move emptied -- forgetting its name. The host's own workspace (workspaceId()) removed, the
-    /// first workspace left becomes it.
+    /// first workspace left becomes it, or, with none left, a new empty one.
     /// @param workspace The workspace; one that holds a tab is left alone.
     void discardWorkspace(vtworkspace::WorkspaceId workspace);
 
@@ -1256,6 +1257,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return The connection a clipboard write of @p session goes to: the one focused last among those
     ///         selecting the session's workspace; nullopt when none does, or the session is in none.
     [[nodiscard]] std::optional<ConnectionId> clipboardTargetOf(vtworkspace::SessionId session) const;
+
+    /// Closes workspace @p workspace in one step: ends every session it holds now, then removes it, so it
+    /// does not stay behind as an ended, tabless entry. An unknown workspace changes nothing.
+    /// @param workspace The workspace.
+    void closeWorkspace(vtworkspace::WorkspaceId workspace);
 
     /// @return The workspace some window selected last; nullopt when none ever did.
     [[nodiscard]] std::optional<uint64_t> lastSelectedWorkspace() const noexcept { return _lastSelected; }
@@ -1624,6 +1630,8 @@ class SessionHost final: public vtworkspace::ModelEvents
                   vtworkspace::TabId tab,
                   int fromIndex,
                   int toIndex) override;
+    void workspaceMoved(vtworkspace::WorkspaceId workspace, int fromIndex, int toIndex) override;
+    void workspaceRemoved(vtworkspace::WorkspaceId workspace, int index) override;
     void tabAboutToBeMovedToWorkspace(vtworkspace::WorkspaceId from,
                                       int fromIndex,
                                       vtworkspace::WorkspaceId to,

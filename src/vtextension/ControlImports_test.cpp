@@ -145,7 +145,7 @@ TEST_CASE("the control imports are the everywhere-verbs, named and shaped as the
 {
     auto const functions = controlHostFunctions();
     CHECK(functions.size() == ControlImportCount);
-    CHECK(ControlImportCount == 15);
+    CHECK(ControlImportCount == 20);
     CHECK(std::ranges::all_of(functions, [](wasm::HostFunction const& function) {
         return function.module == ControlImportModule;
     }));

@@ -120,6 +120,25 @@ TEST_CASE("the directory follows the model's order, not the order the window too
     CHECK(directory.workspaces[1].id == second.value);
 }
 
+TEST_CASE("a workspace moved in the model is listed in its new place", "[directory][inprocess]")
+{
+    auto h = Harness {};
+    auto const first = h.addWorkspace().id();
+    auto const second = h.addWorkspace().id();
+    auto const third = h.addWorkspace().id();
+
+    h.model.model.moveWorkspace(third, 0);
+    auto directory = h.source.directory();
+    REQUIRE(directory.workspaces.size() == 3);
+    CHECK(directory.workspaces[0].id == third.value);
+    CHECK(directory.workspaces[1].id == first.value);
+    CHECK(directory.workspaces[2].id == second.value);
+
+    h.model.model.moveWorkspace(third, 99);
+    directory = h.source.directory();
+    CHECK(directory.workspaces[2].id == third.value);
+}
+
 TEST_CASE("a workspace the window does not own is not listed", "[directory][inprocess]")
 {
     auto h = Harness {};

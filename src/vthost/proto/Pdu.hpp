@@ -100,6 +100,9 @@ enum class PduType : uint8_t
     PaneSummary = 54,
     AuthChallenge = 55,
     WorkspaceMeta = 56,
+    MoveWorkspace = 57,
+    SetWorkspaceLabel = 58,
+    CloseWorkspace = 59,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1780,7 +1783,41 @@ struct WorkspaceMeta
     std::array<uint8_t, 16> controlId = {};          ///< Its control-API UUID; all zero when unbound.
     std::optional<std::string> label = std::nullopt; ///< Its label, if it changed; empty clears it.
     std::optional<WireGitInfo> git = std::nullopt;   ///< Its git state, if it changed.
+    /// Its 0-based place in the daemon's workspace order, if it changed. The daemon sends it with the full
+    /// meta and again, for every workspace that shifted, after a reorder, a creation or a removal: a client
+    /// lists its workspaces by it, not by the order layouts happen to arrive or by id.
+    std::optional<uint32_t> position = std::nullopt;
     bool operator==(WorkspaceMeta const&) const = default;
+};
+
+/// Client→server (Capability::WorkspaceMeta): move a workspace to a place in the daemon's workspace order.
+/// The daemon clamps @p toPosition to the order's bounds and answers every client with the new positions
+/// (WorkspaceMeta::position); an unknown workspace changes nothing.
+struct MoveWorkspace
+{
+    uint64_t workspace = 0;  ///< The daemon's workspace id.
+    uint32_t toPosition = 0; ///< The 0-based place it moves to.
+    bool operator==(MoveWorkspace const&) const = default;
+};
+
+/// Client→server (Capability::WorkspaceMeta): close a workspace, in one step. The daemon ends, in one frame,
+/// every session the workspace holds at that moment (a tab another client added a moment ago included) and
+/// then removes the workspace, which no client lists afterwards. An unknown workspace changes nothing.
+struct CloseWorkspace
+{
+    uint64_t workspace = 0; ///< The daemon's workspace id.
+    bool operator==(CloseWorkspace const&) const = default;
+};
+
+/// Client→server (Capability::WorkspaceMeta): set a workspace's label, which is what the sidebar's rename
+/// does. The daemon applies it to the object registry, so every client is told through WorkspaceMeta, and
+/// every control-API subscriber through `workspace.labelChanged`. An empty label clears it; an unknown
+/// workspace changes nothing.
+struct SetWorkspaceLabel
+{
+    uint64_t workspace = 0; ///< The daemon's workspace id.
+    std::string label = {}; ///< The new label.
+    bool operator==(SetWorkspaceLabel const&) const = default;
 };
 
 /// @param summary A pane's summary.
@@ -1938,7 +1975,10 @@ using DecodedPdu = std::variant<Invalid,
                                 NotifyRole,
                                 PaneSummary,
                                 AuthChallenge,
-                                WorkspaceMeta>;
+                                WorkspaceMeta,
+                                MoveWorkspace,
+                                SetWorkspaceLabel,
+                                CloseWorkspace>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

@@ -154,9 +154,12 @@ struct HandoverImage
     vtworkspace::WorkspaceTreeState tree {};    ///< The workspaces, tabs and panes.
     vtworkspace::ModelIdState modelIds {};      ///< The model's id counters.
     vtworkspace::SessionId nextSessionId { 1 }; ///< The id the next session is minted with.
-    ObjectRegistrySnapshot objects {};          ///< The object registry.
-    std::vector<HandoverSession> sessions;      ///< Every hosted session.
-    std::vector<InheritedListener> listeners;   ///< The listeners to keep serving on.
+    /// The model id of the workspace a creation naming none lands in (SessionHost's own workspace); 0 for an
+    /// image from before the field, which has the first one.
+    uint64_t defaultWorkspace = 0;
+    ObjectRegistrySnapshot objects {};        ///< The object registry.
+    std::vector<HandoverSession> sessions;    ///< Every hosted session.
+    std::vector<InheritedListener> listeners; ///< The listeners to keep serving on.
     /// The descriptor (POSIX) or handle (Windows) the daemon image lease is held through; none for none.
     vtpty::CrossingHandle lease {};
     /// The light/dark preference the latest client stated, which new sessions are built under.
@@ -188,6 +191,7 @@ struct HandoverImage
         visitor(10, self.defaultColorPreference);
         visitor(11, self.upgradeGeneration);
         visitor(13, self.cellPixelSize);
+        visitor(15, self.defaultWorkspace);
     }
 };
 

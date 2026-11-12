@@ -345,6 +345,9 @@ NativeSession::NativeSession(core::net::EventLoop& loop,
     _layoutObserver.onWorkspaceChange = [this](vtworkspace::WorkspaceId workspace) {
         layoutChanged(workspace);
     };
+    _layoutObserver.onWorkspaceOrderChange = [this] {
+        syncWorkspacePositions();
+    };
     _layoutObserver.onTabChange = [this](vtworkspace::TabId tab) {
         layoutChanged(_host.model().workspaceOfTab(tab));
     };
@@ -645,7 +648,8 @@ void NativeSession::announceWorkspaceMeta(vtworkspace::Workspace const& workspac
         _announcedMeta.erase(workspace.id().value);
         return;
     }
-    if (!_announcedMeta.insert(workspace.id().value).second)
+    auto const position = static_cast<uint32_t>(positionOf(workspace.id()));
+    if (!_announcedMeta.try_emplace(workspace.id().value, position).second)
         return;
     auto const uuid = _host.objects().uuidOf(workspace.id()).value_or(vtcontrol::Uuid {});
     auto const ref = vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace, .uuid = uuid };
@@ -657,14 +661,48 @@ void NativeSession::announceWorkspaceMeta(vtworkspace::Workspace const& workspac
          proto::DecodedPdu { proto::WorkspaceMeta { .workspace = workspace.id().value,
                                                     .controlId = uuid.bytes,
                                                     .label = std::string { _host.objects().labelOf(ref) },
-                                                    .git = std::move(git) } });
+                                                    .git = std::move(git),
+                                                    .position = position } });
+}
+
+int NativeSession::positionOf(vtworkspace::WorkspaceId workspace) const
+{
+    auto const& model = _host.model();
+    auto const indices = std::views::iota(0, model.workspaceCount());
+    auto const found = std::ranges::find_if(indices, [&](int i) {
+        auto const* candidate = model.workspaceAt(i);
+        return candidate != nullptr && candidate->id() == workspace;
+    });
+    return found != indices.end() ? *found : 0;
+}
+
+void NativeSession::syncWorkspacePositions()
+{
+    if (_phase != ConnectionPhase::Viewing || _closed || !sharesWorkspaceMeta())
+        return;
+    auto const& model = _host.model();
+    for (auto const i: std::views::iota(0, model.workspaceCount()))
+    {
+        auto const* workspace = model.workspaceAt(i);
+        if (workspace == nullptr)
+            continue;
+        auto const told = _announcedMeta.find(workspace->id().value);
+        // One not announced yet is told its position with the rest of its meta.
+        if (told == _announcedMeta.end() || std::cmp_equal(told->second, i))
+            continue;
+        told->second = static_cast<uint32_t>(i);
+        send(0,
+             proto::DecodedPdu { proto::WorkspaceMeta { .workspace = workspace->id().value,
+                                                        .controlId = controlIdOf(workspace->id()),
+                                                        .position = static_cast<uint32_t>(i) } });
+    }
 }
 
 void NativeSession::forgetRemovedWorkspaceMeta()
 {
     auto const& model = _host.model();
-    std::erase_if(_announcedMeta, [&model](uint64_t workspace) {
-        return model.workspace(vtworkspace::WorkspaceId { workspace }) == nullptr;
+    std::erase_if(_announcedMeta, [&model](auto const& announced) {
+        return model.workspace(vtworkspace::WorkspaceId { announced.first }) == nullptr;
     });
 }
 
@@ -920,6 +958,7 @@ void NativeSession::pushLayout()
             pushed = true;
         }
     forgetRemovedWorkspaceMeta();
+    syncWorkspacePositions();
     noteModelSessions();
     if (pushed && batchesLayouts())
     {
@@ -1001,6 +1040,7 @@ bool NativeSession::flushChangedLayouts()
         pushed = true;
     }
     forgetRemovedWorkspaceMeta();
+    syncWorkspacePositions();
     noteModelSessions();
     return pushed;
 }
@@ -2415,6 +2455,52 @@ NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame con
             openLayoutBatch();
             _layoutBatch = LayoutBatch::Pushed;
         }
+        return TabVerb::Served;
+    }
+    if (auto const* move = std::get_if<proto::MoveWorkspace>(&frame.pdu))
+    {
+        if (!_negotiated->shared.contains(proto::Capability::WorkspaceMeta))
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        // Applied to the model, which announces the move: every client is told the new positions.
+        if (_host.model().workspace(vtworkspace::WorkspaceId { move->workspace }) == nullptr)
+            errorLog()("{}: ignoring {}: there is no such workspace", _id, proto::describe(frame.pdu));
+        else
+            _host.model().moveWorkspace(
+                vtworkspace::WorkspaceId { move->workspace },
+                static_cast<int>(std::min<uint32_t>(move->toPosition, std::numeric_limits<int>::max())));
+        return TabVerb::Served;
+    }
+    if (auto const* close = std::get_if<proto::CloseWorkspace>(&frame.pdu))
+    {
+        if (!_negotiated->shared.contains(proto::Capability::WorkspaceMeta))
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        // Whatever the workspace holds now, in this one step: a tab another client added a moment ago too.
+        if (_host.model().workspace(vtworkspace::WorkspaceId { close->workspace }) == nullptr)
+            errorLog()("{}: ignoring {}: there is no such workspace", _id, proto::describe(frame.pdu));
+        else
+            _host.closeWorkspace(vtworkspace::WorkspaceId { close->workspace });
+        return TabVerb::Served;
+    }
+    if (auto const* set = std::get_if<proto::SetWorkspaceLabel>(&frame.pdu))
+    {
+        if (!_negotiated->shared.contains(proto::Capability::WorkspaceMeta))
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        // Set on the object registry, whose label observers tell every client and every control subscriber.
+        auto const uuid = _host.objects().uuidOf(vtworkspace::WorkspaceId { set->workspace });
+        if (!uuid)
+            errorLog()("{}: ignoring {}: there is no such workspace", _id, proto::describe(frame.pdu));
+        else
+            _host.objects().setLabel(
+                vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace, .uuid = *uuid }, set->label);
         return TabVerb::Served;
     }
     if (std::holds_alternative<proto::ReportFocus>(frame.pdu))

@@ -140,6 +140,12 @@ class SessionModel
     /// Creates a new, empty workspace and returns it.
     [[nodiscard]] Workspace* createWorkspace();
 
+    /// Moves @p workspace to position @p toIndex in the workspace order. @p toIndex is clamped to the order's
+    /// bounds; an unknown workspace, or a move to where it already is, changes nothing and announces nothing.
+    /// @param workspace The workspace to move.
+    /// @param toIndex   Its new 0-based position.
+    void moveWorkspace(WorkspaceId workspace, int toIndex);
+
     /// Removes a workspace and everything in it. Each contained session is reported closed.
     void removeWorkspace(WorkspaceId workspace);
 

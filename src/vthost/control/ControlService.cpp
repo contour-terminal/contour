@@ -836,6 +836,101 @@ void ControlService::handle(vtcontrol::CallContext& context,
     }));
 }
 
+void ControlService::handle(vtcontrol::CallContext& /*context*/,
+                            vtcontrol::CreateWorkspaceRequest const& request,
+                            vtcontrol::Completion<vtcontrol::CreateWorkspaceReply> done)
+{
+    // Through the host's own path, which names the workspace after the folder its shell starts in.
+    auto* workspace = _host.createWorkspace(spawnRequestOf({}, request.cwd));
+    if (workspace == nullptr)
+    {
+        done(std::unexpected(failed("the new workspace's shell could not be started")));
+        return;
+    }
+    auto const uuid = _host.objects().uuidOf(workspace->id()).value_or(vtcontrol::Uuid {});
+    // A label stated outright replaces the default one.
+    if (!request.label.empty())
+        _host.objects().setLabel(ObjectRef { .kind = ObjectKind::Workspace, .uuid = uuid }, request.label);
+    auto const* tab = workspace->activeTab();
+    done(vtcontrol::CreateWorkspaceReply {
+        .workspace = idOf(ObjectKind::Workspace, uuid),
+        .tab = idOf(ObjectKind::Tab, _host.objects().uuidOf(tab->id()).value_or(vtcontrol::Uuid {})),
+        .pane = idOf(ObjectKind::Pane,
+                     _host.objects().uuidOf(tab->rootPane()->session()).value_or(vtcontrol::Uuid {})),
+    });
+}
+
+void ControlService::handle(vtcontrol::CallContext& context,
+                            vtcontrol::RenameWorkspaceRequest const& request,
+                            vtcontrol::Completion<vtcontrol::EmptyReply> done)
+{
+    // object.setLabel on a workspace, which publishes workspace.labelChanged and tells every window.
+    done(resolveWorkspace(context, request.workspace).transform([&](WorkspaceId workspace) {
+        _host.objects().setLabel(
+            ObjectRef { .kind = ObjectKind::Workspace,
+                        .uuid = _host.objects().uuidOf(workspace).value_or(vtcontrol::Uuid {}) },
+            request.label);
+        return vtcontrol::EmptyReply {};
+    }));
+}
+
+void ControlService::handle(vtcontrol::CallContext& context,
+                            vtcontrol::CloseWorkspaceRequest const& request,
+                            vtcontrol::Completion<vtcontrol::EmptyReply> done)
+{
+    // In one step, as a window's close is: what the workspace holds now ends, and the workspace goes.
+    done(resolveWorkspace(context, request.workspace).transform([&](WorkspaceId workspace) {
+        _host.closeWorkspace(workspace);
+        return vtcontrol::EmptyReply {};
+    }));
+}
+
+namespace
+{
+    /// @param position A position as the API counts them, from 1.
+    /// @return The model's 0-based index for it, or BadRequest for 0.
+    [[nodiscard]] std::expected<int, ControlError> indexOfPosition(uint32_t position)
+    {
+        if (position == 0)
+            return std::unexpected(ControlError { .code = ControlErrorCode::BadRequest,
+                                                  .message = "positions count from 1",
+                                                  .candidates = {} });
+        return static_cast<int>(std::min<uint32_t>(position - 1, std::numeric_limits<int>::max()));
+    }
+} // namespace
+
+void ControlService::handle(vtcontrol::CallContext& context,
+                            vtcontrol::MoveWorkspaceRequest const& request,
+                            vtcontrol::Completion<vtcontrol::EmptyReply> done)
+{
+    done(indexOfPosition(request.toPosition).and_then([&](int index) {
+        return resolveWorkspace(context, request.workspace).transform([&](WorkspaceId workspace) {
+            // Clamped by the model, which tells every window the new order.
+            _host.model().moveWorkspace(workspace, index);
+            return vtcontrol::EmptyReply {};
+        });
+    }));
+}
+
+void ControlService::handle(vtcontrol::CallContext& context,
+                            vtcontrol::MoveTabRequest const& request,
+                            vtcontrol::Completion<vtcontrol::EmptyReply> done)
+{
+    done(indexOfPosition(request.toPosition).and_then([&](int index) {
+        return resolveTab(context, request.tab).and_then([&](TabId tab) {
+            return resolveWorkspace(context, request.toWorkspace).transform([&](WorkspaceId target) {
+                auto const source = _host.model().workspaceOfTab(tab);
+                _host.model().moveTabToWorkspace(source, tab, target, index);
+                // A workspace that lost its last tab goes, as a move over the native protocol leaves none.
+                if (auto const* emptied = _host.model().workspace(source);
+                    emptied != nullptr && emptied->empty() && source != target)
+                    _host.discardWorkspace(source);
+                return vtcontrol::EmptyReply {};
+            });
+        });
+    }));
+}
+
 namespace
 {
     /// How the control API names a window's answer to a switch.

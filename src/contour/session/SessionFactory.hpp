@@ -386,6 +386,41 @@ class SessionFactory
         return RemoteRouting::Local;
     }
 
+    /// Attach mode: renames the DAEMON's workspace @p workspace; the daemon's label change reaches every
+    /// window listing it (WorkspaceMeta).
+    /// @param workspace The daemon's workspace id, as a directory lists it.
+    /// @param label The new label; empty clears it.
+    /// @return Routed if handed to the daemon; Refused if the daemon owns the labels and cannot take it (the
+    ///         capability not shared, no connection); Local for a local factory, whose caller labels the
+    ///         workspace itself.
+    [[nodiscard]] virtual RemoteRouting requestRemoteRenameWorkspace(uint64_t /*workspace*/,
+                                                                     std::string_view /*label*/)
+    {
+        return RemoteRouting::Local;
+    }
+
+    /// Attach mode: moves the DAEMON's workspace @p workspace to a place in its workspace order; the daemon
+    /// states the new order to every window (WorkspaceMeta::position).
+    /// @param workspace The daemon's workspace id, as a directory lists it.
+    /// @param position The 0-based place it moves to; the daemon clamps it.
+    /// @return As requestRemoteRenameWorkspace().
+    [[nodiscard]] virtual RemoteRouting requestRemoteMoveWorkspace(uint64_t /*workspace*/,
+                                                                   uint32_t /*position*/)
+    {
+        return RemoteRouting::Local;
+    }
+
+    /// Attach mode: closes the DAEMON's workspace @p workspace in one step: the daemon ends whatever it holds
+    /// at that moment, a tab another client added a moment ago included, and removes the workspace; whether
+    /// or not this client mirrors its sessions.
+    /// @param workspace The daemon's workspace id, as a directory lists it.
+    /// @return Routed if handed to the daemon; Refused if it cannot be told (the capability not shared, no
+    ///         connection); Local for a local factory.
+    [[nodiscard]] virtual RemoteRouting requestRemoteCloseWorkspace(uint64_t /*workspace*/)
+    {
+        return RemoteRouting::Local;
+    }
+
     /// Attach mode: reports that the user moved the divider of the split separating the panes backed
     /// by @p firstPty and @p secondPty, so the DAEMON's model records the new ratio.
     ///

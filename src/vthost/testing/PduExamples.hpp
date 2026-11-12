@@ -253,7 +253,13 @@ namespace vthost::testing
               .git = proto::WireGitInfo { .branch = "secret-branch",
                                           .kind = proto::GitHeadKindWire::Branch,
                                           .ahead = 1,
-                                          .behind = 2 } } } },
+                                          .behind = 2 },
+              .position = 4 } } },
+        { proto::PduType::MoveWorkspace,
+          proto::DecodedPdu { proto::MoveWorkspace { .workspace = 3, .toPosition = 1 } } },
+        { proto::PduType::CloseWorkspace, proto::DecodedPdu { proto::CloseWorkspace { .workspace = 3 } } },
+        { proto::PduType::SetWorkspaceLabel,
+          proto::DecodedPdu { proto::SetWorkspaceLabel { .workspace = 3, .label = "secret-label" } } },
     };
 }
 

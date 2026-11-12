@@ -407,6 +407,31 @@ TEST_CASE("a restored session takes the scrollback limit of the configuration th
     CHECK(terminal.primaryScreen().renderMainPageText().contains("ready"));
 }
 
+TEST_CASE("a reordered daemon keeps its workspace order and its default workspace across an upgrade",
+          "[vthost][handover]")
+{
+    auto old = std::make_unique<LiveHost>(catDevice);
+    REQUIRE(old->host.createTab() != nullptr);
+    auto const defaultWorkspace = old->host.workspaceId();
+    auto* const other = old->host.createWorkspace();
+    REQUIRE(other != nullptr);
+    // The host's own workspace is no longer the first.
+    old->host.model().moveWorkspace(defaultWorkspace, 1);
+    auto const order = [](SessionHost& host) {
+        return std::ranges::to<std::vector>(
+            std::views::iota(0, host.model().workspaceCount())
+            | std::views::transform([&](int i) { return host.model().workspaceAt(i)->id().value; }));
+    };
+    auto const expected = order(old->host);
+    REQUIRE(expected == std::vector { other->id().value, defaultWorkspace.value });
+
+    auto const image = handOver(std::move(old));
+    auto const live = takeOver(image);
+
+    CHECK(order(live->host) == expected);
+    CHECK(live->host.workspaceId() == defaultWorkspace);
+}
+
 TEST_CASE("a refused workspace tree still adopts every session, each in a tab of its own",
           "[vthost][handover][threading]")
 {

@@ -580,6 +580,10 @@ class WindowController:
     /// already gone closes nothing: its row may now hold another tab.
     /// @param tab The tab's vtworkspace::TabId value.
     Q_INVOKABLE void confirmCloseTab(quint64 tab);
+    /// Closes the workspace the user confirmed closing, as closeWorkspaceConfirmationRequested() asked. One
+    /// that is gone already closes nothing.
+    /// @param workspace The workspace's id, as the window's directory lists it (DirectoryWorkspace::id).
+    Q_INVOKABLE void confirmCloseWorkspace(quint64 workspace);
     // }}}
     /// Asks the QML to open this window's "save layout as" name prompt (the keyboard/palette entry point
     /// for a nameless SaveLayout action). Emits saveLayoutRequested(); the dialog calls saveLayoutAs()
@@ -1393,6 +1397,14 @@ class WindowController:
     /// QML withdraws the question.
     /// @param tab The tab's vtworkspace::TabId value.
     void closeTabConfirmationWithdrawn(quint64 tab);
+    /// Closing a workspace may end running programs, so the window asks first (the same question as for a
+    /// tab, over every pane of the workspace); a dialog calls confirmCloseWorkspace() on "Close".
+    /// @param workspace The workspace's id, as the window's directory lists it.
+    /// @param workspaceLabel The workspace's label; empty when it has none.
+    /// @param program The running program's name; empty when no pane could name one.
+    void closeWorkspaceConfirmationRequested(quint64 workspace,
+                                             QString const& workspaceLabel,
+                                             QString const& program);
     void activeSessionChanged();
     /// activeStickyHeader() may have changed: the active session did, or its header.
     void activeStickyHeaderChanged();

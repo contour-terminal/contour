@@ -913,6 +913,263 @@ TEST_CASE("object.setLabel on a workspace publishes workspace.labelChanged", "[v
             CHECK(delivery.event.origin.workspace == workspace);
 }
 
+namespace
+{
+/// @return The id the control API gives the daemon's workspace @p workspace.
+[[nodiscard]] std::string workspaceIdOf(ControlHarness& h, vtworkspace::WorkspaceId workspace)
+{
+    return vtcontrol::toString(vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace,
+                                                      .uuid = *h.host.objects().uuidOf(workspace) });
+}
+
+/// @return The workspaces of @p h's model, in order, by id.
+[[nodiscard]] std::vector<uint64_t> workspaceOrderOf(ControlHarness& h)
+{
+    return std::ranges::to<std::vector>(
+        std::views::iota(0, h.host.model().workspaceCount())
+        | std::views::transform([&](int i) { return h.host.model().workspaceAt(i)->id().value; }));
+}
+} // namespace
+
+TEST_CASE("workspace.create opens a workspace with a tab, labelled as asked", "[vthost][control][write]")
+{
+    auto h = ControlHarness {};
+    std::ignore = h.openTab();
+
+    auto const created = callSync<vtcontrol::CreateWorkspaceReply>(
+        h.service, h.context, vtcontrol::CreateWorkspaceRequest { .label = "ops" });
+    REQUIRE(created.has_value());
+    REQUIRE(h.host.model().workspaceCount() == 2);
+    auto const* workspace = h.host.model().workspaceAt(1);
+    CHECK(created->workspace == workspaceIdOf(h, workspace->id()));
+    REQUIRE(workspace->tabCount() == 1);
+    CHECK(created->tab
+          == vtcontrol::toString(
+              vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Tab,
+                                     .uuid = *h.host.objects().uuidOf(workspace->activeTab()->id()) }));
+    CHECK(h.host.objects().labelOf(vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace,
+                                                          .uuid = *h.host.objects().uuidOf(workspace->id()) })
+          == "ops");
+}
+
+TEST_CASE("workspace.rename sets the label and publishes workspace.labelChanged",
+          "[vthost][control][write][events]")
+{
+    auto h = ControlHarness {};
+    std::ignore = h.openTab();
+    std::ignore = subscribe(h);
+    auto const workspace = workspaceIdOf(h, h.host.workspaceId());
+
+    REQUIRE(callSync<vtcontrol::EmptyReply>(
+                h.service,
+                h.context,
+                vtcontrol::RenameWorkspaceRequest { .workspace = workspace, .label = "release" })
+                .has_value());
+    h.drain();
+
+    auto const changes = delivered<vtcontrol::WorkspaceLabelChangedEvent>(h.context.sink);
+    REQUIRE(changes.size() == 1);
+    CHECK(changes[0].label == "release");
+    // Addressed by it from then on.
+    CHECK(callSync<vtcontrol::EmptyReply>(
+              h.service, h.context, vtcontrol::RenameWorkspaceRequest { .workspace = "release", .label = "" })
+              .has_value());
+
+    SECTION("a workspace nobody has is not found")
+    {
+        auto const missing = callSync<vtcontrol::EmptyReply>(
+            h.service, h.context, vtcontrol::RenameWorkspaceRequest { .workspace = "nowhere", .label = "x" });
+        REQUIRE_FALSE(missing.has_value());
+        CHECK(missing.error().code == ControlErrorCode::NotFound);
+    }
+}
+
+TEST_CASE("workspace.move reorders the workspaces", "[vthost][control][write]")
+{
+    auto h = ControlHarness {};
+    std::ignore = h.openTab();
+    auto const first = h.host.workspaceId().value;
+    auto const second = h.host.createWorkspace()->id().value;
+    auto const third = h.host.createWorkspace()->id().value;
+    REQUIRE(workspaceOrderOf(h) == std::vector { first, second, third });
+
+    SECTION("to the front, by id")
+    {
+        REQUIRE(callSync<vtcontrol::EmptyReply>(
+                    h.service,
+                    h.context,
+                    vtcontrol::MoveWorkspaceRequest {
+                        .workspace = workspaceIdOf(h, vtworkspace::WorkspaceId { third }), .toPosition = 1 })
+                    .has_value());
+        CHECK(workspaceOrderOf(h) == std::vector { third, first, second });
+        // Which workspace.list then reports.
+        auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
+        REQUIRE(list.has_value());
+        CHECK(list->workspaces.at(0).id == workspaceIdOf(h, vtworkspace::WorkspaceId { third }));
+        CHECK(list->workspaces.at(0).position == 1);
+    }
+    SECTION("beyond the end clamps, by position")
+    {
+        REQUIRE(
+            callSync<vtcontrol::EmptyReply>(
+                h.service, h.context, vtcontrol::MoveWorkspaceRequest { .workspace = "1", .toPosition = 99 })
+                .has_value());
+        CHECK(workspaceOrderOf(h) == std::vector { second, third, first });
+    }
+    SECTION("position 0 is a bad request")
+    {
+        auto const bad = callSync<vtcontrol::EmptyReply>(
+            h.service, h.context, vtcontrol::MoveWorkspaceRequest { .workspace = "1", .toPosition = 0 });
+        REQUIRE_FALSE(bad.has_value());
+        CHECK(bad.error().code == ControlErrorCode::BadRequest);
+    }
+    SECTION("a workspace nobody has is not found")
+    {
+        auto const missing = callSync<vtcontrol::EmptyReply>(
+            h.service,
+            h.context,
+            vtcontrol::MoveWorkspaceRequest { .workspace = "nowhere", .toPosition = 1 });
+        REQUIRE_FALSE(missing.has_value());
+        CHECK(missing.error().code == ControlErrorCode::NotFound);
+    }
+}
+
+TEST_CASE("workspace.close ends what the workspace holds and removes it", "[vthost][control][write]")
+{
+    auto h = ControlHarness {};
+    std::ignore = h.openTab();
+    auto const first = h.host.workspaceId().value;
+    auto const created =
+        callSync<vtcontrol::CreateWorkspaceReply>(h.service, h.context, vtcontrol::CreateWorkspaceRequest {});
+    REQUIRE(created.has_value());
+    // A second tab in it, as another client may have added a moment ago.
+    REQUIRE(callSync<vtcontrol::CreateTabReply>(
+                h.service, h.context, vtcontrol::CreateTabRequest { .workspace = created->workspace })
+                .has_value());
+    auto const second = h.host.model().workspaceAt(1)->id();
+    REQUIRE(h.host.model().workspace(second)->tabCount() == 2);
+
+    SECTION("by id")
+    {
+        REQUIRE(
+            callSync<vtcontrol::EmptyReply>(
+                h.service, h.context, vtcontrol::CloseWorkspaceRequest { .workspace = created->workspace })
+                .has_value());
+        CHECK(workspaceOrderOf(h) == std::vector { first });
+        CHECK_FALSE(h.host.hasEnded(second)); // gone, not left behind as an ended entry
+        CHECK(h.host.sessionIds().size() == 1);
+    }
+    SECTION("a workspace nobody has is not found")
+    {
+        auto const missing = callSync<vtcontrol::EmptyReply>(
+            h.service, h.context, vtcontrol::CloseWorkspaceRequest { .workspace = "nowhere" });
+        REQUIRE_FALSE(missing.has_value());
+        CHECK(missing.error().code == ControlErrorCode::NotFound);
+        CHECK(workspaceOrderOf(h).size() == 2);
+    }
+    SECTION("a move naming no position is a bad request")
+    {
+        auto const workspace = callSync<vtcontrol::EmptyReply>(
+            h.service, h.context, vtcontrol::MoveWorkspaceRequest { .workspace = created->workspace });
+        REQUIRE_FALSE(workspace.has_value());
+        CHECK(workspace.error().code == ControlErrorCode::BadRequest);
+        auto const tab = callSync<vtcontrol::EmptyReply>(
+            h.service,
+            h.context,
+            vtcontrol::MoveTabRequest { .tab = created->tab, .toWorkspace = created->workspace });
+        REQUIRE_FALSE(tab.has_value());
+        CHECK(tab.error().code == ControlErrorCode::BadRequest);
+    }
+}
+
+TEST_CASE("workspace.close of the only workspace leaves an empty one a tab.create can fill",
+          "[vthost][control][write]")
+{
+    auto h = ControlHarness {};
+    std::ignore = h.openTab();
+    auto const only = h.host.workspaceId();
+    auto const onlyId = workspaceIdOf(h, only);
+    REQUIRE(callSync<vtcontrol::EmptyReply>(
+                h.service, h.context, vtcontrol::CloseWorkspaceRequest { .workspace = onlyId })
+                .has_value());
+    REQUIRE(h.host.model().workspace(only) == nullptr);
+    // The host's own workspace is a new, empty one, not the removed one.
+    REQUIRE(h.host.model().workspaceCount() == 1);
+    auto const replacement = h.host.workspaceId();
+    CHECK(replacement != only);
+    REQUIRE(h.host.model().workspace(replacement) != nullptr);
+    CHECK(h.host.model().workspace(replacement)->tabCount() == 0);
+
+    // A tab naming no workspace lands in it.
+    auto const created =
+        callSync<vtcontrol::CreateTabReply>(h.service, h.context, vtcontrol::CreateTabRequest {});
+    REQUIRE(created.has_value());
+    CHECK(created->workspace == workspaceIdOf(h, replacement));
+    CHECK(h.host.model().workspace(replacement)->tabCount() == 1);
+}
+
+TEST_CASE("tab.move moves a tab into a workspace, or within its own", "[vthost][control][write]")
+{
+    auto h = ControlHarness {};
+    std::ignore = h.openTab();
+    auto const secondTab =
+        callSync<vtcontrol::CreateTabReply>(h.service, h.context, vtcontrol::CreateTabRequest {});
+    REQUIRE(secondTab.has_value());
+    auto const other =
+        callSync<vtcontrol::CreateWorkspaceReply>(h.service, h.context, vtcontrol::CreateWorkspaceRequest {});
+    REQUIRE(other.has_value());
+    auto const first = h.host.model().workspaceAt(0);
+    auto const target = h.host.model().workspaceAt(1);
+    REQUIRE(first->tabCount() == 2);
+
+    SECTION("into another workspace, at the front")
+    {
+        REQUIRE(callSync<vtcontrol::EmptyReply>(h.service,
+                                                h.context,
+                                                vtcontrol::MoveTabRequest { .tab = secondTab->tab,
+                                                                            .toWorkspace = other->workspace,
+                                                                            .toPosition = 1 })
+                    .has_value());
+        CHECK(first->tabCount() == 1);
+        REQUIRE(target->tabCount() == 2);
+        CHECK(h.host.model().workspaceOfTab(target->tabAt(0)->id()) == target->id());
+        auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
+        REQUIRE(list.has_value());
+        CHECK(list->workspaces.at(1).tabs.at(0).id == secondTab->tab);
+    }
+    SECTION("within its own workspace it reorders")
+    {
+        REQUIRE(callSync<vtcontrol::EmptyReply>(
+                    h.service,
+                    h.context,
+                    vtcontrol::MoveTabRequest { .tab = secondTab->tab,
+                                                .toWorkspace = workspaceIdOf(h, first->id()),
+                                                .toPosition = 1 })
+                    .has_value());
+        auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
+        REQUIRE(list.has_value());
+        CHECK(list->workspaces.at(0).tabs.at(0).id == secondTab->tab);
+    }
+    SECTION("a tab nobody has is not found")
+    {
+        auto const missing = callSync<vtcontrol::EmptyReply>(
+            h.service,
+            h.context,
+            vtcontrol::MoveTabRequest { .tab = "nowhere", .toWorkspace = other->workspace, .toPosition = 1 });
+        REQUIRE_FALSE(missing.has_value());
+        CHECK(missing.error().code == ControlErrorCode::NotFound);
+    }
+    SECTION("a workspace nobody has is not found")
+    {
+        auto const missing = callSync<vtcontrol::EmptyReply>(
+            h.service,
+            h.context,
+            vtcontrol::MoveTabRequest { .tab = secondTab->tab, .toWorkspace = "nowhere", .toPosition = 1 });
+        REQUIRE_FALSE(missing.has_value());
+        CHECK(missing.error().code == ControlErrorCode::NotFound);
+    }
+}
+
 TEST_CASE("control subscribers see pane.programStatusChanged and ls shows it",
           "[vthost][control][programstatus]")
 {

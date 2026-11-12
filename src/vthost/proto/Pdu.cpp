@@ -346,6 +346,18 @@ namespace
     {
         return std::to_underlying(PduType::WorkspaceMeta);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(MoveWorkspace const&) noexcept
+    {
+        return std::to_underlying(PduType::MoveWorkspace);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(CloseWorkspace const&) noexcept
+    {
+        return std::to_underlying(PduType::CloseWorkspace);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(SetWorkspaceLabel const&) noexcept
+    {
+        return std::to_underlying(PduType::SetWorkspaceLabel);
+    }
 
     [[nodiscard]] constexpr uint64_t tagOf(AuthChallenge const&) noexcept
     {
@@ -1140,6 +1152,7 @@ namespace
     {
         MetaHasLabel = 0b01,
         MetaHasGit = 0b10,
+        MetaHasPosition = 0b100,
     };
 
     /// The presence bits of a WireGitInfo's optionals.
@@ -1156,6 +1169,7 @@ namespace
         auto mask = uint8_t { 0 };
         mask |= pdu.label ? MetaHasLabel : 0;
         mask |= pdu.git ? MetaHasGit : 0;
+        mask |= pdu.position ? MetaHasPosition : 0;
         out.u8(mask);
         if (pdu.label)
             out.string(*pdu.label);
@@ -1175,6 +1189,25 @@ namespace
                 git.varint(*pdu.git->behind);
             out.blob(git.view());
         }
+        if (pdu.position)
+            out.varint(*pdu.position);
+    }
+
+    void encodeBody(Writer& out, MoveWorkspace const& pdu)
+    {
+        out.varint(pdu.workspace);
+        out.varint(pdu.toPosition);
+    }
+
+    void encodeBody(Writer& out, CloseWorkspace const& pdu)
+    {
+        out.varint(pdu.workspace);
+    }
+
+    void encodeBody(Writer& out, SetWorkspaceLabel const& pdu)
+    {
+        out.varint(pdu.workspace);
+        out.string(pdu.label);
     }
 
     void encodeBody(Writer& out, SwitchRequest const& pdu)
@@ -2482,6 +2515,35 @@ namespace
                 return std::unexpected(error);
             pdu.git = std::move(git);
         }
+        if (!decodeOptionalCount(in, mask, MetaHasPosition, pdu.position, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeMoveWorkspace(Reader& in)
+    {
+        auto pdu = MoveWorkspace {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.workspace, error) || !assign(in.varint(), pdu.toPosition, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeCloseWorkspace(Reader& in)
+    {
+        auto pdu = CloseWorkspace {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.workspace, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeSetWorkspaceLabel(Reader& in)
+    {
+        auto pdu = SetWorkspaceLabel {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.workspace, error) || !assign(in.string(), pdu.label, error))
+            return std::unexpected(error);
         return pdu;
     }
 
@@ -2746,6 +2808,9 @@ namespace
         DecodeRow { PduType::PaneSummary, decodePaneSummary },
         DecodeRow { PduType::AuthChallenge, decodeAuthChallenge },
         DecodeRow { PduType::WorkspaceMeta, decodeWorkspaceMeta },
+        DecodeRow { PduType::MoveWorkspace, decodeMoveWorkspace },
+        DecodeRow { PduType::SetWorkspaceLabel, decodeSetWorkspaceLabel },
+        DecodeRow { PduType::CloseWorkspace, decodeCloseWorkspace },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

@@ -50,7 +50,9 @@
 #include <optional>
 #include <ranges>
 #include <set>
+#include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -504,6 +506,14 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// made it ended.
     [[nodiscard]] contour::session::RemoteRouting requestRemoteMove(
         contour::session::RemoteMove const& move) override;
+
+    /// SessionFactory: the daemon's workspace verbs. Refused where the daemon does not share
+    /// Capability::WorkspaceMeta, which it must to serve them.
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteRenameWorkspace(
+        uint64_t workspace, std::string_view label) override;
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteMoveWorkspace(uint64_t workspace,
+                                                                             uint32_t position) override;
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteCloseWorkspace(uint64_t workspace) override;
 
     /// SessionFactory: the toggle of a split's axis in a daemon-hosted window is made by the daemon, whose
     /// layout push brings it in (a local flip would be reverted by the next one). Local when the daemon does

@@ -1335,10 +1335,15 @@ void SessionHost::discardWorkspace(WorkspaceId workspace)
     if (_workspaceGit)
         _workspaceGit->forget(workspace);
     _model.removeWorkspace(workspace);
-    // The host's own workspace is what a creation naming no workspace lands in: another takes its place. A
-    // move empties a workspace only by filling another, so one is left.
-    if (workspace == _workspace && _model.workspaceCount() > 0)
+    // The host's own workspace is what a creation naming no workspace lands in: another takes its place, and
+    // with none left (the last one closed) an empty one is made for it, as a handover restoring no workspace
+    // does, so the next tab has somewhere to go.
+    if (workspace != _workspace)
+        return;
+    if (_model.workspaceCount() > 0)
         _workspace = _model.workspaceAt(0)->id();
+    else
+        _workspace = createEmptyWorkspace().id();
 }
 
 void SessionHost::settleSwitch(uint32_t request, proto::SwitchReply reply)
@@ -2307,6 +2312,7 @@ std::expected<QuiescedHost, HostQuiesceError> SessionHost::quiesceAll()
         return QuiescedHost { .tree = _model.captureTree(),
                               .modelIds = _model.idState(),
                               .nextSessionId = SessionId { _nextSessionId },
+                              .defaultWorkspace = _workspace,
                               .sessions = std::move(sessions) };
     });
 }
@@ -2325,6 +2331,25 @@ void SessionHost::handleSessionExit(SessionId session)
 void SessionHost::closeSession(SessionId session)
 {
     endSession(session, SessionEnd::Requested);
+}
+
+void SessionHost::closeWorkspace(WorkspaceId workspace)
+{
+    auto const* const found = _model.workspace(workspace);
+    if (found == nullptr)
+        return;
+    // Collected first: ending a session changes the trees being walked.
+    auto sessions = std::vector<SessionId> {};
+    for (auto const index: std::views::iota(0, found->tabCount()))
+        found->tabAt(index)->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+            if (pane.isLeaf())
+                sessions.push_back(pane.session());
+        });
+    for (auto const session: sessions)
+        endSession(session, SessionEnd::Requested);
+    // Whatever the loop left (a workspace that held no tab) goes too; one that still holds a tab is kept.
+    _endedWorkspaces.erase(workspace.value);
+    discardWorkspace(workspace);
 }
 
 std::optional<std::filesystem::path> SessionHost::workingDirectoryOf(SessionId session) const
@@ -2801,6 +2826,16 @@ void SessionHost::tabClosed(WorkspaceId workspace, TabId tab, int index)
 void SessionHost::tabMoved(WorkspaceId workspace, TabId tab, int fromIndex, int toIndex)
 {
     fanOut(&vtworkspace::ModelEvents::tabMoved, workspace, tab, fromIndex, toIndex);
+}
+
+void SessionHost::workspaceMoved(WorkspaceId workspace, int fromIndex, int toIndex)
+{
+    fanOut(&vtworkspace::ModelEvents::workspaceMoved, workspace, fromIndex, toIndex);
+}
+
+void SessionHost::workspaceRemoved(WorkspaceId workspace, int index)
+{
+    fanOut(&vtworkspace::ModelEvents::workspaceRemoved, workspace, index);
 }
 
 void SessionHost::tabAboutToBeMovedToWorkspace(WorkspaceId from, int fromIndex, WorkspaceId to, int toIndex)

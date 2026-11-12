@@ -5675,6 +5675,27 @@ TEST_CASE("a CreateTab's profile overrides the connection's", "[vthost][native][
     CHECK(profilesOf(h.host) == std::vector<std::string> { "build", "ops", "build" });
 }
 
+TEST_CASE("a CreateTab after the only workspace closed lands in the empty one left in its place",
+          "[vthost][native][workspace-meta]")
+{
+    auto h = NativeHarness {};
+    auto const only = h.host.workspaceId();
+    h.host.closeWorkspace(only);
+    REQUIRE(h.host.model().workspace(only) == nullptr);
+    auto const replacement = h.host.workspaceId();
+    REQUIRE(replacement != only);
+    REQUIRE(h.host.model().workspace(replacement) != nullptr);
+
+    std::ignore = h.exchangeUntil({ proto::ClientHello {}, proto::CreateTab { .session = 0 } },
+                                  [workspace = replacement.value](auto const& got) {
+                                      auto const* layout = lastLayoutOf(got, workspace);
+                                      return layout != nullptr && layout->tabs.size() == 2;
+                                  });
+    // The attach gave the empty workspace its first tab; the CreateTab, naming no session, the second.
+    CHECK(h.host.model().workspaceCount() == 1);
+    CHECK(h.host.model().workspace(replacement)->tabCount() == 2);
+}
+
 TEST_CASE("a client without ProfileByName keeps the session-settings path", "[vthost][native][profiles]")
 {
     auto h = NativeHarness { profileOptions() };
@@ -9332,12 +9353,14 @@ TEST_CASE("a client with WorkspaceMeta gets one WorkspaceMeta per workspace afte
           == proto::WorkspaceMeta { .workspace = f.first,
                                     .controlId = f.refOf(f.first).uuid.bytes,
                                     .label = std::string {},
-                                    .git = std::nullopt });
+                                    .git = std::nullopt,
+                                    .position = 0 });
     CHECK(metas[1]
           == proto::WorkspaceMeta { .workspace = f.second,
                                     .controlId = f.refOf(f.second).uuid.bytes,
                                     .label = "ops",
-                                    .git = std::nullopt });
+                                    .git = std::nullopt,
+                                    .position = 1 });
     // Each comes after its workspace's layout, so the client knows the workspace by then.
     auto const layoutAt = std::ranges::find_if(client.received, [&](auto const& frame) {
         auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu);
@@ -9359,7 +9382,145 @@ TEST_CASE("a client with WorkspaceMeta gets one WorkspaceMeta per workspace afte
         CHECK(created[0].workspace == third);
         CHECK(created[0].controlId == f.refOf(third).uuid.bytes);
         CHECK(created[0].label == std::optional<std::string> { "" });
+        CHECK(created[0].position == std::optional<uint32_t> { 2 });
     }
+}
+
+TEST_CASE("a moved workspace reaches every client in the new order", "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& one = f.attachSelecting(f.first);
+    auto& other = f.attachSelecting(f.second);
+    f.settle();
+    auto const skipOne = one.received.size();
+    auto const skipOther = other.received.size();
+
+    // The window that asked for the move is no different from the one that did not.
+    NativeSessionFlushTester::serveWorkspaceVerb(
+        *one.session, proto::MoveWorkspace { .workspace = f.first, .toPosition = 1 });
+    f.settle();
+
+    auto const model = f.flush.h.host.model().workspaceAt(0)->id().value;
+    CHECK(model == f.second);
+    auto const positions = [](FlushClient const& client, std::size_t skip) {
+        auto order = std::map<uint64_t, std::optional<uint32_t>> {};
+        for (auto const& meta: MetaFixture::metasOf(client, skip))
+            order[meta.workspace] = meta.position;
+        return order;
+    };
+    auto const expected = std::map<uint64_t, std::optional<uint32_t>> { { f.second, 0 }, { f.first, 1 } };
+    CHECK(positions(one, skipOne) == expected);
+    CHECK(positions(other, skipOther) == expected);
+
+    SECTION("and a position beyond the end is clamped")
+    {
+        NativeSessionFlushTester::serveWorkspaceVerb(
+            *one.session, proto::MoveWorkspace { .workspace = f.second, .toPosition = 99 });
+        f.settle();
+        CHECK(f.flush.h.host.model().workspaceAt(1)->id().value == f.second);
+    }
+    SECTION("and an unknown workspace changes nothing")
+    {
+        NativeSessionFlushTester::serveWorkspaceVerb(
+            *one.session, proto::MoveWorkspace { .workspace = 987654, .toPosition = 0 });
+        CHECK(f.flush.h.host.model().workspaceAt(0)->id().value == f.second);
+    }
+}
+
+TEST_CASE("a closed workspace goes from every client, with a tab another client added just before",
+          "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& one = f.attachSelecting(f.first);
+    auto& other = f.attachSelecting(f.first);
+    f.settle();
+    // Another client's tab, added in the workspace a moment before the close.
+    auto const beside = vtworkspace::SessionId { f.inSecond };
+    REQUIRE(f.flush.h.host.createTab(vthost::SessionSpawnRequest {}, beside) != nullptr);
+    REQUIRE(f.flush.h.host.model().workspace(vtworkspace::WorkspaceId { f.second })->tabCount() == 2);
+    auto const before = f.flush.h.host.sessionIds().size();
+    auto const skipOne = one.received.size();
+    auto const skipOther = other.received.size();
+
+    NativeSessionFlushTester::serveWorkspaceVerb(*one.session,
+                                                 proto::CloseWorkspace { .workspace = f.second });
+    f.settle();
+
+    CHECK(f.flush.h.host.model().workspace(vtworkspace::WorkspaceId { f.second }) == nullptr);
+    CHECK(f.flush.h.host.sessionIds().size() == before - 2);
+    CHECK_FALSE(f.flush.h.host.hasEnded(vtworkspace::WorkspaceId { f.second }));
+    for (auto const* client: { &one, &other })
+    {
+        auto const skip = client == &one ? skipOne : skipOther;
+        auto emptied = false;
+        for (auto const& frame: client->received | std::views::drop(skip))
+            if (auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu))
+                emptied = emptied || (layout->workspace == f.second && layout->tabs.empty());
+        CHECK(emptied);
+    }
+
+    SECTION("an unknown workspace changes nothing, and the capability is needed")
+    {
+        NativeSessionFlushTester::serveWorkspaceVerb(*one.session,
+                                                     proto::CloseWorkspace { .workspace = 987654 });
+        CHECK(f.flush.h.host.model().workspaceCount() == 1);
+        auto& plain = f.attachSelecting(f.first, OffersMeta::No);
+        f.settle();
+        NativeSessionFlushTester::serveWorkspaceVerb(*plain.session,
+                                                     proto::CloseWorkspace { .workspace = f.first });
+        CHECK(f.flush.h.host.model().workspace(vtworkspace::WorkspaceId { f.first }) != nullptr);
+    }
+}
+
+TEST_CASE("positions are sent again after a workspace ahead of others is removed",
+          "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& client = f.attachSelecting(f.second);
+    f.settle();
+    auto const skip = client.received.size();
+
+    // The first workspace goes: the second is the first now.
+    NativeSessionFlushTester::serveWorkspaceVerb(*client.session,
+                                                 proto::CloseWorkspace { .workspace = f.first });
+    f.settle();
+
+    auto told = std::optional<uint32_t> {};
+    for (auto const& meta: MetaFixture::metasOf(client, skip))
+        if (meta.workspace == f.second && meta.position)
+            told = meta.position;
+    CHECK(told == std::optional<uint32_t> { 0 });
+}
+
+TEST_CASE("a client's label for a workspace is every client's", "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& one = f.attachSelecting(f.first);
+    auto& other = f.attachSelecting(f.second);
+    f.settle();
+    auto const skipOther = other.received.size();
+
+    NativeSessionFlushTester::serveWorkspaceVerb(
+        *one.session, proto::SetWorkspaceLabel { .workspace = f.second, .label = "ops" });
+    f.settle();
+
+    CHECK(f.flush.h.host.objects().labelOf(f.refOf(f.second)) == "ops");
+    auto const metas = MetaFixture::metasOf(other, skipOther);
+    REQUIRE(metas.size() == 1);
+    CHECK(metas[0].label == std::optional<std::string> { "ops" });
+}
+
+TEST_CASE("workspace verbs are refused without the capability", "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& client = f.attachSelecting(f.first, OffersMeta::No);
+    f.settle();
+    NativeSessionFlushTester::serveWorkspaceVerb(
+        *client.session, proto::MoveWorkspace { .workspace = f.first, .toPosition = 1 });
+    NativeSessionFlushTester::serveWorkspaceVerb(
+        *client.session, proto::SetWorkspaceLabel { .workspace = f.first, .label = "x" });
+    CHECK(f.flush.h.host.model().workspaceAt(0)->id().value == f.first);
+    CHECK(f.flush.h.host.objects().labelOf(f.refOf(f.first)).empty());
 }
 
 TEST_CASE("a label change reaches every client", "[vthost][native][workspace-meta]")

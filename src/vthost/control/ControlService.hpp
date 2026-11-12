@@ -105,6 +105,11 @@ class ControlService final:
     void handle(vtcontrol::CallContext& context, vtcontrol::CaptureRequest const& request, vtcontrol::Completion<vtcontrol::CaptureReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ClosePaneRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::CloseTabRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::CreateWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::CreateWorkspaceReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::RenameWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::CloseWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::MoveWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::MoveTabRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::SwitchWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::SwitchWorkspaceReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::SetLabelRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ReportStatusRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;

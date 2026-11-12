@@ -394,6 +394,21 @@ window resolves a switch naming one from its own directory, with no listing), it
 The daemon sends every field once per workspace, right after that workspace's first layout on the connection,
 and from then on a delta: absent optionals are unchanged, an empty label clears it, and a git state of kind
 `None` says the workspace is in no repository anymore. A workspace's removal is told by its layout emptying.
+
+The workspace order travels in the same PDU: `position`, the workspace's 0-based place in the daemon's model,
+is sent with the full state and again for every workspace whose place changed (a reorder, a workspace created
+or removed ahead of it). A client lists its workspaces by it, not by the order layouts arrive in, which a
+batch that re-sends only some of them does not preserve.
+
+**`MoveWorkspace`** (tag 57, gated on `Capability::WorkspaceMeta`) moves a workspace in that order: `workspace`
+is the daemon's id and `toPosition` the 0-based place, which `SessionModel::moveWorkspace` clamps. An unknown
+workspace is a logged no-op. The model's `workspaceMoved` event makes every connection send the new positions.
+**`CloseWorkspace`** (tag 59, same gate) closes a workspace in one step: `SessionHost::closeWorkspace` ends every
+session the workspace holds at that moment, a tab another client added a moment ago included, and removes the
+workspace, so it does not linger as an ended, tabless entry. An unknown workspace is a logged no-op.
+**`SetWorkspaceLabel`** (tag 58, same gate) sets a workspace's label through the object registry, so every
+window hears it as a `WorkspaceMeta` delta and every control subscriber as `workspace.labelChanged`. Neither
+has a reply.
 Label changes come from the object registry's label observer (`ObjectRegistry::onLabelChanged`), which also
 publishes the control event `workspace.labelChanged`.
 

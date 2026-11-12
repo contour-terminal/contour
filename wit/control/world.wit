@@ -199,6 +199,37 @@ interface types {
         tab: string,
     }
 
+    record create-workspace-request {
+        cwd: string,
+        label: string,
+    }
+
+    record create-workspace-reply {
+        workspace: string,
+        tab: string,
+        pane: string,
+    }
+
+    record rename-workspace-request {
+        workspace: string,
+        label: string,
+    }
+
+    record close-workspace-request {
+        workspace: string,
+    }
+
+    record move-workspace-request {
+        workspace: string,
+        to-position: u32,
+    }
+
+    record move-tab-request {
+        tab: string,
+        to-workspace: string,
+        to-position: u32,
+    }
+
     record set-label-request {
         object: string,
         label: string,
@@ -305,6 +336,12 @@ interface control {
         capture-reply,
         close-pane-request,
         close-tab-request,
+        create-workspace-request,
+        create-workspace-reply,
+        rename-workspace-request,
+        close-workspace-request,
+        move-workspace-request,
+        move-tab-request,
         set-label-request,
         report-status-request,
         clear-status-request,
@@ -349,6 +386,26 @@ interface control {
     /// Close a tab with all its panes.
     /// Needs `write`.
     tab-close: func(request: close-tab-request) -> result<_, control-error>;
+
+    /// Open a workspace with one tab, named after its folder unless a label is given.
+    /// Needs `write`.
+    workspace-create: func(request: create-workspace-request) -> result<create-workspace-reply, control-error>;
+
+    /// Rename a workspace; an empty label clears it.
+    /// Needs `write`.
+    workspace-rename: func(request: rename-workspace-request) -> result<_, control-error>;
+
+    /// Close a workspace with all its tabs and panes, and end their shells.
+    /// Needs `write`.
+    workspace-close: func(request: close-workspace-request) -> result<_, control-error>;
+
+    /// Move a workspace to a position in the workspace order, counted from 1.
+    /// Needs `write`.
+    workspace-move: func(request: move-workspace-request) -> result<_, control-error>;
+
+    /// Move a tab to a position in a workspace, which may be another one; its panes keep running.
+    /// Needs `write`.
+    tab-move: func(request: move-tab-request) -> result<_, control-error>;
 
     /// Give a workspace, tab or pane a label to address it by; an empty label clears it.
     /// Needs `write`.
