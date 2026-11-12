@@ -1,0 +1,94 @@
+name: "Windows build environment"
+description: >-
+  Everything the two Windows jobs of build.yml need between the checkout and the configure: the embedded
+  dependencies, Qt, vcpkg with its NuGet binary cache, CMake, the MSVC developer environment and Rust.
+  One copy, so that the job a pull request runs (plain) and the one that ships (production) cannot drift.
+  The per-step time limits of a workflow do not exist inside a composite action; the job bounds this step.
+inputs:
+  github-token:
+    description: "The token vcpkg's NuGet binary cache on GitHub Packages is read and written with."
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: "Fetch embedded dependencies"
+      shell: powershell
+      run: |
+        ./scripts/install-deps.ps1 --skip-vcpkg
+        type ./_deps/sources/CMakeLists.txt
+    - name: Install Qt
+      # Attempted twice, for the bad-mirror failure documented at the clang-tidy job's copy of
+      # this step; only a repeated failure fails the job.
+      id: install_qt
+      continue-on-error: true
+      uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+      with:
+        # 6.10, not the 6.11 the other platforms pin: Qt restructured its Windows package
+        # repository at 6.11 into per-architecture subdirectories
+        # (qt6_6111/qt6_6111_msvc2022_64/Updates.xml) where every release up to 6.10 kept a flat
+        # one (qt6_6103/Updates.xml). aqtinstall still requests the flat path, so a 6.11 install
+        # here dies with "Failed to locate XML data for Qt version '6.11.1'". 3.3.0 is its latest
+        # release, so there is nothing newer to move to; Linux and macOS are unaffected because
+        # their repositories stayed flat.
+        #
+        # 6.10 carries all four modules below, so this costs no feature -- only the configure-time
+        # notice that the detected Qt is older than the version Contour is tested against. Raise
+        # this to "6.11.*" once aqtinstall learns the new layout.
+        version: "6.10.*"
+        modules: qtmultimedia qt5compat qtshadertools qtspeech
+    - name: Install Qt -- retry past a bad mirror
+      if: steps.install_qt.outcome == 'failure'
+      uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+      with:
+        version: "6.10.*"
+        modules: qtmultimedia qt5compat qtshadertools qtspeech
+    - name: "Setup NuGet for vcpkg caching"
+      shell: bash
+      env:
+        NUGET_TOKEN: ${{ inputs.github-token }}
+      run: |
+        dotnet nuget add source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+          --name GitHub \
+          --username "${{ github.repository_owner }}" \
+          --password "$NUGET_TOKEN" \
+          --store-password-in-clear-text
+    - name: "Cache vcpkg"
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      id: vcpkg-cache
+      with:
+        path: ${{ runner.workspace }}/vcpkg
+        key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+        restore-keys: |
+          vcpkg-${{ runner.os }}-
+    - name: "Upgrade NuGet"
+      shell: pwsh
+      run: |
+        choco upgrade nuget.commandline -y
+    - name: "vcpkg: Clone and bootstrap"
+      if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        git clone --depth 1 https://github.com/microsoft/vcpkg.git ${{ runner.workspace }}\vcpkg
+        ${{ runner.workspace }}\vcpkg\bootstrap-vcpkg.bat
+        ${{ runner.workspace }}\vcpkg\vcpkg.exe fetch nuget
+      env:
+        VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
+    - name: "vcpkg: Install dependencies"
+      shell: pwsh
+      run: |
+        ${{ runner.workspace }}\vcpkg\vcpkg.exe install --triplet x64-windows
+      env:
+        VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
+        VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
+    # CMake 3.30 is the first to honour CPACK_WIX_VERSION: older ones run WiX 3's candle and light whatever
+    # WiX the package job installs.
+    - name: "Install cmake"
+      uses: lukka/get-cmake@f5b8fbb4d77cec1acc5a5f9f0df4beffaf5d98d9 # v4.3.4
+    - name: "Check cmake version"
+      shell: pwsh
+      run: cmake --version
+    - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+    - name: "install Rust (wasm32-wasip1)"
+      # @see the same step on Linux: the bundled extensions and the test guests are Rust.
+      shell: bash
+      run: ./scripts/install-rust-wasm.sh

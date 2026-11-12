@@ -1,0 +1,127 @@
+name: "macOS build environment"
+description: >-
+  Everything the two macOS jobs of build.yml need between the checkout and the configure: Qt, the build
+  dependencies, vcpkg, the tmux and fish the tests drive, and Rust. One copy, so that the job a pull
+  request runs (plain) and the one that ships (production) cannot drift. The per-step time limits of a
+  workflow do not exist inside a composite action; the job bounds this step as a whole.
+runs:
+  using: composite
+  steps:
+    - name: Install Qt
+      # The official Qt binaries, as on Linux and Windows -- not Homebrew's. Homebrew
+      # splits Qt across ~40 per-module prefixes and macdeployqt only follows one of
+      # them, so a brew-Qt bundle ships missing frameworks and unresolvable @rpath
+      # references. That is the defect this job used to hand to users as a .dmg.
+      #
+      # Version pinned and the install attempted twice, both for the reasons documented at the
+      # clang-tidy job's copy of this step. Pinned here too so every platform is measured against
+      # one Qt, even though the corrupt archive is Linux AARCH64 only.
+      id: install_qt
+      continue-on-error: true
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: 6.11.1
+        modules: qtmultimedia qt5compat qtshadertools qtspeech
+        cache: true
+    - name: Install Qt -- retry past a bad mirror
+      if: steps.install_qt.outcome == 'failure'
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: 6.11.1
+        modules: qtmultimedia qt5compat qtshadertools qtspeech
+        cache: true
+    - name: "Install dependencies"
+      # Sometimes, brew thinks it needs to install from source rather than binary; the job's bound
+      # on this action caps that rather than burning CI credits on a source build.
+      #
+      # The libraries Contour links are NOT taken from Homebrew here -- see the vcpkg
+      # steps below for why. install-deps.sh also brings the autotools that some vcpkg
+      # ports need on the build host.
+      shell: bash
+      run: |
+        set -ex
+        #brew update
+
+        # Trying to work around some Github CI issues causing `brew install` to fail
+        brew uninstall aws-sam-cli azure-cli
+
+        ./scripts/install-deps.sh
+    - name: "Cache vcpkg"
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/vcpkg/archives
+        key: vcpkg-macos-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/vcpkg-triplets/arm64-osx-contour.cmake') }}
+        restore-keys: vcpkg-macos-
+    - name: "vcpkg: clone and bootstrap"
+      # The libraries Contour links (openssl, libssh2, yaml-cpp, freetype, harfbuzz,
+      # cairo) are built from source against CMAKE_OSX_DEPLOYMENT_TARGET rather than
+      # taken from Homebrew. Homebrew ships one prebuilt bottle per macOS release and
+      # installs the one matching the runner, which made the .dmg's minimum macOS equal
+      # to the runner image's -- an invisible compatibility cliff that moved whenever
+      # GitHub rotated the image. vcpkg puts that floor under our control; the triplet at
+      # cmake/vcpkg-triplets/arm64-osx-contour.cmake is where it is set.
+      shell: bash
+      run: |
+        set -ex
+        git clone --depth 1 https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/vcpkg"
+        "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+        echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+    - name: "install tmux (oracle for the tmux-interop tests)"
+      # A CI-only tool, so it is here rather than in install-deps.sh, which lists what Contour
+      # needs to BUILD. Without it the tmux oracles self-skip, and the jobs' ctest would otherwise
+      # have reached them only to watch them do nothing -- macOS is where the BSD socket and
+      # Apple-libc++ differences in that code path would show up.
+      #
+      # Built from source at the same pinned 3.7b as the Linux matrix, rather than taken from the
+      # formula. Both platforms then measure against the exact protocol version the control-mode
+      # server claims to speak (docs/internals/vthost.md), and neither can start or stop running
+      # the imsg oracle because a formula moved.
+      shell: bash
+      run: |
+        set -ex
+        # tmux's configure hard-errors without libevent; ncurses comes with the SDK on macOS.
+        # PKG_CONFIG_PATH is stated rather than assumed: the formula is not keg-only today, so its
+        # .pc file is normally on the default search path anyway -- but naming the prefix keeps
+        # this working if that ever changes, and costs nothing while it has not.
+        brew install libevent
+        export PKG_CONFIG_PATH="$(brew --prefix libevent)/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+        curl -sSL -o "$RUNNER_TEMP/tmux.tar.gz" \
+          https://github.com/tmux/tmux/releases/download/3.7b/tmux-3.7b.tar.gz
+        tar xzf "$RUNNER_TEMP/tmux.tar.gz" -C "$RUNNER_TEMP"
+        # The release tarball ships a generated configure, so no autotools are needed here.
+        # --disable-utf8proc is required, not merely a choice: 3.7b's configure hard-errors
+        # ("must give --enable-utf8proc or --disable-utf8proc") rather than defaulting, and this
+        # oracle only has to speak the control-mode protocol -- how tmux measures east-Asian
+        # width does not enter into it. Stated on both platforms so they build the same binary.
+        cd "$RUNNER_TEMP/tmux-3.7b" \
+          && ./configure --disable-utf8proc \
+          && make -j"$(sysctl -n hw.ncpu)" \
+          && sudo make install
+        tmux -V
+    - name: "install fish, the one shell the shell-integration tests drive that macOS lacks"
+      # contour_test runs each bundled integration script in its own shell on a real PTY, and SKIPs a
+      # shell that is not installed. macOS brings bash (/bin/bash, 3.2.57), zsh and tcsh, and the runner
+      # image PowerShell (actions/runner-images' macos-15-arm64-Readme.md); fish it does not.
+      #
+      # Pinned, as tmux is: Homebrew installs whatever its formula moved to, and the fish version
+      # decides which marks the script sends itself. fish's own release package, checked against its
+      # SHA-256, installs a universal binary into /usr/local/bin.
+      shell: bash
+      run: |
+        set -ex
+        curl -sSL -o "$RUNNER_TEMP/fish.pkg" \
+          https://github.com/fish-shell/fish-shell/releases/download/4.2.1/fish-4.2.1.pkg
+        echo "07630a79598eb52ec42d54f458c99c9e2ebd39e525342ce3b354d338ef716965  $RUNNER_TEMP/fish.pkg" \
+          | shasum -a 256 -c -
+        sudo installer -pkg "$RUNNER_TEMP/fish.pkg" -target /
+        fish --version
+        bash --version
+        zsh --version
+        tcsh --version
+        pwsh --version
+    # CONTOUR_EXTENSIONS_BUNDLED is on by default, and its configuration fails without cargo and the
+    # wasm32-wasip1 target: the bundled status-line extensions, and the test guests, are Rust.
+    - name: "install Rust (wasm32-wasip1)"
+      shell: bash
+      run: ./scripts/install-rust-wasm.sh

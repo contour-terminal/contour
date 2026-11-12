@@ -1,7 +1,7 @@
 # Windows code signing
 
 Windows shows "Unknown publisher" and SmartScreen warnings for installers and programs that carry
-no trusted signature. The Windows job of [`build.yml`](https://github.com/contour-terminal/contour/blob/master/.github/workflows/build.yml)
+no trusted signature. The Windows package job (`windows_package`) of [`build.yml`](https://github.com/contour-terminal/contour/blob/master/.github/workflows/build.yml)
 is ready to sign `contour.exe`, the DLLs it ships and both installers; it signs once a signer is
 configured, and until then it ships unsigned packages exactly as before. This page says what the
 pipeline does, what the owner sets up on GitHub and with the signing vendor, and how to switch it
@@ -48,7 +48,7 @@ A signed build makes about 18 signatures: 16 files of the payload and 2 installe
 is the one place a signer is described: its secrets, the tools it runs (each pinned by release and
 SHA-256, each with a probe that starts it), the command line of its payload and installer steps, the
 `Publisher` its certificate must have, and which builds it may sign. A new vendor is a new row there,
-plus its secrets in the one `env` block the signing steps of the Windows job share. Its self-test,
+plus its secrets in the one `env` block the signing steps of the Windows package job share. Its self-test,
 `scripts/windows-signing/Test-WindowsSigning.ps1`, runs as the `contour_windows_signing` test.
 
 ## The GitHub environment
@@ -65,7 +65,7 @@ can read them.
    `v*`. Add the branch `master` only if you set `WINDOWS_SIGNING_BUILDS=releases-and-master`, which is
    not recommended (see below). Releases are cut from version tags, so a tag rule is all a release
    needs.
-4. Set **Required reviewers** to the owner. They hold the whole Windows job before it starts, which
+4. Set **Required reviewers** to the owner. They hold the whole Windows package job before it starts, which
    is also the way to stop a signature that nobody asked for.
 5. Put the signer's **secrets** on the environment, and only there, never as repository secrets
    (never their values anywhere else):
@@ -87,9 +87,11 @@ can read them.
    The condition that decides it is spelled twice in `build.yml` (the `environment:` key and the
    concurrency group); the two copies must stay identical.
 
-Pull requests never package, and a job that does not sign never enters the environment.
+Pull requests never package (the package job does not run on them), and a job that does not sign never
+enters the environment.
 
-**Time.** The Windows job may run 150 minutes, or 300 with `WINDOWS_SIGNER=signpath`. With SignPath
+**Time.** The Windows package job may run 300 minutes, or 360 (GitHub's limit) with `WINDOWS_SIGNER=signpath`:
+it has no compiler cache, so it compiles the whole tree and links it with link-time optimization on every run. With SignPath
 the job waits for the owner twice, once for the payload and once for the installers, up to an hour
 each from the moment the request appears. Approve each within an hour, or the release has no Windows
 packages and a re-run makes two new requests.
@@ -98,10 +100,11 @@ packages and a re-run makes two new requests.
 single use and two jobs logging in within its 30 seconds collide. GitHub keeps only one waiting job
 per group, so tags pushed in quick succession can lose the middle one; cut releases one at a time.
 
-**A residual risk.** The secrets belong to the whole Windows job, not to the signing steps alone: the
-runner hands them over when the job starts, and the 70 minutes of build and test steps before the
-signing run beside them. Every action of the job is therefore pinned to the commit of a release tag
-(with the tag in a comment), so that a moved tag cannot change it, but the build still runs vcpkg,
+**A residual risk.** The secrets belong to the whole Windows package job, not to the signing steps alone: the
+runner hands them over when the job starts, and the build and test steps (well over an hour) before the
+signing run beside them. Every action of the job, and of the local actions under `.github/actions/` it
+runs, is therefore pinned to the commit of a release tag (with the tag in a comment), so that a moved
+tag cannot change it, but the build still runs vcpkg,
 Qt's installer and the project's own scripts next to the secrets. If any of that is ever suspected,
 rotate what the signer holds (below) and review the signing history of the account. Moving the
 signing into a job of its own, which would take only the build tree, is the stronger design and is
@@ -205,7 +208,7 @@ of the CI user.
 
 1. Put the secrets and variables of the chosen signer in place (above).
 2. Set the repository variable `WINDOWS_SIGNER`.
-3. Push a release tag. The Windows job enters `release-signing` (a deployment shows on the run),
+3. Push a release tag. The Windows package job enters `release-signing` (a deployment shows on the run),
    `Signing: plan` prints the signer, `cpack` prints `WindowsSignedOverlay: <n> files from the
    signing manifest`, and `Signing: verify what ships` ends with what the signer ships.
 4. Check a downloaded artifact:
