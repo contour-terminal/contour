@@ -7983,6 +7983,7 @@ void TerminalSession::configureTerminal()
 
         sessionLog()("Setting terminal ID to {}.", _profile.terminalId.value());
         _terminal.setTerminalId(_profile.terminalId.value());
+        _terminal.setAnswerback(configured.answerback);
         _terminal.setMaxSixelColorRegisters(_config.images.value().maxImageColorRegisters);
         // NB: the image canvas ceiling is deliberately NOT touched here. It is monitor-derived, and
         // configureTerminal() runs on every config reload and profile switch -- paths that

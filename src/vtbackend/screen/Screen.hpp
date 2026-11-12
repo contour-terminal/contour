@@ -23,6 +23,7 @@
 #include <vtbackend/vt/Capabilities.hpp>
 #include <vtbackend/vt/Charset.hpp>
 #include <vtbackend/vt/KittyClipboard.hpp>
+#include <vtbackend/vt/PresentationState.hpp>
 #include <vtbackend/vt/SemanticPrompt.hpp>
 #include <vtbackend/vt/Sequence.hpp>
 #include <vtbackend/vt/TextSizing.hpp>
@@ -116,11 +117,26 @@ enum class LineFeedTarget : uint8_t
 /// This control function clears tab stops.
 enum class HorizontalTabClear : uint8_t
 {
-    /// Ps = 0 (default)
+    /// Ps = 3
     AllTabs,
 
-    /// Ps = 3
+    /// Ps = 0 (default)
     UnderCursor,
+};
+
+/// CTC - Cursor Tabulation Control
+///
+/// The horizontal tab-stop operations one CTC parameter names.
+enum class CursorTabulationControl : uint8_t
+{
+    /// Ps = 0 (default): set a stop on the cursor's column.
+    SetUnderCursor,
+
+    /// Ps = 2: clear the stop on the cursor's column.
+    ClearUnderCursor,
+
+    /// Ps = 4 or 5: clear every stop.
+    ClearAll,
 };
 
 /// Input: CSI 16 t
@@ -677,6 +693,11 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void backspace();                                  // BS
     void horizontalTabClear(HorizontalTabClear which); // TBC
     void horizontalTabSet();                           // HTS
+    /// Sets or clears horizontal tab stops (CTC).
+    /// @param operation The operation one CTC parameter names.
+    void cursorTabulationControl(CursorTabulationControl operation);
+    /// Returns the tab stops to one every 8 columns, those beyond the page included (DECST8C).
+    void resetTabStops();
 
     void index();        // IND
     void reverseIndex(); // RI
@@ -703,6 +724,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Sets the current working directory as file:// URL.
     void setCurrentWorkingDirectory(std::string const& url); // OSC 7
+    /// Applies one OSC 133 shell-integration command.
+    /// @param cmd The payload after `133;`: the sub-command letter and its arguments.
+    void processShellIntegration(std::string const& cmd);
 
     void hyperlink(std::string id, std::string uri);                   // OSC 8
     void notify(std::string const& title, std::string const& content); // OSC 777
@@ -1803,6 +1827,15 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECDLD(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECDMAC(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRSPS(Sequence const& seq);
+
+    /// Restores a DECCIR payload handed back with DECRSPS 1: on the page it names, if it can be read whole
+    /// and its position lies on the page.
+    void restoreCursorInformation(std::string_view payload);
+    /// Makes this page's cursor the one a decoded DECCIR describes.
+    void adoptCursorInformation(CursorInformation const& info);
+    /// Restores a DECTABSR payload handed back with DECRSPS 2, if it can be read whole.
+    void restoreTabStops(std::string_view payload);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECUDK(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& seq);
 
@@ -1815,8 +1848,6 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void replyGipStatus(int statusCode);
 
     [[nodiscard]] std::optional<Image::Data> decodePng(std::span<uint8_t const> data, ImageSize& size) const;
-
-    void processShellIntegration(Sequence const& seq);
 
     /// Marks the cursor's logical line as where a command's output starts (LineFlag::OutputStart), as OSC
     /// 133;C or an OSC 3008 command start says, and notes that the shell marks output starts.

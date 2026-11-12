@@ -66,6 +66,7 @@ constexpr inline auto CSIUENHCE = FunctionDocumentation { .mnemonic = "CSIUENHCE
 constexpr inline auto CSIUENTER = FunctionDocumentation { .mnemonic = "CSIUENTER", .comment = "Enter Extended keyboard mode" };
 constexpr inline auto CSIULEAVE = FunctionDocumentation { .mnemonic = "CSIULEAVE", .comment = "Leave Extended keyboard mode" };
 constexpr inline auto CSIUQUERY = FunctionDocumentation { .mnemonic = "CSIUQUERY", .comment = "Query Extended keyboard mode" };
+constexpr inline auto CTC = FunctionDocumentation { .mnemonic = "CTC", .comment = "Cursor Tabulation Control", .parameters = "Ps ; ...", .description = "Sets or clears horizontal tab stops, applying each Ps in turn: 0 (or omitted) = set a stop on the cursor's column, 2 = clear the stop on the cursor's column, 4 or 5 = clear every stop. Tab stops are shared by all lines (ECMA-48 TSM single), so 4 -- the stops of the active line -- clears them all as 5 does. The line (vertical) tab stops 1, 3 and 6 are not supported.", .notes = "ECMA-48. See also HTS, TBC and DECST8C.", .examples = "CSI 2 W" };
 constexpr inline auto CUB = FunctionDocumentation { .mnemonic = "CUB", .comment = "Move cursor backward" };
 constexpr inline auto CUD = FunctionDocumentation { .mnemonic = "CUD", .comment = "Move cursor down" };
 constexpr inline auto CUF = FunctionDocumentation { .mnemonic = "CUF", .comment = "Move cursor forward" };
@@ -108,6 +109,7 @@ constexpr inline auto DECREQTPARM = FunctionDocumentation {
 };
 constexpr inline auto DECRQM = FunctionDocumentation { .mnemonic = "DECRQM", .comment = "Request DEC-mode" };
 constexpr inline auto DECRQM_ANSI = FunctionDocumentation { .mnemonic = "DECRQM_ANSI", .comment = "Request ANSI-mode" }; // NOLINT
+constexpr inline auto DECRSPS = FunctionDocumentation { .mnemonic = "DECRSPS", .comment = "Restore Presentation State", .parameters = "Ps ; Pt", .description = "Restores what a presentation state report handed out: Ps 1 the cursor information of a DECCIR (position, page, rendition, protection, origin mode, single shift, pending wrap and character sets), Ps 2 the tab stops of a DECTABSR. Pt is the report's payload. A payload that cannot be read whole, or a position off the page, changes nothing; an SCS designator Contour has no character set for leaves that G-set as it was.", .notes = "VT320. See DECRQPSR, which asks for the reports.", .examples = "DCS 2 $ t 9/17/25 ST" };
 constexpr inline auto DECRQPSR = FunctionDocumentation { .mnemonic = "DECRQPSR", .comment = "Request presentation state report" };
 constexpr inline auto DECRQUPSS = FunctionDocumentation { .mnemonic = "DECRQUPSS", .comment = "Request User-Preferred Supplemental Set", .description = "Reports the current User-Preferred Supplemental Set as a DECAUPSS-shaped DCS. The reported `Ps` is the set's own size, not whatever was last sent." };
 constexpr inline auto DECSASD = FunctionDocumentation { .mnemonic = "DECSASD", .comment = "Select Active Status Display" };
@@ -126,6 +128,7 @@ constexpr inline auto DECSPP = FunctionDocumentation { .mnemonic = "DECSPP", .co
 constexpr inline auto DECSR = FunctionDocumentation { .mnemonic = "DECSR", .comment = "Secure Reset", .parameters = "Pr", .description = "Returns the terminal to its power-up state, exactly as a hard reset (RIS) does -- Contour's RIS never disconnects from the host, which is the one difference the VT510 manual draws between the two. If Pr is given and lies within 0..16383, the terminal then confirms with DECSRC, `CSI Pr * q`, echoing Pr back. An omitted or out-of-range Pr resets without a confirmation.", .notes = "VT420. Unlike most sequences it is honoured at every operating level, as the VT510 manual requires.", .examples = "CSI 1234 + p" };
 constexpr inline auto DECSSCLS = FunctionDocumentation { .mnemonic = "DECSSCLS", .comment = "Set Scroll Speed." };
 constexpr inline auto DECSSDT = FunctionDocumentation { .mnemonic = "DECSSDT", .comment = "Select Status Display (Line) Type" };
+constexpr inline auto DECST8C = FunctionDocumentation { .mnemonic = "DECST8C", .comment = "Set Tab at Every 8 Columns", .parameters = "Ps", .description = "Clears every horizontal tab stop and puts back the ones the terminal starts with: one every 8 columns, also on the columns beyond the page's current width. Ps must be 5; an omitted Ps is taken as 5.", .notes = "VT510.", .examples = "CSI ? 5 W" };
 constexpr inline auto DECSTBM = FunctionDocumentation { .mnemonic = "DECSTBM", .comment = "Set top/bottom margin" };
 constexpr inline auto DECSTGLT = FunctionDocumentation { .mnemonic = "DECSTGLT", .comment = "Select Color Look-Up Table", .parameters = "table", .description = "Selects the color mode used to display text: 1 or 2 = alternate color (text color comes from the " "attribute combinations assigned via DECATC, and ANSI SGR color parameters are ignored entirely; a " "combination with no DECATC assignment uses the default text colors), 3 = ANSI SGR color (the " "power-up default, and what an omitted parameter selects). The monochrome table (0) of the original " "VT525 is not supported.", .notes = "VT525. See also DECATC and DECAC.", };
 constexpr inline auto DECSTR = FunctionDocumentation { .mnemonic = "DECSTR", .comment = "Soft terminal reset" };
@@ -636,6 +639,7 @@ namespace detail // {{{
 
 // C0
 constexpr inline auto EOT = detail::C0('\x04', "EOT", "End of Transmission");
+constexpr inline auto ENQ = detail::C0('\x05', "ENQ", "Enquiry; replies with the configured answerback message, if any.");
 constexpr inline auto BEL = detail::C0('\x07', "BEL", "Bell");
 constexpr inline auto BS  = detail::C0('\x08', "BS", "Backspace");
 constexpr inline auto TAB = detail::C0('\x09', "TAB", "Tab");
@@ -774,6 +778,7 @@ constexpr inline auto CHA         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto CHT         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'I', VTType::VT100, documentation::CHT);
 constexpr inline auto CNL         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'E', VTType::VT100, documentation::CNL);
 constexpr inline auto CPL         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'F', VTType::VT100, documentation::CPL);
+constexpr inline auto CTC         = detail::CSI(std::nullopt, 0, ArgsMax, std::nullopt, 'W', VTType::VT100, documentation::CTC);
 constexpr inline auto CSIUENHCE   = detail::CSI('=', 0, 2, std::nullopt, 'u', VTExtension::Unknown, documentation::CSIUENHCE);
 constexpr inline auto CSIUENTER   = detail::CSI('>', 0, 1, std::nullopt, 'u', VTExtension::Unknown, documentation::CSIUENTER);
 constexpr inline auto CSIULEAVE   = detail::CSI('<', 0, 1, std::nullopt, 'u', VTExtension::Unknown, documentation::CSIULEAVE);
@@ -843,6 +848,7 @@ constexpr inline auto DECSNLS     = detail::CSI(std::nullopt, 0, 1, '*', '|', VT
 constexpr inline auto DECSR       = detail::atEveryLevel(detail::CSI(std::nullopt, 0, 1, '+', 'p', VTType::VT420, documentation::DECSR));
 constexpr inline auto DECSSCLS    = detail::CSI(std::nullopt, 0, 1, ' ', 'p', VTType::VT510, documentation::DECSSCLS);
 constexpr inline auto DECSSDT     = detail::CSI(std::nullopt, 0, 1, '$', '~', VTType::VT320, documentation::DECSSDT);
+constexpr inline auto DECST8C     = detail::CSI('?', 0, 1, std::nullopt, 'W', VTType::VT510, documentation::DECST8C);
 constexpr inline auto DECSTBM     = detail::CSI(std::nullopt, 0, 2, std::nullopt, 'r', VTType::VT100, documentation::DECSTBM);
 constexpr inline auto DECSTGLT    = detail::CSI(std::nullopt, 0, 1, ')', '{', VTType::VT525, documentation::DECSTGLT);
 constexpr inline auto DECSTR      = detail::CSI(std::nullopt, 0, 0, '!', 'p', VTType::VT100, documentation::DECSTR);
@@ -910,6 +916,7 @@ constexpr inline auto DECRQDE         = detail::CSI(std::nullopt, 0, 0, '"', 'v'
 constexpr inline auto DECAUPSS    = detail::DCS(std::nullopt, 0, 1, '!', 'u', VTType::VT320, documentation::DECAUPSS);
 constexpr inline auto DECDLD      = detail::DCS(std::nullopt, 0, 16, std::nullopt, '{', VTType::VT220, documentation::DECDLD);
 constexpr inline auto DECDMAC     = detail::DCS(std::nullopt, 0, 3, '!', 'z', VTType::VT420, documentation::DECDMAC);
+constexpr inline auto DECRSPS     = detail::DCS(std::nullopt, 1, 1, '$', 't', VTType::VT320, documentation::DECRSPS);
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, documentation::DECRQSS);
 constexpr inline auto DECUDK      = detail::DCS(std::nullopt, 0, 2, std::nullopt, '|', VTType::VT220, documentation::DECUDK);
 constexpr inline auto DECSIXEL    = detail::DCS(std::nullopt, 0, 3, std::nullopt, 'q', VTType::VT330, documentation::DECSIXEL);
@@ -973,6 +980,7 @@ constexpr static auto allFunctionsArray() noexcept
     auto funcs = std::array {
         // C0
         EOT,
+        ENQ,
         BEL,
         BS,
         TAB,
@@ -1070,6 +1078,7 @@ constexpr static auto allFunctionsArray() noexcept
         CBT,
         CHA,
         CHT,
+        CTC,
         CNL,
         CPL,
         CUB,
@@ -1128,6 +1137,7 @@ constexpr static auto allFunctionsArray() noexcept
         DECSNLS,
         DECSR,
         DECSSDT,
+        DECST8C,
         DECSTBM,
         DECSTGLT,
         DECSTR,
@@ -1184,6 +1194,7 @@ constexpr static auto allFunctionsArray() noexcept
         GIP,
         STP,
         DECRQSS,
+        DECRSPS,
         DECSIXEL,
         REGIS,
         XTGETTCAP,

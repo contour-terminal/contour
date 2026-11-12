@@ -441,6 +441,9 @@ Terminal::Terminal(Events& eventListener,
     setMode(DECMode::LeftRightMargin, false);
     // Alternate scroll on, as Windows Terminal and foot power up.
     setMode(DECMode::MouseAlternateScroll, true);
+    // Alt sends ESC, as applications expect (@see DECMode::MetaSendsEscape).
+    setMode(DECMode::MetaSendsEscape, true);
+    setMode(DECMode::AltSendsEscape, true);
 
     for (auto const& [mode, frozen]: _settings.frozenModes)
         freezeMode(mode, frozen);
@@ -8058,6 +8061,18 @@ void Terminal::setMode(DECMode mode, bool enable)
         case DECMode::BackarrowKey:
             changeInputEncoding([&](InputGenerator& input) { input.setBackarrowKeyMode(enable); });
             break;
+        case DECMode::MetaSendsEscape:
+        case DECMode::AltSendsEscape: {
+            auto const altMode = mode == DECMode::MetaSendsEscape ? AltEscapeMode::MetaSendsEscape
+                                                                  : AltEscapeMode::AltSendsEscape;
+            changeInputEncoding([&](InputGenerator& input) {
+                if (enable)
+                    input.enableAltEscapeMode(altMode);
+                else
+                    input.disableAltEscapeMode(altMode);
+            });
+            break;
+        }
         case DECMode::Win32InputMode:
             changeInputEncoding([&](InputGenerator& input) { input.setWin32InputMode(enable); });
             break;
@@ -8376,6 +8391,8 @@ void Terminal::hardReset()
     setMode(DECMode::VisibleCursor, true);
     setMode(DECMode::PageCursorCoupling, true);
     setMode(DECMode::MouseAlternateScroll, true); // alternate scroll on, as at power-on
+    setMode(DECMode::MetaSendsEscape, true);      // Alt sends ESC, as at power-on
+    setMode(DECMode::AltSendsEscape, true);
 
     for (auto const& [mode, frozen]: _settings.frozenModes)
         freezeMode(mode, frozen);
@@ -10159,6 +10176,8 @@ std::string toString(DECMode mode)
         case DECMode::ReportColorPaletteUpdated: return "ReportColorPaletteUpdated";
         case DECMode::InBandWindowResize: return "InBandWindowResize";
         case DECMode::PasteMimeNotifications: return "PasteMimeNotifications";
+        case DECMode::MetaSendsEscape: return "MetaSendsEscape";
+        case DECMode::AltSendsEscape: return "AltSendsEscape";
         case DECMode::SemanticBlockProtocol: return "SemanticBlockProtocol";
         case DECMode::PrintFormFeed: return "PrintFormFeed";
         case DECMode::HebrewKeyboardMapping: return "HebrewKeyboardMapping";

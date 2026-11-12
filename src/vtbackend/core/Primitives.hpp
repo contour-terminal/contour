@@ -1141,10 +1141,21 @@ enum class DECMode : std::uint8_t
     /// While set, a paste is announced to the application with the MIME types the clipboard actually
     /// holds, so a full-screen application can choose how to interpret it rather than guessing.
     PasteMimeNotifications = 72,
+
+    /// metaSendsEscape (DEC mode 1036), from xterm: Meta prefixes the key it modifies with ESC.
+    ///
+    /// Contour has one key for Alt and Meta, so Alt sends ESC while either this mode or AltSendsEscape is
+    /// set, as xterm's Alt does while it is Meta. Both are set from power-on: applications expect Alt to
+    /// send ESC, and Contour always did. With both reset, Alt sends the key as if it were not held.
+    MetaSendsEscape = 73,
+
+    /// altSendsEscape (DEC mode 1039), from xterm: Alt prefixes the key it modifies with ESC.
+    /// @see MetaSendsEscape, which it shares the Alt key with.
+    AltSendsEscape = 74,
     // }}}
 
     /// Sentinel value for sizing the mode bitset. Must remain the last entry.
-    DECModeCount = 73
+    DECModeCount = 75
 };
 
 /// The minimum ANSI conformance level (1..5, matching conformanceLevelOf(VTType)) at which a DEC
@@ -1522,6 +1533,8 @@ constexpr inline auto DECModeNumbers = std::to_array<DECModeNumbering>({
     { DECMode::TextReflow, 2028 },
     { DECMode::SixelCursorNextToGraphic, 8452 },
     { DECMode::Win32InputMode, 9001 },
+    { DECMode::MetaSendsEscape, 1036 },
+    { DECMode::AltSendsEscape, 1039 },
 });
 
 /// @return The DEC private mode number for @p m, or its raw ordinal when it has no assigned number.

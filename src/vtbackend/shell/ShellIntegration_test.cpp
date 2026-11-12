@@ -1983,3 +1983,68 @@ TEST_CASE("ShellIntegration.a wrap within left and right margins keeps the row's
     CHECK(row.isFlagEnabled(LineFlag::Marked));
     CHECK_FALSE(row.wrapped());
 }
+
+TEST_CASE("ShellIntegration.ConEmu OSC 9;9 reports the working directory")
+{
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+
+    SECTION("a quoted path, as ConEmu documents it")
+    {
+        mc.writeToScreen("\033]9;9;\"C:\\Users\\me\"\033\\");
+        CHECK(mc.terminal.currentWorkingDirectory() == "C:\\Users\\me");
+    }
+
+    SECTION("an unquoted path")
+    {
+        mc.writeToScreen("\033]9;9;/home/me\033\\");
+        CHECK(mc.terminal.currentWorkingDirectory() == "/home/me");
+    }
+
+    SECTION("a path holding a ';' is kept whole")
+    {
+        mc.writeToScreen("\033]9;9;\"/srv/a;b\"\033\\");
+        CHECK(mc.terminal.currentWorkingDirectory() == "/srv/a;b");
+    }
+
+    SECTION("no path is no directory")
+    {
+        for (auto const* const sequence: { "\033]9;9\033\\", "\033]9;9;\033\\", "\033]9;9;\"\"\033\\" })
+        {
+            mc.writeToScreen(sequence);
+            CHECK(mc.terminal.currentWorkingDirectory().empty());
+        }
+    }
+
+    // The regression: every OSC 9 but 9;4 was a desktop notification, so a prompt reporting its
+    // directory this way popped one up at every prompt.
+    CHECK(mc.notifications.empty());
+}
+
+TEST_CASE("ShellIntegration.ConEmu OSC 9;12 starts a prompt as OSC 133;A does")
+{
+    auto mc = MockTerm { PageSize { LineCount(25), ColumnCount(80) } };
+    auto const& blocks = mc.terminal.commandBlocks();
+
+    mc.writeToScreen("\033]9;12\033\\");
+
+    REQUIRE(blocks.size() == 1);
+    REQUIRE(blocks.current() != nullptr);
+    CHECK(blocks.current()->state == CommandBlockState::Prompting);
+    CHECK(mc.terminal.currentScreen().lineFlagsAt(LineOffset(0)).contains(LineFlag::Marked));
+    CHECK(mc.notifications.empty());
+}
+
+TEST_CASE("ShellIntegration.ConEmu OSC 9 sub-functions leave other messages to the notification")
+{
+    // Only a first field that is exactly 9 or 12 is one of them; a message beginning with either is a
+    // message.
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    mc.writeToScreen("\033]9;9 tests passed\033\\");
+    mc.writeToScreen("\033]9;12 warnings\033\\");
+
+    REQUIRE(mc.notifications.size() == 2);
+    CHECK(mc.notifications[0].second == "9 tests passed");
+    CHECK(mc.notifications[1].second == "12 warnings");
+    CHECK(mc.terminal.currentWorkingDirectory().empty());
+    CHECK(mc.terminal.commandBlocks().size() == 0);
+}

@@ -348,6 +348,12 @@
           <li>Release packages are built with link-time optimization and each platform's exploit mitigations (Control Flow Guard and CET shadow-stack compatibility on Windows; on Linux the build now sets position-independent executables, full RELRO, the stack protector and fortified C library calls itself instead of relying on the compiler's defaults) (#2250)</li>
           <li>The Ubuntu package no longer comes with a separate <code>-dbgsym</code> debug-symbol package; no release publishes debug symbols</li>
           <li>Adds closing a tab with a middle click on it, as in a browser</li>
+          <li>Adds DECST8C (<code>CSI ? 5 W</code>), which resets the horizontal tab stops to one every 8 columns</li>
+          <li>Adds CTC (<code>CSI Ps W</code>), which sets or clears horizontal tab stops: 0 sets one on the cursor's column, 2 clears it, 4 and 5 clear them all</li>
+          <li>Fixes ConEmu <code>OSC 9;9</code> (working directory) and <code>OSC 9;12</code> (prompt start) popping up a desktop notification at every prompt: they now set the working directory as <code>OSC 7</code> does and mark a prompt as <code>OSC 133;A</code> does</li>
+          <li>Adds the <code>answerback</code> profile option: the message Contour replies with when an application sends ENQ (Ctrl+E). Empty by default, so nothing is sent unless configured</li>
+          <li>Adds DECRSPS (<code>DCS Ps $ t</code>), which restores the cursor information (DECCIR) or tab stops (DECTABSR) an application saved with DECRQPSR</li>
+          <li>Adds the xterm modes <code>?1036</code> (metaSendsEscape) and <code>?1039</code> (altSendsEscape): Alt still sends ESC before the key by default, and an application that resets both makes Alt send the key alone</li>
         </ul>
       </description>
     </release>

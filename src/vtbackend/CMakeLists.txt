@@ -58,6 +58,7 @@ set(vtbackend_HEADERS
     screen/GutterSettings.hpp
     vt/Base64Validation.hpp
     vt/HierarchicalContext.hpp
+    vt/PresentationState.hpp
     vt/ProgramStatus.hpp
     vt/SemanticBlockQuery.hpp
     vt/UserVar.hpp
@@ -195,6 +196,7 @@ set(vtbackend_SOURCES
     core/ColorPalette.cpp
     core/TerminalContext.cpp
     vt/HierarchicalContext.cpp
+    vt/PresentationState.cpp
     vt/ProgramStatus.cpp
     vt/UserVar.cpp
     screen/ProgramStatusSet.cpp
@@ -363,6 +365,7 @@ if(LIBTERMINAL_TESTING)
         core/TerminalContext_test.cpp
         core/UntrustedText_test.cpp
         vt/HierarchicalContext_test.cpp
+        vt/PresentationState_test.cpp
         vt/ProgramStatus_test.cpp
         vt/UserVar_test.cpp
         screen/ProgramStatusSet_test.cpp

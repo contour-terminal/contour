@@ -145,6 +145,10 @@ struct Settings
     /// abbreviates with too). Empty takes the environment's `HOME`.
     std::string homeDirectory {};
 
+    /// The answerback message sent in reply to ENQ. Empty, the default, sends nothing, as xterm and Windows
+    /// Terminal do: what a host learns of the terminal this way is for the user to choose to tell it.
+    std::string answerback {};
+
     ImageSize maxImageSize { Width(800), Height(600) };
     unsigned maxImageRegisterCount = 256;
 

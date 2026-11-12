@@ -599,6 +599,252 @@ TEST_CASE("DECTABSR", "[screen]")
     }
 }
 
+TEST_CASE("DECST8C", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(35) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // Stops that are neither the defaults nor none at all: one moved, one cleared, one added.
+    screen.moveCursorToColumn(ColumnOffset(8));
+    screen.horizontalTabClear(HorizontalTabClear::UnderCursor);
+    screen.moveCursorToColumn(ColumnOffset(3));
+    screen.horizontalTabSet();
+
+    SECTION("restores the default stops")
+    {
+        mock.writeToScreen("\033[?5W");
+        CHECK(mock.terminal.tabs().isInitial());
+        screen.requestTabStops();
+        CHECK(e(mock.terminal.peekInput()) == e("\033P2$u1/9/17/25/33\033\\"));
+    }
+
+    SECTION("takes an omitted parameter as 5")
+    {
+        mock.writeToScreen("\033[?W");
+        CHECK(mock.terminal.tabs().isInitial());
+    }
+
+    SECTION("restores the stops after TBC 3 cleared them all")
+    {
+        screen.horizontalTabClear(HorizontalTabClear::AllTabs);
+        mock.writeToScreen("\033[?5W");
+        CHECK(mock.terminal.tabs().isInitial());
+    }
+
+    SECTION("restores the stops beyond the page too")
+    {
+        mock.writeToScreen("\033[?5W");
+        auto const stops = mock.terminal.tabs().within(ColumnCount(80));
+        CHECK(stops.back() == ColumnOffset(72));
+    }
+
+    SECTION("ignores any parameter but 5")
+    {
+        mock.writeToScreen("\033[?4W");
+        CHECK(!mock.terminal.tabs().isInitial());
+        screen.requestTabStops();
+        CHECK(e(mock.terminal.peekInput()) == e("\033P2$u1/4/17/25/33\033\\"));
+    }
+}
+
+TEST_CASE("CTC", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(35) } };
+    auto& screen = mock.terminal.primaryScreen();
+    auto const tabStopReport = [&]() {
+        screen.requestTabStops();
+        return e(mock.terminal.peekInput());
+    };
+    screen.moveCursorToColumn(ColumnOffset(3));
+
+    SECTION("0 sets a stop on the cursor's column")
+    {
+        mock.writeToScreen("\033[0W");
+        CHECK(tabStopReport() == e("\033P2$u1/4/9/17/25/33\033\\"));
+    }
+
+    SECTION("an omitted parameter sets a stop on the cursor's column")
+    {
+        mock.writeToScreen("\033[W");
+        CHECK(tabStopReport() == e("\033P2$u1/4/9/17/25/33\033\\"));
+    }
+
+    SECTION("2 clears the stop on the cursor's column")
+    {
+        screen.moveCursorToColumn(ColumnOffset(8));
+        mock.writeToScreen("\033[2W");
+        CHECK(tabStopReport() == e("\033P2$u1/17/25/33\033\\"));
+    }
+
+    SECTION("5 clears every stop")
+    {
+        mock.writeToScreen("\033[5W");
+        CHECK(tabStopReport() == e("\033P2$u\033\\"));
+        CHECK(!mock.terminal.tabs().isInitial());
+    }
+
+    SECTION("4 clears every stop, the active line's being all of them")
+    {
+        mock.writeToScreen("\033[4W");
+        CHECK(tabStopReport() == e("\033P2$u\033\\"));
+    }
+
+    SECTION("applies its parameters in turn")
+    {
+        mock.writeToScreen("\033[5;0W");
+        CHECK(tabStopReport() == e("\033P2$u4\033\\"));
+    }
+
+    SECTION("a line tab stop leaves the stops as they were")
+    {
+        for (auto const* const sequence: { "\033[1W", "\033[3W", "\033[6W", "\033[0;3W", "\033[7W" })
+        {
+            mock.writeToScreen(sequence);
+            CHECK(mock.terminal.tabs().isInitial());
+        }
+    }
+}
+
+TEST_CASE("DECRSPS", "[screen]")
+{
+    auto const pageSize = PageSize { LineCount(4), ColumnCount(20) };
+    auto const cursorReport = [](MockTerm<vtpty::MockPty>& mock) {
+        mock.writeToScreen(DECRQPSR(1));
+        return mock.terminal.peekInput();
+    };
+
+    SECTION("restores the cursor a DECCIR reported, which then reports the same")
+    {
+        // Every field away from its default: position, bold + inverse, protection, wrap pending, G1 the
+        // special graphics invoked into GL, a 96-set in G2 invoked into GR, and an SS2 still pending.
+        auto source = MockTerm { pageSize };
+        source.writeToScreen("\033[1;7m\033[1\"q\033)0\033.A\016\033}\033[2;20HX\033N");
+        auto const report = cursorReport(source);
+        REQUIRE(report.starts_with("\033P1$u"));
+        REQUIRE(report.ends_with("\033\\"));
+        auto const payload = report.substr(5, report.size() - 7);
+        CHECK(payload == "2;20;1;I;A;J;1;2;D;B0AB");
+
+        auto target = MockTerm { pageSize };
+        target.writeToScreen(std::format("\033P1$t{}\033\\", payload));
+        CHECK(e(cursorReport(target)) == e(report));
+    }
+
+    SECTION("restores origin mode, reporting the position on the page")
+    {
+        auto target = MockTerm { pageSize };
+        target.writeToScreen("\033[2;3r\033P1$t3;4;1;@;@;A;0;2;@;BBBB\033\\");
+        CHECK(target.terminal.primaryScreen().cursor().originMode);
+        CHECK(target.terminal.primaryScreen().cursor().position
+              == CellLocation { .line = LineOffset(2), .column = ColumnOffset(3) });
+    }
+
+    SECTION("a position off the page changes nothing")
+    {
+        auto target = MockTerm { pageSize };
+        target.writeToScreen("\033[2;2H\033P1$t5;1;1;I;@;@;0;2;@;BBBB\033\\");
+        CHECK(e(cursorReport(target)) == e("\033P1$u2;2;1;@;@;@;0;2;@;BBBB\033\\"));
+    }
+
+    SECTION("a payload that cannot be read whole changes nothing")
+    {
+        auto target = MockTerm { pageSize };
+        target.writeToScreen("\033P1$t3;3;1;I;@;@;0;2;@;BBB\033\\");
+        CHECK(e(cursorReport(target)) == e("\033P1$u1;1;1;@;@;@;0;2;@;BBBB\033\\"));
+    }
+
+    SECTION("a designator Contour has no set for leaves that G-set as it was")
+    {
+        auto target = MockTerm { pageSize };
+        target.writeToScreen("\033)0\033P1$t1;1;1;@;@;@;0;2;@;B%5BB\033\\");
+        CHECK(e(cursorReport(target)) == e("\033P1$u1;1;1;@;@;@;0;2;@;B0BB\033\\"));
+    }
+
+    SECTION("restores the tab stops a DECTABSR reported")
+    {
+        auto target = MockTerm { pageSize };
+        target.writeToScreen("\033P2$t4/12\033\\");
+        CHECK_FALSE(target.terminal.tabs().isInitial());
+        target.terminal.primaryScreen().requestTabStops();
+        CHECK(e(target.terminal.peekInput()) == e("\033P2$u4/12\033\\"));
+    }
+
+    SECTION("an empty DECTABSR payload restores no stops at all")
+    {
+        auto target = MockTerm { pageSize };
+        target.writeToScreen("\033P2$t\033\\");
+        CHECK(target.terminal.tabs().within(ColumnCount(80)).empty());
+    }
+
+    SECTION("a report DECRQPSR does not hand out is not printed")
+    {
+        auto target = MockTerm { pageSize };
+        target.writeToScreen("\033P3$tHELLO\033\\");
+        CHECK(target.terminal.primaryScreen().grid().lineText(LineOffset(0)) == std::string(20, ' '));
+    }
+}
+
+TEST_CASE("MetaSendsEscape and AltSendsEscape", "[screen]")
+{
+    auto const altPressed = KeyboardModifiers { Modifier::Alt };
+    auto const sent = [&](MockTerm<vtpty::MockPty>& mock, auto&& press) {
+        // A key goes to the PTY, which is where it is read back from.
+        mock.terminal.flushInput();
+        mock.resetReplyData();
+        press();
+        mock.terminal.flushInput();
+        return mock.replyData();
+    };
+
+    SECTION("both are set from power-on, and Alt sends ESC")
+    {
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+        mock.writeToScreen(DECRQM(1036));
+        CHECK(e(mock.terminal.peekInput()) == e("\033[?1036;1$y"));
+        mock.terminal.flushInput();
+        mock.writeToScreen(DECRQM(1039));
+        CHECK(e(mock.terminal.peekInput()) == e("\033[?1039;1$y"));
+        mock.terminal.flushInput();
+        CHECK(e(sent(mock, [&] { mock.sendCharEvent('a', altPressed); })) == e("\033a"));
+    }
+
+    SECTION("either one keeps Alt sending ESC")
+    {
+        for (auto const mode: { 1036, 1039 })
+        {
+            INFO(mode);
+            auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+            mock.writeToScreen(DECRM(mode));
+            CHECK(e(sent(mock, [&] { mock.sendCharEvent('a', altPressed); })) == e("\033a"));
+        }
+    }
+
+    SECTION("with both reset, Alt sends the key as if it were not held")
+    {
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+        mock.writeToScreen(DECRM(1036));
+        mock.writeToScreen(DECRM(1039));
+        CHECK(e(sent(mock, [&] { mock.sendCharEvent('a', altPressed); })) == e("a"));
+        CHECK(e(sent(mock, [&] { mock.sendCharEvent('c', Modifiers { Modifier::Alt } | Modifier::Control); }))
+              == e("\x03"));
+        CHECK(e(sent(mock, [&] { mock.sendKeyEvent(Key::Escape, altPressed); })) == e("\033"));
+        CHECK(e(sent(mock, [&] { mock.sendKeyEvent(Key::Tab, altPressed); })) == e("\t"));
+
+        // Setting either one back brings the ESC back.
+        mock.writeToScreen(DECSM(1039));
+        CHECK(e(sent(mock, [&] { mock.sendCharEvent('a', altPressed); })) == e("\033a"));
+    }
+
+    SECTION("a full reset sets both again")
+    {
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+        mock.writeToScreen(DECRM(1036));
+        mock.writeToScreen(DECRM(1039));
+        mock.writeToScreen("\033c");
+        CHECK(e(sent(mock, [&] { mock.sendCharEvent('a', altPressed); })) == e("\033a"));
+    }
+}
+
 TEST_CASE("DECSTR", "[screen]")
 {
     // Create a 10x3x5 grid and render a 7x5 image causing one a line-scroll by one.

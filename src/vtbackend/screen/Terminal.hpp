@@ -1091,6 +1091,13 @@ class Terminal: public IStatusLinePublishTarget
     LineCount maxHistoryLineCount() const noexcept;
 
     void setTerminalId(VTType id) noexcept;
+
+    /// Sets the answerback message ENQ replies with. Set after construction for the config reload, which
+    /// reconfigures a running terminal (as setTerminalId does).
+    /// @param message The message; empty sends nothing.
+    void setAnswerback(std::string message) { _settings.answerback = std::move(message); }
+    /// @return The answerback message ENQ replies with; empty when it sends nothing.
+    [[nodiscard]] std::string const& answerback() const noexcept { return _settings.answerback; }
     VTType terminalId() const noexcept { return _terminalId; }
 
     /// Sets the current operating conformance level (used by DECSCL).

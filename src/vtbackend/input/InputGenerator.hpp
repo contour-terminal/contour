@@ -427,6 +427,17 @@ class KeyboardInputGenerator
     virtual bool generateKey(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType) = 0;
 };
 
+/// The xterm modes under which Alt prefixes the key it modifies with ESC, a bit each. They combine
+/// freely, and Alt sends ESC while either is set. @see DECMode::MetaSendsEscape
+enum class AltEscapeMode : uint8_t
+{
+    MetaSendsEscape = 0b01, ///< DEC mode 1036.
+    AltSendsEscape = 0b10,  ///< DEC mode 1039.
+};
+
+/// Both AltEscapeMode bits: how a terminal powers up.
+inline constexpr uint8_t AllAltEscapeModes = 0b11;
+
 /// What a StandardKeyboardInputGenerator holds, as plain data.
 struct StandardKeyboardState
 {
@@ -435,6 +446,9 @@ struct StandardKeyboardState
     bool automaticNewLine = false;            ///< LNM.
     bool backarrowKey = false;                ///< DECBKM.
     std::string pendingSequence {};           ///< Encoded keys not yet taken.
+    /// The AltEscapeMode bits set. A state from a build before them has none recorded and reads as both
+    /// set, which is how that build's Alt behaved.
+    uint8_t altEscapeModes = AllAltEscapeModes;
 
     bool operator==(StandardKeyboardState const&) const = default;
 
@@ -446,6 +460,7 @@ struct StandardKeyboardState
         visitor(3, self.automaticNewLine);
         visitor(4, self.backarrowKey);
         visitor(5, self.pendingSequence);
+        visitor(6, self.altEscapeModes);
     }
 };
 
@@ -473,7 +488,8 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
                                        .numpadKeysMode = _numpadKeysMode,
                                        .automaticNewLine = _automaticNewLine,
                                        .backarrowKey = _backarrowKey,
-                                       .pendingSequence = _pendingSequence };
+                                       .pendingSequence = _pendingSequence,
+                                       .altEscapeModes = _altEscapeModes };
     }
 
     /// Replaces the modes and the pending keys with @p state.
@@ -484,6 +500,7 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
         _automaticNewLine = state.automaticNewLine;
         _backarrowKey = state.backarrowKey;
         _pendingSequence = state.pendingSequence;
+        _altEscapeModes = state.altEscapeModes & AllAltEscapeModes;
     }
     void setApplicationKeypadMode(bool enable)
     {
@@ -496,6 +513,19 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
     /// When disabled (default), the Backspace key sends DEL (0x7F).
     void setBackarrowKeyMode(bool enable) { _backarrowKey = enable; }
     [[nodiscard]] bool backarrowKey() const noexcept { return _backarrowKey; }
+
+    /// Sets one of the modes under which Alt sends ESC (DEC mode 1036 or 1039).
+    void enableAltEscapeMode(AltEscapeMode mode) noexcept { _altEscapeModes |= std::to_underlying(mode); }
+    /// Resets one of the modes under which Alt sends ESC (DEC mode 1036 or 1039).
+    void disableAltEscapeMode(AltEscapeMode mode) noexcept
+    {
+        _altEscapeModes &= static_cast<uint8_t>(~std::to_underlying(mode));
+    }
+    /// @return true if @p mode is set.
+    [[nodiscard]] bool isAltEscapeModeEnabled(AltEscapeMode mode) const noexcept
+    {
+        return (_altEscapeModes & std::to_underlying(mode)) != 0;
+    }
 
     /// Enables or disables LNM (Line Feed / New Line Mode), the input half.
     ///
@@ -521,6 +551,15 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
         _numpadKeysMode = KeyMode::Normal;
         _backarrowKey = false;
         _automaticNewLine = false;
+        _altEscapeModes = AllAltEscapeModes;
+    }
+
+    /// @param chord The modifiers held.
+    /// @return The ESC that Alt prefixes a key with, or nothing: Alt is not held, or both of the modes it
+    ///         sends ESC under are reset.
+    [[nodiscard]] std::string_view altPrefix(Modifiers chord) const noexcept
+    {
+        return chord.contains(Modifier::Alt) && _altEscapeModes != 0 ? "\033" : "";
     }
 
   protected:
@@ -557,6 +596,7 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
     bool _automaticNewLine = false;
     bool _backarrowKey = false;
     std::string _pendingSequence {};
+    uint8_t _altEscapeModes = AllAltEscapeModes; ///< The AltEscapeMode bits set.
 };
 
 enum class KeyboardEventFlag : uint8_t
@@ -698,6 +738,22 @@ class InputGenerator
     void setApplicationKeypadMode(bool enable);
 
     void setBackarrowKeyMode(bool enable);
+
+    /// Sets one of the modes under which Alt sends ESC (DEC mode 1036 or 1039).
+    void enableAltEscapeMode(AltEscapeMode mode) noexcept
+    {
+        _keyboardInputGenerator.enableAltEscapeMode(mode);
+    }
+    /// Resets one of the modes under which Alt sends ESC (DEC mode 1036 or 1039).
+    void disableAltEscapeMode(AltEscapeMode mode) noexcept
+    {
+        _keyboardInputGenerator.disableAltEscapeMode(mode);
+    }
+    /// @return true if @p mode is set.
+    [[nodiscard]] bool isAltEscapeModeEnabled(AltEscapeMode mode) const noexcept
+    {
+        return _keyboardInputGenerator.isAltEscapeModeEnabled(mode);
+    }
 
     /// Enables or disables LNM (Line Feed / New Line Mode) for the Return key. @see
     /// KeyboardInputGenerator::setAutomaticNewLineMode.

@@ -138,6 +138,8 @@ last line, then a CSI left open
 \x1B[?2028$p -> \x1B[?2028;1$y
 \x1B[?8452$p -> \x1B[?8452;1$y
 \x1B[?9001$p -> \x1B[?9001;2$y
+\x1B[?1036$p -> \x1B[?1036;1$y
+\x1B[?1039$p -> \x1B[?1039;1$y
 key 42 -> \x1B[A
 key 0 -> \x1BOP
 key 45 -> \x1B[H

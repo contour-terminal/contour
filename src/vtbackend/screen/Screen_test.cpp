@@ -6598,3 +6598,30 @@ TEST_CASE("XTWINOPS.CellArea.reports_the_given_cell", "[screen]")
     mock.writeToScreen("\033[14t");
     CHECK(mock.terminal.peekInput() == std::format("\033[4;{};{}t", 16 * 10, 8 * 20));
 }
+
+TEST_CASE("ENQ", "[screen]")
+{
+    SECTION("sends nothing while no answerback message is configured")
+    {
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+        mock.writeToScreen("\x05");
+        CHECK(mock.terminal.peekInput().empty());
+    }
+
+    SECTION("replies with the configured answerback message")
+    {
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+        mock.terminal.setAnswerback("contour");
+        mock.writeToScreen("\x05");
+        CHECK(mock.terminal.peekInput() == "contour");
+    }
+
+    SECTION("leaves the page as it was")
+    {
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+        mock.terminal.setAnswerback("contour");
+        mock.writeToScreen("A\x05"
+                           "B"); // split: \x05B would read as one escape
+        CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)) == "AB        ");
+    }
+}

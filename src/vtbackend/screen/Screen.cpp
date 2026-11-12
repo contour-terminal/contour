@@ -1550,14 +1550,9 @@ void Screen::reportCursorInformation()
     // Bit 1=Bold, Bit 2=Underline, Bit 3=Blinking, Bit 4=Inverse
     auto const& flags = cursor.graphicsRendition.flags;
     auto srendBits = 0;
-    if (flags.test(CellFlag::Bold))
-        srendBits |= 1;
-    if (flags.test(CellFlag::Underline))
-        srendBits |= 2;
-    if (flags.test(CellFlag::Blinking))
-        srendBits |= 4;
-    if (flags.test(CellFlag::Inverse))
-        srendBits |= 8;
+    for (auto const& [bit, flag]: CursorInformationRenditions)
+        if (flags.test(flag))
+            srendBits |= bit;
     auto const srend = static_cast<char>(0x40 + srendBits);
 
     // Satt: protection attribute (Bit 1 = DECSCA protection)
@@ -1568,16 +1563,16 @@ void Screen::reportCursorInformation()
     auto const& charsets = cursor.charsets;
     auto sflagBits = 0;
     if (cursor.originMode)
-        sflagBits |= 1;
+        sflagBits |= std::to_underlying(CursorInformationFlag::OriginMode);
     if (charsets.tableForNextGraphic() != charsets.selectedTable())
     {
         if (charsets.tableForNextGraphic() == CharsetTable::G2)
-            sflagBits |= 2; // SS2 active
+            sflagBits |= std::to_underlying(CursorInformationFlag::SingleShift2);
         else if (charsets.tableForNextGraphic() == CharsetTable::G3)
-            sflagBits |= 4; // SS3 active
+            sflagBits |= std::to_underlying(CursorInformationFlag::SingleShift3);
     }
     if (cursor.wrapPending)
-        sflagBits |= 8;
+        sflagBits |= std::to_underlying(CursorInformationFlag::WrapPending);
     auto const sflag = static_cast<char>(0x40 + sflagBits);
 
     // Pgl: GL charset table index (0=G0, 1=G1, 2=G2, 3=G3)
@@ -2444,6 +2439,23 @@ void Screen::horizontalTabClear(HorizontalTabClear which)
         case HorizontalTabClear::AllTabs: _terminal->tabs().clearAll(); break;
         case HorizontalTabClear::UnderCursor: _terminal->tabs().clear(realCursorPosition().column); break;
     }
+}
+
+void Screen::cursorTabulationControl(CursorTabulationControl operation)
+{
+    switch (operation)
+    {
+        case CursorTabulationControl::SetUnderCursor: horizontalTabSet(); break;
+        case CursorTabulationControl::ClearUnderCursor:
+            horizontalTabClear(HorizontalTabClear::UnderCursor);
+            break;
+        case CursorTabulationControl::ClearAll: horizontalTabClear(HorizontalTabClear::AllTabs); break;
+    }
+}
+
+void Screen::resetTabStops()
+{
+    _terminal->tabs().reset();
 }
 
 void Screen::horizontalTabSet()
@@ -4293,6 +4305,44 @@ namespace impl
             return ApplyResult::Ok;
         }
 
+        /// Maps one CTC parameter to the tab-stop operation it names.
+        /// @return The operation, or nothing for the line (vertical) tab stops and unknown values.
+        [[nodiscard]] std::optional<CursorTabulationControl> cursorTabulationControl(unsigned ps) noexcept
+        {
+            switch (ps)
+            {
+                case 0: return CursorTabulationControl::SetUnderCursor;
+                case 2: return CursorTabulationControl::ClearUnderCursor;
+                // Stops are shared by every line (ECMA-48 TSM single), so the active line's are all of them.
+                case 4:
+                case 5: return CursorTabulationControl::ClearAll;
+                default: return std::nullopt;
+            }
+        }
+
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
+        ApplyResult CTC(Sequence const& seq, Screen& screen)
+        {
+            if (seq.parameterCount() == 0)
+            {
+                screen.cursorTabulationControl(CursorTabulationControl::SetUnderCursor);
+                return ApplyResult::Ok;
+            }
+
+            // Every parameter is checked before any is applied, so a bad one leaves the stops as they were.
+            auto operations = std::vector<CursorTabulationControl> {};
+            for (auto const index: std::views::iota(size_t { 0 }, seq.parameterCount()))
+            {
+                auto const operation = cursorTabulationControl(seq.param<unsigned>(index));
+                if (!operation)
+                    return ApplyResult::Invalid;
+                operations.push_back(*operation);
+            }
+            for (auto const operation: operations)
+                screen.cursorTabulationControl(operation);
+            return ApplyResult::Ok;
+        }
+
         inline std::unordered_map<std::string_view, std::string_view> parseSubParamKeyValuePairs(
             std::string_view const& s)
         {
@@ -4596,13 +4646,28 @@ namespace impl
                 return ApplyResult::Unsupported;
         }
 
-        /// OSC 9 — ConEmu-style notification and progress indicator.
+        /// The directory an `OSC 9 ; 9 ; <path>` names: the rest of the payload, with the double quotes
+        /// ConEmu documents around it taken off. Unquoted is accepted too, as ConEmu and Windows Terminal do.
+        /// @param path The payload after `9;`, which may itself hold a ';'.
+        /// @return The path, or nothing when it is empty.
+        [[nodiscard]] std::optional<std::string> conEmuWorkingDirectory(std::string_view path)
+        {
+            if (path.size() >= 2 && path.front() == '"' && path.back() == '"')
+                path = path.substr(1, path.size() - 2);
+            if (path.empty())
+                return std::nullopt;
+            return std::string { path };
+        }
+
+        /// OSC 9 — ConEmu-style notification, progress indicator, working directory and prompt mark.
         ///
         /// Simple notification: OSC 9 ; <message> ST
         /// Progress indicator:  OSC 9 ; 4 ; <State> ; <progress> ST
+        /// Working directory:   OSC 9 ; 9 ; "<path>" ST   (as OSC 7)
+        /// Prompt start:        OSC 9 ; 12 ST            (as OSC 133 ; A)
 
         // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
-        ApplyResult CONEMU(Sequence const& seq, Terminal& terminal)
+        ApplyResult CONEMU(Sequence const& seq, Screen& screen, Terminal& terminal)
         {
             auto const& value = seq.intermediateCharacters();
             if (value.empty())
@@ -4624,6 +4689,26 @@ namespace impl
                     // A malformed payload leaves the previous indicator alone: withdrawing one the
                     // application still wants shown is worse than ignoring a sequence we cannot read.
                     .value_or(ApplyResult::Invalid);
+            }
+
+            // The sub-functions a shell's prompt emits at every prompt. A notification for either would
+            // pop up each time the prompt is drawn, so even a malformed one is rejected rather than shown.
+            if (firstField == "9")
+            {
+                auto const path =
+                    value.size() > 2 ? std::string_view { value }.substr(2) : std::string_view {};
+                return conEmuWorkingDirectory(path)
+                    .transform([&](std::string const& directory) {
+                        screen.setCurrentWorkingDirectory(directory);
+                        return ApplyResult::Ok;
+                    })
+                    .value_or(ApplyResult::Invalid);
+            }
+            if (firstField == "12")
+            {
+                // ConEmu: "treat current cursor position as prompt start" -- OSC 133;A, as Ghostty reads it.
+                screen.processShellIntegration("A");
+                return ApplyResult::Ok;
             }
 
             // Simple notification: the payload is the notification message
@@ -5022,6 +5107,10 @@ void Screen::executeControlCode(char controlCode)
         case 0x00: // NUL
             break;
         case BEL.finalSymbol: _terminal->bell(); break;
+        case ENQ.finalSymbol:
+            if (auto const& message = _terminal->answerback(); !message.empty())
+                reply(message);
+            break;
         case BS.finalSymbol: backspace(); break;
         case TAB.finalSymbol: moveCursorToNextTab(); break;
         case LF.finalSymbol: linefeed(); break;
@@ -7622,9 +7711,8 @@ void Screen::synthesizeSemanticMarks(ContextTransition const& transition, Contex
     }
 }
 
-void Screen::processShellIntegration(Sequence const& seq)
+void Screen::processShellIntegration(std::string const& cmd)
 {
-    auto const& cmd = seq.intermediateCharacters();
     if (cmd.empty())
         return;
 
@@ -8448,6 +8536,12 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                 r = std::max(r, impl::setModeDEC(seq, i, true, *_terminal));
             return r;
         }
+        case DECST8C:
+            // xterm also takes an omitted (or zero) Ps for the 5 the VT510 manual names.
+            if (seq.paramOr<unsigned>(0, 5) != 5)
+                return ApplyResult::Invalid;
+            resetTabStops();
+            break;
         case DECSTBM:
             // The margins are the main display's. Received on a status line, which keeps none of its own (DEC
             // STD 070 ch. 14 §2.2) and leaves the main display's state alone (ch. 14 §2), it is ignored, as
@@ -8559,6 +8653,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SR: scrollRight(seq.paramOr<ColumnCount>(0, ColumnCount(1))); break;
         case SU: scrollUp(seq.paramPositiveOr<LineCount>(0, LineCount(1))); break;
         case TBC: return impl::TBC(seq, *this);
+        case CTC: return impl::CTC(seq, *this);
         case VPA: moveCursorToLine(seq.paramPositiveOr<LineOffset>(0, LineOffset { 1 }) - 1); break;
         case VPR: moveCursorDown(seq.paramPositiveOr<LineCount>(0, LineCount { 1 })); break;
         case WINMANIP: return impl::WINDOWMANIP(seq, *_terminal);
@@ -8821,7 +8916,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case RCOLORMOUSEBG: resetDynamicColor(DynamicColorName::MouseBackgroundColor); break;
         case RCOLORHIGHLIGHTFG: resetDynamicColor(DynamicColorName::HighlightForegroundColor); break;
         case RCOLORHIGHLIGHTBG: resetDynamicColor(DynamicColorName::HighlightBackgroundColor); break;
-        case CONEMU: return impl::CONEMU(seq, *_terminal);
+        case CONEMU: return impl::CONEMU(seq, *this, *_terminal);
         case NOTIFY: return impl::NOTIFY(seq, *this);
         case ITERM2: processITerm2(seq.intermediateCharacters()); return ApplyResult::Ok;
         case TEXTSIZING: return processTextSizing(seq.intermediateCharacters());
@@ -8831,7 +8926,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case PROGRAMSTATUS: return processProgramStatus(seq.intermediateCharacters());
         case DESKTOPNOTIFY: return impl::DESKTOPNOTIFY(seq, *_terminal);
         case DUMPSTATE: inspect(); break;
-        case SEMA: processShellIntegration(seq); break;
+        case SEMA: processShellIntegration(seq.intermediateCharacters()); break;
 
         // hooks
         case DECAUPSS:
@@ -8849,6 +8944,18 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case REGIS: _terminal->hookParser(hookReGIS(seq)); break;
         case STP: _terminal->hookParser(hookSTP(seq)); break;
         case DECRQSS: _terminal->hookParser(hookDECRQSS(seq)); break;
+        case DECRSPS:
+            // Only the two reports DECRQPSR hands out can be handed back. Any other Ps is rejected before
+            // hooking, so its payload is discarded rather than written to the screen as text.
+            switch (seq.paramOr(0, 0))
+            {
+                case std::to_underlying(PresentationStateReport::CursorInformation):
+                case std::to_underlying(PresentationStateReport::TabStops):
+                    _terminal->hookParser(hookDECRSPS(seq));
+                    break;
+                default: return ApplyResult::Invalid;
+            }
+            break;
         case DECUDK: _terminal->hookParser(hookDECUDK(seq)); break;
         case XTGETTCAP: _terminal->hookParser(hookXTGETTCAP(seq)); break;
         case GIP: _terminal->hookParser(hookGoodImageProtocol(seq)); break;
@@ -9055,6 +9162,98 @@ unique_ptr<ParserExtension> Screen::hookXTGETTCAP(Sequence const& /*seq*/)
                 requestCapability(capOpt.value());
         }
     });
+}
+
+unique_ptr<ParserExtension> Screen::hookDECRSPS(Sequence const& seq)
+{
+    auto const report = static_cast<PresentationStateReport>(seq.paramOr(0, 0));
+    return make_unique<SimpleStringCollector>([this, report](string_view payload) {
+        switch (report)
+        {
+            case PresentationStateReport::CursorInformation: restoreCursorInformation(payload); break;
+            case PresentationStateReport::TabStops: restoreTabStops(payload); break;
+        }
+    });
+}
+
+void Screen::restoreCursorInformation(std::string_view payload)
+{
+    auto const info = decodeCursorInformation(payload);
+    if (!info)
+    {
+        errorLog()("Ignoring DECRSPS cursor information: {}", toString(info.error()));
+        return;
+    }
+    // Off the page is rejected rather than clamped, as xterm does: clamping would restore a cursor the
+    // report never described.
+    if (info->line < 1 || info->line > unbox(pageSize().lines) || info->column < 1
+        || info->column > unbox(pageSize().columns) || info->page < 1)
+    {
+        errorLog()("Ignoring DECRSPS cursor information off the page: line {}, column {}, page {}",
+                   info->line,
+                   info->column,
+                   info->page);
+        return;
+    }
+    // The report names the cursor's page, which is where the rest of it is restored.
+    if (info->page != _terminal->cursorPageNumber())
+        pagePositionAbsolute(info->page);
+    _terminal->pageAt(_terminal->cursorPageIndex()).adoptCursorInformation(*info);
+}
+
+void Screen::adoptCursorInformation(CursorInformation const& info)
+{
+    auto cursor = _cursor;
+    // DECCIR reports the cursor's position on the page, not within the origin-mode margins.
+    cursor.position =
+        CellLocation { .line = LineOffset(info.line - 1), .column = ColumnOffset(info.column - 1) };
+
+    auto const setFlag = [&](CellFlag flag, bool isSet) {
+        if (isSet)
+            cursor.graphicsRendition.flags.enable(flag);
+        else
+            cursor.graphicsRendition.flags.disable(flag);
+    };
+    for (auto const& [bit, flag]: CursorInformationRenditions)
+        setFlag(flag, (info.rendition & bit) != 0);
+    setFlag(CellFlag::CharacterProtected, info.isProtected);
+
+    cursor.originMode = info.has(CursorInformationFlag::OriginMode);
+    cursor.wrapPending = info.has(CursorInformationFlag::WrapPending);
+
+    for (auto const table: { CharsetTable::G0, CharsetTable::G1, CharsetTable::G2, CharsetTable::G3 })
+    {
+        auto const& designator = info.designations[std::to_underlying(table)];
+        if (designator == "<")
+            cursor.charsets.selectUserPreferred(table, _terminal->userPreferredSupplementalSet());
+        else if (auto const charset = charsetOfDesignator(designator, info.is96Charset(table)); !charset)
+            continue; // One Contour has no map for: that G-set keeps what it holds, as in xterm.
+        else if (info.is96Charset(table))
+            cursor.charsets.select96(table, *charset);
+        else
+            cursor.charsets.select(table, *charset);
+    }
+
+    // The locking shifts first, for a locking shift into GL also ends a single shift.
+    cursor.charsets.lockingShift(info.gl);
+    cursor.charsets.lockingShiftGR(info.gr);
+    if (info.has(CursorInformationFlag::SingleShift3))
+        cursor.charsets.singleShift(CharsetTable::G3);
+    else if (info.has(CursorInformationFlag::SingleShift2))
+        cursor.charsets.singleShift(CharsetTable::G2);
+
+    restoreCursor(cursor);
+}
+
+void Screen::restoreTabStops(std::string_view payload)
+{
+    auto stops = decodeTabStops(payload);
+    if (!stops)
+    {
+        errorLog()("Ignoring DECRSPS tab stops: {}", toString(stops.error()));
+        return;
+    }
+    _terminal->tabs() = TabStops::only(*std::move(stops));
 }
 
 unique_ptr<ParserExtension> Screen::hookDECRQSS(Sequence const& /*seq*/)
