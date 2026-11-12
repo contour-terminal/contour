@@ -74,6 +74,7 @@ namespace
     constexpr auto ReleaseNames = std::array {
         EnumName { .value = WorkspaceRelease::Closed, .name = "closed" },
         EnumName { .value = WorkspaceRelease::SwitchedAway, .name = "switched-away" },
+        EnumName { .value = WorkspaceRelease::WindowClosed, .name = "window-closed" },
     };
 
     constexpr auto SwitchDaemonNames = std::array {

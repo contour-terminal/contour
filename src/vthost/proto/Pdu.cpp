@@ -2181,7 +2181,7 @@ namespace
         if (!assign(in.varint(), pdu.workspace, error) || !assign(in.u8(), reason, error))
             return std::unexpected(error);
         // A reason a newer peer knows is the weaker claim: the workspace is left, not hidden.
-        pdu.reason = enumOrElse(reason, WorkspaceRelease::SwitchedAway, WorkspaceRelease::Closed);
+        pdu.reason = enumOrElse(reason, WorkspaceRelease::WindowClosed, WorkspaceRelease::Closed);
         return pdu;
     }
 

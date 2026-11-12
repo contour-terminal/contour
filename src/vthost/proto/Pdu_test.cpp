@@ -2239,7 +2239,8 @@ TEST_CASE("the workspace follow, release and switch PDUs round-trip", "[vthost][
 {
     auto const follow = FollowWorkspace { .workspace = 9 };
     CHECK(roundTrip(DecodedPdu { follow }) == DecodedPdu { follow });
-    for (auto const reason: { WorkspaceRelease::Closed, WorkspaceRelease::SwitchedAway })
+    for (auto const reason:
+         { WorkspaceRelease::Closed, WorkspaceRelease::SwitchedAway, WorkspaceRelease::WindowClosed })
     {
         auto const release = ReleaseWorkspace { .workspace = 3, .reason = reason };
         CHECK(roundTrip(DecodedPdu { release }) == DecodedPdu { release });

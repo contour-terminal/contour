@@ -1610,8 +1610,12 @@ struct PanesReprojected
 /// Why a client stopped showing a workspace.
 enum class WorkspaceRelease : uint8_t
 {
-    Closed = 0,       ///< The window showing it closed (or the client went away): the workspace is left.
+    Closed = 0,       ///< The client stopped showing it without the user closing it: the workspace is left.
     SwitchedAway = 1, ///< The window moved on to another workspace or daemon: the workspace stays, hidden.
+    /// The user closed the window showing it. The daemon ends the workspace, its sessions with it, while it
+    /// shows another workspace to some window; the last one shown is left instead, as Closed leaves it. A
+    /// daemon predating it decodes it as Closed.
+    WindowClosed = 2,
 };
 
 /// Client→server (Capability::WorkspaceFollow): show another workspace of this daemon in addition to the

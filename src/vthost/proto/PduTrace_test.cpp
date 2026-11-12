@@ -322,6 +322,9 @@ TEST_CASE("the trace names the new PDUs without revealing a title", "[vthost][pr
     CHECK(summarize(
               DecodedPdu { ReleaseWorkspace { .workspace = 2, .reason = WorkspaceRelease::SwitchedAway } })
           == "workspace=2 reason=switched-away");
+    CHECK(summarize(
+              DecodedPdu { ReleaseWorkspace { .workspace = 2, .reason = WorkspaceRelease::WindowClosed } })
+          == "workspace=2 reason=window-closed");
     CHECK(summarize(DecodedPdu {
               SwitchRequest { .request = 7,
                               .workspace = 2,
