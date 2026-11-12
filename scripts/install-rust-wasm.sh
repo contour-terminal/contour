@@ -3,7 +3,7 @@
 set -ex
 
 # Installs what CONTOUR_EXTENSIONS_BUNDLED needs: cargo, rustc and the wasm32-wasip1 standard library,
-# through rustup, on the current stable Rust. The bundled status-line extensions and the test guests are
+# through rustup, on the Rust release named below. The bundled status-line extensions and the test guests are
 # Rust crates built for that target, and a configuration with the option on (the default) fails without
 # it rather than building without them.
 #
@@ -17,6 +17,10 @@ set -ex
 # later steps of a GitHub job find cargo; a caller in one shell session extends PATH itself.
 
 WASM_TARGET="wasm32-wasip1"
+# A named release, not "stable": the guests are built by whatever this installs, so "stable" changes what
+# every build produces on the day Rust releases. 1.100.0 did exactly that -- the guests it builds trap in
+# the WebAssembly runtime. Raise this on purpose, with the extension tests green.
+RUST_TOOLCHAIN="1.99.1"
 CARGO_BIN="${CARGO_HOME:-$HOME/.cargo}/bin"
 
 if ! command -v rustup >/dev/null 2>&1 && [ -x "$CARGO_BIN/rustup" ]; then
@@ -38,9 +42,9 @@ if ! command -v rustup >/dev/null 2>&1; then
     fi
 fi
 
-# Brings an image's preinstalled stable up to date, too: what it ships may predate what the guests need.
-rustup toolchain install stable --profile minimal --target "$WASM_TARGET" --no-self-update
-rustup default stable
+# Whatever Rust an image ships is left alone; the guests are built by this one.
+rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target "$WASM_TARGET" --no-self-update
+rustup default "$RUST_TOOLCHAIN"
 
 rustc --version
 cargo --version
