@@ -487,7 +487,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::function<void(int)> exitEventLoop,
                              window::BootstrapPromptFactory bootstrapPromptFactory,
                              std::unique_ptr<remote::IWorkspaceLister> startupLister,
-                             std::unique_ptr<vthost::IGitStatusProbe> workspaceGitProbe):
+                             std::unique_ptr<vthost::IGitStatusProbe> workspaceGitProbe,
+                             platform::ApplicationReadiness::State applicationAtStart):
     ContourApp { env },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
     _exitEventLoop { exitEventLoop ? std::move(exitEventLoop)
@@ -526,6 +527,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     // In the config directory, as ssh keeps known_hosts: never under the state directory, which falls back
     // to a shared temporary directory that another local user could have planted a pin in.
     _knownDaemons(_fileSystem, vthost::knownDaemonsPath(config::configHome()), core::systemRandom()),
+    _applicationReadiness { std::make_shared<platform::ApplicationReadiness>(applicationAtStart) },
     _startupLister(std::move(startupLister)),
     _taskbarProgressSink(taskbarProgress ? std::move(taskbarProgress) : platform::makeTaskbarProgressSink()),
     _titleBandMaterial(appearanceServices.titleBand()),
@@ -3259,8 +3261,13 @@ int ContourGuiApp::terminalGuiAction()
         return likelyWayland && !wmClass.isEmpty() ? wmClass : QStringLiteral(CONTOUR_APP_ID);
     }());
     QApplication const app(qtArgsCount, (char**) qtArgsPtr.data());
-    // The attach above may wait to serve ssh's prompts: Qt can run that thread's event loop now.
+    // The attach above may wait to serve ssh's prompts: Qt can run that thread's event loop now, and the
+    // askpass broker starts it here, on this thread.
     _applicationReadiness->markReady();
+    // Declared after `app`, so that it runs before `app` is destroyed, on every return from here on: the
+    // links outlive the QApplication (releaseHosting() runs after it is gone), and a reconnect then must not
+    // start a Qt thread without it.
+    auto const applicationClosed = core::Finally { [this] { _applicationReadiness->close(); } };
     // The platform Qt runs on is known now; a test injected its own probe at construction.
     if (!_dragEndProbe)
         _dragEndProbe = window::makeDragEndProbe(QGuiApplication::platformName());

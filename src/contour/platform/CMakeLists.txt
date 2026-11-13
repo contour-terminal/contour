@@ -17,6 +17,7 @@ add_library(contour_platform STATIC
     Announcer.hpp
     AppearanceServices.hpp
     ApplicationReadiness.hpp
+    AsyncLatch.hpp
     Audio.cpp Audio.hpp
     AudioNote.hpp
     MenuBarIntegration.cpp MenuBarIntegration.hpp
