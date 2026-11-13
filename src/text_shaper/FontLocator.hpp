@@ -68,7 +68,8 @@ class FontLocator
     }
 
     /**
-     * Enumerates all available fonts.
+     * Enumerates all available fonts, fixed-pitch faces first where the locator can tell them apart:
+     * LastResortFontLocator takes the first one when nothing better is installed.
      */
     [[nodiscard]] virtual FontSourceList all() = 0;
 
