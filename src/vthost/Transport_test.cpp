@@ -452,14 +452,17 @@ TEST_CASE("a pin store that cannot be read refuses every daemon and asks nobody"
         std::filesystem::create_directory(file);
     }
 #ifndef _WIN32
-    SECTION("a file this user may not read")
+    // Root reads a file of mode 000 anyway, and so cannot stand in for a user who may not. The section is
+    // left out for root rather than skipped from within: Catch2 then runs the case once more with no section
+    // entered, where no store exists at all and the assertions below do not hold.
+    if (::geteuid() != 0)
     {
-        // Root reads it anyway, and so cannot stand in for a user who may not.
-        if (::geteuid() == 0)
-            SKIP("root reads a file of mode 000");
-        std::ofstream { file } << "studio:7297 SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU\n";
-        std::filesystem::permissions(
-            file, std::filesystem::perms::none, std::filesystem::perm_options::replace);
+        SECTION("a file this user may not read")
+        {
+            std::ofstream { file } << "studio:7297 SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU\n";
+            std::filesystem::permissions(
+                file, std::filesystem::perms::none, std::filesystem::perm_options::replace);
+        }
     }
 #endif
 
