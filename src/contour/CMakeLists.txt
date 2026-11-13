@@ -264,6 +264,7 @@ set(_header_files
     window/SecureLockPlacement.hpp
     window/StickyHeaderChrome.hpp
     window/StickyHeaderPlacement.hpp
+    window/TabGlassShapes.hpp
     window/TabLabel.hpp
     window/TaskbarAttentionTally.hpp
 )
@@ -1065,6 +1066,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/ContourLinuxStyle_test.cpp
             window/WindowControlStyleProvider_test.cpp
             window/TabLabel_test.cpp
+            window/TabGlassShapes_test.cpp
             window/DaemonDriftModel_test.cpp
             window/DaemonDriftChoice_test.cpp
             window/NewDefaultsNotice_test.cpp
@@ -1585,6 +1587,7 @@ if(CONTOUR_TESTING)
         config/PtyReadBufferSize_test.cpp
         config/ScrollBarMode_test.cpp
         config/TabBarMode_test.cpp
+        config/TabStyle_test.cpp
         config/UiStyle_test.cpp
         config/WindowControlStyle_test.cpp
         test/ChromeSnapshotPlan_test.cpp

@@ -12,6 +12,9 @@ import QtQuick
 
 Item {
     id: root
+
+    /// The colour roles the chip is inked with: the chrome's, or the tab bar's where it sits on the bar.
+    property var colors: chromeStyle.colors
     objectName: "hostChip"
 
     /// A click, a tap, the accessibility press action, or Space/Return while focused.
@@ -79,9 +82,9 @@ Item {
         anchors.fill: parent
         radius: chromeStyle.radii.hostChip
         // The toolbar buttons' fills (ToolbarButton.qml), so the chip answers the pointer as they do.
-        color: primary.pressed ? chromeStyle.colors.controlPressedFill
-             : hover.hovered || root.activeFocus ? chromeStyle.colors.tabHoverFill
-             : chromeStyle.colors.chipFill
+        color: primary.pressed ? root.colors.controlPressedFill
+             : hover.hovered || root.activeFocus ? root.colors.tabHoverFill
+             : root.colors.chipFill
     }
 
     // What a click does, with the chord that does the same.
@@ -109,7 +112,7 @@ Item {
             Accessible.ignored: true
             text: chromeStyle.chipOpenGlyph
             font: chromeStyle.type.footnote
-            color: chromeStyle.colors.chipText
+            color: root.colors.chipText
         }
 
         // The status dot: a vector circle on the native rows, the dot glyph on the Terminal row.
@@ -146,7 +149,7 @@ Item {
             leftPadding: root.gap
             text: root.hostLabel
             font: chromeStyle.type.footnoteStrong
-            color: chromeStyle.colors.chipTextStrong
+            color: root.colors.chipTextStrong
         }
 
         // The state's text, absent while connected.
@@ -159,7 +162,7 @@ Item {
             leftPadding: root.gap
             text: root.statusText
             font: chromeStyle.type.footnote
-            color: chromeStyle.colors.chipText
+            color: root.colors.chipText
         }
 
         Text {
@@ -170,7 +173,7 @@ Item {
             Accessible.ignored: true
             text: chromeStyle.chipCloseGlyph
             font: chromeStyle.type.footnote
-            color: chromeStyle.colors.chipText
+            color: root.colors.chipText
         }
     }
 }

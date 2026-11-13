@@ -9,9 +9,11 @@
 #include <QtCore/Qt>
 #include <QtCore/QtTypes>
 
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 class QWindow;
 
@@ -46,6 +48,22 @@ enum class BandMaterialHealth : uint8_t
     Failed,      ///< The material failed once: the window's band is Solid from then on.
 };
 
+/// One tab the operating system draws as a shape of its own material (TabSurface::Glass): where it is, in
+/// window-relative logical pixels from the top-left, how round, and what it is tinted toward.
+struct TabGlassShape
+{
+    double x = 0.0;      ///< Left edge.
+    double y = 0.0;      ///< Top edge.
+    double width = 0.0;  ///< Width.
+    double height = 0.0; ///< Height.
+    double radius = 0.0; ///< Corner radius: the tab's own, so the shapes stay concentric with it.
+    /// What the glass is tinted toward, as 0xAARRGGBB; 0 (transparent) tints nothing. The active tab is
+    /// tinted with the accent or its own colour, to say it is the prominent one.
+    uint32_t tint = 0;
+
+    [[nodiscard]] bool operator==(TabGlassShape const&) const = default;
+};
+
 /// What the controller asks the OS to draw behind and around a window's title band.
 struct TitleBandRequest
 {
@@ -56,6 +74,12 @@ struct TitleBandRequest
     config::TitleBarGrowth growth =
         config::TitleBarGrowth::None;                  ///< Whether the title bar grows to the band.
     Qt::ColorScheme scheme = Qt::ColorScheme::Unknown; ///< The appearance; Unknown follows the app.
+    /// The band's height in logical pixels: the region a material behind the band alone covers
+    /// (BandBackdrop::Blurred). A material behind the whole window ignores it.
+    qreal height = 0.0;
+    /// What draws the tabs' own surfaces; for TabSurface::Glass, @c tabShapes are the tabs to draw.
+    config::TabSurface tabs = config::TabSurface::Painted;
+    std::vector<TabGlassShape> tabShapes {}; ///< The tabs as the band lays them out now, first to last.
 
     [[nodiscard]] bool operator==(TitleBandRequest const&) const = default;
 };
@@ -72,6 +96,13 @@ struct NativeTitleBarMetrics
     qreal fullScreenTop = 0.0;
 
     [[nodiscard]] bool operator==(NativeTitleBarMetrics const&) const = default;
+};
+
+/// What a title-band material needs of a window's frame before it can draw.
+enum class BandMaterialHost : uint8_t
+{
+    NativeTitleBar = 0, ///< A frame that keeps the OS's title bar (hostsTitleBandMaterial): Windows, macOS.
+    Compositor,         ///< Only a compositor that blurs behind a region of the window: KWin.
 };
 
 /// Draws the operating system's material behind a client-drawn title band, and measures its title bar.
@@ -93,6 +124,11 @@ class ITitleBandMaterial
     /// @param window The window to measure.
     /// @return @p window's native title bar; zeros where there is none.
     [[nodiscard]] virtual NativeTitleBarMetrics metrics(QWindow& window) const = 0;
+
+    /// @return What the material needs of a window's frame: the controller applies one that needs only a
+    ///         compositor whatever the frame, and one that needs the OS's title bar only where the frame
+    ///         keeps it.
+    [[nodiscard]] virtual BandMaterialHost host() const noexcept { return BandMaterialHost::NativeTitleBar; }
 };
 
 /// The material for platforms that draw none: apply() does nothing and metrics() measures nothing.

@@ -29,18 +29,32 @@ enum class Material : uint8_t
     None = 0, //!< No material: the surface is a plain cell fill (the Terminal style).
     Glass,    //!< Vibrancy / blur-behind.
     Mica,     //!< Wallpaper-tinted backdrop.
+    Acrylic,  //!< A blurred, translucent view of what is behind the window.
+    Frost,    //!< What is behind the window, blurred, under a mostly opaque tint.
     Solid,    //!< An opaque fill.
 };
 
 /// Number of @c Material enumerators, derived from the last one.
 inline constexpr size_t MaterialCount = static_cast<size_t>(Material::Solid) + 1;
 
-/// A material as drawn where nothing translucent may be: Glass and Mica become Solid, the rest stay.
+/// Whether @p material is one of Windows' DWM system backdrops, which the compositor draws behind the
+/// whole window.
+/// @param material The material.
+/// @return Whether it is Mica or Acrylic.
+[[nodiscard]] constexpr bool isSystemBackdrop(Material material) noexcept
+{
+    return material == Material::Mica || material == Material::Acrylic;
+}
+
+/// A material as drawn where nothing translucent may be: Glass, Frost, Mica and Acrylic become Solid, the
+/// rest stay.
 /// @param material The material.
 /// @return Its opaque counterpart.
 [[nodiscard]] constexpr Material opaqueMaterialOf(Material material) noexcept
 {
-    return material == Material::Glass || material == Material::Mica ? Material::Solid : material;
+    return material == Material::Glass || material == Material::Frost || isSystemBackdrop(material)
+               ? Material::Solid
+               : material;
 }
 
 /// Which kind of window asks for the operating system's material: it picks the material's variant.
@@ -48,6 +62,9 @@ enum class BackdropKind : uint8_t
 {
     Tabbed = 0, //!< A tabbed terminal window: Mica Alt on Windows.
     Main,       //!< A single-content window (Settings): Mica on Windows.
+    /// A tabbed terminal window whose band is clearly see-through (`tab_style.material: glass`): Acrylic on
+    /// Windows, Liquid Glass on macOS.
+    TabbedGlass,
 };
 
 /// What the operating system draws behind the title band.
@@ -55,6 +72,9 @@ enum class BandBackdrop : uint8_t
 {
     Client = 0,     //!< Nothing: the band is the client area's own paint.
     NativeMaterial, //!< The platform's title-bar material (macOS vibrancy) shows through the band.
+    /// What is behind the window, blurred by the platform under the band alone: KWin's blur on KDE Plasma,
+    /// a visual-effect view of our own behind the Qt content on macOS.
+    Blurred,
 };
 
 /// What the title band paints.
@@ -64,10 +84,41 @@ enum class BandFill : uint8_t
     Clear,       //!< Nothing, so the backdrop shows as it is.
     Tint,        //!< The terminal background, tinted (see window::bandTintOf).
     Background,  //!< The terminal background itself (Minimal's bare band).
+    FrostTint,   //!< The tint, mostly opaque, so a blurred backdrop colours it softly.
+    GlassTint,   //!< The tint, clearly translucent, so a blurred backdrop shows through.
 };
 
 /// Number of @c BandFill enumerators, derived from the last one.
-inline constexpr size_t BandFillCount = static_cast<size_t>(BandFill::Background) + 1;
+inline constexpr size_t BandFillCount = static_cast<size_t>(BandFill::GlassTint) + 1;
+
+/// What draws the tabs' own surfaces in the title band.
+enum class TabSurface : uint8_t
+{
+    Painted = 0, //!< The chrome paints each tab's fill (TabItem.qml).
+    /// The operating system draws each tab as a shape of its own material, and the chrome paints only the
+    /// labels over it: Liquid Glass on macOS 26, where Apple keeps the material to controls and
+    /// navigation and lets the system draw their backgrounds.
+    Glass,
+};
+
+/// How opaque a translucent band fill is, as a percentage: frosted at the top of the 60-80 % a regular
+/// glass-like surface is approximated with off Apple platforms, glass between that and the 20-40 % of a
+/// clear one, since text sits on it.
+/// @param fill A band fill.
+/// @return 100 for every fill but the two translucent tints.
+[[nodiscard]] constexpr int bandFillOpacityPercent(BandFill fill) noexcept
+{
+    switch (fill)
+    {
+        case BandFill::FrostTint: return 75;
+        case BandFill::GlassTint: return 45;
+        case BandFill::Palette:
+        case BandFill::Clear:
+        case BandFill::Tint:
+        case BandFill::Background: break;
+    }
+    return 100;
+}
 
 /// What the native title bar is grown with.
 enum class TitleBarGrowth : uint8_t
@@ -757,7 +808,10 @@ struct MaterialTokens
 /// Separation strength; the accessibility contrast preference adjusts these.
 struct ContrastTokens
 {
-    int separatorPercent = 0;             ///< Opacity of separators.
+    int separatorPercent = 0; ///< Opacity of separators.
+    /// Opacity of the line between two @c TabShape::Joined tabs. Its own number: that line is all that tells
+    /// two tabs apart over the band, where a separator between two surfaces is only a hint.
+    int tabSeparatorPercent = 0;
     double activeCardRing = 0.0;          ///< Width of the active pane card's ring.
     std::optional<int> paneDimPercent {}; ///< Dimming of inactive panes, when set.
 

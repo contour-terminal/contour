@@ -266,7 +266,9 @@ ChromeInputs chromeInputsFor(config::ChromeStyle row, QFont const& font)
                           .appearance = {},
                           .scheme = config::chromeSchemeColorsOf(vtbackend::ColorPalette {}),
                           .density = config::ChromeDensity::Comfortable,
-                          .secureInput = platform::SecureInputSupport::None };
+                          .secureInput = platform::SecureInputSupport::None,
+                          .tabStyle = {},
+                          .tabSeparators = config::TabSeparators::Classic };
 }
 
 UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
@@ -276,8 +278,11 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _fonts { chromeFontsFor(_tokens, _inputs.font) },
     _metrics { chromeMetricsFor(_tokens, _inputs.font) },
     _glyphs { chromeGlyphsFor(_tokens) },
-    _groups { config::resolveChromeTokens(
-        _inputs.row, _inputs.accessibility, _inputs.density, _inputs.appearance.materials) },
+    _groups { config::resolveChromeTokens(_inputs.row,
+                                          _inputs.accessibility,
+                                          _inputs.density,
+                                          _inputs.appearance.materials,
+                                          _inputs.tabStyle.material) },
     // The same pair chromeMetricsFor() resolves every other extent with, so a group token and a
     // legacy one land on the same grid.
     _units { .horizontal = _metrics.widthQuantum,
@@ -296,6 +301,28 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _settings { _groups.settings, _units, this },
     _settingsTraits { _groups.layout.settings, this },
     _colors { _groups.colors, _inputs.scheme, _groups.contrast.separatorPercent, *this },
+    _bandColors {
+        _groups.colors, _inputs.scheme, _groups.contrast.separatorPercent, *this, ChromeGround::Bar
+    },
+    _tabStyle { config::resolveTabStyle(
+                    { .separatorPercent = _groups.contrast.tabSeparatorPercent,
+                      .classicSeparatorPercent = _groups.contrast.separatorPercent,
+                      .separators = _inputs.tabSeparators,
+                      .unit = _tokens.unit,
+                      // A flat strip has always shown every tab's close button; the
+                      // pills and the joined tabs only the active or hovered one's.
+                      .closeVisibility = _groups.layout.tabShape == config::TabShape::Flat
+                                             ? config::TabCloseVisibility::Always
+                                             : config::TabCloseVisibility::ActiveOrHovered,
+                      // The pills of a well are equal; every other strip fits each tab to its title.
+                      .widths = _groups.layout.tabShape == config::TabShape::Pill
+                                    ? config::TabWidthLayout::Equal
+                                    : config::TabWidthLayout::Fit,
+                      .minTabWidth = static_cast<int>(std::lround(_metrics.minTabWidth)),
+                      .maxTabWidth = static_cast<int>(std::lround(_metrics.maxTabWidth)) },
+                    _inputs.tabStyle),
+                _colors,
+                *this },
     _paneHeaderActionNames { paneHeaderActionTexts(&PaneHeaderActionRow::accessibleName) },
     _paneHeaderActionCommands { paneHeaderActionTexts(&PaneHeaderActionRow::commandName) },
     _paneRoles { this },
@@ -464,8 +491,8 @@ QVariantMap UiStyleProvider::tabWellLayout(qreal available, int tabCount) const
 {
     auto const layout = layoutTabWell(available,
                                       tabCount,
-                                      TabWellMetrics { .minTab = _metrics.minTabWidth,
-                                                       .maxTab = _metrics.maxTabWidth,
+                                      TabWellMetrics { .minTab = minTabWidth(),
+                                                       .maxTab = maxTabWidth(),
                                                        .iconOnlyTab = (2 * _space.s5()) + _size.tabIcon(),
                                                        .gap = wellGap(),
                                                        .padding = wellPadding() });
@@ -473,6 +500,20 @@ QVariantMap UiStyleProvider::tabWellLayout(qreal available, int tabCount) const
              { QStringLiteral("wellWidth"), layout.wellWidth },
              { QStringLiteral("label"), nameOf(tabLabelModeName(layout.label)) },
              { QStringLiteral("scrolls"), layout.overflow == TabWellOverflow::Scrolls } };
+}
+
+qreal UiStyleProvider::equalTabWidth(qreal available, int tabCount, qreal gap) const
+{
+    // The well's own arithmetic, without a well: no padding around the tabs, and no icon-only step below
+    // the minimum, since a strip that is not a well scrolls instead.
+    return layoutTabWell(available,
+                         tabCount,
+                         TabWellMetrics { .minTab = minTabWidth(),
+                                          .maxTab = maxTabWidth(),
+                                          .iconOnlyTab = minTabWidth(),
+                                          .gap = gap,
+                                          .padding = 0 })
+        .tabWidth;
 }
 
 QVariantMap UiStyleProvider::palettePlacement(qreal windowWidth, qreal windowHeight) const
@@ -553,7 +594,51 @@ int UiStyleProvider::bandSurfaceFill(int frame, int mode, QString const& centre)
                                 .fill);
 }
 
+std::optional<QColor> UiStyleProvider::barGround() const
+{
+    auto const& fill = _inputs.tabStyle.barFill;
+    switch (fill.kind)
+    {
+        case config::TabFillKind::Auto:
+        case config::TabFillKind::Subtle: break;
+        case config::TabFillKind::Accent: return accentColor();
+        case config::TabFillKind::Custom: return platform::toQColor(fill.color);
+    }
+    return std::nullopt;
+}
+
 QColor UiStyleProvider::bandFillColor(int fill) const
+{
+    auto const row = rowBandFillColor(fill);
+    // A bar that paints nothing shows the material behind it, so a fill of the user's is a tint the material
+    // shows through; a translucent bar keeps its translucency in the user's colour; an opaque bar takes the
+    // fill as it is.
+    auto const clear = row.alpha() == 0;
+    if (auto const bar = barGround())
+    {
+        if (clear)
+            return platform::atOpacity(*bar, config::BarFillOverMaterialPercent);
+        auto tinted = *bar;
+        tinted.setAlpha(row.alpha());
+        return tinted;
+    }
+    if (_inputs.tabStyle.barFill.kind != config::TabFillKind::Subtle)
+        return row;
+    // The row's hover wash laid over the row's own fill: the same tone, a step off it.
+    auto const wash = _colors.color(config::ChromeColorRole::TabHoverFill);
+    if (clear)
+        return wash;
+    auto const alpha = wash.alphaF();
+    auto const mix = [alpha](float over, float under) {
+        return (over * alpha) + (under * (1.0F - alpha));
+    };
+    return QColor::fromRgbF(mix(wash.redF(), row.redF()),
+                            mix(wash.greenF(), row.greenF()),
+                            mix(wash.blueF(), row.blueF()),
+                            row.alphaF());
+}
+
+QColor UiStyleProvider::rowBandFillColor(int fill) const
 {
     auto const paletteWindow = QGuiApplication::palette().color(QPalette::Window);
     if (!inRange(fill, config::BandFillCount))
@@ -570,6 +655,10 @@ QColor UiStyleProvider::bandFillColor(int fill) const
         case config::BandFill::Clear: return { Qt::transparent };
         case config::BandFill::Tint: return orPaletteWindow(legibleBandTint(background, tone));
         case config::BandFill::Background: return orPaletteWindow(legibleBandBackground(background, tone));
+        case config::BandFill::FrostTint:
+        case config::BandFill::GlassTint:
+            return platform::atOpacity(orPaletteWindow(legibleBandTint(background, tone)),
+                                       config::bandFillOpacityPercent(static_cast<config::BandFill>(fill)));
     }
     return paletteWindow;
 }

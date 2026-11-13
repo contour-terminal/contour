@@ -426,6 +426,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ImagesConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, DaemonSettings& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, QuickTerminalConfig& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, TabStyleConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, DaemonRestoreConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, FoldingConfig& where);
@@ -895,6 +896,30 @@ struct Writer
             return hotkeyYaml(*v.hotkey);
         }();
         return format(doc, hotkey, v.focusLoss == QuickTerminalFocusLoss::Hide);
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, TabStyleConfig const& v)
+    {
+        // A colour is single-quoted: a plain YAML scalar cannot begin with `#`.
+        auto const fill = [](TabFill const& value) {
+            return value.kind == TabFillKind::Custom ? std::format("{}", SingleQuoted { tabFillText(value) })
+                                                     : tabFillText(value);
+        };
+        return format(doc,
+                      v.shape,
+                      v.spacing,
+                      v.material,
+                      fill(v.activeFill),
+                      fill(v.inactiveFill),
+                      fill(v.barFill),
+                      v.activeIndicator,
+                      fill(v.indicatorColor),
+                      v.tabColorMode,
+                      v.closeButton,
+                      v.newTabButton,
+                      v.tabWidth,
+                      v.minTabWidth,
+                      v.maxTabWidth);
     }
 
     [[nodiscard]] std::string format(std::string_view doc, WindowMargins const& v)

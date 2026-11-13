@@ -21,6 +21,7 @@
 #include <contour/config/SecureInputMode.hpp>
 #include <contour/config/SingleQuoted.hpp>
 #include <contour/config/TabBarMode.hpp>
+#include <contour/config/TabStyle.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 #include <contour/config/WindowShadow.hpp>
@@ -932,6 +933,7 @@ struct EditionDefaults
     TabBarVisibility tabBarVisibility; ///< When the window's tab strip is shown.
     GuiTheme theme;                    ///< Which palette the window chrome follows.
     ChromeDensity chromeDensity;       ///< How much room the window chrome takes.
+    TabSeparators tabSeparators;       ///< Where the line between two joined tabs is drawn.
     /// Whether hovering a link shows its target without the follow modifier held
     /// (`hyperlink_hover_tooltip`). A `bool` because the YAML key it seeds is one: Config's documented
     /// carve-out; the session converts it at the boundary.
@@ -1220,6 +1222,9 @@ struct Config
     ConfigEntry<TabBarVisibility, documentation::TabBarVisibility> tabBarVisibility {
         editionDefaults(defaultsEdition).tabBarVisibility
     };
+    // The window's too, for the tab bar's reason: one strip, whichever profiles its tabs run. Every member
+    // defaults to the chrome row's own look in both editions.
+    ConfigEntry<TabStyleConfig, documentation::TabStyle> tabStyle {};
     ConfigEntry<bool, documentation::GuiConfigLocked> guiConfigLocked { false };
     ConfigEntry<contour::config::GuiTheme, documentation::Theme> theme {
         editionDefaults(defaultsEdition).theme

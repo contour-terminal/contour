@@ -89,14 +89,31 @@ Item {
     // Whether the fill and the label come from the chrome colour roles rather than the OS palette: the
     // pills and the Terminal row do, so a scheme's legible selection pair is what the active tab wears.
     readonly property bool roleColors: chromeStyle.layout.tabColors === chromeStyle.layout.roles
-    readonly property var colors: chromeStyle.colors
+    readonly property var colors: chromeStyle.bandColors
+    // What the bar under the tab is painted in, as far as the tab can know it: tab_style.bar_fill where it
+    // names a colour, else the OS window colour the band is tinted from.
+    readonly property color bandGround: chromeStyle.tabStyle.hasBarGround ? chromeStyle.tabStyle.barGround
+                                                                         : systemPalette.window
 
     readonly property bool hasBadge: badgeSlot.known
-    // The close button shows on every Flat tab, and on a pill or a joined tab only while it is active or
-    // hovered and has the room for one. A hidden button is hidden from assistive technology too, so an
+    // When the close button shows is tab_style.close_button resolved against the row (tabStyle.closeVisibility):
+    // by default on every Flat tab, and on a pill or a joined tab while it is active or hovered; never on an
+    // icon-only pill, which has no room. A hidden button is hidden from assistive technology too, so an
     // inactive or an icon-only pill offers no "Close tab" there; closing it stays reachable through its
     // context menu and the keyboard (the CloseTab action on the tab once activated).
-    readonly property bool closeShown: !root.kitTab || (!root.iconOnly && (root.tabActive || hover.hovered))
+    readonly property bool closeShown: {
+        const shows = root.tabStyle.closeVisibility
+        if (shows === root.tabStyle.closeNever || root.iconOnly)
+            return false
+        if (shows === root.tabStyle.closeAlways)
+            return true
+        if (shows === root.tabStyle.closeHovered)
+            return hover.hovered
+        return root.tabActive || hover.hovered
+    }
+    // Whether the tab keeps room for the button: always, so a tab keeps its width as the pointer comes and
+    // goes, unless the button never shows.
+    readonly property bool closeReserved: root.tabStyle.closeVisibility !== root.tabStyle.closeNever
     // The gap between the parts of a tab: the kit's between a kit tab's icon, title, badge and close.
     readonly property real partGap: root.kitTab ? root.kitGap : chromeStyle.labelGap
 
@@ -118,9 +135,9 @@ Item {
         ? root.leadingInset + icon.width + root.kitGap + lock.room + label.implicitWidth
           + root.partGap + badgeSlot.width + badgeSlot.gapAfter
           + zoomBadge.width + zoomBadge.anchors.rightMargin
-          + chromeStyle.size.tabClose + chromeStyle.space.s4
+          + (root.closeReserved ? chromeStyle.size.tabClose : 0) + chromeStyle.space.s4
         : lock.room + label.implicitWidth + chromeStyle.labelPadding
-          + chromeStyle.labelGap + chromeStyle.controlWidth
+          + chromeStyle.labelGap + (root.closeReserved ? chromeStyle.controlWidth : 0)
           + chromeStyle.trailingPadding
           + separator.width + chromeStyle.tabSlack
           + zoomBadge.width + zoomBadge.anchors.rightMargin
@@ -160,12 +177,50 @@ Item {
     // What a pill sits on: the band's ground with the well's fill over it. A tint is laid over this
     // rather than over the pill's translucent fill alone, so the tinted pill is opaque and its label's
     // contrast is the one measured against it.
-    readonly property color wellGround: Qt.tint(systemPalette.window, root.colors.tabWellFill)
+    readonly property color wellGround: Qt.tint(root.bandGround, root.colors.tabWellFill)
 
     // The content's colour (R-k), which a joined active tab fills with and its label is resolved on.
     readonly property color contentColor: root.colors.paneGapFill
 
+    // The user's `tab_style:` laid over the row (chromeStyle.tabStyle).
+    readonly property var tabStyle: chromeStyle.tabStyle
+    // Whether the active tab is the content's colour with a square foot, so it reads as one piece with the
+    // content: the Joined row's own tab. A look that marks the active tab its own way (tab_style.shape)
+    // keeps the row's strip but not this.
+    readonly property bool joinsContent: root.joined && !root.tabStyle.marksActive
+    // Whether the look, not the row, decides this tab's fill and label: an uncoloured tab under such a look.
+    readonly property bool lookFilled: root.tabStyle.marksActive && !root.colorFilled
+    // Whether the operating system draws this tab's surface as glass (WindowController.tabsAreGlass, Liquid
+    // Glass on macOS 26): the tab then paints no fill, outline or tint of its own -- Apple's guidance is to let
+    // the system draw a control's background -- only its label, the bar's ink, over the glass. The strip
+    // publishes where the glass goes (TabStrip.publishGlassShapes): this tab's surface and its tint.
+    readonly property bool glassTab: !!root.controller && (root.controller.tabsAreGlass ?? false)
+    readonly property Item glassSurface: background
+    // Colour spent on the one prominent tab: the active one, tinted with its own colour or the accent.
+    readonly property color glassTint: root.tabActive ? (root.colored ? root.tabColor : chromeStyle.accentColor)
+                                                      : "transparent"
+    // Whether the tab after this one is the active one, which needs no line before it.
+    readonly property bool nextActive: !!root.controller
+                                       && (root.controller.activeTabIndex ?? -1) === root.tabIndex + 1
+    // How a tab's own colour is shown (tab_style.tab_color_mode). As its fill, the colour replaces the
+    // styled fill, since a colour given to one tab is the more specific choice; as a tint or as the
+    // indicator line, the tab is filled like every other and the colour is laid over or beside that.
+    readonly property bool colorFilled: root.colored && root.tabStyle.tabColorMode === root.tabStyle.colorFill
+    readonly property bool colorTinted: root.colored && root.tabStyle.tabColorMode === root.tabStyle.colorTint
+    readonly property bool colorLined: root.colored
+        && root.tabStyle.tabColorMode === root.tabStyle.colorIndicator
+    readonly property bool styledFill: !root.colorFilled
+        && (root.tabActive ? root.tabStyle.hasActiveFill : root.tabStyle.hasInactiveFill)
+    readonly property color styleFill: root.tabActive ? root.tabStyle.activeFill : root.tabStyle.inactiveFill
+    // What the row's own label is inked for, and what a styled fill puts under it instead: the content's
+    // colour under a joined active tab, else the band, with the fill laid over it (a wash keeps the band's
+    // tone, an opaque colour brings its own).
+    readonly property color rowGround: root.joinsContent && root.tabActive ? root.contentColor : root.bandGround
+    readonly property color styleGround: Qt.tint(root.bandGround, root.styleFill)
+
     // The fill behind the label; also drives text contrast.
+    //   - Styled (tab_style.active_fill / inactive_fill): the user's fill, the hover fill over it on a
+    //     hovered inactive tab.
     //   - Pill: the state's fill, and a coloured tab's colour over it at chromeStyle.tint.tab.
     //   - Joined: the content's colour while active, the hover fill while hovered, else the band shows
     //     through; a coloured tab is filled as on the Flat strip below.
@@ -174,21 +229,34 @@ Item {
     //     TabColorScheme.hpp (via the controller), else OS highlight / hover wash / transparent.
     // controller is null-guarded (torn down before this tree on window close).
     readonly property color effectiveBackground: {
+        if (root.glassTab)
+            return "transparent"
+        if (root.styledFill)
+            return hover.hovered && !root.tabActive ? Qt.tint(root.styleFill, root.colors.tabHoverFill)
+                                                    : root.styleFill
+        // A look of the user's (tab_style.shape): the active tab is the row's active-tab fill over the bar,
+        // or nothing where the look marks it with an outline or a line; the rest show the bar, and the
+        // hover fill under the pointer.
+        if (root.lookFilled) {
+            if (root.tabActive)
+                return root.tabStyle.washesActive ? root.colors.tabActiveFill : "transparent"
+            return hover.hovered ? root.colors.tabHoverFill : "transparent"
+        }
         if (root.pill) {
-            if (!root.colored)
+            if (!root.colorFilled)
                 return root.pillStateFill
             return Qt.tint(Qt.tint(root.wellGround, root.pillStateFill),
                            Qt.rgba(root.tabColor.r, root.tabColor.g, root.tabColor.b, chromeStyle.tint.tab))
         }
-        if (root.joined && !root.colored)
+        if (root.joinsContent && !root.colorFilled)
             return root.tabActive ? root.contentColor : hover.hovered ? root.colors.tabHoverFill : "transparent"
         if (root.roleColors) {
             if (root.tabActive)
                 return root.colors.tabActiveFill
             return hover.hovered ? root.colors.tabHoverFill : root.colors.tabWellFill
         }
-        if (root.colored && root.controller)
-            return root.controller.tabBackgroundColor(root.tabColor, systemPalette.window,
+        if (root.colorFilled && root.controller)
+            return root.controller.tabBackgroundColor(root.tabColor, root.bandGround,
                                                       root.tabActive, hover.hovered, Window.active)
         if (root.tabActive)
             return systemPalette.highlight
@@ -203,12 +271,33 @@ Item {
     // matching palette role.
     // A joined tab's labels are the kit's, the active one resolved on the content's colour it sits on, each
     // a level dimmer while the window is in the background (R-o).
+    // On a styled fill (tab_style) the row's own label stays wherever the fill keeps the ground's tone, so
+    // the active and the inactive labels keep their levels; a fill of the other tone takes black or white,
+    // whichever reads on it.
     readonly property color foreground: {
+        // Over glass the label is the bar's ink: glass takes on the colours of what is behind it, here the
+        // bar, so the bar's monochrome label reads on it.
+        if (root.glassTab)
+            return root.tabActive ? (Window.active ? root.colors.tabTextActive : root.colors.tabText)
+                                  : (Window.active ? root.colors.tabText : root.colors.tabTextDimmed)
+        if (root.styledFill && !Qt.colorEqual(chromeStyle.onColor(root.styleGround),
+                                              chromeStyle.onColor(root.rowGround)))
+            return chromeStyle.onColor(root.styleGround)
+        return root.rowForeground
+    }
+    readonly property color rowForeground: {
         // A row that fills the focused item instead of ringing it (size.focusRing 0: the Terminal row)
         // inks the label for that fill, the selection's own text.
         if (root.keyboardFocused && chromeStyle.size.focusRing === 0)
             return root.colors.paletteSelectionText
-        if (root.joined && !root.colored) {
+        // Under a look of the user's the tab sits on the bar, so its labels are the bar's: the active one,
+        // and the rest, each a level dimmer while the window is in the background.
+        if (root.lookFilled) {
+            if (root.tabActive)
+                return Window.active ? root.colors.tabTextActive : root.colors.tabText
+            return Window.active ? root.colors.tabText : root.colors.tabTextDimmed
+        }
+        if (root.joinsContent && !root.colorFilled) {
             if (root.tabActive)
                 return chromeStyle.colorOn(Window.active ? chromeStyle.roles.tabTextActive
                                                          : chromeStyle.roles.tabTextDimmed, root.contentColor)
@@ -220,9 +309,9 @@ Item {
                 return background ? root.colors.tabText : root.colors.tabTextActive
             if (background)
                 return root.colors.tabTextDimmed
-            return root.colored && root.pill ? root.colors.tabTextTinted : root.colors.tabText
+            return root.colorFilled && root.pill ? root.colors.tabTextTinted : root.colors.tabText
         }
-        if (root.colored && root.controller)
+        if (root.colorFilled && root.controller)
             return root.controller.tabTextColor(root.effectiveBackground)
         return root.tabActive ? systemPalette.highlightedText : systemPalette.windowText
     }
@@ -278,12 +367,31 @@ Item {
         id: background
         objectName: "tabBackground"   // findChild() handle for the GUI test
         anchors.fill: parent
+        // A look that floats (tab_style.shape) lifts the tab off the floor of a strip that seats its tabs
+        // on it, so the bar shows under the tab; a pill already floats in its well.
+        anchors.bottomMargin: root.joined && root.tabStyle.floats ? chromeStyle.space.s2 : 0
         // A pill is rounded; a joined tab's top corners are, its bottom meeting the content; the Flat strip's
-        // tabs are square, as they always were.
-        radius: root.kitTab ? chromeStyle.radii.tab : 0
-        bottomLeftRadius: root.joined ? 0 : background.radius
-        bottomRightRadius: root.joined ? 0 : background.radius
+        // tabs are square, as they always were. A look of the user's may square or round all four.
+        radius: root.kitTab && !root.tabStyle.squaresCorners ? chromeStyle.radii.tab : 0
+        bottomLeftRadius: root.joinsContent && !root.tabStyle.roundsCorners ? 0 : background.radius
+        bottomRightRadius: root.joinsContent && !root.tabStyle.roundsCorners ? 0 : background.radius
         color: root.effectiveBackground
+        // The outline that marks the active tab under a look that draws one, in the bar's label ink.
+        border.width: root.tabActive && root.tabStyle.outlinesActive && !root.glassTab ? chromeStyle.borderWidth : 0
+        border.color: root.colors.tabText
+
+        // The tab's own colour as a wash over its fill (tab_color_mode: tint), at the row's tab tint. A
+        // layer of its own rather than a blend into the fill: the fill may be transparent or a wash itself,
+        // and blending a colour into that darkens it.
+        Rectangle {
+            objectName: "tabColorTint"   // findChild() handle for the GUI test
+            anchors.fill: parent
+            visible: root.colorTinted && !root.glassTab
+            radius: background.radius
+            bottomLeftRadius: background.bottomLeftRadius
+            bottomRightRadius: background.bottomRightRadius
+            color: Qt.alpha(root.tabColor, chromeStyle.tint.tab)
+        }
     }
 
     // Keyboard focus. A pill rings outside itself, in the room its well leaves (TabStrip lets the list
@@ -293,19 +401,46 @@ Item {
         reach: root.pill ? chromeStyle.size.focusRing : 0
         hostRadius: background.radius
         // Inside the tab the ring lies over its fill, which a Flat tab's own colour or the OS accent sets.
-        ground: root.pill ? "transparent" : Qt.tint(systemPalette.window, root.effectiveBackground)
+        ground: root.pill ? "transparent" : Qt.tint(root.bandGround, root.effectiveBackground)
     }
 
     // A joined tab at rest ends in a rule, which sets it off the next one over the band; the active tab and
-    // the strip's last need none.
+    // the strip's last need none. Under the native2026 defaults (tabStyle.separatesRestingTabsOnly) neither
+    // does the tab before the active one: the line is drawn only where two tabs at rest meet, since the active
+    // tab is set apart by its own fill. A gap between the tabs (tab_style.spacing) replaces the line, whose
+    // opacity is then 0.
     Rectangle {
         objectName: "tabJoinedRule"   // findChild() handle for the GUI test
-        visible: root.joined && !root.tabActive && !root.lastInStrip
+        visible: root.joined && !root.tabActive && !root.lastInStrip && !root.glassTab
+                 && !(root.nextActive && root.tabStyle.separatesRestingTabsOnly)
+                 && root.tabStyle.separatorAlpha > 0
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: chromeStyle.borderWidth
-        color: Qt.alpha(root.colors.tabText, chromeStyle.contrast.separatorAlpha)
+        color: Qt.alpha(root.colors.tabText, root.tabStyle.separatorAlpha)
+    }
+
+    // The indicator line (tab_style.active_indicator), along the tab's top or its bottom edge and inset by
+    // its corner radius, so it stays inside a rounded tab. On the active tab it is tab_style.indicator_color
+    // -- not the tab's own colour, which as the tab's fill would hide a line of the same colour. Under
+    // tab_color_mode: indicator the line is how a coloured tab shows its colour at all, so such a tab
+    // carries it in that colour, active or not, along the bottom where the style names no edge.
+    // Declared before the progress bar, which takes the same bottom edge of a tab that reports progress and
+    // is drawn over it.
+    Rectangle {
+        id: activeIndicator
+        objectName: "tabActiveIndicator"   // findChild() handle for the GUI test
+        // A look that marks the active tab with the line shows it whatever active_indicator says.
+        visible: root.colorLined
+                 || (root.tabActive && (root.tabStyle.indicator !== root.tabStyle.none
+                                        || root.tabStyle.underlinesActive))
+        x: background.radius
+        y: root.tabStyle.indicator === root.tabStyle.topLine ? 0 : parent.height - height
+        width: Math.max(0, parent.width - background.radius - background.radius)
+        // As thick as the progress bar, the other line a tab draws along its edge.
+        height: chromeStyle.size.progressBar
+        color: root.colorLined ? root.tabColor : root.tabStyle.indicatorColor
     }
 
     // The tab colour as a cell of its own, on a row that draws colours as glyphs (the Terminal row's
@@ -666,7 +801,8 @@ Item {
         anchors.rightMargin: root.kitTab ? chromeStyle.space.s4 : chromeStyle.trailingPadding
         anchors.verticalCenter: parent.verticalCenter
         visible: root.closeShown
-        width: !root.kitTab ? chromeStyle.controlWidth : root.closeShown ? chromeStyle.size.tabClose : 0
+        width: !root.kitTab ? (root.closeReserved ? chromeStyle.controlWidth : 0)
+                            : root.closeShown ? chromeStyle.size.tabClose : 0
         height: root.kitTab ? chromeStyle.size.tabClose : chromeStyle.controlHeight
         text: chromeStyle.closeGlyph
         Accessible.name: qsTr("Close tab %1").arg(root.tabTitle)
@@ -678,7 +814,7 @@ Item {
         background: Rectangle {
             radius: root.kitTab ? chromeStyle.radii.tabClose : 0
             color: !closeButton.hovered ? "transparent"
-                 : root.joined && root.tabActive && !root.colored
+                 : root.joinsContent && root.tabActive && !root.colorFilled
                    ? chromeStyle.colorOn(chromeStyle.roles.tabCloseFill, root.contentColor)
                  : root.kitTab ? root.colors.tabCloseFill
                  : root.hoverWash

@@ -5,10 +5,12 @@
 #include <contour/config/ChromeDensity.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/MaterialSupport.hpp>
+#include <contour/config/TabStyle.hpp>
 #include <contour/config/UiStyle.hpp>
 
 #include <vtbackend/core/Color.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 
@@ -69,8 +71,17 @@ namespace detail
     };
 
     inline constexpr ContrastTokens StandardContrast { .separatorPercent = 10,
+                                                       .tabSeparatorPercent = 10,
                                                        .activeCardRing = 0.0,
                                                        .paneDimPercent = std::nullopt };
+
+    /// The Windows 11 row's contrast: the standard one, with a line between its joined tabs that reads over
+    /// Mica. The standard 10 % all but disappears there, and two inactive tabs then read as one.
+    inline constexpr ContrastTokens FluentContrast = [] {
+        auto contrast = StandardContrast;
+        contrast.tabSeparatorPercent = 20;
+        return contrast;
+    }();
 
     /// @param slot The scheme slot.
     /// @return A @c Scheme source at full opacity.
@@ -821,7 +832,7 @@ namespace detail
         .motion = NativeMotion,
         .elevation = NativeElevation,
         .material = { .titleBand = Material::Mica, .popover = Material::Solid },
-        .contrast = StandardContrast,
+        .contrast = FluentContrast,
         .tui = { .inactivePaneOpacity = 1.0, .toastStyle = ToastStyle::Floating },
         .layout = { .dialog = DialogPlacement::Centered,
                     // In-scene, not native (see docs/internals/native-chrome.md): Windows' native menu is
@@ -1289,6 +1300,56 @@ inline constexpr std::array<ChromeTokenRow, detail::ChromeStyleCount> ChromeToke
 static_assert(ChromeTokenRows.size() == detail::ChromeStyleCount,
               "Every ChromeStyle needs exactly one 1a token row.");
 
+/// One chrome row's way of granting a wished-for tab bar material.
+struct BandMaterialGrant
+{
+    ChromeStyle style {};   ///< The chrome row.
+    TabBarMaterial wish {}; ///< What the user asked for.
+    Material material {};   ///< The row's material that grants it.
+};
+
+/// What each row grants `tab_style.material: frosted | glass` with; a row and wish with no entry keeps the
+/// row's own material. A platform gains a material by gaining its row here, and nowhere else.
+///
+/// Windows: the compositor's two system backdrops, Mica Alt and Acrylic. macOS and KDE Plasma: a blurred
+/// backdrop under a translucent band (BandBackdrop::Blurred), frosted under a mostly opaque tint and glass
+/// under a clearly translucent one; Liquid Glass on macOS 26. A desktop without the blur (GNOME, any X11
+/// window manager but KWin) reports the material unsupported, and the window paints the solid band.
+inline constexpr auto BandMaterialGrants = std::array {
+    BandMaterialGrant {
+        .style = ChromeStyle::Fluent, .wish = TabBarMaterial::Frosted, .material = Material::Mica },
+    BandMaterialGrant {
+        .style = ChromeStyle::Fluent, .wish = TabBarMaterial::Glass, .material = Material::Acrylic },
+    BandMaterialGrant {
+        .style = ChromeStyle::MacOS, .wish = TabBarMaterial::Frosted, .material = Material::Frost },
+    BandMaterialGrant {
+        .style = ChromeStyle::MacOS, .wish = TabBarMaterial::Glass, .material = Material::Glass },
+    BandMaterialGrant {
+        .style = ChromeStyle::ContourLinux, .wish = TabBarMaterial::Frosted, .material = Material::Frost },
+    BandMaterialGrant {
+        .style = ChromeStyle::ContourLinux, .wish = TabBarMaterial::Glass, .material = Material::Glass },
+};
+
+/// The title band's material once the user's wish (`tab_style.material`) is laid over a row's own.
+/// @param style       The chrome row.
+/// @param rowMaterial The row's own title-band material.
+/// @param wish        What the user asked for.
+/// @return The material to resolve the row with: the row's own for @c Auto, its opaque counterpart for
+///         @c Solid, the row's grant for the rest, and @p rowMaterial where the row grants none.
+[[nodiscard]] constexpr Material bandMaterialFor(ChromeStyle style,
+                                                 Material rowMaterial,
+                                                 TabBarMaterial wish) noexcept
+{
+    if (wish == TabBarMaterial::Auto)
+        return rowMaterial;
+    if (wish == TabBarMaterial::Solid)
+        return opaqueMaterialOf(rowMaterial);
+    auto const grant = std::ranges::find_if(BandMaterialGrants, [&](BandMaterialGrant const& candidate) {
+        return candidate.style == style && candidate.wish == wish;
+    });
+    return grant != BandMaterialGrants.end() ? grant->material : rowMaterial;
+}
+
 /// Resolves a style's token row against the chrome density, the user's accessibility preferences and what
 /// the operating system can draw.
 /// @param row The chrome style whose row to take.
@@ -1297,14 +1358,20 @@ static_assert(ChromeTokenRows.size() == detail::ChromeStyleCount,
 ///                the pane extents, before the accessibility steps.
 /// @param materials Whether the OS draws the row's materials: @c Unsupported turns them Solid, as Reduced
 ///                  transparency does; @c Unknown changes nothing.
+/// @param bandMaterial What the user asked the title band to be made of (`tab_style.material`).
 /// @return The adjusted row.
 [[nodiscard]] constexpr ChromeTokenRow resolveChromeTokens(
     ChromeStyle row,
     AccessibilityPreferences preferences,
     ChromeDensity density = ChromeDensity::Comfortable,
-    MaterialSupport materials = MaterialSupport::Unknown) noexcept
+    MaterialSupport materials = MaterialSupport::Unknown,
+    TabBarMaterial bandMaterial = TabBarMaterial::Auto) noexcept
 {
     auto tokens = ChromeTokenRows[static_cast<size_t>(row)];
+
+    // Before the accessibility steps: Reduced transparency and an OS without the material still turn
+    // whatever was wished for Solid.
+    tokens.material.titleBand = bandMaterialFor(row, tokens.material.titleBand, bandMaterial);
 
     if (density == ChromeDensity::Minimal)
     {
@@ -1329,13 +1396,15 @@ static_assert(ChromeTokenRows.size() == detail::ChromeStyleCount,
     if (preferences.transparency == TransparencyPreference::Reduced
         || materials == MaterialSupport::Unsupported)
     {
-        for (auto* material: { &tokens.material.titleBand, &tokens.material.popover })
-            *material = opaqueMaterialOf(*material);
+        tokens.material.titleBand = opaqueMaterialOf(tokens.material.titleBand);
+        tokens.material.popover = opaqueMaterialOf(tokens.material.popover);
     }
 
     if (preferences.contrast == ContrastPreference::Increased)
     {
         tokens.contrast.separatorPercent *= 2;
+        // Not clamped here: config::resolveTabStyle holds what it publishes to 0..100.
+        tokens.contrast.tabSeparatorPercent *= 2;
         tokens.contrast.activeCardRing = 1.5;
         tokens.contrast.paneDimPercent = 5;
     }

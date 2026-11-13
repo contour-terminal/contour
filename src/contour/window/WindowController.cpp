@@ -33,6 +33,7 @@
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabColorScheme.hpp>
+#include <contour/window/TabGlassShapes.hpp>
 #include <contour/window/TabLabel.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/TitleBandSurface.hpp>
@@ -2403,7 +2404,10 @@ Qt::ColorScheme WindowController::effectiveColorScheme() const
 
 bool WindowController::dressesTitleBand() const noexcept
 {
-    return platform::hostsTitleBandMaterial(framePolicy().shadow);
+    // A material a compositor draws (KWin's blur) needs no title bar of the OS's; the others need a frame
+    // that keeps one.
+    return _manager.app().titleBandMaterial().host() == platform::BandMaterialHost::Compositor
+           || platform::hostsTitleBandMaterial(framePolicy().shadow);
 }
 
 QString WindowController::toastHost(QString const& band,
@@ -2455,9 +2459,16 @@ platform::TitleBandRequest WindowController::titleBandRequest() const
 {
     auto const surface = titleBandSurface();
     return platform::TitleBandRequest { .backdrop = surface.backdrop,
-                                        .kind = config::BackdropKind::Tabbed,
+                                        .kind = surface.kind,
                                         .growth = surface.growth,
-                                        .scheme = effectiveColorScheme() };
+                                        .scheme = effectiveColorScheme(),
+                                        .height = titleBandGeometry().height,
+                                        .tabs = surface.tabs,
+                                        // Only for tabs the material draws: shapes of painted tabs would
+                                        // re-apply the band on every tab move for nothing.
+                                        .tabShapes = surface.tabs == config::TabSurface::Glass
+                                                         ? _tabGlassShapes
+                                                         : std::vector<platform::TabGlassShape> {} };
 }
 
 WindowMode WindowController::windowMode() const noexcept
@@ -2529,10 +2540,24 @@ void WindowController::refreshTitleBand()
     emit titleBandChanged();
 }
 
+bool WindowController::tabsAreGlass() const
+{
+    return titleBandSurface().tabs == config::TabSurface::Glass;
+}
+
+void WindowController::setTabGlassShapes(QVariantList const& shapes)
+{
+    auto next = tabGlassShapesOf(shapes);
+    if (next == _tabGlassShapes)
+        return;
+    _tabGlassShapes = std::move(next);
+    refreshTitleBand();
+}
+
 bool WindowController::clearsTitleBarBackground() const noexcept
 {
     return needsExpandedClientArea() && _publishedTitleBand
-           && _publishedTitleBand->backdrop == config::BandBackdrop::Client;
+           && _publishedTitleBand->backdrop != config::BandBackdrop::NativeMaterial;
 }
 
 void WindowController::onOSWindowActiveChanged()

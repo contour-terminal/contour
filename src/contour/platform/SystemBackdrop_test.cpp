@@ -30,6 +30,13 @@ constexpr auto BackdropCases = std::array {
         BandBackdrop::NativeMaterial, BackdropKind::Tabbed, BlurBehindWish::Off, DwmBackdrop::TabbedWindow },
     BackdropCase {
         BandBackdrop::NativeMaterial, BackdropKind::Main, BlurBehindWish::Off, DwmBackdrop::MainWindow },
+    // A tab bar asked to be Acrylic (tab_style.material) is DWM's transient-window backdrop behind the band,
+    // and nothing once the band is the client's own paint (full screen, a failed material).
+    BackdropCase { BandBackdrop::NativeMaterial,
+                   BackdropKind::TabbedGlass,
+                   BlurBehindWish::Off,
+                   DwmBackdrop::TransientWindow },
+    BackdropCase { BandBackdrop::Client, BackdropKind::TabbedGlass, BlurBehindWish::Off, DwmBackdrop::None },
     BackdropCase { BandBackdrop::Client, BackdropKind::Tabbed, BlurBehindWish::Off, DwmBackdrop::None },
     BackdropCase { BandBackdrop::Client, BackdropKind::Main, BlurBehindWish::Off, DwmBackdrop::None },
     BackdropCase {

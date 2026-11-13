@@ -4,6 +4,7 @@
 #include <contour/config/AccessibilityPreferences.hpp>
 #include <contour/config/ChromeDensity.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
+#include <contour/config/TabStyle.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
 #include <contour/platform/SecureInput.hpp>
@@ -131,6 +132,9 @@ struct ChromeInputs
     config::ChromeDensity density = config::ChromeDensity::Comfortable; ///< The configured chrome density.
     /// Whether the OS turns secure keyboard entry on here; it decides the words beside the lock.
     platform::SecureInputSupport secureInput = platform::SecureInputSupport::None;
+    config::TabStyleConfig tabStyle {}; ///< The configured `tab_style:`, laid over the row's tab look.
+    /// Where the line between two joined tabs is drawn: the defaults edition's choice.
+    config::TabSeparators tabSeparators = config::TabSeparators::Classic;
 
     [[nodiscard]] bool operator==(ChromeInputs const&) const = default;
 };
@@ -259,11 +263,16 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QObject* tui READ tui CONSTANT)
     Q_PROPERTY(QObject* layout READ layout CONSTANT)
     Q_PROPERTY(QObject* tint READ tint CONSTANT)
+    /// The tabs' look once `tab_style:` is laid over the row. The object is CONSTANT; its fills notify.
+    Q_PROPERTY(QObject* tabStyle READ tabStyle CONSTANT)
     /// The Settings window's extents and type, and the traits of its layout.
     Q_PROPERTY(QObject* settings READ settings CONSTANT)
     Q_PROPERTY(QObject* settingsTraits READ settingsTraits CONSTANT)
     /// The chrome colour roles. The object is CONSTANT; its own properties notify.
     Q_PROPERTY(QObject* colors READ colors CONSTANT)
+    /// The same roles as what is drawn on the tab bar reads them: inked for `tab_style.bar_fill` where it
+    /// gives the bar a colour, and equal to @c colors where it does not.
+    Q_PROPERTY(QObject* bandColors READ bandColors CONSTANT)
 
     /// The accent the chrome highlights with: the platform's when it publishes one, else the palette's.
     Q_PROPERTY(QColor accentColor READ accentColor NOTIFY paletteRevisionChanged)
@@ -637,8 +646,18 @@ class UiStyleProvider: public QObject
     [[nodiscard]] qreal labelPadding() const noexcept { return _metrics.labelPadding; }
     [[nodiscard]] qreal labelGap() const noexcept { return _metrics.labelGap; }
     [[nodiscard]] qreal trailingPadding() const noexcept { return _metrics.trailingPadding; }
-    [[nodiscard]] qreal minTabWidth() const noexcept { return _metrics.minTabWidth; }
-    [[nodiscard]] qreal maxTabWidth() const noexcept { return _metrics.maxTabWidth; }
+    /// @return The narrowest and the widest a tab gets: `tab_style.min_tab_width` and `max_tab_width` where
+    ///         set, else the row's own; always the row's on a row counted in cells, whose tabs are cells.
+    [[nodiscard]] qreal minTabWidth() const noexcept
+    {
+        return _tokens.unit == config::LengthUnit::Cell ? _metrics.minTabWidth
+                                                        : static_cast<qreal>(_tabStyle.tokens().minTabWidth);
+    }
+    [[nodiscard]] qreal maxTabWidth() const noexcept
+    {
+        return _tokens.unit == config::LengthUnit::Cell ? _metrics.maxTabWidth
+                                                        : static_cast<qreal>(_tabStyle.tokens().maxTabWidth);
+    }
     [[nodiscard]] qreal tabSlack() const noexcept { return _metrics.tabSlack; }
     [[nodiscard]] qreal controlWidth() const noexcept { return _metrics.controlWidth; }
     [[nodiscard]] qreal controlHeight() const noexcept { return _metrics.controlHeight; }
@@ -800,6 +819,15 @@ class UiStyleProvider: public QObject
     ///         the well scrolls (a QML-facing bool, the documented carve-out).
     [[nodiscard]] Q_INVOKABLE QVariantMap tabWellLayout(qreal available, int tabCount) const;
 
+    /// One width for every tab of a strip that is not a well of pills (`tab_style.tab_width: equal`): the
+    /// share of @p available between @p tabCount tabs @p gap apart, within the minimum and maximum tab width,
+    /// and the minimum where the share falls under it (the strip then scrolls, as it does for wide tabs).
+    /// @param available The width the strip leaves its tabs.
+    /// @param tabCount  The number of tabs.
+    /// @param gap       The gap between two tabs (`tab_style.spacing`).
+    /// @return The width.
+    [[nodiscard]] Q_INVOKABLE qreal equalTabWidth(qreal available, int tabCount, qreal gap) const;
+
     /// Where the command palette goes in a window of the given size (window::placePalette), from the
     /// row's palette tokens in logical pixels, @c space.s7 as the margin, snapped to whole rows of cells on
     /// the Terminal row.
@@ -869,6 +897,10 @@ class UiStyleProvider: public QObject
     /// The colour of a band fill, as bandFill() paints it. Main.qml asks it for the window's own fill
     /// (WindowController::titleBandFill), which differs from the row's where the window's material failed.
     /// Reads the palette, so a binding over it also reads @ref paletteRevision.
+    ///
+    /// `tab_style.bar_fill` is laid over the row's own answer here, so every caller paints it: a colour
+    /// replaces a bar that paints and tints one that shows its material, and `subtle` is the row's hover
+    /// wash over the row's fill.
     /// @param fill A config::BandFill as its underlying value.
     /// @return The colour; the palette's window colour for a value out of range.
     [[nodiscard]] Q_INVOKABLE QColor bandFillColor(int fill) const;
@@ -943,9 +975,17 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QObject* tui() noexcept { return &_tui; }
     [[nodiscard]] QObject* layout() noexcept { return &_layout; }
     [[nodiscard]] QObject* tint() noexcept { return &_tint; }
+    [[nodiscard]] QObject* tabStyle() noexcept { return &_tabStyle; }
     [[nodiscard]] QObject* settings() noexcept { return &_settings; }
     [[nodiscard]] QObject* settingsTraits() noexcept { return &_settingsTraits; }
     [[nodiscard]] QObject* colors() noexcept { return &_colors; }
+    [[nodiscard]] QObject* bandColors() noexcept { return &_bandColors; }
+
+    /// The colour the tab bar is painted in where `tab_style.bar_fill` names one of its own: the accent or
+    /// the user's colour.
+    /// @return That colour, as the ground whatever is drawn on the bar is inked for; @c std::nullopt where
+    ///         the bar keeps the row's fill or takes a wash of the row's tone.
+    [[nodiscard]] std::optional<QColor> barGround() const;
 
     [[nodiscard]] QString const& tabSeparator() const noexcept { return _glyphs.tabSeparator; }
     [[nodiscard]] QString const& trafficLightGlyph() const noexcept { return _glyphs.trafficLight; }
@@ -1013,6 +1053,11 @@ class UiStyleProvider: public QObject
     void paletteRevisionChanged();
 
   private:
+    /// The colour of a band fill as the row itself paints it, before `tab_style.bar_fill`.
+    /// @param fill A config::BandFill as its underlying value.
+    /// @return The colour; the palette's window colour for a value out of range.
+    [[nodiscard]] QColor rowBandFillColor(int fill) const;
+
     /// The colour that says @p role when drawn as @p use on a ground of @p tone: statusColor()'s and
     /// statusMarkOn()'s one pick of the row's source and hue.
     /// @param role A status role inside config::StatusColors.
@@ -1047,6 +1092,8 @@ class UiStyleProvider: public QObject
     ChromeSettingsTokens _settings;
     ChromeSettingsTraits _settingsTraits;
     ChromeColorTokens _colors;
+    ChromeColorTokens _bandColors;         ///< The same roles, inked for the tab bar's own fill.
+    ChromeTabStyleTokens _tabStyle;        ///< After _colors, which it reads.
     QStringList _paneHeaderActionNames;    ///< PaneHeaderActions' accessible names, built once.
     QStringList _paneHeaderActionCommands; ///< PaneHeaderActions' command names, built once.
     ChromePaneRoleNames _paneRoles;

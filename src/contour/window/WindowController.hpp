@@ -199,6 +199,10 @@ class WindowController:
     Q_PROPERTY(qreal titleBandHeight READ titleBandHeight NOTIFY titleBandChanged)
     Q_PROPERTY(qreal titleBandRevealTop READ titleBandRevealTop NOTIFY titleBandChanged)
     Q_PROPERTY(bool clearsTitleBarBackground READ clearsTitleBarBackground NOTIFY titleBandChanged)
+    // Whether the operating system draws this window's tabs as glass (config::TabSurface::Glass), so the
+    // strip paints only their labels and publishes where they are (setTabGlassShapes). A bool, the
+    // QML-facing carve-out: the strip asks only yes or no.
+    Q_PROPERTY(bool tabsAreGlass READ tabsAreGlass NOTIFY titleBandChanged)
     // What this window's band paints, a config::BandFill as its underlying value: the row's surface, unless
     // this window's frame hosts no material or its material failed.
     Q_PROPERTY(int titleBandFill READ titleBandFill NOTIFY titleBandChanged)
@@ -1016,6 +1020,15 @@ class WindowController:
     /// own band), and only while the published request's backdrop is the client's own paint. A bool for
     /// QML, the documented QML-facing carve-out, read as the question the `flags` binding asks.
     [[nodiscard]] bool clearsTitleBarBackground() const noexcept;
+
+    /// @return Whether the operating system draws this window's tabs as glass: the band's surface asks for
+    ///         it (config::TabSurface::Glass) and the material has not failed.
+    [[nodiscard]] bool tabsAreGlass() const;
+
+    /// Where the tab strip lays out the tabs the operating system draws as glass. The strip publishes them
+    /// whenever they move; an unchanged list asks nothing of the material.
+    /// @param shapes The tabs, as window::tabGlassShapesOf reads them.
+    Q_INVOKABLE void setTabGlassShapes(QVariantList const& shapes);
     // }}}
 
     // {{{ Tab strip (tab bar) placement + visibility
@@ -1825,6 +1838,7 @@ class WindowController:
     // The title band request last applied to this window's platform window, if any; forgotten when the
     // decoration changes, so the next refresh applies again.
     std::optional<platform::TitleBandRequest> _appliedTitleBand;
+    std::vector<platform::TabGlassShape> _tabGlassShapes; ///< The strip's glass tabs, as last published.
     // The request and the geometry refreshTitleBand() last published (the properties read these).
     std::optional<platform::TitleBandRequest> _publishedTitleBand;
     std::optional<int> _publishedTitleBandFill;

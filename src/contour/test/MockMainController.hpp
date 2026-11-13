@@ -143,6 +143,9 @@ class MockMainController: public MainWindowControllerMock
     // test sets them, as it does to load the real Main.qml under Qt::ExpandedClientAreaHint.
     Q_PROPERTY(bool needsExpandedClientArea READ needsExpandedClientArea WRITE setNeedsExpandedClientArea
                    NOTIFY frameHintsChanged)
+    // Mirrors WindowController::tabsAreGlass: whether the strip paints only the labels and publishes where
+    // the glass goes (setTabGlassShapes, recorded in tabGlassShapes()). A bool, the QML-facing carve-out.
+    Q_PROPERTY(bool tabsAreGlass READ tabsAreGlass NOTIFY frameHintsChanged)
     Q_PROPERTY(bool clearsTitleBarBackground READ clearsTitleBarBackground WRITE setClearsTitleBarBackground
                    NOTIFY frameHintsChanged)
     // Mirrors WindowController's role flags, which Main.qml's `flags` OR in; none unless a test sets them, as
@@ -440,6 +443,21 @@ class MockMainController: public MainWindowControllerMock
             emit frameHintsChanged();
         }
     }
+    /// @return Whether the operating system draws the tabs as glass; a test turns it on.
+    [[nodiscard]] bool tabsAreGlass() const noexcept { return _tabsAreGlass; }
+    /// Has the operating system draw the tabs as glass, or the strip paint them again.
+    void setTabsAreGlass(bool glass)
+    {
+        if (_tabsAreGlass != glass)
+        {
+            _tabsAreGlass = glass;
+            emit frameHintsChanged();
+        }
+    }
+    /// Records where the strip lays out the glass tabs, as WindowController::setTabGlassShapes reads them.
+    Q_INVOKABLE void setTabGlassShapes(QVariantList const& shapes) { _tabGlassShapes = shapes; }
+    /// @return The glass tabs the strip published last.
+    [[nodiscard]] QVariantList const& tabGlassShapes() const noexcept { return _tabGlassShapes; }
     [[nodiscard]] bool clearsTitleBarBackground() const noexcept { return _clearsTitleBarBackground; }
     void setClearsTitleBarBackground(bool clears)
     {
@@ -859,6 +877,8 @@ class MockMainController: public MainWindowControllerMock
     int _roleFlags = 0;                     // the window role's Qt flags, which a test sets
     bool _needsExpandedClientArea = false;  // Qt::ExpandedClientAreaHint, which a test sets
     bool _clearsTitleBarBackground = false; // Qt::NoTitleBarBackgroundHint, which a test sets
+    bool _tabsAreGlass = false;             // WindowController::tabsAreGlass, which a test sets
+    QVariantList _tabGlassShapes;           // What the strip published last.
     window::DaemonDriftModel _drift;
     bool _multimediaReady = false; // the background probe has not finished
     QString _hostingNotice;

@@ -44,6 +44,7 @@ struct ProgressTimeout {};
 struct NotificationCloseTimeout {};
 struct TabBarPosition {};
 struct TabBarVisibility {};
+struct TabStyle {};
 struct UiStyle {};
 struct ChromeDensity {};
 struct SecureInput {};
