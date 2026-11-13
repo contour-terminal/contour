@@ -281,10 +281,10 @@ inline constexpr auto TitleBandRules = std::array {
                     .sidebar = std::nullopt,
                     .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
     // Joined on a client band (Windows): the tabs are the title bar, so the band always shows -- it carries
-    // the caption buttons -- and holds the tabs whatever the gate says, one tab being still a tab, as in
-    // Windows Terminal (R-j). Otherwise it is Pill's band (Q3): Minimal's bare band for one tab, and the
-    // title
-    // on top with a bar of the tabs' own at the bottom.
+    // the caption buttons. Its centre follows the gate as Pill's does: the tabs while the gate shows them,
+    // else the title, so tab_bar_visibility Never and Multiple hide them here too. Otherwise it is Pill's
+    // band (Q3): Minimal's bare band for one tab, and the title on top with a bar of the tabs' own at the
+    // bottom.
     TitleBandRule { .shape = config::TabShape::Joined,
                     .frame = WindowFrame::ClientBand,
                     .mode = WindowMode::FullScreen,
@@ -308,13 +308,24 @@ inline constexpr auto TitleBandRules = std::array {
     TitleBandRule { .shape = config::TabShape::Joined,
                     .frame = WindowFrame::ClientBand,
                     .mode = std::nullopt,
-                    .strip = std::nullopt,
+                    .strip = TabStripGate::Shown,
                     .notice = std::nullopt,
                     .density = std::nullopt,
                     .position = config::TabBarPosition::Top,
                     .placement = std::nullopt,
                     .sidebar = std::nullopt,
                     .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    TitleBandRule { .shape = config::TabShape::Joined,
+                    .frame = WindowFrame::ClientBand,
+                    .mode = std::nullopt,
+                    .strip = TabStripGate::Hidden,
+                    // An interrupted remote window falls through: the strip is the host chip's home (R-d).
+                    .notice = HostNotice::None,
+                    .density = std::nullopt,
+                    .position = config::TabBarPosition::Top,
+                    .placement = std::nullopt,
+                    .sidebar = std::nullopt,
+                    .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
     TitleBandRule { .shape = config::TabShape::Joined,
                     .frame = WindowFrame::ClientBand,
                     .mode = std::nullopt,
