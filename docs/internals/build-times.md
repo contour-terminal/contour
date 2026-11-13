@@ -332,7 +332,7 @@ that runs `scripts/report-nightly-failure.py`. It keeps one issue per workflow, 
 
 | Last night | Issue open? | What happens |
 |---|---|---|
-| failed | no | the issue is opened, with the failed jobs and the end of their logs |
+| failed | no | the issue is opened, with the failed jobs and the lines of their logs that name the failure |
 | failed | yes | a comment is added |
 | passed | yes | the issue is closed |
 | passed | no | nothing |
