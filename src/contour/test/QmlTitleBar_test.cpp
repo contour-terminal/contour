@@ -9,6 +9,7 @@
 #include <contour/config/WindowControlLook.hpp>
 #include <contour/platform/CaptionHitTest.hpp>
 #include <contour/platform/ColorConversion.hpp>
+#include <contour/platform/GuiTheme.hpp>
 #include <contour/session/EndReason.hpp>
 #include <contour/session/SearchStatus.hpp>
 #include <contour/test/MockMainController.hpp>
@@ -1696,6 +1697,249 @@ TEST_CASE("KitDialog: a destructive accept is painted in the danger colour (offs
     auto const* background = accept->property("background").value<QQuickItem*>();
     REQUIRE(background != nullptr);
     CHECK(background->property("color").value<QColor>() == provider->statusColor(provider->statusDanger()));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("KitDialog: the default button is the filled one (offscreen)", "[contour][gui][qml][kit][dialog]")
+{
+    // Native dialogs draw the button Enter takes in the accent. Filling the accept button whatever the
+    // default drew Trust, Yes and Allow as if Enter took them, over a Cancel, No or Deny that it did.
+    struct Row
+    {
+        int defaultButton;  ///< A KitDialog.DefaultButton.
+        char const* filled; ///< The button drawn filled, and focused.
+        char const* plain;  ///< The other one.
+        int fillRole;       ///< The StatusColorRole it is filled with.
+    };
+    // The accept button fills with the accept role's colour, the danger here; the reject button with the
+    // accent.
+    auto const row = GENERATE(
+        Row { 0, "kitDialogAccept", "kitDialogReject", contour::window::UiStyleProvider::statusDanger() },
+        Row { 1, "kitDialogReject", "kitDialogAccept", contour::window::UiStyleProvider::statusRunning() });
+    INFO("defaultButton " << row.defaultButton);
+
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+    auto const* provider = engine.rootContext()
+                               ->contextProperty(QStringLiteral("chromeStyle"))
+                               .value<contour::window::UiStyleProvider*>();
+    REQUIRE(provider != nullptr);
+
+    DialogHost const host;
+    auto dialog =
+        openKitDialog(engine,
+                      host.window.contentItem(),
+                      QVariantMap { { "heading", QStringLiteral("Trust it?") },
+                                    { "acceptText", QStringLiteral("Trust") },
+                                    { "acceptRole", contour::window::UiStyleProvider::statusDanger() },
+                                    { "defaultButton", row.defaultButton } });
+    auto const* filled = dialog->findChild<QQuickItem*>(QString::fromLatin1(row.filled));
+    auto const* plain = dialog->findChild<QQuickItem*>(QString::fromLatin1(row.plain));
+    REQUIRE(filled != nullptr);
+    REQUIRE(plain != nullptr);
+    CHECK(filled->isVisible());
+    CHECK(plain->isVisible());
+
+    auto const fillRole = row.fillRole;
+    auto const* fill = filled->property("background").value<QQuickItem*>();
+    REQUIRE(fill != nullptr);
+    CHECK(fill->property("color").value<QColor>() == provider->statusColor(fillRole));
+    auto const* label = filled->property("contentItem").value<QQuickItem*>();
+    REQUIRE(label != nullptr);
+    CHECK(label->property("color").value<QColor>() == provider->onStatusColor(fillRole));
+    CHECK(filled->hasActiveFocus());
+
+    // The other is the style's own button, in neither the accept role's colour nor the accent.
+    auto const* plainBackground = plain->property("background").value<QQuickItem*>();
+    REQUIRE(plainBackground != nullptr);
+    auto const plainFill = plainBackground->property("color").value<QColor>();
+    CHECK(plainFill != provider->statusColor(contour::window::UiStyleProvider::statusDanger()));
+    CHECK(plainFill != provider->statusColor(contour::window::UiStyleProvider::statusRunning()));
+    CHECK_FALSE(plain->hasActiveFocus());
+
+    // The roles keep their places: reject left of accept, whichever is filled.
+    auto const* accept = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogAccept"));
+    auto const* reject = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogReject"));
+    CHECK(reject->mapToScene({}).x() < accept->mapToScene({}).x());
+    CHECK(accept->property("text").toString() == "Trust");
+    CHECK(reject->property("text").toString() == "Cancel");
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("KitDialog: Tab takes the buttons in the order they stand (offscreen)",
+          "[contour][gui][qml][kit][dialog]")
+{
+    // Reject stands left of accept whichever is the default, and Tab must walk them that way: the filled
+    // default used to be declared after the other button and took its place in the chain from there.
+    auto const defaultButton = GENERATE(0, 1);
+    INFO("defaultButton " << defaultButton);
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+    DialogHost host;
+    auto dialog = openKitDialog(engine,
+                                host.window.contentItem(),
+                                QVariantMap { { "heading", QStringLiteral("Close?") },
+                                              { "acceptText", QStringLiteral("Close") },
+                                              { "defaultButton", defaultButton } });
+    auto const* accept = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogAccept"));
+    auto const* reject = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogReject"));
+    REQUIRE(accept != nullptr);
+    REQUIRE(reject != nullptr);
+    REQUIRE((defaultButton == 0 ? accept : reject)->hasActiveFocus());
+    if (defaultButton == 1)
+    {
+        QTest::keyClick(&host.window, Qt::Key_Tab);
+        CHECK(accept->hasActiveFocus());
+    }
+    else
+    {
+        QTest::keyClick(&host.window, Qt::Key_Backtab, Qt::ShiftModifier);
+        CHECK(reject->hasActiveFocus());
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("KitDialog: a default reject button that is not shown falls to the accept button (offscreen)",
+          "[contour][gui][qml][kit][dialog]")
+{
+    // A dialog with nothing to decline names no reject text; asked to default to it, the one button there is
+    // takes the default -- filled, focused, and Enter's -- rather than the focus sitting on a hidden button.
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+    auto const* provider = engine.rootContext()
+                               ->contextProperty(QStringLiteral("chromeStyle"))
+                               .value<contour::window::UiStyleProvider*>();
+    REQUIRE(provider != nullptr);
+    DialogHost host;
+    auto dialog = openKitDialog(engine,
+                                host.window.contentItem(),
+                                QVariantMap { { "heading", QStringLiteral("Contour") },
+                                              { "acceptText", QStringLiteral("OK") },
+                                              { "rejectText", QString {} },
+                                              { "defaultButton", 1 } });
+    auto const* accept = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogAccept"));
+    auto const* reject = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogReject"));
+    REQUIRE(accept != nullptr);
+    REQUIRE(reject != nullptr);
+    CHECK_FALSE(reject->isVisible());
+    CHECK(accept->isVisible());
+    CHECK(accept->hasActiveFocus());
+    auto const* fill = accept->property("background").value<QQuickItem*>();
+    REQUIRE(fill != nullptr);
+    CHECK(fill->property("color").value<QColor>()
+          == provider->statusColor(contour::window::UiStyleProvider::statusRunning()));
+    QSignalSpy const acceptedSpy(dialog.get(), SIGNAL(accepted()));
+    QTest::keyClick(&host.window, Qt::Key_Return);
+    CHECK(acceptedSpy.count() == 1);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("KitDialog: an accept that is not the default keeps its role in its words (offscreen)",
+          "[contour][gui][qml][kit][dialog]")
+{
+    // The Close Tab confirmation (Main.qml): Cancel is the default and filled, and Close -- plain -- must
+    // still read as destructive, as macOS writes it: in the danger hue where that reads on the button, else
+    // black or white. An accept of the ordinary role says nothing more than any button, in the palette's
+    // button text.
+    struct Row
+    {
+        int acceptRole; ///< The StatusColorRole of the accept button.
+        char const* description;
+    };
+    auto const row =
+        GENERATE(Row { contour::window::UiStyleProvider::statusDanger(), "Close Tab: danger" },
+                 Row { contour::window::UiStyleProvider::statusRunning(), "an ordinary accept" });
+    INFO(row.description);
+
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+    auto const* provider = engine.rootContext()
+                               ->contextProperty(QStringLiteral("chromeStyle"))
+                               .value<contour::window::UiStyleProvider*>();
+    REQUIRE(provider != nullptr);
+
+    DialogHost host;
+    auto dialog = openKitDialog(engine,
+                                host.window.contentItem(),
+                                QVariantMap { { "heading", QStringLiteral("Close “bash”?") },
+                                              { "acceptText", QStringLiteral("Close") },
+                                              { "rejectText", QStringLiteral("Cancel") },
+                                              { "acceptRole", row.acceptRole },
+                                              { "defaultButton", 1 } });
+    auto const* cancel = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogReject"));
+    auto* const close = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogAccept"));
+    REQUIRE(cancel != nullptr);
+    REQUIRE(close != nullptr);
+    CHECK(cancel->hasActiveFocus());
+    CHECK(cancel->property("fill").value<QColor>()
+          == provider->statusColor(contour::window::UiStyleProvider::statusRunning()));
+
+    // What Close's label is drawn on: the style's own fill of the button, over the dialog's surface -- read
+    // afresh, as the fill changes with the button's state.
+    auto const* surface = dialog->property("background").value<QQuickItem*>();
+    auto const* closeLabel = close->property("contentItem").value<QQuickItem*>();
+    REQUIRE(surface != nullptr);
+    REQUIRE(closeLabel != nullptr);
+    auto const groundNow = [&] {
+        auto const* fill = close->property("background").value<QQuickItem*>();
+        REQUIRE(fill != nullptr);
+        return over(fill->property("color").value<QColor>(), surface->property("color").value<QColor>());
+    };
+    auto const checkInk = [&](char const* state) {
+        INFO("state: " << state);
+        auto const ground = groundNow();
+        auto const ink = closeLabel->property("color").value<QColor>();
+        if (row.acceptRole != contour::window::UiStyleProvider::statusDanger())
+        {
+            CHECK(ink.rgb()
+                  == QGuiApplication::palette().color(QPalette::Active, QPalette::ButtonText).rgb());
+            return;
+        }
+        CHECK(ink.rgb() == provider->statusTextOn(row.acceptRole, ground).rgb());
+        CHECK(contrastOf(ink, ground) >= 4.5);
+        // And red: Danger's hue, a shade of it at most. Saturated first, so a black or white fallback is
+        // named as one rather than read as a hue that drifted.
+        INFO("saturation " << ink.hslSaturationF() << ": fell back to black or white");
+        REQUIRE(ink.hslSaturationF() >= 0.5F);
+        // The role's own text hue for the tone statusTextOn() decides the ground has (by the same rule),
+        // unshaded -- rather than statusColor(), which follows the application palette's tone: on a runner
+        // whose palette is dark while the button's fill is light, those are two different reds.
+        auto const& hues = contour::config::StatusColors[static_cast<size_t>(row.acceptRole)].hues(
+            contour::config::StatusInkUse::Text);
+        auto const groundIsDark =
+            contour::platform::colorSchemeOfBackground(contour::platform::toRGBColor(ground))
+            == Qt::ColorScheme::Dark;
+        auto const danger = QColor::fromRgb(groundIsDark ? hues.dark : hues.light);
+        auto const drift = std::abs(ink.hslHueF() - danger.hslHueF());
+        CHECK(std::min(drift, 1.0F - drift) * 360.0F <= 6.0F);
+        CHECK(ink.hslSaturationF() >= 0.8F);
+    };
+    checkInk("at rest");
+
+    if (row.acceptRole == contour::window::UiStyleProvider::statusDanger())
+    {
+        // Every fill the style's button shows: hovered, pressed (forced, so nothing is clicked).
+        close->setProperty("hoverEnabled", true);
+        QTest::mouseMove(&host.window, close->mapToScene(close->boundingRect().center()).toPoint());
+        QCoreApplication::processEvents();
+        if (close->property("hovered").toBool())
+            checkInk("hovered");
+        close->setProperty("down", true);
+        QCoreApplication::processEvents();
+        checkInk("pressed");
+        close->setProperty("down", QVariant {});
+        QTest::mouseMove(&host.window, QPoint(1, 1));
+
+        // Disabled, it is the palette's disabled text, as any other disabled button's.
+        dialog->setProperty("acceptEnabled", false);
+        QCoreApplication::processEvents();
+        CHECK(closeLabel->property("color").value<QColor>().rgb()
+              == QGuiApplication::palette().color(QPalette::Disabled, QPalette::ButtonText).rgb());
+    }
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
