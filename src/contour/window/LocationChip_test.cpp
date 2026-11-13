@@ -3,6 +3,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+
 using namespace contour::window;
 using contour::session::SwitchTarget;
 using vthost::proto::SwitchDaemonKind;
@@ -85,4 +87,37 @@ TEST_CASE("locationChip.toolTip", "[LocationChip]")
           == "Switch workspace or daemon");
     CHECK(locationChipToolTip(HostChipState::Reconnecting, LocationChipFit::DotOnly, "")
           == "Switch workspace");
+}
+
+TEST_CASE("locationChip.place", "[LocationChip]")
+{
+    constexpr auto bands = std::array {
+        BarPresence::Hidden, BarPresence::Shown, BarPresence::RevealOnEdge, BarPresence::Pinned
+    };
+    constexpr auto centres = std::array {
+        BarCentre::Empty, BarCentre::Tabs, BarCentre::Title, BarCentre::Breadcrumb, BarCentre::ChipAndTabs
+    };
+    for (auto const band: bands)
+        for (auto const centre: centres)
+        {
+            auto const daemon = locationChipPlace(band, centre, DaemonHosting::Daemon);
+            auto const inProcess = locationChipPlace(band, centre, DaemonHosting::InProcess);
+            auto expectedDaemon = LocationChipPlace::Band;
+            if (band == BarPresence::Hidden)
+                expectedDaemon = LocationChipPlace::None;
+            else if (centre == BarCentre::Breadcrumb)
+                expectedDaemon = LocationChipPlace::Sidebar;
+            auto const expectedInProcess = band != BarPresence::Hidden && centre == BarCentre::ChipAndTabs
+                                               ? LocationChipPlace::Band
+                                               : LocationChipPlace::None;
+            CHECK(daemon == expectedDaemon);
+            CHECK(inProcess == expectedInProcess);
+        }
+}
+
+TEST_CASE("locationChip.placeName", "[LocationChip]")
+{
+    CHECK(locationChipPlaceName(LocationChipPlace::None) == "none");
+    CHECK(locationChipPlaceName(LocationChipPlace::Band) == "band");
+    CHECK(locationChipPlaceName(LocationChipPlace::Sidebar) == "sidebar");
 }

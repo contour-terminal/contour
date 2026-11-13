@@ -10,6 +10,7 @@
 #include <contour/window/DaemonDriftChoice.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/SidebarTree.hpp>
+#include <contour/window/TitleBandLayout.hpp>
 
 #include <array>
 #include <cctype>
@@ -182,6 +183,58 @@ static_assert(detail::locationChipStateRowsInOrder(),
         return action;
     return std::string(row.tooltipBefore) + std::string(daemon) + std::string(row.tooltipAfter) + " · "
            + action;
+}
+
+/// Whether the window's sessions live in a daemon or in this very process.
+enum class DaemonHosting : uint8_t
+{
+    InProcess = 0, ///< No daemon: the window hosts its own sessions.
+    Daemon,        ///< The sessions live in a daemon.
+};
+
+/// Where the location chip shows.
+enum class LocationChipPlace : uint8_t
+{
+    None = 0, ///< Nowhere.
+    Band,     ///< In the title band.
+    Sidebar,  ///< In the workspace sidebar's header.
+};
+
+/// @param band    Whether the title band shows.
+/// @param centre  What the band's middle holds.
+/// @param hosting Whether the sessions live in a daemon.
+/// @return Where the chip shows: a daemon's chip follows the band's centre, an in-process window shows the
+///         chip only in the band's workspace-chip centre.
+[[nodiscard]] constexpr LocationChipPlace locationChipPlace(BarPresence band,
+                                                            BarCentre centre,
+                                                            DaemonHosting hosting) noexcept
+{
+    if (band == BarPresence::Hidden)
+        return LocationChipPlace::None;
+    switch (centre)
+    {
+        case BarCentre::Breadcrumb:
+            return hosting == DaemonHosting::Daemon ? LocationChipPlace::Sidebar : LocationChipPlace::None;
+        case BarCentre::ChipAndTabs: return LocationChipPlace::Band;
+        case BarCentre::Empty:
+        case BarCentre::Tabs:
+        case BarCentre::Title:
+            return hosting == DaemonHosting::Daemon ? LocationChipPlace::Band : LocationChipPlace::None;
+    }
+    return LocationChipPlace::None;
+}
+
+/// @param place Where the chip shows.
+/// @return The word QML switches on: "none", "band" or "sidebar".
+[[nodiscard]] constexpr std::string_view locationChipPlaceName(LocationChipPlace place) noexcept
+{
+    switch (place)
+    {
+        case LocationChipPlace::None: return "none";
+        case LocationChipPlace::Band: return "band";
+        case LocationChipPlace::Sidebar: return "sidebar";
+    }
+    return "none";
 }
 
 } // namespace contour::window
