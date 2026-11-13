@@ -149,7 +149,6 @@ SwitcherView SwitcherController::view() const
                           .daemon = indexOf(_level == SwitcherLevel::Daemon ? _levelAddress : _scopeAddress),
                           .origin = _opening.origin,
                           .scope = _scope,
-                          .reach = _opening.reach,
                           .filter = _filterText };
 }
 
@@ -237,8 +236,11 @@ void SwitcherController::open(SwitcherOpening opening)
     else
     {
         // The saved hosts after the local daemons; the window's own first, or, on a saved host, that host.
-        _scope = _opening.reach == SwitcherReach::WindowOnly ? SwitcherScope::OneDaemon : _opening.scope;
-        _daemons = _services.savedHosts ? _services.savedHosts() : std::vector<SwitcherDaemon> {};
+        // A window with no daemon lists its own workspaces and no saved host.
+        _scope = _opening.scope;
+        _daemons = _services.savedHosts && _scope != SwitcherScope::WindowOnly
+                       ? _services.savedHosts()
+                       : std::vector<SwitcherDaemon> {};
         if (auto const found =
                 std::ranges::find_if(_daemons, [&](auto const& each) { return isAt(each, own); });
             found != _daemons.end())

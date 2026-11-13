@@ -119,7 +119,11 @@ void WindowSwitcher::request(vtworkspace::WorkspaceId window,
     auto* const own = linkOf(window);
     if (own == nullptr)
     {
-        // In-process: nothing to switch between (spec §Not available).
+        if (_sessions.isInProcessWindow(window))
+        {
+            switchInProcess(window, target, mode, {}, done);
+            return;
+        }
         attachLog()("switch: window {} has no daemon behind it; nothing to switch.", window.value);
         done(std::unexpected(std::string { "this window has no daemon behind it" }));
         return;
@@ -250,7 +254,16 @@ void WindowSwitcher::createWorkspace(vtworkspace::WorkspaceId window,
     auto* const own = linkOf(window);
     if (own == nullptr)
     {
-        failCreate(window, daemon, "this window has no daemon behind it", done);
+        if (_sessions.isInProcessWindow(window))
+            switchInProcess(window,
+                            session::SwitchTarget { .kind = daemon.kind,
+                                                    .daemon = daemon.daemon,
+                                                    .workspace = session::NewWorkspace {} },
+                            mode,
+                            std::move(label),
+                            done);
+        else
+            failCreate(window, daemon, "this window has no daemon behind it", done);
         return;
     }
     auto destination = destinationOf(*own, daemon, window);
@@ -283,10 +296,66 @@ void WindowSwitcher::createWorkspace(vtworkspace::WorkspaceId window,
         });
 }
 
+std::vector<WorkspaceRow> WindowSwitcher::inProcessRows(vtworkspace::WorkspaceId window)
+{
+    auto const* const controller = _sessions.controllerDisplaying(window);
+    auto const* const source = controller != nullptr ? controller->directorySource() : nullptr;
+    return inProcessWorkspaceRowsOf(source != nullptr ? source->directory() : window::WorkspaceDirectory {},
+                                    window);
+}
+
+void WindowSwitcher::switchInProcess(vtworkspace::WorkspaceId window,
+                                     session::SwitchTarget const& target,
+                                     session::SwitchMode mode,
+                                     std::string label,
+                                     session::SwitchCompletion const& done)
+{
+    auto* const controller = _sessions.controllerDisplaying(window);
+    if (controller == nullptr)
+    {
+        done(std::unexpected(std::string { "the window went away" }));
+        return;
+    }
+    if (target.kind != vthost::proto::SwitchDaemonKind::Same)
+    {
+        done(std::unexpected(std::string { "this window has no daemon behind it" }));
+        return;
+    }
+    if (mode == session::SwitchMode::Open)
+    {
+        done(
+            std::unexpected(std::string { "this window has no daemon to open a workspace of in a new one" }));
+        return;
+    }
+    auto const decision = planSwitch(target, inProcessRows(window), window.value, SameDaemon::Yes);
+    if (auto const* const to = std::get_if<SwitchTo>(&decision))
+    {
+        if (to->workspace == 0)
+        {
+            if (!_sessions.newWorkspaceFor(window, std::move(label)))
+            {
+                done(std::unexpected(std::string { "no workspace could be made" }));
+                return;
+            }
+        }
+        else
+            controller->showWorkspace(to->workspace);
+        // What was chosen is what the user types into next.
+        controller->focusActiveDisplay();
+        done(vthost::proto::SwitchOutcome::Switched);
+    }
+    else if (std::holds_alternative<SwitchNoop>(decision))
+        done(vthost::proto::SwitchOutcome::Switched);
+    else
+        done(std::unexpected(std::string { "no such workspace in this window" }));
+}
+
 std::vector<WorkspaceRow> WindowSwitcher::windowWorkspaceRows(vtworkspace::WorkspaceId window)
 {
     auto* const own = linkOf(window);
-    if (own == nullptr || own->liveController() == nullptr)
+    if (own == nullptr)
+        return _sessions.isInProcessWindow(window) ? inProcessRows(window) : std::vector<WorkspaceRow> {};
+    if (own->liveController() == nullptr)
         return {};
     auto const address = own->address();
     return workspaceRowsOf(own->liveController()->directory(), [&](uint64_t daemonWorkspace) {

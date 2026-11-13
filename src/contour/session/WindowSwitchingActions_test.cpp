@@ -282,7 +282,12 @@ TEST_CASE("every switching action is a no-op for a window whose sessions run in-
     rig.run(ShowSwitcher {});
     rig.run(NewDaemon {});
 
-    CHECK(rig.requests().empty());
+    // The one switch such a window can make is among its own workspaces: the switching service gets it
+    // (WindowSwitcher), and refuses the rest itself.
+    REQUIRE(rig.requests().size() == 1);
+    CHECK(rig.requests().front().target.workspace
+          == contour::session::WorkspaceTarget { contour::session::WorkspaceAt { 2 } });
+    CHECK(rig.requests().front().mode == SwitchMode::Switch);
     CHECK(rig.app.switchDirectory().refreshes == 0);
 }
 
@@ -407,11 +412,13 @@ TEST_CASE("NewWorkspace creates and selects a workspace in the same window, in-p
         CHECK(rig.app.manager().controllerDisplaying(rig.window->ownedWorkspaces()[2])
               == rig.window.controller);
 
-        // The session switching action picks among them by 1-based position, without asking any daemon.
-        // Run from the session of the first workspace, which now sits hidden.
+        // The session switching action names one of them by 1-based position and leaves the showing to the
+        // switching service (WindowSwitcher, which asks no daemon of an in-process window).
         rig.run(SwitchToWorkspace { 1 });
-        CHECK(rig.window->displayedWorkspace() == first);
-        CHECK(rig.requests().empty());
+        REQUIRE(rig.requests().size() == 1);
+        CHECK(rig.requests().front().target.workspace
+              == contour::session::WorkspaceTarget { contour::session::WorkspaceAt { 1 } });
+        CHECK(rig.window->displayedWorkspace() != first); // the mock service shows nothing
     }
     SECTION("a window a daemon serves has the daemon make the workspace, and selects it")
     {

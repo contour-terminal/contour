@@ -1422,13 +1422,13 @@ void TerminalSessionManager::newWorkspace(TerminalSession const& acting)
         return;
     }
     // A window whose binding has no daemon (a tmux window) holds what its binding gives it.
-    if (bindingOf(controller->displayedWorkspace()) != nullptr)
+    if (!isInProcessWindow(controller->displayedWorkspace()))
     {
         managerLog()("NewWorkspace: this window's workspaces come from what it is attached to.");
         postNotice(window::workspaceRefusedNotice(), &acting);
         return;
     }
-    newWorkspaceStartingIn(acting, acting.workingDirectory());
+    std::ignore = newWorkspaceStartingIn(acting, acting.workingDirectory());
 }
 
 namespace
@@ -1450,11 +1450,12 @@ namespace
     }
 } // namespace
 
-void TerminalSessionManager::newWorkspaceStartingIn(TerminalSession const& acting, std::string const& cwd)
+std::optional<vtworkspace::WorkspaceId> TerminalSessionManager::newWorkspaceStartingIn(
+    TerminalSession const& acting, std::string const& cwd)
 {
     auto* const controller = hostOf(&acting).controller;
     if (controller == nullptr)
-        return;
+        return std::nullopt;
     // Started where the pane that asked is, and named after that folder.
     auto const directory = knownDirectoryOf(cwd);
     auto const workspace = createWorkspaceIn(controller->windowId());
@@ -1469,9 +1470,23 @@ void TerminalSessionManager::newWorkspaceStartingIn(TerminalSession const& actin
         // No shell could be made: the window keeps the workspace it had, not an empty one.
         managerLog()("NewWorkspace: no session could be created; dropping the new workspace.");
         controller->dropWorkspaceIfEmpty(workspace);
-        return;
+        return std::nullopt;
     }
     nameNewWorkspace(workspace, directory);
+    return workspace;
+}
+
+std::optional<vtworkspace::WorkspaceId> TerminalSessionManager::newWorkspaceFor(
+    vtworkspace::WorkspaceId window, std::string label)
+{
+    auto const* const controller = controllerDisplaying(window);
+    auto const* const acting = controller != nullptr ? controller->activeSession() : nullptr;
+    if (acting == nullptr)
+        return std::nullopt;
+    auto const made = newWorkspaceStartingIn(*acting, acting->workingDirectory());
+    if (made && !label.empty())
+        setWorkspaceLabel(*made, std::move(label));
+    return made;
 }
 
 std::string TerminalSessionManager::defaultWorkspaceName(std::filesystem::path const& directory)
@@ -2002,7 +2017,7 @@ void TerminalSessionManager::refreshWorkspaceGit(vtworkspace::WorkspaceId worksp
         return;
     // A window a daemon serves lists its daemon's git state; the daemon tracks it, and on its timer.
     auto const* const owner = controllerOwning(workspace);
-    if (owner == nullptr || bindingOf(owner->displayedWorkspace()) != nullptr)
+    if (owner == nullptr || !isInProcessWindow(owner->displayedWorkspace()))
         return;
     auto const* const activeTab =
         _model->workspace(workspace) != nullptr ? _model->workspace(workspace)->activeTab() : nullptr;
@@ -2035,17 +2050,12 @@ void TerminalSessionManager::requestSwitch(TerminalSession const& acting,
                                            SwitchMode mode)
 {
     auto const* const window = hostOf(&acting).window;
-    // An in-process window shows the Nth workspace it owns.
-    if (auto* const controller = hostOf(&acting).controller;
-        controller != nullptr && window != nullptr && mode == SwitchMode::Switch
-        && bindingOf(window->id()) == nullptr && target.kind == vthost::proto::SwitchDaemonKind::Same)
-        if (auto const* const at = std::get_if<WorkspaceAt>(&target.workspace);
-            at != nullptr && at->position > 0)
-        {
-            selectWorkspace(controller->windowId(), at->position - 1);
-            return;
-        }
-    if (window == nullptr || !daemonTargetOf(window->id()))
+    // An in-process window switches among the workspaces it owns, which the switching service does for it;
+    // another daemon is none of its business.
+    auto const inProcess = window != nullptr && isInProcessWindow(window->id())
+                           && target.kind == vthost::proto::SwitchDaemonKind::Same
+                           && mode == SwitchMode::Switch;
+    if (window == nullptr || (!inProcess && !daemonTargetOf(window->id())))
     {
         logNoDaemon("switch");
         return;
@@ -2153,9 +2163,11 @@ void TerminalSessionManager::openSwitcherOver(TerminalSession const& acting,
 {
     auto const* const window = hostOf(&acting).window;
     auto const daemon = window != nullptr ? daemonTargetOf(window->id()) : std::nullopt;
-    // An in-process window has no daemon, but several workspaces of its own: the popup lists those.
-    auto const inProcess = window != nullptr && !daemon && isInProcessWindow(window->id());
-    if (!daemon && !inProcess)
+    // An in-process window has no daemon, but several workspaces of its own: the popup lists those. Starting
+    // a daemon from it would have nothing to switch, so that is not offered.
+    auto const inProcess = window != nullptr && isInProcessWindow(window->id());
+    auto const servable = daemon.has_value() || (inProcess && prompt != window::SwitcherPrompt::NewDaemon);
+    if (!servable)
     {
         logNoDaemon(what);
         return;
@@ -2172,18 +2184,15 @@ void TerminalSessionManager::openSwitcherOver(TerminalSession const& acting,
     // The window's own workspaces are its sidebar's, as of now.
     controller->sidebar().refreshNow();
     if (auto const shown = _app.openSwitcher(
-            window::SwitcherOpening {
-                .window = window->id(),
-                .windowDaemon = daemon.value_or(SwitchTarget { .kind = vthost::proto::SwitchDaemonKind::Same,
-                                                               .daemon = {},
-                                                               .workspace = AnyWorkspace {} }),
-                .mode = SwitchMode::Switch,
-                .prompt = prompt,
-                .pick = std::nullopt,
-                .scope = scope,
-                .windowWorkspaces = _app.windowWorkspacesOf(*controller, window->id()),
-                .origin = control ? window::SwitcherOrigin::Chip : window::SwitcherOrigin::Centred,
-                .reach = inProcess ? window::SwitcherReach::WindowOnly : window::SwitcherReach::AnyDaemon },
+            window::SwitcherOpening { .window = window->id(),
+                                      .windowDaemon = daemon.value_or(SwitchTarget {}),
+                                      .mode = SwitchMode::Switch,
+                                      .prompt = prompt,
+                                      .pick = std::nullopt,
+                                      .scope = inProcess ? window::SwitcherScope::WindowOnly : scope,
+                                      .windowWorkspaces = _app.windowWorkspacesOf(*controller, window->id()),
+                                      .origin = control ? window::SwitcherOrigin::Chip
+                                                        : window::SwitcherOrigin::Centred },
             *controller,
             control);
         !shown)

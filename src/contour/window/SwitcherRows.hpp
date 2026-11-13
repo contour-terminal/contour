@@ -116,21 +116,22 @@ enum class SwitcherOrigin : uint8_t
     Chip,        ///< The workspace chip: hanging below it.
 };
 
-/// Whether the popup may leave the window's own daemon for another.
-enum class SwitcherReach : uint8_t
-{
-    AnyDaemon = 0, ///< Every daemon is reachable: the chip's dropdown offers `All daemons…`.
-    WindowOnly,    ///< The window has no daemon (an in-process window): it lists its own workspaces and no
-                   ///< other daemon is looked for or offered.
-};
-
 /// Whether the top level lists every daemon or one daemon's workspaces.
 enum class SwitcherScope : uint8_t
 {
     Everything = 0, ///< Every daemon, grouped; the ShowSwitcher action, or the chip's dropdown widened.
     OneDaemon,      ///< One daemon's workspaces alone: the chip's dropdown, or the daemon a switch asked to
                     ///< pick a workspace of.
+    WindowOnly,     ///< The window has no daemon (an in-process window): its own workspaces alone, and no
+                    ///< other daemon is looked for or offered.
 };
+
+/// @param scope A top level's scope.
+/// @return Whether it lists the workspaces of a single daemon (or of the window alone), not every daemon.
+[[nodiscard]] constexpr bool listsOneDaemon(SwitcherScope scope) noexcept
+{
+    return scope != SwitcherScope::Everything;
+}
 
 /// Whether looking for other local daemons is still under way.
 enum class SwitcherDiscovery : uint8_t
@@ -362,7 +363,6 @@ struct SwitcherView
     std::size_t daemon = 0;
     SwitcherOrigin origin = SwitcherOrigin::Centred; ///< Where the popup opened from.
     SwitcherScope scope = SwitcherScope::Everything; ///< Every daemon, or one, at the top level.
-    SwitcherReach reach = SwitcherReach::AnyDaemon;  ///< Whether another daemon is offered at all.
     std::string_view filter {};                      ///< What the user typed; the New Daemon level's label.
 };
 
@@ -392,9 +392,6 @@ struct SwitcherOpening
     std::vector<SwitcherWorkspace> windowWorkspaces {};
     /// Where it opened from: centred, or hanging below the workspace chip.
     SwitcherOrigin origin = SwitcherOrigin::Centred;
-    /// Whether another daemon is offered: not for an in-process window, which has none of its own and
-    /// switches among the workspaces it owns.
-    SwitcherReach reach = SwitcherReach::AnyDaemon;
 };
 
 /// What a typed label for a new daemon amounts to.

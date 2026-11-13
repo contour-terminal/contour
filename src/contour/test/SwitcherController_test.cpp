@@ -230,10 +230,9 @@ TEST_CASE("Switcher: a window reaching no other daemon lists its own workspaces 
                                                  .mode = SwitchMode::Switch,
                                                  .prompt = window::SwitcherPrompt::Browse,
                                                  .pick = std::nullopt,
-                                                 .scope = window::SwitcherScope::Everything,
+                                                 .scope = window::SwitcherScope::WindowOnly,
                                                  .windowWorkspaces = workWorkspaces(),
-                                                 .origin = window::SwitcherOrigin::Chip,
-                                                 .reach = window::SwitcherReach::WindowOnly });
+                                                 .origin = window::SwitcherOrigin::Chip });
     auto const titles = s.titles();
     CHECK(std::ranges::contains(titles, "contour"));
     CHECK(std::ranges::contains(titles, "New Workspace"));

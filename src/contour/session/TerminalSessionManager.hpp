@@ -431,7 +431,17 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// failed first session drops the workspace again.
     /// @param acting The session that triggered the action.
     /// @param cwd The folder the first shell starts in, as UTF-8; empty or "." for the profile's.
-    void newWorkspaceStartingIn(TerminalSession const& acting, std::string const& cwd);
+    /// @return The workspace made; none when no shell could start.
+    std::optional<vtworkspace::WorkspaceId> newWorkspaceStartingIn(TerminalSession const& acting,
+                                                                   std::string const& cwd);
+
+    /// (In-process) Makes a workspace for the window showing @p window, in the folder its active pane is in,
+    /// and shows it (newWorkspaceStartingIn()).
+    /// @param window The workspace the window shows.
+    /// @param label What to call it; empty to keep the folder's name.
+    /// @return The workspace made; none when the window has no pane to start beside, or no shell started.
+    std::optional<vtworkspace::WorkspaceId> newWorkspaceFor(vtworkspace::WorkspaceId window,
+                                                            std::string label);
 
     /// (In-process) Labels @p workspace, which the in-process directory of its window lists
     /// (InProcessDirectory); an empty label removes it. Not for a daemon's workspace, whose label is its

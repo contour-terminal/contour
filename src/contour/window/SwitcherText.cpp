@@ -171,7 +171,7 @@ std::string switcherDescription(SwitcherRow const& row,
             if (mode == session::SwitchMode::Open)
                 return std::format("Open {} in a new window", row.title);
             if (view.level == SwitcherLevel::Top && view.origin == SwitcherOrigin::Chip
-                && view.scope == SwitcherScope::OneDaemon)
+                && listsOneDaemon(view.scope))
                 return joined({ row.title, row.status.gitText });
             if (row.daemon != inputs.windowDaemon)
                 return std::format("Move this window to {}{}{}", daemon, LabelSeparator, row.title);
@@ -304,7 +304,7 @@ std::string switcherHintText(SwitcherView const& view, std::string_view daemonNa
         case SwitcherLevel::Daemon: return std::format("Filter workspaces on {}…", daemonName);
         case SwitcherLevel::Top: break;
     }
-    if (view.scope == SwitcherScope::OneDaemon)
+    if (listsOneDaemon(view.scope))
         return std::format("Filter workspaces on {}…", daemonName);
     return "Switch workspace or daemon…";
 }

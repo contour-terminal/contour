@@ -583,10 +583,12 @@ TEST_CASE("an in-process window's rows name each workspace it owns and resolve a
     auto const tabOf = [](uint64_t id) {
         return contour::window::DirectoryTab { .id = id, .title = {}, .label = "sh", .panes = {} };
     };
-    auto const directory = std::optional { contour::window::WorkspaceDirectory {
+    auto const directory = contour::window::WorkspaceDirectory {
         .workspaces = { contour::window::DirectoryWorkspace { .id = 4, .label = "one", .tabs = { tabOf(1) } },
                         contour::window::DirectoryWorkspace {
-                            .id = 9, .label = "two", .tabs = { tabOf(1), tabOf(2) } } } } };
+                            .id = 9, .label = "two", .tabs = { tabOf(1), tabOf(2) } } },
+        .selected = std::nullopt,
+    };
     auto const window = vtworkspace::WorkspaceId { 4 };
 
     auto const rows = contour::remote::inProcessWorkspaceRowsOf(directory, window);
@@ -609,6 +611,4 @@ TEST_CASE("an in-process window's rows name each workspace it owns and resolve a
     REQUIRE(std::holds_alternative<SwitchTo>(other));
     CHECK(std::get<SwitchTo>(other).workspace == 9);
     CHECK(std::holds_alternative<SwitchNoop>(choose(rows[0].ref)));
-
-    CHECK(contour::remote::inProcessWorkspaceRowsOf(std::nullopt, window).empty());
 }
