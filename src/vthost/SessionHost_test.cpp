@@ -4362,6 +4362,7 @@ template <typename T>
     return terminal.primaryScreen().renderMainPageText();
 }
 
+#ifndef _WIN32
 /// @return Every non-empty line of @p session's primary screen, its history included, oldest first.
 [[nodiscard]] std::vector<std::string> nonEmptyLines(vthost::HostedSession& session)
 {
@@ -4377,7 +4378,6 @@ template <typename T>
     return lines;
 }
 
-#ifndef _WIN32
 /// @return A hosted session running `/bin/sh -c @p script` on a PTY of its own, not yet started.
 /// @param onClosed Invoked on the pump thread once the session's close is announced.
 /// @param placement Where its child is placed.

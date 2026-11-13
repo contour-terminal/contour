@@ -256,11 +256,12 @@ namespace
         ULONG namedPipeEnd;
     };
 
-    /// FilePipeLocalInformation, of FILE_INFORMATION_CLASS (ntifs.h).
-    constexpr auto FilePipeLocalInformation = static_cast<FILE_INFORMATION_CLASS>(24);
+    /// FilePipeLocalInformation, of FILE_INFORMATION_CLASS (ntifs.h). An integer, as winternl.h declares
+    /// that enum with one enumerator only, which makes 24 out of its range and the cast to it undefined.
+    constexpr auto FilePipeLocalInformation = ULONG { 24 };
 
-    using NtQueryInformationFileFn =
-        LONG(NTAPI*)(HANDLE, IO_STATUS_BLOCK*, void*, ULONG, FILE_INFORMATION_CLASS);
+    /// NtQueryInformationFile, its FILE_INFORMATION_CLASS argument passed as the integer it is in the ABI.
+    using NtQueryInformationFileFn = LONG(NTAPI*)(HANDLE, IO_STATUS_BLOCK*, void*, ULONG, ULONG);
 
 } // namespace
 
