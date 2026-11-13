@@ -60,7 +60,12 @@ foreach(_dir IN ITEMS "${_msvc}/include" "${_sdkInclude}/ucrt" "${_sdkInclude}/s
                       "${_sdkInclude}/winrt")
     string(APPEND _includes " /imsvc \"${_dir}\"")
 endforeach()
+# _MSC_VER is the toolset's, not clang-cl's default (1933, VS 2022 17.3): headers decide by it, as Qt's do
+# which name stdext::make_checked_array_iterator only below 1938, and the STL of a newer toolset has none.
+# Toolset 14.XY is _MSC_VER 19XY.
+string(REGEX REPLACE "^14\\.([0-9]+).*$" "19.\\1" _msvcCompatibilityVersion "${MSVC_WINE_TOOLSET_VERSION}")
 set(_target "--target=x86_64-pc-windows-msvc -fuse-ld=lld-link")
+string(APPEND _target " -fms-compatibility-version=${_msvcCompatibilityVersion}")
 set(CMAKE_C_FLAGS_INIT "${_target}${_includes}")
 set(CMAKE_CXX_FLAGS_INIT "${_target}${_includes}")
 set(CMAKE_RC_FLAGS_INIT "/I \"${_sdkInclude}/um\" /I \"${_sdkInclude}/shared\"")
