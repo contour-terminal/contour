@@ -23,6 +23,7 @@
 
 #include <wasm_export.h>
 
+#include <vtextension/wasm/wamr/HiddenExports.hpp>
 #include <vtextension/wasm/wamr/WamrHandles.hpp>
 #include <vtextension/wasm/wamr/WamrRuntime.hpp>
 
@@ -254,7 +255,10 @@ namespace
                                     return candidate.kind == ExternKind::Function;
                                 }))
         {
-            auto* const function = wasm_runtime_lookup_function(instance.get(), entry.name.c_str());
+            // The exports are described by the names the module gave them; WAMR knows a hidden one by its
+            // alias.
+            auto const runtimeName = std::string { runtimeExportName(entry.name) };
+            auto* const function = wasm_runtime_lookup_function(instance.get(), runtimeName.c_str());
             if (!function)
                 continue;
             functions.push_back(

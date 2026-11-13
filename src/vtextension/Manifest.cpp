@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <vtextension/Utf8.hpp>
+#include <vtextension/wasm/WasmBinary.hpp>
 
 namespace vtextension
 {
@@ -34,72 +35,6 @@ namespace
         return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
                || c == '-';
     }
-
-    /// The first eight bytes of every core module: `\0asm`, then version 1 as a little-endian u32.
-    constexpr auto ModuleHeader = std::array<uint8_t, 8> { 0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00 };
-
-    /// The id of a custom section, the only kind that carries a name.
-    constexpr uint8_t CustomSectionId = 0;
-
-    /// The most bytes a LEB128-encoded u32 takes.
-    constexpr std::size_t MaxLeb128U32Bytes = 5;
-
-    /// Of the fifth byte of a LEB128-encoded u32, only the low four bits may be set.
-    constexpr uint8_t LastLeb128ByteMask = 0b0000'1111;
-
-    /// The bits of a LEB128 byte that carry the value; the top bit says another byte follows.
-    constexpr uint8_t Leb128PayloadMask = 0b0111'1111;
-    constexpr uint8_t Leb128ContinueBit = 0b1000'0000;
-
-    /// Reads bytes from a span and fails, rather than reads past it, when they run out.
-    class ByteReader
-    {
-      public:
-        explicit ByteReader(Bytes bytes) noexcept: _bytes { bytes } {}
-
-        [[nodiscard]] bool atEnd() const noexcept { return _bytes.empty(); }
-
-        /// Takes the next @p count bytes.
-        [[nodiscard]] std::optional<Bytes> take(std::size_t count) noexcept
-        {
-            if (count > _bytes.size())
-                return std::nullopt;
-            auto const taken = _bytes.first(count);
-            _bytes = _bytes.subspan(count);
-            return taken;
-        }
-
-        /// Takes one byte.
-        [[nodiscard]] std::optional<uint8_t> byte() noexcept
-        {
-            return take(1).transform([](Bytes taken) { return std::to_integer<uint8_t>(taken.front()); });
-        }
-
-        /// Takes an unsigned LEB128 integer of at most 32 bits.
-        [[nodiscard]] std::optional<uint32_t> u32() noexcept
-        {
-            auto value = uint32_t { 0 };
-            for (auto const index: std::views::iota(std::size_t { 0 }, MaxLeb128U32Bytes))
-            {
-                auto const next = byte();
-                if (!next)
-                    return std::nullopt;
-                auto const isLast = index + 1 == MaxLeb128U32Bytes;
-                if (isLast && (*next & static_cast<uint8_t>(~LastLeb128ByteMask)) != 0)
-                    return std::nullopt;
-                value |= static_cast<uint32_t>(*next & Leb128PayloadMask) << (index * 7);
-                if ((*next & Leb128ContinueBit) == 0)
-                    return value;
-            }
-            return std::nullopt;
-        }
-
-        /// Takes everything that is left.
-        [[nodiscard]] Bytes rest() noexcept { return std::exchange(_bytes, Bytes {}); }
-
-      private:
-        Bytes _bytes;
-    };
 
     /// Copies @p bytes into a string.
     [[nodiscard]] std::string asText(Bytes bytes)
@@ -143,66 +78,31 @@ namespace
         NotFound,  ///< The module is sound and has no manifest section.
     };
 
-    /// The id of the start section, which names a function the runtime calls on instantiation.
-    constexpr uint8_t StartSectionId = 8;
-
-    /// What a section visitor tells the walk.
-    enum class Walk : uint8_t
-    {
-        Continue, ///< Visit the next section.
-        Fail,     ///< The module is malformed; stop.
-    };
-
-    /// Walks a core module's sections, calling @p visit with each one's id and payload.
-    /// @return Whether the module could be walked to its end without @p visit failing it.
-    template <typename Visit>
-    [[nodiscard]] bool walkSections(Bytes module, Visit const& visit)
-    {
-        auto reader = ByteReader(module);
-        auto const header = reader.take(ModuleHeader.size());
-        if (!header || !std::ranges::equal(*header, ModuleHeader, [](std::byte a, uint8_t b) {
-                return std::to_integer<uint8_t>(a) == b;
-            }))
-            return false;
-
-        while (!reader.atEnd())
-        {
-            auto const id = reader.byte();
-            auto const size = reader.u32();
-            if (!id || !size)
-                return false;
-            auto const payload = reader.take(*size);
-            if (!payload || visit(*id, *payload) == Walk::Fail)
-                return false;
-        }
-        return true;
-    }
-
     /// Walks a core module's sections for the manifest's custom section.
     /// @return The section's content (the bytes after its name); malformed if there are two.
     [[nodiscard]] std::expected<Bytes, ScanFailure> findManifestSection(Bytes module)
     {
+        auto const all = wasm::binary::sections(module);
+        if (!all)
+            return std::unexpected(ScanFailure::Malformed);
         auto found = std::optional<Bytes> {};
-        auto const walked = walkSections(module, [&](uint8_t id, Bytes payload) {
-            if (id != CustomSectionId)
-                return Walk::Continue;
-            auto section = ByteReader(payload);
-            auto const nameLength = section.u32();
-            auto const name = nameLength ? section.take(*nameLength) : std::nullopt;
+        for (auto const& section: *all | std::views::filter([](wasm::binary::Section const& candidate) {
+                 return candidate.id == wasm::binary::CustomSectionId;
+             }))
+        {
+            auto reader = wasm::binary::Reader { section.content };
+            auto const name = reader.name();
             if (!name)
-                return Walk::Fail;
+                return std::unexpected(ScanFailure::Malformed);
             if (!std::ranges::equal(*name, ManifestSectionName, [](std::byte a, char b) {
                     return static_cast<char>(a) == b;
                 }))
-                return Walk::Continue;
+                continue;
             // Linkers concatenate same-named sections; a second one is a smuggling attempt, not a manifest.
             if (found)
-                return Walk::Fail;
-            found = section.rest();
-            return Walk::Continue;
-        });
-        if (!walked)
-            return std::unexpected(ScanFailure::Malformed);
+                return std::unexpected(ScanFailure::Malformed);
+            found = reader.rest();
+        }
         if (!found)
             return std::unexpected(ScanFailure::NotFound);
         return *found;
@@ -413,12 +313,8 @@ std::expected<Manifest, ExtensionError> parseManifest(std::span<std::byte const>
 
 bool hasStartFunction(std::span<std::byte const> module) noexcept
 {
-    auto found = false;
-    auto const walked = walkSections(module, [&](uint8_t id, Bytes /*payload*/) {
-        found = found || id == StartSectionId;
-        return Walk::Continue;
-    });
-    return walked && found;
+    auto const all = wasm::binary::sections(module);
+    return all && std::ranges::contains(*all, wasm::binary::StartSectionId, &wasm::binary::Section::id);
 }
 
 } // namespace vtextension

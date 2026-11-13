@@ -297,9 +297,13 @@ std::expected<void, ExtensionError> Instance::instantiate()
                          .postLoad = lookup("cabi_post_load"),
                          .postUpdate = lookup("cabi_post_update"),
                          .postRender = lookup("cabi_post_render") };
-    // A WASI reactor's `_initialize` already ran, inside the backend's instantiate(): calling it again
-    // would run it twice, which wasi-libc's traps on (IWasmModule::instantiate).
-    return {};
+    // A WASI reactor's `_initialize` runs here, once, under the load deadline: the backend does not run it
+    // while instantiating, where no deadline could stop it (IWasmModule::instantiate).
+    // Not kept with the other exports: nothing but this may call it.
+    auto const initialize = lookup("_initialize");
+    if (!initialize)
+        return {};
+    return guarded(_limits.loadDeadline, [&] { return callExport(*initialize, {}); });
 }
 
 WatchToken Instance::watchToken() noexcept

@@ -12,6 +12,7 @@
 #include <expected>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -48,6 +49,23 @@ namespace
     auto const engine = Engine::create(backend, ExtensionLimits {});
     REQUIRE(engine.has_value());
     return CompiledExtension::load(**engine, std::move(module));
+}
+
+/// Loads @p module on a fresh engine under @p limits and, if that succeeds, creates an instance of it, which
+/// is discarded.
+/// @return The error loading or creating it failed with; nothing if both succeeded.
+[[nodiscard]] std::optional<ExtensionError> outcomeOf(std::vector<std::byte> module,
+                                                      ExtensionLimits limits = {})
+{
+    auto const backend = wasm::makeDefaultBackend();
+    auto const engine = Engine::create(*backend, limits);
+    REQUIRE(engine.has_value());
+    auto const compiled = CompiledExtension::load(**engine, std::move(module));
+    if (!compiled)
+        return compiled.error();
+    auto services = vtextension::testing::FakeHostServices {};
+    auto clock = core::platform::ManualClock {};
+    return errorOf(Instance::create(**engine, **compiled, services, clock, limits));
 }
 
 } // namespace
@@ -405,16 +423,16 @@ TEST_CASE("CompiledExtension.wasi", "[vtextension]")
           == ExtensionError::WorldMismatch);
     CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::WasiPathOpenModule)))
           == ExtensionError::WorldMismatch);
-    // A WASI module's `_initialize` must take and return nothing; the runtime's loader refuses any other
-    // before the world check sees it.
+    // A WASI reactor's `_initialize` must take and return nothing, as the world says.
     CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::WasiReactorInitializerSignatureModule)))
-          == ExtensionError::InvalidComponent);
+          == ExtensionError::WorldMismatch);
 }
 
 TEST_CASE("Instance.wasiReactor", "[vtextension]")
 {
-    // A WASI reactor's `_initialize` runs once, while instantiating; the instance does not run it again,
-    // which wasi-libc's traps on: every Rust guest built with Rust 1.100 or newer is such a reactor.
+    // A WASI reactor's `_initialize` runs once, called by the host under the load deadline: never by the
+    // runtime while instantiating, where no deadline applies and host functions fail, and never twice,
+    // which wasi-libc's traps on. Every Rust guest built with Rust 1.100 or newer is such a reactor.
     SECTION("a reactor is initialized exactly once, before load")
     {
         auto guest = RunningGuest(toModule(vtextension::testing::WasiReactorModule));
@@ -428,19 +446,59 @@ TEST_CASE("Instance.wasiReactor", "[vtextension]")
         CHECK(guest.loadAndRender({}).empty());
         CHECK_FALSE(guest.instance().fault().has_value());
     }
+    SECTION("a reactor's _initialize may call the host")
+    {
+        auto guest = RunningGuest(toModule(vtextension::testing::WasiReactorLoggingModule));
+        CHECK(guest.services.logged
+              == std::vector {
+                  vtextension::testing::LoggedMessage { .level = LogLevel::Info, .message = "init" } });
+        CHECK(guest.loadAndRender({}).empty());
+    }
     SECTION("a reactor whose _initialize traps is not instantiated")
     {
-        // It traps inside the backend's instantiation, which reports no more than that it failed.
-        auto const backend = wasm::makeDefaultBackend();
-        auto const engine = Engine::create(*backend, ExtensionLimits {});
-        REQUIRE(engine.has_value());
-        auto const compiled =
-            CompiledExtension::load(**engine, toModule(vtextension::testing::WasiReactorTrappingModule));
-        REQUIRE(compiled.has_value());
-        auto services = vtextension::testing::FakeHostServices {};
-        auto clock = core::platform::ManualClock {};
-        CHECK(errorOf(Instance::create(**engine, **compiled, services, clock, ExtensionLimits {}))
-              == ExtensionError::InvalidComponent);
+        CHECK(outcomeOf(toModule(vtextension::testing::WasiReactorTrappingModule))
+              == ExtensionError::Trapped);
+    }
+    SECTION("a reactor whose _initialize never returns is stopped by the load deadline")
+    {
+        auto const limits = ExtensionLimits {};
+        auto const start = std::chrono::steady_clock::now();
+        auto const error = outcomeOf(toModule(vtextension::testing::WasiReactorSpinningModule), limits);
+        auto const elapsed = std::chrono::steady_clock::now() - start;
+        CHECK(error == ExtensionError::DeadlineExceeded);
+        // The bound only proves that termination happened at all; how soon is the scheduler's business.
+        CHECK(elapsed < 10 * limits.loadDeadline);
+    }
+}
+
+TEST_CASE("CompiledExtension.instantiationHooks", "[vtextension]")
+{
+    // What the runtime would run by itself while instantiating -- where no deadline stops it and host
+    // functions fail -- refuses the module before it can run, and promptly: none of these is instantiated.
+    struct Case
+    {
+        std::string_view description;
+        std::vector<std::byte> module;
+    };
+    auto const cases = std::vector<Case> {
+        { .description = "__post_instantiate",
+          .module = toModule(vtextension::testing::PostInstantiateSpinningModule) },
+        { .description = "__wasm_call_ctors without WASI",
+          .module = toModule(vtextension::testing::CallCtorsSpinningModule) },
+        { .description = "_initialize followed by a NUL",
+          .module = toModule(vtextension::testing::NulInitializerModule) },
+        { .description = "two export sections",
+          .module = toModule(vtextension::testing::TwoExportSectionsModule) },
+        { .description = "the backend's alias of _initialize",
+          .module = toModule(vtextension::testing::AliasExportingModule) },
+    };
+    auto const limits = ExtensionLimits {};
+    for (auto const& [description, module]: cases)
+    {
+        INFO(description);
+        auto const start = std::chrono::steady_clock::now();
+        CHECK(outcomeOf(module, limits) == ExtensionError::InvalidComponent);
+        CHECK(std::chrono::steady_clock::now() - start < 10 * limits.loadDeadline);
     }
 }
 

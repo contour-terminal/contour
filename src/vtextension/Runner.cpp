@@ -200,6 +200,7 @@ class Runner::Core final: public IHostServices, public std::enable_shared_from_t
                                 .replyCapacity = _config.limits.maxReplyBytes },
                 SurfaceServices { .environment = _services.environment, .fileSystem = _services.fileSystem });
 
+        // Instantiating runs the module's _initialize, if it exports one, which may log as load may.
         _logsThisCall = 0;
         auto instance = Instance::create(*_engine, *_compiled, *this, clock(), _config.limits);
         if (!instance)

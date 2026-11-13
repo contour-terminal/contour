@@ -9,11 +9,13 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include <wasm_export.h>
 
+#include <vtextension/wasm/wamr/HiddenExports.hpp>
 #include <vtextension/wasm/wamr/WamrHandles.hpp>
 #include <vtextension/wasm/wamr/WamrRuntime.hpp>
 
@@ -137,7 +139,7 @@ namespace
                 wasm_runtime_get_export_type(module, index, &entry);
                 auto const kind = externKindOf(entry.kind);
                 return ExportDescription {
-                    .name = std::string { entry.name },
+                    .name = std::string { hostExportName(entry.name) },
                     .kind = kind,
                     .signature =
                         kind == ExternKind::Function ? signatureOf(entry.u.func_type) : FunctionSignature {},
@@ -196,6 +198,11 @@ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
 {
     if (bytes.size() > std::numeric_limits<uint32_t>::max())
         return std::unexpected(ExtensionError::InvalidComponent);
+    // WAMR would run a WASI reactor's `_initialize` while instantiating, where no deadline can stop it and
+    // host functions fail; the host calls it under one (IWasmModule::instantiate). Bytes this cannot read,
+    // WAMR could not load either.
+    if (!hideExports(bytes))
+        return std::unexpected(ExtensionError::InvalidComponent);
     auto errorBuffer = std::array<char, 128> {};
     // The vector's buffer stays where it is when the vector moves into the module. WAMR may rewrite it.
     auto module = detail::ModuleHandle { wasm_runtime_load(reinterpret_cast<uint8_t*>(bytes.data()),
@@ -203,6 +210,17 @@ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
                                                            errorBuffer.data(),
                                                            static_cast<uint32_t>(errorBuffer.size())) };
     if (!module)
+        return std::unexpected(ExtensionError::InvalidComponent);
+
+    // What WAMR would still run by itself while instantiating, by the names WAMR read, refuses the module:
+    // the backstop for an export the rewrite above did not hide, and for the hooks nothing calls.
+    auto const exportNames =
+        indicesUpTo(wasm_runtime_get_export_count(module.get())) | std::views::transform([&](int32_t index) {
+            auto entry = wasm_export_t {};
+            wasm_runtime_get_export_type(module.get(), index, &entry);
+            return std::string_view { entry.name };
+        });
+    if (std::ranges::any_of(exportNames, isInstantiationHook))
         return std::unexpected(ExtensionError::InvalidComponent);
 
     // No directories, no environment, no arguments, and standard streams that lead nowhere: the
