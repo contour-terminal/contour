@@ -352,8 +352,12 @@ bool Tab::moveActivePane(FocusDirection direction, PaneId newSplitId)
 
 std::string Tab::title(SessionTitleResolver const& resolver) const
 {
-    if (_runtimeTitle.has_value())
-        return *_runtimeTitle;
+    switch (tabNameSourceOf(nameCandidates()))
+    {
+        case TabNameSource::Label: return _label;
+        case TabNameSource::Title: return *_runtimeTitle;
+        case TabNameSource::Panes: break;
+    }
     if (usesMultiplePanesLabel())
         return std::string { MultiplePanesLabel };
     return resolver(_activeLeaf->session());

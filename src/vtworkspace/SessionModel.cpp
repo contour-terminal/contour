@@ -1211,6 +1211,15 @@ void SessionModel::resetTabTitle(TabId tabId)
     _events.tabTitleChanged(tabId);
 }
 
+void SessionModel::setTabLabel(TabId tabId, std::string label)
+{
+    auto* tab = findTab(tabId);
+    if (tab == nullptr || tab->label() == label)
+        return;
+    tab->setLabel(std::move(label));
+    _events.tabTitleChanged(tabId);
+}
+
 void SessionModel::setTabColor(TabId tabId, TabColorSource source, vtbackend::RGBColor color)
 {
     auto* tab = findTab(tabId);

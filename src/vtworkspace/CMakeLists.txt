@@ -9,6 +9,7 @@ add_library(vtworkspace STATIC
     PaneLayout.hpp
     Tab.cpp
     Tab.hpp
+    TabName.hpp
     SessionModel.cpp
     SessionModel.hpp
     ModelEvents.hpp
@@ -37,6 +38,7 @@ if(VTWORKSPACE_TESTING)
         Pane_test.cpp
         PaneLayout_test.cpp
         Tab_test.cpp
+        TabName_test.cpp
         SessionModel_test.cpp
     )
     target_link_libraries(vtworkspace_test vtworkspace core::testing Catch2::Catch2 contour_test_trace)
