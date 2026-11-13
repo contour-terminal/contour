@@ -988,6 +988,12 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// @return @p workspace's 0-based place in the daemon's workspace order; 0 for one the model lacks.
     [[nodiscard]] int positionOf(vtworkspace::WorkspaceId workspace) const;
 
+    /// Tells the client of a label the registry changed: a workspace's as a label delta, where the client
+    /// shares Capability::WorkspaceMeta; a tab's with its workspace's layout; a pane's not at all.
+    /// @param ref The object whose label changed.
+    /// @param label Its label now; empty when it was cleared.
+    void labelChanged(vtcontrol::ObjectRef const& ref, std::string_view label);
+
     /// Sends a label delta when @p ref is a workspace this connection was told of.
     /// @param ref The object whose label changed.
     /// @param label Its label now; empty when it was cleared.
@@ -1411,7 +1417,7 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// the last members, so they are released before anything they deliver to.
     std::optional<ScopedStreamSubscription> _streamSubscription;
     std::optional<ScopedModelSubscription> _layoutSubscription;
-    /// The registry's label changes, taken for a client sharing Capability::WorkspaceMeta.
+    /// The registry's label changes (@see labelChanged()).
     std::optional<ObjectRegistry::Subscription> _labelSubscription;
     UpgradeEnd _upgradeEnd = UpgradeEnd::Open;
     std::shared_ptr<UpgradeLink> _upgradeLink = std::make_shared<UpgradeLink>(UpgradeLink { this });

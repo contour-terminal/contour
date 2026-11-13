@@ -419,6 +419,7 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                                     .activePane = 12,
                                     .zoomedPane = 0,
                                     .title = "editor",
+                                    .label = "build",
                                     .hasColor = 1,
                                     .color = 0x336699,
                                     .root =

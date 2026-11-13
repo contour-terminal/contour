@@ -9720,6 +9720,39 @@ TEST_CASE("a label change reaches every client", "[vthost][native][workspace-met
     CHECK(MetaFixture::metasOf(other, skipOther) == expected);
 }
 
+TEST_CASE("a tab's label reaches every client in its workspace's layout", "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& one = f.attachSelecting(f.first);
+    auto& other = f.attachSelecting(f.second, OffersMeta::No);
+    f.settle();
+    auto const* tab = f.flush.h.host.model().workspace(vtworkspace::WorkspaceId { f.first })->activeTab();
+    auto const ref = vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Tab,
+                                            .uuid = *f.flush.h.host.objects().uuidOf(tab->id()) };
+    // The label the last layout of the first workspace a client received names the tab by.
+    auto const lastLabel = [&](FlushClient const& client) -> std::optional<std::string> {
+        auto label = std::optional<std::string> {};
+        for (auto const& frame: client.received)
+            if (auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu);
+                layout != nullptr && layout->workspace == f.first)
+                for (auto const& wireTab: layout->tabs)
+                    if (wireTab.tabId == tab->id().value)
+                        label = wireTab.label;
+        return label;
+    };
+    REQUIRE(lastLabel(one) == std::optional<std::string> { "" });
+
+    f.flush.h.host.objects().setLabel(ref, "build");
+    f.settle();
+    CHECK(lastLabel(one) == std::optional<std::string> { "build" });
+    CHECK(lastLabel(other) == std::optional<std::string> { "build" });
+
+    f.flush.h.host.objects().setLabel(ref, "");
+    f.settle();
+    CHECK(lastLabel(one) == std::optional<std::string> { "" });
+    CHECK(lastLabel(other) == std::optional<std::string> { "" });
+}
+
 TEST_CASE("a client without the capability gets none", "[vthost][native][workspace-meta]")
 {
     auto f = MetaFixture {};

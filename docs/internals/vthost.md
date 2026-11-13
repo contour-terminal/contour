@@ -258,6 +258,11 @@ tell the daemon is lost on the next attach, and never reaches another client. Tw
 back: `ResizeSplit` for a divider (below), and `EditTab` for how a tab is presented — its active
 pane, its zoom, its title, its colour, and which tab of the workspace is active.
 
+A tab's control-API label goes one way only: the daemon's object registry holds it, `WireTab.label` carries
+it in every `LayoutState`, and a label change re-pushes the tab's workspace. A client takes it into its
+model (`vtworkspace::Tab::label()`) and never reports it back; `vtworkspace::tabNameSourceOf` makes it name
+the tab over its title wherever a tab is named.
+
 **`EditTab`** (tag 28, gated on `Capability::TabEdits`; without it the daemon answers
 `Unsupported`) names a session and a `TabEditKind`, and `vthost::applyTabEdit` applies it through
 one table row per kind: `ActivatePane` → `setActivePane`; `Zoom`/`Unzoom` → activate the pane, then
