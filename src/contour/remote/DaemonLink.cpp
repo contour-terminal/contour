@@ -468,7 +468,7 @@ std::optional<std::expected<void, std::string>> DaemonLink::pollAttached(vthost:
     requireGuiThread();
     if (_controller == nullptr)
         return std::unexpected(std::string { "the attach was given up" });
-    auto polled = _controller->pollConnected(budget);
+    auto polled = _controller->pollConnected(std::move(budget));
     if (!polled)
         return std::nullopt;
     if (!*polled)
