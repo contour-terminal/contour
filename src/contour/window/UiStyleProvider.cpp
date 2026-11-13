@@ -614,9 +614,8 @@ QColor UiStyleProvider::statusMarkOn(int role, QColor const& background) const
                   config::StatusInkUse::Mark,
                   platform::colorSchemeOfBackground(ground) == Qt::ColorScheme::Dark ? ChromeTone::Dark
                                                                                      : ChromeTone::Light);
-    if (vtbackend::contrastRatio(platform::toRGBColor(mark), ground) >= config::MinimumMarkContrast)
-        return mark;
-    return onColor(background);
+    return platform::toQColor(
+        config::legibleShadeOn(platform::toRGBColor(mark), ground, config::MinimumMarkContrast));
 }
 
 QColor UiStyleProvider::statusTextOn(int role, QColor const& background) const
@@ -630,9 +629,8 @@ QColor UiStyleProvider::statusTextOn(int role, QColor const& background) const
                   config::StatusInkUse::Text,
                   platform::colorSchemeOfBackground(ground) == Qt::ColorScheme::Dark ? ChromeTone::Dark
                                                                                      : ChromeTone::Light);
-    if (vtbackend::contrastRatio(platform::toRGBColor(text), ground) >= config::MinimumTextContrast)
-        return text;
-    return onColor(background);
+    return platform::toQColor(
+        config::legibleShadeOn(platform::toRGBColor(text), ground, config::MinimumTextContrast));
 }
 
 QColor UiStyleProvider::accentColor() const
@@ -644,11 +642,7 @@ QColor UiStyleProvider::accentColor() const
 
 QColor UiStyleProvider::onColor(QColor const& background) const
 {
-    auto const rgb = platform::toRGBColor(background);
-    auto const black = vtbackend::RGBColor(0, 0, 0);
-    auto const white = vtbackend::RGBColor(255, 255, 255);
-    return vtbackend::contrastRatio(rgb, black) >= vtbackend::contrastRatio(rgb, white) ? QColor(Qt::black)
-                                                                                        : QColor(Qt::white);
+    return platform::toQColor(config::monoInkOn(platform::toRGBColor(background)));
 }
 
 QColor UiStyleProvider::onStatusColor(int role) const

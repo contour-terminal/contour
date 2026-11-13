@@ -9,7 +9,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <format>
 #include <ranges>
 #include <utility>
 #include <vector>
@@ -2606,5 +2609,107 @@ TEST_CASE("chromeTokens.tooltipColourRolesPerRow", "[chrometokens]")
         CHECK(role(ChromeStyle::Terminal, ChromeColorRole::TooltipTextSecondary).kind
               == ColorSourceKind::PaletteWindowText);
         CHECK(role(ChromeStyle::Terminal, ChromeColorRole::TooltipEdge).kind == ColorSourceKind::PaletteMid);
+    }
+}
+
+TEST_CASE("chromeTokens.legibleShadeOnKeepsTheHue", "[chrometokens]")
+{
+    // A status hue that falls short on its ground is shaded -- darker on a light ground, lighter on a dark
+    // one -- until it reads, and stays that hue; black or white only where no shade of it reaches the floor.
+    using contour::config::legibleShadeOn;
+    using contour::config::monoInkOn;
+    using contour::config::detail::hslOf;
+
+    enum class Expect : uint8_t
+    {
+        Unchanged = 0, ///< The ink already reads: it comes back as it went in.
+        Shade,         ///< A shade of the ink's own hue, at least the floor.
+        Mono,          ///< Black or white: no shade of the hue reaches the floor.
+    };
+    struct Row
+    {
+        char const* description = "";
+        RGBColor ink;
+        RGBColor ground;
+        double floor = 0.0;
+        Expect expect = Expect::Unchanged;
+    };
+    auto constexpr Danger = RGBColor(0xD7, 0x00, 0x15);
+    auto const rows = std::array {
+        Row { "danger text on ContourLinux's button wash",
+              Danger,
+              RGBColor(227, 227, 227),
+              4.5,
+              Expect::Shade },
+        Row { "danger text on white already reads", Danger, RGBColor(255, 255, 255), 4.5, Expect::Unchanged },
+        Row { "a danger mark on the wash reads at 3:1",
+              Danger,
+              RGBColor(227, 227, 227),
+              3.0,
+              Expect::Unchanged },
+        Row { "danger text on a dark ground", Danger, RGBColor(30, 30, 30), 4.5, Expect::Shade },
+        Row { "a mid grey no shade reaches 7:1 on", Danger, RGBColor(118, 118, 118), 7.0, Expect::Mono },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(row.description);
+        auto const ink = legibleShadeOn(row.ink, row.ground, row.floor);
+        switch (row.expect)
+        {
+            case Expect::Unchanged: CHECK(ink == row.ink); break;
+            case Expect::Mono: CHECK(ink == monoInkOn(row.ground)); break;
+            case Expect::Shade: {
+                CHECK(ink != row.ink);
+                CHECK(ink != monoInkOn(row.ground));
+                CHECK(contrastRatio(ink, row.ground) >= row.floor);
+                // Saturated first: a grey here is the black or white fallback, not a hue that drifted.
+                INFO("saturation " << hslOf(ink).saturation << ": fell back to black or white");
+                REQUIRE(hslOf(ink).saturation >= 0.9);
+                // Within three degrees of the hue it was, on the wheel's circle.
+                auto const drift = std::abs(hslOf(ink).hue - hslOf(row.ink).hue);
+                CHECK(std::min(drift, 1.0 - drift) * 360.0 <= 3.0);
+                break;
+            }
+        }
+    }
+}
+
+TEST_CASE("chromeTokens.legibleShadeOnTakesTheFewestPoints", "[chrometokens]")
+{
+    // legibleShadeOn() bisects for the first shade that reads; it must land where a scan from one point up
+    // would, inks on either side of their ground included.
+    using contour::config::legibleShadeOn;
+    using contour::config::monoInkOn;
+    using contour::config::shiftLightness;
+    auto const linear = [](RGBColor ink, RGBColor ground, double floor) {
+        if (contrastRatio(ink, ground) >= floor)
+            return ink;
+        auto const direction = monoInkOn(ground) == RGBColor(0, 0, 0) ? -1 : 1;
+        for (auto const points: std::views::iota(1, 101))
+            if (auto const shade = shiftLightness(ink, direction * points);
+                contrastRatio(shade, ground) >= floor)
+                return shade;
+        return monoInkOn(ground);
+    };
+    struct Row
+    {
+        RGBColor ink;
+        RGBColor ground;
+        double floor = 0.0;
+    };
+    auto const rows = std::array {
+        Row { .ink = RGBColor(0xD7, 0x00, 0x15), .ground = RGBColor(227, 227, 227), .floor = 4.5 },
+        Row { .ink = RGBColor(0xD7, 0x00, 0x15), .ground = RGBColor(30, 30, 30), .floor = 4.5 },
+        Row { .ink = RGBColor(0x00, 0x7A, 0xFF), .ground = RGBColor(240, 240, 240), .floor = 4.5 },
+        Row { .ink = RGBColor(0xFF, 0xCC, 0x00), .ground = RGBColor(250, 250, 250), .floor = 3.0 },
+        // Lighter than its light ground: darkened, it first passes through the ground.
+        Row { .ink = RGBColor(0xFF, 0xF0, 0xF0), .ground = RGBColor(200, 200, 200), .floor = 4.5 },
+        Row { .ink = RGBColor(0x30, 0xD1, 0x58), .ground = RGBColor(60, 60, 60), .floor = 4.5 },
+        Row { .ink = RGBColor(0xD7, 0x00, 0x15), .ground = RGBColor(118, 118, 118), .floor = 7.0 },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(std::format("ink {} on {} at {}", row.ink, row.ground, row.floor));
+        CHECK(legibleShadeOn(row.ink, row.ground, row.floor) == linear(row.ink, row.ground, row.floor));
     }
 }

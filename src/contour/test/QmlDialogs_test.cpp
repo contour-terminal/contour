@@ -15,6 +15,7 @@
 #include <contour/test/QmlComponentsTestSupport.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
+#include <contour/test/ScrollBarVisibility.hpp>
 #include <contour/window/BootstrapPrompt.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/PromptHost.hpp>
@@ -157,6 +158,17 @@ void collectItemsBeneath(QQuickItem* root, QList<QQuickItem*>& items)
     items.append(root);
     for (auto* child: root->childItems())
         collectItemsBeneath(child, items);
+}
+
+/// @return The vertical scroll bar of the ScrollView @p scroll; null when it has none.
+[[nodiscard]] QQuickItem* verticalScrollBarOf(QQuickItem* scroll)
+{
+    auto beneath = QList<QQuickItem*> {};
+    collectItemsBeneath(scroll, beneath);
+    auto const found = std::ranges::find_if(beneath, [](QQuickItem const* item) {
+        return item->inherits("QQuickScrollBar") && item->property("orientation").toInt() == Qt::Vertical;
+    });
+    return found != beneath.end() ? *found : nullptr;
 }
 
 /// The gap between @p dialog's heading and the top of its part named @p next.
@@ -3074,6 +3086,22 @@ TEST_CASE("AskpassDialog: a host key is shown verbatim, selectable, and defaults
         CHECK(host.replies.front().outcome == AskpassOutcome::Answered);
         CHECK(host.replies.front().answer == "no");
     }
+    SECTION("a text taller than the block scrolls")
+    {
+        auto host = AskpassHost {};
+        auto lines = QStringList {};
+        for (auto const index: std::views::iota(0, 200))
+            lines.append(QStringLiteral("line %1 of a long host key notice").arg(index));
+        host.ask(1, AskpassPromptKind::HostKey, lines.join(QLatin1Char('\n')));
+        REQUIRE(host.waitOpened(true));
+        auto* const scroll = host.part(QStringLiteral("askpassVerbatimScroll"));
+        CHECK(scroll->property("contentHeight").toReal() > scroll->height());
+        auto const* const bar = verticalScrollBarOf(scroll);
+        REQUIRE(bar != nullptr);
+        CHECK(bar->property("policy").toInt() == contour::test::scrollBarPolicy(*bar, "AsNeeded"));
+        CHECK(bar->property("size").toReal() < 1.0);
+        CHECK(bar->isVisible());
+    }
     SECTION("Yes")
     {
         auto host = AskpassHost {};
@@ -3111,12 +3139,17 @@ TEST_CASE("AskpassDialog: a new daemon's fingerprint is selectable, on one line,
         CHECK(verbatim->property("selectByMouse").toBool());
         CHECK(verbatim->property("text").toString() == fingerprint);
         CHECK(verbatim->property("lineCount").toInt() == 1);
-        // No scrollbar is needed: what the block holds is no taller than the block.
+        // No scrollbar is needed: what the block holds is no taller than the block, so its bar -- shown as
+        // needed (ContourLinuxStyle_test, ContourTuiStyle_test) -- has nothing to scroll and is not drawn.
         auto* const scroll = host.part(QStringLiteral("askpassVerbatimScroll"));
         CHECK(scroll->property("contentHeight").toReal() <= scroll->height());
+        auto const* const bar = verticalScrollBarOf(scroll);
+        REQUIRE(bar != nullptr);
+        CHECK(bar->property("policy").toInt() == contour::test::scrollBarPolicy(*bar, "AsNeeded"));
+        CHECK(bar->property("size").toReal() >= 1.0);
         CHECK(verbatim->width() >= verbatim->property("contentWidth").toReal());
         CHECK(host.part(QStringLiteral("kitDialogMessage"))->property("text").toString()
-              == "Compare with `contour daemon status` on that machine.");
+              == "Compare with “contour daemon status” on that machine.");
         CHECK_FALSE(host.part(QStringLiteral("askpassSecret"))->isVisible());
         CHECK(host.dialog->property("heading").toString() == "Trust the daemon at studio.example:7297?");
         CHECK(host.part(QStringLiteral("kitDialogAccept"))->property("text").toString() == "Trust");
@@ -3127,8 +3160,26 @@ TEST_CASE("AskpassDialog: a new daemon's fingerprint is selectable, on one line,
         auto host = AskpassHost {};
         ask(host);
         REQUIRE(host.waitOpened(true));
-        // The default button, the one Enter takes, is Cancel.
+        // The default button, the one Enter takes, is Cancel -- the focused one, drawn filled.
         CHECK(host.dialog->property("defaultButton").toInt() == 1);
+        auto const* cancel = host.part(QStringLiteral("kitDialogReject"));
+        CHECK(cancel->hasActiveFocus());
+        // Cancel is filled in the accent; Trust is not, in neither the accent nor any other status colour.
+        auto const* style = host.engine.rootContext()
+                                ->contextProperty(QStringLiteral("chromeStyle"))
+                                .value<contour::window::UiStyleProvider*>();
+        REQUIRE(style != nullptr);
+        auto const accent = style->statusColor(contour::window::UiStyleProvider::statusRunning());
+        auto const fillOfPart = [&](char const* name) {
+            auto const* fill =
+                host.part(QString::fromLatin1(name))->property("background").value<QQuickItem*>();
+            REQUIRE(fill != nullptr);
+            return fill->property("color").value<QColor>();
+        };
+        CHECK(fillOfPart("kitDialogReject") == accent);
+        auto const trustFill = fillOfPart("kitDialogAccept");
+        CHECK(trustFill != accent);
+        CHECK(trustFill != style->statusColor(contour::window::UiStyleProvider::statusDanger()));
         QTest::keyClick(qobject_cast<QWindow*>(host.window.get()), Qt::Key_Return);
         REQUIRE(host.waitOpened(false));
         REQUIRE(host.replies.size() == 1);

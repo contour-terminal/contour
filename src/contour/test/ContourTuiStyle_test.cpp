@@ -2,6 +2,7 @@
 #include <contour/config/UiStyle.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlComponentsTestSupport.hpp>
+#include <contour/test/ScrollBarVisibility.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <QtCore/QFile>
@@ -275,6 +276,19 @@ TEST_CASE("A ContourTui scrollbar keeps a grabbable handle", "[contour][gui][sty
     REQUIRE(handle != nullptr);
     INFO("minimumSize=" << bar->property("minimumSize").toReal() << " handle=" << handle->height());
     CHECK(handle->height() >= provider->cellHeight());
+}
+
+TEST_CASE("A ContourTui scroll bar shows only while there is something to scroll", "[contour][gui][style]")
+{
+    // A handle filling its whole trough says nothing, and drew a bar beside every view whose content fits.
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine, contour::config::UiStyle::Terminal);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/ContourTui/ScrollBar.qml")));
+    INFO("ScrollBar errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    std::unique_ptr<QQuickItem> bar(qobject_cast<QQuickItem*>(component.create()));
+    REQUIRE(bar != nullptr);
+    contour::test::checkScrollBarVisibility(*bar);
 }
 
 TEST_CASE("A ContourTui combo box popup is sized before it has a window", "[contour][gui][style]")

@@ -136,7 +136,8 @@ inline constexpr auto PromptKindRows = std::array {
                     "" },
     // Not ssh's: the application asks whether to pin a daemon's fingerprint. Verbatim, so that the
     // fingerprint is selectable and compared by eye, and Cancel (the reject button, the default) answers
-    // nothing.
+    // nothing. The hint quotes the command typographically: the dialog shows it as plain text, where a
+    // backtick reads as itself.
     PromptKindRow {
         askpass::AskpassPromptKind::PinConfirm,
         PromptKindRow::Answer::Question,
@@ -148,7 +149,7 @@ inline constexpr auto PromptKindRows = std::array {
         "yes",
         askpass::AskpassOutcome::Cancelled,
         "",
-        QT_TRANSLATE_NOOP("PromptHost", "Compare with `contour daemon status` on that machine.") },
+        QT_TRANSLATE_NOOP("PromptHost", "Compare with “contour daemon status” on that machine.") },
 };
 
 namespace detail

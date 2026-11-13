@@ -73,7 +73,7 @@ TEST_CASE("a daemon's fingerprint comes with what to compare it with", "[askpass
     auto const prompt = host.pendingPrompt();
     CHECK(prompt.value("text").toString() == "SHA256:abc");
     CHECK(prompt.value("isVerbatim").toBool());
-    CHECK(prompt.value("hint").toString() == "Compare with `contour daemon status` on that machine.");
+    CHECK(prompt.value("hint").toString() == "Compare with “contour daemon status” on that machine.");
 }
 
 TEST_CASE("an answer goes to the broker once, naming the prompt", "[askpass][prompthost]")

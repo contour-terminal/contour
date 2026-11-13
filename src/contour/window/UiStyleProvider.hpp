@@ -897,8 +897,9 @@ class UiStyleProvider: public QObject
     [[nodiscard]] Q_INVOKABLE QColor onColor(QColor const& background) const;
 
     /// The mark ink of @p role for a mark drawn on @p background, rather than on the chrome the palette
-    /// paints: the role's mark hue for the background's tone, or black or white (onColor()) where that hue
-    /// falls short of config::MinimumMarkContrast there. For a mark on a surface of its own, such as a
+    /// paints: the role's mark hue for the background's tone, shaded away from the background where it falls
+    /// short of config::MinimumMarkContrast there, or black or white where no shade of it reaches that
+    /// (config::legibleShadeOn()). For a mark on a surface of its own, such as a
     /// pane's pill on the toast fill. Running is the accent, as in statusColor().
     /// @param role       A config::StatusColorRole as its underlying value.
     /// @param background The opaque fill the mark is drawn on.
@@ -906,8 +907,9 @@ class UiStyleProvider: public QObject
     [[nodiscard]] Q_INVOKABLE QColor statusMarkOn(int role, QColor const& background) const;
 
     /// statusMarkOn()'s counterpart for words: the text ink of @p role (config::StatusInkUse::Text) for text
-    /// drawn on @p background, or black or white (onColor()) where that hue falls short of
-    /// config::MinimumTextContrast there. For a label on a surface of its own, such as the sticky header's
+    /// drawn on @p background, shaded away from the background where it falls short of
+    /// config::MinimumTextContrast there, or black or white where no shade of it reaches that
+    /// (config::legibleShadeOn()). For a label on a surface of its own, such as the sticky header's
     /// jump link on a pane's header. Running is the accent, as in statusColor().
     /// @param role       A config::StatusColorRole as its underlying value.
     /// @param background The opaque fill the text is drawn on.
