@@ -517,6 +517,24 @@ struct TabStyleTokens
 /// Lays the user's `tab_style:` over a chrome row's tab look.
 ///
 /// A gap replaces the line between two tabs: tabs that do not touch need nothing drawn between them.
+/// How a row counted in pixels lays its tabs out by width, once `tab_style.tab_width` is laid over it.
+/// @param wish   The configured `tab_style.tab_width`.
+/// @param rowOwn The row's own layout.
+/// @return The layout @p wish names, else the row's own. A row whose own layout is Equal keeps it: its
+///         pills sit in a well, which is laid out around equal pills.
+[[nodiscard]] constexpr TabWidthLayout tabWidthLayoutOf(TabWidth wish, TabWidthLayout rowOwn) noexcept
+{
+    if (rowOwn == TabWidthLayout::Equal)
+        return rowOwn;
+    switch (wish)
+    {
+        case TabWidth::Auto: return rowOwn;
+        case TabWidth::Equal: return TabWidthLayout::Equal;
+        case TabWidth::Fit: return TabWidthLayout::Fit;
+    }
+    return rowOwn;
+}
+
 /// @param row   What of the row the section is laid over.
 /// @param style The configured section.
 /// @return What the tabs are drawn with: the row's value wherever the section leaves one to it.
@@ -550,11 +568,7 @@ struct TabStyleTokens
         .tabColorMode = style.tabColorMode,
         .closeVisibility = closeVisibilityOf(style.closeButton, row.closeVisibility),
         .newTabButton = style.newTabButton,
-        // The pills of a well are always equal: the well is laid out around it.
-        .widths = !pixels || style.tabWidth == TabWidth::Auto || row.widths == TabWidthLayout::Equal
-                      ? row.widths
-                  : style.tabWidth == TabWidth::Equal ? TabWidthLayout::Equal
-                                                      : TabWidthLayout::Fit,
+        .widths = pixels ? tabWidthLayoutOf(style.tabWidth, row.widths) : row.widths,
         .minTabWidth = minTab,
         .maxTabWidth = std::max(minTab, maxTab),
     };

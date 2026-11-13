@@ -1578,7 +1578,10 @@ class ChromeTabStyleTokens: public QObject
         return static_cast<int>(config::TabCloseVisibility::Never);
     }
     /// @return Whether every tab is as wide as the others (config::TabWidthLayout::Equal).
-    [[nodiscard]] bool equalWidths() const noexcept { return _tokens.widths == config::TabWidthLayout::Equal; }
+    [[nodiscard]] bool equalWidths() const noexcept
+    {
+        return _tokens.widths == config::TabWidthLayout::Equal;
+    }
     /// @return The resolved tab look, for the provider's own extents (its minimum and maximum tab widths).
     [[nodiscard]] config::TabStyleTokens const& tokens() const noexcept { return _tokens; }
     /// @return Whether the window shows a new-tab button (config::NewTabButton::Shown).

@@ -3,6 +3,7 @@
 #include <contour/platform/XcbProperty.hpp>
 
 #include <core/Utils.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <QtCore/QDebug>
 #include <QtGui/QGuiApplication>
@@ -27,9 +28,6 @@
     #include <QtWaylandClient/QWaylandClientExtension>
     #include <QtWaylandClient/private/qwaylanddisplay_p.h>
     #include <QtWaylandClient/private/qwaylandwindow_p.h>
-
-    #include <map>
-    #include <memory>
 
     #include "qwayland-blur.h"
     #include <qpa/qplatformwindow.h>
@@ -215,8 +213,14 @@ void setBlurBehind(QWindow* window, BlurBehindWish blur, QRegion const& region)
     core::ignoreUnused(region);
 
 #if !defined(_WIN32) && !defined(__APPLE__)
-    // Not just Linux but every UNIX that is not macOS: the BSDs run KWin too.
-    (void) updateCompositorBlur(window, [blur](CompositorBlurWishes& wishes) { wishes.window = blur; });
+    // Not just Linux but every UNIX that is not macOS: the BSDs run KWin too. A desktop with no compositor
+    // blur (GNOME, most X11 window managers) is the ordinary case and says nothing; a compositor that has
+    // one and refuses it is worth a line.
+    if (auto const blurred =
+            updateCompositorBlur(window, [blur](CompositorBlurWishes& wishes) { wishes.window = blur; });
+        !blurred && blurred.error() == TitleBandMaterialError::Rejected)
+        errorLog()("The compositor rejected the window's background blur ({}).",
+                   titleBandMaterialErrorName(blurred.error()));
 #else
     auto const enable = blur == BlurBehindWish::On;
 #endif
@@ -294,7 +298,7 @@ void setBlurBehind(QWindow* window, BlurBehindWish blur, QRegion const& region)
     }
 #endif // }}}
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
     core::ignoreUnused(window, enable);
 #endif
 }

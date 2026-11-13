@@ -2702,7 +2702,7 @@ TEST_CASE("tab_style restyles the joined tabs (offscreen)", "[contour][gui][qml]
     CHECK(indicator.isVisible());
     CHECK(indicator.y() == 0.0);
     CHECK(indicator.x() == styleGroup(engine, "radii").property("tab").toReal());
-    CHECK(indicator.width() == tabs[0]->width() - 2 * indicator.x());
+    CHECK(indicator.width() == tabs[0]->width() - (2 * indicator.x()));
     CHECK_FALSE(part(*tabs[1], QStringLiteral("tabActiveIndicator")).isVisible());
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
@@ -2825,7 +2825,7 @@ TEST_CASE("the line between joined tabs follows the defaults edition (offscreen)
         CAPTURE(index);
         auto const beforeActive = index + 1 == activeTab;
         auto const expected = index != activeTab && index != TabCount - 1
-                              && !(beforeActive && separators == TabSeparators::BetweenResting);
+                              && (!beforeActive || separators != TabSeparators::BetweenResting);
         CHECK(part(*tabs[static_cast<size_t>(index)], QStringLiteral("tabJoinedRule")).isVisible()
               == expected);
     }
