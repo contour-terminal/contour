@@ -29,7 +29,13 @@ if(${PEDANTIC_COMPILER})
         message(STATUS "Enabling pedantic compiler options: yes")
         # TODO: check https://github.com/lefticus/cppbestpractices/blob/master/02-Use_the_Tools_Available.md#compilers
         try_add_compile_options(-Qunused-arguments)
-        try_add_compile_options(-Wall)
+        if("${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}" STREQUAL "MSVC")
+            # clang-cl reads -Wall as MSVC's /Wall, which is -Weverything -- the C++98 compatibility
+            # warnings included. Its /W4 is what -Wall -Wextra means to clang.
+            try_add_compile_options(/W4)
+        else()
+            try_add_compile_options(-Wall)
+        endif()
         #try_add_compile_options(-Wconversion)
         try_add_compile_options(-Wduplicate-enum)
         try_add_compile_options(-Wduplicated-cond)

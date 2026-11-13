@@ -1,0 +1,92 @@
+{
+    "version": 6,
+    "include": [
+        "common.json"
+    ],
+    "configurePresets": [
+        {
+            "name": "linux-to-windows-common",
+            "hidden": true,
+            "inherits": "contour-common",
+            "description": "Windows x64 executables built on Linux: see docs/internals/windows-cross-build.md",
+            "generator": "Ninja",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            },
+            "toolchainFile": "${sourceDir}/cmake/toolchains/windows-clangcl-cross.cmake",
+            "environment": {
+                "PKG_CONFIG_LIBDIR": "${sourceDir}/out/windows-cross-deps/lib/pkgconfig",
+                "PKG_CONFIG_PATH": ""
+            },
+            "cacheVariables": {
+                "CMAKE_PREFIX_PATH": "${sourceDir}/out/windows-cross-deps",
+                "CMAKE_FIND_ROOT_PATH": "${sourceDir}/out/windows-cross-deps",
+                "OPENSSL_ROOT_DIR": "${sourceDir}/out/windows-cross-deps",
+                "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+                "CONTOUR_FRONTEND_GUI": "OFF",
+                "CONTOUR_EXTENSIONS": "OFF",
+                "CONTOUR_INSTALL_TOOLS": "OFF",
+                "LIBTERMINAL_BUILD_BENCH_HEADLESS": "OFF",
+                "VTHOST_BUILD_BENCH_LATENCY": "OFF"
+            }
+        },
+        {
+            "name": "linux-to-windows-clangcl-debug",
+            "displayName": "Windows x64 (clang-cl, cross from Linux) Debug",
+            "inherits": [
+                "linux-to-windows-common",
+                "debug"
+            ]
+        },
+        {
+            "name": "linux-to-windows-clangcl-release",
+            "displayName": "Windows x64 (clang-cl, cross from Linux) Release",
+            "inherits": [
+                "linux-to-windows-common",
+                "release"
+            ]
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "linux-to-windows-clangcl-debug",
+            "configurePreset": "linux-to-windows-clangcl-debug"
+        },
+        {
+            "name": "linux-to-windows-clangcl-release",
+            "configurePreset": "linux-to-windows-clangcl-release"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "linux-to-windows-clangcl-debug",
+            "configurePreset": "linux-to-windows-clangcl-debug",
+            "environment": {
+                "WINEDEBUG": "-all"
+            },
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error",
+                "timeout": 600
+            }
+        },
+        {
+            "name": "linux-to-windows-clangcl-release",
+            "configurePreset": "linux-to-windows-clangcl-release",
+            "environment": {
+                "WINEDEBUG": "-all"
+            },
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error",
+                "timeout": 600
+            }
+        }
+    ]
+}

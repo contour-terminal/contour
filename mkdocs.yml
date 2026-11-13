@@ -160,3 +160,4 @@ nav:
     - internals/releasing.md
     - internals/release-signing.md
     - internals/release-builds.md
+    - internals/windows-cross-build.md

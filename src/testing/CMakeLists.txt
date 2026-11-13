@@ -13,7 +13,7 @@ if(CONTOUR_TESTING)
     enable_testing()
     add_executable(testing_test test_main.cpp CaseTrace_test.cpp)
     target_link_libraries(testing_test contour_test_trace core::testing Catch2::Catch2)
-    add_test(NAME testing_test COMMAND $<TARGET_FILE:testing_test>)
+    add_test(NAME testing_test COMMAND testing_test)
 
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.

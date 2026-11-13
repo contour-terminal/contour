@@ -222,7 +222,7 @@ if(VTPTY_TESTING)
         endif()
     endif()
     target_link_libraries(vtpty_test vtpty core::testing Catch2::Catch2 contour_test_trace)
-    add_test(NAME vtpty_test COMMAND $<TARGET_FILE:vtpty_test>)
+    add_test(NAME vtpty_test COMMAND vtpty_test)
 
     if(CONTOUR_WITH_SYSTEMD)
         # Needs a systemd user manager; SKIPs (77) without one. CI runs it under a lingering user

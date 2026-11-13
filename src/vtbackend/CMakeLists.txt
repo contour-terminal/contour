@@ -505,7 +505,7 @@ if(LIBTERMINAL_TESTING)
     # Regenerates the golden of the format this build writes: `vtbackend_make_golden state/golden`.
     add_executable(vtbackend_make_golden state/golden/MakeGolden.cpp)
     target_link_libraries(vtbackend_make_golden vtbackend)
-    add_test(NAME vtbackend_test COMMAND $<TARGET_FILE:vtbackend_test>)
+    add_test(NAME vtbackend_test COMMAND vtbackend_test)
     vtbackend_force_include_test_printers(vtbackend_test)
 
     if(NOT WIN32)

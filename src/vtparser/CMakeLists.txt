@@ -28,7 +28,7 @@ if(VTPARSER_TESTING)
         Parser_test.cpp
     )
     target_link_libraries(vtparser_test vtparser core::testing Catch2::Catch2 contour_test_trace)
-    add_test(NAME vtparser_test COMMAND $<TARGET_FILE:vtparser_test>)
+    add_test(NAME vtparser_test COMMAND vtparser_test)
 
     if(NOT WIN32)
         target_compile_options(vtparser_test PRIVATE -Wno-c2y-extensions)

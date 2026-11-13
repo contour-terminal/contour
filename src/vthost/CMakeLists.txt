@@ -454,7 +454,7 @@ if(VTHOST_TESTING)
             VTHOST_TEST_ECHO_WASM="${CONTOUR_CARGO_TARGET_DIR}/${CONTOUR_WASM_TARGET}/release/echo.wasm")
         add_dependencies(vthost_test echo_wasm)
     endif()
-    add_test(NAME vthost_test COMMAND $<TARGET_FILE:vthost_test>)
+    add_test(NAME vthost_test COMMAND vthost_test)
     # `ctest -L daemon` selects everything daemon mode must pass to be trusted -- see the same
     # label on vtworkspace, a layer it is built on. The other two, core::async and core::net, are
     # vendored in vendor/core-cpp, and their suites run in core-cpp's own CI.
@@ -494,7 +494,7 @@ if(VTHOST_BUILD_BENCH_LATENCY)
         if(NOT WIN32)
             target_compile_options(bench_latency_test PRIVATE -Wno-c2y-extensions)
         endif()
-        add_test(NAME bench_latency_test COMMAND $<TARGET_FILE:bench_latency_test>)
+        add_test(NAME bench_latency_test COMMAND bench_latency_test)
         set_tests_properties(bench_latency_test PROPERTIES LABELS "daemon;bench")
         # A short headless run of each leg: a crash in the daemon leg or the in-process leg fails the suite.
         add_test(NAME bench_latency_headless_smoke COMMAND bench-latency headless runs 1 keys 20)

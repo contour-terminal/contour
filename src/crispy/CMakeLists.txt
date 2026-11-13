@@ -154,7 +154,7 @@ if(CRISPY_TESTING)
         target_sources(crispy_test PRIVATE FileDescriptor_test.cpp ReadSelector_test.cpp)
     endif()
     target_link_libraries(crispy_test Catch2::Catch2 crispy::core core::testing contour::tracy contour_test_trace)
-    add_test(NAME crispy_test COMMAND $<TARGET_FILE:crispy_test>)
+    add_test(NAME crispy_test COMMAND crispy_test)
 
     if(NOT WIN32)
         target_compile_options(crispy_test PRIVATE -Wno-c2y-extensions)

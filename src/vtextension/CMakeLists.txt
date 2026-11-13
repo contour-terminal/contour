@@ -158,7 +158,7 @@ if(VTEXTENSION_TESTING)
     add_library(vtextension_public_headers_test OBJECT testing/PublicHeaders.cpp)
     target_link_libraries(vtextension_public_headers_test PRIVATE vtextension)
     add_dependencies(vtextension_test vtextension_public_headers_test)
-    add_test(NAME vtextension_test COMMAND $<TARGET_FILE:vtextension_test>)
+    add_test(NAME vtextension_test COMMAND vtextension_test)
 
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.

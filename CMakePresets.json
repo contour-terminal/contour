@@ -8,6 +8,7 @@
     "include": [
         "cmake/presets/os-linux.json",
         "cmake/presets/os-windows.json",
-        "cmake/presets/os-macos.json"
+        "cmake/presets/os-macos.json",
+        "cmake/presets/os-linux-cross-windows.json"
     ]
 }
