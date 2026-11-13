@@ -693,6 +693,9 @@ std::expected<void, std::string> DaemonLink::selectWorkspace(uint64_t workspace,
             landed(workspace);
         return {};
     }
+    // Taken before the request goes out: the controller's reactor sends it at once, and the daemon's answer
+    // may settle -- the workspace it made among the layouts -- before this thread reads them.
+    auto before = std::ranges::to<std::set>(_controller->settledLayouts() | std::views::keys);
     auto const sent = _controller->select(workspace);
     if (!sent)
         return std::unexpected(sent.error());
@@ -702,7 +705,7 @@ std::expected<void, std::string> DaemonLink::selectWorkspace(uint64_t workspace,
     _switch = PendingSwitch {
         .to = workspace,
         .request = *sent,
-        .before = std::ranges::to<std::set>(_controller->settledLayouts() | std::views::keys),
+        .before = std::move(before),
         .landed = std::move(landed),
     };
     return {};

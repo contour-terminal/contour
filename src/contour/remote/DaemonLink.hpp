@@ -526,7 +526,8 @@ class DaemonLink final: public session::WindowBinding
     {
         uint64_t to = 0;      ///< The workspace it switches to; 0 for one the daemon makes.
         uint64_t request = 0; ///< The selection's request number, which the daemon's answer names.
-        /// The workspaces the connection was pushed before: a new one is the one not among them.
+        /// The workspaces the connection was pushed before the selection was asked for: a new one is the one
+        /// not among them.
         std::set<uint64_t> before;
         SwitchLanded landed; ///< Told how it went.
     };
