@@ -76,7 +76,7 @@ elseif("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
     # find_package(cairo CONFIG REQUIRED) -- unavailable in vcpkg for cairo
     pkg_check_modules(Cairo REQUIRED IMPORTED_TARGET cairo-ft)
     list(APPEND TEXT_SHAPER_LIBS PkgConfig::Cairo)
-    list(APPEND TEXT_SHAPER_LIBS harfbuzz harfbuzz::harfbuzz)
+    list(APPEND TEXT_SHAPER_LIBS harfbuzz::harfbuzz)
     list(APPEND TEXT_SHAPER_LIBS Freetype::Freetype)
     list(APPEND TEXT_SHAPER_LIBS dwrite)
 endif()
