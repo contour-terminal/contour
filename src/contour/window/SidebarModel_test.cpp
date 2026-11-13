@@ -261,20 +261,10 @@ TEST_CASE("SidebarModel: activate selects, activates and marks seen", "[contour]
         t.sidebar().activate(3);
         CHECK(t.host.shown == std::vector<PaneKey> { PaneKey { 20 } });
     }
-    SECTION("every kind of row asks for the terminal to take the keyboard")
-    {
-        auto asked = QSignalSpy { &t.sidebar(), &SidebarModel::terminalFocusWanted };
-        t.sidebar().activate(0); // workspace
-        t.sidebar().activate(1); // tab
-        CHECK(asked.count() == 2);
-    }
     SECTION("an out-of-range row does nothing")
     {
         t.sidebar().activate(99);
         CHECK(t.host.shown.empty());
-        auto asked = QSignalSpy { &t.sidebar(), &SidebarModel::terminalFocusWanted };
-        t.sidebar().activate(99);
-        CHECK(asked.count() == 0);
         CHECK(t.source.selected.empty());
     }
     SECTION("markSeen counts every pane under the row")

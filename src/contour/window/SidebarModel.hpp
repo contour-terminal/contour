@@ -577,9 +577,6 @@ class SidebarModel: public QAbstractListModel
     void summaryChanged();
     /// A rebuild changed a workspace's row (workspaceRows()).
     void workspaceRowsChanged();
-    /// Activating a row showed something the keyboard belongs to (focusAfterActivation()): the window gives
-    /// the terminal the keyboard, as a pointer press on the row does.
-    void terminalFocusWanted();
 
   private:
     /// A node drag as the sidebar reads it: what it is to the drop policy, and what moves.

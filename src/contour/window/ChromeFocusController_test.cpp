@@ -693,18 +693,19 @@ TEST_CASE("the sidebar's keys are requested of the tree, and typed text promotes
     CHECK(f.area() == ChromeArea::Terminal);
 }
 
-TEST_CASE("activating a row of the sidebar's tree hands the keyboard to the terminal",
+TEST_CASE("Enter on a row of the sidebar's tree activates it and hands the keyboard to the terminal",
           "[windowcontroller][chromefocus][sidebar]")
 {
+    using contour::window::ChromeCommand;
     auto const f = ChromeFixture {};
     auto& controller = f.controller();
     controller.focusSidebar();
     REQUIRE(f.area() == ChromeArea::Sidebar);
-    controller.sidebar().refreshNow();
-    REQUIRE(controller.sidebar().rowCount() > 0);
+    auto spy = QSignalSpy { &controller, &contour::window::WindowController::sidebarCommandRequested };
 
-    // The row the keyboard is on: Enter in the tree asks the model to activate it.
-    controller.sidebar().activate(0);
+    CHECK(f.chromeKey(Qt::Key_Return));
+    REQUIRE(spy.count() == 1);
+    CHECK(spy.at(0).at(0).toInt() == static_cast<int>(ChromeCommand::Activate));
     CHECK(f.area() == ChromeArea::Terminal);
 }
 

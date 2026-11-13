@@ -282,7 +282,6 @@ void WindowController::initSidebar()
     _sidebar = std::make_unique<SidebarModel>(*_sidebarHost, _attention, _wallClock, *_noticeAnnouncer);
     connect(this, &WindowController::workspaceDirectoryChanged, _sidebar.get(), &SidebarModel::noteChanged);
     connect(this, &WindowController::workspaceDirectoryChanged, this, &WindowController::followMovedPane);
-    connect(_sidebar.get(), &SidebarModel::terminalFocusWanted, this, &WindowController::leaveChrome);
     connect(_sidebar.get(),
             &SidebarModel::summaryChanged,
             this,
@@ -1931,6 +1930,9 @@ window::ChromeKeyOutcome WindowController::runChromeCommand(window::ChromeComman
     {
         // The tree is QML's: it moves its own row focus, expands, renames and filters.
         emit sidebarCommandRequested(static_cast<int>(command), text);
+        // What Enter activates is shown in the window, and what is shown is what the user types into next.
+        if (command == ChromeCommand::Activate)
+            leaveChrome();
         return ChromeKeyOutcome::Handled;
     }
     auto const inTabs = _chromeArea == window::ChromeArea::Tabs;
