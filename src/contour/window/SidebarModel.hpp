@@ -544,6 +544,8 @@ class SidebarModel: public QAbstractListModel
     void currentIndexChanged();
     /// The shown workspace, its row or what the other workspaces ask changed.
     void summaryChanged();
+    /// A rebuild changed a workspace's row (workspaceRows()).
+    void workspaceRowsChanged();
 
   private:
     /// A node drag as the sidebar reads it: what it is to the drop policy, and what moves.

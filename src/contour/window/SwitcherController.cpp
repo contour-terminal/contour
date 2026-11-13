@@ -5,11 +5,7 @@
 #include <contour/window/SwitcherController.hpp>
 #include <contour/window/Utf16Offsets.hpp>
 
-#include <core/log/LogStore.hpp>
-
 #include <QtCore/QPointer>
-#include <QtQml/QQmlComponent>
-#include <QtQml/QQmlEngine>
 
 #include <algorithm>
 #include <array>
@@ -914,26 +910,6 @@ QHash<int, QByteArray> SwitcherController::roleNames() const
         { static_cast<int>(Roles::DrillsInRole), "drillsIn" },
         { static_cast<int>(Roles::OpensInNewWindowRole), "opensInNewWindow" },
     };
-}
-
-std::unique_ptr<QQuickWindow> loadSwitcherWindow(QQmlEngine& engine, SwitcherController& switcher)
-{
-    auto component = QQmlComponent(&engine);
-    component.loadFromModule("Contour.Ui", "Switcher");
-    if (!component.isReady())
-    {
-        errorLog()("Could not load the switcher: {}", component.errorString().toStdString());
-        return nullptr;
-    }
-    auto object = std::unique_ptr<QObject>(component.createWithInitialProperties(
-        QVariantMap { { QStringLiteral("switcher"), QVariant::fromValue(&switcher) } }));
-    if (qobject_cast<QQuickWindow*>(object.get()) == nullptr)
-    {
-        errorLog()("The switcher did not build a window: {}",
-                   object ? object->metaObject()->className() : component.errorString().toStdString());
-        return nullptr;
-    }
-    return std::unique_ptr<QQuickWindow>(static_cast<QQuickWindow*>(object.release()));
 }
 
 } // namespace contour::window

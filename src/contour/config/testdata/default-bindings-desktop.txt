@@ -55,6 +55,7 @@ char modes=[Any] mods=[Shift|Control] input=U+0053 clicks=- -> SpeakSelection de
 char modes=[Any] mods=[Shift|Control] input=U+0057 clicks=- -> ClosePane declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0058 clicks=- -> ClosePane declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0052 clicks=- -> ShowSwitcher declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+005C clicks=- -> ToggleSplitOrientation declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+005A clicks=- -> TogglePaneZoom declined=pass gated=no
 char modes=[Any] mods=[Alt] input=U+0031 clicks=- -> SwitchToTab, position: 1 declined=pass gated=no
@@ -151,6 +152,7 @@ char modes=[Any] mods=[Shift|Control] input=U+0053 clicks=- -> SpeakSelection de
 char modes=[Any] mods=[Shift|Control] input=U+0057 clicks=- -> ClosePane declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0058 clicks=- -> ClosePane declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0052 clicks=- -> ShowSwitcher declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+005C clicks=- -> ToggleSplitOrientation declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0042 clicks=- -> ToggleSidebar declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+004A clicks=- -> JumpToNextAttention declined=pass gated=no

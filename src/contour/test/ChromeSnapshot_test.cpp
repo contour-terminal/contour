@@ -1135,7 +1135,7 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 // The dropdown lists this window's daemon's workspaces, and nothing else.
                 auto const* dropdown = scene.workspaceDropdown();
                 REQUIRE(dropdown != nullptr);
-                CHECK(dropdown->isVisible());
+                CHECK(dropdown->property("visible").toBool());
                 break;
             }
             case SnapshotScript::QuickTerminal: {

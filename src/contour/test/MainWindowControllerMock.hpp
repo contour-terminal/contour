@@ -32,6 +32,7 @@
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QList>
 #include <QtCore/QPointF>
+#include <QtCore/QPointer>
 #include <QtCore/QRectF>
 #include <QtCore/QString>
 #include <QtCore/QVariant>
@@ -128,6 +129,11 @@ class MainWindowControllerMock: public QAbstractListModel
     Q_OBJECT
     // Mirrors WindowController's remote chrome, which Main.qml's title and the tab strip's badge read.
     Q_PROPERTY(QString hostLabel READ hostLabel NOTIFY hostLabelChanged)
+    /// Mirrors WindowController's switcher hosting: the switcher presented, and whether it hangs from the
+    /// chip.
+    Q_PROPERTY(QObject* switcher READ switcher NOTIFY switcherChanged)
+    Q_PROPERTY(bool isWorkspaceDropdownOpen READ isWorkspaceDropdownOpen NOTIFY switcherChanged)
+    Q_PROPERTY(QString workspaceChipDescription READ workspaceChipDescription NOTIFY switcherChanged)
     // Mirrors WindowController's host chip state (a window::HostChipState); a test sets it to drive the chip.
     Q_PROPERTY(int hostChipState READ hostChipState WRITE setHostChipState NOTIFY hostChipStateChanged)
     // Mirrors WindowController's version string, which the About dialog shows.
@@ -615,6 +621,27 @@ class MainWindowControllerMock: public QAbstractListModel
     Q_INVOKABLE void newWorkspace() { ++newWorkspaces; }
     /// Mirrors WindowController::showWorkspaceDropdown(): records where the chip asked it to drop down.
     Q_INVOKABLE void showWorkspaceDropdown(QRectF const& chip) { workspaceDropdownAnchor = chip; }
+    /// Mirrors WindowController::presentSwitcher().
+    void presentSwitcher(QObject* switcher, std::optional<QRectF> anchor)
+    {
+        _switcher = switcher;
+        _switcherAnchor = anchor;
+        emit switcherChanged();
+        emit switcherRequested(anchor ? QVariant { *anchor } : QVariant {});
+    }
+    /// Mirrors WindowController::closeSwitcher().
+    Q_INVOKABLE void closeSwitcher()
+    {
+        _switcher = nullptr;
+        _switcherAnchor.reset();
+        emit switcherChanged();
+    }
+    [[nodiscard]] QObject* switcher() const { return _switcher.data(); }
+    [[nodiscard]] bool isWorkspaceDropdownOpen() const { return _switcher && _switcherAnchor.has_value(); }
+    [[nodiscard]] QString workspaceChipDescription() const
+    {
+        return isWorkspaceDropdownOpen() ? QStringLiteral("expanded") : QStringLiteral("collapsed");
+    }
     /// Mirrors WindowController::openSidebarFilter().
     Q_INVOKABLE void openSidebarFilter() { emit sidebarFilterRequested(); }
     /// Mirrors WindowController::beginSidebarDrag(): the payload a workspace, tab or pane row carries, as the
@@ -679,6 +706,9 @@ class MainWindowControllerMock: public QAbstractListModel
     int newTabMenuOpenings = 0;           ///< How often the new-tab menu was asked for.
 
   signals:
+    void switcherChanged();
+    void switcherRequested(QVariant anchor);
+    void switcherWithdrawn();
     void hostChipStateChanged();
     void hostLabelChanged();
     void commandPaletteRequested();
@@ -715,6 +745,8 @@ class MainWindowControllerMock: public QAbstractListModel
                                              QString const& program);
 
   private:
+    QPointer<QObject> _switcher;           ///< The switcher presented; null for none.
+    std::optional<QRectF> _switcherAnchor; ///< What it hangs from; none while centred.
     std::shared_ptr<contour::askpass::AskpassPromptRouter> _promptRouter =
         std::make_shared<contour::askpass::AskpassPromptRouter>();
     contour::window::PromptHost _promptHost { _promptRouter, 1 };

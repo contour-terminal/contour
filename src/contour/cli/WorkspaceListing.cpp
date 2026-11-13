@@ -22,6 +22,23 @@ std::expected<std::vector<vtcontrol::WorkspaceInfo>, std::string> decodeWorkspac
         .transform_error([](vtcontrol::ControlError const& error) { return error.message; });
 }
 
+std::string encodeCreateWorkspace(std::string const& label)
+{
+    return vtcontrol::encodeJson(vtcontrol::CreateWorkspaceRequest { .cwd = {}, .label = label });
+}
+
+std::expected<vtcontrol::ObjectRef, std::string> decodeCreatedWorkspace(std::string_view replyJson)
+{
+    return vtcontrol::decodeJson<vtcontrol::CreateWorkspaceReply>(replyJson)
+        .transform_error([](vtcontrol::ControlError const& error) { return error.message; })
+        .and_then([](vtcontrol::CreateWorkspaceReply const& reply)
+                      -> std::expected<vtcontrol::ObjectRef, std::string> {
+            if (auto const ref = vtcontrol::parseObjectRef(reply.workspace))
+                return *ref;
+            return std::unexpected(std::string { "the daemon named no new workspace" });
+        });
+}
+
 std::expected<uint64_t, std::string> resolveWorkspaceSpec(
     std::string_view spec, std::span<vtcontrol::WorkspaceInfo const> workspaces)
 {

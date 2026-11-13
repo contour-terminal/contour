@@ -3,6 +3,7 @@
 
 #include <contour/command/CommandCatalog.hpp>
 #include <contour/command/MenuBarTable.hpp>
+#include <contour/command/SidebarMenus.hpp>
 #include <contour/display/WindowHost.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
 #include <contour/platform/Announcer.hpp>
@@ -101,6 +102,7 @@ namespace contour::window
 [[nodiscard]] QString const& processToken();
 
 class PromptHost;
+class SwitcherController;
 
 /// A place a context menu opens from. Each holds its own published menu, so opening one never rebuilds
 /// -- or re-targets -- another the user may still have open.
@@ -166,6 +168,14 @@ class WindowController:
     Q_PROPERTY(contour::window::NoticeModel* notices READ noticesForQml CONSTANT)
     /// The workspace sidebar's rows (SidebarModel).
     Q_PROPERTY(QObject* sidebar READ sidebarForQml CONSTANT)
+    /// The switcher this window presents (SwitcherController), or null while it presents none.
+    Q_PROPERTY(QObject* switcher READ switcherForQml NOTIFY switcherChanged)
+    /// Whether the switcher this window presents hangs from its workspace chip: the chip wears its open fill.
+    /// A QML-facing predicate, hence a bool.
+    Q_PROPERTY(bool isWorkspaceDropdownOpen READ isWorkspaceDropdownOpen NOTIFY switcherChanged)
+    /// The workspace chip's accessible description: "expanded" while its dropdown is open, else "collapsed"
+    /// (Qt has no expanded state for a button).
+    Q_PROPERTY(QString workspaceChipDescription READ workspaceChipDescription NOTIFY switcherChanged)
     Q_PROPERTY(QVariantList sidebarContextMenuModel READ sidebarContextMenuModel NOTIFY
                    sidebarContextMenuModelChanged)
     Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
@@ -769,8 +779,36 @@ class WindowController:
 
     /// Opens the switcher as the workspace chip's dropdown: below the chip, listing this window's daemon's
     /// workspaces alone (TerminalSessionManager::showWorkspaceDropdown()).
-    /// @param chip The chip in the window's scene coordinates, the gap below it included.
+    /// @param chip The chip in the window's scene coordinates.
     Q_INVOKABLE void showWorkspaceDropdown(QRectF const& chip) const;
+
+    /// Presents @p switcher in this window's scene: centred, or hanging below @p anchor. A documented
+    /// rebinding seam: the application's one switcher moves between windows, and the caller withdraws it
+    /// from the window that presented it before (withdrawSwitcher()).
+    /// @param switcher The switcher, opened already; borrowed, it outlives this window's hold on it.
+    /// @param anchor The control it hangs from, in the scene's coordinates; none to centre it.
+    void presentSwitcher(SwitcherController* switcher, std::optional<QRectF> anchor);
+
+    /// Closes the switcher this window presents, if any, and lets go of it.
+    void withdrawSwitcher();
+
+    /// Lets go of the switcher once its popup has closed, however it closed.
+    Q_INVOKABLE void closeSwitcher();
+
+    /// @return The switcher this window presents; null for none.
+    [[nodiscard]] SwitcherController* presentedSwitcher() const noexcept;
+    [[nodiscard]] QObject* switcherForQml() const noexcept;
+    [[nodiscard]] bool isWorkspaceDropdownOpen() const noexcept;
+    [[nodiscard]] QString workspaceChipDescription() const;
+
+    /// @param workspace A workspace of this window's directory, by its id.
+    /// @return What its sidebar row's menu is built from: the switcher's row menu shows the same rows.
+    [[nodiscard]] command::WorkspaceMenuState workspaceMenuStateOf(uint64_t workspace) const;
+
+    /// Runs one of the sidebar's workspace menu rows on @p workspace, as the sidebar's own menu does.
+    /// @param workspace The workspace, by its id.
+    /// @param action The row's action.
+    void runWorkspaceMenuAction(uint64_t workspace, actions::Action const& action);
     // }}}
 
     // {{{ Terminal context menu
@@ -1563,6 +1601,13 @@ class WindowController:
     /// Requests that this window show its command palette. Per-window (like tabTitleEditRequested), so
     /// the popup opens over the window the user pressed the chord in — not over every open window.
     void commandPaletteRequested();
+    /// The switcher this window presents changed, or stopped hanging from the chip.
+    void switcherChanged();
+    /// Asks the scene to show the switcher presented: centred for a null @p anchor, else below that rect.
+    /// @param anchor The control it hangs from (a QRectF), or null.
+    void switcherRequested(QVariant anchor);
+    /// Asks the scene to close the switcher: it was withdrawn from this window.
+    void switcherWithdrawn();
     /// Requests that this window open its "save layout as" name prompt. Per-window, exactly like
     /// commandPaletteRequested: the prompt opens over the window the SaveLayout action fired in.
     void saveLayoutRequested();
@@ -2185,6 +2230,8 @@ class WindowController:
     // The sidebar's window-facing half and its model; the model is declared last, as it uses the rest.
     std::unique_ptr<SidebarHost> _sidebarHost;
     std::unique_ptr<SidebarModel> _sidebar;
+    QPointer<SwitcherController> _switcher; ///< The switcher presented; null for none.
+    std::optional<QRectF> _switcherAnchor;  ///< What it hangs from; none while centred.
 
     // Carries beginMoveRows()'s result from onTabAboutToBeMoved() to onTabMoved().
     bool _tabMoveInProgress = false;

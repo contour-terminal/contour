@@ -36,6 +36,24 @@ class SwitchingService: public session::WindowSwitching
     virtual void listWorkspaces(vtworkspace::WorkspaceId window,
                                 session::SwitchTarget const& daemon,
                                 DaemonWorkspacesListed done) = 0;
+
+    /// Creates a workspace labelled @p label on @p daemon (`workspace.create`), then switches @p window to
+    /// it, or opens it in a new window; never blocks.
+    /// @param window The window asking.
+    /// @param daemon The daemon; its workspace spec is not read.
+    /// @param label The new workspace's label.
+    /// @param mode Switch the window, or open a new one.
+    /// @param done Told how the switch went, or why no workspace was made.
+    virtual void createWorkspace(vtworkspace::WorkspaceId window,
+                                 session::SwitchTarget const& daemon,
+                                 std::string label,
+                                 session::SwitchMode mode,
+                                 session::SwitchCompletion done) = 0;
+
+    /// @param window A window.
+    /// @return Its own daemon's workspaces as a switch decides on them, from the directory its connection
+    ///         holds (nothing is listed); empty for a window no daemon serves.
+    [[nodiscard]] virtual std::vector<WorkspaceRow> windowWorkspaceRows(vtworkspace::WorkspaceId window) = 0;
 };
 
 } // namespace contour::remote

@@ -18,6 +18,13 @@ Item {
     required property var sidebar
     /// Whether keyboard focus is on the chip and the chrome says so: the host's to set.
     property bool focusRingShown: false
+    /// Whether the dropdown the chip opened is open: the chip wears its pressed fill meanwhile.
+    property bool isOpen: false
+    /// The accessible description, "expanded" or "collapsed" (Qt has no expanded state for a button).
+    property string openDescription: ""
+    // Whether the dropdown was open as the press began: that press closed it, and its release must not open
+    // it again (ui-ux rule 2).
+    property bool _wasOpenAtPress: false
 
     readonly property string label: root.sidebar ? root.sidebar.currentWorkspaceTitle : ""
     readonly property bool marked: !!root.sidebar && root.sidebar.workspaceChipMarked
@@ -28,6 +35,7 @@ Item {
     Accessible.focusable: root.focusRingShown
     Accessible.focused: root.focusRingShown
     Accessible.name: root.sidebar ? root.sidebar.workspaceChipAccessibleName : ""
+    Accessible.description: root.openDescription
     Accessible.onPressAction: root.clicked()
 
     Keys.onPressed: function(event) {
@@ -51,19 +59,20 @@ Item {
         id: primary
         acceptedButtons: Qt.LeftButton
         gesturePolicy: TapHandler.ReleaseWithinBounds
-        onTapped: root.clicked()
+        onPressedChanged: if (primary.pressed) root._wasOpenAtPress = root.isOpen
+        onTapped: if (!root._wasOpenAtPress) root.clicked()
     }
 
-    /// The chip in the scene, with the gap a dropdown hangs below it by: where its dropdown opens.
+    /// The chip in the scene: what its dropdown hangs below (the gap is the dropdown's).
     function dropdownAnchor() {
-        return root.mapToItem(null, 0, 0, root.width, root.height + chromeStyle.space.s1)
+        return root.mapToItem(null, 0, 0, root.width, root.height)
     }
 
     Rectangle {
         anchors.fill: parent
         radius: chromeStyle.radii.hostChip
         color: chromeStyle.paletteRevision < 0 ? "transparent"
-             : primary.pressed ? chromeStyle.colors.controlPressedFill
+             : primary.pressed || root.isOpen ? chromeStyle.colors.controlPressedFill
              : hover.hovered || root.activeFocus ? chromeStyle.colors.tabHoverFill
              : chromeStyle.colors.chipFill
     }

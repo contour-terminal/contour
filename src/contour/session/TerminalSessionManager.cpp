@@ -2109,7 +2109,7 @@ void TerminalSessionManager::showSwitcher(TerminalSession const& acting)
                      std::nullopt);
 }
 
-void TerminalSessionManager::showWorkspaceDropdown(TerminalSession const& acting, QRect chip)
+void TerminalSessionManager::showWorkspaceDropdown(TerminalSession const& acting, QRectF chip)
 {
     openSwitcherOver(
         acting, window::SwitcherPrompt::Browse, "WorkspaceChip", window::SwitcherScope::OneDaemon, chip);
@@ -2142,7 +2142,7 @@ void TerminalSessionManager::openSwitcherOver(TerminalSession const& acting,
                                               window::SwitcherPrompt prompt,
                                               std::string_view what,
                                               window::SwitcherScope scope,
-                                              std::optional<QRect> control)
+                                              std::optional<QRectF> control)
 {
     auto const* const window = hostOf(&acting).window;
     auto const daemon = window != nullptr ? daemonTargetOf(window->id()) : std::nullopt;
@@ -2153,15 +2153,26 @@ void TerminalSessionManager::openSwitcherOver(TerminalSession const& acting,
     }
     // The palette's rows and the cycling actions read the directory; the popup asks the daemons itself.
     _switchDirectory.refresh();
-    auto const* const controller = controllerHostingSession(&acting);
-    if (auto const shown = _app.openSwitcher(window::SwitcherOpening { .window = window->id(),
-                                                                       .windowDaemon = *daemon,
-                                                                       .mode = SwitchMode::Switch,
-                                                                       .prompt = prompt,
-                                                                       .pick = std::nullopt,
-                                                                       .scope = scope },
-                                             controller != nullptr ? controller->screen() : nullptr,
-                                             control);
+    auto* const controller = controllerHostingSession(&acting);
+    if (controller == nullptr)
+    {
+        managerLog()("{}: no window shows the session.", what);
+        return;
+    }
+    // The window's own workspaces are its sidebar's, as of now.
+    controller->sidebar().refreshNow();
+    if (auto const shown = _app.openSwitcher(
+            window::SwitcherOpening { .window = window->id(),
+                                      .windowDaemon = *daemon,
+                                      .mode = SwitchMode::Switch,
+                                      .prompt = prompt,
+                                      .pick = std::nullopt,
+                                      .scope = scope,
+                                      .windowWorkspaces = _app.windowWorkspacesOf(*controller, window->id()),
+                                      .origin = control ? window::SwitcherOrigin::Chip
+                                                        : window::SwitcherOrigin::Centred },
+            *controller,
+            control);
         !shown)
         managerLog()("{}: {}.", what, shown.error());
 }

@@ -427,33 +427,16 @@ class ChromeSnapshotScene
     }
 
     /// The window the picture is of, as rendered. Needs a display: the offscreen platform grabs nothing
-    /// worth keeping.
+    /// worth keeping. The workspace chip's dropdown is in the window's scene, so it is in the picture.
     /// @return The grabbed frame of subject().
-    /// A script with the workspace chip's dropdown open is the window with the dropdown drawn where it hangs
-    /// below the chip (window::popupBelow, within the window), as the two are seen together on screen.
-    [[nodiscard]] QImage grab() const
-    {
-        auto image = subject().grabWindow();
-        if (_dropdownWindow == nullptr || !_controller.workspaceDropdownAnchor)
-            return image;
-        auto const dropdown = _dropdownWindow->grabWindow();
-        auto const& chip = *_controller.workspaceDropdownAnchor;
-        auto const at =
-            window::popupBelow({ .x = static_cast<int>(chip.x()),
-                                 .y = static_cast<int>(chip.y()),
-                                 .width = static_cast<int>(chip.width()),
-                                 .height = static_cast<int>(chip.height()) },
-                               _dropdownWindow->width(),
-                               _dropdownWindow->height(),
-                               0,
-                               { .x = 0, .y = 0, .width = window().width(), .height = window().height() });
-        auto painter = QPainter { &image };
-        painter.drawImage(QPointF { static_cast<qreal>(at.x), static_cast<qreal>(at.y) }, dropdown);
-        return image;
-    }
+    [[nodiscard]] QImage grab() const { return subject().grabWindow(); }
 
-    /// @return The workspace chip's dropdown, once OpenWorkspaceDropdown opened it; else null.
-    [[nodiscard]] QQuickWindow const* workspaceDropdown() const noexcept { return _dropdownWindow.get(); }
+    /// @return The workspace chip's dropdown, the switcher popup in the scene, once OpenWorkspaceDropdown
+    ///         opened it; else null.
+    [[nodiscard]] QObject const* workspaceDropdown() const
+    {
+        return _dropdown ? root().findChild<QObject*>(QStringLiteral("switcher")) : nullptr;
+    }
 
     /// The window the picture is of: the Settings window for SnapshotSurface::SettingsWindow, else window().
     /// @return That window.
@@ -1517,11 +1500,13 @@ class ChromeSnapshotScene
             .scope = window::SwitcherScope::OneDaemon,
             .windowWorkspaces = workspaces,
             .origin = window::SwitcherOrigin::Chip });
-        _dropdownWindow = window::loadSwitcherWindow(_engine, *_dropdown);
-        REQUIRE(_dropdownWindow != nullptr);
-        _dropdownWindow->setFlags(Qt::Tool | Qt::FramelessWindowHint);
-        _dropdownWindow->show();
-        REQUIRE(QTest::qWaitForWindowExposed(_dropdownWindow.get()));
+        _controller.presentSwitcher(_dropdown.get(), _controller.workspaceDropdownAnchor);
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                auto const* popup = root().findChild<QObject*>(QStringLiteral("switcher"));
+                return popup != nullptr && popup->property("opened").toBool();
+            },
+            3000));
         _incubation.settle();
         QCoreApplication::processEvents();
     }
@@ -1779,11 +1764,10 @@ class ChromeSnapshotScene
     /// The Settings window over *_settings, on _engine; null unless the script's surface is that window.
     std::unique_ptr<window::SettingsWindowHost> _settingsWindow;
     IncubationDriver _incubation;
-    std::unique_ptr<QObject> _root; ///< The QML tree dies before everything it borrows.
-    /// The workspace chip's dropdown and its window (openWorkspaceDropdown()); null otherwise. The window, on
-    /// _engine and borrowing the controller, goes first.
+    /// The workspace chip's dropdown's switcher (openWorkspaceDropdown()), presented in _root's scene; null
+    /// otherwise. Before _root, which borrows it, so it outlives the QML tree.
     std::unique_ptr<window::SwitcherController> _dropdown;
-    std::unique_ptr<QQuickWindow> _dropdownWindow;
+    std::unique_ptr<QObject> _root; ///< The QML tree dies before everything it borrows.
     /// Last: openKitDialog()'s dialog, parented into _root's tree, dies first.
     std::unique_ptr<QObject> _overlay;
     QObject const* _tabColorFlyout = nullptr; ///< The flyout openTabColorFlyout() opened; owned by _root.

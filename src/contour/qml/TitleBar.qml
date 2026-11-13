@@ -504,6 +504,9 @@ Item {
                 id: workspaceChip
                 sidebar: root.controller.sidebar
                 focusRingShown: activeFocus && root.toolbarHasFocus
+                isOpen: !!root.controller && !!root.controller.isWorkspaceDropdownOpen
+                openDescription: root.controller && root.controller.workspaceChipDescription
+                                 ? root.controller.workspaceChipDescription : ""
                 onClicked: if (root.controller && root.controller.showWorkspaceDropdown)
                     root.controller.showWorkspaceDropdown(workspaceChip.dropdownAnchor())
             }

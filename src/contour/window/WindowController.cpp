@@ -39,6 +39,7 @@
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SidebarMenuState.hpp>
+#include <contour/window/SwitcherController.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabColorScheme.hpp>
 #include <contour/window/TabLabel.hpp>
@@ -705,10 +706,68 @@ void WindowController::showWorkspaceDropdown(QRectF const& chip) const
     auto const* session = activeSession();
     if (session == nullptr)
         return;
-    // The scene is the window's content; the OS window places it on the screen.
-    auto const origin =
-        _osWindow != nullptr ? _osWindow->mapToGlobal(chip.topLeft().toPoint()) : chip.topLeft().toPoint();
-    _manager.showWorkspaceDropdown(*session, QRect { origin, chip.size().toSize() });
+    // In the scene's coordinates: the dropdown hangs from the chip inside this window.
+    _manager.showWorkspaceDropdown(*session, chip);
+}
+
+void WindowController::presentSwitcher(SwitcherController* switcher, std::optional<QRectF> anchor)
+{
+    _switcher = switcher;
+    _switcherAnchor = anchor;
+    emit switcherChanged();
+    emit switcherRequested(anchor ? QVariant { *anchor } : QVariant {});
+}
+
+void WindowController::withdrawSwitcher()
+{
+    if (!_switcher)
+        return;
+    emit switcherWithdrawn();
+    closeSwitcher();
+}
+
+void WindowController::closeSwitcher()
+{
+    if (!_switcher && !_switcherAnchor)
+        return;
+    _switcher = nullptr;
+    _switcherAnchor.reset();
+    emit switcherChanged();
+}
+
+SwitcherController* WindowController::presentedSwitcher() const noexcept
+{
+    return _switcher.data();
+}
+
+QObject* WindowController::switcherForQml() const noexcept
+{
+    return _switcher.data();
+}
+
+bool WindowController::isWorkspaceDropdownOpen() const noexcept
+{
+    return _switcher && _switcherAnchor.has_value();
+}
+
+command::WorkspaceMenuState WindowController::workspaceMenuStateOf(uint64_t workspace) const
+{
+    return window::workspaceMenuStateOf(_directorySource != nullptr ? _directorySource->directory()
+                                                                    : WorkspaceDirectory {},
+                                        workspace,
+                                        menuMovesOf(_manager.hostMovesOf(*this)));
+}
+
+void WindowController::runWorkspaceMenuAction(uint64_t workspace, actions::Action const& action)
+{
+    runSidebarAction(
+        SidebarRowKey { .kind = SidebarRowKind::Workspace, .workspace = workspace, .tab = 0, .pane = {} },
+        action);
+}
+
+QString WindowController::workspaceChipDescription() const
+{
+    return isWorkspaceDropdownOpen() ? tr("expanded") : tr("collapsed");
 }
 
 void WindowController::runMenuBarAction(actions::Action const& action) const
@@ -3684,19 +3743,10 @@ void WindowController::openSidebarContextMenu(SidebarRow const& row, QPointF win
     auto entries = std::vector<command::ContextMenuEntry> {};
     switch (row.key.kind)
     {
-        case SidebarRowKind::Workspace: {
-            // A workspace of one tab merges into another tab as that tab does.
-            auto const only =
-                holder != nullptr && holder->tabs.size() == 1
-                    ? std::optional { TabRef { .workspace = holder->id, .tab = holder->tabs.front().id } }
-                    : std::nullopt;
+        case SidebarRowKind::Workspace:
             entries = command::buildWorkspaceMenu(
-                { .position = row.position,
-                  .count = directory.workspaces.size(),
-                  .joinable = only ? joinTargetsOf(directory, only) : std::vector<command::TabChoiceGroup> {},
-                  .moves = moves });
+                window::workspaceMenuStateOf(directory, row.key.workspace, moves));
             break;
-        }
         case SidebarRowKind::Tab: {
             // Every workspace but the tab's own can take it.
             auto others = directory;

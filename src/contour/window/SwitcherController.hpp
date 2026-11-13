@@ -17,7 +17,6 @@
 #include <QtCore/QHash>
 #include <QtCore/QString>
 #include <QtCore/QVariantList>
-#include <QtQuick/QQuickWindow>
 
 #include <chrono>
 #include <cstdint>
@@ -30,8 +29,6 @@
 
 #include <QtQmlIntegration/QtQmlIntegration>
 #include <vtworkspace/Primitives.hpp>
-
-class QQmlEngine;
 
 namespace contour::window
 {
@@ -385,12 +382,5 @@ class SwitcherController: public QAbstractListModel
     /// goes, and the ones that ended as the next one starts.
     platform::OffThreadJobs _jobs;
 };
-
-/// Builds the switcher popup's window on @p engine.
-/// @param engine The app's QML engine.
-/// @param switcher What the window shows; borrowed, it outlives the window.
-/// @return The window, not yet shown; null when Switcher.qml did not load (the errors are logged).
-[[nodiscard]] std::unique_ptr<QQuickWindow> loadSwitcherWindow(QQmlEngine& engine,
-                                                               SwitcherController& switcher);
 
 } // namespace contour::window

@@ -4485,6 +4485,34 @@ window::SwitcherServices ContourGuiApp::switcherServices()
                                                    .timeout = NamedDaemonStartTimeout });
                 };
             },
+        .createWorkspace =
+            [this](vtworkspace::WorkspaceId window,
+                   session::SwitchTarget const& daemon,
+                   std::string label,
+                   session::SwitchMode mode) {
+                _windowSwitching->createWorkspace(
+                    window,
+                    daemon,
+                    std::move(label),
+                    mode,
+                    [](std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome) {
+                        if (!outcome)
+                            attachLog()("new workspace from the switcher failed: {}", outcome.error());
+                    });
+            },
+        .now = [] { return std::chrono::system_clock::now(); },
+        .style = command::platformShortcutStyle(),
+        .workspaceMenu =
+            [this](vtworkspace::WorkspaceId window, uint64_t workspace) {
+                auto const* const controller = _sessionManager.controllerDisplaying(window);
+                return controller != nullptr ? controller->workspaceMenuStateOf(workspace)
+                                             : command::WorkspaceMenuState {};
+            },
+        .runWorkspaceAction =
+            [this](vtworkspace::WorkspaceId window, uint64_t workspace, actions::Action const& action) {
+                if (auto* const controller = _sessionManager.controllerDisplaying(window))
+                    controller->runWorkspaceMenuAction(workspace, action);
+            },
     };
 }
 
@@ -4505,66 +4533,46 @@ void ContourGuiApp::returnFocusTo(FocusReturn const& target)
 }
 
 std::expected<void, std::string> ContourGuiApp::openSwitcher(window::SwitcherOpening opening,
-                                                             QScreen* anchor,
-                                                             std::optional<QRect> control)
+                                                             window::WindowController& host,
+                                                             std::optional<QRectF> anchor)
 {
     if (!_qmlEngine)
         return std::unexpected(std::string { "there is no window to show the switcher in" });
     if (!_switcher)
     {
         _switcher = std::make_unique<window::SwitcherController>(switcherServices());
-        _switcherWindow = window::loadSwitcherWindow(*_qmlEngine, *_switcher);
-        if (!_switcherWindow)
-        {
-            _switcher.reset();
-            return std::unexpected(std::string { "the switcher popup could not be loaded" });
-        }
-        _switcherWindowFlags = _switcherWindow->flags();
         // Both a choice and a cancel close it; the choice was handed to the window switcher already.
-        connect(_switcher.get(), &window::SwitcherController::finished, this, [this] {
-            if (_switcherWindow)
-                _switcherWindow->close();
-        });
-        connect(_switcher.get(), &window::SwitcherController::cancelled, this, [this] {
-            if (_switcherWindow)
-                _switcherWindow->close();
-        });
-        connect(_switcherWindow.get(), &QWindow::visibleChanged, this, [this](bool isVisible) {
-            if (!isVisible)
-                returnFocusTo(_switcherReturn);
-        });
+        auto const withdraw = [this] {
+            if (_switcherHost)
+                _switcherHost->withdrawSwitcher();
+            _switcherHost = nullptr;
+            QObject::disconnect(_switcherSidebar);
+        };
+        connect(_switcher.get(), &window::SwitcherController::finished, this, withdraw);
+        connect(_switcher.get(), &window::SwitcherController::cancelled, this, withdraw);
     }
-    _switcherReturn = focusReturnPoint();
+    // One switcher for the application: shown over another window, it leaves the first.
+    if (_switcherHost && _switcherHost != &host)
+        _switcherHost->withdrawSwitcher();
+    QObject::disconnect(_switcherSidebar);
+    _switcherHost = &host;
+    // The window's own workspaces follow its sidebar while the popup is up: the status changes, the
+    // selection stays.
+    _switcherSidebar = connect(
+        &host.sidebar(), &window::SidebarModel::workspaceRowsChanged, this, [this, window = opening.window] {
+            if (_switcherHost && _switcherHost->presentedSwitcher() == _switcher.get())
+                _switcher->updateWindowWorkspaces(windowWorkspacesOf(*_switcherHost, window));
+        });
     _switcher->open(std::move(opening));
-    _switcherWindow->setTransientParent(
-        window::popupParentFor(QGuiApplication::focusWindow(), *_switcherWindow));
-    if (anchor != nullptr)
-        _switcherWindow->setScreen(anchor);
-    if (control)
-    {
-        // A dropdown: a popup hanging below the control that opened it, which a click elsewhere closes, as a
-        // pop-up button's menu does. Not modal: the popup's own grab already keeps the window's input.
-        _switcherWindow->setFlags(Qt::Popup | Qt::FramelessWindowHint);
-        _switcherWindow->setModality(Qt::NonModal);
-        auto const area = _switcherWindow->screen()->availableGeometry();
-        auto const at = window::popupBelow(
-            { .x = control->x(), .y = control->y(), .width = control->width(), .height = control->height() },
-            _switcherWindow->width(),
-            _switcherWindow->height(),
-            0,
-            { .x = area.x(), .y = area.y(), .width = area.width(), .height = area.height() });
-        _switcherWindow->setPosition(at.x, at.y);
-    }
-    else
-    {
-        _switcherWindow->setFlags(_switcherWindowFlags);
-        _switcherWindow->setModality(_switcherWindow->transientParent() != nullptr ? Qt::WindowModal
-                                                                                   : Qt::NonModal);
-    }
-    _switcherWindow->show();
-    _switcherWindow->raise();
-    _switcherWindow->requestActivate();
+    host.presentSwitcher(_switcher.get(), anchor);
     return {};
+}
+
+std::vector<window::SwitcherWorkspace> ContourGuiApp::windowWorkspacesOf(window::WindowController& host,
+                                                                         vtworkspace::WorkspaceId window)
+{
+    return remote::windowWorkspacesOf(
+        _windowSwitching->windowWorkspaceRows(window), host.sidebar().workspaceRows(), window);
 }
 
 std::expected<void, std::string> ContourGuiApp::showSwitchPick(remote::SwitchPickRequest const& pick)
@@ -4572,7 +4580,10 @@ std::expected<void, std::string> ContourGuiApp::showSwitchPick(remote::SwitchPic
     auto const daemon = _sessionManager.daemonTargetOf(pick.window);
     if (!daemon)
         return std::unexpected(std::string { "the window went away" });
-    auto const* const controller = _sessionManager.controllerDisplaying(pick.window);
+    auto* const controller = _sessionManager.controllerDisplaying(pick.window);
+    if (controller == nullptr)
+        return std::unexpected(std::string { "the window went away" });
+    controller->sidebar().refreshNow(); // its rows as of now, not as of its last rebuild
     return openSwitcher(
         window::SwitcherOpening {
             .window = pick.window,
@@ -4588,8 +4599,11 @@ std::expected<void, std::string> ContourGuiApp::showSwitchPick(remote::SwitchPic
                     .failure = {},
                     .workspaces = remote::switcherWorkspacesOf(pick.workspaces, pick.window),
                 },
+            .scope = window::SwitcherScope::OneDaemon,
+            .windowWorkspaces = windowWorkspacesOf(*controller, pick.window),
+            .origin = window::SwitcherOrigin::Centred,
         },
-        controller != nullptr ? controller->screen() : nullptr);
+        *controller);
 }
 
 void ContourGuiApp::openSettingsPage(std::string const& page, QScreen* anchor)

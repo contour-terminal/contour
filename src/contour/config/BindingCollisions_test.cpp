@@ -225,9 +225,9 @@ TEST_CASE("no default chord fires twice", "[bindings]")
 
 TEST_CASE("the daemon and workspace switching actions are bound by no default chord", "[bindings][switch]")
 {
-    // Deliberately unbound, CycleWorkspace aside (its own case below): every plausible chord is a shell,
-    // editor or tmux key somewhere, and the palette, the title bar and the switcher reach them. A user binds
-    // the ones they want.
+    // Deliberately unbound, the switcher and CycleWorkspace aside (their own cases below): every plausible
+    // chord is a shell, editor or tmux key somewhere, and the palette, the title bar and the switcher reach
+    // them. A user binds the ones they want.
     using namespace contour::actions;
     for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
         for (auto const kind: AllKinds)
@@ -241,7 +241,6 @@ TEST_CASE("the daemon and workspace switching actions are bound by no default ch
                            || std::holds_alternative<CycleDaemon>(action)
                            || std::holds_alternative<SwitchToDaemon>(action)
                            || std::holds_alternative<OpenDaemon>(action)
-                           || std::holds_alternative<ShowSwitcher>(action)
                            || std::holds_alternative<NewDaemon>(action)
                            || std::holds_alternative<UpgradeDaemon>(action);
                 });
@@ -522,6 +521,24 @@ TEST_CASE("macOS opens the command palette with Command+P and Shift+Command+P", 
     // A configuration written before Command+P existed lists Shift+Command+P only; Command+P reaches it as a
     // fallback.
     CHECK(fallbackCharActions(mac, Modifiers { Modifier::Super }, U'P') == Names { "OpenCommandPalette" });
+}
+
+TEST_CASE("the switcher opens with Shift+Command+R on macOS and Ctrl+Shift+R elsewhere, in every edition",
+          "[bindings][switch]")
+{
+    // Owner ruling: beside every defaults row that opens the command palette, in both editions.
+    for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        for (auto const kind: AllKinds)
+        {
+            INFO("edition " << token << ", platform " << std::to_underlying(kind));
+            auto const chord = kind == KeyboardPlatformKind::Mac
+                                   ? Modifiers { Modifier::Super, Modifier::Shift }
+                                   : Modifiers { Modifier::Control, Modifier::Shift };
+            auto names = Names {};
+            appendActions(
+                defaultInputMappings(edition, kind).charMappings, chord, U'R', MatchModes {}, names);
+            CHECK(names == Names { "ShowSwitcher" });
+        }
 }
 
 TEST_CASE("every platform closes the active pane with Primary+W", "[bindings][panes]")

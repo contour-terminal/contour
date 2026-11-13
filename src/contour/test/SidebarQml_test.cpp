@@ -1516,11 +1516,11 @@ TEST_CASE("the chip drops its workspaces down below itself (offscreen)", "[conto
         REQUIRE(scene.controller.workspaceDropdownAnchor.has_value());
         auto const chipRect = sceneRectOf(*chip);
         auto const& anchor = *scene.controller.workspaceDropdownAnchor;
-        // The chip itself, and the gap the dropdown hangs below it by: it opens under the chip, not centred.
+        // The chip itself: the dropdown hangs below it, by the gap popupBelow puts between them.
         CHECK(anchor.left() == Catch::Approx(chipRect.left()));
         CHECK(anchor.top() == Catch::Approx(chipRect.top()));
         CHECK(anchor.width() == Catch::Approx(chipRect.width()));
-        CHECK(anchor.bottom() >= chipRect.bottom());
+        CHECK(anchor.bottom() == Catch::Approx(chipRect.bottom()));
         auto const* attached = accessibleOf(*chip);
         REQUIRE(attached != nullptr);
         CHECK(attached->property("role").toInt() == QAccessible::ButtonMenu);

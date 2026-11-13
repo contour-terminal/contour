@@ -66,6 +66,30 @@ namespace contour::window
     return groups;
 }
 
+/// The world, as the workspace row's menu of @p workspace sees it: the sidebar's, and the switcher's for a
+/// workspace of the window's own daemon.
+/// @param directory What the window lists.
+/// @param workspace The workspace's id.
+/// @param moves What the window's host moves.
+/// @return Its 0-based place among the workspaces and their count; for a workspace of one tab, the tabs that
+///         tab can merge into. Place 0 for a workspace the directory does not list.
+[[nodiscard]] inline command::WorkspaceMenuState workspaceMenuStateOf(WorkspaceDirectory const& directory,
+                                                                      uint64_t workspace,
+                                                                      command::MenuMoves moves)
+{
+    auto const holder = std::ranges::find(directory.workspaces, workspace, &DirectoryWorkspace::id);
+    if (holder == directory.workspaces.end())
+        return { .position = 0, .count = directory.workspaces.size(), .joinable = {}, .moves = moves };
+    // A workspace of one tab merges into another tab as that tab does.
+    return { .position = static_cast<std::size_t>(std::distance(directory.workspaces.begin(), holder)),
+             .count = directory.workspaces.size(),
+             .joinable = holder->tabs.size() == 1 ? joinTargetsOf(directory,
+                                                                  TabRef { .workspace = holder->id,
+                                                                           .tab = holder->tabs.front().id })
+                                                  : std::vector<command::TabChoiceGroup> {},
+             .moves = moves };
+}
+
 /// The tab @p workspace position @p tab position names, 1-based as MoveToTab names them.
 /// @return The tab; none where either place is out of range.
 [[nodiscard]] inline std::optional<TabRef> tabAtPlaces(WorkspaceDirectory const& directory,

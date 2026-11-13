@@ -9,10 +9,12 @@
 #include <contour/test/InMemoryGuiStateStore.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/window/ConnectPickerController.hpp>
+#include <contour/window/PopupParent.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEventLoop>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QWindow>
 #include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
@@ -429,4 +431,17 @@ TEST_CASE("ConnectPicker: discovery that never answers does not hold the picker,
                && fixture.all("connectDetail")[1]->property("text").toString()
                       == "admin · running · 2 workspaces";
     });
+}
+
+TEST_CASE("ConnectPicker: its window reopened while it has the focus stays over the terminal window",
+          "[contour][connect]")
+{
+    auto terminal = QWindow {};
+    auto popup = QWindow {};
+    CHECK(window::popupParentFor(&terminal, popup) == &terminal);
+    CHECK(window::popupParentFor(nullptr, popup) == nullptr);
+
+    popup.setTransientParent(&terminal);
+    // Focused itself, the popup is not made its own parent: it keeps the one it has.
+    CHECK(window::popupParentFor(&popup, popup) == &terminal);
 }

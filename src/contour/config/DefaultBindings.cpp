@@ -369,6 +369,8 @@ namespace
             // muscle memory. This row comes first, so the menus and the palette show Command+P.
             both(PlatformScope::MacOnly, Primary, U'P', Any, { actions::OpenCommandPalette {} }),
             written(All, PrimaryShift, U'P', Any, { actions::OpenCommandPalette {} }),
+            // The daemon and workspace switcher, beside the palette: Shift+Command+R, Ctrl+Shift+R.
+            written(All, PrimaryShift, U'R', Any, { actions::ShowSwitcher {} }),
             written(All, CtrlShift, U'\\', Any, { actions::ToggleSplitOrientation {} }),
             // The workspace sidebar (Native2026 only): Command+\ toggles it on a Mac, Ctrl+Shift+B elsewhere
             // Jump to the next pane that needs you: Command+J, Ctrl+Shift+J. Focus: Shift+Command+E,

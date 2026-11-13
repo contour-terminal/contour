@@ -467,6 +467,7 @@ void SidebarModel::refreshNow()
     else
         apply(std::move(built.rows));
 
+    auto const workspacesMoved = _workspaceRows != built.workspaces;
     _workspaceRows = std::move(built.workspaces);
     if (std::exchange(_footer, built.footer) != built.footer)
         emit footerChanged();
@@ -486,6 +487,8 @@ void SidebarModel::refreshNow()
     auto const summaryMoved = std::exchange(_summary, built.summary) != built.summary;
     if (std::exchange(_currentWorkspaceIndex, workspaceIndex) != workspaceIndex || summaryMoved)
         emit summaryChanged();
+    if (workspacesMoved)
+        emit workspaceRowsChanged();
     updateTimer();
 }
 

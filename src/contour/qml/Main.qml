@@ -719,6 +719,15 @@ ThemedWindow
         window: appWindow
     }
 
+    // The daemon and workspace switcher, in this window's scene: the application presents its one switcher
+    // in the window it is opened over (WindowController.presentSwitcher), which shows it here.
+    Switcher {
+        id: switcher
+        objectName: "switcher" // so offscreen tests can findChild() it
+        controller: appWindow.win
+        window: appWindow
+    }
+
     // Save Layout. Opened by a nameless SaveLayout action (the command-palette row or a key bound to bare
     // SaveLayout), routed per-window exactly like the command palette above, so the dialog appears over the
     // window the action fired in.

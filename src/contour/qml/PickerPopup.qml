@@ -50,6 +50,10 @@ Popup {
     property alias list: listView
     /// The filter field.
     property alias field: filterField
+    /// Whether the picker selects the first row itself as it opens and as the query changes (the palette's
+    /// way); false where the owner's model holds the selection and the picker only follows it (the switcher).
+    /// A QML-facing switch, hence a bool.
+    property bool ownsSelection: true
 
     /// Where a row's text starts: the selection's inset from the list, then the same again inside it.
     readonly property real textInset: chromeStyle.space.paletteInset + chromeStyle.space.paletteInset
@@ -158,7 +162,8 @@ Popup {
         root._returnFocus = root.window ? root.window.activeFocusItem : null;
         filterField.clear();
         filterField.forceActiveFocus();
-        root.select(listView.count > 0 ? 0 : -1);
+        if (root.ownsSelection)
+            root.select(listView.count > 0 ? 0 : -1);
     }
 
     // Where the keyboard goes back to on close: @p item, or where it has been hidden (a dialog's button gone
@@ -300,7 +305,8 @@ Popup {
                 // The owner re-ranks (and regroups) on every keystroke; the best match is selected.
                 onTextChanged: {
                     root.queryEdited(text);
-                    root.select(listView.count > 0 ? 0 : -1);
+                    if (root.ownsSelection)
+                        root.select(listView.count > 0 ? 0 : -1);
                 }
 
                 // Every key is the owner's to decide first: the arrows move the SELECTION while the caret stays

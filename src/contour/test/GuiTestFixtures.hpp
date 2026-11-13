@@ -187,6 +187,27 @@ class RecordingWindowSwitching final: public contour::remote::SwitchingService
         done(std::unexpected(std::string { "switching is not available" }));
     }
 
+    /// Records the creation as a request for a new workspace, labelled @p label.
+    void createWorkspace(vtworkspace::WorkspaceId window,
+                         contour::session::SwitchTarget const& daemon,
+                         std::string label,
+                         contour::session::SwitchMode mode,
+                         contour::session::SwitchCompletion done) override
+    {
+        createdLabels.push_back(std::move(label));
+        auto target = daemon;
+        target.workspace = contour::session::NewWorkspace {};
+        request(window, std::move(target), mode, contour::session::NoLandingDeadline, std::move(done));
+    }
+
+    /// No window here has a daemon behind it.
+    [[nodiscard]] std::vector<contour::remote::WorkspaceRow> windowWorkspaceRows(
+        vtworkspace::WorkspaceId /*window*/) override
+    {
+        return {};
+    }
+
+    std::vector<std::string> createdLabels; ///< The labels createWorkspace() was asked for, in order.
     std::vector<Request> requests;          ///< Every request, in order.
     std::optional<std::string> failWith {}; ///< When set, every request fails at once with this reason.
     /// When set (and failWith is not), every request is handed on to it: a test of a real switcher behind

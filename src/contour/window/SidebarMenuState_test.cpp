@@ -99,3 +99,28 @@ TEST_CASE("the sidebar's menus offer what the window's host moves", "[sidebarmen
     CHECK(menuMovesOf(HostMoves::Tabs) == contour::command::MenuMoves::Tabs);
     CHECK(menuMovesOf(HostMoves::Nothing) == contour::command::MenuMoves::Nothing);
 }
+
+TEST_CASE("a workspace's menu state is its place, the count, and what its only tab can join", "[sidebarmenu]")
+{
+    auto one = workspace(10, "api");
+    one.tabs = { DirectoryTab { .id = 1, .title = {}, .label = "shell", .panes = {} } };
+    auto two = workspace(11, "web");
+    two.tabs = { DirectoryTab { .id = 2, .title = {}, .label = "a", .panes = {} },
+                 DirectoryTab { .id = 3, .title = {}, .label = "b", .panes = {} } };
+    auto const directory = WorkspaceDirectory { .workspaces = { one, two }, .selected = 10 };
+
+    auto const single = workspaceMenuStateOf(directory, 10, contour::command::MenuMoves::Nodes);
+    CHECK(single.position == 0);
+    CHECK(single.count == 2);
+    REQUIRE(single.joinable.size() == 1);
+    CHECK(single.joinable[0].tabs.size() == 2);
+
+    auto const several = workspaceMenuStateOf(directory, 11, contour::command::MenuMoves::Tabs);
+    CHECK(several.position == 1);
+    CHECK(several.moves == contour::command::MenuMoves::Tabs);
+    CHECK(several.joinable.empty());
+
+    auto const unlisted = workspaceMenuStateOf(directory, 99, contour::command::MenuMoves::Nothing);
+    CHECK(unlisted.position == 0);
+    CHECK(unlisted.moves == contour::command::MenuMoves::Nothing);
+}

@@ -42,6 +42,7 @@
 #include <QtCore/QPoint>
 #include <QtCore/QPointer>
 #include <QtCore/QRect>
+#include <QtCore/QRectF>
 #include <QtCore/QTimer>
 #include <QtGui/QColor>
 #include <QtQml/QQmlEngine>
@@ -415,8 +416,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Opens the switcher as the workspace chip's dropdown: hanging below the chip, listing the workspaces of
     /// the daemon the window hosting @p acting is on, and nothing else.
     /// @param acting The session of the window whose chip was clicked.
-    /// @param chip The chip, in screen coordinates, the gap below it included.
-    void showWorkspaceDropdown(TerminalSession const& acting, QRect chip);
+    /// @param chip The chip, in its window's scene coordinates.
+    void showWorkspaceDropdown(TerminalSession const& acting, QRectF chip);
 
     /// (In-process) Gives the window hosting @p acting a workspace of its own with one new tab and shows it;
     /// the workspace shown until now keeps running, hidden. Does nothing for a window a daemon serves, which
@@ -1899,12 +1900,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param prompt The list, or the "New daemon…" label prompt.
     /// @param what The action's name, for the log.
     /// @param scope Every daemon, or the window's own alone.
-    /// @param control The control it drops down from, in screen coordinates; none centres it.
+    /// @param control The control it drops down from, in its window's scene coordinates; none centres it.
     void openSwitcherOver(TerminalSession const& acting,
                           window::SwitcherPrompt prompt,
                           std::string_view what,
                           window::SwitcherScope scope,
-                          std::optional<QRect> control);
+                          std::optional<QRectF> control);
 
     /// Repaints the tab hosting @p session for its lock (WindowController::Roles::SecureRole), if it has one.
     void notifySecureTab(TerminalSession const& session);

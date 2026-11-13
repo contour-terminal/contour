@@ -1061,6 +1061,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/NoticeModel_test.cpp
             window/SidebarModel_test.cpp
             test/MainWindowControllerMock.hpp
+            test/SwitcherHost.hpp
             test/MockMainController.hpp
             test/QmlMocks.hpp
             test/RecordingAnnouncer.hpp

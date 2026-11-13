@@ -69,6 +69,7 @@
 
 #include <QtCore/QPointer>
 #include <QtCore/QRect>
+#include <QtCore/QRectF>
 #include <QtCore/QTimer>
 #include <QtGui/QPalette>
 #include <QtQml/QQmlApplicationEngine>
@@ -515,19 +516,25 @@ class ContourGuiApp:
     /// @param anchor The screen of the window that asked; null for the primary screen.
     void openConnectPicker(PickerPresentation presentation, QScreen* anchor);
 
-    /// Shows the daemon and workspace switcher popup over a window -- built on first use, opened afresh
-    /// (filter cleared, the window's own daemon listed, the local daemons looked for) on every later one --
-    /// and focuses its field. Modal over the focused window; a choice asks the window switcher, Esc changes
-    /// nothing.
+    /// Shows the daemon and workspace switcher popup in a window's scene -- built on first use, opened afresh
+    /// (filter cleared, the window's own workspaces taken, the local daemons looked for) on every later one
+    /// -- and focuses its field. Opening it over another window withdraws it from the one it was over. A
+    /// choice asks the window switcher, Escape changes nothing.
     /// @param opening Over which window, and what to show: everything, a pick, or the "New daemon…" prompt.
-    /// @param anchor The screen of the window that asked; null for the primary screen.
-    /// @param control The control that opened it, in screen coordinates, the gap below it included: the
-    ///                popup is then a dropdown hanging below it (window::popupBelow) and closed by a click
-    ///                outside it. None centres it over the window, as the action's chord does.
-    /// @return Nothing once shown; why it cannot be (no QML engine, or Switcher.qml did not load).
+    /// @param host The window it is shown in.
+    /// @param anchor The control that opened it, in the scene's coordinates: the popup then hangs below it
+    ///               (window::popupBelow). None centres it, as the action's chord does.
+    /// @return Nothing once shown; why it cannot be (no QML engine).
     [[nodiscard]] std::expected<void, std::string> openSwitcher(window::SwitcherOpening opening,
-                                                                QScreen* anchor,
-                                                                std::optional<QRect> control = std::nullopt);
+                                                                window::WindowController& host,
+                                                                std::optional<QRectF> anchor = std::nullopt);
+
+    /// @param host A window's controller.
+    /// @param window That window.
+    /// @return Its own daemon's workspaces, with the status its sidebar showed at its last rebuild
+    ///         (remote::windowWorkspacesOf).
+    [[nodiscard]] std::vector<window::SwitcherWorkspace> windowWorkspacesOf(window::WindowController& host,
+                                                                            vtworkspace::WorkspaceId window);
 
     /// The app-wide keyboard layout (single instance; see KeyboardLayout.h). The active layout is
     /// process-global ambient state, and the macOS implementation registers an observer for changes
@@ -1858,19 +1865,19 @@ class ContourGuiApp:
     /// Where each popup's close gives the keyboard back to. Declared before the windows: destroying a window
     /// hides it, and hiding runs the handler that reads these.
     FocusReturn _connectPickerReturn;
-    FocusReturn _switcherReturn;
     /// The Connect picker, created on first use. The window is declared after the controller it binds to, so
     /// it goes first; both go before the engine they were built on.
     std::unique_ptr<window::ConnectPickerController> _connectPicker;
     std::unique_ptr<QQuickWindow> _connectPickerWindow;
     /// How the picker was last shown, which decides what a started connection does to the app.
     PickerPresentation _connectPickerPresentation = PickerPresentation::Launcher;
-    /// The daemon and workspace switcher popup, created on first use; ordered as the picker's pair is.
+    /// The daemon and workspace switcher popup's controller, created on first use; presented in the scene of
+    /// the window it is over (WindowController::presentSwitcher).
     std::unique_ptr<window::SwitcherController> _switcher;
-    std::unique_ptr<QQuickWindow> _switcherWindow;
-    /// The switcher window's own flags, as Switcher.qml built it: what a centred opening restores after a
-    /// dropdown made it a popup.
-    Qt::WindowFlags _switcherWindowFlags {};
+    /// The window presenting it now; null while none does.
+    QPointer<window::WindowController> _switcherHost;
+    /// The host's sidebar rebuilds, pushed into the switcher while it is presented.
+    QMetaObject::Connection _switcherSidebar;
 
     // Build the two OS appearance sources, each bound to its change handler. The app keeps these
     // factories and builds each source the first time it is read, not at construction (ruling R-i): the
