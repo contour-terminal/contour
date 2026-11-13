@@ -79,6 +79,7 @@ namespace
         section<&Config::gutter>("gutter"),
         section<&Config::commandBlocks>("command_blocks"),
         section<&Config::quickTerminal>("quick_terminal"),
+        section<&Config::tabStyle>("tab_style"),
     };
 } // namespace
 

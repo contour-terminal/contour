@@ -17,6 +17,9 @@ import QtQuick
 
 Item {
     id: root
+
+    /// The colour roles the chip is inked with: the chrome's, or the tab bar's where it sits on the bar.
+    property var colors: chromeStyle.colors
     objectName: "workspaceChip"
 
     /// A click, a tap, the accessibility press action, or Space/Return while focused. The chip answers it
@@ -192,9 +195,9 @@ Item {
         anchors.fill: parent
         radius: chromeStyle.radii.hostChip
         color: chromeStyle.paletteRevision < 0 ? "transparent"
-             : primary.pressed || root.isOpen ? chromeStyle.colors.controlPressedFill
-             : hover.hovered || root.activeFocus ? chromeStyle.colors.tabHoverFill
-             : chromeStyle.colors.chipFill
+             : primary.pressed || root.isOpen ? root.colors.controlPressedFill
+             : hover.hovered || root.activeFocus ? root.colors.tabHoverFill
+             : root.colors.chipFill
     }
 
     // What a click does, with the chord that does the same: the window's switcher opens centred from the key.
@@ -221,7 +224,7 @@ Item {
             Accessible.ignored: true
             text: chromeStyle.chipOpenGlyph
             font: chromeStyle.type.footnote
-            color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.chipText
+            color: chromeStyle.paletteRevision < 0 ? "transparent" : root.colors.chipText
         }
 
         // The status dot: a vector circle on the native rows, the state's glyph on the Terminal row.
@@ -258,7 +261,7 @@ Item {
             textFormat: Text.PlainText
             text: root.daemonText
             font: chromeStyle.type.footnote
-            color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.chipText
+            color: chromeStyle.paletteRevision < 0 ? "transparent" : root.colors.chipText
         }
 
         // The state's words, while the whole chip fits.
@@ -283,7 +286,7 @@ Item {
             textFormat: Text.PlainText
             text: chromeStyle.breadcrumbGlyph
             font: chromeStyle.type.footnote
-            color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.chipText
+            color: chromeStyle.paletteRevision < 0 ? "transparent" : root.colors.chipText
         }
 
         Text {
@@ -296,7 +299,7 @@ Item {
             textFormat: Text.PlainText
             text: root.workspaceText
             font: chromeStyle.type.footnoteStrong
-            color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.chipTextStrong
+            color: chromeStyle.paletteRevision < 0 ? "transparent" : root.colors.chipTextStrong
         }
 
         // The pop-up button's caret, a step after the name, the same one that parts the chip's other segments (a
@@ -310,7 +313,7 @@ Item {
             textFormat: Text.PlainText
             text: chromeStyle.menuGlyph
             font: chromeStyle.type.footnoteStrong
-            color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.chipTextStrong
+            color: chromeStyle.paletteRevision < 0 ? "transparent" : root.colors.chipTextStrong
         }
 
         // The marker: another workspace's status glyph, after a gap.
@@ -339,7 +342,7 @@ Item {
             Accessible.ignored: true
             text: chromeStyle.chipCloseGlyph
             font: chromeStyle.type.footnote
-            color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.chipText
+            color: chromeStyle.paletteRevision < 0 ? "transparent" : root.colors.chipText
         }
     }
 }

@@ -24,6 +24,17 @@ TEST_CASE("Mica behind the Settings window's title bar on the Fluent row", "[set
     }
 }
 
+TEST_CASE("the Settings window keeps Mica where the tab bar is Acrylic", "[settingsbackdrop]")
+{
+    // tab_style.material: acrylic is a wish about the terminal window's bar; Settings still asks for a
+    // Main window's Mica.
+    auto const request = settingsBackdropFor(
+        { .row = ChromeStyle::Fluent, .material = Material::Acrylic, .scheme = Qt::ColorScheme::Dark });
+    REQUIRE(request.has_value());
+    CHECK(request->backdrop == BandBackdrop::NativeMaterial);
+    CHECK(request->kind == BackdropKind::Main);
+}
+
 TEST_CASE("no backdrop for the Settings window on any other row or material", "[settingsbackdrop]")
 {
     // Mica taken away (Reduced transparency, a contrast theme, an OS without it) leaves Solid.

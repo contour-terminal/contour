@@ -64,6 +64,9 @@ inline constexpr auto SystemBackdropRows = std::array {
     SystemBackdropRow { .band = config::BandBackdrop::NativeMaterial,
                         .kind = config::BackdropKind::Main,
                         .backdrop = DwmBackdrop::MainWindow },
+    SystemBackdropRow { .band = config::BandBackdrop::NativeMaterial,
+                        .kind = config::BackdropKind::TabbedGlass,
+                        .backdrop = DwmBackdrop::TransientWindow },
 };
 
 /// Decides the DWM system backdrop.

@@ -49,6 +49,10 @@ struct ChromeSetup
     /// The fixed-width face code is set in off the cell grid: the system's, as the app passes, unless a test
     /// names one.
     QFont fixedFont { QFontDatabase::systemFont(QFontDatabase::FixedFont) };
+    config::TabStyleConfig
+        tabStyle {}; ///< The `tab_style:` the tokens resolve with; the row's own by default.
+    /// Where the line between two joined tabs goes: the classic rule unless a test names the native2026 one.
+    config::TabSeparators tabSeparators = config::TabSeparators::Classic;
     /// Whether a font family is installed, for the window controls' icon font: none by default, so a test's
     /// glyphs never depend on the fonts of the machine it runs on.
     std::function<bool(std::string_view)> isFontInstalled = [](std::string_view) {
@@ -82,7 +86,9 @@ inline contour::window::UiStyleProvider* installChromeStyle(QQmlEngine& engine, 
                                         .appearance = setup.appearance,
                                         .scheme = setup.scheme,
                                         .density = setup.density,
-                                        .secureInput = setup.secureInput },
+                                        .secureInput = setup.secureInput,
+                                        .tabStyle = setup.tabStyle,
+                                        .tabSeparators = setup.tabSeparators },
         &engine);
     engine.rootContext()->setContextProperty(QStringLiteral("chromeStyle"), provider);
     // The tab strip names TabBarSpot, which ContourGuiApp registers with the engine's types.

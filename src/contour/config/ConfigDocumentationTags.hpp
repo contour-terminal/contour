@@ -47,6 +47,7 @@ struct TabBarPosition {};
 struct TabBarVisibility {};
 struct TabPlacement {};
 struct Sidebar {};
+struct TabStyle {};
 struct UiStyle {};
 struct ChromeDensity {};
 struct SecureInput {};
