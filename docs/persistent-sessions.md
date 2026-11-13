@@ -216,13 +216,8 @@ window somewhere else without closing it, and its panes are swapped in place:
   daemon's only workspace, on a new one when it has none, and asks which when it has several. A workspace
   that holds no tab -- a daemon no window has attached to yet keeps one -- counts as none: there is nothing
   in it to show.
-- **From the switcher popup** (`ShowSwitcher`), which lists every local daemon and saved host with their
-  workspaces; **New daemon…** there (or `NewDaemon`) starts a local daemon under a label you give and opens
-  a window on it. A daemon's workspace count is the number of workspaces that hold a tab, the same ones its
-  expansion lists. A saved host reads *connected* while a window of this
-  application is on it, *not connected* once one was (or a listing reached it), and *not yet connected*
-  before. It opens on the first local daemon that is not the window's own, so Return alone moves the
-  window; a saved host is never preselected.
+- **From the switcher** (`ShowSwitcher`, `Ctrl+Shift+R`, `⇧⌘R` on macOS), a popup in the command
+  palette's family, drawn over the window. See [The switcher](#the-switcher) below.
 - **By mouse**: click the host chip in the title band of a window on a daemon (Space or Return when it has
   keyboard focus) to open the switcher, or pick **Switch To Daemon** or **Daemon & Workspace Switcher…**
   from the Window submenu of the main menu (☰). **Switch To Daemon** lists the same daemons as the command
@@ -233,7 +228,7 @@ window somewhere else without closing it, and its panes are swapped in place:
 The `Open…` variants (`OpenWorkspace`, `OpenDaemon`) open a new window on the destination instead. If a
 window already shows the destination workspace, that window is focused and nothing else changes. The
 actions and their palette rows are listed in [Key Mapping](configuration/key-mapping.md#switching-daemons-and-workspaces);
-none is bound to a key by default.
+of them, only `ShowSwitcher` is bound to a key by default.
 
 A window stays on one connection while it moves between a daemon's workspaces, so switching, creating
 (`NewWorkspace`) and cycling are immediate and open no window. A window attached to a daemon that predates this
@@ -259,6 +254,36 @@ cannot tell a script outside any pane from you typing `contour switch`, so that 
 !!! note
 
     Windows of the in-process mode have no daemon behind them and cannot switch.
+
+### The switcher
+
+The switcher lists the workspaces of the daemon this window is on first, under *Workspaces on ‹daemon›*,
+with the status glyph the sidebar shows, the branch, and the tab count; the current one wears a *Current*
+pill. Under *Other daemons* come the other local daemons and the saved hosts, each with its workspace
+count and the most urgent status among its workspaces; a saved host also shows how it is reached (`SSH`,
+`TLS`). *Actions* end the list: **New Workspace**, and **New Daemon…**.
+
+- **Type to filter.** What you type finds workspaces on every local daemon at once, each match with a pill
+  naming its daemon. A saved host is searched only once you open it, since connecting may ask for a
+  password. When nothing matches, the switcher says so and offers **New Workspace “what you typed”**.
+- **Return** switches this window to the selected workspace; **Shift+Return** opens it in a new window, as
+  does the button on the selected row and on the row under the pointer. Hovering a row does not move the
+  selection: the arrow keys own it.
+- **→**, or Return on a daemon, opens that daemon: its workspaces alone, with **New Workspace** on it.
+  Backspace in an empty field, or Escape, goes back. A saved host shows *Connecting…* while it connects;
+  you can type, or back out, meanwhile.
+- **A daemon that cannot be listed** says why on its row, and everything else keeps working.
+- **New Daemon…** asks for a label. As you type it says whether the label is available, already running
+  (Return then switches to that daemon), or not a valid label, and shows the equivalent `contour daemon
+  --label` command. Return starts the daemon and switches this window to it; Shift+Return opens it in a
+  new window.
+- **Right-click** a workspace of this window's daemon, or press the Menu key or Shift+F10, for the menu its
+  sidebar row has. Another daemon's workspace offers switching and opening in a new window.
+- **Escape** clears what you typed, then closes; a click elsewhere closes. Either changes nothing, and a
+  daemon a New Daemon… start was still bringing up is not switched to.
+
+A workspace of another daemon shows a done or failed status as unseen for as long as it stands: this window
+never saw that pane, and a daemon keeps no record of who did.
 
 ### Shown and hidden workspaces
 

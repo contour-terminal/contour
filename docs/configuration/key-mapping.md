@@ -62,6 +62,7 @@ Shift or moves, and the table says why.
 | Command | Linux / Windows | macOS | Note |
 |---------|-----------------|-------|------|
 | Command palette (`OpenCommandPalette`) | `Ctrl+Shift+P` | `⌘P`, `⇧⌘P` | `⇧⌘P` for VS Code, Zed and Ghostty habits |
+| Daemon and workspace switcher (`ShowSwitcher`) | `Ctrl+Shift+R` | `⇧⌘R` | |
 | Copy (`CopySelection`) | `Ctrl+Shift+C`; `Ctrl+C` while selecting | `⌘C` | |
 | Paste (`PasteClipboard`) | `Ctrl+Shift+V` | `⌘V` | |
 | Paste without control characters | `Ctrl+Alt+V` | `⌃⌘V` | Option composes characters on a Mac, so the `Ctrl+Alt` chords become `⌃⌘` |

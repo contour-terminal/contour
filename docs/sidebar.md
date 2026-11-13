@@ -204,8 +204,20 @@ up). Work that is only running, or unseen output, does not mark it: the chip is 
 The tabs move into the title band behind the chip, following `tab_bar_position`.
 
 Clicking the chip drops this window's workspaces down below it, the ones of the daemon the window is on and
-nothing else; pick one to show it here, or press Escape or click elsewhere to close it. The whole daemon and
-workspace switcher stays on its `ShowSwitcher` key.
+nothing else, with the status glyph, branch and tab count the sidebar would show. The chip stays highlighted
+while the dropdown is open, and clicking it again closes it.
+
+- Type to filter the workspaces; Return switches this window to the selected one, Shift+Return opens it in a
+  new window. The row under the pointer shows a button that does the same.
+- **New Workspace** creates one on this daemon, named after what you typed, if anything.
+- **All daemons…** widens the dropdown, in place, to the whole switcher: every local daemon and saved host.
+  It shows the chord bound to `ShowSwitcher` beside it; Escape narrows it back.
+- Right-click a workspace (or press the Menu key, or Shift+F10) for the same menu its sidebar row has:
+  rename, mark seen, new tab, move, close.
+- Escape, or a click elsewhere, closes it and changes nothing.
+
+The switcher keeps the sidebar's times running while it is open, so a working workspace's time moves on even
+with the sidebar hidden.
 
 ## Tab placement
 
