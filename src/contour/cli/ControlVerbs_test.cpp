@@ -777,7 +777,7 @@ TEST_CASE("the workspace and tab verbs build their requests", "[contour][cli][co
     };
     auto const rows = std::vector<Row> {
         { "workspace.new",
-          { "workspace", "new", "--cwd", "/tmp", "--label", "ops" },
+          { "workspace", "new", "--cwd", "/tmp", "--name", "ops" },
           vtcontrol::encodeJson(vtcontrol::CreateWorkspaceRequest { .cwd = "/tmp", .label = "ops" }) },
         { "workspace.new",
           { "workspace", "new" },
@@ -1060,6 +1060,42 @@ TEST_CASE("--daemon and --label exclude each other, and --label names a local da
         auto run = Run {};
         CHECK(contour::cli::runControlVerb(verbNamed("ls"), parseFlags({ "ls", "--label", "work" }), run.io())
               == 4);
+        INFO(run.err.str());
+        CHECK(run.err.str().contains(
+            core::pathToUtf8(vthost::muxSocketPath(vthost::socketLabelOf("work"), {}, run.env))));
+    }
+}
+
+TEST_CASE("--label picks the daemon and --name names what a creating verb makes", "[contour][cli][control]")
+{
+    struct Row
+    {
+        std::string_view path;
+        std::vector<std::string_view> args;
+        std::string params; ///< The request the verb sends.
+    };
+    auto const rows = std::array {
+        Row { .path = "workspace.new",
+              .args = { "workspace", "new", "--label", "work", "--name", "ops" },
+              .params = vtcontrol::encodeJson(vtcontrol::CreateWorkspaceRequest { .label = "ops" }) },
+        Row { .path = "new",
+              .args = { "new", "--label", "work", "--name", "logs" },
+              .params = vtcontrol::encodeJson(vtcontrol::CreateTabRequest { .label = "logs" }) },
+        Row { .path = "split",
+              .args = { "split", "--label", "work", "--name", "tail" },
+              .params = vtcontrol::encodeJson(vtcontrol::SplitRequest { .label = "tail" }) },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(row.path);
+        auto const flags = parseFlags(row.args);
+        auto const params = verbNamed(row.path).buildParams(flags);
+        REQUIRE(params.has_value());
+        CHECK(*params == row.params);
+
+        // The connection goes to the daemon labelled `work`, which does not run: its socket is named.
+        auto run = Run {};
+        CHECK(contour::cli::runControlVerb(verbNamed(row.path), flags, run.io()) == 4);
         INFO(run.err.str());
         CHECK(run.err.str().contains(
             core::pathToUtf8(vthost::muxSocketPath(vthost::socketLabelOf("work"), {}, run.env))));
