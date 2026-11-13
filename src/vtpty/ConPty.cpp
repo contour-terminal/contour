@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/ConPty.hpp>
 
+#include <vtpty/ChunkedWrite.hpp>
 #include <vtpty/Win32Handle.hpp>
 
 #include <crispy/BufferObject.hpp>
@@ -10,7 +11,9 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cassert>
 #include <cerrno>
+#include <concepts>
 #include <cstdint>
 #include <expected>
 #include <format>
@@ -259,20 +262,21 @@ namespace
     using NtQueryInformationFileFn =
         LONG(NTAPI*)(HANDLE, IO_STATUS_BLOCK*, void*, ULONG, FILE_INFORMATION_CLASS);
 
-    /// @return How many bytes a write to @p pipe, a pipe end open for reading its attributes as well as for
-    ///         writing, takes now without waiting for the reader; 0 while it is full, or where that cannot be
-    ///         told.
-    [[nodiscard]] std::size_t writableWithoutWaiting(HANDLE pipe) noexcept
-    {
-        static auto* const query = ntdllFunction<NtQueryInformationFileFn>("NtQueryInformationFile");
-        auto information = PipeLocalInformation {};
-        auto status = IO_STATUS_BLOCK {};
-        if (query == nullptr
-            || query(pipe, &status, &information, sizeof(information), FilePipeLocalInformation) != 0)
-            return 0;
-        return information.writeQuotaAvailable;
-    }
+} // namespace
 
+std::size_t writableWithoutWaiting(HANDLE pipe) noexcept
+{
+    static auto* const query = ntdllFunction<NtQueryInformationFileFn>("NtQueryInformationFile");
+    auto information = PipeLocalInformation {};
+    auto status = IO_STATUS_BLOCK {};
+    if (query == nullptr
+        || query(pipe, &status, &information, sizeof(information), FilePipeLocalInformation) != 0)
+        return 0;
+    return information.writeQuotaAvailable;
+}
+
+namespace
+{
     /// @return Whether @p handle names a handle open in this process.
     [[nodiscard]] bool isOpenHandle(CrossingHandle handle) noexcept
     {
@@ -310,6 +314,103 @@ namespace
         return static_cast<DWORD>(std::clamp<std::chrono::milliseconds::rep>(
             timeout->count(), 0, std::chrono::milliseconds::rep { INFINITE - 1 }));
     }
+
+    /// The pipe to the pseudoconsole as writeInChunks() writes to it: one overlapped write at a time, whose
+    /// wait ends once it completes or writes are interrupted.
+    /// @tparam IsInterrupted Asks whether writes are interrupted, without a call into the kernel.
+    template <std::invocable IsInterrupted>
+    class OverlappedPipeWriter
+    {
+      public:
+        /// @param pipe          Our end of the pipe, open for overlapped writes and for reading its own
+        ///                      attributes.
+        /// @param completed     A manual-reset event, signalled as a write completes.
+        /// @param interrupted   The manual-reset event interruptWrites() sets.
+        /// @param isInterrupted Asks whether writes are interrupted.
+        OverlappedPipeWriter(HANDLE pipe, HANDLE completed, HANDLE interrupted, IsInterrupted isInterrupted):
+            _pipe { pipe }, _events { completed, interrupted }, _isInterrupted { std::move(isInterrupted) }
+        {
+        }
+
+        // The chunk in flight names _overlapped by its address until finish().
+        OverlappedPipeWriter(OverlappedPipeWriter const&) = delete;
+        OverlappedPipeWriter& operator=(OverlappedPipeWriter const&) = delete;
+        OverlappedPipeWriter(OverlappedPipeWriter&&) = delete;
+        OverlappedPipeWriter& operator=(OverlappedPipeWriter&&) = delete;
+        ~OverlappedPipeWriter() = default;
+
+        [[nodiscard]] bool isInterrupted() const { return _isInterrupted(); }
+
+        [[nodiscard]] std::size_t room() const noexcept { return writableWithoutWaiting(_pipe); }
+
+        /// Called only once the previous chunk's finish() returned: _overlapped is then the system's no more.
+        [[nodiscard]] ChunkStart start(std::string_view chunk) noexcept
+        {
+            assert(_flight == Flight::None);
+            // Fresh for every chunk, and WriteFile() resets the event.
+            _overlapped = OVERLAPPED {};
+            _overlapped.hEvent = _events.front();
+            _chunk = chunk;
+            if (WriteFile(_pipe, chunk.data(), static_cast<DWORD>(chunk.size()), nullptr, &_overlapped))
+            {
+                _flight = Flight::InFlight;
+                return ChunkStart::Completed;
+            }
+            if (GetLastError() != ERROR_IO_PENDING)
+                return ChunkStart::Failed;
+            _flight = Flight::InFlight;
+            return ChunkStart::Pending;
+        }
+
+        /// A write that completes as writes are interrupted counts as completed: the wait names the lowest of
+        /// the two.
+        [[nodiscard]] PendingWait awaitPending() const noexcept
+        {
+            assert(_flight == Flight::InFlight);
+            auto const waited =
+                WaitForMultipleObjects(static_cast<DWORD>(_events.size()), _events.data(), FALSE, INFINITE);
+            return waited == WAIT_OBJECT_0 ? PendingWait::Completed : PendingWait::Interrupted;
+        }
+
+        void cancel() noexcept
+        {
+            assert(_flight == Flight::InFlight);
+            CancelIoEx(_pipe, &_overlapped);
+        }
+
+        /// Waits for a cancelled write too, which may have completed in the meantime. Its count is what the
+        /// pipe reports: for a request cancelled while pending, none (the cancellation contract of Windows
+        /// drivers), even where the reader took part of it.
+        /// What counts as written is logged, whichever way the chunk ended.
+        [[nodiscard]] ChunkResult finish()
+        {
+            assert(_flight == Flight::InFlight);
+            auto transferred = DWORD {};
+            auto status = ChunkStatus::Written;
+            if (!GetOverlappedResult(_pipe, &_overlapped, &transferred, TRUE))
+                status =
+                    GetLastError() == ERROR_OPERATION_ABORTED ? ChunkStatus::Cancelled : ChunkStatus::Failed;
+            _flight = Flight::None;
+            if (ptyOutLog)
+                ptyOutLog()("Sending bytes: \"{}\"", core::escape(_chunk.substr(0, transferred)));
+            return { .status = status, .transferred = transferred };
+        }
+
+      private:
+        HANDLE _pipe;
+        /// What a pending write waits on: its completion, then the interruption.
+        std::array<HANDLE, 2> _events;
+        IsInterrupted _isInterrupted;
+        /// Whether a chunk is in flight: started, and not yet finished.
+        enum class Flight : std::uint8_t
+        {
+            None = 0, ///< None: _overlapped may be reused.
+            InFlight, ///< One is: the system may still write _overlapped.
+        };
+        Flight _flight = Flight::None;
+        OVERLAPPED _overlapped {};
+        std::string_view _chunk;
+    };
 } // namespace
 
 namespace
@@ -651,53 +752,18 @@ int ConPty::write(std::string_view data)
         return -1;
     }
 
-    // Never more at once than the pipe takes without waiting, which a write completes with then and there;
-    // only while it is full, a single byte, which waits until the pseudoconsole reads it -- or until writes
-    // are interrupted, which cancels it. A cancelled write of one byte was read or was not; one of more may
-    // have been read in part, and the pipe then reports none of it written, so what was written would be
-    // written again.
-    //
-    // The room is asked of the pipe only when a write needs more than is known to be free: this is the pipe's
-    // one writer, and its reader only ever frees room, so what was free less what was written since is free
-    // still. A keystroke asks nothing.
-    auto written = std::size_t { 0 };
-    while (written < data.size())
+    // Every chunk that waits for the pseudoconsole -- the single byte of a full pipe, and one the pipe's room
+    // was overstated for -- waits until it is read or until writes are interrupted (@see writeInChunks()).
+    auto pipe = OverlappedPipeWriter { _output, _writeCompleted, _writesInterrupted, [this] {
+                                          return _writeInterruption.load(std::memory_order_acquire)
+                                                 == WriteInterruption::Interrupted;
+                                      } };
+    auto const [written, end] = writeInChunks(pipe, data, _knownRoom);
+    switch (end)
     {
-        if (_writeInterruption.load(std::memory_order_acquire) == WriteInterruption::Interrupted)
-        {
-            errno = EINTR;
-            return static_cast<int>(written);
-        }
-        auto const left = data.size() - written;
-        if (left > _knownRoom && left > 1)
-            _knownRoom = writableWithoutWaiting(_output);
-        auto const chunk = data.substr(written, std::clamp<std::size_t>(_knownRoom, 1, left));
-        auto overlapped = OVERLAPPED {};
-        overlapped.hEvent = _writeCompleted;
-        if (!WriteFile(_output, chunk.data(), static_cast<DWORD>(chunk.size()), nullptr, &overlapped))
-        {
-            if (GetLastError() != ERROR_IO_PENDING)
-                return writeFailed(data.size(), written);
-            // Only a single byte waits for the reader. A write that completes as writes are interrupted
-            // counts as completed: the wait names the lowest of the two.
-            auto const events = std::array { _writeCompleted, _writesInterrupted };
-            if (chunk.size() == 1
-                && WaitForMultipleObjects(static_cast<DWORD>(events.size()), events.data(), FALSE, INFINITE)
-                       != WAIT_OBJECT_0)
-                CancelIoEx(_output, &overlapped);
-        }
-        auto nwritten = DWORD {};
-        if (!GetOverlappedResult(_output, &overlapped, &nwritten, TRUE))
-        {
-            if (GetLastError() != ERROR_OPERATION_ABORTED)
-                return writeFailed(data.size(), written);
-            errno = EINTR;
-            return static_cast<int>(written);
-        }
-        if (ptyOutLog)
-            ptyOutLog()("Sending bytes: \"{}\"", core::escape(chunk.substr(0, nwritten)));
-        _knownRoom -= std::min<std::size_t>(_knownRoom, nwritten);
-        written += nwritten;
+        case WriteEnd::Complete: break;
+        case WriteEnd::Interrupted: errno = EINTR; break;
+        case WriteEnd::Failed: return writeFailed(data.size(), written);
     }
     return static_cast<int>(written);
 }

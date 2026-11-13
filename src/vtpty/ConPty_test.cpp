@@ -940,6 +940,40 @@ enum class Scheduling : uint8_t
     return call != nullptr ? call(process) : static_cast<LONG>(STATUS_ENTRYPOINT_NOT_FOUND);
 }
 
+/// A handle of the test's own to what @p handle names: the program's exit closes the pseudoconsole's handles,
+/// and frees their values.
+[[nodiscard]] vtpty::UniqueHandle ownHandleTo(HANDLE handle)
+{
+    auto duplicate = HANDLE {};
+    REQUIRE(DuplicateHandle(
+                GetCurrentProcess(), handle, GetCurrentProcess(), &duplicate, 0, FALSE, DUPLICATE_SAME_ACCESS)
+            != FALSE);
+    return vtpty::UniqueHandle { duplicate };
+}
+
+/// Fills @p pipe, the pipe to a pseudoconsole that reads nothing, behind the back of the ConPty that writes
+/// to it: in ever smaller writes, until a single byte no longer goes in at once. A write that does not is
+/// cancelled, which takes all of it back, as nothing reads it.
+void fillBehindItsBack(HANDLE pipe)
+{
+    auto const completed = vtpty::UniqueHandle { CreateEventW(nullptr, TRUE, FALSE, nullptr) };
+    REQUIRE(completed.get() != nullptr);
+    auto const filler = std::string(4096, 'z');
+    auto size = filler.size();
+    while (size > 0)
+    {
+        auto overlapped = OVERLAPPED {};
+        overlapped.hEvent = completed.get();
+        if (WriteFile(pipe, filler.data(), static_cast<DWORD>(size), nullptr, &overlapped))
+            continue;
+        REQUIRE(GetLastError() == ERROR_IO_PENDING);
+        CancelIoEx(pipe, &overlapped);
+        auto transferred = DWORD {};
+        std::ignore = GetOverlappedResult(pipe, &overlapped, &transferred, TRUE);
+        size /= 2;
+    }
+}
+
 } // namespace
 
 // A live upgrade on Windows hands each pseudoconsole to a successor process: the successor inherits its
@@ -1021,17 +1055,7 @@ TEST_CASE("ConPty.interruptWritesEndsAWriteThePseudoconsoleDoesNotRead", "[vtpty
     auto const handles = pty.handover();
     REQUIRE(handles.has_value());
     REQUIRE(handles->conpty.has_value());
-    // A handle of the test's own: the program's exit closes the pseudoconsole's, and frees its value.
-    auto duplicate = HANDLE {};
-    REQUIRE(DuplicateHandle(GetCurrentProcess(),
-                            handles->conpty->consoleHost.native(),
-                            GetCurrentProcess(),
-                            &duplicate,
-                            0,
-                            FALSE,
-                            DUPLICATE_SAME_ACCESS)
-            != FALSE);
-    auto const consoleHost = vtpty::UniqueHandle { duplicate };
+    auto const consoleHost = ownHandleTo(handles->conpty->consoleHost.native());
 
     // Unchecked: the console host may have ended with the program by then, and it is resumed twice where the
     // test runs to its end.
@@ -1081,6 +1105,61 @@ TEST_CASE("ConPty.interruptWritesEndsAWriteThePseudoconsoleDoesNotRead", "[vtpty
 
     // Running again before the program is ended and waited for: past the checks, nothing waits on a console
     // host that cannot run.
+    resumeConsoleHost();
+    process.terminate(vtpty::Process::TerminationHint::Normal);
+    std::ignore = process.wait();
+}
+
+// A chunk of more than one byte waits for the reader where the pipe's room was overstated -- here, because
+// the pipe was filled behind ConPty's back after it last asked. interruptWrites() ends that wait as it ends a
+// single byte's, and the cancelled chunk, which the pseudoconsole never read, counts as not written.
+TEST_CASE("ConPty.interruptWritesEndsAChunkThePipeHadNoRoomFor", "[vtpty][conpty][threading]")
+{
+    vtpty::testing::requireHandoverCapable();
+    auto process = vtpty::testing::unplacedProcess(execInfo(core::pathToUtf8(handoverProbe()), { "program" }),
+                                                   pageSize(80, 25));
+    REQUIRE(process.start().has_value());
+    auto& pty = static_cast<ConPty&>(process.pty());
+    REQUIRE(awaitOutput(process, "ready"));
+    auto const handles = pty.handover();
+    REQUIRE(handles.has_value());
+    REQUIRE(handles->conpty.has_value());
+    auto const consoleHost = ownHandleTo(handles->conpty->consoleHost.native());
+    auto const resumeConsoleHost = [&consoleHost] {
+        std::ignore = schedule(consoleHost.get(), Scheduling::Running);
+    };
+    auto result = std::future<std::pair<int, int>> {};
+
+    REQUIRE(schedule(consoleHost.get(), Scheduling::Suspended) == 0);
+    // As in ConPty.interruptWritesEndsAWriteThePseudoconsoleDoesNotRead: run before the future waits.
+    auto const release = gsl::finally([&] {
+        resumeConsoleHost();
+        pty.allowWrites();
+        pty.close();
+    });
+
+    // ConPty asks the pipe its room, as nothing has written to it yet, and knows all of it but these two
+    // bytes free. The host, suspended, changes nothing in between. Room enough for the chunk below, or it
+    // would be sized to a single byte, and the case would test what the one above does.
+    auto const chunk = std::string(1024, 'y');
+    auto const pipe = handles->conpty->inputWriter.native();
+    REQUIRE(vtpty::writableWithoutWaiting(pipe) >= chunk.size() + 2);
+    REQUIRE(pty.write("ab") == 2);
+    fillBehindItsBack(pipe);
+
+    // Within what ConPty knows free, so it asks nothing, and hands the pipe all of it at once.
+    result = std::async(std::launch::async, [&] {
+        auto const written = pty.write(chunk);
+        return std::pair { written, errno };
+    });
+    CHECK(result.wait_for(std::chrono::milliseconds { 300 }) == std::future_status::timeout);
+
+    pty.interruptWrites();
+    REQUIRE(result.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    auto const [written, error] = result.get();
+    CHECK(written == 0);
+    CHECK(error == EINTR);
+
     resumeConsoleHost();
     process.terminate(vtpty::Process::TerminationHint::Normal);
     std::ignore = process.wait();

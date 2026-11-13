@@ -41,6 +41,7 @@ set(vtpty_SOURCES
 
 set(vtpty_HEADERS
     ChannelPty.hpp
+    ChunkedWrite.hpp
     CommandCapture.hpp
     CommandLine.hpp
     ControllingTerminal.hpp
@@ -160,6 +161,7 @@ if(VTPTY_TESTING)
     add_executable(vtpty_test
         test_main.cpp
         ChannelPty_test.cpp
+        ChunkedWrite_test.cpp
         CommandCapture_test.cpp
         CommandLine_test.cpp
         CrossingHandle_test.cpp
