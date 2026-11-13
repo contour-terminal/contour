@@ -157,11 +157,36 @@ namespace
         return failure.empty() ? std::string { "the connection to the daemon was lost" } : std::move(failure);
     }
 
+    /// Holds @p controller in the state of a layout being realized for its lifetime: what the window does to
+    /// its panes meanwhile is the daemon's doing, or the window's own housekeeping, and none of it is
+    /// reported back as the user's (NativeController::reportTabPresentation drops it as it drops a layout's).
+    class DaemonOriginated
+    {
+      public:
+        explicit DaemonOriginated(NativeController& controller): _controller { controller }
+        {
+            _controller.setRealizingLayout(true);
+        }
+
+        DaemonOriginated(DaemonOriginated const&) = delete;
+        DaemonOriginated& operator=(DaemonOriginated const&) = delete;
+        DaemonOriginated(DaemonOriginated&&) = delete;
+        DaemonOriginated& operator=(DaemonOriginated&&) = delete;
+
+        ~DaemonOriginated() { _controller.setRealizingLayout(false); }
+
+      private:
+        NativeController& _controller;
+    };
+
     /// Detaches every pane of @p sessions still alive: its session runs on in its daemon. Each is activated
-    /// and closed, as closeActivePane() closes the tab's active pane.
+    /// and closed, as closeActivePane() closes the tab's active pane. None of that is the user's doing, so
+    /// none of it is reported to the daemon, which keeps the tab and pane the user left active.
     void detachPanes(session::TerminalSessionManager& manager,
+                     NativeController& controller,
                      std::span<QPointer<session::TerminalSession> const> sessions)
     {
+        auto const daemonOriginated = DaemonOriginated { controller };
         for (auto const& session: sessions)
         {
             if (!session)
@@ -801,7 +826,7 @@ std::expected<void, std::string> DaemonLink::adoptWindow(vtworkspace::WorkspaceI
     for (auto* const session: _sessions.sessionsOfWindow(window))
         previous.emplace_back(session);
     bindDaemonWorkspace(*workspace, window);
-    detachPanes(_sessions, previous);
+    detachPanes(_sessions, *_controller, previous);
     return {};
 }
 
@@ -972,7 +997,7 @@ DaemonLink::Placement DaemonLink::placeWindow(uint64_t selected)
         // is not there yet binds it as it comes (bindPendingWindow()). Never the quick terminal, which is no
         // daemon workspace, nor a window another link serves.
         if (auto const* const boot = _sessions.applicationController();
-            boot != nullptr && _sessions.bindingOf(boot->displayedWorkspace()) == nullptr)
+            boot != nullptr && _sessions.isInProcessWindow(boot->displayedWorkspace()))
         {
             bindDaemonWorkspace(selected, boot->displayedWorkspace());
             return Placement::Placed;
@@ -1015,7 +1040,7 @@ void DaemonLink::switchTo(uint64_t workspace)
     if (!_shown || _shown->local != fresh)
         return; // the window went while it was realized
     controller->displayWorkspace(fresh);
-    detachPanes(_sessions, previous);
+    detachPanes(_sessions, *_controller, previous);
     controller->dropWorkspaceIfEmpty(before);
     if (_switch && (_switch->to == workspace || (_switch->to == 0 && !_switch->before.contains(workspace))))
     {
