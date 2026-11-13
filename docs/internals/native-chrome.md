@@ -393,6 +393,16 @@ forks: what differs is data.
 - **Display passes.** Tests tagged `[display]` drive a real `TerminalDisplay` through RHI and are
   skipped offscreen. `scripts/run-display-tests.sh` runs them under headless weston (CI) or an existing
   X11 session. Run them once per body of work, not per edit.
+- **Workflows on a real X server.** `CONTOUR_E2E_DISPLAY=1 ctest -L e2e-display` runs
+  `src/contour/test/e2e/sidebar-workflows.py`,
+  one test per case: each starts its own Xvfb (`-displayfd`), `minimal-wm.py` beside it (for window moves and
+  focus), a private session bus, daemon and `contour client`, drives the window with xdotool, so the OS drag
+  loop runs as it does for a user, and asserts through the control API. Where things are comes from
+  `CONTOUR_TEST_GEOMETRY_FILE`, which makes the GUI write every named item's screen rectangle there
+  (`window/GeometryDump.hpp`); no pixel position is written into a case. The cases are opt-in: without
+  `CONTOUR_E2E_DISPLAY=1` (set only by CI's e2e-display step), or without Xvfb or xdotool, they skip, saying
+  so, so a plain `ctest` never starts X servers and GUI clients on a developer's machine. `CONTOUR_E2E_KEEP=1` keeps a case's logs and dumps, `CONTOUR_E2E_DEBUG=TAGS` turns on the
+  client's logging. Every process is killed by the PID it was started with.
 - **Pixel tests for in-grid visuals.** Anything drawn in or over the grid (rails, chips, the cursor, hint
   labels) gets a `[display]` test that grabs a real frame and samples pixels
   (`test/DisplayPixels.hpp`, `display/CommandBlockRendering_test.cpp`,

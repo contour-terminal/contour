@@ -20,6 +20,7 @@ import Contour.Terminal
 
 Item {
     id: root
+    objectName: "tabItem"
 
     // A page tab, named by its title. Accessible.selected is not decoration: QtQuick's attached type
     // emits a state-change event from its setter, so binding it here IS the tab-switch announcement an

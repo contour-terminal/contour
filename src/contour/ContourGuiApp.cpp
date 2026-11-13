@@ -59,6 +59,7 @@
 #include <contour/window/ChromeStyleHost.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ConnectPickerController.hpp>
+#include <contour/window/GeometryDump.hpp>
 #include <contour/window/HotkeyRefusals.hpp>
 #include <contour/window/NewDefaultsNotice.hpp>
 #include <contour/window/NoticeModel.hpp>
@@ -912,6 +913,21 @@ void ContourGuiApp::relaunchOnAutomaticGpu()
     }
     errorLog()("{} could not render; restarting Contour on the automatic GPU.", failed);
     _exitEventLoop(EXIT_SUCCESS);
+}
+
+void ContourGuiApp::startGeometryDump()
+{
+    auto const name = std::string(window::GeometryDumpVariable);
+    auto const file = window::geometryDumpFileOf(qEnvironmentVariable(name.c_str()));
+    if (!file)
+        return;
+    _geometryDump = make_unique<window::GeometryDump>(*file, std::chrono::milliseconds { 100 }, [] {
+        auto windows = std::vector<QQuickWindow*> {};
+        for (auto* const window: QGuiApplication::topLevelWindows())
+            if (auto* const quick = qobject_cast<QQuickWindow*>(window))
+                windows.push_back(quick);
+        return windows;
+    });
 }
 
 void ContourGuiApp::takeGpuFallbackRequest()
@@ -3245,6 +3261,7 @@ int ContourGuiApp::terminalGuiAction()
         _settingsController.reset();
         // The QML engine next: its context properties point at the style providers, and the windows
         // the helpers below served are gone with it.
+        _geometryDump.reset();
         _qmlEngine.reset();
         // Its window went with the engine; the host cancels the prompts it still holds, so that none targets
         // a sink that is gone.
@@ -3373,6 +3390,7 @@ int ContourGuiApp::terminalGuiAction()
     {
         auto const timer = crispy::ScopedTimer(startupLog, "QML engine setup");
         _qmlEngine = make_unique<QQmlApplicationEngine>();
+        startGeometryDump();
         // A prompt that arrived before the engine existed (a startup attach reaching ssh first) found no
         // stand-in to show it; it waits in the router, so show it now.
         if (_askpassRouter->waitingCount() > 0)

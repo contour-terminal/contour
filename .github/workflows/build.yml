@@ -2215,6 +2215,18 @@ jobs:
           done
           export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
           CONTOUR_REQUIRE_SYSTEMD_TESTS=1 ctest --test-dir out/gcc-debug -L systemd --output-on-failure --no-tests=error
+      - name: "sidebar workflows on Xvfb (e2e-display)"
+        # The suite above SKIPs these (exit 77): they are opt-in (CONTOUR_E2E_DISPLAY=1), and it runs before Xvfb
+        # and xdotool are installed. Each case starts
+        # its own Xvfb, a minimal window manager, a private daemon and `contour client`, and drives the window
+        # with real X input, so QDrag's real drag loop runs (src/contour/test/e2e/sidebar-workflows.py).
+        # Non-gating until proven on a GitHub runner, like the weston steps below; the timeout ends a hang,
+        # which continue-on-error does not.
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          sudo apt-get install -qy xvfb xdotool x11-utils
+          CONTOUR_E2E_DISPLAY=1 ctest --test-dir out/gcc-debug -L e2e-display --output-on-failure --no-tests=error
       - name: "install weston and dbus-run-session (display-gated GUI tests)"
         # Non-gating until proven on a GitHub runner: the local run is green (headless weston,
         # 32 cases), but this step has not yet been validated on ubuntu-24.04 CI, so it must not

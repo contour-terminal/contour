@@ -434,6 +434,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/UiStyleProvider.cpp
         window/WindowControlStyleProvider.cpp
         window/DragEndProbe.cpp
+        window/GeometryDump.cpp
         window/NodeDrag.cpp
         window/TabBarHitValue.cpp
         window/WindowController.cpp
@@ -1073,6 +1074,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/Win32Settings_test.cpp
             window/WindowPositionStore_test.cpp
             window/DragEndProbe_test.cpp
+            window/GeometryDump_test.cpp
             window/ContextMenuModel_test.cpp
             window/SettingsWindowRules_test.cpp
             platform/PopupShadow_test.cpp
@@ -1528,6 +1530,42 @@ if(CONTOUR_FRONTEND_GUI)
                              APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
             endif()
         endif()
+
+        # {{{ The sidebar's workflows on a real X server (label e2e-display)
+        # What the offscreen suites cannot run: the OS drag loop. Each case of sidebar-workflows.py starts its own
+        # Xvfb (`-displayfd`, so it never takes a display someone else has), the minimal window manager beside
+        # it, a private daemon and `contour client`, drives the window with xdotool's real pointer and keyboard
+        # events, and asserts through the control API. One test per case, the cases listed by the script
+        # itself so a new one is a function there and nothing here. Opt-in: they skip, saying so (exit 77),
+        # unless CONTOUR_E2E_DISPLAY=1 is set (CI's e2e-display step sets it), and on a machine without Xvfb or
+        # xdotool. LeakSanitizer is off for the reason given for the offscreen app runs above.
+        if(NOT WIN32 AND NOT APPLE)
+            find_package(Python3 COMPONENTS Interpreter QUIET)
+        endif()
+        if(NOT WIN32 AND NOT APPLE AND Python3_Interpreter_FOUND)
+            set(_display_workflows ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/sidebar-workflows.py)
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_display_workflows})
+            execute_process(COMMAND ${Python3_EXECUTABLE} -I ${_display_workflows} --list
+                            OUTPUT_VARIABLE _display_cases OUTPUT_STRIP_TRAILING_WHITESPACE
+                            RESULT_VARIABLE _display_list_status)
+            if(NOT _display_list_status EQUAL 0)
+                message(FATAL_ERROR "${_display_workflows} --list failed (${_display_list_status})")
+            endif()
+            string(REPLACE "\n" ";" _display_cases "${_display_cases}")
+            foreach(_case IN LISTS _display_cases)
+                add_test(NAME contour_e2e_display_${_case}
+                         COMMAND setsid -w ${Python3_EXECUTABLE} -I ${_display_workflows} $<TARGET_FILE:contour>
+                                 ${_case})
+                set_tests_properties(contour_e2e_display_${_case}
+                    PROPERTIES
+                        ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0"
+                        TIMEOUT 300
+                        RUN_SERIAL TRUE
+                        SKIP_RETURN_CODE 77
+                        LABELS e2e-display)
+            endforeach()
+        endif()
+        # }}}
 
         # A real in-place daemon upgrade: the daemon re-execs itself while a program runs in a pane, and the
         # program, its screen (alternate screen, mouse modes, a kitty image), a non-default profile setting

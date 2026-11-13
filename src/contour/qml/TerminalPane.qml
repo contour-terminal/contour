@@ -19,6 +19,7 @@ import Contour.Terminal
 
 ContourTerminal {
     id: pane
+    objectName: "terminalPane"
 
     // Puts this item into the ACCESSIBILITY TREE. Without an Accessible attached property QtQuick does
     // not consider a plain QQuickItem accessible, so it never appears as a child of the window's

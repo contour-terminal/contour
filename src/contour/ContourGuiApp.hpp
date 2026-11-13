@@ -188,6 +188,7 @@ namespace window
     class ChromeStyleHost;
     class ConnectPickerController;
     struct ConnectPickerServices;
+    class GeometryDump;
     class NewDefaultsNotice;
     class QuickTerminalController;
     class SettingsController;
@@ -1677,6 +1678,9 @@ class ContourGuiApp:
     /// Reads (and removes) the restart request relaunchOnAutomaticGpu() leaves in the environment.
     void takeGpuFallbackRequest();
 
+    /// Starts the test-only item geometry dump when window::GeometryDumpVariable names a file.
+    void startGeometryDump();
+
     /// @return `renderer.gpu`, or `auto` when this process is the restart after a failed GPU.
     [[nodiscard]] config::GpuSelector effectiveGpuSelector() const;
 
@@ -1821,6 +1825,10 @@ class ContourGuiApp:
 #endif
 
     std::unique_ptr<QQmlApplicationEngine> _qmlEngine;
+
+    /// The windows' item geometry, written for the e2e-display tests while CONTOUR_TEST_GEOMETRY_FILE is set
+    /// (window::GeometryDump); null otherwise. Reset before _qmlEngine, whose windows it reads.
+    std::unique_ptr<window::GeometryDump> _geometryDump;
 
     /// Builds the Settings window on its first show: the injected factory, or one over _qmlEngine.
     window::SettingsWindowFactory _settingsWindowFactory;
