@@ -1294,12 +1294,13 @@ if(CONTOUR_FRONTEND_GUI)
         # it the run needs a real display and fails wherever there is none. It was passing only because
         # every invocation that mattered happened to export QT_QPA_PLATFORM by hand.
         #
-        # LeakSanitizer is off here for the same, already-documented reason as the e2e app runs below:
-        # constructing a QGuiApplication initializes freetype through Qt's font database, whose one-time
-        # global allocations are freed by teardown hooks that run AFTER LSan reports. Every block in that
-        # report is freetype/Qt-internal with ZERO first-party frames, and it fires after Catch2 has
-        # already reported the suite green -- so it turns a passing run into a failing test. ASan proper
-        # (use-after-free, overflow) stays fully enabled; the Qt-free unit suites keep leak checking.
+        # LeakSanitizer is off for these four runs, and only for them. The system libraries' leaks are left out
+        # of every report (cmake/lsan-suppressions.txt, docs/internals/sanitizers.md), but these suites still
+        # end with indirect leaks inside Qt Quick's own grab paths, with no direct leak behind them: the
+        # QQuickItemGrabResult that QQuickItem::grabToImage() creates (a reference cycle through its
+        # QSharedPointer and signal connections), and the software renderer's QRasterPaintEngine and QImage
+        # under QQuickWindow::grabWindow(), from the pixel checks in MainWindowQml_test, QmlPaneCards_test and
+        # QmlComponents_test. Every assertion passes; the report alone fails the run. ASan proper stays on.
         #
         # A QML disk cache of this build tree's own. Qt's default is one per user and application name,
         # so every contour_gui_test on the machine -- across worktrees and build types -- shares one
@@ -1422,7 +1423,7 @@ if(CONTOUR_FRONTEND_GUI)
             set_tests_properties(contour_notification_nonblocking
                 PROPERTIES
                     ENVIRONMENT
-                        "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0;${CONTOUR_QML_TEST_ENVIRONMENT}"
+                        "QT_QPA_PLATFORM=offscreen;${CONTOUR_QML_TEST_ENVIRONMENT}"
                     TIMEOUT 120
                     LABELS e2e)
             if(CONTOUR_SANITIZE STREQUAL "thread")
@@ -1505,21 +1506,17 @@ if(CONTOUR_FRONTEND_GUI)
                 COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/tls-key-login.sh $<TARGET_FILE:contour>)
             set_tests_properties(contour_e2e_tls_key_login PROPERTIES SKIP_RETURN_CODE 77)
 
-            # LeakSanitizer is disabled for the e2e app runs (LSAN_OPTIONS=detect_leaks=0). Booting the
-            # real binary probes the audio/GPU driver stack (QMediaDevices::audioOutputs() ->
-            # FFmpeg/VA-API, libcuda, libdbus), which leaves one-time global-init allocations freed by the
-            # drivers' own atexit hooks AFTER LSan runs. Every leaked block is driver-internal
-            # (libcuda/libdbus/stripped <unknown module> FFmpeg frames) with ZERO first-party frames, and
-            # the stripped frames cannot be targeted by a suppression file. This mirrors the identical,
-            # documented relaxation in scripts/run-display-tests.sh. ASan proper (use-after-free/overflow)
-            # stays fully enabled here; the unit-test suites keep full leak checking.
+            # LeakSanitizer checks the e2e app runs. Booting the real binary probes the audio, GPU and D-Bus
+            # stacks, whose one-time allocations are freed, if at all, by the libraries' own atexit hooks after
+            # LSan reports; those libraries are left out of the report by cmake/lsan-suppressions.txt, which an
+            # ASan build compiles into the binary (docs/internals/sanitizers.md). A leak of ours still fails.
             set_tests_properties(
                 contour_e2e_lifecycle contour_e2e_vt_stream
                 contour_e2e_custom_config contour_e2e_cli contour_e2e_daemon
                 contour_e2e_client_unreachable contour_e2e_hosting contour_e2e_stdio_relay contour_e2e_connect
                 contour_e2e_tls_key_login
                 PROPERTIES
-                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;LSAN_OPTIONS=detect_leaks=0"
+                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1"
                     TIMEOUT 120
                     RUN_SERIAL TRUE
                     LABELS e2e)
@@ -1572,7 +1569,6 @@ if(CONTOUR_FRONTEND_GUI)
                                  ${_case})
                 set_tests_properties(contour_e2e_display_${_case}
                     PROPERTIES
-                        ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0"
                         TIMEOUT 300
                         RUN_SERIAL TRUE
                         SKIP_RETURN_CODE 77
@@ -1600,7 +1596,7 @@ if(CONTOUR_FRONTEND_GUI)
                         $<TARGET_FILE:contour>)
             set_tests_properties(contour_e2e_daemon_live_upgrade
                 PROPERTIES
-                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;LSAN_OPTIONS=detect_leaks=0"
+                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1"
                     TIMEOUT 120
                     RUN_SERIAL TRUE
                     LABELS "e2e;daemon")

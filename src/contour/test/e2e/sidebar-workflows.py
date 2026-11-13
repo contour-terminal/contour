@@ -816,6 +816,22 @@ def case_in_process_tab_row_to_empty_area(d):
     expect_panes_draw(d)
 
 
+
+def case_ctrl_d_quits_clean(d):
+    """Ctrl+D ends the window's only shell, and with it the window and the client, which exits 0. An
+    AddressSanitizer build reports its leaks as the client exits, with the system libraries' left out
+    (cmake/lsan-suppressions.txt): a leak of ours makes the exit status nonzero and fails the case."""
+    d.wait_item("terminalPane")
+    d.xdotool("windowactivate", "--sync", d.window_id())
+    d.key("ctrl+d")
+    client = next(proc for name, proc in d.procs if name == "client")
+    deadline_loop(60, "the client to exit", lambda: client.poll() is not None, interval=0.25)
+    log_text = d.read_log("client")
+    # The tail only: a long report's first line may be cut off, its SUMMARY line never is.
+    expect("LeakSanitizer" not in log_text and "leaked in" not in log_text,
+           "the client reported leaks:\n" + log_text)
+    expect(client.returncode == 0, f"the client exited {client.returncode}:\n" + log_text)
+
 # The tab strip the drag starts from is on top only where the tabs are not in the sidebar.
 case_tab_strip_to_workspace_row.tab_placement = "top"
 case_in_process_tab_row_to_empty_area.in_process = True

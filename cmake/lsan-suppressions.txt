@@ -1,0 +1,47 @@
+# LeakSanitizer suppressions: leaks reported at exit that belong to a system library, never to Contour.
+#
+# The one list both ways of using it read (docs/internals/sanitizers.md):
+# - compiled into every executable of a CONTOUR_SANITIZE=address build, as __lsan_default_suppressions()
+#   (cmake/LeakSanitizerSuppressions.cmake), so a plain run of `contour` or a test applies it;
+# - or named at run time: LSAN_OPTIONS=suppressions=cmake/lsan-suppressions.txt.
+#
+# A line matches a leak when any frame of the allocating stack lies in the named library. Suppress by a
+# system library only, each with the reason: never by a frame of Contour's own code, which would hide our
+# own leaks along with theirs. '#' starts a comment; the generated string leaves comments out.
+
+# Qt's speech-dispatcher plugin (texttospeech_speechd), built when QTextToSpeech is: libspeechd keeps its
+# connection's reply buffers in globals it never frees.
+leak:libspeechd.so
+
+# XKB keymaps and compose tables: QtWaylandClient and Qt's xcb plugin create them once per process (context,
+# keymap, compose table and state) and leave them to the process's end.
+leak:libxkbcommon.so
+
+# The session bus connection and its message buffers: QtDBus (portals, notifications, the desktop
+# services) holds them in libdbus-1's globals, released by its own shutdown, which nobody calls at exit.
+leak:libdbus-1.so
+
+# Fonts: fontconfig's configuration and caches, and FreeType's library objects Qt's font database creates
+# once; they are freed by teardown that runs after LeakSanitizer reports, if at all.
+leak:libfontconfig.so
+leak:libfreetype.so
+
+# GL and EGL drivers (Mesa, NVIDIA's libGLX/libEGL, the GLVND dispatch): one-time driver state freed by the
+# drivers' atexit hooks, which run after LeakSanitizer's.
+leak:libEGL_mesa.so
+leak:libGLX_mesa.so
+leak:libgallium
+leak:libGLdispatch.so
+leak:libEGL.so
+leak:libGLX.so
+leak:libglapi.so
+
+# Qt's own: one object Qt allocates per thread and never frees, so with no frame of a library outside Qt
+# to name it by, its function is named instead (a Qt frame, never one of ours).
+# - The FreeType handle Qt's font engine keeps per thread (QtFreetypeData, from qt_getFreetype()); the scene
+#   graph's render thread exits holding it.
+leak:qt_getFreetype
+# - The GL driver's buffers made while the scene graph swaps (under QRhi::endFrame()). The driver itself is
+#   unloaded by the time LeakSanitizer reports, so its own frames are `<unknown module>` and no library line
+#   above can match them; this Qt frame is the nearest one with a name.
+leak:QRhi::endFrame

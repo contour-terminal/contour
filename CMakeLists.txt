@@ -429,6 +429,10 @@ if(CONTOUR_WASM_GUESTS)
 endif()
 add_subdirectory(src)
 add_subdirectory(examples)
+# LeakSanitizer's built-in suppressions (cmake/lsan-suppressions.txt), into every executable defined above;
+# after them, since it walks the targets they define.
+include(LeakSanitizerSuppressions)
+contour_add_lsan_suppressions()
 
 # ----------------------------------------------------------------------------
 # Summary

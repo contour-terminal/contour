@@ -155,6 +155,7 @@ nav:
     - internals/native-chrome.md
     - internals/vthost.md
     - internals/session-oom-isolation.md
+    - internals/sanitizers.md
     - internals/text-stack.md
     - internals/vt-conformance.md
     - internals/macos-code-signing.md
