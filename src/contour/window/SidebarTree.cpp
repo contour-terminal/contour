@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/window/AttentionJump.hpp>
+#include <contour/window/LocationChip.hpp>
 #include <contour/window/SidebarTree.hpp>
 
 #include <vtbackend/shell/CommandBlock.hpp>
@@ -456,10 +457,7 @@ std::string_view urgencyText(Urgency urgency) noexcept
 
 std::string workspaceChipAccessibleName(SidebarSummary const& summary)
 {
-    auto name = std::format("Workspace {}", summary.currentWorkspace);
-    if (chipMarkerOf(summary.otherWorkspaces) == ChipMarker::Shown)
-        name += std::format(", another workspace {}", urgencyText(summary.otherWorkspaces));
-    return name;
+    return locationChipAccessibleName({}, summary);
 }
 
 std::string hoverDetailOf(SidebarRow const& row)

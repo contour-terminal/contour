@@ -1769,6 +1769,7 @@ if(CONTOUR_TESTING)
         window/SecureInputPolicy_test.cpp
         window/SecureLockPlacement_test.cpp
         window/HostChipState_test.cpp
+        window/LocationChip_test.cpp
         window/TabAttention_test.cpp
         window/SidebarMenuState_test.cpp
         window/WorkspaceDirectory_test.cpp
