@@ -71,7 +71,10 @@ namespace vthost::testing
               .profileName = "work",
               .cellPixelSize = proto::WireCellPixelSize { .width = 9, .height = 18 },
               // A path of the user's; PduTrace_test proves the trace states only its presence.
-              .workingDirectory = "/home/user/secret" } } },
+              .workingDirectory = "/home/user/secret",
+              // The last field, stated: PduTrace_test proves the trace states only its presence.
+              .keyProof = proto::KeyProof { .publicKey = { std::byte { 0x0A }, std::byte { 0x0B } },
+                                            .signature = "secret-signature" } } } },
         { proto::PduType::ServerHello,
           proto::DecodedPdu { proto::ServerHello { .agreedVersion = 4,
                                                    .capabilities = { .idents = { 1 } },
@@ -152,7 +155,8 @@ namespace vthost::testing
                                                       .lastFailure = 10,
                                                       .lastFailureDetail = "did not settle" },
               .relocation = uint8_t { 1 },
-              .workspaces = 2 } } },
+              .workspaces = 2,
+              .tlsFingerprint = "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU" } } },
         { proto::PduType::StopDaemon, proto::DecodedPdu { proto::StopDaemon { .reason = 1 } } },
         { proto::PduType::EditTab,
           proto::DecodedPdu {
@@ -237,6 +241,9 @@ namespace vthost::testing
                                                            .body = "secret body",
                                                            .occasion =
                                                                proto::NotifyOccasion::Unfocused } } } } },
+        { proto::PduType::AuthChallenge,
+          proto::DecodedPdu {
+              proto::AuthChallenge { .nonce = {}, .methods = std::to_underlying(proto::AuthMethod::Key) } } },
     };
 }
 

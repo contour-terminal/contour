@@ -171,7 +171,8 @@ std::expected<void, std::string> RemoteController::awaitConnected(vthost::Attach
     // from when the transport returned -- recomputed whenever that changes -- which is waited for in slices
     // so that its return is seen. The time left is read off the clock at every slice rather than counted down
     // by the slices: a wait oversleeps its timeout on a loaded machine, and counting would add every
-    // overshoot to the budget.
+    // overshoot to the budget. Nor does it count the time the user spends answering a prompt the transport
+    // asked (AttachBudget::pause): that is added afresh at every slice, as long as the prompt stays open.
     auto deadline =
         budget.connect
             ? std::optional { attachBoundDeadline(*budget.connect, *_connectStartedAt, _clock.now()) }
@@ -191,7 +192,8 @@ std::expected<void, std::string> RemoteController::awaitConnected(vthost::Attach
         auto slice = vthost::TransportReturnPollInterval;
         if (deadline)
         {
-            auto const left = std::chrono::ceil<std::chrono::milliseconds>(*deadline - _clock.now());
+            auto const left =
+                std::chrono::ceil<std::chrono::milliseconds>(*deadline + budget.paused() - _clock.now());
             // Past the deadline, one last look without waiting: an attach that settled while the last slice
             // overslept has settled, and is not to be stopped for the scheduler's delay.
             slice = std::clamp(left, std::chrono::milliseconds::zero(), slice);
@@ -217,10 +219,11 @@ std::optional<core::platform::SteadyTimePoint> RemoteController::attachDeadline(
     // MinimumConnectAwait from the first look -- or, without one, the handshake bound from when the transport
     // returned, from the later of that and the first look: a handshake that stalls fails once the bound has
     // passed, whatever number of looks it took.
+    // Neither counts the time the user spent answering a prompt the transport asked (AttachBudget::pause).
     if (budget.connect)
-        return attachBoundDeadline(*budget.connect, *_connectStartedAt, *_pollStartedAt);
+        return attachBoundDeadline(*budget.connect, *_connectStartedAt, *_pollStartedAt) + budget.paused();
     if (returnedAt)
-        return std::max(*returnedAt, *_pollStartedAt) + budget.handshake;
+        return std::max(*returnedAt, *_pollStartedAt) + budget.handshake + budget.paused();
     return std::nullopt;
 }
 

@@ -37,6 +37,10 @@ core::cli::OptionList mcpOptions()
                       CLI::Value { ""s },
                       "The CA certificate (PEM) a HOST:PORT daemon is verified against.",
                       "FILE" },
+        CLI::Option { "daemon-fingerprint",
+                      CLI::Value { ""s },
+                      "The fingerprint a HOST:PORT daemon without a CA must present on first contact.",
+                      "SHA256:..." },
     };
 }
 

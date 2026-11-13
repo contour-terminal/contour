@@ -112,9 +112,10 @@ class ContourApp: public core::cli::App
     /// @return The process exit code: 0 unless a move failed.
     [[nodiscard]] int daemonRelocateAction();
     /// Reads `contour daemon --listen-tcp` and the options that go with it.
+    /// @param daemonLabel The daemon's label, which names its TLS identity file.
     /// @return The TCP listener to serve, nullopt for none; or why the options cannot be served.
-    [[nodiscard]] std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string>
-    nativeTcpOption();
+    [[nodiscard]] std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string> nativeTcpOption(
+        std::string_view daemonLabel);
     /// Checks that `contour daemon --stdio` names no option only a daemon this process becomes can honour.
     /// @return The refusal, naming the option, when one is given.
     [[nodiscard]] std::expected<void, std::string> checkStdioCombinations();

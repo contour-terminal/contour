@@ -81,14 +81,14 @@ TEST_CASE("Config: a host side file the loader cannot use is skipped, the others
           "[config][hosts][gui]")
 {
     QTemporaryDir const dir;
-    writeSideFile(dir, "hosts/no-token.yml", "url: tls://studio:7297\n");
+    writeSideFile(dir, "hosts/no-scheme.yml", "url: studio:7297\n");
     writeSideFile(dir, "hosts/broken.yml", "url: [unterminated\n");
     writeSideFile(dir, "hosts/fine.yml", "url: ssh://fine\n");
     auto const config = loadFromYaml(dir, "default_profile: main\n"sv);
 
     CHECK(config.hosts.value().size() == 1);
     CHECK(config.hosts.value().contains("fine"));
-    CHECK_FALSE(config.hostOrigins.contains("no-token"));
+    CHECK_FALSE(config.hostOrigins.contains("no-scheme"));
 }
 
 TEST_CASE("Config: an in-place reload drops a removed host side file", "[config][hosts][gui]")

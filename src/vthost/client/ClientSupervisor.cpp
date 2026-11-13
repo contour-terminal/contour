@@ -148,7 +148,7 @@ core::async::Task<ClientSupervisor::Outcome> ClientSupervisor::attempt(proto::At
     else if (auto const& refusal = _current->refusal())
         outcome = Outcome { .ending = Ending::Refused,
                             .error = { .kind = TransportErrorKind::Refused,
-                                       .message = proto::describe(*refusal, proto::PeerRole::Daemon) } };
+                                       .message = _current->refusalMessage() } };
     else if (auto const& upgrading = _current->upgradingTo(); upgrading && _current->connected())
         outcome =
             Outcome { .ending = Ending::Upgrading,

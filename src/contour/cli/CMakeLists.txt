@@ -53,6 +53,7 @@ add_library(contour_cli STATIC
     ControlVerbs.cpp ControlVerbs.hpp
     DaemonDiscovery.cpp DaemonDiscovery.hpp
     NewDaemon.cpp NewDaemon.hpp
+    TerminalPinPrompt.cpp TerminalPinPrompt.hpp
     WorkspaceListing.cpp WorkspaceListing.hpp
     DaemonStart.cpp DaemonStart.hpp
     DaemonVerbs.cpp DaemonVerbs.hpp

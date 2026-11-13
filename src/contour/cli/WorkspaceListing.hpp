@@ -12,18 +12,9 @@
 #include <vector>
 
 #include <vtcontrol/Api.hpp>
-#include <vthost/Transport.hpp>
 
 namespace contour::cli
 {
-
-/// Says whether `contour client --workspace` may list a daemon's workspaces over a transport. The listing is
-/// a control request, which carries the token and is never sent to a peer whose certificate is not pinned
-/// (vthost::client::runControlCall): a first-use TLS link (`--connect-tcp` without `--tls-ca`) can attach,
-/// but cannot name a workspace.
-/// @param trust What the transport knows of its peer.
-/// @return Nothing when the listing may be asked; otherwise the refusal, which names `--tls-ca`.
-[[nodiscard]] std::expected<void, std::string> requireVerifiedForWorkspaceListing(vthost::PeerTrust trust);
 
 /// Reads what `workspace.list` answered.
 /// @param replyJson The reply JSON.

@@ -36,7 +36,7 @@ TEST_CASE("the prompt kind rows are in the order of the kinds", "[askpass][promp
 {
     for (auto const index: std::views::iota(std::size_t { 0 }, PromptKindRows.size()))
         CHECK(static_cast<std::size_t>(PromptKindRows[index].kind) == index);
-    CHECK(PromptKindRows.size() == 7);
+    CHECK(PromptKindRows.size() == 8);
 }
 
 TEST_CASE("a window's host publishes the prompt it holds", "[askpass][prompthost]")
@@ -59,6 +59,21 @@ TEST_CASE("a window's host publishes the prompt it holds", "[askpass][prompthost
     CHECK(prompt.value("heading").toString() == "Log in to ssh://me@host");
     CHECK(prompt.value("acceptText").toString() == "OK");
     CHECK(prompt.value("rejectText").toString() == "Cancel");
+    // A password asks for nothing to be compared with.
+    CHECK(prompt.value("hint").toString().isEmpty());
+}
+
+TEST_CASE("a daemon's fingerprint comes with what to compare it with", "[askpass][prompthost]")
+{
+    auto replied = Replied {};
+    auto router = std::make_shared<AskpassPromptRouter>();
+    auto host = PromptHost { router, 1 };
+    router->ask(1, 7, AskpassPromptKind::PinConfirm, "studio:7297", "SHA256:abc", replied.reply());
+
+    auto const prompt = host.pendingPrompt();
+    CHECK(prompt.value("text").toString() == "SHA256:abc");
+    CHECK(prompt.value("isVerbatim").toBool());
+    CHECK(prompt.value("hint").toString() == "Compare with `contour daemon status` on that machine.");
 }
 
 TEST_CASE("an answer goes to the broker once, naming the prompt", "[askpass][prompthost]")

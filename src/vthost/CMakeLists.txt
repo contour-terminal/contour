@@ -3,6 +3,11 @@ add_library(vthost STATIC
     AccessFile.hpp
     Askpass.hpp
     AttachBudget.hpp
+    AuthorizedKeys.cpp
+    AuthorizedKeys.hpp
+    KeyAuth.hpp
+    KnownDaemons.cpp
+    KnownDaemons.hpp
     AttachPlan.cpp
     AttachPlan.hpp
     WorkspaceVisibility.hpp
@@ -20,6 +25,8 @@ add_library(vthost STATIC
     DaemonControl.cpp
     DaemonControl.hpp
     DaemonControlWire.hpp
+    DaemonIdentity.cpp
+    DaemonIdentity.hpp
     DaemonBinary.cpp
     DaemonBinary.hpp
     DaemonImage.cpp
@@ -153,6 +160,8 @@ add_library(vthost STATIC
     client/DaemonRestart.hpp
     client/DaemonUpgrade.cpp
     client/DaemonUpgrade.hpp
+    client/KeySource.cpp
+    client/KeySource.hpp
     client/ReleaseDrift.cpp
     client/ReleaseDrift.hpp
     client/Liveness.hpp
@@ -286,6 +295,9 @@ if(VTHOST_TESTING)
         AccessFile_test.cpp
         AttachPlan_test.cpp
         ViewRouting_test.cpp
+        AuthorizedKeys_test.cpp
+        DaemonIdentity_test.cpp
+        KnownDaemons_test.cpp
         ByteStream_test.cpp
         CellPixelBounds_test.cpp
         TabEdits_test.cpp
@@ -342,13 +354,17 @@ if(VTHOST_TESTING)
         StdioChild_test.cpp
         StdioPreamble_test.cpp
         Token_test.cpp
+        PromptPause_test.cpp
         Transport_test.cpp
         testing/GridParity.cpp
         testing/GridParity.hpp
         testing/ShippedCodec.hpp
+        testing/SoftwareKeySource.hpp
+        testing/TlsDaemon.hpp
         testing/PduExamples.hpp
         testing/PreNegotiationCodec.hpp
         testing/RecordedSnapshots.hpp
+        testing/CountingRandom.hpp
         testing/RecordingFilePrivacy.hpp
         testing/RecordingDurableFiles.hpp
         testing/FaultyFileSystem.hpp
@@ -371,6 +387,7 @@ if(VTHOST_TESTING)
         testing/ScenarioGuard.hpp
         client/ClientSupervisor_test.cpp
         client/ControlClient_test.cpp
+        client/KeySource_test.cpp
         client/DaemonControlClient_test.cpp
         control/ControlService_test.cpp
         control/LoopControlBridge_test.cpp

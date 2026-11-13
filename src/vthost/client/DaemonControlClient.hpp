@@ -77,6 +77,9 @@ struct DaemonStatus
     std::optional<RelocationRequest> relocation {};
     /// How many workspaces it holds that hold a tab; nullopt for a daemon from before it states them.
     std::optional<std::size_t> workspaces {};
+    /// The `SHA256:...` fingerprint of the certificate its TCP listener presents; nullopt for a daemon
+    /// without one, or from before it states this.
+    std::optional<std::string> tlsFingerprint {};
 };
 
 /// @param reply A DaemonStatusReply as the wire spells it.

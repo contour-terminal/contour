@@ -52,12 +52,13 @@ hosts:
 | Key | Meaning |
 | --- | --- |
 | `url` | Where the host is: `ssh://[user@]host[:port]` or `tls://host:port`. Required. |
-| `token_file` | The file holding the remote daemon's token. Required for `tls://`, unused for `ssh://`. |
-| `tls_ca` | A CA certificate to verify the daemon's TLS certificate against (`tls://`). Without it the connection is encrypted but the daemon's certificate is not checked. |
+| `token_file` | The file holding the remote daemon's token (`tls://`). Not needed when an SSH key signs in. |
+| `tls_ca` | A CA certificate to verify the daemon's TLS certificate against (`tls://`). Without it the daemon is pinned on first use, as ssh does for a host: its certificate's fingerprint is kept in `known_daemons`, and a daemon that presents another one is refused. |
+| `identity_file` | The SSH private key that signs in to a `tls://` daemon, instead of the keys of your SSH agent. |
 | `remote_command` | Replaces the **whole** command run on the remote side of `ssh://` (default: `contour daemon --stdio`). Use it when `contour` is not on the remote non-interactive `PATH`. It reaches the remote shell verbatim, so quote a path with spaces inside the YAML string yourself (`"'/opt/my apps/contour' daemon --stdio"`). |
 | `profile` | The profile the remote sessions are created with; empty selects the default one. |
 
-Paths in `token_file` and `tls_ca` expand `~` and `${VAR}`, as every path in the configuration does.
+Paths in `token_file`, `tls_ca` and `identity_file` expand `~` and `${VAR}`, as every path in the configuration does.
 
 ## Key binding
 
@@ -97,10 +98,15 @@ hosts:
     token_file: "~/.config/contour/studio.token"
 ```
 
-A daemon listening with `contour daemon --listen-tcp` always requires a token, so a `tls://` host
-must name its `token_file`; a `tls://` host without one is skipped with a warning, and an ad-hoc
-`tls://` URL (one not saved under `hosts:`) is refused. The port is required, and a `tls://` URL
-takes no user: the token authenticates.
+A `tls://` host needs nothing beyond its `url`: it signs in with the keys of your SSH agent, or with its
+`identity_file` (best loaded into the agent with `ssh-add` when it has a passphrase, as the daemon waits only 20
+seconds for the sign-in), when the daemon authorizes keys, and with its `token_file` otherwise. The first time a
+daemon without a `tls_ca` is met, a dialog (a question on the terminal, for the control commands) shows its
+fingerprint to compare with what `contour daemon status` prints on that machine, and asks whether to trust
+it; where nobody can be asked, it is refused unless the fingerprint is given (`--daemon-fingerprint`). A trusted
+daemon is pinned, and one that later presents another certificate is refused, never asked about. After a daemon was reinstalled,
+`contour daemon forget-pin HOST:PORT` forgets the old pin. The port is required, and a `tls://` URL
+takes no user.
 
-An entry that cannot be used — no `url`, a malformed one, a `tls://` host without `token_file` — is
+An entry that cannot be used — no `url`, or a malformed one — is
 reported in the log and skipped; the other hosts still load.

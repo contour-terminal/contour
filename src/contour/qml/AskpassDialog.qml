@@ -1,11 +1,13 @@
 // vim:syntax=qml
-// The dialog of an ssh login: what ssh asks through the askpass helper (PromptHost.pendingPrompt), as a
-// KitDialog -- a masked field for a password or passphrase, a Yes/No pair for a question, a Cancel for a
-// notice that something outside the window (a security key's touch) is awaited.
+// The dialog of an ssh login, and of the first contact with a TLS daemon (the pin confirmation): what ssh asks
+// through the askpass helper, or the application asks for itself (PromptHost.pendingPrompt), as a KitDialog --
+// a masked field for a password or passphrase, a Yes/No pair for a question, a Cancel for a notice that
+// something outside the window (a security key's touch) is awaited.
 //
-// A question that compares things -- a host key's fingerprint -- shows ssh's own text verbatim, in a
-// selectable monospaced block, and its default button is No. The secret field never reaches an accessible
-// description, and is cleared the moment the dialog closes, answered or not.
+// A question that compares things -- a host key's fingerprint -- shows its text verbatim, in a selectable
+// monospaced block, and its default button is the rejecting one (No; Cancel for a daemon's fingerprint). The
+// secret field never reaches an accessible description, and is cleared the moment the dialog closes, answered
+// or not.
 //
 // It answers through `answered`, exactly once per prompt shown: a button, Enter, or Escape (which is Cancel).
 import QtQuick
@@ -30,6 +32,14 @@ KitDialog {
 
     // The most the verbatim block may take: half of what the dialog hangs in.
     readonly property real _blockRoom: root.parent ? root.parent.height / 2 : verbatimText.implicitHeight
+
+    // The widest line of a verbatim block, set as it is: the dialog grows to hold it (a fingerprint is compared
+    // by eye, and must not break across lines) as far as the window lets it, and the block wraps only beyond that.
+    readonly property real _verbatimLineWidth: root.prompt.isVerbatim === true && root.prompt.text !== undefined
+        ? Math.max(...root.prompt.text.split("\n").map(line => lineMetrics.advanceWidth(line)))
+          + verbatimText.leftPadding + verbatimText.rightPadding + verbatimScroll.leftPadding
+          + verbatimScroll.rightPadding + chromeStyle.space.s8
+        : 0
 
     // A notice has no accept button: its one button, Cancel, takes the accept place.
     readonly property bool _hasAccept: root.prompt.acceptText !== undefined && root.prompt.acceptText !== ""
@@ -61,8 +71,12 @@ KitDialog {
     }
 
     heading: root.prompt.heading !== undefined ? root.prompt.heading : ""
-    // A verbatim prompt's text is the block's; the others say it here, in the dialog's message.
-    message: root.prompt.isVerbatim === true || root.prompt.text === undefined ? "" : root.prompt.text
+    // A verbatim prompt's text is the block's; the others say it here, in the dialog's message. A kind that
+    // has a hint of its own (what to compare the block with) says that here, in ordinary text.
+    message: root.prompt.hint !== undefined && root.prompt.hint !== ""
+             ? root.prompt.hint
+             : (root.prompt.isVerbatim === true || root.prompt.text === undefined ? "" : root.prompt.text)
+    bodyControlsWidth: root._verbatimLineWidth
     // What a screen reader reads: ssh's own words. The field's content is never among them.
     description: root.prompt.text !== undefined ? root.prompt.text : ""
     acceptText: root._hasAccept ? root.prompt.acceptText : (root.prompt.rejectText ?? "")
@@ -142,7 +156,9 @@ KitDialog {
             id: verbatimScroll
             objectName: "askpassVerbatimScroll"
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(verbatimText.implicitHeight, root._blockRoom)
+            Layout.preferredHeight: Math.min(verbatimText.contentHeight + verbatimText.topPadding
+                                             + verbatimText.bottomPadding + verbatimScroll.topPadding
+                                             + verbatimScroll.bottomPadding, root._blockRoom)
             visible: root.prompt.isVerbatim === true
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
@@ -159,10 +175,15 @@ KitDialog {
                 font: Qt.font({ family: "monospace", pixelSize: chromeStyle.type.footnote.pixelSize })
                 color: sys.windowText
                 Accessible.role: Accessible.StaticText
-                Accessible.name: qsTr("What ssh says")
+                Accessible.name: qsTr("What is asked")
             }
         }
     ]
+
+    FontMetrics {
+        id: lineMetrics
+        font: verbatimText.font
+    }
 
     SystemPalette {
         id: sys

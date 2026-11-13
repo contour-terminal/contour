@@ -8,10 +8,12 @@
 
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
+#include <core/net/ITlsContext.hpp>
 #include <core/net/Sockets.hpp>
 #include <core/net/Tls.hpp>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <chrono>
 #include <coroutine>
@@ -44,6 +46,7 @@
 #include <vthost/GridWire.hpp>
 #include <vthost/HostIdentity.hpp>
 #include <vthost/InputEchoWire.hpp>
+#include <vthost/KeyAuth.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/MirroredModes.hpp>
 #include <vthost/MouseWire.hpp>
@@ -2567,6 +2570,75 @@ void NativeSession::adoptClientSessionSettings(std::optional<proto::WireSessionS
         "{}: sessions this client creates will emulate as {}", _id, _clientSessionSettings->terminalId);
 }
 
+namespace
+{
+    /// How core-cpp's SSHSIG refusals read in a log; the signature itself is never logged.
+    struct SigErrorName
+    {
+        core::net::SshSigError error;
+        std::string_view name;
+    };
+    constexpr auto SigErrorNames = std::to_array<SigErrorName>({
+        { core::net::SshSigError::Malformed, "malformed signature" },
+        { core::net::SshSigError::WrongNamespace, "wrong namespace" },
+        { core::net::SshSigError::KeyMismatch, "signed by another key" },
+        { core::net::SshSigError::BadSignature, "signature does not verify" },
+        { core::net::SshSigError::UserNotPresent, "security key user presence not set" },
+        { core::net::SshSigError::UnsupportedHash, "unsupported hash" },
+    });
+} // namespace
+
+void NativeSession::preAuthExpired()
+{
+    if (_closed)
+        return;
+    errorLog()("{}: no hello was accepted within {}s of the accept; closing", _id, PreAuthTimeout.count());
+    _closed = true;
+    // The queue closes _connection too, which resumes the parked read and ends the flow that owns this.
+    _writer.close();
+}
+
+void NativeSession::sendKeyChallenge(KeyAuthPolicy const& keyAuth, uint64_t serial)
+{
+    keyAuth.random.get().fill(_keyNonce);
+    auto const methods = std::to_underlying(proto::AuthMethod::Key)
+                         | (keyAuth.auth == DaemonAuth::Any && !_services.handshake.acceptedTokens.empty()
+                                ? std::to_underlying(proto::AuthMethod::Token)
+                                : 0);
+    send(serial,
+         proto::DecodedPdu {
+             proto::AuthChallenge { .nonce = _keyNonce, .methods = static_cast<std::uint8_t>(methods) } });
+}
+
+std::optional<vtcontrol::ControlGrants> NativeSession::verifyKeyProof(KeyAuthPolicy const& keyAuth,
+                                                                      proto::KeyProof const& proof) const
+{
+    auto const* entry = findAuthorizedKeyByBlob(keyAuth.keys, proof.publicKey);
+    if (entry == nullptr)
+    {
+        // The fingerprint names the key for the operator who must add it; the signature is never logged.
+        auto const offered = core::net::parseSshPublicKeyBlob(proof.publicKey);
+        errorLog()("{}: key proof refused: {} is not an authorized key",
+                   _id,
+                   offered ? core::net::sshFingerprintOf(*offered) : std::string { "an unparsable key" });
+        return std::nullopt;
+    }
+    auto const message = keyAuthMessage(_keyNonce, keyAuth.channelBinding);
+    auto const verified =
+        core::net::verifySshSignature(entry->key, KeyAuthNamespace, message, proof.signature);
+    if (!verified)
+    {
+        auto const named = std::ranges::find(SigErrorNames, verified.error(), &SigErrorName::error);
+        errorLog()("{}: key proof refused for {}: {}",
+                   _id,
+                   core::net::sshFingerprintOf(entry->key),
+                   named != SigErrorNames.end() ? named->name : std::string_view { "refused" });
+        return std::nullopt;
+    }
+    connectionLog()("{}: key {} authenticated", _id, core::net::sshFingerprintOf(entry->key));
+    return entry->grants;
+}
+
 bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
 {
     auto const& policy = _services.handshake;
@@ -2592,13 +2664,34 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
     // Preshared-token auth (an empty token accepts any — the AF_UNIX default, where the socket's
     // permissions are the gate). A mismatch is answered with the very bytes a version refusal of this
     // hello is, and dropped, revealing nothing.
-    auto const grants = grantsOf(policy.acceptedTokens, hello->token);
+    auto grants = std::optional<vtcontrol::ControlGrants> {};
+    if (!policy.keyAuth)
+        grants = grantsOf(policy.acceptedTokens, hello->token);
+    else if (hello->keyProof)
+    {
+        grants = verifyKeyProof(*policy.keyAuth, *hello->keyProof);
+        if (!grants)
+        {
+            ++_keyAttempts;
+            if (_keyAttempts < MaxKeyAuthAttempts)
+            {
+                // Another go, on a fresh nonce: the agent may hold several keys, and a refused one says
+                // nothing about which are listed.
+                sendKeyChallenge(*policy.keyAuth, frame.serial);
+                return true;
+            }
+        }
+    }
+    else if (policy.keyAuth->auth == DaemonAuth::Any && !policy.acceptedTokens.empty())
+        grants = grantsOf(policy.acceptedTokens, hello->token);
+    // Otherwise a hello with no proof has nothing to be admitted by: an endpoint with keys but no token must
+    // not read its empty token list as "accept any".
     if (!grants)
     {
         // Server-side only, and WITHOUT either token: the wire answer deliberately makes
         // this indistinguishable from a version mismatch, so the log must not undo on disk what
         // the protocol is careful not to reveal on the network.
-        errorLog()("{}: handshake rejected: preshared token mismatch", _id);
+        errorLog()("{}: handshake rejected: authentication failed", _id);
         send(frame.serial, proto::DecodedPdu { refusalFor(*hello, policy.versions) });
         return false;
     }
@@ -2613,6 +2706,7 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
         return false;
     }
     _grants = *grants;
+    _preAuthTimer.reset(); // authenticated: the deadline is met
     // Only an accepted client learns which machine the daemon runs on: what every record's locality was
     // judged against, so the client can tell whose "local" that is before it mirrors a single one. By an
     // id derived for this application, never the machine's own, which machine-id(5) keeps confidential.
@@ -2960,6 +3054,15 @@ core::async::Task<void> NativeSession::run()
     auto failure = std::exception_ptr {};
     try
     {
+        if (auto const deadline = _services.handshake.authDeadline)
+            _preAuthTimer.emplace(
+                _loop,
+                *deadline,
+                [](void* state) { static_cast<NativeSession*>(state)->preAuthExpired(); },
+                this);
+        // A daemon that authenticates by key speaks first: the challenge the hello's proof must answer.
+        if (_services.handshake.keyAuth)
+            sendKeyChallenge(*_services.handshake.keyAuth, 0);
         // Nothing is valid before a version-matching ClientHello; afterwards the
         // pump serves request PDUs until the peer disconnects.
         auto const outcome = co_await pumpPdus(
@@ -3026,26 +3129,21 @@ bool NativeSession::spawnedFlowsEnded() const noexcept
            && _layoutBatch == LayoutBatch::Closed;
 }
 
-namespace
+core::async::Task<void> serveNativeClient(core::net::EventLoop* loop,
+                                          SessionHost* host,
+                                          ConnectionId id,
+                                          std::unique_ptr<core::net::ISocket> connection,
+                                          NativeSessionServices services)
 {
-    /// One native client's whole lifetime, as a free coroutine (a capturing
-    /// lambda coroutine would dangle its closure; pointers live in the frame).
-    core::async::Task<void> serveNativeClient(core::net::EventLoop* loop,
-                                              SessionHost* host,
-                                              ConnectionId id,
-                                              std::unique_ptr<core::net::ISocket> connection,
-                                              NativeSessionServices services)
-    {
-        // The session subscribes itself to the host, once its hello says it is a client.
-        auto session = std::make_unique<NativeSession>(*loop,
-                                                       *host,
-                                                       std::move(id),
-                                                       std::move(connection),
-                                                       NativeSession::DefaultWriteQueueBytes,
-                                                       std::move(services));
-        co_await session->run();
-    }
-} // namespace
+    // The session subscribes itself to the host, once its hello says it is a client.
+    auto session = std::make_unique<NativeSession>(*loop,
+                                                   *host,
+                                                   std::move(id),
+                                                   std::move(connection),
+                                                   NativeSession::DefaultWriteQueueBytes,
+                                                   std::move(services));
+    co_await session->run();
+}
 
 ConnectionHandler makeNativeHandler(core::net::EventLoop& loop,
                                     SessionHost& host,
@@ -3056,6 +3154,91 @@ ConnectionHandler makeNativeHandler(core::net::EventLoop& loop,
     return [&loop, &host, services = std::move(services)](ConnectionId id,
                                                           std::unique_ptr<core::net::ISocket> connection) {
         return serveNativeClient(&loop, &host, std::move(id), std::move(connection), services);
+    };
+}
+
+namespace
+{
+    /// What the handshake deadline's timer needs to end a connection and say so.
+    struct HandshakeExpiry
+    {
+        core::net::ISocket* socket;
+        ConnectionId const* id;
+    };
+
+    /// One TLS client's lifetime: the handshake settled first, so that its channel binding is known before
+    /// the native session speaks, then the session itself. A free coroutine for the reason serveNativeClient
+    /// is.
+    core::async::Task<void> serveTlsNativeClient(core::net::EventLoop* loop,
+                                                 SessionHost* host,
+                                                 ConnectionId id,
+                                                 std::unique_ptr<core::net::ISocket> socket,
+                                                 NativeSessionServices services,
+                                                 std::shared_ptr<TlsKeyAuth const> keyAuth)
+    {
+        // From the accept: the TLS handshake and then the hello share this one budget, so a peer that
+        // stalls in either is closed. Closing the socket ends whatever is parked on it.
+        auto const deadline = loop->clock().now() + PreAuthTimeout;
+        services.handshake.authDeadline = deadline;
+        auto expiry = HandshakeExpiry { .socket = socket.get(), .id = &id };
+        auto handshakeTimer = core::net::DeadlineTimer {
+            *loop,
+            deadline,
+            [](void* state) {
+                auto const& stalled = *static_cast<HandshakeExpiry*>(state);
+                errorLog()("{}: the TLS handshake was not finished within {}s of the accept; closing",
+                           *stalled.id,
+                           PreAuthTimeout.count());
+                stalled.socket->close();
+            },
+            &expiry
+        };
+        auto const handshaken = co_await socket->handshakeIfNeeded();
+        if (!handshaken)
+            co_return; // No channel to answer on: dropped, as an accept loop drops it.
+        handshakeTimer.disarm();
+        if (keyAuth)
+        {
+            auto const* const session = core::net::tlsSessionOf(*socket);
+            auto binding = session != nullptr ? session->channelBinding()
+                                              : std::unexpected(std::string { "not a TLS connection" });
+            if (!binding)
+            {
+                errorLog()("{}: no channel binding, refusing the connection: {}", id, binding.error());
+                co_return;
+            }
+            services.handshake.keyAuth = KeyAuthPolicy { .keys = keyAuth->keys,
+                                                         .auth = keyAuth->auth,
+                                                         .channelBinding = *binding,
+                                                         .random = keyAuth->random };
+        }
+        co_await serveNativeClient(loop, host, std::move(id), std::move(socket), std::move(services));
+    }
+} // namespace
+
+std::expected<ConnectionHandler, std::string> makeTlsNativeHandler(
+    core::net::EventLoop& loop,
+    SessionHost& host,
+    std::shared_ptr<core::net::ITlsContext> tls,
+    NativeSessionServices services,
+    TlsKeyAuth keyAuth)
+{
+    // An empty token list accepts any hello, which is right only where a socket's permissions are the gate.
+    // The command line refuses such a listener already; this is the rule where it is enforced, whoever builds
+    // the listener.
+    if (keyAuth.keys.empty() && services.handshake.acceptedTokens.empty())
+        return std::unexpected(
+            std::string { "a TCP listener needs an authorized key or a token: with neither it "
+                          "would admit anyone who connects" });
+    auto shared = keyAuth.keys.empty() ? std::shared_ptr<TlsKeyAuth const> {}
+                                       : std::make_shared<TlsKeyAuth const>(std::move(keyAuth));
+    // NOT a coroutine itself, as makeNativeHandler's is not: it only builds the free coroutine's task.
+    return ConnectionHandler {
+        [tls = std::move(tls), services = std::move(services), shared = std::move(shared), &loop, &host](
+            ConnectionId id, std::unique_ptr<core::net::ISocket> socket) {
+            return serveTlsNativeClient(
+                &loop, &host, std::move(id), tls->wrap(std::move(socket), loop), services, shared);
+        }
     };
 }
 

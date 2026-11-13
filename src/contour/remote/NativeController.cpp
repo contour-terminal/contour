@@ -350,6 +350,8 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             // asked for. A reconnect resumes the windows it lost and creates nothing of its own.
             .workingDirectory =
                 _acceptedConnections == 0 ? core::pathToUtf8(_workingDirectory) : std::string {},
+            // What signs in to a daemon that authenticates by key: the transport's, which only it can make.
+            .keySource = connection->keySource,
         },
         // What the panes' own stores keep (`command_blocks.max_records`), resolved from the same
         // configuration: a mirror holds no more records than the terminal it feeds.

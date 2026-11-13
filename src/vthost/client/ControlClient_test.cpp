@@ -6,15 +6,18 @@
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
 #include <core/net/Sockets.hpp>
+#include <core/net/WithTimeout.hpp>
 #include <core/net/testing/CoroTestSupport.hpp>
 #include <core/net/testing/InMemoryTransport.hpp>
 #include <core/platform/Clock.hpp>
+#include <core/platform/testing/InMemoryFileSystem.hpp>
 #include <core/testing/Environment.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -26,6 +29,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <thread>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -33,12 +37,15 @@
 #include <vtcontrol/Api.hpp>
 #include <vtcontrol/Events.hpp>
 #include <vtcontrol/Json.hpp>
+#include <vthost/KeyAuth.hpp>
+#include <vthost/KnownDaemons.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/ControlClient.hpp>
 #include <vthost/control/ControlService.hpp>
+#include <vthost/testing/CountingRandom.hpp>
 
 using core::async::Task;
 using vthost::client::ControlClient;
@@ -153,31 +160,30 @@ Task<void> daemonWithoutControlApi(core::net::ISocket* socket, std::vector<proto
         received->push_back(*frame);
 }
 
-/// A transport that only counts its attempts.
+/// A transport whose every attempt fails the same way, and that counts them.
 class CountingTransport final: public vthost::ITransportFactory
 {
   public:
-    explicit CountingTransport(vthost::PeerTrust trust): _trust(trust) {}
+    explicit CountingTransport(vthost::TransportErrorKind failure): _failure(failure) {}
 
     [[nodiscard]] Task<std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>> connect(
         core::net::EventLoop& /*loop*/) override
     {
         ++connects;
-        return refuse();
+        return refuse(_failure);
     }
     [[nodiscard]] std::string describe() const override { return "tls://h:7297"; }
-    [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override { return _trust; }
 
     int connects = 0; ///< How many attempts were made.
 
   private:
-    static Task<std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>> refuse()
+    static Task<std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>> refuse(
+        vthost::TransportErrorKind failure)
     {
-        co_return std::unexpected(vthost::TransportError { .kind = vthost::TransportErrorKind::Unreachable,
-                                                           .message = "nothing here" });
+        co_return std::unexpected(vthost::TransportError { .kind = failure, .message = "nothing here" });
     }
 
-    vthost::PeerTrust _trust;
+    vthost::TransportErrorKind _failure;
 };
 
 } // namespace
@@ -289,8 +295,11 @@ TEST_CASE("nextEvent yields subscribed events", "[vthost][client][control]")
 
 TEST_CASE("resolveControlEndpoint precedence", "[vthost][client][control]")
 {
-    auto const describe = [](vthost::client::ControlEndpointOptions const& options,
-                             core::Environment const& env) {
+    auto const files = core::platform::testing::InMemoryFileSystem {};
+    auto random = vthost::testing::CountingRandom {};
+    auto known = vthost::KnownDaemons { files, "/state/known_daemons", random };
+    auto const describe = [&](vthost::client::ControlEndpointOptions options, core::Environment const& env) {
+        options.knownDaemons = &known;
         auto const transport = vthost::client::resolveControlEndpoint(options, env);
         REQUIRE(transport);
         return (*transport)->describe();
@@ -319,13 +328,27 @@ TEST_CASE("resolveControlEndpoint precedence", "[vthost][client][control]")
     }
     SECTION("a TCP endpoint carries the CA, and so is verified")
     {
-        auto const pinned = vthost::client::resolveControlEndpoint(
-            { .daemon = "h:7297", .token = "t", .tlsCaPem = "-----BEGIN CERTIFICATE-----" }, empty);
+        auto const pinned =
+            vthost::client::resolveControlEndpoint({ .daemon = "h:7297",
+                                                     .token = "t",
+                                                     .tlsCaPem = "-----BEGIN CERTIFICATE-----",
+                                                     .knownDaemons = &known },
+                                                   empty);
         REQUIRE(pinned);
-        CHECK((*pinned)->peerTrust() == vthost::PeerTrust::Verified);
-        auto const unpinned = vthost::client::resolveControlEndpoint({ .daemon = "h:7297" }, empty);
+        auto const unpinned =
+            vthost::client::resolveControlEndpoint({ .daemon = "h:7297", .knownDaemons = &known }, empty);
         REQUIRE(unpinned);
-        CHECK((*unpinned)->peerTrust() == vthost::PeerTrust::Unverified);
+        // Told the daemon's fingerprint, or having pinned it, a daemon is verified too.
+        auto const told = vthost::client::resolveControlEndpoint(
+            { .daemon = "h:7297",
+              .daemonFingerprint = "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU",
+              .knownDaemons = &known },
+            empty);
+        REQUIRE(told);
+        // Without a file to keep pins in, a HOST:PORT is refused outright.
+        auto const nowhere = vthost::client::resolveControlEndpoint({ .daemon = "h:7297" }, empty);
+        REQUIRE_FALSE(nowhere);
+        CHECK(nowhere.error().failure == vthost::client::ControlFailure::Misconfigured);
     }
     SECTION("saved hosts go to the resolver, whose failure is Unreachable")
     {
@@ -334,7 +357,7 @@ TEST_CASE("resolveControlEndpoint precedence", "[vthost][client][control]")
             .daemon = "",
             .token = {},
             .tlsCaPem = {},
-            .resolveSavedHost = [&](std::string_view name)
+            .resolveSavedHost = [&](std::string_view name, std::string_view /*daemonFingerprint*/)
                 -> std::expected<std::shared_ptr<vthost::ITransportFactory>, std::string> {
                 asked.emplace_back(name);
                 return std::unexpected(std::format("no saved host '{}'", name));
@@ -359,30 +382,79 @@ TEST_CASE("resolveControlEndpoint precedence", "[vthost][client][control]")
     }
 }
 
-TEST_CASE("an unverified TLS endpoint is refused before connecting", "[vthost][client][control]")
+namespace
 {
-    // Review focus 6.
-    auto transport = CountingTransport { vthost::PeerTrust::Unverified };
-    auto const reply = vthost::client::runControlCall(transport, "workspace.list", "{}", {});
-    REQUIRE_FALSE(reply);
-    CHECK(reply.error().failure == ControlFailure::Untrusted);
-    CHECK(reply.error().message.contains("--tls-ca"));
-    CHECK(reply.error().message.contains("tls://h:7297"));
-    CHECK(transport.connects == 0);
-
-    auto const stream = vthost::client::runEventStream(
-        transport, "{}", {}, [](std::string_view) { return vthost::client::StreamStep::Stop; }, {});
-    REQUIRE_FALSE(stream);
-    CHECK(stream.error().failure == ControlFailure::Untrusted);
-    CHECK(transport.connects == 0);
-
-    SECTION("a verified one is connected")
+/// A transport whose connect takes a while (the user is being asked something) and then fails.
+class SlowConnectTransport final: public vthost::ITransportFactory
+{
+  public:
+    [[nodiscard]] Task<std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>> connect(
+        core::net::EventLoop& loop) override
     {
-        auto verified = CountingTransport { vthost::PeerTrust::Verified };
-        auto const attempted = vthost::client::runControlCall(verified, "workspace.list", "{}", {});
+        return slowly(&loop);
+    }
+    [[nodiscard]] std::string describe() const override { return "tls://h:7297"; }
+
+  private:
+    static Task<std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>> slowly(
+        core::net::EventLoop* loop)
+    {
+        co_await loop->delay(std::chrono::milliseconds { 300 });
+        co_return std::unexpected(vthost::TransportError { .kind = vthost::TransportErrorKind::Unreachable,
+                                                           .message = "nobody there" });
+    }
+};
+} // namespace
+
+TEST_CASE("a call's timeout does not run while the transport connects", "[vthost][client][control]")
+{
+    // The connect may be waiting for the user to trust a daemon: a clock through it would end the call under
+    // their hand. The timeout bounds what the daemon does once connected.
+    auto transport = SlowConnectTransport {};
+    auto const reply = vthost::client::runControlCall(
+        transport, "workspace.list", "{}", {}, std::chrono::milliseconds { 50 });
+    REQUIRE_FALSE(reply);
+    CHECK(reply.error().failure == ControlFailure::Unreachable);
+    CHECK(reply.error().message == "nobody there");
+}
+
+TEST_CASE("a daemon the transport does not trust is Untrusted, and a declined question is Declined",
+          "[vthost][client][control]")
+{
+    struct Row
+    {
+        vthost::TransportErrorKind kind;
+        ControlFailure failure;
+    };
+    // The trust is settled by the connect, which may ask the user: the prediction gates nothing.
+    constexpr auto Rows = std::array {
+        Row { .kind = vthost::TransportErrorKind::HostKeyUnknown, .failure = ControlFailure::Untrusted },
+        Row { .kind = vthost::TransportErrorKind::HostKeyChanged, .failure = ControlFailure::Untrusted },
+        Row { .kind = vthost::TransportErrorKind::Cancelled, .failure = ControlFailure::Declined },
+    };
+    for (auto const& row: Rows)
+    {
+        auto transport = CountingTransport { row.kind };
+        auto const reply = vthost::client::runControlCall(transport, "workspace.list", "{}", {});
+        REQUIRE_FALSE(reply);
+        CHECK(reply.error().failure == row.failure);
+        CHECK(reply.error().message == "nothing here");
+        CHECK(transport.connects == 1);
+
+        auto const stream = vthost::client::runEventStream(
+            transport, "{}", {}, [](std::string_view) { return vthost::client::StreamStep::Stop; }, {});
+        REQUIRE_FALSE(stream);
+        CHECK(stream.error().failure == row.failure);
+        CHECK(transport.connects == 2);
+    }
+
+    SECTION("any other failure is Unreachable")
+    {
+        auto transport = CountingTransport { vthost::TransportErrorKind::Unreachable };
+        auto const attempted = vthost::client::runControlCall(transport, "workspace.list", "{}", {});
         REQUIRE_FALSE(attempted);
         CHECK(attempted.error().failure == ControlFailure::Unreachable);
-        CHECK(verified.connects == 1);
+        CHECK(transport.connects == 1);
     }
 }
 
@@ -467,7 +539,6 @@ class StreamingTransport final: public vthost::ITransportFactory
             vthost::Connection { .lifetime = {}, .socket = std::move(pair.second), .token = {} }));
     }
     [[nodiscard]] std::string describe() const override { return "streaming:"; }
-    [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override { return vthost::PeerTrust::Local; }
 
   private:
     static Task<std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>> settled(
@@ -480,6 +551,227 @@ class StreamingTransport final: public vthost::ITransportFactory
     AfterEvents _after;
 };
 } // namespace
+
+namespace
+{
+/// A daemon that answers the hello and then the call, each only after @p wait.
+Task<void> slowDaemon(core::net::EventLoop* loop,
+                      std::unique_ptr<core::net::ISocket> socket,
+                      std::chrono::milliseconds wait)
+{
+    auto buffer = std::vector<std::byte> {};
+    auto const hello = co_await readOne(socket.get(), &buffer);
+    if (!hello)
+        co_return;
+    co_await loop->delay(wait); // the client is unanswered meanwhile, and sends nothing
+    std::ignore = co_await socket->write(framed(
+        hello->serial,
+        proto::ServerHello { .agreedVersion = proto::SupportedVersions.max,
+                             .versions = proto::SupportedVersions,
+                             .capabilities = proto::CapabilitySet::of({ proto::Capability::ControlApi }) }));
+    auto const call = co_await readOne(socket.get(), &buffer);
+    if (!call)
+        co_return;
+    co_await loop->delay(wait);
+    auto const& request = std::get<proto::ControlRequest>(call->pdu);
+    std::ignore = co_await socket->write(framed(call->serial,
+                                                proto::ControlReply { .requestId = request.requestId,
+                                                                      .outcome = proto::ControlOutcome::Ok,
+                                                                      .body = "{}" }));
+    while (co_await readOne(socket.get(), &buffer))
+        ;
+}
+
+/// A local transport whose every connection is served by a slowDaemon on the caller's loop.
+class SlowDaemonTransport final: public vthost::ITransportFactory
+{
+  public:
+    explicit SlowDaemonTransport(std::chrono::milliseconds wait): _wait(wait) {}
+
+    [[nodiscard]] Task<std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>> connect(
+        core::net::EventLoop& loop) override
+    {
+        auto pair = *core::net::testing::makeSocketPair(loop);
+        loop.spawn(slowDaemon(&loop, std::move(pair.first), _wait));
+        return settled(std::make_unique<vthost::Connection>(
+            vthost::Connection { .lifetime = {}, .socket = std::move(pair.second), .token = {} }));
+    }
+    [[nodiscard]] std::string describe() const override { return "slow:"; }
+
+  private:
+    static Task<std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>> settled(
+        std::unique_ptr<vthost::Connection> connection)
+    {
+        co_return std::move(connection);
+    }
+
+    std::chrono::milliseconds _wait;
+};
+} // namespace
+
+TEST_CASE("a call's timeout is one deadline for the handshake and the call together",
+          "[vthost][client][control]")
+{
+    using namespace std::chrono_literals;
+    // Each phase takes 70 ms, under the 100 ms given: a bound per phase would let this succeed, and the
+    // two together take 140 ms.
+    auto slow = SlowDaemonTransport { 70ms };
+    auto const reply = vthost::client::runControlCall(slow, "workspace.list", "{}", {}, 100ms);
+    REQUIRE_FALSE(reply);
+    CHECK(reply.error().failure == ControlFailure::TimedOut);
+
+    // Given time for both, the same daemon answers.
+    auto patient = SlowDaemonTransport { 70ms };
+    auto const answered = vthost::client::runControlCall(patient, "workspace.list", "{}", {}, 5s);
+    REQUIRE(answered);
+    CHECK(*answered == "{}");
+}
+
+namespace
+{
+/// A daemon that challenges first, then answers the hello and the call at once.
+Task<void> challengingDaemon(std::unique_ptr<core::net::ISocket> socket)
+{
+    auto buffer = std::vector<std::byte> {};
+    std::ignore = co_await socket->write(framed(1, proto::AuthChallenge { .nonce = {}, .methods = 1 }));
+    auto const hello = co_await readOne(socket.get(), &buffer);
+    if (!hello)
+        co_return;
+    std::ignore = co_await socket->write(framed(
+        hello->serial,
+        proto::ServerHello { .agreedVersion = proto::SupportedVersions.max,
+                             .versions = proto::SupportedVersions,
+                             .capabilities = proto::CapabilitySet::of({ proto::Capability::ControlApi }) }));
+    auto const call = co_await readOne(socket.get(), &buffer);
+    if (!call)
+        co_return;
+    auto const& request = std::get<proto::ControlRequest>(call->pdu);
+    std::ignore = co_await socket->write(framed(call->serial,
+                                                proto::ControlReply { .requestId = request.requestId,
+                                                                      .outcome = proto::ControlOutcome::Ok,
+                                                                      .body = "{}" }));
+    while (co_await readOne(socket.get(), &buffer))
+        ;
+}
+
+/// A key source that takes @c wait to list its keys, as an agent asking the user to confirm does, and then
+/// has none.
+class SlowKeySource final: public vthost::client::IClientKeySource
+{
+  public:
+    SlowKeySource(core::net::EventLoop& loop, std::chrono::milliseconds wait): _loop(loop), _wait(wait) {}
+
+    Task<std::expected<std::vector<core::net::SshPublicKey>, std::string>> candidates() override
+    {
+        co_await _loop.delay(_wait);
+        co_return std::vector<core::net::SshPublicKey> {};
+    }
+
+    Task<std::expected<std::string, std::string>> sign(core::net::SshPublicKey const& /*key*/,
+                                                       std::span<std::byte const> /*message*/) override
+    {
+        return refuse();
+    }
+
+  private:
+    static Task<std::expected<std::string, std::string>> refuse()
+    {
+        co_return std::unexpected(std::string { "no key" });
+    }
+
+    core::net::EventLoop& _loop;
+    std::chrono::milliseconds _wait;
+};
+
+/// A local transport whose every connection is challenged by a challengingDaemon, with a key source that
+/// takes @c wait.
+class ChallengingTransport final: public vthost::ITransportFactory
+{
+  public:
+    explicit ChallengingTransport(std::chrono::milliseconds wait): _wait(wait) {}
+
+    [[nodiscard]] Task<std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>> connect(
+        core::net::EventLoop& loop) override
+    {
+        auto pair = *core::net::testing::makeSocketPair(loop);
+        loop.spawn(challengingDaemon(std::move(pair.first)));
+        return settled(std::make_unique<vthost::Connection>(
+            vthost::Connection { .lifetime = {},
+                                 .socket = std::move(pair.second),
+                                 .token = {},
+                                 .keySource = std::make_shared<SlowKeySource>(loop, _wait) }));
+    }
+    [[nodiscard]] std::string describe() const override { return "challenging:"; }
+
+  private:
+    static Task<std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>> settled(
+        std::unique_ptr<vthost::Connection> connection)
+    {
+        co_return std::move(connection);
+    }
+
+    std::chrono::milliseconds _wait;
+};
+} // namespace
+
+TEST_CASE("a call's timeout does not run while a challenge is being signed", "[vthost][client][control]")
+{
+    // The key takes 300 ms (a passphrase typed, an agent's confirmation), the call is given 100 ms: the
+    // daemon itself answers at once, and the time is the user's.
+    using namespace std::chrono_literals;
+    auto transport = ChallengingTransport { 300ms };
+    auto const reply = vthost::client::runControlCall(transport, "workspace.list", "{}", {}, 100ms);
+    REQUIRE(reply);
+    CHECK(*reply == "{}");
+}
+
+TEST_CASE("a call whose challenge is never signed fails within its bound", "[vthost][client][control]")
+{
+    // A signer that never answers (a pinentry on another terminal, a dead forwarded agent): the signing time
+    // is excused up to the daemon's own pre-authentication deadline, and no further.
+    using namespace std::chrono_literals;
+    auto transport = ChallengingTransport { std::chrono::hours { 1 } };
+    auto const started = std::chrono::steady_clock::now();
+    auto const reply = vthost::client::runControlCall(transport, "workspace.list", "{}", {}, 100ms);
+    auto const took = std::chrono::steady_clock::now() - started;
+    REQUIRE_FALSE(reply);
+    CHECK(reply.error().failure == ControlFailure::TimedOut);
+    CHECK(took >= vthost::PreAuthTimeout);
+    CHECK(took < vthost::PreAuthTimeout + 5s);
+}
+
+TEST_CASE("an untimed call whose challenge is never signed fails at the daemon's deadline",
+          "[vthost][client][control]")
+{
+    // No timeout of the caller's own: the daemon's pre-authentication deadline is the bound all the same.
+    using namespace std::chrono_literals;
+    auto transport = ChallengingTransport { std::chrono::hours { 1 } };
+    auto const started = std::chrono::steady_clock::now();
+    auto const reply = vthost::client::runControlCall(transport, "workspace.list", "{}", {}, std::nullopt);
+    auto const took = std::chrono::steady_clock::now() - started;
+    REQUIRE_FALSE(reply);
+    CHECK(reply.error().failure == ControlFailure::TimedOut);
+    CHECK(took >= vthost::PreAuthTimeout);
+    CHECK(took < vthost::PreAuthTimeout + 5s);
+}
+
+TEST_CASE("a stop given from another thread ends a call at once", "[vthost][client][control]")
+{
+    // The listing of a window or a launch whose owner goes away: the call ends, wherever it waits.
+    using namespace std::chrono_literals;
+    auto transport = ChallengingTransport { std::chrono::hours { 1 } };
+    auto stop = core::async::StopSource {};
+    auto const stopper = std::jthread { [&stop] {
+        std::this_thread::sleep_for(100ms);
+        stop.request_stop();
+    } };
+    auto const started = std::chrono::steady_clock::now();
+    auto const reply =
+        vthost::client::runControlCall(transport, "workspace.list", "{}", {}, std::nullopt, stop.get_token());
+    REQUIRE_FALSE(reply);
+    CHECK(reply.error().failure == ControlFailure::Declined);
+    CHECK(std::chrono::steady_clock::now() - started < 5s);
+}
 
 TEST_CASE("runEventStream hands events over until told to stop", "[vthost][client][control]")
 {

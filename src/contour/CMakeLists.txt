@@ -430,6 +430,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/FontControl.cpp
         session/SpawnCommand.cpp
         askpass/AskpassBroker.cpp
+        askpass/AskpassPinPrompt.cpp
         askpass/AskpassPromptRouter.cpp
         remote/DaemonLink.cpp
         remote/StartupAttach.cpp
@@ -950,9 +951,12 @@ if(CONTOUR_FRONTEND_GUI)
         add_executable(contour_gui_test
             test/test_main.cpp
             askpass/AskpassBroker_test.cpp
+            askpass/AskpassPinPrompt_test.cpp
             askpass/AskpassPromptRouter_test.cpp
             window/PromptHost_test.cpp
             remote/StartupAttach_test.cpp
+            remote/SwitchTrust_test.cpp
+            remote/WorkspaceLister_test.cpp
             remote/RemoteController_test.cpp
             remote/DaemonSwitchDirectory_test.cpp
             remote/SwitchGuard_test.cpp
@@ -1438,6 +1442,13 @@ if(CONTOUR_FRONTEND_GUI)
             add_test(NAME contour_e2e_stdio_relay
                 COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/stdio-relay.sh $<TARGET_FILE:contour>)
 
+            # A real `contour daemon --listen-tcp --auth keys` and a control client signing in with a key from an
+            # ssh-agent: the options' wiring, the TLS fingerprint, the pin a first contact writes, and the
+            # refusals. Skips (77) where the ssh tools are missing.
+            add_test(NAME contour_e2e_tls_key_login
+                COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/tls-key-login.sh $<TARGET_FILE:contour>)
+            set_tests_properties(contour_e2e_tls_key_login PROPERTIES SKIP_RETURN_CODE 77)
+
             # LeakSanitizer is disabled for the e2e app runs (LSAN_OPTIONS=detect_leaks=0). Booting the
             # real binary probes the audio/GPU driver stack (QMediaDevices::audioOutputs() ->
             # FFmpeg/VA-API, libcuda, libdbus), which leaves one-time global-init allocations freed by the
@@ -1450,6 +1461,7 @@ if(CONTOUR_FRONTEND_GUI)
                 contour_e2e_lifecycle contour_e2e_vt_stream
                 contour_e2e_custom_config contour_e2e_cli contour_e2e_daemon
                 contour_e2e_client_unreachable contour_e2e_hosting contour_e2e_stdio_relay contour_e2e_connect
+                contour_e2e_tls_key_login
                 PROPERTIES
                     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;LSAN_OPTIONS=detect_leaks=0"
                     TIMEOUT 120
@@ -1458,7 +1470,7 @@ if(CONTOUR_FRONTEND_GUI)
             # Also selectable with the daemon suites: `ctest -L daemon` must cover the feature
             # end to end, not just its unit layers.
             set_property(TEST contour_e2e_daemon contour_e2e_client_unreachable
-                              contour_e2e_hosting contour_e2e_stdio_relay
+                              contour_e2e_hosting contour_e2e_stdio_relay contour_e2e_tls_key_login
                          APPEND PROPERTY LABELS daemon)
 
             # Under ThreadSanitizer, the same ignore_noninstrumented_modules=1 as contour_gui_test, and
@@ -1605,6 +1617,7 @@ if(CONTOUR_TESTING)
         cli/ConnectProbe_test.cpp
         cli/DaemonDiscovery_test.cpp
         cli/NewDaemon_test.cpp
+        cli/TerminalPinPrompt_test.cpp
         cli/WorkspaceListing_test.cpp
         cli/ClientAttach_test.cpp
         cli/Hosting_test.cpp

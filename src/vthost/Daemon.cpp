@@ -21,6 +21,7 @@
 
 #include <core/Assert.hpp>
 #include <core/Environment.hpp>
+#include <core/Random.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/WideString.hpp>
@@ -64,6 +65,7 @@
 #include <vthost/ConnectionRegistry.hpp>
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonControl.hpp>
+#include <vthost/DaemonIdentity.hpp>
 #include <vthost/DaemonRuntime.hpp>
 #include <vthost/DaemonSpawn.hpp>
 #include <vthost/DaemonUpgradeHooks.hpp>
@@ -192,36 +194,76 @@ namespace
         /// The certificate and key the daemon made up for it, which a live upgrade carries so that the new
         /// image presents the very same one; nullopt for a configured certificate, which it reads again.
         std::optional<handover::TlsIdentity> generated;
+        /// The certificate's, as OpenSSH spells one; if it cannot be read, why, as `contour daemon status`
+        /// shows it.
+        std::string fingerprint;
     };
 
-    /// Builds the TLS server context for the native TCP listener: the configured PEM cert + key; else the
-    /// self-signed identity a live upgrade carried over, so that a client that trusted it on first use goes
-    /// on trusting it; else an ephemeral self-signed one, made up now (the TOFU default). The TCP transport
-    /// is always encrypted.
+    /// @param identity The certificate the TCP listener presents.
+    /// @return Its fingerprint; else why not, logged, in words `contour daemon status` can show.
+    [[nodiscard]] std::string statedFingerprint(handover::TlsIdentity const& identity)
+    {
+        auto fingerprint = daemonFingerprint(identity);
+        if (fingerprint)
+            return *std::move(fingerprint);
+        errorLog()("cannot state the TLS certificate's fingerprint: {}", fingerprint.error());
+        return std::format("unavailable ({})", fingerprint.error());
+    }
+
+    /// Builds the TLS server context for the native TCP listener, TLS 1.3 only: the configured PEM cert +
+    /// key; else the self-signed identity a live upgrade carried over, so that a client that trusted it on
+    /// first use goes on trusting it; else the daemon's own persistent identity file, made on first use, so
+    /// that its fingerprint survives a restart; else an ephemeral self-signed one, made up now. The TCP
+    /// transport is always encrypted.
     /// @param config The listener's configuration.
     /// @param carried The identity the previous image of this daemon presented on it; nullopt for none.
+    /// @param fileSystem What the identity file is read and written through.
+    /// @param privacy What makes the identity file private.
     /// @return The TLS, or nullopt after logging why it could not be built.
     [[nodiscard]] std::optional<NativeTcpTls> makeNativeTcpTls(NativeTcpListenerConfig const& config,
-                                                               std::optional<handover::TlsIdentity> carried)
+                                                               std::optional<handover::TlsIdentity> carried,
+                                                               core::platform::FileSystem const& fileSystem,
+                                                               IFilePrivacy const& privacy)
     {
         if (config.tlsCertPath.empty() && config.tlsKeyPath.empty())
         {
             if (carried)
             {
-                if (auto context = core::net::makeTlsServerContext(carried->certPem, carried->keyPem))
+                if (auto context = core::net::makeTlsServerContext(
+                        carried->certPem, carried->keyPem, NativeTcpTlsOptions))
                 {
                     daemonLog()(
                         "native TCP keeps the self-signed certificate it presented before the upgrade");
-                    return NativeTcpTls { .context = *std::move(context), .generated = std::move(carried) };
+                    auto fingerprint = statedFingerprint(*carried);
+                    return NativeTcpTls { .context = *std::move(context),
+                                          .generated = std::move(carried),
+                                          .fingerprint = std::move(fingerprint) };
                 }
                 else
                     errorLog()("cannot present the carried TLS certificate again ({}); clients that trusted "
                                "it will be asked to trust a new one",
                                context.error());
             }
+            if (!config.identityFile.empty())
+            {
+                auto identity = loadOrCreateDaemonIdentity(fileSystem, privacy, config.identityFile);
+                auto context = identity.and_then([](handover::TlsIdentity const& pem) {
+                    return core::net::makeTlsServerContext(pem.certPem, pem.keyPem, NativeTcpTlsOptions);
+                });
+                if (!context)
+                {
+                    errorLog()("cannot present the daemon's TLS identity: {}", context.error());
+                    return std::nullopt;
+                }
+                daemonLog()("native TCP presents the daemon's identity from '{}'",
+                            core::pathToUtf8(config.identityFile));
+                return NativeTcpTls { .context = *std::move(context),
+                                      .generated = std::nullopt,
+                                      .fingerprint = statedFingerprint(*identity) };
+            }
             auto material = core::net::generateSelfSignedCertificate({ .commonName = "contour-daemon" });
             auto context = material.and_then([](core::net::CertKeyPem const& pem) {
-                return core::net::makeTlsServerContext(pem.certPem, pem.keyPem);
+                return core::net::makeTlsServerContext(pem.certPem, pem.keyPem, NativeTcpTlsOptions);
             });
             if (!context)
             {
@@ -229,11 +271,12 @@ namespace
                 return std::nullopt;
             }
             daemonLog()("native TCP is using an ephemeral self-signed certificate (TOFU)");
-            return NativeTcpTls {
-                .context = *std::move(context),
-                .generated = handover::TlsIdentity { .certPem = std::move(material->certPem),
-                                                     .keyPem = std::move(material->keyPem) },
-            };
+            auto identity = handover::TlsIdentity { .certPem = std::move(material->certPem),
+                                                    .keyPem = std::move(material->keyPem) };
+            auto fingerprint = statedFingerprint(identity);
+            return NativeTcpTls { .context = *std::move(context),
+                                  .generated = std::move(identity),
+                                  .fingerprint = std::move(fingerprint) };
         }
         auto const cert = readFileToString(config.tlsCertPath);
         auto const key = readFileToString(config.tlsKeyPath);
@@ -247,28 +290,43 @@ namespace
                 errorLog()("cannot read the TLS key '{}'", config.tlsKeyPath);
             return std::nullopt;
         }
-        auto context = core::net::makeTlsServerContext(*cert, *key);
+        auto context = core::net::makeTlsServerContext(*cert, *key, NativeTcpTlsOptions);
         if (!context)
         {
             errorLog()("cannot build the TLS server context: {}", context.error());
             return std::nullopt;
         }
-        return NativeTcpTls { .context = *std::move(context), .generated = std::nullopt };
+        return NativeTcpTls { .context = *std::move(context),
+                              .generated = std::nullopt,
+                              .fingerprint = statedFingerprint(
+                                  handover::TlsIdentity { .certPem = *cert, .keyPem = {} }) };
     }
 
-    /// Composes a native connection handler that FIRST encrypts each accepted
-    /// socket (server-side TLS), then serves the native protocol over it.
-    /// @param services What each native connection is served with, the TCP token among them.
-    [[nodiscard]] ConnectionHandler makeTlsNativeHandler(core::net::EventLoop& loop,
-                                                         SessionHost& host,
-                                                         std::shared_ptr<core::net::ITlsContext> tls,
-                                                         NativeSessionServices services)
+    /// The TCP listener's handler: TLS with @p tls's context, then the native protocol.
+    /// @param loop The loop every connection runs on.
+    /// @param host The session host every connection serves.
+    /// @param tls The listener's TLS, whose context is taken; nullopt when it could not be had.
+    /// @param services What each connection is served with.
+    /// @param tcp The listener.
+    /// @return The handler; nullopt, with why logged, when the listener is not to be served.
+    [[nodiscard]] std::optional<ConnectionHandler> nativeTcpHandler(core::net::EventLoop& loop,
+                                                                    SessionHost& host,
+                                                                    std::optional<NativeTcpTls>& tls,
+                                                                    NativeSessionServices services,
+                                                                    NativeTcpListenerConfig const& tcp)
     {
-        auto base = makeNativeHandler(loop, host, std::move(services));
-        return [tls = std::move(tls), base = std::move(base), &loop](
-                   ConnectionId id, std::unique_ptr<core::net::ISocket> socket) {
-            return base(std::move(id), tls->wrap(std::move(socket), loop));
-        };
+        if (!tls)
+            return std::nullopt;
+        auto made = makeTlsNativeHandler(
+            loop,
+            host,
+            std::move(tls->context),
+            std::move(services),
+            TlsKeyAuth { .keys = tcp.authorizedKeys, .auth = tcp.auth, .random = core::systemRandom() });
+        if (made)
+            return *std::move(made);
+        errorLog()("native TCP listener on {}:{} is not served: {}", tcp.host, tcp.port, made.error());
+        return std::nullopt;
     }
 
     /// Binds a unix listener at @p path, or prints the error and yields the process
@@ -401,6 +459,22 @@ namespace
       private:
         std::vector<handover::InheritedListener> _pending;
     };
+
+    /// @param listener The TCP listener's configuration; nullopt for none.
+    /// @param inherited What the previous image handed over, among it the listener's carried identity.
+    /// @param fileSystem What the identity file is read and written through.
+    /// @param privacy What makes the identity file private.
+    /// @return The listener's TLS (makeNativeTcpTls); nullopt without a listener, or when it cannot be built.
+    [[nodiscard]] std::optional<NativeTcpTls> nativeTcpTlsOf(
+        std::optional<NativeTcpListenerConfig> const& listener,
+        InheritedListeners& inherited,
+        core::platform::FileSystem const& fileSystem,
+        IFilePrivacy const& privacy)
+    {
+        return listener.and_then([&](NativeTcpListenerConfig const& config) {
+            return makeNativeTcpTls(config, inherited.takeTlsIdentity("native-tcp"), fileSystem, privacy);
+        });
+    }
 
     /// Serves @p path on the listener inherited as @p name, else binds it.
     /// @return The listener, or the exit code a bind failure ends the daemon with.
@@ -662,8 +736,11 @@ namespace
 
     /// @param config The daemon's configuration.
     /// @param upgradeGeneration How many live upgrades this run of the daemon has completed.
+    /// @param tlsFingerprint The fingerprint its TCP listener presents; empty without a listener.
     /// @return What its DaemonRuntime states about it.
-    [[nodiscard]] DaemonRuntimeConfig runtimeConfigOf(DaemonConfig const& config, uint64_t upgradeGeneration)
+    [[nodiscard]] DaemonRuntimeConfig runtimeConfigOf(DaemonConfig const& config,
+                                                      uint64_t upgradeGeneration,
+                                                      std::string tlsFingerprint)
     {
         return DaemonRuntimeConfig { .releaseVersion = config.releaseVersion,
                                      .processId = currentProcessId(),
@@ -672,7 +749,8 @@ namespace
                                      .logFile = config.logFile,
                                      .lifecycle = config.lifecycle,
                                      .upgradeGeneration = upgradeGeneration,
-                                     .relocationRequest = config.relocationRequest };
+                                     .relocationRequest = config.relocationRequest,
+                                     .tlsFingerprint = std::move(tlsFingerprint) };
     }
 
     /// What every native endpoint of a daemon serves its connections with: @p runtime behind them, and a
@@ -1005,6 +1083,9 @@ std::string joinCommandLine(std::span<std::string const> args)
 std::vector<AcceptedToken> acceptedTokensOf(NativeTcpListenerConfig const& listener)
 {
     auto tokens = std::vector<AcceptedToken> {};
+    // Keys alone: a token, however configured, admits nobody.
+    if (listener.auth == DaemonAuth::KeysOnly)
+        return tokens;
     if (!listener.token.empty())
         tokens.push_back(
             AcceptedToken { .token = listener.token, .grants = vtcontrol::ControlGrants::all() });
@@ -1012,26 +1093,43 @@ std::vector<AcceptedToken> acceptedTokensOf(NativeTcpListenerConfig const& liste
     return tokens;
 }
 
+namespace
+{
+    /// @param spec `HOST:PORT`, or `[v6]:PORT`.
+    /// @param lowestPort The smallest port @p spec may name.
+    /// @return The host and port, or nullopt if @p spec is malformed or names a lower port.
+    std::optional<std::pair<std::string, std::uint16_t>> parseHostPortFrom(std::string_view spec,
+                                                                           unsigned lowestPort)
+    {
+        // Split on the LAST colon so bare IPv6 works when bracketed as [addr]:port.
+        auto const colon = spec.rfind(':');
+        if (colon == std::string_view::npos || colon == 0 || colon + 1 == spec.size())
+            return std::nullopt;
+        auto host = spec.substr(0, colon);
+        auto const portText = spec.substr(colon + 1);
+        // Strip one layer of [] around an IPv6 literal.
+        if (host.size() >= 2 && host.front() == '[' && host.back() == ']')
+            host = host.substr(1, host.size() - 2);
+        if (host.empty())
+            return std::nullopt;
+        auto port = 0U;
+        auto const* const first = portText.data();
+        auto const* const last = portText.data() + portText.size();
+        auto const [ptr, ec] = std::from_chars(first, last, port);
+        if (ec != std::errc {} || ptr != last || port < lowestPort || port > 65535)
+            return std::nullopt;
+        return std::pair { std::string { host }, static_cast<std::uint16_t>(port) };
+    }
+} // namespace
+
 std::optional<std::pair<std::string, std::uint16_t>> parseHostPort(std::string_view spec)
 {
-    // Split on the LAST colon so bare IPv6 works when bracketed as [addr]:port.
-    auto const colon = spec.rfind(':');
-    if (colon == std::string_view::npos || colon == 0 || colon + 1 == spec.size())
-        return std::nullopt;
-    auto host = spec.substr(0, colon);
-    auto const portText = spec.substr(colon + 1);
-    // Strip one layer of [] around an IPv6 literal.
-    if (host.size() >= 2 && host.front() == '[' && host.back() == ']')
-        host = host.substr(1, host.size() - 2);
-    if (host.empty())
-        return std::nullopt;
-    auto port = 0U;
-    auto const* const first = portText.data();
-    auto const* const last = portText.data() + portText.size();
-    auto const [ptr, ec] = std::from_chars(first, last, port);
-    if (ec != std::errc {} || ptr != last || port == 0 || port > 65535)
-        return std::nullopt;
-    return std::pair { std::string { host }, static_cast<std::uint16_t>(port) };
+    return parseHostPortFrom(spec, 1);
+}
+
+std::optional<std::pair<std::string, std::uint16_t>> parseListenSpec(std::string_view spec)
+{
+    return parseHostPortFrom(spec, 0);
 }
 
 int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage> image)
@@ -1138,11 +1236,19 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     // Declared before the drain, as the funnel is: the connection flows the drain unwinds hold its census
     // tickets, and a shutdown request still queued may run during it — a no-op by then, but one that reads
     // the funnel.
-    auto runtime = DaemonRuntime { runtimeConfigOf(config, lineage.upgradeGeneration),
-                                   host,
-                                   clock,
-                                   postedShutdown(loop, funnel),
-                                   upgradePortOf(config, upgradeHooks, liveUpgrade) };
+    // Built before the runtime, which states its fingerprint, and before the listener is taken, so that a
+    // listener it cannot encrypt is closed, unserved.
+    auto tls = nativeTcpTlsOf(config.nativeTcp,
+                              inherited,
+                              core::platform::NativeFileSystem::instance(),
+                              NativeFilePrivacy::instance());
+    auto runtime = DaemonRuntime {
+        runtimeConfigOf(config, lineage.upgradeGeneration, tls ? tls->fingerprint : std::string {}),
+        host,
+        clock,
+        postedShutdown(loop, funnel),
+        upgradePortOf(config, upgradeHooks, liveUpgrade)
+    };
     // Declared after the host it serves and before the drain, as the runtime is: the connection flows the
     // drain unwinds drop their subscriptions and waits in it, and its own subscriptions to the host end
     // before the host goes.
@@ -1240,10 +1346,15 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     auto tlsIdentities = std::map<std::string, handover::TlsIdentity, std::less<>> {};
     if (config.nativeTcp)
     {
-        // Built before the listener is taken, so that a listener it cannot encrypt is closed, unserved.
-        auto tls = makeNativeTcpTls(*config.nativeTcp, inherited.takeTlsIdentity("native-tcp"));
+        // The handler first: a listener it refuses to serve (no credentials) is never bound.
+        auto handler = nativeTcpHandler(
+            loop,
+            host,
+            tls,
+            daemonNativeServices(runtime, controlService, config, acceptedTokensOf(*config.nativeTcp)),
+            *config.nativeTcp);
         auto listened = std::optional<std::unique_ptr<core::net::IListener>> {};
-        if (tls)
+        if (handler)
         {
             if (auto adopted = inherited.take(loop, "native-tcp"))
                 listened = std::move(*adopted);
@@ -1257,23 +1368,17 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
         }
         if (!listened && continuity == StartContinuity::Fresh)
             return EXIT_FAILURE;
-        if (listened && tls)
+        if (listened)
         {
             auto const boundPort = (*listened)->boundPort();
-            nativeTcpServer.emplace(
-                loop,
-                "native-tcp",
-                std::move(*listened),
-                makeTlsNativeHandler(
-                    loop,
-                    host,
-                    std::move(tls->context),
-                    daemonNativeServices(
-                        runtime, controlService, config, acceptedTokensOf(*config.nativeTcp))));
+            nativeTcpServer.emplace(loop, "native-tcp", std::move(*listened), std::move(*handler));
             servers.push_back(&*nativeTcpServer);
             if (tls->generated)
                 tlsIdentities.insert_or_assign("native-tcp", *std::move(tls->generated));
-            daemonLog()("native TCP listener on {}:{}", config.nativeTcp->host, boundPort);
+            daemonLog()("native TCP listener on {}:{}, TLS fingerprint {}",
+                        config.nativeTcp->host,
+                        boundPort,
+                        tls->fingerprint);
         }
         else
             unserved("native-tcp");

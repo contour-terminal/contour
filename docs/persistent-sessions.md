@@ -149,8 +149,10 @@ owned by you, and must not be world-accessible. Group access is permitted, match
 | `--stdio` | Relays the native protocol between standard input/output and this user's daemon, starting it if needed: what `contour client --host` runs over ssh. Honours `--label`, `--socket`, `--config`, `--profile`, `--log`, `--log-file` and `--size-policy` (forwarded to a daemon it starts); cannot be combined with `--listen-tcp`, `--background` or `--tmux-compat-socket`. |
 | `--in-place` | Runs from the installed binary instead of a per-version copy. See [After upgrading Contour](#after-upgrading-contour). |
 | `--tmux-compat-socket LABEL` | Additionally binds tmux's own discovery path `/tmp/tmux-<uid>/<LABEL>`, so a plain `tmux -L LABEL -C attach-session` finds this daemon. |
-| `--listen-tcp HOST:PORT` | Also serve the native protocol over TCP. Opt-in; always TLS-encrypted and token-authenticated. See [Remote access](#remote-access-over-tcp). |
-| `--token TOKEN` | Preshared token every TCP client must present. Required with `--listen-tcp`. Visible to other local users through the process list — prefer `--token-file`. |
+| `--listen-tcp HOST:PORT` | Also serve the native protocol over TCP. Opt-in; always TLS-encrypted, and clients sign in with an authorized key or a token. The daemon's TLS fingerprint is logged and shown by `daemon status`. Port `0` lets the system pick a free port, which the log names. See [Remote access](#remote-access-over-tcp). |
+| `--authorized-keys FILE` | SSH public keys, in `authorized_keys` format, that may log in to the TCP listener by signing a challenge. Defaults to `authorized_keys` in the configuration directory; a missing file is no keys. Needs `--listen-tcp`. |
+| `--auth any\|keys` | How TCP clients authenticate: `any` (the default) accepts a token, an access-file entry or an authorized key; `keys` accepts authorized keys alone and refuses `--token`, `--token-file` and `--access-file`. Needs `--listen-tcp`. |
+| `--token TOKEN` | Preshared token a TCP client may present. With `--listen-tcp`, one of a token or an authorized key is required. Visible to other local users through the process list — prefer `--token-file`. |
 | `--token-file FILE` | Reads the token from `FILE` instead, so the secret is protected by that file's permissions. Trailing newlines are ignored. |
 | `--access-file FILE` | Further TCP tokens with narrower grants, one per line. Needs `--listen-tcp`. See [Narrower tokens](#narrower-tokens-for-scripts). |
 | `--tls-cert FILE`, `--tls-key FILE` | PEM certificate and matching private key for the TCP listener. Omit both to have the daemon generate an ephemeral self-signed certificate. |
@@ -283,10 +285,11 @@ so reopening Contour finds your sessions where you left them. The same holds acr
 | `--tmux-socket PATH` | The tmux server socket (tmux's `-S`) for `--tmux`. |
 | `--profile NAME` | Config profile the window renders remote sessions with. |
 | `--config FILE` | Configuration file to load. |
-| `--host NAME\|URL` | Attach to a remote host: a name saved under [`hosts:`](configuration/hosts.md), or an ad-hoc `ssh://[USER@]HOST[:PORT]` (a `tls://` host needs its token, so it must be saved). The remote daemon is started there when none runs; the window title and the tab strip name the host. A host's `profile:` is used unless `--profile` names one. Cannot be combined with `--socket`, `--connect-tcp`, `--token`, `--token-file`, `--tls-ca` or `--tmux`. See [Remote hosts](remote-hosts.md). |
-| `--connect-tcp HOST:PORT` | Connect to a remote daemon over TLS instead of a local socket. |
+| `--host NAME\|URL` | Attach to a remote host: a name saved under [`hosts:`](configuration/hosts.md), or an ad-hoc `ssh://[USER@]HOST[:PORT]` (or an ad-hoc `tls://HOST:PORT`, which signs in with your SSH agent's keys). The remote daemon is started there when none runs; the window title and the tab strip name the host. A host's `profile:` is used unless `--profile` names one. Cannot be combined with `--socket`, `--connect-tcp`, `--token`, `--token-file`, `--tls-ca` or `--tmux`. See [Remote hosts](remote-hosts.md). |
+| `--connect-tcp HOST:PORT` | Connect to a remote daemon over TLS instead of a local socket. It signs in with a key of your SSH agent, or with the token. A daemon met for the first time is pinned once you trust its fingerprint in a dialog. |
 | `--token TOKEN`, `--token-file FILE` | The preshared token to present, inline or read from a file. |
-| `--tls-ca FILE` | PEM trust anchor pinning the daemon's certificate. Omitted means encrypt-but-do-not-verify. |
+| `--tls-ca FILE` | PEM trust anchor the daemon's certificate is verified against. Omitted, the daemon is pinned on first use instead: you are asked to trust its fingerprint, which is kept in `known_daemons`, and a daemon that presents another one is refused. |
+| `--daemon-fingerprint SHA256:...` | The fingerprint a `--connect-tcp` or `--host` daemon without a CA must present on first contact, as `contour daemon status` prints it on that machine. It is pinned without asking, and any other fingerprint is refused. |
 | `--log TAGS`, `--log-file FILE` | As above — and **passed on to a daemon this client auto-starts**, which is otherwise the one instance nobody can configure. |
 
 ## tmux interoperability
@@ -339,35 +342,47 @@ tmux windows become Contour tabs, tmux panes become splits, and input travels ba
 ## Remote access over TCP
 
 By default a daemon is reachable only through its Unix socket, where the filesystem permissions
-are the access control. `--listen-tcp` additionally exposes the native protocol over the network:
+are the access control. `--listen-tcp` additionally exposes the native protocol over the network.
+It serves **one user per daemon**: whoever signs in gets that user's sessions and everything they can do.
+To serve several users, give each their own daemon, reached over ssh, which is what separates them by
+account; see [Remote hosts](remote-hosts.md#over-ssh).
 
 ```sh
-# On the host running the sessions:
-umask 077 && openssl rand -base64 32 > ~/.contour-token
-contour daemon --listen-tcp 127.0.0.1:9090 --token-file ~/.contour-token
+# On the host running the sessions: authorize a key, then listen for keys alone.
+cat ~/.ssh/id_ed25519.pub >> ~/.config/contour/authorized_keys
+contour daemon --listen-tcp 127.0.0.1:9090 --auth keys
 
-# On the machine you are sitting at:
-contour client --connect-tcp server.example.com:9090 --token-file ~/.contour-token
+# On the machine you are sitting at (its SSH agent signs in; the first contact asks you to compare the
+# daemon's fingerprint, which `contour daemon status` prints on the host):
+contour client --connect-tcp server.example.com:9090
 ```
+
+A token still works, and is the way for a script: `--token-file FILE` on the daemon (the default
+`--auth any` accepts both) and `--token-file FILE` on the client.
 
 Properties worth knowing before you open a port:
 
 - **TLS is not optional.** The TCP endpoint is always encrypted; there is no plaintext mode.
-- **A token is required.** TCP has no filesystem gate to fall back on, so `--listen-tcp` without
-  `--token`/`--token-file` refuses to start rather than serving anonymously.
+- **A credential is required.** TCP has no filesystem gate to fall back on, so `--listen-tcp` with
+  neither an authorized key nor `--token`/`--token-file` refuses to start rather than serving anonymously.
+  A key signs in over the TLS connection itself, so a daemon never learns a secret it could replay.
 - **Prefer `--token-file`.** A token passed as `--token` is readable by every other user on the
   machine through the process list; a file carries permissions.
-- **Without `--tls-cert`/`--tls-key` the daemon generates an ephemeral self-signed certificate**,
-  and without `--tls-ca` the client encrypts but does **not** verify who it is talking to. That is
-  a trust-on-first-use posture: it stops passive eavesdropping, not an active
-  machine-in-the-middle. For anything beyond a trusted network, pass a real certificate on the
-  daemon and pin it with `--tls-ca` on the client — the certificate must then also be **issued for
-  the host you connect to**, not merely signed by that CA.
+- **Without `--tls-cert`/`--tls-key` the daemon keeps a self-signed identity of its own**, made on
+  first start in `<state-dir>/tls/<label>.pem` and presented ever after. The daemon refuses that file
+  unless it is yours and readable by you alone (mode 0600), so a copy with looser permissions needs a
+  `chmod 600`. The client pins it on first use, as ssh pins a host key:
+  it asks you to compare the fingerprint, remembers it in `known_daemons`, and refuses the daemon
+  for good if it ever presents another (`contour daemon forget-pin HOST:PORT` after a reinstall).
+  For a certificate verified the way a browser does, pass one on the daemon and name its CA with
+  `--tls-ca` on the client — the certificate must then also be **issued for the host you connect
+  to**, not merely signed by that CA. See [Remote hosts](remote-hosts.md#over-tls).
 - **Bind deliberately.** `127.0.0.1` reaches only the local machine; `0.0.0.0` reaches everyone who
   can route to you. Prefer forwarding the loopback port over SSH to exposing it directly.
-- **Control requests need a verified daemon.** A client of the control API refuses to send a single
-  request over TLS it has not verified: without `--tls-ca` it stops before connecting. With the
-  control API a token types into and reads every pane, so it must not be handed to whoever answers.
+- **Control requests need a trusted daemon.** A client of the control API sends nothing over a TLS
+  connection whose daemon is neither verified by `--tls-ca` nor pinned: it asks you to trust the
+  fingerprint first, or is given `--daemon-fingerprint`. With the control API a token types into and
+  reads every pane, so it must not be handed to whoever answers.
 
 ### Narrower tokens for scripts
 

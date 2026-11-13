@@ -148,6 +148,9 @@ class WindowSwitcher final: public SwitchingService
     void succeed(Request const& request, vthost::proto::SwitchOutcome outcome);
     /// Ends @p request as failed: said in its window, in Attach to Host's words, and to the caller.
     void fail(Request const& request, std::string const& reason);
+    /// Ends @p request as declined by the user: said in its window without alarm, and to the caller. The
+    /// window shows what it showed.
+    void decline(Request const& request, std::string const& reason);
 
     session::TerminalSessionManager& _sessions;
     ISwitchHost& _host;

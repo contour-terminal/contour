@@ -6,14 +6,17 @@
 #include <vtpty/MockPty.hpp>
 
 #include <core/Base64.hpp>
+#include <core/Random.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/async/WhenAll.hpp>
 #include <core/log/LogSink.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
+#include <core/net/Tls.hpp>
 #include <core/net/testing/CoroTestSupport.hpp>
 #include <core/net/testing/InMemorySocket.hpp>
 #include <core/net/testing/InMemoryTransport.hpp>
+#include <core/net/testing/SoftwareSecurityKey.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
@@ -55,6 +58,7 @@
 #include <vthost/DaemonControlWire.hpp>
 #include <vthost/FlushPolicy.hpp>
 #include <vthost/HostIdentity.hpp>
+#include <vthost/KeyAuth.hpp>
 #include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/NodeMove.hpp>
@@ -3005,7 +3009,7 @@ TEST_CASE("a token mismatch is reported without either token", "[vthost][native]
     loop.blockOn(driveExchange(&loop, session.get(), pair.second.get(), &bytes, 1, &received));
 
     CHECK(capture.contains("native-tcp#3@10.0.0.7"));
-    CHECK(capture.contains("preshared token mismatch"));
+    CHECK(capture.contains("authentication failed"));
     CHECK_FALSE(capture.contains("the-right-token"));
     CHECK_FALSE(capture.contains("the-wrong-token"));
 }
@@ -8709,3 +8713,536 @@ TEST_CASE("a bell summarized before its workspace was selected still reaches the
             CHECK_FALSE(summary.title.has_value());
 }
 // }}}
+
+// ---- key authentication (AuthChallenge and the proof that answers it) ----------------------------------
+
+namespace
+{
+/// A deterministic nonce source: the n-th nonce is 32 bytes of the value n, so a test knows what to sign.
+class CountingRandom final: public core::IRandom
+{
+  public:
+    void fill(std::span<std::byte> out) override
+    {
+        ++_calls;
+        std::ranges::fill(out, static_cast<std::byte>(_calls));
+    }
+
+    /// @return The nonce the @p ordinal-th challenge carries (one-based).
+    [[nodiscard]] static std::array<std::byte, 32> nonce(std::size_t ordinal)
+    {
+        auto result = std::array<std::byte, 32> {};
+        result.fill(static_cast<std::byte>(ordinal));
+        return result;
+    }
+
+  private:
+    std::size_t _calls = 0;
+};
+
+/// A security key standing in for the user's, and the authorized_keys entry listing it.
+struct TestKey
+{
+    std::unique_ptr<core::net::testing::SoftwareSecurityKey> device;
+    core::net::SshPublicKey pub;
+
+    [[nodiscard]] static TestKey make()
+    {
+        auto device = core::net::testing::SoftwareSecurityKey::generate(core::net::SshKeyType::SkEd25519);
+        REQUIRE(device.has_value());
+        auto const parsed = vthost::parseAuthorizedKeys((*device)->publicKeyLine("t"));
+        REQUIRE(parsed.keys.size() == 1);
+        return TestKey { .device = std::move(*device), .pub = parsed.keys.front().key };
+    }
+
+    [[nodiscard]] vthost::AuthorizedKey entry(vtcontrol::ControlGrants grants) const
+    {
+        return vthost::AuthorizedKey { .key = pub, .grants = grants };
+    }
+
+    /// @return A proof of this key over @p nonce, bound to @p binding.
+    [[nodiscard]] proto::KeyProof prove(
+        std::array<std::byte, 32> const& nonce,
+        std::array<std::byte, 32> const& binding,
+        core::net::testing::UserPresence presence = core::net::testing::UserPresence::Present) const
+    {
+        auto const message = vthost::keyAuthMessage(nonce, binding);
+        auto const signedData = core::net::sshsigSignedData(vthost::KeyAuthNamespace, message);
+        auto const signature = device->sign(signedData, presence, 1);
+        REQUIRE(signature.has_value());
+        return proto::KeyProof { .publicKey = pub.blob,
+                                 .signature =
+                                     core::net::assembleSshsig(pub, vthost::KeyAuthNamespace, *signature) };
+    }
+};
+
+/// @return The channel binding the daemon side of these cases is told its connection has.
+std::array<std::byte, 32> testBinding()
+{
+    auto binding = std::array<std::byte, 32> {};
+    binding.fill(std::byte { 0xB1 });
+    return binding;
+}
+
+/// @return The binding of some other TLS session.
+std::array<std::byte, 32> otherBinding()
+{
+    auto binding = testBinding();
+    binding.back() ^= std::byte { 0xFF };
+    return binding;
+}
+
+/// @return A Control hello, which is answered by the ServerHello alone, carrying @p proof or @p token.
+proto::ClientHello controlHello(std::optional<proto::KeyProof> proof, std::string token = {})
+{
+    return proto::ClientHello { .token = std::move(token),
+                                .role = proto::ConnectionRole::Control,
+                                .keyProof = std::move(proof) };
+}
+
+/// Runs a session that authenticates by key through @p hellos and returns every frame it sent.
+std::vector<proto::DecodedFrame> keyAuthExchange(vthost::KeyAuthPolicy policy,
+                                                 std::vector<proto::ClientHello> const& hellos,
+                                                 std::vector<vthost::AcceptedToken> tokens = {},
+                                                 vtcontrol::ControlGrants* grantsOut = nullptr)
+{
+    auto options = HarnessOptions {};
+    options.services.handshake.acceptedTokens = std::move(tokens);
+    options.services.handshake.keyAuth = std::move(policy);
+    auto h = NativeHarness { std::move(options) };
+    auto pdus = std::vector<proto::DecodedPdu> {};
+    for (auto const& hello: hellos)
+        pdus.emplace_back(hello);
+    auto frames = exchangeAll(&h, pdus);
+    if (grantsOut != nullptr)
+        *grantsOut = h.session->grants();
+    return frames;
+}
+
+/// @return The policy of a connection bound to testBinding(), listing @p keys.
+vthost::KeyAuthPolicy policyOf(std::vector<vthost::AuthorizedKey> keys,
+                               CountingRandom& random,
+                               vthost::DaemonAuth auth = vthost::DaemonAuth::KeysOnly)
+{
+    return vthost::KeyAuthPolicy {
+        .keys = std::move(keys), .auth = auth, .channelBinding = testBinding(), .random = random
+    };
+}
+
+/// @return Whether @p frame is a ServerHello that admits the client.
+bool admits(proto::DecodedFrame const& frame)
+{
+    auto const* hello = std::get_if<proto::ServerHello>(&frame.pdu);
+    return hello != nullptr && hello->agreedVersion != 0;
+}
+
+/// @return The bytes of the refusal that ends @p frames, as the client reads them, or empty when the exchange
+///         did not end in one.
+std::vector<std::byte> refusalBytes(std::vector<proto::DecodedFrame> const& frames)
+{
+    auto sink = proto::Writer {};
+    if (frames.empty() || !std::holds_alternative<proto::ServerHello>(frames.back().pdu)
+        || admits(frames.back()))
+        return {};
+    proto::encodePdu(sink, 1, frames.back().pdu);
+    return { sink.view().begin(), sink.view().end() };
+}
+} // namespace
+
+TEST_CASE("a daemon that authenticates by key speaks first, with a challenge", "[vthost][native][auth]")
+{
+    auto const key = TestKey::make();
+    auto random = CountingRandom {};
+    auto const frames = keyAuthExchange(policyOf({ key.entry(vtcontrol::ControlGrants::all()) }, random),
+                                        { controlHello(std::nullopt) });
+    REQUIRE_FALSE(frames.empty());
+    auto const* challenge = std::get_if<proto::AuthChallenge>(&frames.front().pdu);
+    REQUIRE(challenge != nullptr);
+    CHECK(challenge->nonce == CountingRandom::nonce(1));
+    CHECK(challenge->methods == std::to_underlying(proto::AuthMethod::Key)); // keys only: no token offered
+}
+
+TEST_CASE("a unix-socket session sends no challenge", "[vthost][native][auth]")
+{
+    auto h = NativeHarness {};
+    auto const frames = exchangeAll(&h, { proto::DecodedPdu { controlHello(std::nullopt) } });
+    REQUIRE_FALSE(frames.empty());
+    CHECK(std::holds_alternative<proto::ServerHello>(frames.front().pdu));
+    CHECK(admits(frames.front()));
+}
+
+TEST_CASE("a valid proof is answered with a ServerHello and the key's grants", "[vthost][native][auth]")
+{
+    auto const key = TestKey::make();
+    auto const grants = vtcontrol::ControlGrants::all();
+    auto random = CountingRandom {};
+    auto got = vtcontrol::ControlGrants::none();
+    auto capture = core::log::ScopedCapture {};
+    auto const frames = keyAuthExchange(policyOf({ key.entry(grants) }, random),
+                                        { controlHello(key.prove(CountingRandom::nonce(1), testBinding())) },
+                                        {},
+                                        &got);
+    REQUIRE(frames.size() >= 2);
+    CHECK(admits(frames[1]));
+    CHECK(got == grants);
+    // The log names the key, and never the signature.
+    CHECK(capture.contains(core::net::sshFingerprintOf(key.pub)));
+}
+
+TEST_CASE("a proof carries the grants of the key that made it", "[vthost][native][auth]")
+{
+    auto const key = TestKey::make();
+    auto const narrow = vtcontrol::parseGrants("read,screen");
+    REQUIRE(narrow.has_value());
+    auto random = CountingRandom {};
+    auto got = vtcontrol::ControlGrants::none();
+    auto const frames = keyAuthExchange(policyOf({ key.entry(*narrow) }, random),
+                                        { controlHello(key.prove(CountingRandom::nonce(1), testBinding())) },
+                                        {},
+                                        &got);
+    REQUIRE(frames.size() >= 2);
+    CHECK(admits(frames[1]));
+    CHECK(got == *narrow);
+}
+
+TEST_CASE("a proof over another session's binding is refused after five attempts", "[vthost][native][auth]")
+{
+    // What a man in the middle holds: a proof the user made on ANOTHER connection, replayed here.
+    auto const key = TestKey::make();
+    auto random = CountingRandom {};
+    auto hellos = std::vector<proto::ClientHello> {};
+    for (auto const attempt: std::views::iota(std::size_t { 1 }, std::size_t { 6 }))
+        hellos.push_back(controlHello(key.prove(CountingRandom::nonce(attempt), otherBinding())));
+    auto const frames =
+        keyAuthExchange(policyOf({ key.entry(vtcontrol::ControlGrants::all()) }, random), hellos);
+
+    // The opening challenge, a fresh one after each of the first four refusals, then the refusal.
+    REQUIRE(frames.size() == 6);
+    for (auto const index: std::views::iota(std::size_t { 0 }, std::size_t { 5 }))
+    {
+        auto const* challenge = std::get_if<proto::AuthChallenge>(&frames[index].pdu);
+        REQUIRE(challenge != nullptr);
+        CHECK(challenge->nonce == CountingRandom::nonce(index + 1)); // fresh every time
+    }
+    CHECK_FALSE(refusalBytes(frames).empty());
+}
+
+TEST_CASE("five bad proofs and then a good one is still refused", "[vthost][native][auth]")
+{
+    auto const key = TestKey::make();
+    auto random = CountingRandom {};
+    auto hellos = std::vector<proto::ClientHello> {};
+    for (auto const attempt: std::views::iota(std::size_t { 1 }, std::size_t { 6 }))
+        hellos.push_back(controlHello(key.prove(CountingRandom::nonce(attempt), otherBinding())));
+    // The sixth is made over the very nonce a sixth challenge would carry, and the right binding.
+    hellos.push_back(controlHello(key.prove(CountingRandom::nonce(6), testBinding())));
+    auto got = vtcontrol::ControlGrants::all();
+    auto const frames =
+        keyAuthExchange(policyOf({ key.entry(vtcontrol::ControlGrants::all()) }, random), hellos, {}, &got);
+
+    CHECK(std::ranges::none_of(frames, admits));
+    CHECK_FALSE(refusalBytes(frames).empty());
+    CHECK(got == vtcontrol::ControlGrants::none()); // nothing was granted
+}
+
+TEST_CASE("a refused key, an unknown key, a token under keys-only and a wrong token are refused alike",
+          "[vthost][native][auth]")
+{
+    auto const listed = TestKey::make();
+    auto const stranger = TestKey::make();
+    auto const all = vtcontrol::ControlGrants::all();
+
+    auto const failedKey = [&] {
+        auto random = CountingRandom {};
+        auto hellos = std::vector<proto::ClientHello> {};
+        for (auto const attempt: std::views::iota(std::size_t { 1 }, std::size_t { 6 }))
+            hellos.push_back(controlHello(listed.prove(CountingRandom::nonce(attempt), otherBinding())));
+        return keyAuthExchange(policyOf({ listed.entry(all) }, random), hellos);
+    }();
+    auto const unknownKey = [&] {
+        auto random = CountingRandom {};
+        auto hellos = std::vector<proto::ClientHello> {};
+        for (auto const attempt: std::views::iota(std::size_t { 1 }, std::size_t { 6 }))
+            hellos.push_back(controlHello(stranger.prove(CountingRandom::nonce(attempt), testBinding())));
+        return keyAuthExchange(policyOf({ listed.entry(all) }, random), hellos);
+    }();
+    auto random = CountingRandom {};
+    auto const tokenUnderKeysOnly = keyAuthExchange(policyOf({ listed.entry(all) }, random),
+                                                    { controlHello(std::nullopt, "some-token") });
+    auto random2 = CountingRandom {};
+    auto const wrongToken = keyAuthExchange(policyOf({ listed.entry(all) }, random2, vthost::DaemonAuth::Any),
+                                            { controlHello(std::nullopt, "the-wrong-token") },
+                                            { { .token = "the-right-token" } });
+
+    auto const reference = refusalBytes(wrongToken);
+    REQUIRE_FALSE(reference.empty());
+    CHECK(refusalBytes(failedKey) == reference);
+    CHECK(refusalBytes(unknownKey) == reference);
+    // Nor does the number of frames tell a listed key from an unlisted one: each is five challenges, then the
+    // refusal.
+    REQUIRE(unknownKey.size() == failedKey.size());
+    CHECK(unknownKey.size() == 6);
+    for (auto const index: std::views::iota(std::size_t { 0 }, unknownKey.size()))
+        CHECK(unknownKey[index].pdu.index() == failedKey[index].pdu.index());
+    CHECK(std::ranges::all_of(unknownKey | std::views::take(5), [](auto const& frame) {
+        return std::holds_alternative<proto::AuthChallenge>(frame.pdu);
+    }));
+    CHECK(refusalBytes(tokenUnderKeysOnly) == reference);
+}
+
+TEST_CASE("a token still works beside keys unless the daemon is keys-only", "[vthost][native][auth]")
+{
+    auto const key = TestKey::make();
+    auto random = CountingRandom {};
+    auto const frames = keyAuthExchange(
+        policyOf({ key.entry(vtcontrol::ControlGrants::all()) }, random, vthost::DaemonAuth::Any),
+        { controlHello(std::nullopt, "the-right-token") },
+        { { .token = "the-right-token" } });
+    REQUIRE(frames.size() >= 2);
+    auto const* challenge = std::get_if<proto::AuthChallenge>(&frames.front().pdu);
+    REQUIRE(challenge != nullptr);
+    CHECK(challenge->methods
+          == (std::to_underlying(proto::AuthMethod::Key) | std::to_underlying(proto::AuthMethod::Token)));
+    CHECK(admits(frames[1]));
+}
+
+TEST_CASE("a security-key proof made without user presence is refused", "[vthost][native][auth]")
+{
+    auto const key = TestKey::make();
+    auto random = CountingRandom {};
+    auto capture = core::log::ScopedCapture {};
+    auto const frames = keyAuthExchange(
+        policyOf({ key.entry(vtcontrol::ControlGrants::all()) }, random),
+        { controlHello(
+            key.prove(CountingRandom::nonce(1), testBinding(), core::net::testing::UserPresence::Absent)) });
+    CHECK(std::ranges::none_of(frames, admits));
+    CHECK(capture.contains("user presence"));
+}
+
+TEST_CASE("an endpoint with keys and no token never reads its empty token list as accept-any",
+          "[vthost][native][auth]")
+{
+    auto const key = TestKey::make();
+    auto random = CountingRandom {};
+    auto const frames = keyAuthExchange(
+        policyOf({ key.entry(vtcontrol::ControlGrants::all()) }, random, vthost::DaemonAuth::Any),
+        { controlHello(std::nullopt) });
+    CHECK(std::ranges::none_of(frames, admits));
+    CHECK_FALSE(refusalBytes(frames).empty());
+}
+
+namespace
+{
+/// A key and an SSHSIG signature made once by OpenSSH over keyAuthMessage(nonce 32 x 0x01, binding 32 x
+/// 0xB1).
+struct OpenSshFixture
+{
+    std::string_view type;      ///< Names the case.
+    std::string_view publicKey; ///< The `.pub` line.
+    std::string_view signature; ///< The armored signature.
+};
+
+// Made once, so the daemon agrees with ssh-keygen and not only with itself:
+//   ssh-keygen -t ed25519 -N "" -C fixture -f k      (and: ssh-keygen -t ecdsa -b 256 -N "" -C fixture -f e)
+//   printf 'contour-auth-v1' > msg; head -c 32 /dev/zero | tr '\0' '\001' >> msg
+//   head -c 32 /dev/zero | tr '\0' '\261' >> msg         # 32 x 0xB1, the binding testBinding() states
+//   ssh-keygen -Y sign -f k -n contour-auth -O hashalg=sha512 msg
+// The private keys are not kept. Should keyAuthMessage, the nonce or the binding change, so must these.
+constexpr auto OpenSshFixtures = std::to_array<OpenSshFixture>({
+    { "ssh-ed25519",
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPOGEVwBoLkljc/Bl66BFDumXvW5ZoSv3rpHQs87dqpJ fixture",
+      R"(-----BEGIN SSH SIGNATURE-----
+U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAg84YRXAGguSWNz8GXroEUO6Ze9b
+lmhK/eukdCzzt2qkkAAAAMY29udG91ci1hdXRoAAAAAAAAAAZzaGE1MTIAAABTAAAAC3Nz
+aC1lZDI1NTE5AAAAQIFlLyOF6a2BKbrsdxw2OQLVIgtRP17dUjX9KFSkqQ5tDpD0jtF1rY
+rRGR0vbQXhSHNKpzS+PeD4xJZH3G65KQE=
+-----END SSH SIGNATURE-----
+)" },
+    { "ecdsa-sha2-nistp256",
+      "ecdsa-sha2-nistp256 "
+      "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBDAIBDqOHQhYf6VMCPntLUchx90O868V45R7PFwJ7nxS5GmHg4"
+      "FG6lFe"
+      "1rTQkS3DaULuo4ZDlolPO4xxo8Z9Co0= fixture",
+      R"(-----BEGIN SSH SIGNATURE-----
+U1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE
+EEMAgEOo4dCFh/pUwI+e0tRyHH3Q7zrxXjlHs8XAnufFLkaYeDgUbqUV7WtNCRLcNpQu6j
+hkOWiU87jHGjxn0KjQAAAAxjb250b3VyLWF1dGgAAAAAAAAABnNoYTUxMgAAAGQAAAATZW
+Nkc2Etc2hhMi1uaXN0cDI1NgAAAEkAAAAgP/5A2imOewhJSn256DT9Kxv+8HXPaZ8Bqc6l
+2nrVsU0AAAAhAO6drQ4V8kx0enjw3XxQAJQKIQrteQ9fHhMWLw4e70Fr
+-----END SSH SIGNATURE-----
+)" },
+});
+} // namespace
+
+TEST_CASE("a proof by a plain key made by ssh-keygen is accepted", "[vthost][native][auth]")
+{
+    auto const message = vthost::keyAuthMessage(CountingRandom::nonce(1), testBinding());
+    REQUIRE(message.size() == 15 + 32 + 32);
+    CHECK(std::ranges::count(message, std::byte { 0x01 }) == 32);
+    CHECK(std::ranges::count(message, std::byte { 0xB1 }) == 32);
+
+    for (auto const& fixture: OpenSshFixtures)
+    {
+        INFO(fixture.type);
+        auto const keys = vthost::parseAuthorizedKeys(fixture.publicKey);
+        REQUIRE(keys.keys.size() == 1);
+        auto const narrow = vtcontrol::parseGrants("read,screen");
+        REQUIRE(narrow.has_value());
+        auto random = CountingRandom {};
+        auto got = vtcontrol::ControlGrants::none();
+        auto const frames = keyAuthExchange(
+            policyOf({ vthost::AuthorizedKey { .key = keys.keys.front().key, .grants = *narrow } }, random),
+            { controlHello(proto::KeyProof { .publicKey = keys.keys.front().key.blob,
+                                             .signature = std::string { fixture.signature } }) },
+            {},
+            &got);
+        REQUIRE(frames.size() >= 2);
+        CHECK(admits(frames[1]));
+        CHECK(got == *narrow);
+    }
+}
+
+// ---- the pre-authentication deadline ------------------------------------------------------------------
+
+namespace
+{
+/// Runs @p session and says so once it has ended.
+Task<void> runUntilEnded(NativeSession* session, bool* ended)
+{
+    co_await session->run();
+    *ended = true;
+}
+
+/// A session on a ManualClock whose hello must be accepted PreAuthTimeout after "accept", turned one loop
+/// turn at a time so each instant is exact.
+struct DeadlineHarness
+{
+    core::platform::ManualClock clock { core::platform::SteadyTimePoint {} + 10s };
+    NativeHarness h { [this] {
+        auto options = HarnessOptions { .clock = &clock };
+        options.services.handshake.authDeadline = clock.now() + vthost::PreAuthTimeout;
+        return options;
+    }() };
+    bool ended = false;
+    bool clientSawEnd = false;
+    std::vector<proto::DecodedFrame> received;
+
+    DeadlineHarness()
+    {
+        h.loop.spawn(runUntilEnded(h.session.get(), &ended));
+        h.loop.spawn(readAll(h.pair.second.get(), &received, &clientSawEnd));
+    }
+
+    /// Lets the session end (its client closes) before anything it reaches is destroyed.
+    ~DeadlineHarness()
+    {
+        h.pair.second->close();
+        std::ignore = turnUntil(h.loop, [this] { return ended; });
+    }
+};
+} // namespace
+
+TEST_CASE("a connection that sends no hello is closed at the pre-authentication deadline",
+          "[vthost][native][auth][deadline]")
+{
+    auto capture = core::log::ScopedCapture {};
+    auto d = DeadlineHarness {};
+    turnIdle(d.h.loop);
+    CHECK_FALSE(d.ended);
+
+    d.clock.advance(vthost::PreAuthTimeout - 1s);
+    turnIdle(d.h.loop);
+    CHECK_FALSE(d.ended); // a second early: still waiting
+
+    d.clock.advance(2s);
+    CHECK(turnUntil(d.h.loop, [&] { return d.ended && d.clientSawEnd; }));
+    CHECK(capture.contains("no hello was accepted"));
+}
+
+TEST_CASE("a connection whose hello was accepted outlives the pre-authentication deadline",
+          "[vthost][native][auth][deadline]")
+{
+    auto d = DeadlineHarness {};
+    auto const hello = encodeRequest({ proto::DecodedPdu { controlHello(std::nullopt) } });
+    d.h.loop.spawn(feedBytes(d.h.pair.second.get(), &hello));
+    CHECK(turnUntil(d.h.loop, [&] { return !d.received.empty(); }));
+    REQUIRE_FALSE(d.received.empty());
+    CHECK(admits(d.received.front()));
+
+    d.clock.advance(vthost::PreAuthTimeout + 5s);
+    turnIdle(d.h.loop);
+    CHECK_FALSE(d.ended);
+}
+
+TEST_CASE("a unix-socket session has no pre-authentication deadline", "[vthost][native][auth][deadline]")
+{
+    auto clock = core::platform::ManualClock { core::platform::SteadyTimePoint {} + 10s };
+    auto h = NativeHarness { HarnessOptions { .clock = &clock } };
+    auto ended = false;
+    h.loop.spawn(runUntilEnded(h.session.get(), &ended));
+    turnIdle(h.loop);
+    clock.advance(10min);
+    turnIdle(h.loop);
+    CHECK_FALSE(ended);
+    h.pair.second->close();
+    CHECK(turnUntil(h.loop, [&] { return ended; }));
+}
+
+TEST_CASE("a TLS listener with neither a key nor a token is refused", "[vthost][native][auth]")
+{
+    auto h = NativeHarness {};
+    auto tls = core::net::makeSelfSignedServerContext();
+    REQUIRE(tls.has_value());
+    auto random = CountingRandom {};
+    auto const made = vthost::makeTlsNativeHandler(
+        h.loop,
+        h.host,
+        *tls,
+        vthost::NativeSessionServices {},
+        vthost::TlsKeyAuth { .keys = {}, .auth = vthost::DaemonAuth::Any, .random = random });
+    REQUIRE_FALSE(made);
+    CHECK(made.error().contains("token"));
+}
+
+TEST_CASE("a TLS peer that stalls its handshake is closed at the pre-authentication deadline",
+          "[vthost][native][auth][deadline]")
+{
+    auto capture = core::log::ScopedCapture {};
+    auto clock = core::platform::ManualClock { core::platform::SteadyTimePoint {} + 10s };
+    auto h = NativeHarness { HarnessOptions { .clock = &clock } };
+    auto tls = core::net::makeSelfSignedServerContext();
+    REQUIRE(tls.has_value());
+    auto random = CountingRandom {};
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.acceptedTokens = { vthost::AcceptedToken { .token = "tok" } };
+    auto const made = vthost::makeTlsNativeHandler(
+        h.loop,
+        h.host,
+        *tls,
+        std::move(services),
+        vthost::TlsKeyAuth { .keys = {}, .auth = vthost::DaemonAuth::Any, .random = random });
+    REQUIRE(made);
+    auto const& handler = *made;
+
+    // The peer connects over TCP and says nothing: the server end waits for a ClientHello that never comes.
+    auto pair = makeConnection(h.loop, std::nullopt);
+    auto served = false;
+    h.loop.spawn([](core::async::Task<void> serve, bool* done) -> Task<void> {
+        co_await std::move(serve);
+        *done = true;
+    }(handler(vthost::ConnectionId { .endpoint = "native-tcp", .index = 9 }, std::move(pair.first)),
+                                                               &served));
+    auto received = std::vector<proto::DecodedFrame> {};
+    auto clientSawEnd = false;
+    h.loop.spawn(readAll(pair.second.get(), &received, &clientSawEnd));
+
+    turnIdle(h.loop);
+    clock.advance(vthost::PreAuthTimeout - 1s);
+    turnIdle(h.loop);
+    CHECK_FALSE(served);
+    CHECK_FALSE(clientSawEnd);
+
+    clock.advance(2s);
+    CHECK(turnUntil(h.loop, [&] { return served && clientSawEnd; }));
+    CHECK(capture.contains("TLS handshake was not finished"));
+}

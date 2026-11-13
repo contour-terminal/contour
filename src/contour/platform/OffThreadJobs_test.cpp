@@ -9,9 +9,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <ranges>
+#include <stop_token>
 #include <string>
 #include <thread>
 
@@ -73,4 +75,28 @@ TEST_CASE("OffThreadJobs joins the workers that ended as the next job starts", "
     jobs.run([] { return 1; }, [&delivered](int one) { delivered += one; });
     REQUIRE(deliveredWhen([&] { return delivered == 6; }));
     CHECK(jobs.workerCount() <= 2);
+}
+
+TEST_CASE("OffThreadJobs stops a job that takes a stop token as it is destroyed", "[contour][qt][threading]")
+{
+    auto stopped = std::atomic<bool> { false };
+    auto delivered = false;
+    auto const started = std::chrono::steady_clock::now();
+    {
+        auto jobs = contour::platform::OffThreadJobs {};
+        jobs.run(
+            [&stopped](std::stop_token const& stop) {
+                // Waits for its owner to go, as a listing waits on the network or on the user.
+                while (!stop.stop_requested())
+                    std::this_thread::sleep_for(std::chrono::milliseconds { 1 });
+                stopped = true;
+                return 0;
+            },
+            [&delivered](int) { delivered = true; });
+    }
+    // The destruction asked it to stop and waited for it: it ended, promptly, before the destruction did.
+    CHECK(stopped);
+    CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds { 5 });
+    QCoreApplication::processEvents();
+    CHECK_FALSE(delivered); // nobody is left to deliver to
 }

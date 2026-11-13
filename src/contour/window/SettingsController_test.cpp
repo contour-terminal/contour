@@ -5388,16 +5388,15 @@ TEST_CASE("SettingsController: a host's rows follow its address", "[settings][ho
     CHECK(profile.value("options").toStringList().contains(QString {}));
     CHECK(profile.value("optionLabels").toStringList().front() == "Default");
 
-    // Typed over to a tls:// address, the SSH group gives way to TLS, and the token is required.
+    // Typed over to a tls:// address, the SSH group gives way to TLS, and nothing else is required.
     REQUIRE(fx.controller->setHostField("url", "tls://starfive:7297").has_value());
     CHECK(keysOf(fx.controller->hostFields())
-          == QStringList { "url", "transport", "token_file", "tls_ca", "profile" });
+          == QStringList { "url", "transport", "token_file", "tls_ca", "identity_file", "profile" });
     CHECK(rowWithKey(fx.controller->hostFields(), "transport").value("value").toString() == "TLS");
-    CHECK(rowWithKey(fx.controller->hostFields(), "token_file").value("problem").toString().toStdString()
-          == config::describe(config::HostEntryError::TokenRequired));
+    CHECK(rowWithKey(fx.controller->hostFields(), "token_file").value("problem").toString().isEmpty());
     CHECK(rowWithKey(fx.controller->hostFields(), "tls_ca").value("placeholder").toString()
-          == "System trust");
-    CHECK_FALSE(fx.controller->hostAttachable());
+          == "Pinned on first use");
+    CHECK(fx.controller->hostAttachable());
 
     // An address that names no transport keeps the last one's rows, and says what is wrong under it.
     REQUIRE(fx.controller->setHostField("url", "starfive:22").has_value());
@@ -5415,13 +5414,13 @@ TEST_CASE("SettingsController: an invalid host page saves nothing", "[settings][
     fx.fire();
     CHECK(hostFileOf(fx, "starfive")->url == "ssh://me@starfive");
 
-    // A tls:// host without its token is no host the loader takes either.
+    // A tls:// host needs nothing beyond its address, so the loader takes it as it is.
     REQUIRE(fx.controller->setHostField("url", "tls://starfive:7297").has_value());
     fx.fire();
-    CHECK(hostFileOf(fx, "starfive")->url == "ssh://me@starfive");
-    CHECK(fx.cfg.hosts.value().at("starfive").url.scheme == config::HostScheme::Ssh);
+    CHECK(hostFileOf(fx, "starfive") == config::HostDraft { .url = "tls://starfive:7297" });
+    CHECK(fx.cfg.hosts.value().at("starfive").url.scheme == config::HostScheme::Tls);
 
-    // With the token, it is.
+    // And with a token too.
     REQUIRE(fx.controller->setHostField("token_file", "~/starfive.token").has_value());
     fx.fire();
     CHECK(hostFileOf(fx, "starfive")

@@ -562,8 +562,6 @@ TEST_CASE("ssh connect succeeds after login noise", "[vthost][ssh]")
     REQUIRE(fixture.spawner->spawned.size() == 1);
     CHECK(fixture.spawner->spawned.front() == vthost::sshArguments(fixture.target, SshPromptMode::Batch));
     CHECK(factory.describe() == "ssh://me@homepc");
-    // ssh verifies the host key, so a control client may send this transport its token.
-    CHECK(factory.peerTrust() == vthost::PeerTrust::Verified);
 }
 
 TEST_CASE("ssh connect names a refused login and the command to run once", "[vthost][ssh]")

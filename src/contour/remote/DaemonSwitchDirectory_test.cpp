@@ -83,8 +83,7 @@ class FakeLister final: public contour::remote::IWorkspaceLister
     }
 
     /// Answers the listing of @p daemon asked first and not answered yet.
-    void answer(std::string const& daemon,
-                std::expected<std::vector<vtcontrol::WorkspaceInfo>, std::string> listed)
+    void answer(std::string const& daemon, contour::remote::WorkspaceListing listed)
     {
         auto const found = std::ranges::find_if(
             asked, [&](Asked const& entry) { return entry.target.address.name == daemon; });
@@ -240,7 +239,8 @@ TEST_CASE("DaemonSwitchDirectory: a window's workspaces are its daemon's every o
     SECTION("a failed listing keeps the last answer")
     {
         rig.directory->refresh();
-        rig.lister->answer("admin", std::unexpected(std::string { "daemon went away" }));
+        rig.lister->answer("admin",
+                           std::unexpected(contour::remote::ListFailure { .reason = "daemon went away" }));
         CHECK(rig.directory->workspacesOf(WorkspaceId { 10 }).size() == 3);
     }
 

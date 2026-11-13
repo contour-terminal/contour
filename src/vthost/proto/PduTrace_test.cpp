@@ -360,6 +360,13 @@ TEST_CASE("the trace names the new PDUs without revealing a title", "[vthost][pr
                             .notifications = { PaneNotification { .title = "secret", .body = "secret" } } } })
           == "session=4 activity=none bell=rang notifications=1");
     CHECK(toString(PduType::PaneSummary) == "PaneSummary");
+    CHECK(summarize(DecodedPdu { AuthChallenge { .nonce = {}, .methods = 0b10 } }) == "methods=0b10");
+    CHECK(toString(PduType::AuthChallenge) == "AuthChallenge");
+    // A key proof is reported by its presence; neither the key nor the signature is transcribed.
+    auto const proven = summarize(DecodedPdu {
+        ClientHello { .keyProof = KeyProof { .publicKey = { std::byte { 9 } }, .signature = "SECRET" } } });
+    CHECK(proven.contains("key-proof=yes"));
+    CHECK_FALSE(proven.contains("SECRET"));
     CHECK(summarize(DecodedPdu { CreateTab { .session = 3, .profileName = "ssh" } })
           == "session=3 profile=\"ssh\"");
 }

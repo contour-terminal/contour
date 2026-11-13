@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/client/NativeClient.hpp>
 
+#include <core/async/WhenAny.hpp>
 #include <core/net/Sockets.hpp>
 
 #include <libunicode/convert.h>
@@ -12,12 +13,14 @@
 #include <iterator>
 #include <optional>
 #include <ranges>
+#include <tuple>
 #include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
 
 #include <vthost/GracefulClose.hpp>
+#include <vthost/KeyAuth.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/PduPump.hpp>
 #include <vthost/SessionSettings.hpp>
@@ -427,7 +430,10 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _onSwitchRequest(std::move(onSwitchRequest)),
     _onPaneSummary(std::move(onPaneSummary)),
     _onRaiseRole(std::move(onRaiseRole)),
-    _liveness(liveness)
+    _liveness(liveness),
+    _keyAuth(_handshake.keySource ? std::optional { KeyAuthenticator { _handshake.keySource } }
+                                  : std::nullopt),
+    _challenges(loop, core::async::AsyncQueueOptions { .capacity = MaxKeyAuthAttempts + 1 })
 {
 }
 
@@ -752,6 +758,16 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
         handleServerHello(*hello);
         return;
     }
+    // The daemon speaks first when it has keys to authenticate by, and answers a refused proof with another
+    // challenge; a client with a token sent that at once, and has nothing to answer with.
+    if (auto const* challenge = std::get_if<proto::AuthChallenge>(&pdu))
+    {
+        if (waitsForChallenge())
+            std::ignore = _challenges.push(*challenge);
+        else
+            clientLog()("attach: the daemon offers key authentication; this client sent its hello already");
+        return;
+    }
     // Before a ServerHello negotiated, nothing is applied and nothing is answered: the handshake has not
     // said what either end speaks, so a session PDU might be read in a protocol the daemon does not speak.
     if (!_negotiated)
@@ -1002,7 +1018,7 @@ void NativeClient::handleServerHello(proto::ServerHello const& hello)
     if (!outcome)
     {
         _refusal = outcome.error();
-        errorLog()("attach: {}; detaching", proto::describe(*_refusal, proto::PeerRole::Daemon));
+        errorLog()("attach: {}; detaching", refusalMessage());
         return;
     }
     _daemonIdentity = vtbackend::HostIdentity { .machineId = hello.machineId, .hostname = hello.hostname };
@@ -1034,25 +1050,58 @@ void NativeClient::reportPumpOutcome(PumpResult const& outcome)
     }
 }
 
-core::async::Task<void> NativeClient::run()
+std::string NativeClient::refusalMessage() const
 {
-    // Silence is measured from the hello, once the daemon answered it; until then the handshake deadline is
-    // what gives up on a daemon that never does.
-    auto const now = _loop.clock().now();
-    _liveness.noteInbound(now);
-    _handshakeTimer.emplace(
-        _loop, now + _liveness.policy().handshakeDeadline, &NativeClient::handshakeExpired, this);
+    if (!_refusal)
+        return {};
+    auto const words = proto::describe(*_refusal, proto::PeerRole::Daemon);
+    return _keyAuth ? _keyAuth->explainRefusal(words) : words;
+}
+
+void NativeClient::armHandshakeDeadline()
+{
+    _handshakeTimer.emplace(_loop,
+                            _loop.clock().now() + _liveness.policy().handshakeDeadline,
+                            &NativeClient::handshakeExpired,
+                            this);
+}
+
+void NativeClient::sendHello(std::optional<proto::KeyProof> proof)
+{
     send(proto::DecodedPdu { proto::ClientHello { .versions = _handshake.versions,
                                                   .capabilities = _handshake.capabilities,
-                                                  .token = _handshake.token,
+                                                  .token = proof ? std::string {} : _handshake.token,
                                                   .sessionSettings = _handshake.sessionSettings,
                                                   .clientArea = _handshake.clientArea,
                                                   .attachIntent = _handshake.attachIntent,
                                                   .profileName = _handshake.profileName,
                                                   .colorPreference = _handshake.colorPreference,
                                                   .cellPixelSize = _handshake.cellPixelSize,
-                                                  .workingDirectory = _handshake.workingDirectory } });
+                                                  .workingDirectory = _handshake.workingDirectory,
+                                                  .keyProof = std::move(proof) } });
+}
 
+core::async::Task<void> NativeClient::answerChallenges()
+{
+    while (auto const challenge = co_await _challenges.pop())
+    {
+        // The daemon answered: its challenge is the answer so far. What the signature takes -- a passphrase
+        // typed into a dialog -- is the user's time, not the daemon's silence, and is not measured.
+        _handshakeTimer.reset();
+        auto proof = co_await _keyAuth->proofFor(*challenge, channelBindingOf(*_connection));
+        // Keeps waiting rather than ending: pumpWithKeyAuth() stops at the first of its two tasks to end, and
+        // this one ends only when the connection's reading does.
+        if (_detached || _closing || _refusal || _negotiated)
+            continue;
+        // With no proof to give the hello goes out bare, and the daemon's refusal is what ends the attempt.
+        sendHello(std::move(proof));
+        // The daemon's silence is measured again, from the hello it now has to answer.
+        armHandshakeDeadline();
+    }
+}
+
+core::async::Task<PumpResult> NativeClient::pump()
+{
     auto outcome = co_await pumpPdus(
         _connection.get(),
         [this](proto::DecodedFrame const& frame) {
@@ -1060,6 +1109,33 @@ core::async::Task<void> NativeClient::run()
             return !_detached && !_refusal;
         },
         [this] { return _detached; });
+    _challenges.close();
+    co_return outcome;
+}
+
+core::async::Task<PumpResult> NativeClient::pumpWithKeyAuth()
+{
+    auto outcome = PumpResult {};
+    auto reading = [](NativeClient* self, PumpResult* result) -> core::async::Task<void> {
+        *result = co_await self->pump();
+    }(this, &outcome);
+    // The first to end ends the other: a signature still being made (a passphrase dialog open) is abandoned,
+    // its signer ended, when the connection's reading ends, so that run() does not wait on the user.
+    std::ignore = co_await core::async::whenAny(std::move(reading), answerChallenges());
+    co_return outcome;
+}
+
+core::async::Task<void> NativeClient::run()
+{
+    // Silence is measured from the hello, once the daemon answered it; until then the handshake deadline is
+    // what gives up on a daemon that never does.
+    _liveness.noteInbound(_loop.clock().now());
+    armHandshakeDeadline();
+    // A client with a key and no token lets the daemon speak first: its challenge is what the proof covers.
+    if (!waitsForChallenge())
+        sendHello(std::nullopt);
+
+    auto outcome = co_await (_keyAuth ? pumpWithKeyAuth() : pump());
     // detach() retires the read it parked on, which the pump reports as a cancelled read. That is
     // the detach itself, not a failure.
     // So does a connection given up on, whose loss was logged as it was declared.

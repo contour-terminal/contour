@@ -14,15 +14,6 @@
 namespace contour::cli
 {
 
-std::expected<void, std::string> requireVerifiedForWorkspaceListing(vthost::PeerTrust const trust)
-{
-    if (trust != vthost::PeerTrust::Unverified)
-        return {};
-    return std::unexpected(
-        std::string { "naming a workspace asks the daemon for its list, which is never sent "
-                      "over a link whose certificate is not pinned: pass --tls-ca FILE" });
-}
-
 std::expected<std::vector<vtcontrol::WorkspaceInfo>, std::string> decodeWorkspaceList(
     std::string_view replyJson)
 {

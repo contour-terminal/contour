@@ -15,6 +15,7 @@
 #include <iostream>
 #include <iterator>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -22,6 +23,7 @@
 #include <vector>
 
 #include <vthost/DaemonLifecycle.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
 #include <vthost/client/DaemonUpgrade.hpp>
 #include <vthost/handover/UpgradeError.hpp>
@@ -197,6 +199,8 @@ std::string formatDaemonStatus(DaemonStatus const& status)
     // A daemon from before the field states nothing.
     if (status.relocation)
         rows.push_back(Row { "staged copy", std::string { vthost::nameOf(*status.relocation) } });
+    if (status.tlsFingerprint)
+        rows.push_back(Row { "TLS fingerprint", *status.tlsFingerprint });
     auto const width =
         std::ranges::max(rows | std::views::transform([](Row const& r) { return r.label.size(); }));
     auto text = std::string {};
@@ -259,6 +263,34 @@ std::string LogFollower::poll()
     auto text = std::string { std::istreambuf_iterator<char> { **stream }, {} };
     _offset += text.size();
     return text;
+}
+
+ExitStatus daemonForgetPinVerb(vthost::KnownDaemons& knownDaemons,
+                               std::span<std::string_view const> words,
+                               std::ostream& out,
+                               std::ostream& err)
+{
+    // Spelled as the pin was written, whichever way the user spells it: `[::1]:7297` and `::1:7297` are one
+    // daemon.
+    auto const key = words.size() == 1 ? vthost::pinKeyOf(words.front()) : std::nullopt;
+    if (!key)
+    {
+        err << "contour daemon forget-pin: expected one HOST:PORT\n";
+        return ExitStatus::BadUsage;
+    }
+    auto const forgotten = knownDaemons.forget(*key);
+    if (!forgotten)
+    {
+        err << std::format("contour daemon forget-pin: {}\n", forgotten.error());
+        return ExitStatus::Failed;
+    }
+    if (!*forgotten)
+    {
+        err << std::format("contour daemon forget-pin: no daemon is pinned for {}\n", *key);
+        return ExitStatus::BadUsage;
+    }
+    out << std::format("forgot the pin of {}\n", *key);
+    return ExitStatus::Ok;
 }
 
 ExitStatus daemonStatusVerb(DaemonControlPort& control,

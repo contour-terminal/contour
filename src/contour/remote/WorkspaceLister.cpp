@@ -3,7 +3,10 @@
 #include <contour/platform/OffThreadJobs.hpp>
 #include <contour/remote/WorkspaceLister.hpp>
 
+#include <core/async/StopToken.hpp>
+
 #include <memory>
+#include <stop_token>
 #include <utility>
 
 #include <vthost/client/ControlClient.hpp>
@@ -27,15 +30,24 @@ namespace
         void list(ListTarget target, WorkspacesListed done) override
         {
             // Off the GUI thread: an ssh connect takes seconds. The answer is told back here.
+            // Stopped as this lister goes: the dial, a question about the daemon and the call all end then,
+            // rather than hold the owner's destruction up, or outlive what they borrow.
             _jobs.run(
-                [timeout = _timeout, transport = std::move(target.transport)] {
-                    auto listed = std::expected<std::vector<vtcontrol::WorkspaceInfo>, std::string> {};
-                    if (auto const answer =
-                            vthost::client::runControlCall(*transport, "workspace.list", "{}", "", timeout);
+                [timeout = _timeout, transport = std::move(target.transport)](std::stop_token const& stop) {
+                    auto source = core::async::StopSource {};
+                    auto const forward = std::stop_callback { stop, [&source] { source.request_stop(); } };
+                    auto listed = WorkspaceListing {};
+                    if (auto const answer = vthost::client::runControlCall(
+                            *transport, "workspace.list", "{}", "", timeout, source.get_token());
                         !answer)
-                        listed = std::unexpected(answer.error().message);
+                        listed = std::unexpected(ListFailure {
+                            .kind = answer.error().failure == vthost::client::ControlFailure::Declined
+                                        ? ListFailureKind::Declined
+                                        : ListFailureKind::Failed,
+                            .reason = answer.error().message });
                     else
-                        listed = cli::decodeWorkspaceList(*answer);
+                        listed = cli::decodeWorkspaceList(*answer).transform_error(
+                            [](std::string reason) { return ListFailure { .reason = std::move(reason) }; });
                     return listed;
                 },
                 [done = std::move(done)](auto listed) mutable { done(std::move(listed)); });

@@ -2,10 +2,14 @@
 #include <vthost/client/ControlClient.hpp>
 
 #include <core/Utf8Path.hpp>
+#include <core/async/AsyncQueue.hpp>
+#include <core/async/StopToken.hpp>
+#include <core/async/WhenAny.hpp>
 #include <core/net/IoBackend.hpp>
 #include <core/net/Sockets.hpp>
-#include <core/net/WithTimeout.hpp>
 
+#include <algorithm>
+#include <array>
 #include <format>
 #include <span>
 #include <utility>
@@ -13,6 +17,7 @@
 
 #include <vtcontrol/Json.hpp>
 #include <vthost/DaemonSpawn.hpp>
+#include <vthost/KeyAuth.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/proto/Negotiation.hpp>
@@ -42,16 +47,53 @@ namespace
         return spec.contains("://") || spec.find_first_of("/\\:") == std::string_view::npos;
     }
 
-    /// @param transport The transport a request would travel over.
-    /// @return The refusal of a transport that does not verify its peer, or nothing for one that does.
-    [[nodiscard]] std::expected<void, ControlClientError> requireVerified(ITransportFactory const& transport)
+    /// @param kind Why a transport could not connect.
+    /// @return How a control client reports it: a daemon that is not (yet) trusted is Untrusted, so no
+    ///         request goes to it, a question the user declined is Declined, a transport that is set up
+    ///         wrongly is Misconfigured, the rest Unreachable.
+    [[nodiscard]] constexpr ControlFailure controlFailureOf(TransportErrorKind kind) noexcept
     {
-        if (transport.peerTrust() != PeerTrust::Unverified)
-            return {};
-        return fail(ControlFailure::Untrusted,
-                    std::format("refusing to send control requests to {} without a verified certificate: "
-                                "pass --tls-ca FILE, or set tls_ca on the saved host",
-                                transport.describe()));
+        switch (kind)
+        {
+            case TransportErrorKind::HostKeyUnknown:
+            case TransportErrorKind::HostKeyChanged: return ControlFailure::Untrusted;
+            case TransportErrorKind::Cancelled: return ControlFailure::Declined;
+            case TransportErrorKind::Misconfigured: return ControlFailure::Misconfigured;
+            case TransportErrorKind::Unreachable:
+            case TransportErrorKind::Refused:
+            case TransportErrorKind::AuthenticationRequired:
+            case TransportErrorKind::RemoteProgramMissing:
+            case TransportErrorKind::ProgramNotFound:
+            case TransportErrorKind::Protocol:
+            case TransportErrorKind::DaemonAbsent: return ControlFailure::Unreachable;
+        }
+        return ControlFailure::Unreachable;
+    }
+
+    /// @param transport What the call goes to.
+    /// @param method The method called.
+    /// @param timeout How long it was given.
+    /// @return The failure of a call that did not answer in time.
+    [[nodiscard]] ControlClientError timedOut(ITransportFactory const& transport,
+                                              std::string_view method,
+                                              std::chrono::milliseconds timeout)
+    {
+        return ControlClientError {
+            .failure = ControlFailure::TimedOut,
+            .message = std::format("{} did not answer '{}' within {}", transport.describe(), method, timeout),
+            .remote = std::nullopt
+        };
+    }
+
+    /// Connects through @p transport.
+    /// @return The client, not yet handshaken, or why there is none.
+    core::async::Task<std::expected<std::unique_ptr<ControlClient>, ControlClientError>> connectClient(
+        core::net::EventLoop* loop, ITransportFactory* transport)
+    {
+        auto connection = co_await transport->connect(*loop);
+        if (!connection)
+            co_return fail(controlFailureOf(connection.error().kind), std::move(connection.error().message));
+        co_return std::make_unique<ControlClient>(*loop, std::move(*connection));
     }
 
     /// Connects through @p transport and handshakes.
@@ -59,28 +101,83 @@ namespace
     core::async::Task<std::expected<std::unique_ptr<ControlClient>, ControlClientError>> connectControl(
         core::net::EventLoop* loop, ITransportFactory* transport)
     {
-        auto connection = co_await transport->connect(*loop);
-        if (!connection)
-            co_return fail(connection.error().kind == TransportErrorKind::Misconfigured
-                               ? ControlFailure::Misconfigured
-                               : ControlFailure::Unreachable,
-                           std::move(connection.error().message));
-        auto client = std::make_unique<ControlClient>(*loop, std::move(*connection));
-        if (auto handshaken = co_await client->handshake(); !handshaken)
+        auto client = co_await connectClient(loop, transport);
+        if (!client)
+            co_return std::unexpected(std::move(client.error()));
+        if (auto handshaken = co_await (*client)->handshake(); !handshaken)
             co_return std::unexpected(std::move(handshaken.error()));
         co_return std::move(client);
     }
 
-    core::async::Task<std::expected<std::string, ControlClientError>> callOnce(core::net::EventLoop* loop,
-                                                                               ITransportFactory* transport,
+    /// Handshakes and calls one method.
+    core::async::Task<std::expected<std::string, ControlClientError>> exchange(ControlClient* client,
                                                                                std::string method,
                                                                                std::string params,
                                                                                std::string context)
     {
-        auto client = co_await connectControl(loop, transport);
+        if (auto handshaken = co_await client->handshake(); !handshaken)
+            co_return std::unexpected(std::move(handshaken.error()));
+        co_return co_await client->call(std::move(method), std::move(params), std::move(context));
+    }
+
+    /// Ends when @p client has spent @p timeout waiting for the daemon since this began: the time it spends
+    /// signing the daemon's challenges is not counted, up to PreAuthTimeout -- by then the daemon has closed
+    /// the connection, and a signature that never comes (a pinentry on another terminal, a dead agent) must
+    /// not hold the call for ever.
+    core::async::Task<void> expireAfter(core::net::EventLoop* loop,
+                                        ControlClient const* client,
+                                        std::chrono::milliseconds timeout)
+    {
+        auto const start = loop->clock().now();
+        while (true)
+        {
+            // While a signature is being made the due time moves with the clock, and this sleeps on.
+            auto const due =
+                start + timeout
+                + std::min(client->signingTime(),
+                           std::chrono::duration_cast<std::chrono::milliseconds>(PreAuthTimeout));
+            auto const now = loop->clock().now();
+            if (now >= due)
+                co_return;
+            co_await loop->delay(std::chrono::ceil<std::chrono::milliseconds>(due - now));
+        }
+    }
+
+    /// Connects, then handshakes and calls.
+    ///
+    /// @p timeout bounds the handshake and the call together, one deadline for both, and never the connect:
+    /// the connect may be waiting for the user to trust a daemon (the transport bounds the dialling itself),
+    /// and a clock that runs through a question would end the call under the user's hand. For the same
+    /// reason it does not run while a challenge is signed: a passphrase is the user's to type.
+    core::async::Task<std::expected<std::string, ControlClientError>> callOnce(
+        core::net::EventLoop* loop,
+        ITransportFactory* transport,
+        std::string method,
+        std::string params,
+        std::string context,
+        std::optional<std::chrono::milliseconds> timeout)
+    {
+        auto client = co_await connectClient(loop, transport);
         if (!client)
             co_return std::unexpected(std::move(client.error()));
-        co_return co_await (*client)->call(std::move(method), std::move(params), std::move(context));
+        if (!timeout)
+            co_return co_await exchange(
+                (*client).get(), std::move(method), std::move(params), std::move(context));
+        auto const name = method;
+        auto answered = std::optional<std::expected<std::string, ControlClientError>> {};
+        auto exchanging = [](ControlClient* control,
+                             std::string method,
+                             std::string params,
+                             std::string context,
+                             std::optional<std::expected<std::string, ControlClientError>>* out)
+            -> core::async::Task<void> {
+            *out = co_await exchange(control, std::move(method), std::move(params), std::move(context));
+        }((*client).get(), std::move(method), std::move(params), std::move(context), &answered);
+        std::ignore = co_await core::async::whenAny(std::move(exchanging),
+                                                    expireAfter(loop, (*client).get(), *timeout));
+        if (!answered)
+            co_return std::unexpected(timedOut(*transport, name, *timeout));
+        co_return std::move(*answered);
     }
 
     /// What a stop request reaches the stream through, from any thread, by way of the loop.
@@ -191,19 +288,67 @@ core::async::Task<std::expected<void, ControlClientError>> ControlClient::handsh
 {
     auto const ours = proto::SupportedVersions;
     auto const offered = proto::CapabilitySet::of({ proto::Capability::ControlApi });
-    if (auto const sent =
-            send(proto::DecodedPdu { proto::ClientHello { .versions = ours,
-                                                          .capabilities = offered,
-                                                          .token = _connection->token,
-                                                          .role = proto::ConnectionRole::Control } });
-        !sent)
-        co_return std::unexpected(sent.error());
+    auto const sendHello = [&](std::optional<proto::KeyProof> proof) {
+        return send(
+            proto::DecodedPdu { proto::ClientHello { .versions = ours,
+                                                     .capabilities = offered,
+                                                     .token = proof ? std::string {} : _connection->token,
+                                                     .role = proto::ConnectionRole::Control,
+                                                     .keyProof = std::move(proof) } });
+    };
+    // A client with a key and no token lets the daemon speak first: its challenge is what the proof covers.
+    auto keyAuth =
+        _connection->keySource ? std::optional { KeyAuthenticator { _connection->keySource } } : std::nullopt;
+    auto helloSent = !keyAuth || !_connection->token.empty();
+    if (helloSent)
+        if (auto const sent = sendHello(std::nullopt); !sent)
+            co_return std::unexpected(sent.error());
 
     while (true)
     {
         auto frame = co_await readFrame();
         if (!frame)
             co_return std::unexpected(std::move(frame.error()));
+        if (auto const* challenge = std::get_if<proto::AuthChallenge>(&frame->pdu))
+        {
+            if (!helloSent)
+            {
+                // The signature is the user's to give (a passphrase, an agent's confirmation), but not for
+                // longer than the daemon waits for it: by PreAuthTimeout it has closed the connection, and a
+                // signer that never answers must not hold the call -- timed or not -- for ever.
+                auto const allowance =
+                    std::max(std::chrono::duration_cast<std::chrono::milliseconds>(PreAuthTimeout) - _signed,
+                             std::chrono::milliseconds::zero());
+                _signingSince = _loop.clock().now();
+                auto proof = std::optional<std::optional<proto::KeyProof>> {};
+                auto signing =
+                    [](KeyAuthenticator* authenticator,
+                       proto::AuthChallenge challenge,
+                       std::optional<std::array<std::byte, 32>> binding,
+                       std::optional<std::optional<proto::KeyProof>>* out) -> core::async::Task<void> {
+                    *out = co_await authenticator->proofFor(challenge, binding);
+                }(&*keyAuth, *challenge, channelBindingOf(*_connection->socket), &proof);
+                auto givingUp = [](core::net::EventLoop* loop,
+                                   std::chrono::milliseconds wait) -> core::async::Task<void> {
+                    co_await loop->delay(wait);
+                }(&_loop, allowance);
+                std::ignore = co_await core::async::whenAny(std::move(signing), std::move(givingUp));
+                _signed = signingTime();
+                _signingSince = std::nullopt;
+                if (!proof)
+                {
+                    close();
+                    co_return fail(ControlFailure::TimedOut,
+                                   std::format("the SSH key did not sign within the daemon's {} to sign in",
+                                               PreAuthTimeout));
+                }
+                if (auto const sent = sendHello(*std::move(proof)); !sent)
+                    co_return std::unexpected(sent.error());
+                // Still waiting: a refused proof is answered with a fresh challenge, on which the next key
+                // is offered.
+            }
+            continue;
+        }
         auto const* hello = std::get_if<proto::ServerHello>(&frame->pdu);
         if (hello == nullptr)
             continue;
@@ -211,7 +356,8 @@ core::async::Task<std::expected<void, ControlClientError>> ControlClient::handsh
         if (!judged)
         {
             close();
-            co_return fail(ControlFailure::Refused, proto::describe(judged.error(), proto::PeerRole::Daemon));
+            auto const words = proto::describe(judged.error(), proto::PeerRole::Daemon);
+            co_return fail(ControlFailure::Refused, keyAuth ? keyAuth->explainRefusal(words) : words);
         }
         if (!judged->shared.contains(proto::Capability::ControlApi))
         {
@@ -227,6 +373,13 @@ core::async::Task<std::expected<void, ControlClientError>> ControlClient::handsh
         }
         co_return std::expected<void, ControlClientError> {};
     }
+}
+
+std::chrono::milliseconds ControlClient::signingTime() const
+{
+    if (!_signingSince)
+        return _signed;
+    return _signed + std::chrono::ceil<std::chrono::milliseconds>(_loop.clock().now() - *_signingSince);
 }
 
 core::async::Task<std::expected<std::string, ControlClientError>> ControlClient::call(std::string method,
@@ -309,16 +462,26 @@ std::expected<std::shared_ptr<ITransportFactory>, ControlClientError> resolveCon
     if (spec.starts_with('/') || spec.starts_with('.'))
         return socketAt(spec);
     if (auto const hostPort = parseHostPort(spec))
-        return std::make_shared<TlsTransportFactory>(TcpEndpoint { .host = hostPort->first,
-                                                                   .port = hostPort->second,
-                                                                   .token = options.token,
-                                                                   .caPem = options.tlsCaPem });
+    {
+        if (options.knownDaemons == nullptr)
+            return fail(ControlFailure::Misconfigured, "no file to keep pinned daemons in is available");
+        return std::make_shared<TlsTransportFactory>(
+            TcpEndpoint { .host = hostPort->first,
+                          .port = hostPort->second,
+                          .token = options.token,
+                          .caPem = options.tlsCaPem,
+                          .expectedFingerprint = options.daemonFingerprint },
+            *options.knownDaemons,
+            options.pinPrompt,
+            options.keySourceProvider);
+    }
     if (options.resolveSavedHost && namesSavedHost(spec))
-        return options.resolveSavedHost(spec).transform_error([](std::string message) {
-            return ControlClientError { .failure = ControlFailure::Unreachable,
-                                        .message = std::move(message),
-                                        .remote = std::nullopt };
-        });
+        return options.resolveSavedHost(spec, options.daemonFingerprint)
+            .transform_error([](std::string message) {
+                return ControlClientError { .failure = ControlFailure::Unreachable,
+                                            .message = std::move(message),
+                                            .remote = std::nullopt };
+            });
     return socketAt(spec);
 }
 
@@ -327,22 +490,48 @@ std::expected<std::string, ControlClientError> runControlCall(
     std::string_view method,
     std::string_view params,
     std::string_view context,
-    std::optional<std::chrono::milliseconds> timeout)
+    std::optional<std::chrono::milliseconds> timeout,
+    core::async::StopToken const& stop)
 {
-    if (auto const verified = requireVerified(transport); !verified)
-        return std::unexpected(verified.error());
-
     auto const backend = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *backend };
-    auto work =
-        callOnce(&loop, &transport, std::string { method }, std::string { params }, std::string { context });
-    if (!timeout)
-        return loop.blockOn(std::move(work));
-    auto bounded = loop.blockOn(core::net::withTimeout(&loop, std::move(work), *timeout));
-    if (!bounded)
-        return fail(ControlFailure::TimedOut,
-                    std::format("{} did not answer '{}' within {}", transport.describe(), method, *timeout));
-    return std::move(*bounded);
+    // Closed when stop is requested, from whichever thread asks: what waits on it then ends the call, and
+    // the call's frames unwind (a dial, a question to the user, a read) on the loop. Declared before the
+    // callback, which is deregistered first.
+    auto stopped = core::async::AsyncQueue<int> { loop, core::async::AsyncQueueOptions { .capacity = 1 } };
+    auto const onStop = core::async::StopCallback { stop, [&stopped] { stopped.close(); } };
+    auto answer = std::optional<std::expected<std::string, ControlClientError>> {};
+    auto calling =
+        [](core::net::EventLoop* loop,
+           ITransportFactory* transport,
+           std::string method,
+           std::string params,
+           std::string context,
+           std::optional<std::chrono::milliseconds> timeout,
+           std::optional<std::expected<std::string, ControlClientError>>* out) -> core::async::Task<void> {
+        // The timeout bounds what the daemon does, not the connect, which may wait for the user (callOnce).
+        *out = co_await callOnce(
+            loop, transport, std::move(method), std::move(params), std::move(context), timeout);
+    }(&loop,
+                                                                               &transport,
+                                                                               std::string { method },
+                                                                               std::string { params },
+                                                                               std::string { context },
+                                                                               timeout,
+                                                                               &answer);
+    auto stopping = [](core::async::AsyncQueue<int>* stopped) -> core::async::Task<void> {
+        std::ignore = co_await stopped->pop();
+    }(&stopped);
+    loop.blockOn(
+        [](core::async::Task<void> calling, core::async::Task<void> stopping) -> core::async::Task<void> {
+            std::ignore = co_await core::async::whenAny(std::move(calling), std::move(stopping));
+        }(std::move(calling), std::move(stopping)));
+    if (!answer)
+        return std::unexpected(
+            ControlClientError { .failure = ControlFailure::Declined,
+                                 .message = std::format("the call to {} was given up", transport.describe()),
+                                 .remote = std::nullopt });
+    return *std::move(answer);
 }
 
 std::expected<void, ControlClientError> runEventStream(
@@ -352,9 +541,6 @@ std::expected<void, ControlClientError> runEventStream(
     std::function<StreamStep(std::string_view eventJson)> onEvent,
     core::async::StopToken const& stop)
 {
-    if (auto const verified = requireVerified(transport); !verified)
-        return std::unexpected(verified.error());
-
     auto const backend = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *backend };
     auto const state = std::make_shared<StreamState>();

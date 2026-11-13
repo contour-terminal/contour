@@ -13,11 +13,15 @@ ThemedWindow {
     /// The window::PromptHost whose prompts this window shows.
     required property var host
 
-    title: qsTr("Contour")
+    // Named for what it asks, so that it can be told from the terminal window it stands in for.
+    title: root.host.pendingPrompt.heading !== undefined
+           ? qsTr("Contour \u2014 %1").arg(root.host.pendingPrompt.heading)
+           : qsTr("Contour")
     // Room for the dialog and, for a host key, for the text it quotes: twice the dialog's own width, either way.
     width: chromeStyle.size.dialogWidth + chromeStyle.size.dialogWidth
     height: chromeStyle.size.dialogWidth + chromeStyle.size.dialogWidth
-    flags: Qt.Dialog
+    // An ordinary dialog window, with the title bar and close button the platform gives one.
+    flags: Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint
     visible: root.host.pendingPrompt.promptId !== undefined
 
     // The window's own close button dismisses the prompt shown: Cancel.

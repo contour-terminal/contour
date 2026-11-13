@@ -1329,10 +1329,11 @@ TEST_CASE("a hello with fields appended by a newer peer still decodes", "[vthost
             .capabilities = { .idents = { 1, 77 } },
             .token = "s3cr3t",
             .sessionSettings = WireSessionSettings { .historyLineCount = 5000 },
-            // The last field this version knows, stated: a byte after it is a newer peer's.
+            // The fields this version knows, all stated: a byte after them is a newer peer's.
             .attachIntent = { .kind = AttachIntentKind::Resume, .workspace = 2, .daemonInstance = 3 },
             .cellPixelSize = WireCellPixelSize { .width = 9, .height = 18 },
-            .workingDirectory = "/home/user"
+            .workingDirectory = "/home/user",
+            .keyProof = KeyProof { .publicKey = { std::byte { 1 } }, .signature = "sig" }
         };
         auto const decoded = decodePdu(withAppendedField(PduType::ClientHello, hello));
         REQUIRE(decoded.has_value());
@@ -2951,4 +2952,76 @@ TEST_CASE("Pdu.Input.kindRoundTripsWithAndWithoutCapability", "[vthost][proto][i
     auto const decoded = decodePdu(frameOf(PduType::Input, body));
     REQUIRE(decoded.has_value());
     CHECK(std::get<Input>(decoded->pdu).kind == InputKind::Other);
+}
+
+TEST_CASE("an AuthChallenge round-trips and holds its place in the catalog", "[vthost][pdu][auth]")
+{
+    auto challenge = AuthChallenge {
+        .nonce = {}, .methods = std::to_underlying(AuthMethod::Token) | std::to_underlying(AuthMethod::Key)
+    };
+    for (auto const index: std::views::iota(std::size_t { 0 }, challenge.nonce.size()))
+        challenge.nonce[index] = static_cast<std::byte>(index + 1);
+    CHECK(roundTrip(DecodedPdu { challenge }) == DecodedPdu { challenge });
+    STATIC_CHECK(std::to_underlying(PduType::AuthChallenge) == 55);
+    STATIC_CHECK(std::to_underlying(AuthMethod::Token) == 0b01);
+    STATIC_CHECK(std::to_underlying(AuthMethod::Key) == 0b10);
+}
+
+TEST_CASE("a ClientHello's key proof round-trips; a hello without one still decodes", "[vthost][pdu][auth]")
+{
+    auto hello = ClientHello {};
+    hello.keyProof = KeyProof { .publicKey = { std::byte { 1 }, std::byte { 2 }, std::byte { 3 } },
+                                .signature = "-----BEGIN SSH SIGNATURE-----" };
+    CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
+
+    // With a working directory and an instance too: the proof is appended after both.
+    hello.workingDirectory = "/tmp";
+    hello.attachIntent.daemonInstance = 7;
+    CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
+
+    // A hello that states none is byte for byte what it was, and decodes with no proof.
+    auto const plain = ClientHello { .token = "tok" };
+    auto const decoded = roundTrip(DecodedPdu { plain });
+    CHECK(decoded == DecodedPdu { plain });
+    CHECK_FALSE(std::get<ClientHello>(decoded).keyProof.has_value());
+}
+
+TEST_CASE("a truncated AuthChallenge or key proof does not decode", "[vthost][pdu][auth]")
+{
+    // A 31-byte nonce: the methods byte and the nonce's last byte are gone.
+    auto const challenge = DecodedPdu { AuthChallenge { .nonce = {}, .methods = 0b10 } };
+    CHECK_FALSE(decodePdu(encodeWithoutTrailingField(challenge, 2)).has_value());
+
+    // A proof that ends after the public key: its signature string is missing.
+    auto const hello = DecodedPdu { ClientHello {
+        .keyProof = KeyProof { .publicKey = { std::byte { 1 } }, .signature = {} } } };
+    // Only the empty signature's length byte is cut.
+    CHECK_FALSE(decodePdu(encodeWithFieldsCut(hello, [](std::span<std::byte const>) {
+                    return std::size_t { 1 };
+                })).has_value());
+}
+
+TEST_CASE("a key proof larger than its caps is refused", "[vthost][pdu][auth]")
+{
+    auto const atCap =
+        ClientHello { .keyProof = KeyProof { .publicKey = std::vector<std::byte>(MaxKeyProofKeyBytes),
+                                             .signature = std::string(MaxKeyProofSignatureBytes, 's') } };
+    CHECK(roundTrip(DecodedPdu { atCap }) == DecodedPdu { atCap });
+
+    auto const bigKey =
+        ClientHello { .keyProof = KeyProof { .publicKey = std::vector<std::byte>(MaxKeyProofKeyBytes + 1),
+                                             .signature = "s" } };
+    auto const keyFrame = [&] {
+        auto sink = Writer {};
+        encodePdu(sink, 1, DecodedPdu { bigKey });
+        return std::vector<std::byte>(sink.view().begin(), sink.view().end());
+    }();
+    CHECK_FALSE(decodePdu(keyFrame).has_value());
+
+    auto const bigSignature =
+        ClientHello { .keyProof = KeyProof { .publicKey = { std::byte { 1 } },
+                                             .signature = std::string(MaxKeyProofSignatureBytes + 1, 's') } };
+    auto sink = Writer {};
+    encodePdu(sink, 1, DecodedPdu { bigSignature });
+    CHECK_FALSE(decodePdu(std::vector<std::byte>(sink.view().begin(), sink.view().end())).has_value());
 }

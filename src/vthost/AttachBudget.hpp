@@ -9,6 +9,7 @@
 #include <core/net/EventLoop.hpp>
 #include <core/platform/Clock.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <expected>
 #include <functional>
@@ -17,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include <vthost/PromptPause.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/WithDeadline.hpp>
 
@@ -55,6 +57,12 @@ struct AttachBudget
     /// The handshake phase's bound, from the moment the transport returned its connection. Used only when
     /// @c connect is nullopt; with a connect bound the whole attach is bound by it.
     std::chrono::milliseconds handshake;
+    /// The time the user has spent answering prompts that this transport asks while it attaches, which the
+    /// attach does not count against its bound (a passphrase asked during the handshake); null for none.
+    std::shared_ptr<PromptPause const> pause = nullptr;
+    /// What @c pause held when this attempt began: prompts answered before it, for an earlier attempt on the
+    /// same transport, extend nothing of this one.
+    std::chrono::milliseconds pausedBefore = std::chrono::milliseconds::zero();
 
     /// A single bound for the whole attach.
     /// @param total How long the attach may take in all.
@@ -63,6 +71,31 @@ struct AttachBudget
         connect(std::chrono::duration_cast<std::chrono::milliseconds>(total)),
         handshake(std::chrono::duration_cast<std::chrono::milliseconds>(total))
     {
+    }
+
+    /// @param prompts Where the time of the prompts asked during the attach is kept.
+    /// @return This budget, extended by as long as prompts are open.
+    [[nodiscard]] AttachBudget pausedBy(std::shared_ptr<PromptPause const> prompts) const
+    {
+        auto budget = *this;
+        budget.pause = std::move(prompts);
+        return budget;
+    }
+
+    /// @return This budget for an attempt that begins now: only prompts from now on extend it.
+    [[nodiscard]] AttachBudget startingNow() const
+    {
+        auto budget = *this;
+        budget.pausedBefore = pause ? pause->total() : std::chrono::milliseconds::zero();
+        return budget;
+    }
+
+    /// @return How long prompts have been open since the attempt began (startingNow()), which the attach's
+    ///         bound does not count.
+    [[nodiscard]] std::chrono::milliseconds paused() const
+    {
+        return pause ? std::max(pause->total() - pausedBefore, std::chrono::milliseconds::zero())
+                     : std::chrono::milliseconds::zero();
     }
 
     /// @param handshakeBound How long the handshake may take after the transport returned its connection.
@@ -84,13 +117,14 @@ namespace detail
                                                   TransportReturnMark const* mark)
     {
         auto const start = loop->clock().now();
+        budget = budget.startingNow();
         while (true)
         {
             auto deadline = std::optional<core::platform::SteadyTimePoint> {};
             if (budget.connect)
-                deadline = start + *budget.connect;
+                deadline = start + *budget.connect + budget.paused();
             else if (auto const returned = mark != nullptr ? mark->at() : std::nullopt)
-                deadline = *returned + budget.handshake;
+                deadline = *returned + budget.handshake + budget.paused();
             if (!deadline)
             {
                 co_await loop->delay(TransportReturnPollInterval);
@@ -138,7 +172,6 @@ class ConnectObservingFactory final: public ITransportFactory
     }
 
     [[nodiscard]] std::string describe() const override { return _inner->describe(); }
-    [[nodiscard]] PeerTrust peerTrust() const noexcept override { return _inner->peerTrust(); }
     void holdDaemonStart(core::platform::SteadyTimePoint until) override { _inner->holdDaemonStart(until); }
 
   private:

@@ -37,8 +37,10 @@
 #include <vtcontrol/Catalog.hpp>
 #include <vtcontrol/Json.hpp>
 #include <vtcontrol/Wit.hpp>
+#include <vthost/KnownDaemons.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/StdioChild.hpp>
+#include <vthost/testing/CountingRandom.hpp>
 
 using namespace std::string_literals;
 using contour::cli::ControlIo;
@@ -117,6 +119,8 @@ struct Run
     core::testing::FakeEnvironment env { { { "CONTOUR_PANE",
                                              "pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ad" } } };
     core::platform::testing::InMemoryFileSystem fs {};
+    vthost::testing::CountingRandom random {};
+    vthost::KnownDaemons known { fs, "/pins/known_daemons", random };
     std::istringstream in {};
     std::ostringstream out {};
     std::ostringstream err {};
@@ -133,7 +137,8 @@ struct Run
                            .err = err,
                            .clock = clock,
                            .target = contour::cli::OutputTarget::Pipe,
-                           .stop = stop.get_token() };
+                           .stop = stop.get_token(),
+                           .knownDaemons = &known };
     }
 };
 
@@ -336,6 +341,7 @@ TEST_CASE("every ControlErrorCode and ControlFailure has an exit status", "[cont
         FailureRow { .failure = ControlFailure::Refused, .status = ExitStatus::Failed },
         FailureRow { .failure = ControlFailure::Unsupported, .status = ExitStatus::Failed },
         FailureRow { .failure = ControlFailure::Untrusted, .status = ExitStatus::Failed },
+        FailureRow { .failure = ControlFailure::Declined, .status = ExitStatus::Failed },
         FailureRow { .failure = ControlFailure::Disconnected, .status = ExitStatus::Unreachable },
         FailureRow { .failure = ControlFailure::TimedOut, .status = ExitStatus::Failed },
         FailureRow { .failure = ControlFailure::Remote, .status = ExitStatus::Failed },
@@ -531,31 +537,51 @@ TEST_CASE("an unreachable daemon exits 4 naming the socket", "[contour][cli][con
     CHECK(run.err.str().contains(socket));
 }
 
-TEST_CASE("a TCP daemon without --tls-ca is refused before connecting", "[contour][cli][control]")
+TEST_CASE("a TCP daemon that nobody listens at is unreachable, pinned or not", "[contour][cli][control]")
 {
     auto run = Run {};
 
+    // The trust is settled by the connection, so an unpinned daemon is dialled like any other.
     auto const status = contour::cli::runControlVerb(
         verbNamed("ls"), parseFlags({ "ls", "--daemon", "127.0.0.1:9" }), run.io());
 
-    CHECK(status == 1);
-    CHECK(run.err.str().contains("--tls-ca"));
+    CHECK(status == 4);
 }
 
-TEST_CASE("openControlChannel refuses an unverified HOST:PORT", "[contour][cli][control]")
+TEST_CASE("openControlChannel dials an unpinned HOST:PORT, which the connection then vets",
+          "[contour][cli][control]")
 {
     auto run = Run {};
 
     auto const channel =
         contour::cli::openControlChannel(parseFlags({ "ls", "--daemon", "127.0.0.1:1234" }), "ls", run.io());
 
-    // The transport is built lazily: the refusal to dial an unverified TCP daemon is the first call's.
+    // The transport is built lazily, and nothing listens on that port.
     REQUIRE(channel.has_value());
     auto const reply = (*channel)->call("pane.list", "{}", "", std::nullopt);
     REQUIRE_FALSE(reply.has_value());
-    CHECK(reply.error().failure == ControlFailure::Untrusted);
-    CHECK(contour::cli::exitStatusFor(reply.error()) == ExitStatus::Failed);
-    CHECK(reply.error().message.contains("--tls-ca"));
+    CHECK(reply.error().failure == ControlFailure::Unreachable);
+}
+
+TEST_CASE("openControlChannel takes --daemon-fingerprint as the daemon's verification",
+          "[contour][cli][control]")
+{
+    auto run = Run {};
+
+    auto const channel =
+        contour::cli::openControlChannel(parseFlags({ "ls",
+                                                      "--daemon",
+                                                      "127.0.0.1:1",
+                                                      "--daemon-fingerprint",
+                                                      "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU" }),
+                                         "ls",
+                                         run.io());
+
+    // Verified by what it is told, the transport is dialled -- and nothing listens on port 1.
+    REQUIRE(channel.has_value());
+    auto const reply = (*channel)->call("pane.list", "{}", "", std::nullopt);
+    REQUIRE_FALSE(reply.has_value());
+    CHECK(reply.error().failure != ControlFailure::Untrusted);
 }
 
 TEST_CASE("openControlChannel reports an unreadable --tls-ca", "[contour][cli][control]")
@@ -629,15 +655,22 @@ TEST_CASE("a saved host named by --daemon is reached through its own transport",
     run.fs.addFile("/home/me/studio.token", "secret\n");
     auto const spawner = std::make_shared<RecordingSpawner>();
     auto io = run.io();
+    auto random = vthost::testing::CountingRandom {};
+    auto known = vthost::KnownDaemons { run.fs, "/pins/known_daemons", random };
     io.resolveSavedHost =
-        contour::cli::makeSavedHostResolver(lookup, run.fs, spawner, contour::cli::SshPrompting {});
+        contour::cli::makeSavedHostResolver(lookup,
+                                            run.fs,
+                                            spawner,
+                                            contour::cli::SshPrompting {},
+                                            contour::cli::TlsTrust { .knownDaemons = &known });
 
-    SECTION("a tls host is the host's transport, refused for want of its tls_ca before connecting")
+    SECTION("a tls host is the host's transport, dialled whether or not it has a tls_ca")
     {
+        // Nothing answers at studio: the connection is what vets the daemon, so it is reached for.
         CHECK(contour::cli::runControlVerb(verbNamed("ls"), parseFlags({ "ls", "--daemon", "studio" }), io)
-              == 1);
-        CHECK(run.err.str().contains("tls://studio:7297"));
-        CHECK(run.err.str().contains("tls_ca"));
+              == 4);
+        CHECK(run.err.str().contains("studio"));
+        CHECK_FALSE(run.err.str().contains("tls_ca"));
     }
 
     SECTION("an ssh host starts ssh to it")

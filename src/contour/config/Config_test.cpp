@@ -884,9 +884,10 @@ hosts:
     CHECK(hosts.contains("home"));
 }
 
-TEST_CASE("Config: tls host without token_file is skipped", "[config][hosts]")
+TEST_CASE("Config: a tls host needs nothing beyond its url", "[config][hosts]")
 {
-    // A TCP daemon always requires a token, so a saved TLS host without one could never attach.
+    // No token_file: a daemon that authorizes keys is signed in to by one, and the daemon is pinned on first
+    // use.
     QTemporaryDir dir;
     auto const config = loadFromYaml(dir, R"(
 hosts:
@@ -894,12 +895,29 @@ hosts:
         url: "tls://studio:7297"
 )"sv);
 
-    CHECK(config.hosts.value().empty());
+    REQUIRE(config.hosts.value().contains("studio"));
+    auto const& studio = config.hosts.value().at("studio");
+    CHECK(studio.tokenFile.empty());
+    CHECK(studio.tlsCa.empty());
+    CHECK(studio.identityFile.empty());
 }
 
-TEST_CASE("Config: tls host without tls_ca loads, unverified", "[config][hosts]")
+TEST_CASE("Config: identity_file is parsed and its path expanded", "[config][hosts]")
 {
-    // Warned about at load rather than skipped: the guide explains when an unpinned daemon is acceptable.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+hosts:
+    studio:
+        url: "tls://studio:7297"
+        identity_file: "~/.ssh/id_work"
+)"sv);
+
+    REQUIRE(config.hosts.value().contains("studio"));
+    CHECK(config.hosts.value().at("studio").identityFile == vtpty::Process::homeDirectory() / ".ssh/id_work");
+}
+
+TEST_CASE("Config: tls host without tls_ca loads, pinned on first use", "[config][hosts]")
+{
     QTemporaryDir dir;
     auto const config = loadFromYaml(dir, R"(
 hosts:
@@ -947,11 +965,12 @@ hosts:
         CHECK(host->url.host == "other");
     }
 
-    SECTION("an ad-hoc tls URL is refused")
+    SECTION("an ad-hoc tls URL needs no configuration either")
     {
-        auto const host = contour::config::resolveHost(path.string(), "tls://studio:7297");
-        REQUIRE_FALSE(host.has_value());
-        CHECK(host.error() == "a tls:// host needs a token; save it under hosts: with token_file");
+        auto const host = contour::config::resolveHost(path.string(), "tls://other:7297");
+        REQUIRE(host.has_value());
+        CHECK(host->url.host == "other");
+        CHECK(host->tokenFile.empty());
     }
 
     SECTION("a malformed ad-hoc URL says why")

@@ -42,6 +42,9 @@ enum class AskpassPromptKind : std::uint8_t
     HostKeyUpdate, ///< UpdateHostKeys: whether to take the new keys the server offers, answered `yes` or
                    ///< `no`.
     Question, ///< Any other question ssh asks in the `(yes/no` form: shown as it is, answered `yes` or `no`.
+    /// Whether to trust a daemon met for the first time over TLS and pin its fingerprint. Not ssh's: asked
+    /// by the application itself, answered Answered (trust) or Cancelled.
+    PinConfirm,
 };
 
 /// One row of the table classifyAskpassPrompt() reads: what in the request selects a kind.

@@ -28,7 +28,8 @@ struct RecordedRestrict
     bool operator==(RecordedRestrict const&) const = default;
 };
 
-/// Records every restriction; fails them all while @ref failure is set.
+/// Records every restriction; fails them all while @ref failure is set. Reads through the file system, and
+/// refuses every read while @ref refusal is set.
 class RecordingFilePrivacy final: public IFilePrivacy
 {
   public:
@@ -56,6 +57,17 @@ class RecordingFilePrivacy final: public IFilePrivacy
         calls.push_back({ path, kind });
         _contents[path] = _fileSystem.readFile(path).value_or(std::string {});
         return {};
+    }
+
+    /// When set, readPrivateFile() refuses every file with this text, as an owner or mode check would.
+    std::optional<std::string> refusal;
+
+    [[nodiscard]] std::expected<std::string, std::string> readPrivateFile(
+        std::filesystem::path const& path) const override
+    {
+        if (refusal)
+            return std::unexpected(*refusal);
+        return _fileSystem.readFile(path);
     }
 
   private:

@@ -116,7 +116,7 @@ void DaemonSwitchDirectory::startListing(LinkedDaemon const& daemon)
                       _listing.erase(key);
                       if (!listed)
                       {
-                          attachLog()("switch directory: listing {} failed: {}", key, listed.error());
+                          attachLog()("switch directory: listing {} failed: {}", key, listed.error().reason);
                           return;
                       }
                       _workspaces[key] = *std::move(listed);

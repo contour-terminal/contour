@@ -121,3 +121,11 @@ extend-glob = ["Win32CaptionButtons.cpp"]
 
 [type.win32-track-mouse.extend-words]
 TME = "TME" # The TRACKMOUSEEVENT flag prefix.
+
+# AuthorizedKeys_test holds real SSH public keys, whose base64 blobs read as words by accident
+# (`...AAABBBFoLtny...`). Scoped to that one file.
+[type.authorized-keys-test]
+extend-glob = ["AuthorizedKeys_test.cpp"]
+
+[type.authorized-keys-test.extend-words]
+Fo = "Fo" # Inside a base64 SSH public key blob, not prose.

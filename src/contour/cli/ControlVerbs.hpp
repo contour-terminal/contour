@@ -138,6 +138,13 @@ struct ControlIo
     /// Resolves `--daemon NAME` and `--daemon ssh://...` (@ref makeSavedHostResolver); empty for no saved
     /// hosts, every such spec then being a socket path.
     vthost::client::SavedHostResolver resolveSavedHost {};
+    /// Where a `HOST:PORT` daemon's pin is kept; null refuses every such spec (@ref
+    /// vthost::client::ControlEndpointOptions::knownDaemons). Borrowed.
+    vthost::KnownDaemons* knownDaemons = nullptr;
+    /// Asks the user to pin a `HOST:PORT` daemon met for the first time; null where nobody can be asked.
+    std::shared_ptr<vthost::IPinPrompt> pinPrompt {};
+    /// Makes what signs a `HOST:PORT` daemon's key proof; empty for no key.
+    vthost::client::ClientKeySourceProvider keySourceProvider {};
 };
 
 /// The daemon's end of a control verb: where its calls go. The real one dials a transport; tests answer.
@@ -187,12 +194,15 @@ using HostLookup = std::function<std::expected<config::HostEntry, std::string>(s
 /// @param fileSystem Where a host's token_file and tls_ca are read. Must outlive the resolver.
 /// @param spawner Starts ssh, for an ssh host.
 /// @param prompting Who answers an ssh host's prompts, and the shared version probe.
+/// @param tls How a tls host's daemon is trusted and signed in to; the call's `--daemon-fingerprint` is
+///        added to it.
 /// @return The resolver, whose refusal names the host and why it cannot be reached as configured.
 [[nodiscard]] vthost::client::SavedHostResolver makeSavedHostResolver(
     HostLookup lookup,
     core::platform::FileSystem const& fileSystem,
     std::shared_ptr<vthost::IStdioSpawner> spawner,
-    contour::cli::SshPrompting prompting);
+    contour::cli::SshPrompting prompting,
+    contour::cli::TlsTrust tls);
 
 /// @param code What the daemon answered.
 /// @return BadRequest is BadUsage; NotFound and Ambiguous are TargetNotFound; everything else

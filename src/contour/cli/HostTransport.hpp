@@ -26,7 +26,9 @@ namespace vthost
 {
 class IAskpassBroker;
 class IStdioSpawner;
+class IPinPrompt;
 class ITransportFactory;
+class KnownDaemons;
 class SshVersionProbe;
 } // namespace vthost
 
@@ -68,6 +70,22 @@ struct SshPrompting
     std::shared_ptr<vthost::SshVersionProbe> probe; ///< The process's one `ssh -V` probe.
 };
 
+/// What a `tls://` host is trusted and signed in with beyond its own entry: shared by every host of the
+/// process.
+struct TlsTrust
+{
+    /// Where pinned daemons are kept and looked up; borrowed, and must outlive the transports. Null refuses
+    /// a `tls://` host, which could then be verified by nothing.
+    vthost::KnownDaemons* knownDaemons = nullptr;
+    /// Asks the user to pin a daemon met for the first time; null where there is no one to ask, and a first
+    /// contact then needs @ref daemonFingerprint.
+    std::shared_ptr<vthost::IPinPrompt> pinPrompt = nullptr;
+    /// `--daemon-fingerprint`: what a daemon without a CA must present on first contact; empty for none.
+    std::string daemonFingerprint {};
+    /// Where the user's SSH agent listens (core::net::defaultSshAgentEndpoint()); empty for no agent.
+    std::string sshAgentEndpoint {};
+};
+
 /// How to reach one remote host.
 struct HostTransport
 {
@@ -95,12 +113,14 @@ struct HostTransport
 /// @param fileSystem Where token_file and tls_ca are read.
 /// @param spawner Starts ssh, for an ssh host.
 /// @param prompting Who answers an ssh host's prompts, and the shared version probe.
+/// @param tls How a tls host's daemon is trusted, and what signs in to it.
 /// @return The transport, or why the host cannot be reached as configured.
 [[nodiscard]] std::expected<HostTransport, std::string> makeHostTransport(
     std::string label,
     config::HostEntry const& host,
     core::platform::FileSystem const& fileSystem,
     std::shared_ptr<vthost::IStdioSpawner> spawner,
-    SshPrompting prompting);
+    SshPrompting prompting,
+    TlsTrust tls);
 
 } // namespace contour::cli

@@ -8,6 +8,7 @@
 #include <contour/remote/SwitchPlan.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <expected>
 #include <functional>
 #include <memory>
@@ -27,9 +28,25 @@ struct ListTarget
     std::shared_ptr<vthost::ITransportFactory> transport; ///< How to reach it.
 };
 
+/// Why a listing told no workspaces.
+enum class ListFailureKind : uint8_t
+{
+    Failed = 0, ///< The daemon could not be reached, or did not answer.
+    Declined, ///< The user declined a question the connection asked (a daemon's fingerprint, an ssh prompt).
+};
+
+/// A listing that told no workspaces.
+struct ListFailure
+{
+    ListFailureKind kind = ListFailureKind::Failed; ///< What a caller acts on.
+    std::string reason;                             ///< For the user, a sentence's worth.
+};
+
+/// What a listing told: the daemon's workspaces, or why there are none.
+using WorkspaceListing = std::expected<std::vector<vtcontrol::WorkspaceInfo>, ListFailure>;
+
 /// Told once, on the GUI thread, what a daemon's `workspace.list` answered, or why it did not.
-using WorkspacesListed =
-    std::function<void(std::expected<std::vector<vtcontrol::WorkspaceInfo>, std::string>)>;
+using WorkspacesListed = std::function<void(WorkspaceListing)>;
 
 /// Lists a daemon's workspaces without blocking the GUI thread: a daemon over ssh may take seconds.
 class IWorkspaceLister
@@ -40,6 +57,9 @@ class IWorkspaceLister
     IWorkspaceLister(IWorkspaceLister&&) = delete;
     IWorkspaceLister& operator=(IWorkspaceLister const&) = delete;
     IWorkspaceLister& operator=(IWorkspaceLister&&) = delete;
+    /// Ends every listing still under way -- its dial, a question to the user about the daemon, its call --
+    /// and releases what it holds, the transport among it, before it returns; a listing ended so tells no
+    /// one. So a lister may be destroyed before anything its transports borrow.
     virtual ~IWorkspaceLister() = default;
 
     /// Lists @p target's workspaces; @p done is told later, on the GUI thread, unless the lister is gone.
@@ -50,7 +70,9 @@ class IWorkspaceLister
 
 /// The production lister: `workspace.list` over the control API, one call per listing, on a thread of its
 /// own; the answer is posted to the GUI thread.
-/// @param timeout How long one listing may take.
+/// @param timeout How long the handshake and the `workspace.list` call of one listing may take together,
+///        from the moment its transport hands out the connection; the dial, which may wait for the user to
+///        trust the daemon, is not counted (vthost::client::runControlCall()).
 /// @return The lister.
 [[nodiscard]] std::unique_ptr<IWorkspaceLister> makeControlWorkspaceLister(std::chrono::milliseconds timeout);
 

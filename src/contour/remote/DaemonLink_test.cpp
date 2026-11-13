@@ -13,7 +13,10 @@
 #include <contour/window/PromptHost.hpp>
 #include <contour/window/WindowController.hpp>
 
+#include <core/Utils.hpp>
+
 #include <QtCore/QPointer>
+#include <QtGui/QGuiApplication>
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
@@ -37,6 +40,7 @@
 #include <vector>
 
 #include <QtTest/QTest>
+#include <vtcontrol/Api.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/WorkspaceCapture.hpp>
 #include <vthost/WorkspaceVisibility.hpp>
@@ -348,7 +352,7 @@ void settleGui()
 /// What a link that cannot reach its daemon is built with: nothing listens on port 1.
 void unreachable(contour::remote::DaemonLinkConfig& config)
 {
-    config.controller.transport = std::make_shared<vthost::TlsTransportFactory>(
+    config.controller.transport = contour::remote::testing::makeTestTlsTransport(
         vthost::TcpEndpoint { .host = "127.0.0.1", .port = 1, .token = {}, .caPem = {} });
 }
 
@@ -2414,4 +2418,51 @@ TEST_CASE("DaemonLink: a New Window that never loads tells the window it was ask
     CHECK(rig.host.endings > endingsBefore);
     // The window it was asked from still shows its workspace on its own link.
     CHECK(rig.app.manager().bindingOf(boot.id) == rig.link.get());
+}
+
+TEST_CASE(
+    "ContourGuiApp: a launch that names a workspace lists the daemon's, attaches to that one and opens its "
+    "first window",
+    "[contour][app][attach][link][startup]")
+{
+    using vthost::WorkspaceVisibility;
+    auto daemon = DaemonFixture {};
+    auto const ids = seedWorkspaces(daemon, 2);
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    // The wait turns it off until the first window; the rest of the suite expects the default.
+    auto const restoreQuit = core::Finally { [] { QGuiApplication::setQuitOnLastWindowClosed(true); } };
+    auto const transport = contour::remote::testing::makeTestTlsTransport(daemon.endpoint());
+
+    REQUIRE(app.app().prepareLaunchAttach(contour::ContourGuiApp::LaunchAttach {
+        .transport = transport,
+        .budget = vthost::AttachBudget { 10s },
+        .hostLabel = "home",
+        .locality = contour::window::DaemonLocality::Remote,
+        .address = {},
+        .workspace = "work",
+    }));
+    app.app().startAttachWait();
+    REQUIRE(app.app().isStartingUp());
+
+    // The listing goes to the daemon the launch attaches to, and nothing is attached before it answers.
+    REQUIRE(app.startupLister().requests.size() == 1);
+    CHECK(app.startupLister().requests.front().target.transport == transport);
+    CHECK(daemon.onDaemon([&daemon] { return daemon.live.size(); }) == 0);
+    app.startupLister().answer(std::vector {
+        vtcontrol::WorkspaceInfo { .id = "workspace:018f3c4e-9a1b-7c2d-8e3f-0123456789aa",
+                                   .label = {},
+                                   .position = 1,
+                                   .native = std::to_string(ids[0]) },
+        vtcontrol::WorkspaceInfo { .id = "workspace:018f3c4e-9a1b-7c2d-8e3f-0123456789ab",
+                                   .label = "work",
+                                   .position = 2,
+                                   .native = std::to_string(ids[1]) },
+    });
+
+    // The attach follows the workspace it named, and the first window opens: the launch waits no more.
+    REQUIRE(QTest::qWaitFor([&app] { return !app.app().isStartingUp(); }, 15000));
+    CHECK(app.exitCodes().empty());
+    REQUIRE(waitUntil([&] { return visibilityOn(daemon, ids[1]) == WorkspaceVisibility::Shown; }));
+    CHECK(visibilityOn(daemon, ids[0]) == WorkspaceVisibility::Hidden);
+    CHECK(daemon.onDaemon([&daemon] { return daemon.live.size(); }) == 1);
 }

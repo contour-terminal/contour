@@ -99,6 +99,8 @@ std::expected<proto::DaemonStatusReply, DaemonControlError> DaemonRuntime::statu
         .upgrade = upgradeRecordOf(_config.upgradeGeneration, _upgradeAttempts, _lastUpgradeFailure),
         .relocation = std::to_underlying(_config.relocationRequest),
         .workspaces = wireCount(_host.populatedWorkspaceCount()),
+        .tlsFingerprint =
+            _config.tlsFingerprint.empty() ? std::nullopt : std::optional { _config.tlsFingerprint },
     };
 }
 

@@ -13,6 +13,7 @@
 #include <vtbackend/shell/CommandBlock.hpp>
 #include <vtbackend/vt/ProgramStatus.hpp>
 
+#include <core/async/AsyncQueue.hpp>
 #include <core/async/Task.hpp>
 #include <core/net/DeadlineTimer.hpp>
 #include <core/net/EventLoop.hpp>
@@ -39,6 +40,7 @@
 #include <vthost/PduPump.hpp>
 #include <vthost/PermissionWire.hpp>
 #include <vthost/RestoredCounts.hpp>
+#include <vthost/client/KeySource.hpp>
 #include <vthost/client/LayoutReconstruction.hpp>
 #include <vthost/client/Liveness.hpp>
 #include <vthost/proto/Negotiation.hpp>
@@ -365,6 +367,11 @@ class NativeClient final
         /// The absolute directory, UTF-8, the session this attach creates starts in; empty for the profile's.
         /// @see proto::ClientHello::workingDirectory.
         std::string workingDirectory = {};
+        /// Signs this client's answers to the daemon's AuthChallenge; null for a client with no key to offer.
+        /// With one, and no @ref token, the hello waits for the challenge a daemon with authorized keys sends
+        /// first, and is sent with the proof; a client with a token sends it at once, as a daemon that asks
+        /// for no key sends no challenge to wait for.
+        std::shared_ptr<IClientKeySource> keySource = {};
     };
 
     /// @param loop The event loop everything runs on.
@@ -604,6 +611,10 @@ class NativeClient final
     /// @return The refusal.
     [[nodiscard]] std::optional<proto::HandshakeRefusal> const& refusal() const noexcept { return _refusal; }
 
+    /// @return refusal() in words for the user; when the daemon asked for a key, with the fingerprints that
+    ///         were offered and a pointer to `identity_file`. Empty while there is no refusal.
+    [[nodiscard]] std::string refusalMessage() const;
+
     /// @param type A PDU type this client may send.
     /// @return Whether the daemon answered it with Unsupported, so it is no longer sent.
     [[nodiscard]] bool peerRefused(proto::PduType type) const noexcept
@@ -666,6 +677,30 @@ class NativeClient final
     }
 
     void handlePdu(proto::DecodedFrame const& frame);
+
+    /// @return Whether this client signs in by key: it has a key source and no token, so its hello is sent
+    ///         in answer to each challenge rather than at once.
+    [[nodiscard]] bool waitsForChallenge() const noexcept
+    {
+        return _keyAuth.has_value() && _handshake.token.empty();
+    }
+
+    /// Sends the ClientHello.
+    /// @param proof The key proof answering a challenge; none sends the token alone.
+    void sendHello(std::optional<proto::KeyProof> proof);
+
+    /// (Re)arms the handshake deadline, LivenessPolicy::handshakeDeadline from now: as run() starts, and
+    /// again after each keyed hello, since the time a signature takes is not the daemon's to answer for.
+    void armHandshakeDeadline();
+
+    /// Answers each AuthChallenge the daemon sends with the next key's proof, until the connection ends.
+    [[nodiscard]] core::async::Task<void> answerChallenges();
+
+    /// Reads and handles the daemon's PDUs until the connection ends or the client is done.
+    [[nodiscard]] core::async::Task<PumpResult> pump();
+
+    /// Reads as pump() does, and answers the challenges alongside.
+    [[nodiscard]] core::async::Task<PumpResult> pumpWithKeyAuth();
 
     /// Applies a pushed layout: drops one for a released workspace, follows one this connection created,
     /// hands it on with the pending edits applied, and confirms a followed workspace's first one.
@@ -774,9 +809,15 @@ class NativeClient final
     /// connection is open, disarmed as run() closes it.
     std::optional<core::net::DeadlineTimer> _livenessTimer;
     core::platform::SteadyTimePoint _livenessTickDue {}; ///< When the armed tick was due, to spot a late one.
-    /// LivenessPolicy::handshakeDeadline from the ClientHello; armed as run() sends it, disarmed by the
-    /// daemon's answer and as run() closes the connection.
+    /// LivenessPolicy::handshakeDeadline from the ClientHello; armed as run() starts, disarmed while a
+    /// challenge is being signed and re-armed when the keyed hello is sent, disarmed by the daemon's answer
+    /// and as run() closes the connection.
     std::optional<core::net::DeadlineTimer> _handshakeTimer;
+    /// Proves keys for the daemon's challenges; empty for a client with no key source.
+    std::optional<KeyAuthenticator> _keyAuth;
+    /// The challenges handlePdu() received and answerChallenges() has not answered yet; closed when the
+    /// connection's reading ends.
+    core::async::AsyncQueue<proto::AuthChallenge> _challenges;
     bool _detached = false;
     bool _closing = false; ///< Set once run() has begun its orderly close; send() then writes nothing.
 };

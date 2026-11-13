@@ -100,9 +100,11 @@ Dialog {
         Accessible.name: root.heading
         Accessible.description: root.description
 
-        // Enter takes the default button.
-        Keys.onReturnPressed: root.pressDefault()
-        Keys.onEnterPressed: root.pressDefault()
+        // Enter takes the default button -- the press of a key that was struck, not the repeats of one still
+        // held down since before the dialog appeared (the Return that chose a row of the switcher, which
+        // opened this dialog a moment later, must not answer it).
+        Keys.onReturnPressed: (event) => { if (!event.isAutoRepeat) root.pressDefault() }
+        Keys.onEnterPressed: (event) => { if (!event.isAutoRepeat) root.pressDefault() }
         // Reached only where the popup keeps Escape for itself (no CloseOnEscape).
         Keys.onEscapePressed: root.escaped()
 

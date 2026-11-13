@@ -83,28 +83,16 @@ enum class HostUrlError : std::uint8_t
 /// One saved host of the configuration's `hosts:` section.
 struct HostEntry
 {
-    HostUrl url;                     ///< Where the host is.
-    std::filesystem::path tokenFile; ///< The daemon's token (`tls://`, where it is required).
-    std::filesystem::path tlsCa;     ///< A CA to verify the daemon's certificate against; empty for none.
-    std::string remoteCommand;       ///< Replaces the whole remote command (`ssh://`); empty for the default.
-    std::string profile; ///< The profile the remote sessions are created with; empty for the default.
+    HostUrl url; ///< Where the host is.
+    std::filesystem::path
+        tokenFile;               ///< The daemon's token (`tls://`); empty for none: a key signs in instead.
+    std::filesystem::path tlsCa; ///< A CA to verify the daemon's certificate against; empty for none.
+    /// The SSH private key file (`tls://`) to sign in with instead of the agent's keys; empty for the
+    /// agent's.
+    std::filesystem::path identityFile {};
+    std::string remoteCommand; ///< Replaces the whole remote command (`ssh://`); empty for the default.
+    std::string profile;       ///< The profile the remote sessions are created with; empty for the default.
 };
-
-/// Why a saved host whose URL parses still cannot be used.
-enum class HostEntryError : std::uint8_t
-{
-    TokenRequired, ///< A `tls://` host names no token file: a TCP daemon always requires one.
-};
-
-/// @return The sentence the loader logs, and Settings shows, for @p error.
-[[nodiscard]] std::string_view describe(HostEntryError error) noexcept;
-
-/// Whether a host needs @p tokenFile and has none: what the loader and Settings both refuse beyond the URL.
-/// @param scheme    The host's transport.
-/// @param tokenFile The token file it names, as written; empty for none.
-/// @return Nothing, or why the host cannot be used.
-[[nodiscard]] std::expected<void, HostEntryError> checkHostToken(HostScheme scheme,
-                                                                 std::string_view tokenFile) noexcept;
 
 /// @return The scheme @p url begins with (`ssh://`, `TLS://`), whether or not the rest of it parses; nullopt
 ///         while it names none of @ref HostSchemes. What a half-typed address already says about its host.
@@ -119,6 +107,7 @@ enum class HostField : std::uint8_t
     Url = 0,       ///< `url`
     TokenFile,     ///< `token_file`
     TlsCa,         ///< `tls_ca`
+    IdentityFile,  ///< `identity_file`
     RemoteCommand, ///< `remote_command`
     Profile,       ///< `profile`
 };
@@ -130,6 +119,7 @@ struct HostDraft
     std::string url {};           ///< The address, e.g. `ssh://me@homepc`.
     std::string tokenFile {};     ///< The daemon's token; empty for none.
     std::string tlsCa {};         ///< The CA the daemon's certificate is verified against; empty for none.
+    std::string identityFile {};  ///< The key file to sign in with; empty for the agent's keys.
     std::string remoteCommand {}; ///< Replaces the remote command (`ssh://`); empty for the default.
     std::string profile {}; ///< The profile the remote sessions are created with; empty for the default.
 
@@ -149,6 +139,7 @@ inline constexpr auto HostFields = std::array {
     HostFieldInfo { HostField::Url, "url", &HostDraft::url },
     HostFieldInfo { HostField::TokenFile, "token_file", &HostDraft::tokenFile },
     HostFieldInfo { HostField::TlsCa, "tls_ca", &HostDraft::tlsCa },
+    HostFieldInfo { HostField::IdentityFile, "identity_file", &HostDraft::identityFile },
     HostFieldInfo { HostField::RemoteCommand, "remote_command", &HostDraft::remoteCommand },
     HostFieldInfo { HostField::Profile, "profile", &HostDraft::profile },
 };
@@ -175,8 +166,7 @@ struct HostFieldProblem
 };
 
 /// What keeps @p draft from loading, field by field, in the loader's own words: an address that does not
-/// parse, and a `tls://` host without a token file. The token is judged by the address's scheme alone, so a
-/// half-typed `tls://` address already says it needs one.
+/// parse.
 /// @param draft The host as written.
 /// @return The problems, in @ref HostField order; empty when the loader would take it.
 [[nodiscard]] std::vector<HostFieldProblem> checkHostDraft(HostDraft const& draft);

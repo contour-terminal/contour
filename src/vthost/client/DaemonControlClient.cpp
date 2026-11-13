@@ -423,6 +423,7 @@ std::optional<DaemonStatus> fromWire(proto::DaemonStatusReply const& reply)
         .relocation =
             reply.relocation ? enumUpTo(*reply.relocation, RelocationRequest::Refused) : std::nullopt,
         .workspaces = reply.workspaces.transform([](uint32_t count) { return std::size_t { count }; }),
+        .tlsFingerprint = reply.tlsFingerprint,
     };
 }
 

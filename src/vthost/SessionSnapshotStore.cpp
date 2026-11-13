@@ -198,13 +198,16 @@ std::expected<void, StoreFailure> SessionSnapshotStore::confirmRestored() const
     return failedAt(StoreStep::Replace, _fileSystem.remove(sibling(".restored"))).transform([](bool) {});
 }
 
+bool isFileNameLabel(std::string_view label)
+{
+    constexpr auto Refused = std::string_view { "/\\:\0", 4 };
+    return !label.empty() && label.find_first_of(Refused) == std::string_view::npos && !label.contains("..");
+}
+
 std::optional<std::filesystem::path> sessionSnapshotPath(std::filesystem::path const& stateDirectory,
                                                          std::string_view label)
 {
-    // A separator or `..` would leave `sessions/`; so would `:` on Windows, where `C:x` is a root name that
-    // replaces the whole path it is appended to. NUL ends the name the OS sees.
-    constexpr auto Refused = std::string_view { "/\\:\0", 4 };
-    if (label.empty() || label.find_first_of(Refused) != std::string_view::npos || label.contains(".."))
+    if (!isFileNameLabel(label))
         return std::nullopt;
     return stateDirectory / "sessions" / std::format("{}.snapshot", label);
 }

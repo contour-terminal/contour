@@ -343,6 +343,11 @@ namespace
         return std::to_underlying(PduType::PaneSummary);
     }
 
+    [[nodiscard]] constexpr uint64_t tagOf(AuthChallenge const&) noexcept
+    {
+        return std::to_underlying(PduType::AuthChallenge);
+    }
+
     // --- body encoders ------------------------------------------------------
 
     void encodeBody(Writer&, Invalid const&)
@@ -467,7 +472,10 @@ namespace
         // size before it is omitted when absent, and would read this string as its own: stated as 0x0
         // instead, which decodeCellPixelSize reads as none.
         // The same for the run the intent's ids are of, after the directory, which it then states empty.
-        auto const statesInstance = pdu.attachIntent.daemonInstance != 0;
+        // A proof is appended after the instance, which it then states (0 when none): the fields before it
+        // are positional.
+        auto const statesProof = pdu.keyProof.has_value();
+        auto const statesInstance = pdu.attachIntent.daemonInstance != 0 || statesProof;
         if (!pdu.workingDirectory.empty() || statesInstance)
         {
             if (!pdu.cellPixelSize)
@@ -476,6 +484,11 @@ namespace
         }
         if (statesInstance)
             fields.varint(pdu.attachIntent.daemonInstance);
+        if (pdu.keyProof)
+        {
+            fields.blob(pdu.keyProof->publicKey);
+            fields.string(pdu.keyProof->signature);
+        }
         out.blob(fields.view());
         out.u8(0);
     }
@@ -921,7 +934,12 @@ namespace
                 out.u8(*pdu.relocation);
                 // Behind the relocation, for the same reason.
                 if (pdu.workspaces.has_value())
+                {
                     out.varint(*pdu.workspaces);
+                    // Behind the workspace count, for the same reason.
+                    if (pdu.tlsFingerprint.has_value())
+                        out.string(*pdu.tlsFingerprint);
+                }
             }
         }
     }
@@ -1043,6 +1061,12 @@ namespace
     void encodeBody(Writer& out, ReportFocus const& pdu)
     {
         out.u8(std::to_underlying(pdu.focus));
+    }
+
+    void encodeBody(Writer& out, AuthChallenge const& pdu)
+    {
+        out.bytes(pdu.nonce);
+        out.u8(pdu.methods);
     }
 
     void encodeBody(Writer& out, NotifyRole const& pdu)
@@ -1388,13 +1412,35 @@ namespace
         return assign(in.varint(), pdu.attachIntent.daemonInstance, error);
     }
 
+    [[nodiscard]] bool decodeHelloKeyProof(Reader& in, ClientHello& pdu, DecodeError& error)
+    {
+        auto key = in.blob();
+        if (!key)
+        {
+            error = key.error();
+            return false;
+        }
+        auto proof = KeyProof { .publicKey = std::vector<std::byte>(key->begin(), key->end()) };
+        if (!assign(in.string(), proof.signature, error))
+            return false;
+        // Read before any authentication, so bounded: an oversized proof is refused as malformed.
+        if (proof.publicKey.size() > MaxKeyProofKeyBytes
+            || proof.signature.size() > MaxKeyProofSignatureBytes)
+        {
+            error = DecodeError::MalformedPdu;
+            return false;
+        }
+        pdu.keyProof = std::move(proof);
+        return true;
+    }
+
     /// The ClientHello fields after the capabilities, in wire order; a field is appended here, never
     /// inserted.
-    constexpr auto ClientHelloFields = std::array<ClientHelloField, 10> {
+    constexpr auto ClientHelloFields = std::array<ClientHelloField, 11> {
         decodeHelloToken,           decodeHelloSessionSettings, decodeHelloRole,
         decodeHelloClientArea,      decodeHelloAttachIntent,    decodeHelloProfileName,
         decodeHelloColorPreference, decodeHelloCellPixelSize,   decodeHelloWorkingDirectory,
-        decodeHelloAttachInstance,
+        decodeHelloAttachInstance,  decodeHelloKeyProof,
     };
 
     /// The inverse of encodeBody(ClientHello), which says why the fields travel in a blob. Bytes after the
@@ -2017,6 +2063,14 @@ namespace
                     if (!assign(in.varint(), workspaces, error))
                         return std::unexpected(error);
                     pdu.workspaces = workspaces;
+                    // Appended after the workspace count by a later version yet.
+                    if (in.remaining() != 0)
+                    {
+                        auto fingerprint = std::string {};
+                        if (!assign(in.string(), fingerprint, error))
+                            return std::unexpected(error);
+                        pdu.tlsFingerprint = std::move(fingerprint);
+                    }
                 }
             }
         }
@@ -2217,6 +2271,19 @@ namespace
             return std::unexpected(error);
         // A state a newer peer knows is the weaker claim: the window does not have the focus.
         pdu.focus = enumOrElse(focus, WindowFocus::Focused, WindowFocus::Unfocused);
+        return pdu;
+    }
+
+    DecodeResult decodeAuthChallenge(Reader& in)
+    {
+        auto pdu = AuthChallenge {};
+        auto error = DecodeError {};
+        auto const nonce = in.bytes(pdu.nonce.size());
+        if (!nonce)
+            return std::unexpected(nonce.error());
+        std::ranges::copy(*nonce, pdu.nonce.begin());
+        if (!assign(in.u8(), pdu.methods, error))
+            return std::unexpected(error);
         return pdu;
     }
 
@@ -2567,6 +2634,7 @@ namespace
         DecodeRow { PduType::ReportFocus, decodeReportFocus },
         DecodeRow { PduType::NotifyRole, decodeNotifyRole },
         DecodeRow { PduType::PaneSummary, decodePaneSummary },
+        DecodeRow { PduType::AuthChallenge, decodeAuthChallenge },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with
