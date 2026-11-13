@@ -148,3 +148,24 @@ TEST_CASE("the input method is bypassed only for an Option key acting as Alt", "
                   ->inputMethodRouteFor(MacLeftOption)
               == InputMethodRoute::ToInputMethod);
 }
+
+TEST_CASE("Control+Command with a vertical arrow normalizes to the chord CycleWorkspace is bound to",
+          "[input][platform][mac]")
+{
+    auto const platform = macPlatform(OptionAsAlt::Off);
+    // Qt reports a Mac's arrow keys with the keypad modifier; the chord must not depend on it.
+    for (auto const& [qtKey, key]:
+         { std::pair { Qt::Key_Down, Key::DownArrow }, std::pair { Qt::Key_Up, Key::UpArrow } })
+    {
+        for (auto const keypad: { uint32_t { 0 }, Keypad })
+        {
+            INFO("key " << static_cast<int>(qtKey) << ", keypad " << keypad);
+            auto const event = platform->normalize({ .qtKey = qtKey,
+                                                     .text = {},
+                                                     .qtModifiers = Ctrl | Meta | keypad,
+                                                     .nativeVirtualKey = 0x7d });
+            CHECK(event.key == key);
+            CHECK(event.modifiers.chord == vtbackend::Modifiers { Modifier::Control, Modifier::Super });
+        }
+    }
+}
