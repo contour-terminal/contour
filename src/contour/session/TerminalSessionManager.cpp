@@ -4348,12 +4348,14 @@ std::unique_ptr<NodeDragSession> TerminalSessionManager::takeNodeDrag()
     if (!_nodeDrag)
         return nullptr;
     auto ended = std::exchange(_nodeDrag, nullptr);
+    // Posted, they run from whatever loop turns next: that of a later drag's QDrag::exec too, when this one
+    // ended as the next began (its carrier lost). Through afterNodeDrag() they wait that one out as well.
     if (auto moves = ended->takeHeld(); !moves.empty())
         QMetaObject::invokeMethod(
             this,
-            [moves = std::move(moves)] {
-                for (auto const& move: moves)
-                    move();
+            [this, moves = std::move(moves)]() mutable {
+                for (auto& move: moves)
+                    afterNodeDrag(std::move(move));
             },
             Qt::QueuedConnection);
     emit nodeDragChanged();

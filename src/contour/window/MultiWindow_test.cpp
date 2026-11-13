@@ -2276,10 +2276,14 @@ TEST_CASE("a drop while the window's drag runs moves once the drag has returned,
         REQUIRE_FALSE(f.a->beginPaneDrag(f.right).isEmpty());
         CHECK(probe.forgotten == 1);
         CHECK(f.a->carriedPane() == f.right);
-        QCoreApplication::processEvents(); // the held drop is made when the stale drag ends
-        CHECK(f.b->count() == 2);
+        // The held drop is released as the stale drag ends, but the new drag's loop turns the event loop it
+        // is posted to: it waits that drag out too, so the layout stays whole under the new drag's delegate.
+        QCoreApplication::processEvents();
+        CHECK(f.b->count() == 1);
         f.a->finishNodeDrag(Qt::MoveAction);
         CHECK(probe.forgotten == 2);
+        QCoreApplication::processEvents();
+        CHECK(f.b->count() == 2);
     }
 
     SECTION("a window that closes with its drag running ends it")

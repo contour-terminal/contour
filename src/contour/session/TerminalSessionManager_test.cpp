@@ -6744,6 +6744,49 @@ TEST_CASE("TerminalSessionManager: a drop on a workspace the daemon stopped list
     manager.releaseBinding(binding);
 }
 
+TEST_CASE("TerminalSessionManager: a move held for a drag never runs inside a later drag",
+          "[manager][workspace][sidebar]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    auto& controller = *window.controller;
+    auto const workspaceDrag = [&] {
+        return contour::window::NodeDrag { .payload = contour::window::DropPayload::Workspace,
+                                           .host = manager.hostIdentity(controller.displayedWorkspace()),
+                                           .window = controller.displayedWorkspace(),
+                                           .tabIndex = 0,
+                                           .workspace = 1,
+                                           .sessions = {} };
+    };
+    auto runs = 0;
+
+    SECTION("a drag whose carrier is destroyed mid-drag lets its moves go")
+    {
+        std::ignore = manager.beginNodeDrag(controller, workspaceDrag(), nullptr);
+        manager.afterNodeDrag([&] { ++runs; });
+        drainPosted();
+        CHECK(runs == 0);
+        // NodeDragSource's Component.onDestruction, for a delegate the OS drag outlived.
+        controller.abandonNodeDrag();
+        drainPosted();
+        CHECK(runs == 1);
+    }
+    SECTION("a drag never finished: its moves wait out the next drag's loop")
+    {
+        auto const other = QObject {};
+        std::ignore = manager.beginNodeDrag(controller, workspaceDrag(), nullptr);
+        manager.afterNodeDrag([&] { ++runs; });
+        // The next drag ends the lost one; its QDrag::exec spins the event loop the moves are posted to.
+        std::ignore = manager.beginNodeDrag(other, workspaceDrag(), nullptr);
+        drainPosted();
+        CHECK(runs == 0);
+        std::ignore = manager.endNodeDrag(&other);
+        drainPosted();
+        CHECK(runs == 1);
+    }
+}
+
 TEST_CASE("TerminalSessionManager: the user's own navigation gives up a pending follow",
           "[manager][workspace][sidebar]")
 {

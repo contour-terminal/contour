@@ -535,6 +535,10 @@ class WindowController:
     /// outside; a drop outside opens a window of its own where the probe says it ended.
     /// @param dropAction The Qt::DropAction the drag ended with, as its value.
     Q_INVOKABLE void finishNodeDrag(int dropAction);
+    /// Ends the node drag this window owns, if any, without acting on how it ended: its carrier is gone
+    /// before the OS drag returned (NodeDragSource's destruction), so finishNodeDrag() never comes. The
+    /// moves its drops held are made then.
+    Q_INVOKABLE void abandonNodeDrag();
     /// @return The pane whose header carries the drag this window began; null for none.
     [[nodiscard]] QObject* carriedPane() const;
 
@@ -1892,8 +1896,6 @@ class WindowController:
     void placeNode(session::ResolvedDrag drag, vtworkspace::MoveTarget target);
     /// Starts the drag of @p drag (@see beginPaneDrag).
     [[nodiscard]] QString beginNodeDrag(std::optional<NodeDrag> drag, session::TerminalSession* carried);
-    /// Ends the node drag this window owns, if any, without acting on how it ended.
-    void abandonNodeDrag();
 
     session::TerminalSessionManager& _manager;
     WindowId _windowId;

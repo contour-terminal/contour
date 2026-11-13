@@ -36,6 +36,13 @@ Item {
             source.controller.finishNodeDrag(dropAction)
     }
 
+    // A carrier destroyed while its OS drag runs (a row rebuilt under it) never sees dragFinished: the drag
+    // ends here, or the moves its drops held would wait for the next drag and run inside that one's loop.
+    Component.onDestruction: {
+        if (source.Drag.active && source.controller)
+            source.controller.abandonNodeDrag()
+    }
+
     /// Picks the node up: the OS drag starts, and runs until it is dropped or cancelled.
     function carry() {
         if (source.Drag.active || !source.controller)
