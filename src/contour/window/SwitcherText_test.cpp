@@ -409,3 +409,17 @@ TEST_CASE("switcherLabelState judges the label as it is typed", "[switcher]")
                                   .equivalentCommand = {},
                                   .subject = SwitcherHintSubject::None });
 }
+
+TEST_CASE("All daemons… shows the chord bound to ShowSwitcher, and nothing while none is", "[switcher]")
+{
+    auto list = daemons();
+    auto const chip = SwitcherView { .origin = SwitcherOrigin::Chip, .scope = SwitcherScope::OneDaemon };
+
+    auto const bound = SwitcherInputs { .daemons = list, .showSwitcherShortcut = "Ctrl+Shift+R" };
+    CHECK(switcherDetail(rowTitled(switcherRows(bound, chip), "All daemons…"), bound, Now)
+          == SwitcherDetail { .text = "Ctrl+Shift+R", .separator = {}, .command = {}, .tail = {} });
+
+    auto const unbound = SwitcherInputs { .daemons = list };
+    CHECK(switcherDetail(rowTitled(switcherRows(unbound, chip), "All daemons…"), unbound, Now)
+          == SwitcherDetail {});
+}

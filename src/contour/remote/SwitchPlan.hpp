@@ -7,7 +7,9 @@
 /// Pure, so every rule is a row of a table test.
 
 #include <contour/session/WindowSwitching.hpp>
+#include <contour/window/SidebarTree.hpp>
 #include <contour/window/SwitcherRows.hpp>
+#include <contour/window/SwitcherStatus.hpp>
 #include <contour/window/WorkspaceDirectory.hpp>
 
 #include <cstddef>
@@ -90,6 +92,9 @@ struct WorkspaceRow
     std::size_t tabs = 0;                                                         ///< How many tabs it holds.
     /// The window of this process that shows it; none when no window here does.
     std::optional<vtworkspace::WorkspaceId> shownByWindowHere;
+    /// What it asks of the user, as another daemon's listing states it (window::switcherStatusOf()); idle for
+    /// a row made from the window's own directory, whose status is the sidebar's (windowWorkspacesOf()).
+    window::SwitcherStatus status {};
 };
 
 /// Raise and focus the window of this process that already shows the workspace.
@@ -188,6 +193,18 @@ using ShownHere = std::function<std::optional<vtworkspace::WorkspaceId>(uint64_t
 /// @return One per row, in their order: its control id to choose it by, and where it is shown.
 [[nodiscard]] std::vector<window::SwitcherWorkspace> switcherWorkspacesOf(std::span<WorkspaceRow const> rows,
                                                                           vtworkspace::WorkspaceId window);
+
+/// The switcher popup's rows of the window's own daemon: switcherWorkspacesOf() of @p rows, each with the
+/// status the window's sidebar shows for it (the workspace row of the same daemon id), so a workspace looks
+/// the same in the sidebar and the switcher; idle for one the sidebar does not list yet.
+/// @param rows The daemon's workspaces, as workspaceRowsOf() made them from the window's directory.
+/// @param sidebarWorkspaces The window's sidebar's workspace rows (SidebarListing::workspaces).
+/// @param window The window the popup is over.
+/// @return One per row, in their order.
+[[nodiscard]] std::vector<window::SwitcherWorkspace> windowWorkspacesOf(
+    std::span<WorkspaceRow const> rows,
+    std::span<window::SidebarRow const> sidebarWorkspaces,
+    vtworkspace::WorkspaceId window);
 
 /// How a workspace is named to the user: its label, else its active tab's title, else "workspace N".
 /// @param label The workspace's label; empty for none.

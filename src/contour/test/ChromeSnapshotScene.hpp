@@ -1514,7 +1514,9 @@ class ChromeSnapshotScene
             .mode = session::SwitchMode::Switch,
             .prompt = window::SwitcherPrompt::Browse,
             .pick = std::nullopt,
-            .scope = window::SwitcherScope::OneDaemon });
+            .scope = window::SwitcherScope::OneDaemon,
+            .windowWorkspaces = workspaces,
+            .origin = window::SwitcherOrigin::Chip });
         _dropdownWindow = window::loadSwitcherWindow(_engine, *_dropdown);
         REQUIRE(_dropdownWindow != nullptr);
         _dropdownWindow->setFlags(Qt::Tool | Qt::FramelessWindowHint);

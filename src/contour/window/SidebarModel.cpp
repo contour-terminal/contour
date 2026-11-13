@@ -446,9 +446,12 @@ SidebarModel::Rebuilt SidebarModel::build(WorkspaceDirectory const& directory) c
     if (!current && displayed)
         current = displayed->workspace;
     // The footer and the summary count every pane and workspace, whatever the filter hides.
+    auto footer = sidebarFooter(listing.workspaces);
+    auto summary = sidebarSummary(listing.workspaces, current);
     return Rebuilt { .rows = std::move(listing.rows),
-                     .footer = sidebarFooter(listing.workspaces),
-                     .summary = sidebarSummary(listing.workspaces, current),
+                     .workspaces = std::move(listing.workspaces),
+                     .footer = footer,
+                     .summary = std::move(summary),
                      .displayed = displayed,
                      .currentWorkspace = current };
 }
@@ -464,6 +467,7 @@ void SidebarModel::refreshNow()
     else
         apply(std::move(built.rows));
 
+    _workspaceRows = std::move(built.workspaces);
     if (std::exchange(_footer, built.footer) != built.footer)
         emit footerChanged();
     auto const index = [&] {

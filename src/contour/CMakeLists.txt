@@ -1030,6 +1030,7 @@ if(CONTOUR_FRONTEND_GUI)
             config/GpuSelector_test.cpp
             test/Accessibility_qml_test.cpp
             test/ConnectPickerQml_test.cpp
+            test/SwitcherController_test.cpp
             test/SwitcherQml_test.cpp
             test/SidebarQml_test.cpp
             test/SidebarFakes.hpp

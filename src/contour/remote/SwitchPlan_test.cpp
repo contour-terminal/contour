@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/remote/SelectAnswer.hpp>
 #include <contour/remote/SwitchPlan.hpp>
+#include <contour/window/SidebarTree.hpp>
+#include <contour/window/SwitcherStatus.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -470,4 +472,88 @@ TEST_CASE(
     {
         CHECK(launchDaemonAddress(dir / "." / "work", dir) == labelled("work"));
     }
+}
+
+TEST_CASE("windowWorkspacesOf takes each workspace's status from the sidebar row of the same id",
+          "[switch][plan][switcher]")
+{
+    using contour::window::SidebarRow;
+    using contour::window::SidebarRowKind;
+    using contour::window::Urgency;
+    constexpr auto PopupWindow = vtworkspace::WorkspaceId { 3 };
+    auto const rows =
+        std::vector<WorkspaceRow> { row(11, 1, "ops", PopupWindow), row(12, 2, "build"), row(13, 3, "docs") };
+    // The sidebar lists them in another order, and knows nothing of 13 yet.
+    auto failed = SidebarRow {};
+    failed.key = { .kind = SidebarRowKind::Workspace, .workspace = 12, .tab = 0, .pane = {} };
+    failed.urgency = Urgency::Failed;
+    failed.glyph = contour::window::TabBadgeKind::Error;
+    failed.gitText = "main ↑2";
+    failed.reasonLabel = "exit 1";
+    failed.reasonSeparator = " · ";
+    failed.reasonCommand = "make deploy";
+    auto idle = SidebarRow {};
+    idle.key = { .kind = SidebarRowKind::Workspace, .workspace = 11, .tab = 0, .pane = {} };
+    idle.gitText = "feat/auth";
+    auto const sidebar = std::vector { failed, idle };
+
+    auto const listed = contour::remote::windowWorkspacesOf(rows, sidebar, PopupWindow);
+
+    REQUIRE(listed.size() == 3);
+    CHECK(listed[0].name == "ops");
+    CHECK(listed[0].state == contour::window::SwitcherWorkspaceState::ThisWindow);
+    CHECK(listed[0].status == contour::window::switcherStatusOf(idle));
+    CHECK(listed[1].status == contour::window::switcherStatusOf(failed));
+    CHECK(listed[1].status.urgency == Urgency::Failed);
+    CHECK(listed[1].id == 12);
+    CHECK(listed[2].status == contour::window::SwitcherStatus {});
+}
+
+TEST_CASE("workspaceRowsOf carries another daemon's status", "[switch][plan][switcher]")
+{
+    auto pane = vtcontrol::PaneInfo {};
+    pane.id = "pane:p";
+    auto block = vtcontrol::BlockInfo {};
+    block.command = "make deploy";
+    block.exitCode = 1;
+    pane.lastFinished = block;
+    auto tab = vtcontrol::TabInfo {};
+    tab.panes = { pane };
+    auto info = vtcontrol::WorkspaceInfo {};
+    info.id = "workspace:00000000-0000-0000-0000-000000000001";
+    info.position = 1;
+    info.native = "9";
+    info.visibility = "hidden";
+    info.tabs = { tab };
+    info.git = vtcontrol::WorkspaceGitInfo {
+        .branch = "main", .kind = vtcontrol::GitHeadKind::Branch, .ahead = 2, .behind = std::nullopt
+    };
+    auto const infos = std::vector { info };
+
+    auto const rows = contour::remote::workspaceRowsOf(
+        infos, [](uint64_t) { return std::optional<vtworkspace::WorkspaceId> {}; });
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].status == contour::window::switcherStatusOf(info));
+    CHECK(rows[0].status.urgency == contour::window::Urgency::Failed);
+    CHECK(rows[0].status.gitText == "main ↑2");
+    auto const listed = contour::remote::switcherWorkspacesOf(rows, vtworkspace::WorkspaceId { 3 });
+    REQUIRE(listed.size() == 1);
+    CHECK(listed[0].status == rows[0].status);
+    CHECK(listed[0].id == 9);
+}
+
+TEST_CASE("switcherWorkspacesOf makes a workspace's name fit for a row", "[switch][plan][switcher]")
+{
+    // U+202E RIGHT-TO-LEFT OVERRIDE, spelled byte by byte so the source itself carries none.
+    auto const rightToLeftOverride =
+        std::string { static_cast<char>(0xE2), static_cast<char>(0x80), static_cast<char>(0xAE) };
+    auto rows = std::vector<WorkspaceRow> { row(11, 1, "evil" + rightToLeftOverride + "exe.txt"),
+                                            row(12, 2, std::string(500, 'x')) };
+    auto const listed = contour::remote::switcherWorkspacesOf(rows, vtworkspace::WorkspaceId { 3 });
+    REQUIRE(listed.size() == 2);
+    CHECK(listed[0].name == contour::window::rowTextOf(rows[0].name));
+    CHECK(listed[0].name != rows[0].name);
+    CHECK(listed[1].name == contour::window::rowTextOf(rows[1].name));
+    CHECK(listed[1].name.size() < rows[1].name.size());
 }

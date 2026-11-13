@@ -51,6 +51,7 @@ struct SwitcherWorkspace
     std::size_t tabs = 0;  ///< How many tabs it holds.
     SwitcherWorkspaceState state = SwitcherWorkspaceState::Hidden; ///< Where it is shown.
     SwitcherStatus status {}; ///< What it asks of the user, its git text, reason and time.
+    uint64_t id = 0; ///< The daemon's native id of it, which the sidebar's rows are keyed by; 0 unknown.
 };
 
 /// How far a daemon's workspaces are known.
@@ -182,6 +183,31 @@ enum class OpensInNewWindow : uint8_t
     Yes,
 };
 
+/// What a row of a kind is to assistive technology: the first words of its description.
+enum class SwitcherRowRole : uint8_t
+{
+    Workspace = 0, ///< `workspace`.
+    Daemon,        ///< `daemon`.
+    Action,        ///< `action`.
+    Progress,      ///< `in progress`.
+    Error,         ///< `error`.
+};
+
+/// Whether a row of a kind stands for an answer still awaited: it turns the Working ring.
+enum class AwaitsAnswer : uint8_t
+{
+    No = 0,
+    Yes,
+};
+
+/// Whether a row of a kind wears the trailing "open in a new window" button while selected or hovered. Only
+/// a workspace does (board 6): Shift+Return on a daemon or an action opens a window too, without one.
+enum class NewWindowButton : uint8_t
+{
+    No = 0,
+    Yes,
+};
+
 /// What a row of one kind does with the keys, and what its footer hints are about.
 struct SwitcherRowKindRule
 {
@@ -189,6 +215,11 @@ struct SwitcherRowKindRule
     DrillsIn drillsIn = DrillsIn::No;                      ///< Whether it leads into a level.
     OpensInNewWindow newWindow = OpensInNewWindow::No;     ///< Whether Shift+Return opens a window.
     SwitcherHintSubject hints = SwitcherHintSubject::None; ///< What its footer hints are about.
+    SwitcherRowRole role = SwitcherRowRole::Workspace;     ///< What it is to assistive technology.
+    /// Whether it waits for an answer. The LabelAction row waits only while its start runs, which the
+    /// controller knows: No here.
+    AwaitsAnswer awaits = AwaitsAnswer::No;
+    NewWindowButton button = NewWindowButton::No; ///< Whether it wears the new-window button.
 };
 
 /// One row per SwitcherRowKind, in enumerator order: every per-kind fact the keys, the footer and the
@@ -197,40 +228,67 @@ inline constexpr auto SwitcherRowKindRules = std::array {
     SwitcherRowKindRule { .kind = SwitcherRowKind::Workspace,
                           .drillsIn = DrillsIn::No,
                           .newWindow = OpensInNewWindow::Yes,
-                          .hints = SwitcherHintSubject::Workspace },
+                          .hints = SwitcherHintSubject::Workspace,
+                          .role = SwitcherRowRole::Workspace,
+                          .awaits = AwaitsAnswer::No,
+                          .button = NewWindowButton::Yes },
     SwitcherRowKindRule { .kind = SwitcherRowKind::Daemon,
                           .drillsIn = DrillsIn::Yes,
                           .newWindow = OpensInNewWindow::Yes,
-                          .hints = SwitcherHintSubject::Daemon },
+                          .hints = SwitcherHintSubject::Daemon,
+                          .role = SwitcherRowRole::Daemon,
+                          .awaits = AwaitsAnswer::No,
+                          .button = NewWindowButton::No },
     SwitcherRowKindRule { .kind = SwitcherRowKind::NewWorkspace,
                           .drillsIn = DrillsIn::No,
                           .newWindow = OpensInNewWindow::Yes,
-                          .hints = SwitcherHintSubject::NewWorkspace },
+                          .hints = SwitcherHintSubject::NewWorkspace,
+                          .role = SwitcherRowRole::Action,
+                          .awaits = AwaitsAnswer::No,
+                          .button = NewWindowButton::No },
     SwitcherRowKindRule { .kind = SwitcherRowKind::NewDaemon,
                           .drillsIn = DrillsIn::Yes,
                           .newWindow = OpensInNewWindow::No,
-                          .hints = SwitcherHintSubject::NewDaemon },
+                          .hints = SwitcherHintSubject::NewDaemon,
+                          .role = SwitcherRowRole::Action,
+                          .awaits = AwaitsAnswer::No,
+                          .button = NewWindowButton::No },
     SwitcherRowKindRule { .kind = SwitcherRowKind::AllDaemons,
                           .drillsIn = DrillsIn::Yes,
                           .newWindow = OpensInNewWindow::No,
-                          .hints = SwitcherHintSubject::AllDaemons },
+                          .hints = SwitcherHintSubject::AllDaemons,
+                          .role = SwitcherRowRole::Action,
+                          .awaits = AwaitsAnswer::No,
+                          .button = NewWindowButton::No },
     SwitcherRowKindRule { .kind = SwitcherRowKind::Discovering,
                           .drillsIn = DrillsIn::No,
                           .newWindow = OpensInNewWindow::No,
-                          .hints = SwitcherHintSubject::None },
+                          .hints = SwitcherHintSubject::None,
+                          .role = SwitcherRowRole::Progress,
+                          .awaits = AwaitsAnswer::Yes,
+                          .button = NewWindowButton::No },
     SwitcherRowKindRule { .kind = SwitcherRowKind::Connecting,
                           .drillsIn = DrillsIn::No,
                           .newWindow = OpensInNewWindow::No,
-                          .hints = SwitcherHintSubject::None },
+                          .hints = SwitcherHintSubject::None,
+                          .role = SwitcherRowRole::Progress,
+                          .awaits = AwaitsAnswer::Yes,
+                          .button = NewWindowButton::No },
     // Its verdict decides its hints (SwitcherLabelState::subject).
     SwitcherRowKindRule { .kind = SwitcherRowKind::LabelAction,
                           .drillsIn = DrillsIn::No,
                           .newWindow = OpensInNewWindow::Yes,
-                          .hints = SwitcherHintSubject::None },
+                          .hints = SwitcherHintSubject::None,
+                          .role = SwitcherRowRole::Action,
+                          .awaits = AwaitsAnswer::No,
+                          .button = NewWindowButton::No },
     SwitcherRowKindRule { .kind = SwitcherRowKind::Failure,
                           .drillsIn = DrillsIn::No,
                           .newWindow = OpensInNewWindow::No,
-                          .hints = SwitcherHintSubject::None },
+                          .hints = SwitcherHintSubject::None,
+                          .role = SwitcherRowRole::Error,
+                          .awaits = AwaitsAnswer::No,
+                          .button = NewWindowButton::No },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SwitcherRowKindRules.size()),
@@ -283,6 +341,9 @@ struct SwitcherInputs
     std::size_t windowDaemon =
         0; ///< The daemon the window the popup is over is on, an index into @c daemons.
     SwitcherDiscovery discovery = SwitcherDiscovery::Settled; ///< Whether other daemons are still looked for.
+    /// The chord bound to ShowSwitcher, as the platform spells it: the `All daemons…` row's detail, since
+    /// that row widens the dropdown to what the chord opens. Empty while nothing binds it.
+    std::string_view showSwitcherShortcut {};
 };
 
 /// Where in the popup the user is, and what they typed.
@@ -317,14 +378,12 @@ struct SwitcherOpening
     /// Every daemon, or the window's own alone, listed afresh as it opens: the workspace chip's dropdown asks
     /// which workspace of this window's daemon to show. A pick is always one daemon, whatever this says.
     SwitcherScope scope = SwitcherScope::Everything;
+    /// The window's own daemon's workspaces, with the status its sidebar shows (remote::windowWorkspacesOf):
+    /// that daemon is not listed over the control API, and the window pushes fresh ones while it is open.
+    std::vector<SwitcherWorkspace> windowWorkspaces {};
+    /// Where it opened from: centred, or hanging below the workspace chip.
+    SwitcherOrigin origin = SwitcherOrigin::Centred;
 };
-
-/// @param opening What opens the popup.
-/// @return Whether it lists one daemon's workspaces alone: a pick's, or the window's own.
-[[nodiscard]] constexpr SwitcherScope scopeOf(SwitcherOpening const& opening) noexcept
-{
-    return opening.pick ? SwitcherScope::OneDaemon : opening.scope;
-}
 
 /// What a typed label for a new daemon amounts to.
 enum class LabelVerdict : uint8_t

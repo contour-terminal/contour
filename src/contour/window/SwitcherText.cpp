@@ -141,9 +141,16 @@ SwitcherDetail switcherDetail(SwitcherRow const& row,
                          .tail = {} };
             return {};
         case SwitcherRowKind::NewWorkspace:
-            return { .text = std::format("on {}", daemonNameOf(row, inputs)), .separator = {}, .command = {}, .tail = {} };
-        case SwitcherRowKind::NewDaemon:
+            return { .text = std::format("on {}", daemonNameOf(row, inputs)),
+                     .separator = {},
+                     .command = {},
+                     .tail = {} };
         case SwitcherRowKind::AllDaemons:
+            return { .text = std::string { inputs.showSwitcherShortcut },
+                     .separator = {},
+                     .command = {},
+                     .tail = {} };
+        case SwitcherRowKind::NewDaemon:
         case SwitcherRowKind::Discovering:
         case SwitcherRowKind::Connecting:
         case SwitcherRowKind::LabelAction:

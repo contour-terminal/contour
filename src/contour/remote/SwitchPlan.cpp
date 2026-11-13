@@ -145,6 +145,7 @@ std::vector<WorkspaceRow> workspaceRowsOf(std::span<vtcontrol::WorkspaceInfo con
             .visibility = visibility != Visibilities.end() ? *visibility : WorkspaceVisibility::Hidden,
             .tabs = info.tabs.size(),
             .shownByWindowHere = shownHere(id),
+            .status = window::switcherStatusOf(info),
         });
     }
     return rows;
@@ -173,6 +174,7 @@ std::vector<WorkspaceRow> workspaceRowsOf(window::WorkspaceDirectory const& dire
             .visibility = shown ? vthost::WorkspaceVisibility::Shown : vthost::WorkspaceVisibility::Hidden,
             .tabs = workspace.tabs.size(),
             .shownByWindowHere = shown,
+            .status = {},
         });
     }
     return rows;
@@ -238,11 +240,33 @@ std::vector<window::SwitcherWorkspace> switcherWorkspacesOf(std::span<WorkspaceR
                                             return window::SwitcherWorkspace {
                                                 .ref = row.ref,
                                                 .position = row.position,
-                                                .name = row.name,
+                                                // Another daemon's name is the user's text: made fit for a
+                                                // row as the sidebar makes its own (bidi disarmed, capped).
+                                                .name = window::rowTextOf(row.name),
                                                 .tabs = row.tabs,
                                                 .state = stateOf(row),
+                                                .status = row.status,
+                                                .id = row.id,
                                             };
                                         }));
+}
+
+std::vector<window::SwitcherWorkspace> windowWorkspacesOf(
+    std::span<WorkspaceRow const> rows,
+    std::span<window::SidebarRow const> sidebarWorkspaces,
+    vtworkspace::WorkspaceId window)
+{
+    auto workspaces = switcherWorkspacesOf(rows, window);
+    for (auto& workspace: workspaces)
+        if (auto const found = std::ranges::find_if(sidebarWorkspaces,
+                                                    [&](window::SidebarRow const& row) {
+                                                        return row.key.kind
+                                                                   == window::SidebarRowKind::Workspace
+                                                               && row.key.workspace == workspace.id;
+                                                    });
+            found != sidebarWorkspaces.end())
+            workspace.status = window::switcherStatusOf(*found);
+    return workspaces;
 }
 
 std::string workspaceDisplayName(std::string_view label, std::string_view activeTabTitle, uint32_t position)

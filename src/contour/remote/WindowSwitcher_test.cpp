@@ -1315,7 +1315,6 @@ TEST_CASE("WindowSwitcher: the switcher popup's pick re-enters the switch, and E
                 .address = pick.target,
                 .workspaceCount = pick.workspaces.size(),
                 .tag = {},
-                .expansion = contour::window::SwitcherExpansion::Expanded,
                 .listing = contour::window::SwitcherListing::Listed,
                 .failure = {},
                 .workspaces = contour::remote::switcherWorkspacesOf(pick.workspaces, pick.window),
@@ -1337,7 +1336,7 @@ TEST_CASE("WindowSwitcher: the switcher popup's pick re-enters the switch, and E
     SECTION("Return on B's second workspace")
     {
         popup.setCurrentIndex(1);
-        popup.activateCurrent();
+        popup.activate(1);
         REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 2000));
         CHECK(*told.outcome == SwitchOutcome::Switched);
         REQUIRE(rig.windowLink() != nullptr);

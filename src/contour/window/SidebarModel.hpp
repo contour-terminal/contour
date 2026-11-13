@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -389,6 +390,9 @@ class SidebarModel: public QAbstractListModel
 
     /// @return The rows as shown, in order.
     [[nodiscard]] std::vector<SidebarRow> const& rows() const noexcept { return _rows; }
+    /// @return Every workspace's row as the last rebuild made it, in order, whatever the filter or a fold
+    ///         hides (SidebarListing::workspaces): what the switcher shows of the window's own daemon.
+    [[nodiscard]] std::span<SidebarRow const> workspaceRows() const noexcept { return _workspaceRows; }
     /// @return Panes that need the user, over every pane the window lists (a filter hides none of them).
     [[nodiscard]] int footerNeedYou() const noexcept { return static_cast<int>(_footer.needYou); }
     /// @return Panes at work, over every pane the window lists.
@@ -568,6 +572,7 @@ class SidebarModel: public QAbstractListModel
     struct Rebuilt
     {
         std::vector<SidebarRow> rows;
+        std::vector<SidebarRow> workspaces; ///< Every workspace's row (SidebarListing::workspaces).
         SidebarFooter footer;
         SidebarSummary summary;
         std::optional<TabRef> displayed;
@@ -591,6 +596,7 @@ class SidebarModel: public QAbstractListModel
     platform::Announcer& _announcer;
     SidebarState _state;
     std::vector<SidebarRow> _rows;
+    std::vector<SidebarRow> _workspaceRows; ///< @see workspaceRows()
     SidebarFooter _footer;
     SidebarSummary _summary;
     int _currentIndex = -1;
