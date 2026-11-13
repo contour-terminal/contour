@@ -35,6 +35,7 @@
 #include <core/log/LogStore.hpp>
 #include <core/platform/PathUtils.hpp>
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
 #include <QtCore/QMetaEnum>
@@ -56,6 +57,7 @@
 #include <QtQuick/QQuickWindow>
 
 #include <chrono>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -397,20 +399,44 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
         // window that has been shown.
         auto const marginsDevicePx =
             geometry::scaled(session::toGeometryMargins(profile().margins.value()), devicePixelRatio());
-        _renderer = make_unique<vtrasterizer::Renderer>(
-            _session->profile().terminalSize.value(),
-            geometry::pageMarginFor(marginsDevicePx),
-            session::sanitizeFontDescription(profile().fonts.value(), fontDPI()),
-            _session->terminal().colorPalette(),
-            _session->config().renderer.value().textureAtlasHashtableSlots,
-            _session->config().renderer.value().textureAtlasTileCount,
-            _session->config().renderer.value().textureAtlasDirectMapping,
-            // The composition root picks the locator engine and what backs it; the renderer just uses what it
-            // is given.
-            _session->app().fontLocator(profile().fonts.value().fontLocator),
-            _session->profile().hyperlinkDecoration.value().normal,
-            _session->profile().hyperlinkDecoration.value().hover,
-            _session->config().textScalingMethod.value());
+        try
+        {
+            _renderer = make_unique<vtrasterizer::Renderer>(
+                _session->profile().terminalSize.value(),
+                geometry::pageMarginFor(marginsDevicePx),
+                session::sanitizeFontDescription(profile().fonts.value(), fontDPI()),
+                _session->terminal().colorPalette(),
+                _session->config().renderer.value().textureAtlasHashtableSlots,
+                _session->config().renderer.value().textureAtlasTileCount,
+                _session->config().renderer.value().textureAtlasDirectMapping,
+                // The composition root picks the locator engine and what backs it; the renderer just uses
+                // what it is given.
+                _session->app().fontLocator(profile().fonts.value().fontLocator),
+                _session->profile().hyperlinkDecoration.value().normal,
+                _session->profile().hyperlinkDecoration.value().hover,
+                _session->config().textScalingMethod.value());
+        }
+        catch (std::exception const& failure)
+        {
+            // Not a missing font: the composition root's last-resort locator finds one whenever the system
+            // has any, and startup refuses a system that has none. This is a font that was found and would
+            // not load. Refused like the missing one, rather than thrown into the QML binding that set the
+            // session, where an exception ends the process. Reported from the event loop, not from inside
+            // this property write: the dialog runs a loop of its own.
+            auto& app = _session->app();
+            auto reason = std::format("The terminal cannot be drawn with the font \"{}\": {}",
+                                      profile().fonts.value().regular.familyName,
+                                      failure.what());
+            releaseSession();
+            QMetaObject::invokeMethod(
+                QCoreApplication::instance(),
+                [&app, reason = std::move(reason)] {
+                    app.reportUnusableFont(reason);
+                    QCoreApplication::exit(EXIT_FAILURE);
+                },
+                Qt::QueuedConnection);
+            return;
+        }
 
         // setup once with the renderer creation
         applyFontDPI();
