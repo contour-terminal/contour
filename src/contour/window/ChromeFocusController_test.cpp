@@ -693,6 +693,21 @@ TEST_CASE("the sidebar's keys are requested of the tree, and typed text promotes
     CHECK(f.area() == ChromeArea::Terminal);
 }
 
+TEST_CASE("activating a row of the sidebar's tree hands the keyboard to the terminal",
+          "[windowcontroller][chromefocus][sidebar]")
+{
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    controller.focusSidebar();
+    REQUIRE(f.area() == ChromeArea::Sidebar);
+    controller.sidebar().refreshNow();
+    REQUIRE(controller.sidebar().rowCount() > 0);
+
+    // The row the keyboard is on: Enter in the tree asks the model to activate it.
+    controller.sidebar().activate(0);
+    CHECK(f.area() == ChromeArea::Terminal);
+}
+
 TEST_CASE("Escape in the sidebar's tree clears a typed filter before it leaves",
           "[windowcontroller][chromefocus][sidebar]")
 {

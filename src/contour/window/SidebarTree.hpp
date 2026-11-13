@@ -41,6 +41,29 @@ enum class SidebarRowKind : uint8_t
     Pane,          ///< One pane of a tab with more than one.
 };
 
+/// Where the keyboard goes once a row has been activated (Enter on it).
+enum class ActivationFocus : uint8_t
+{
+    Stay = 0, ///< It stays on the tree, so the next key moves the row cursor.
+    Terminal, ///< It goes to the terminal the activation shows, ready to type, as a click on the row leaves
+              ///< it.
+};
+
+/// @param kind What the activated row stands for.
+/// @return Where the keyboard goes after the activation. Every row kind shows something in the window --
+///         a workspace selects it, a tab or a pane shows its pane -- so each hands the keyboard to the
+///         terminal, which is what a pointer press on the row does already (the chrome focus ends on it).
+[[nodiscard]] constexpr ActivationFocus focusAfterActivation(SidebarRowKind kind) noexcept
+{
+    switch (kind)
+    {
+        case SidebarRowKind::Workspace:
+        case SidebarRowKind::Tab:
+        case SidebarRowKind::Pane: return ActivationFocus::Terminal;
+    }
+    return ActivationFocus::Stay;
+}
+
 /// Identifies a row across rebuilds, so a view keeps its selection and focus through a refresh.
 struct SidebarRowKey
 {

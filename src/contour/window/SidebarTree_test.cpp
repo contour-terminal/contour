@@ -827,3 +827,9 @@ TEST_CASE("SidebarTree.unlabelled_workspace_is_numbered_as_its_host_numbers_it",
     CHECK(rows[0].title == "ops");
     CHECK(rows[2].title == "Workspace 3");
 }
+
+TEST_CASE("every kind of sidebar row hands the keyboard to the terminal once activated", "[sidebar]")
+{
+    for (auto const kind: { SidebarRowKind::Workspace, SidebarRowKind::Tab, SidebarRowKind::Pane })
+        CHECK(focusAfterActivation(kind) == ActivationFocus::Terminal);
+}

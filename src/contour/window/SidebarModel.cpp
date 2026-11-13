@@ -618,7 +618,9 @@ void SidebarModel::activate(int row)
     auto const* const shown = rowAt(row);
     if (shown == nullptr)
         return;
-    switch (shown->key.kind)
+    // Read before the host runs: showing a row may rebuild the rows it points into.
+    auto const kind = shown->key.kind;
+    switch (kind)
     {
         case SidebarRowKind::Workspace: _host.showWorkspace(shown->key.workspace); break;
         case SidebarRowKind::Tab:
@@ -630,6 +632,8 @@ void SidebarModel::activate(int row)
             break;
     }
     noteChanged();
+    if (focusAfterActivation(kind) == ActivationFocus::Terminal)
+        emit terminalFocusWanted();
 }
 
 void SidebarModel::setExpansion(int row, RowExpansion wanted)

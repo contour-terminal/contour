@@ -282,6 +282,7 @@ void WindowController::initSidebar()
     _sidebar = std::make_unique<SidebarModel>(*_sidebarHost, _attention, _wallClock, *_noticeAnnouncer);
     connect(this, &WindowController::workspaceDirectoryChanged, _sidebar.get(), &SidebarModel::noteChanged);
     connect(this, &WindowController::workspaceDirectoryChanged, this, &WindowController::followMovedPane);
+    connect(_sidebar.get(), &SidebarModel::terminalFocusWanted, this, &WindowController::leaveChrome);
     connect(_sidebar.get(),
             &SidebarModel::summaryChanged,
             this,
