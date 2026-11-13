@@ -1257,10 +1257,12 @@ TEST_CASE("UiStyleProvider: badgeLook, hostChipLook, titleBand and tabWellLayout
           == QStringLiteral("hidden"));
     CHECK(contourLinux.titleBand(0, 0, 0, 0, {}, static_cast<int>(contour::window::HostChipStateCount))
               .isEmpty());
-    // Fluent's joined band always shows, holding its one tab (R-j).
+    // Fluent's joined band always shows, for its caption buttons: the tabs while the gate shows them, else
+    // the title.
     auto const fluent = UiStyleProvider(chromeInputsFor(ChromeStyle::Fluent, font));
     CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0).value("band").toString() == QStringLiteral("shown"));
-    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0).value("centre").toString() == QStringLiteral("tabs"));
+    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0).value("centre").toString() == QStringLiteral("title"));
+    CHECK(fluent.titleBand(0, 0, 1, 0, {}, 0).value("centre").toString() == QStringLiteral("tabs"));
 
     auto const crowded = mac.tabWellLayout(300, 12);
     CHECK(crowded.value("scrolls").toBool());

@@ -2727,8 +2727,9 @@ TEST_CASE("the joined strip keeps its profile dropdown (offscreen)",
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("one tab still shows the joined bar and its caption buttons (offscreen)",
-          "[contour][gui][qml][mainwindow][joinedtabs]")
+TEST_CASE(
+    "one tab under multiple keeps the joined bar for its caption buttons, showing the title (offscreen)",
+    "[contour][gui][qml][mainwindow][joinedtabs]")
 {
     QQmlEngine engine;
     MockMainController controller { MainWindowScene { .tabCount = 1,
@@ -2739,9 +2740,18 @@ TEST_CASE("one tab still shows the joined bar and its caption buttons (offscreen
     auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
     showWindow(*root);
 
+    // The gate hides the tabs, so the band holds the title in their place.
     CHECK(named(*root, QStringLiteral("titleBar")).isVisible());
-    CHECK(tabDelegates(*root).size() == 1);
+    CHECK(named(*root, QStringLiteral("bandTitleRow")).isVisible());
+    auto const* const list = root->findChild<QQuickItem*>(QStringLiteral("tabList"));
+    CHECK((list == nullptr || !list->isVisible()));
     CHECK(showsCloseButton(*root));
+
+    // The gate opening (a second tab, or `always`) brings the tabs back in place of the title.
+    controller.setTabBarShouldShow(true);
+    QCoreApplication::processEvents();
+    CHECK_FALSE(named(*root, QStringLiteral("bandTitleRow")).isVisible());
+    CHECK(tabDelegates(*root).size() == 1);
 
     // Under Minimal it is Pill's bare band: no tabs, but still the caption buttons.
     QQmlEngine minimalEngine;
@@ -4149,25 +4159,45 @@ TEST_CASE("one tab of one pane at a password prompt shows the lock as a band chi
     }
 }
 
-TEST_CASE(
-    "one tab of one pane at a password prompt on the joined Fluent row shows the lock on its tab (offscreen)",
-    "[contour][gui][qml][mainwindow][secureinput]")
+TEST_CASE("one tab of one pane at a password prompt on the joined Fluent row shows the lock on its tab, or "
+          "on the band "
+          "(offscreen)",
+          "[contour][gui][qml][mainwindow][secureinput]")
 {
-    QQmlEngine engine;
-    MockMainController controller { MainWindowScene { .tabCount = 1,
-                                                      .tabBarVisibility = TabBarVisibility::Multiple,
-                                                      .secure =
-                                                          contour::test::snapshot::SecureDecor::Locked } };
-    contour::test::QmlMessageCapture warnings;
-    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
-    showWindow(*root);
+    {
+        // The strip shown: the joined band holds the one tab, and the tab the lock.
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene {
+            .tabCount = 1,
+            .tabBarVisibility = TabBarVisibility::Always,
+            .secure = contour::test::snapshot::SecureDecor::Locked } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+        showWindow(*root);
 
-    // The band always holds the tabs on a joined row, one tab being still a tab.
-    auto const tabs = tabDelegates(*root);
-    REQUIRE(tabs.size() == 1);
-    CHECK(part(*tabs[0], QStringLiteral("tabLock")).isVisible());
-    CHECK_FALSE(root->property("secureLockInPane").toBool());
-    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+        auto const tabs = tabDelegates(*root);
+        REQUIRE(tabs.size() == 1);
+        CHECK(part(*tabs[0], QStringLiteral("tabLock")).isVisible());
+        CHECK_FALSE(root->property("secureLockInPane").toBool());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+    {
+        // One tab under `multiple`: the band stays for its caption buttons and shows the title, as macOS's
+        // does, so it is the band's chip that carries the lock.
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene {
+            .tabCount = 1,
+            .tabBarVisibility = TabBarVisibility::Multiple,
+            .secure = contour::test::snapshot::SecureDecor::Locked } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+        showWindow(*root);
+
+        CHECK(root->findChild<QQuickItem*>(QStringLiteral("bandTitleRow"))->isVisible());
+        CHECK(root->findChild<QQuickItem*>(QStringLiteral("secureInputChip"))->isVisible());
+        CHECK_FALSE(root->property("secureLockInPane").toBool());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
 }
 
 TEST_CASE(
@@ -4175,7 +4205,7 @@ TEST_CASE(
     "[contour][gui][qml][mainwindow][secureinput][securelock]")
 {
     // ContourLinux and Terminal hide the band with the strip: no header, well or band holds the lock. (Fluent
-    // is not here: its joined tabs are the title bar, so its band holds the tab, and the tab the lock.)
+    // is not here: its band stays for the caption buttons, and the band holds the lock.)
     for (auto const row: { ChromeStyle::ContourLinux, ChromeStyle::Terminal })
     {
         INFO("row: " << contour::config::chromeStyleName(row));

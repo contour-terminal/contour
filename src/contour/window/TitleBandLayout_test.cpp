@@ -57,12 +57,12 @@ constexpr auto BandCases = std::array {
     BandCase { { Flat, ClientBand, Windowed, GateHidden, Bottom },
                { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
     // Joined on a client band: the tabs are the title bar, so the band always shows, holding the caption
-    // buttons -- and its tabs, one tab being still a tab (R-j). With the tabs at the bottom it is Pill's
-    // band: the title on top, the tabs in a bar of their own (Q3).
+    // buttons -- its centre the tabs while the gate shows them, else the title. With the tabs at the bottom
+    // it is Pill's band: the title on top, the tabs in a bar of their own (Q3).
     BandCase { { Joined, ClientBand, Windowed, GateShown, Bottom },
                { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Shown } },
     BandCase { { Joined, ClientBand, Windowed, GateHidden, Top },
-               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
     BandCase { { Joined, ClientBand, Windowed, GateShown, Top },
                { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     BandCase { { Joined, ClientBand, Windowed, GateHidden, Bottom },
@@ -295,9 +295,15 @@ TEST_CASE("titleBand.minimalBareBand", "[titleband]")
 
 TEST_CASE("titleBand.joinedKeepsItsBar", "[titleband]")
 {
-    // One tab under Multiple: the joined band still shows, its one tab with it (R-j).
+    // One tab under Multiple, or Never: the joined band still shows, for the caption buttons, and holds the
+    // title in place of the tabs -- Pill's answer.
     CHECK(resolveTitleBand({ Joined, ClientBand, Windowed, GateHidden, Top })
-          == TitleBand { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden });
+          == TitleBand { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden });
+    CHECK(resolveTitleBand({ Joined, ClientBand, Windowed, GateHidden, Top })
+          == resolveTitleBand({ Pill, ClientBand, Windowed, GateHidden, Top }));
+    // An interrupted remote window keeps its tabs: the strip is where its host chip says why (R-d).
+    CHECK(resolveTitleBand({ Joined, ClientBand, Windowed, GateHidden, Top, Interrupted }).centre
+          == BarCentre::Tabs);
     // The tabs at the bottom: Pill's answer, whose centre is the title, since the tabs have a bar of their
     // own there (Q3).
     CHECK(resolveTitleBand({ Joined, ClientBand, Windowed, GateShown, Bottom })
