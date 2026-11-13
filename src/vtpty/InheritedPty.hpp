@@ -52,9 +52,9 @@ struct InheritedPty
     int masterFd = -1; ///< The PTY master descriptor; -1 on Windows.
     /// The reader and writer ends of the stdout fast pipe, where the PTY has one. Either end is -1 where
     /// this process has closed it already (the parent closes the writer after spawning).
-    std::optional<std::pair<int, int>> stdoutFastPipe;
+    std::optional<std::pair<int, int>> stdoutFastPipe {};
     PageSize pageSize;                        ///< The terminal size at hand-off.
-    std::optional<ImageSize> pixels;          ///< The terminal size in pixels at hand-off, where known.
+    std::optional<ImageSize> pixels {};       ///< The terminal size in pixels at hand-off, where known.
     std::optional<InheritedConPty> conpty {}; ///< The pseudoconsole, on Windows; nullopt elsewhere.
 
     /// @return Every handle or descriptor this PTY carries across on this platform: on POSIX the master, then

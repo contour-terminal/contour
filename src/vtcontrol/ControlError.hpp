@@ -45,6 +45,12 @@ struct ControlError
     ControlErrorCode code = ControlErrorCode::Failed; ///< Why the call failed.
     std::string message;                              ///< What went wrong, for a person.
     std::vector<std::string> candidates;              ///< Object ids an `Ambiguous` target matched.
+
+    /// Two errors are equal when code, message and candidates are. Also what makes
+    /// `std::expected<T, ControlError>` comparable: MSVC's library declares that comparison without the
+    /// constraint the standard gives it, so clang-cl instantiates its `noexcept` (for a Catch2 `REQUIRE`) and
+    /// fails where `ControlError` has no `==`.
+    [[nodiscard]] bool operator==(ControlError const&) const = default;
 };
 
 } // namespace vtcontrol

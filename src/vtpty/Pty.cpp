@@ -16,7 +16,7 @@ using std::unique_ptr;
 namespace vtpty
 {
 
-unique_ptr<Pty> createPty(PageSize pageSize, optional<ImageSize> viewSize)
+unique_ptr<Pty> createPty(PageSize pageSize, [[maybe_unused]] optional<ImageSize> viewSize)
 {
 #ifdef _WIN32
     return make_unique<ConPty>(pageSize /*TODO: , viewSize*/);

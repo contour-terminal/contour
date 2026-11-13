@@ -63,7 +63,7 @@ if(VTCONTROL_TESTING)
     # The control WIT package is generated from the catalog; the golden test reads it from the source tree,
     # and rewrites it when UPDATE_WIT=1 is set.
     target_compile_definitions(vtcontrol_test PRIVATE VTCONTROL_WIT_DIR="${PROJECT_SOURCE_DIR}/wit/control")
-    add_test(NAME vtcontrol_test COMMAND $<TARGET_FILE:vtcontrol_test>)
+    add_test(NAME vtcontrol_test COMMAND vtcontrol_test)
     set_tests_properties(vtcontrol_test PROPERTIES LABELS daemon)
 
     if(NOT WIN32)

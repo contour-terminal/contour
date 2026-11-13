@@ -74,7 +74,7 @@ if(VTCONFORMANCE_TESTING)
     configure_file("${CMAKE_CURRENT_BINARY_DIR}/VtTestTranscripts.inc.new"
                    "${CMAKE_CURRENT_BINARY_DIR}/generated/VtTestTranscripts.inc" COPYONLY)
     target_include_directories(vtconformance_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
-    add_test(NAME vtconformance_test COMMAND $<TARGET_FILE:vtconformance_test>)
+    add_test(NAME vtconformance_test COMMAND vtconformance_test)
 
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.

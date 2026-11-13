@@ -9,6 +9,8 @@
 #include <libunicode/convert.h>
 
 #include <array>
+#include <format>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -95,12 +97,17 @@ struct DirectWriteLocator::Private
 
     Private()
     {
-        auto hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
-                                      __uuidof(IDWriteFactory7),
-                                      reinterpret_cast<IUnknown**>(factory.GetAddressOf()));
+        // Without a factory nothing can be located: every member function dereferences it.
+        if (auto const hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
+                                                __uuidof(IDWriteFactory7),
+                                                reinterpret_cast<IUnknown**>(factory.GetAddressOf()));
+            FAILED(hr))
+            throw std::runtime_error(std::format(
+                "directwrite: DWriteCreateFactory failed (HRESULT 0x{:08X}).", static_cast<ULONG>(hr)));
 
+        // The buffer's size is in characters, not bytes.
         wchar_t locale[LOCALE_NAME_MAX_LENGTH];
-        GetUserDefaultLocaleName(locale, sizeof(locale));
+        GetUserDefaultLocaleName(locale, LOCALE_NAME_MAX_LENGTH);
         userLocale = locale;
 
         factory->GetSystemFontCollection(&systemFontCollection);

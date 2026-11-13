@@ -1288,7 +1288,7 @@ if(CONTOUR_FRONTEND_GUI)
                                  Qt6::QOffscreenIntegrationPlugin
                                  Qt6::QWindowsIntegrationPlugin)
 
-        add_test(NAME contour_gui_test COMMAND $<TARGET_FILE:contour_gui_test>)
+        add_test(NAME contour_gui_test COMMAND contour_gui_test)
 
         # The offscreen QPA, because this suite constructs a QGuiApplication and its QML trees: without
         # it the run needs a real display and fails wherever there is none. It was passing only because
@@ -1319,7 +1319,7 @@ if(CONTOUR_FRONTEND_GUI)
         # on any QML diagnostic the style raises against the hand-drawn chrome. Only this variant may skip: a
         # distribution's Qt need not package FluentWinUI3 (Ubuntu 26.04's does not), and test_main.cpp then
         # exits 77 (ControlsStyleMissingExitCode) before a test starts; not 4, Catch2's all-skipped code. The Contour styles below ship in this tree, so a missing one fails.
-        add_test(NAME contour_gui_test_fluent COMMAND $<TARGET_FILE:contour_gui_test> "[contour][gui][qml]")
+        add_test(NAME contour_gui_test_fluent COMMAND contour_gui_test "[contour][gui][qml]")
         set_tests_properties(contour_gui_test_fluent
             PROPERTIES
                 SKIP_RETURN_CODE 77
@@ -1339,7 +1339,7 @@ if(CONTOUR_FRONTEND_GUI)
         # And under ContourTui, the Terminal row's controls style: a style Qt resolves once per process, which
         # is how a control that states no implicit height (collapsing a header's window buttons to nothing)
         # shows up only here.
-        add_test(NAME contour_gui_test_contourtui COMMAND $<TARGET_FILE:contour_gui_test> "[contour][gui][qml]")
+        add_test(NAME contour_gui_test_contourtui COMMAND contour_gui_test "[contour][gui][qml]")
         set_tests_properties(contour_gui_test_contourtui
             PROPERTIES
                 ENVIRONMENT
@@ -1845,7 +1845,7 @@ if(CONTOUR_TESTING)
         )
         target_link_libraries(contour_test PRIVATE contour_extensions)
     endif()
-    add_test(NAME contour_test COMMAND $<TARGET_FILE:contour_test>)
+    add_test(NAME contour_test COMMAND contour_test)
     # The contour binary, for ShellIntegrationShells.profileLine: the profile line it tests asks that binary
     # for the script, as a user's profile asks the installed one. It links Qt, and a CI runner has no display
     # for it, so it runs offscreen.
@@ -1969,7 +1969,7 @@ if(CONTOUR_TESTING)
             CONTOUR_EXPECTED_FILE_VERSION="${CONTOUR_FILE_VERSION}"
             CONTOUR_EXPECTED_PRODUCT_VERSION="${CONTOUR_VERSION_STRING}")
         add_dependencies(contour_manifest_test contour)
-        add_test(NAME contour_e2e_manifest COMMAND $<TARGET_FILE:contour_manifest_test>)
+        add_test(NAME contour_e2e_manifest COMMAND contour_manifest_test)
         set_tests_properties(contour_e2e_manifest PROPERTIES LABELS e2e)
 
         # The self-test of Windows code signing (scripts/windows-signing): the signer table's rules, which signer a
@@ -2002,7 +2002,7 @@ if(CONTOUR_TESTING)
             target_compile_definitions(contour_restart_manager_test PRIVATE
                 CONTOUR_BINARY="$<TARGET_FILE:contour>")
             add_dependencies(contour_restart_manager_test contour)
-            add_test(NAME contour_e2e_restart_manager COMMAND $<TARGET_FILE:contour_restart_manager_test>)
+            add_test(NAME contour_e2e_restart_manager COMMAND contour_restart_manager_test)
             set_tests_properties(contour_e2e_restart_manager PROPERTIES LABELS e2e RUN_SERIAL TRUE TIMEOUT 120)
         endif()
 
@@ -2248,10 +2248,13 @@ if(WIN32)
         # The toolset's redistributable runtime (vcruntime140, vcruntime140_1, msvcp140), app-local beside
         # contour.exe, so Contour starts on a machine that never installed the VC++ Redistributable. The
         # Universal CRT is left out: Windows 10 and later carry it. A GUI-less build needs it too, and the
-        # daemon's staged image copies bin/ whole.
-        set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION bin)
-        set(CMAKE_INSTALL_UCRT_LIBRARIES OFF)
-        include(InstallRequiredSystemLibraries)
+        # daemon's staged image copies bin/ whole. Only on a Windows host: the module locates Visual Studio
+        # through queries that fail elsewhere, as in a cross build from Linux, which installs nothing.
+        if(CMAKE_HOST_WIN32)
+            set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION bin)
+            set(CMAKE_INSTALL_UCRT_LIBRARIES OFF)
+            include(InstallRequiredSystemLibraries)
+        endif()
     endif()
     if(CONTOUR_NERD_FONT_SYMBOLS_DIR)
         install(DIRECTORY "${CONTOUR_NERD_FONT_SYMBOLS_DIR}/" DESTINATION "share/contour/fonts")
