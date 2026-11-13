@@ -100,8 +100,10 @@ struct AttachBudget
 
     /// @param handshakeBound How long the handshake may take after the transport returned its connection.
     /// @return A budget with no bound on the connect, for a transport whose prompts may be open meanwhile.
-    [[nodiscard]] static constexpr AttachBudget promptsOpen(std::chrono::milliseconds handshakeBound) noexcept
+    [[nodiscard]] static AttachBudget promptsOpen(std::chrono::milliseconds handshakeBound) noexcept
     {
+        // Not constexpr: a budget holds a std::shared_ptr, so it is never a constant, and MSVC 14.44 refuses
+        // the keyword on a function that cannot yield one (C3615).
         auto budget = AttachBudget { handshakeBound };
         budget.connect.reset();
         return budget;
