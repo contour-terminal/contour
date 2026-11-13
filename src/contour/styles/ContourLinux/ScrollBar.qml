@@ -13,7 +13,13 @@ T.ScrollBar {
                              implicitContentHeight + topPadding + bottomPadding)
 
     padding: chromeStyle.space.s1
-    visible: control.policy !== T.ScrollBar.AlwaysOff
+    // AsNeeded (the default) shows the bar only while there is something to scroll: a thumb as long as its
+    // track says nothing, and drew a dark bar at the side of every view whose content fits -- a fingerprint
+    // on one line, a short list.
+    // Short of the whole by more than rounding: a content that fits to within a float's error fits. The same
+    // rule as ContourTui/ScrollBar.qml's; separate styles, so stated in each.
+    visible: control.policy === T.ScrollBar.AlwaysOn
+             || (control.policy === T.ScrollBar.AsNeeded && control.size < 1.0 - 1e-6)
 
     // A thumb at least as long as the bar is wide, so it stays visible and grabbable: QQuickScrollBar
     // defaults this to 0 and would shrink the thumb of a long list to a sliver. The zero guards are for

@@ -3,6 +3,7 @@
 #include <contour/config/ChromeTokenRows.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/ScrollBarVisibility.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <QtCore/QFile>
@@ -238,4 +239,17 @@ TEST_CASE("A ContourLinux combo box fits its longest option, not just the one sh
     auto const* popup = combo->property("popup").value<QObject*>();
     REQUIRE(popup != nullptr);
     CHECK(popup->property("width").toReal() >= longest);
+}
+
+TEST_CASE("A ContourLinux scroll bar shows only while there is something to scroll",
+          "[contour][gui][style][contourlinux]")
+{
+    // A thumb as long as its track drew a dark bar at the side of every view whose content fits: the
+    // daemon's fingerprint on one line had one beside it.
+    QQmlEngine engine;
+    installLinuxChrome(engine);
+    auto const instance = createControl(engine, "ScrollBar");
+    auto* const bar = qobject_cast<QQuickItem*>(instance.get());
+    REQUIRE(bar != nullptr);
+    contour::test::checkScrollBarVisibility(*bar);
 }

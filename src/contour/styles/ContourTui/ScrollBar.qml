@@ -14,7 +14,12 @@ T.ScrollBar {
                              implicitContentHeight + topPadding + bottomPadding)
 
     padding: 0
-    visible: control.policy !== T.ScrollBar.AlwaysOff
+    // AsNeeded (the default) shows the bar only while there is something to scroll: a handle filling its
+    // whole trough says nothing, and drew a bar at the side of every view whose content fits.
+    // Short of the whole by more than rounding: a content that fits to within a float's error fits. The same
+    // rule as ContourLinux/ScrollBar.qml's; separate styles, so stated in each.
+    visible: control.policy === T.ScrollBar.AlwaysOn
+             || (control.policy === T.ScrollBar.AsNeeded && control.size < 1.0 - 1e-6)
 
     // A handle of at least one whole cell, so it stays both visible and grabbable. QQuickScrollBar
     // defaults this to 0 and then sizes the handle at `size * trackLength` with no floor at all, so a
