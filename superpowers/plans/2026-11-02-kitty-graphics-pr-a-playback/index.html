@@ -1,0 +1,3034 @@
+<!DOCTYPE html><html lang="en" class="no-js"><head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+      
+      
+        <meta name="author" content="Christian Parpart">
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="/assets/contour-logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>Kitty graphics PR A: playback, compression, composition, daemon tick — Implementation Plan - Contour Terminal Emulator</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  <link href="../../../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../../../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-red" data-md-color-accent="deep-red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#kitty-graphics-pr-a-playback-compression-composition-daemon-tick-implementation-plan" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="Contour Terminal Emulator" class="md-header__button md-logo" aria-label="Contour Terminal Emulator" data-md-component="logo">
+      
+  <img src="/assets/contour-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Contour Terminal Emulator
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Kitty graphics PR A: playback, compression, composition, daemon tick — Implementation Plan
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-red" data-md-color-accent="deep-red" aria-label="Switch to dark mode" type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"></path></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-red" data-md-color-accent="red" aria-label="Switch to light mode" type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"></path></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required="">
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard="" data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"></path></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix="">
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/contour-terminal/contour/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    contour-terminal/contour
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  Home
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../install/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Getting started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../configuration/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Configuration
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../features/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../vt-sequence/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  VT sequence reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../vt-extensions/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  VT extensions
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../internals/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Internals
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="Contour Terminal Emulator" class="md-nav__button md-logo" aria-label="Contour Terminal Emulator" data-md-component="logo">
+      
+  <img src="/assets/contour-logo.png" alt="logo">
+
+    </a>
+    Contour Terminal Emulator
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/contour-terminal/contour/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    contour-terminal/contour
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix="">
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Home
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contribution Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2">
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../release-notes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../../configuration/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Profiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The Settings Window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Links in Terminal Output
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/layouts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Layouts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/hosts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hosts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/colors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Colors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/indicator-statusline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Indicator Statusline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/paths/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Path Handling in Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/key-mapping/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Key Mapping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4">
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    List of features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../persistent-sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Persistent sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../remote-hosts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Remote hosts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../control-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/font-ligatures/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Font ligatures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/regis-graphics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ReGIS vector graphics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/ime/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Input method editor (IME)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/line-marks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Line marks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/command-blocks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command blocks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/statusline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status line
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../extensions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status-line extensions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/hint-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hint mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../input-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Input modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../accessibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accessibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../secure-input/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secure input
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/drag-and-drop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Drag and drop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../quick-terminal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick terminal
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/size_indicator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Size indicator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/git-branch-drawings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Git branch drawings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../../vt-sequence/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VT sequence reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    VT sequence reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../../vt-extensions/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VT extensions
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    VT extensions
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/clickable-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Clickable Links
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/unicode-core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unicode Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/vertical-line-marks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vertical Line Markers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/color-palette-update-notifications/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dark and Light Mode detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/synchronized-output/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synchronized Output
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/buffer-capture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Buffer Capture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/font-settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Query or Change Font Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/line-reflow-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Line Reflow Reconfiguration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/save-and-restore-sgr-attributes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Save and Restore SGR attributes.
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/osc-133-shell-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OSC 133 - Shell Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/osc-3008-context/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OSC 3008 — Hierarchical Context Signalling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/osc-9-4-progress/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Progress indicator (OSC 9;4)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/program-status/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Program status (OSC 7501)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/semantic-block-query/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Semantic Block Query (DEC Mode 2034)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/private-use-glyphs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Private Use Glyphs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../../internals/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internals
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Internals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/CODING_STYLE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding Style Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/native-chrome/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The native chrome
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/vthost/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Daemon mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/session-oom-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Session OOM isolation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/text-stack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    A terminal emulator's text stack.
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/vt-conformance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VT conformance testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/macos-code-signing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    macOS code signing, notarization and packaging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/releasing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/release-signing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Windows code signing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/release-builds/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release builds
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#global-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global Constraints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#review-focus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Review Focus
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Review Focus">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#task-1-action-aware-decoding-of-ac-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 1: Action-aware decoding of a=c keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-2-oz-compression-with-a-streaming-size-cap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 2: o=z compression with a streaming size cap
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-3-self-running-playback-2126" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 3: Self-running playback (#2126)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-4-frame-composition-ac" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 4: Frame composition (a=c)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-5-daemon-ticking-with-a-throttle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 5: Daemon ticking with a throttle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-6-2108-acceptance-test-release-notes-final-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 6: #2108 acceptance test, release notes, final checks
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/contour-terminal/contour/edit/master/docs/superpowers/plans/2026-11-02-kitty-graphics-pr-a-playback.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"></path></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/contour-terminal/contour/raw/master/docs/superpowers/plans/2026-11-02-kitty-graphics-pr-a-playback.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"></path></svg>
+    </a>
+  
+
+
+<div><h1 id="kitty-graphics-pr-a-playback-compression-composition-daemon-tick-implementation-plan">Kitty graphics PR A: playback, compression, composition, daemon tick — Implementation Plan</h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Make <code>a=a,s=2/s=3</code> animations run on their own, accept <code>o=z</code> payloads, implement <code>a=c</code> frame composition, and advance animations for daemon-hosted sessions, closing #2126 and #2108.</p>
+<p><strong>Architecture:</strong> Per-image playback state lives in <code>Screen::KittyAnimation</code>; <code>Screen</code> advances it through the existing <code>showKittyFrame()</code> and publishes the earliest deadline to <code>Terminal</code>, which advances in <code>tick()</code> under its state lock and reports the deadline through <code>nextRender()</code>. Compression is a streaming inflate in <code>vtbackend/graphics/</code> behind the existing quota. The daemon arms a per-session <code>core::net::DeadlineTimer</code> from the same deadline, throttled.</p>
+<p><strong>Tech Stack:</strong> C++23, Catch2, zlib (new, direct <code>vtbackend</code> dependency), <code>core::net::DeadlineTimer</code>.</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-11-02-kitty-graphics-completion-design.md</code> (PR A items: playback, compression, <code>a=c</code>, daemon ticking, #2108 acceptance, daemon throttle).</p>
+<h2 id="global-constraints">Global Constraints</h2>
+<ul>
+<li>AGENT.md applies: C++23; range-for only; <code>enum class : uint8_t</code> over <code>bool</code> (negative case = 0); <code>std::expected</code> for fallible API; constructor injection; Doxygen on new public API; <code>[[nodiscard]]</code>; <code>.hpp</code> headers with <code>#pragma once</code>.</li>
+<li>Zero warnings under <code>-Werror</code>; no <code>NOLINT</code>, no <code>#pragma</code> mutes. Run <code>clang-format</code> on C++ only, never on <code>.qml</code>.</li>
+<li>Never edit <code>vendor/core-cpp</code>.</li>
+<li>Commits: <code>Signed-off-by: Christian Parpart &lt;christian@parpart.family&gt;</code> only; no Co-Authored-By or session trailers.</li>
+<li>Build <code>cmake --build --preset clang-asan</code>; test <code>ctest --preset=clang-asan</code>; threading tests <code>[threading]</code> under <code>clang-tsan</code>.</li>
+<li>Single-fragment-per-cell stays as is in this PR (decided: lifting it is PR B).</li>
+<li>Error replies keep the existing <code>CODE:message</code> form (<code>EINVAL</code>, <code>ENOENT</code>, <code>ENOSPC</code>, <code>ENOTSUP</code>).</li>
+<li>New dependency (zlib) is justified in the spec. Wire it in <code>vcpkg.json</code>, <code>find_package(ZLIB REQUIRED)</code> in <code>cmake/ContourThirdParties.cmake</code> beside OpenSSL (~line 458), link <code>ZLIB::ZLIB</code> into <code>vtbackend</code> <strong>and</strong> <code>vtbackend_test</code> (tests compress fixtures), and add the zlib dev package explicitly to every distro list in <code>scripts/install-deps.sh</code> (it arrives only transitively today).</li>
+<li>Maintainer decisions taken on this plan: <code>a=c</code> has no <code>ENOSPC</code> (Task 4); the <code>o=z</code> inflate cap is the exact expected size for raw formats and the quota remainder for PNG (Task 2).</li>
+<li>The release notes entry in <code>metainfo.xml</code> (line ~372, "Self-running playback … not supported yet") is replaced, not appended to.</li>
+</ul>
+<h2 id="review-focus">Review Focus</h2>
+<ul>
+<li><code>s=2</code> with a single frame and no further <code>a=f</code>: stays on frame 1, no deadline, no CPU wake (Task 3).</li>
+<li>A frame with <code>z=0</code> ("unspecified") during playback: uses a documented default gap, never a zero-delay spin (Task 3).</li>
+<li>All frames gapless (<code>z&lt;0</code>) with <code>s=3</code>: must not busy-loop; at least one frame must have a positive gap or playback holds (Task 3).</li>
+<li>Animation whose image is deleted (<code>d=i</code>/<code>d=I</code>/<code>d=A</code>) or whose placement scrolled off while running: no deadline remains, no crash (Task 3).</li>
+<li><code>o=z</code> bomb: a tiny payload inflating past the quota answers <code>ENOSPC</code> without allocating the whole output (Task 2).</li>
+<li><code>a=c</code> with identical source and destination frame and overlapping rectangles: <code>EINVAL</code> (Task 4).</li>
+<li>Daemon: two attached clients must not double the advance rate; a throttled session still ends on the correct frame (Task 5).</li>
+</ul>
+<hr>
+<h3 id="task-1-action-aware-decoding-of-ac-keys">Task 1: Action-aware decoding of <code>a=c</code> keys</h3>
+<p><strong>Files:</strong>
+- Modify: <code>src/vtbackend/graphics/KittyGraphics.hpp</code> (Command), <code>src/vtbackend/graphics/KittyGraphics.cpp</code> (<code>applyKey</code>, <code>parseCommand</code> post-processing switch)
+- Test: <code>src/vtbackend/graphics/KittyGraphics_test.cpp</code></p>
+<p><strong>Interfaces:</strong>
+- Produces, in <code>Command</code> (all documented, zero = unset):
+  <code>uint32_t composeSourceFrame</code> (<code>r=</code>), <code>uint32_t composeDestinationFrame</code> (<code>c=</code>), <code>uint32_t composeSourceX</code>, <code>composeSourceY</code> (<code>X=</code>, <code>Y=</code>), <code>uint32_t composeDestinationX</code>, <code>composeDestinationY</code> (<code>x=</code>, <code>y=</code>), size in the existing <code>sourceWidth</code>/<code>sourceHeight</code> (<code>w=</code>,<code>h=</code>), and <code>compositionMode</code> (existing field) set from <code>C=</code> under <code>a=c</code> (<code>C=1</code> → <code>CompositionMode::Replace</code>).
+- Consumes: existing <code>Action::Compose</code>, <code>CompositionMode</code>.
+- Parser mechanics (today <code>applyKey</code> converts <code>X=</code> to <code>CompositionMode</code> on the spot, KittyGraphics.cpp:126-131, and keeps <code>Y</code> raw in <code>frameBackground</code>): change <code>applyKey</code> to hold <code>X</code> raw in a new <code>uint32_t</code> field <code>rawX</code>. The <code>Frame</code> arm of the post-processing switch converts <code>rawX</code> to <code>compositionMode</code> (so <code>a=f,X=1</code> still yields <code>Replace</code>). The <code>Compose</code> arm exchanges <code>rawX</code>→<code>composeSourceX</code>, <code>frameBackground</code>→<code>composeSourceY</code>, <code>sourceX/sourceY</code>→<code>composeDestinationX/Y</code>, <code>columns</code>→<code>composeDestinationFrame</code>, <code>rows</code>→<code>composeSourceFrame</code>, and <code>doNotMoveCursor</code>→<code>compositionMode</code> (true → <code>Replace</code>), clearing <code>doNotMoveCursor</code>.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 1: Write failing parse tests</strong>
+  Test names: <code>KittyGraphics.parse.compose_keys_are_frames_and_origins</code>, <code>KittyGraphics.parse.compose_C_selects_overwrite</code>, <code>KittyGraphics.parse.frame_X_and_Y_keep_their_meaning</code>.
+  Assertions: for <code>"a=c,i=1,r=7,c=9,w=23,h=27,X=4,Y=8,x=1,y=3"</code> (the spec's own example): <code>composeSourceFrame==7</code>, <code>composeDestinationFrame==9</code>, <code>sourceWidth==23</code>, <code>sourceHeight==27</code>, <code>composeSourceX==4</code>, <code>composeSourceY==8</code>, <code>composeDestinationX==1</code>, <code>composeDestinationY==3</code>, <code>compositionMode==AlphaBlend</code>, <code>doNotMoveCursor==false</code>, and <code>columns==rows==0</code>. With <code>C=1</code> added: <code>compositionMode==Replace</code>, <code>doNotMoveCursor==false</code>. For <code>"a=f,i=1,X=1,Y=5,x=2,y=3"</code>: <code>compositionMode==Replace</code>, <code>frameBackground==5</code>, <code>sourceX==2</code>, <code>sourceY==3</code> (unchanged behavior; regression guard).</p>
+</li>
+<li>
+<p>[ ] <strong>Step 2: Run them; expect FAIL</strong> — <code>out/clang-asan/src/vtbackend/vtbackend_test "KittyGraphics.parse.*"</code> fails on the missing fields.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 3: Implement</strong> the new <code>Command</code> fields, <code>rawX</code>, and the <code>Frame</code>/<code>Compose</code> arms exactly as the parser mechanics above say, following the existing <code>std::exchange</code> pattern. Doxygen every new field.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 4: Run parse tests; expect PASS</strong>, plus the whole <code>[kitty]</code> tag.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 5: Commit</strong> — <code>vtbackend: decode a=c's keys by action</code>.</p>
+</li>
+</ul>
+<hr>
+<h3 id="task-2-oz-compression-with-a-streaming-size-cap">Task 2: <code>o=z</code> compression with a streaming size cap</h3>
+<p><strong>Files:</strong>
+- Create: <code>src/vtbackend/graphics/KittyInflate.hpp</code>, <code>src/vtbackend/graphics/KittyInflate.cpp</code>, <code>src/vtbackend/graphics/KittyInflate_test.cpp</code>
+- Modify: <code>vcpkg.json</code> (add <code>zlib</code>), <code>src/vtbackend/CMakeLists.txt</code> (find and link ZLIB, add sources/test), <code>src/vtbackend/screen/Screen.cpp</code> (<code>validateKittyTransmission</code> ~5743-5746 and the frame path ~6216-6221: drop the <code>compression != None</code> refusals; inflate before decode)
+- Test: <code>KittyInflate_test.cpp</code>, <code>KittyGraphics_test.cpp</code> (end-to-end)</p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>enum class InflateError : uint8_t { Corrupt, TooLarge };</code> and
+  <code>[[nodiscard]] std::expected&lt;std::vector&lt;uint8_t&gt;, InflateError&gt; inflateZlib(std::span&lt;uint8_t const&gt; compressed, size_t maxOutputBytes);</code> in namespace <code>vtbackend::kitty_graphics</code>.
+- Consumes: the decoded (post-base64) payload bytes. <strong>DECIDED: <code>maxOutputBytes</code> is the exact expected size (<code>width*height*bpp</code>, Screen.cpp:6001-6002, 6271) for raw formats, and the quota remainder (<code>_settings-&gt;kittyImageStorageQuota</code> minus <code>storedKittyBytes()</code>) for PNG.</strong> A raw bomb is refused after a few KiB and answers <code>EINVAL:payload size does not match dimensions</code>; a PNG bomb answers <code>ENOSPC</code>. (Reason: the remainder is unbounded for <code>a=T</code> with <code>i=0</code>, which is never quota-checked today, Screen.cpp:6017.) The end-to-end bomb test is therefore <code>…raw_bomb_answers_EINVAL</code> plus <code>…png_bomb_answers_ENOSPC</code>.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 1: Write failing unit tests</strong> (<code>KittyInflate_test.cpp</code>): <code>inflate.roundtrip</code> (compress 1 MiB of patterned bytes with zlib in the test, inflate, equal); <code>inflate.corrupt_stream_is_Corrupt</code> (flip a byte); <code>inflate.truncated_stream_is_Corrupt</code>; <code>inflate.output_over_cap_is_TooLarge_without_allocating_it</code> (1 GiB of zeros compresses to ~1 MiB; cap 16 MiB; result <code>TooLarge</code> and the test asserts peak capacity of the returned/internal buffer stayed ≤ cap + one chunk — expose nothing; assert via a tiny cap and <code>TooLarge</code>).
+  End-to-end in <code>KittyGraphics_test.cpp</code>: <code>KittyGraphics.compression.transmit_with_o_z_displays_the_image</code> (RGBA 2x2 deflated, base64, <code>a=T,f=32,s=2,v=2,o=z</code>, reply <code>OK</code>, image fragments present), <code>…frame_with_o_z_is_composited</code>, <code>…bomb_answers_ENOSPC</code>, <code>…corrupt_answers_EINVAL</code>. The two existing ENOTSUP-for-compression tests (<code>KittyGraphics_test.cpp</code> ~111-120, 828-838) are rewritten to these expectations.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 2: Run; expect FAIL</strong> (link error / missing function).</p>
+</li>
+<li>
+<p>[ ] <strong>Step 3: Implement <code>inflateZlib</code></strong> with <code>inflateInit</code>/<code>inflate</code> in fixed-size chunks, aborting with <code>TooLarge</code> the moment output would exceed the cap. Wire it in where both payload paths decode base64, before the size check against <code>width*height*bpp</code>. <code>Corrupt</code> → <code>EINVAL:corrupt compressed payload</code>; <code>TooLarge</code> → <code>ENOSPC:image storage quota exceeded</code>. zlib wiring: <code>find_package(ZLIB REQUIRED)</code> and <code>ZLIB::ZLIB</code> on <code>vtbackend</code>; <code>zlib</code> in <code>vcpkg.json</code>.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 4: Run tests; expect PASS.</strong> Also configure and build on the clang-asan preset from clean CMake to prove the dependency resolves.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 5: Commit</strong> — <code>vtbackend: inflate o=z kitty payloads</code>.</p>
+</li>
+</ul>
+<hr>
+<h3 id="task-3-self-running-playback-2126">Task 3: Self-running playback (#2126)</h3>
+<p><strong>Files:</strong>
+- Modify: <code>src/vtbackend/screen/Screen.hpp/.cpp</code> (<code>KittyAnimation</code>, <code>controlKittyAnimation</code>, <code>transmitKittyFrame</code>, delete paths), <code>src/vtbackend/screen/Terminal.hpp/.cpp</code> (<code>tick</code>, <code>nextRender</code>, a published deadline), <code>src/vtbackend/screen/TerminalClocks.hpp</code> untouched (read <code>_clocks.steady</code>)
+- Test: <code>src/vtbackend/graphics/KittyGraphics_test.cpp</code> (playback section), <code>src/vtbackend/screen/Terminal_*_test.cpp</code> for the <code>tick</code>/<code>nextRender</code> part, a <code>[threading]</code> case</p>
+<p><strong>Interfaces:</strong>
+- Produces on <code>Screen</code>: 
+  <code>[[nodiscard]] std::optional&lt;std::chrono::steady_clock::time_point&gt; advanceKittyAnimations(std::chrono::steady_clock::time_point now);</code> — advances every running animation whose deadline ≤ <code>now</code> through <code>showKittyFrame()</code> (as many frames as are due, catching up at most one full loop), returns the earliest remaining deadline or nullopt when nothing runs. Caller holds the state lock.
+  <code>KittyAnimation</code> gains <code>std::chrono::steady_clock::time_point nextFrameDue</code>, <code>uint32_t loopsDone</code>, and <code>AnimationState state</code> is the existing field.
+- Produces on <code>Terminal</code> (review-driven; each is a contract Task 5 relies on):
+  - <code>void Terminal::publishKittyAnimationDeadline(std::optional&lt;std::chrono::steady_clock::time_point&gt; due);</code> — called by <code>Screen</code> (which cannot reach the private <code>_eventListener</code>). Stores <code>std::atomic&lt;time_point&gt; _kittyAnimationDue</code> (max = none) and, <strong>only when the value changed</strong>, calls <code>_eventListener.renderBufferUpdated()</code> (pattern at Terminal.cpp:823), so an idle GUI display re-queries <code>nextRender()</code>. It must not go through <code>Terminal::renderBufferUpdated()</code> (Terminal.cpp:5659-5674: swap bookkeeping swallows the notification).
+  - <code>[[nodiscard]] std::optional&lt;std::chrono::steady_clock::time_point&gt; Terminal::kittyAnimationDue() const noexcept;</code> — the dedicated accessor. <strong>The daemon arms from this, never from <code>nextRender()</code></strong> (which also carries cursor blink, 33 ms cell blink and the indicator status line's minute wakeup, and would make an idle daemon session emit Deltas forever). <code>nextRender()</code> folds it in for the GUI only: <code>max(due - max(currentTime(), _clocks.steady.now()), 0)</code> (the <code>max</code> as at Terminal.cpp:776, because in the daemon nothing else moves <code>currentTime()</code>).
+  - <code>tick(now)</code> advances with its <strong><code>now</code> argument</strong> (what TerminalDisplay.cpp:1218 and the daemon pass), under <code>_ownStateLock</code>, only while <code>_kittyAnimationDue</code> is not max (same discipline as <code>_isGliding</code>), and advances <strong><code>displayedPage()</code>'s</strong> Screen (Terminal.hpp:2789) — each <code>Screen</code> owns its own <code>_kittyAnimations</code> (primary, alternate, status-line screens), so a single atomic written by whichever Screen last ran a command goes stale on <code>\e[?1049l</code>. Each Screen keeps its own due time; <code>Terminal</code> republishes the displayed page's on every publish and in <code>setPage()</code>; <code>hardReset()</code>/<code>resetKittyState()</code> (Screen.cpp:5858) publish "none". After releasing the lock, <code>tick()</code> calls <code>screenUpdated()</code> (must run outside the lock, Terminal.cpp:643-649) if any frame advanced — that is the only event the daemon's Delta path hears (SessionHost.cpp:501-505, 840-853 → NativeSession.cpp:690-730).
+  - <code>controlKittyAnimation</code> stamps <code>nextFrameDue</code> from <code>_clocks.steady.now()</code>.
+  - <code>tick()</code> stays <code>noexcept</code>: the advance is wrapped in <code>try { … } catch (std::bad_alloc const&amp;)</code> that stops the animation and publishes "none" (the daemon's timer callback has no catch).
+- On <code>Screen</code>: <code>showKittyFrame</code> changes from <code>void</code> to <code>[[nodiscard]] Placed</code> where <code>enum class Placed : uint8_t { No, Yes }</code> says whether it replaced any fragment; "no placement on the page → no deadline" is derived from it. The <code>Action::Put</code>/<code>TransmitAndDisplay</code> path (Screen.cpp:5956-5971) re-arms a held animation when a placement appears. Both are in this task's file list.
+- Reuse <code>kitty_graphics::DefaultFrameGapMilliseconds</code> (KittyGraphics.hpp:30) for a <code>z=0</code> frame; do not add a second constant.
+- Consumes: <code>showKittyFrame(shared_ptr&lt;Image const&gt; from, shared_ptr&lt;Image const&gt; to)</code>, <code>_clocks.steady</code>.</p>
+<p>Semantics (from #2126 and the spec; each is a test below):
+<code>s=3</code>: frame 1 → … → last → frame 1, forever when <code>v=1</code> or <code>v=0</code>; <code>v=n</code> (n&gt;1) stops after n−1 loops on the last frame. <code>s=2</code>: same, but at the last frame the animation holds with no deadline until <code>a=f</code> adds a frame, then continues from it. <code>s=1</code> stops on the current frame and drops the deadline. A frame with <code>z&lt;0</code> is skipped. <code>z=0</code> uses <code>DefaultKittyFrameGap</code>. If every frame is gapless, playback holds on frame 1 (no deadline). <code>a=a,c=N</code> still selects a frame immediately in every state. <code>s=2</code>/<code>s=3</code> now answer <code>OK</code>. A deleted image drops its animation and deadline.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 1: Write failing tests</strong> driving <code>MockTerm</code>'s <code>ManualClock steadyClock</code>: 
+  <code>KittyGraphics.playback.s3_advances_frames_by_their_gaps</code> (3 frames gaps 10/20/30 ms; advance clock 10 ms → <code>tick</code> → frame 2 shown; etc.; asserts the fragment's image is frame N's image each step; reply <code>OK</code>), <code>…s3_wraps_to_frame_1</code>, <code>…v_n_stops_after_n_minus_1_loops</code>, <code>…s2_holds_at_last_frame_then_continues_on_new_frame</code>, <code>…s1_stops_on_current_frame</code>, <code>…gapless_frames_are_skipped</code>, <code>…zero_gap_uses_the_default</code>, <code>…all_gapless_holds_without_a_deadline</code>, <code>…explicit_frame_selection_works_while_playing</code>, <code>…deleted_image_drops_deadline</code> (<code>nextRender()==nullopt</code>), <code>…scrolled_off_placement_holds_no_deadline</code>, <code>…nextRender_reports_time_to_next_frame</code> (<code>nextRender()==10ms</code> after start, <code>0ms</code> once due), <code>…alternate_screen_switch_pauses_and_resumes</code>, <code>…RIS_drops_deadline</code>, <code>…tick_raises_screenUpdated_when_a_frame_advanced</code>. The existing <code>self_running_playback_is_declined</code> test (KittyGraphics_test.cpp:768) is rewritten, not left behind. A <code>[threading]</code> case: start playback first (otherwise <code>tick()</code> never takes the lock), then a thread calls <code>tick()</code> in a loop while the main thread feeds <code>a=f</code>/<code>a=a</code> bytes; no data race under TSan (<code>ManualClock</code> is mutex-guarded, Clock.hpp:124-159).</p>
+</li>
+<li>
+<p>[ ] <strong>Step 2: Run; expect FAIL</strong> (<code>ENOTSUP</code> still returned, no <code>advanceKittyAnimations</code>).</p>
+</li>
+<li>
+<p>[ ] <strong>Step 3: Implement</strong> the interface above. In <code>controlKittyAnimation</code> replace the <code>ENOTSUP</code> branch: set state/loop count, compute <code>nextFrameDue</code> from the injected steady clock, publish the earliest deadline to <code>Terminal</code>. In <code>transmitKittyFrame</code>, if the animation is in <code>RunAwaitingFrames</code> and holding at its last frame, resume. "No placement on the page" means <code>updateKittyFragments</code> replaced zero fragments for the image; then the animation holds no deadline until a placement appears (a later <code>a=p</code>/<code>a=T</code> re-arms it). Publish the deadline through <code>publishKittyAnimationDeadline</code> whenever it appears, moves or vanishes.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 4: Run all <code>[kitty]</code> tests and the <code>[threading]</code> case under <code>clang-tsan</code>; expect PASS.</strong></p>
+</li>
+<li>
+<p>[ ] <strong>Step 5: Commit</strong> — <code>vtbackend: play kitty animations on their own clock</code>.</p>
+</li>
+</ul>
+<hr>
+<h3 id="task-4-frame-composition-ac">Task 4: Frame composition (<code>a=c</code>)</h3>
+<p><strong>Files:</strong>
+- Modify: <code>src/vtbackend/screen/Screen.hpp/.cpp</code> (<code>composeKittyFrames</code>, the <code>Action::Compose</code> case that currently replies <code>ENOTSUP:frame composition not supported</code>, ~5980); reuse <code>compositeKittyRectangle</code> (Screen.cpp ~6158)
+- Test: <code>KittyGraphics_test.cpp</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes (Task 1): <code>Command::composeSourceFrame</code>, <code>composeDestinationFrame</code>, <code>composeSourceX/Y</code>, <code>composeDestinationX/Y</code>, <code>sourceWidth/Height</code>, <code>compositionMode</code>.
+- Produces: <code>void Screen::composeKittyFrames(kitty_graphics::Command const&amp; command);</code></p>
+<p>Semantics (kitty spec): copy the <code>w×h</code> rectangle at source origin of frame <code>r</code> onto the destination origin of frame <code>c</code> of image <code>i</code>; <code>w</code>/<code>h</code> default to the whole image; alpha-blend unless <code>C=1</code>. <code>ENOENT</code> for a missing image or frame; <code>EINVAL</code> when either rectangle leaves the image, or when source and destination frame are the same and the rectangles overlap; <strong>DECIDED: <code>a=c</code> has no <code>ENOSPC</code>.</strong> A composition yields a same-size copy of an existing frame, so with the <code>a=f</code> accounting (<code>stored − superseded + new</code>, Screen.cpp:6349-6350) the total never changes and the check could never fire. Implement no <code>ENOSPC</code> branch and no such test; the spec's §5 mention of <code>ENOSPC</code> is dropped. The destination becomes a copy-on-write new <code>Image</code> (frames are immutable shared images); if it is the current frame, refresh placements via <code>showKittyFrame()</code>.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write failing tests</strong>: <code>KittyGraphics.compose.alpha_blends_a_rectangle</code> (assert exact blended pixel values for a half-transparent source over opaque red), <code>…C1_overwrites</code>, <code>…defaults_to_the_whole_image</code>, <code>…missing_image_or_frame_is_ENOENT</code>, <code>…out_of_bounds_is_EINVAL</code>, <code>…same_frame_overlap_is_EINVAL</code>, <code>…same_frame_disjoint_is_allowed</code>, <code>…current_frame_refreshes_the_placement</code>, and a cross-check test that the blend arithmetic equals what <code>a=f</code> uses for the same inputs.</li>
+<li>[ ] <strong>Step 2: Run; expect FAIL</strong> (<code>ENOTSUP</code>).</li>
+<li>[ ] <strong>Step 3: Implement</strong> by sharing <code>compositeKittyRectangle</code> with the <code>a=f</code> path (no second blend implementation). Remove the <code>ENOTSUP</code> reply.</li>
+<li>[ ] <strong>Step 4: Run <code>[kitty]</code> tests; expect PASS.</strong> Manually cross-check three of the blend cases against kitty 0.49.2 (installed) and record the result in the test comments.</li>
+<li>[ ] <strong>Step 5: Commit</strong> — <code>vtbackend: compose kitty animation frames (a=c)</code>.</li>
+</ul>
+<hr>
+<h3 id="task-5-daemon-ticking-with-a-throttle">Task 5: Daemon ticking with a throttle</h3>
+<p><strong>Files:</strong>
+- Modify: <code>src/vthost/SessionHost.hpp/.cpp</code> (a per-session <code>std::optional&lt;core::net::DeadlineTimer&gt; _animationTick</code>, armed from the terminal's deadline; modelled on <code>_foregroundPoll</code>, SessionHost.cpp:1725-1739), <code>src/vthost/NativeSession.cpp</code> only if Delta emission needs the existing <code>screenUpdated</code> path
+- Test: <code>src/vthost/SessionHost_test.cpp</code> (or the nearest existing suite carrying the <code>daemon</code> label)</p>
+<p><strong>Interfaces:</strong>
+- Consumes (Task 3): <code>Terminal::kittyAnimationDue()</code> (<strong>not</strong> <code>nextRender()</code>), <code>Terminal::tick(time_point)</code>, the loop clock <code>_loop.clock().now()</code>.
+- Produces: <code>constexpr std::chrono::milliseconds DaemonMinimumFrameInterval { 100 };</code> in <code>SessionHost.hpp</code> (builder may tune; tests use the constant). A new <code>std::function&lt;void()&gt; onRenderBufferUpdated</code> member of <code>HostedSession::Events</code> (SessionHost.hpp:415-465; set in its constructor like <code>onScreenUpdated</code>) whose override of <code>renderBufferUpdated()</code> only <code>EventLoop::post</code>s to the loop — it may be called from any thread and must not read terminal state. On the loop thread the handler reads <code>kittyAnimationDue()</code> and arms <code>_animationTick</code> (a <code>std::optional&lt;core::net::DeadlineTimer&gt;</code> per session, pattern <code>armForegroundPoll</code>, SessionHost.cpp:1723-1730), <strong>idempotently</strong>: only when no timer is armed or the deadline moved earlier, because <code>renderBufferUpdated</code> fires from many places. The deadline is <code>max(due, lastTickTime + DaemonMinimumFrameInterval)</code>.
+- On fire: call <code>terminal.tick(now)</code> with <strong>no lock held</strong> (<code>tick()</code> takes <code>_ownStateLock</code> itself and is documented never to be called with it held; the mutex is non-recursive), where <code>now</code> is the loop clock; <code>tick()</code> itself raises <code>screenUpdated()</code> after releasing its lock when a frame advanced, which is what reaches the Delta path — the host does not raise it. <code>advanceKittyAnimations(now)</code> lands on the by-time frame, so throttled ticks skip intermediate frames rather than queue them. Note: a loop-thread tick can stall behind a DECSCLM parse (Terminal.hpp:3422-3428); acceptable, since <code>NativeSession</code> already locks the terminal on the loop thread.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write failing tests</strong> in <code>src/vthost/SessionHost_test.cpp</code>. Hand <strong>one</strong> <code>ManualClock</code> to both <code>EventLoop{source, clock}</code> and <code>SessionHostConfig.clocks.steady</code> (existing tests inject them separately, SessionHost_test.cpp:1604-1637). Feed bytes with <code>host.terminal(id)-&gt;writeToScreen(...)</code> under <code>SessionPumping::Manual</code> (line 732); turn the loop with <code>runOnce(0ms)</code> (1657-1661); observe emission by a <code>SessionStreamEvents</code> mirror counting <code>sessionScreenUpdated</code> (1741-1745). Tests: <code>daemon.playback_advances_frames_for_a_hosted_session</code> (3-frame <code>s=3</code>; advance clock; the session's screen shows frame 2 and <code>sessionScreenUpdated</code> fired), <code>daemon.playback_is_throttled_to_the_minimum_interval</code> (10 ms gaps, advance 1 s in 10 ms steps: count ≤ <code>1s / DaemonMinimumFrameInterval + 1</code>, and the final frame equals the by-time frame), <code>daemon.two_clients_do_not_double_the_rate</code>, <code>daemon.idle_session_with_blinking_text_arms_no_animation_timer</code> (SGR 5 text on screen, default <code>BlinkStyle::Smooth</code>: no <code>_animationTick</code>, no <code>sessionScreenUpdated</code> from ticking).</li>
+<li>[ ] <strong>Step 2: Run <code>ctest -L daemon</code>; expect FAIL.</strong></li>
+<li>[ ] <strong>Step 3: Implement</strong> the callback, the idempotent arm and the throttle exactly as above.</li>
+<li>[ ] <strong>Step 4: Run <code>ctest -L daemon</code> and the <code>[threading]</code> tests under <code>clang-tsan</code>; expect PASS.</strong></li>
+<li>[ ] <strong>Step 5: Commit</strong> — <code>vthost: tick kitty animations for hosted sessions</code>.</li>
+</ul>
+<hr>
+<h3 id="task-6-2108-acceptance-test-release-notes-final-checks">Task 6: #2108 acceptance test, release notes, final checks</h3>
+<p><strong>Files:</strong>
+- Test: <code>KittyGraphics_test.cpp</code> (byte-count test)
+- Modify: <code>metainfo.xml</code> (~line 372)</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the byte-count test.</strong> It is the decided #2108 pin, not a measurement of the terminal: it measures the test's own payload strings, so it fails only if the terminal rejects the delta, which the frame-equality assertion already catches; name it and comment it that way. <code>KittyGraphics.frames.a_delta_frame_transmits_only_its_rectangle</code>: send a 64×64 RGBA image, then an <code>a=f,x=…,y=…,s=8,v=8</code> delta; assert the delta's payload bytes (base64-decoded) equal <code>8*8*4</code>, the resulting frame equals base + patch, and the total bytes the terminal accepted for N delta frames is <code>&lt; (N * 64*64*4) / 20</code> for N=30 (the saving #2108 reports, here as a lower bound the test pins).</li>
+<li>[ ] <strong>Step 2: Run; expect PASS</strong> (the delta path exists from #2109; this pins it).</li>
+<li>[ ] <strong>Step 3: Update <code>metainfo.xml</code></strong>: replace the sentence "Self-running playback (<code>s=2</code>/<code>s=3</code>) and frame composition (<code>a=c</code>) are not supported yet (#2108)" with an entry for self-running playback, <code>o=z</code> payloads, <code>a=c</code>, and daemon playback (#2108, #2126).</li>
+<li>[ ] <strong>Step 4: Full verification</strong>: <code>cmake --build --preset clang-asan</code> (zero warnings), <code>ctest --preset=clang-asan</code>, <code>ctest -L daemon</code>, <code>[threading]</code> under <code>clang-tsan</code>; manual check of <code>kitten icat &lt;animated.gif&gt;</code> in a built Contour (generate one with <code>magick</code>/<code>ffmpeg</code>); coverage run on the changed files. Report performance impact (idle terminal: no wakeups with no animation), risk, and coverage in the PR body.</li>
+<li>[ ] <strong>Step 5: <code>/simplify</code>, then <code>/code-review</code></strong> on the branch; address every finding.</li>
+<li>[ ] <strong>Step 6: Commit</strong> — <code>docs: release notes for kitty animation playback</code>; open the PR with <code>Closes #2126</code> and <code>Closes #2108</code>.</li>
+</ul></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden="">
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"></path></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["content.action.edit", "content.action.view", "content.code.copy", "content.tabs.link", "navigation.expand", "navigation.footer", "navigation.indexes", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.sections", "navigation.tracking", "search.highlight", "search.share", "search.suggest", "toc.follow"], "search": "../../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>

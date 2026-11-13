@@ -1,0 +1,3184 @@
+<!DOCTYPE html><html lang="en" class="no-js"><head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+      
+      
+        <meta name="author" content="Christian Parpart">
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="/assets/contour-logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>Wake-Resize After Reconnect Implementation Plan - Contour Terminal Emulator</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  <link href="../../../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../../../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-red" data-md-color-accent="deep-red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#wake-resize-after-reconnect-implementation-plan" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="Contour Terminal Emulator" class="md-header__button md-logo" aria-label="Contour Terminal Emulator" data-md-component="logo">
+      
+  <img src="/assets/contour-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Contour Terminal Emulator
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Wake-Resize After Reconnect Implementation Plan
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-red" data-md-color-accent="deep-red" aria-label="Switch to dark mode" type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"></path></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-red" data-md-color-accent="red" aria-label="Switch to light mode" type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"></path></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required="">
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard="" data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"></path></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix="">
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/contour-terminal/contour/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    contour-terminal/contour
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  Home
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../install/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Getting started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../configuration/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Configuration
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../features/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../vt-sequence/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  VT sequence reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../vt-extensions/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  VT extensions
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../internals/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Internals
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="Contour Terminal Emulator" class="md-nav__button md-logo" aria-label="Contour Terminal Emulator" data-md-component="logo">
+      
+  <img src="/assets/contour-logo.png" alt="logo">
+
+    </a>
+    Contour Terminal Emulator
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/contour-terminal/contour/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    contour-terminal/contour
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix="">
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Home
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contribution Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2">
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../release-notes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../../configuration/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Profiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The Settings Window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Links in Terminal Output
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/layouts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Layouts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/hosts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hosts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/colors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Colors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/indicator-statusline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Indicator Statusline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/paths/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Path Handling in Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/key-mapping/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Key Mapping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4">
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    List of features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../persistent-sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Persistent sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../remote-hosts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Remote hosts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../control-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/font-ligatures/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Font ligatures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/regis-graphics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ReGIS vector graphics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/ime/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Input method editor (IME)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/line-marks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Line marks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/command-blocks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command blocks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/statusline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status line
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../extensions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status-line extensions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/hint-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hint mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../input-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Input modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../accessibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accessibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../secure-input/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secure input
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/drag-and-drop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Drag and drop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../quick-terminal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick terminal
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/size_indicator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Size indicator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/git-branch-drawings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Git branch drawings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../../vt-sequence/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VT sequence reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    VT sequence reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../../vt-extensions/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VT extensions
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    VT extensions
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/clickable-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Clickable Links
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/unicode-core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unicode Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/vertical-line-marks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vertical Line Markers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/color-palette-update-notifications/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dark and Light Mode detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/synchronized-output/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synchronized Output
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/buffer-capture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Buffer Capture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/font-settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Query or Change Font Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/line-reflow-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Line Reflow Reconfiguration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/save-and-restore-sgr-attributes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Save and Restore SGR attributes.
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/osc-133-shell-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OSC 133 - Shell Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/osc-3008-context/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OSC 3008 — Hierarchical Context Signalling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/osc-9-4-progress/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Progress indicator (OSC 9;4)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/program-status/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Program status (OSC 7501)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/semantic-block-query/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Semantic Block Query (DEC Mode 2034)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/private-use-glyphs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Private Use Glyphs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../../internals/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internals
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Internals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/CODING_STYLE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding Style Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/native-chrome/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The native chrome
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/vthost/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Daemon mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/session-oom-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Session OOM isolation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/text-stack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    A terminal emulator's text stack.
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/vt-conformance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VT conformance testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/macos-code-signing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    macOS code signing, notarization and packaging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/releasing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/release-signing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Windows code signing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/release-builds/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release builds
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#global-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global Constraints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#review-focus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Review Focus
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-a-core-cpp-userschristianparpartprojectscore-cpp-system-power" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part A — core-cpp (/Users/christianparpart/projects/core-cpp-system-power)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part A — core-cpp (/Users/christianparpart/projects/core-cpp-system-power)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#task-1-systempower-api-dispatch-registry-fake-unavailable-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 1: SystemPower API, dispatch registry, fake, unavailable fallback
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-2-macos-backend-iokit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 2: macOS backend (IOKit)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-3-linux-backend-logind-over-sd-bus-and-the-cmake-option" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 3: Linux backend (logind over sd-bus) and the CMake option
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-4-windows-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 4: Windows backend
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-5-document-and-release-core-cpp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 5: Document and release core-cpp
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-bc-contour-userschristianparpartprojectscontour-wake-resize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part B/C — Contour (/Users/christianparpart/projects/contour-wake-resize)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part B/C — Contour (/Users/christianparpart/projects/contour-wake-resize)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#task-6-liveness-survives-a-frozen-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 6: Liveness survives a frozen process
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-7-nativeclient-feeds-the-tick-timing-and-the-os-hint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 7: NativeClient feeds the tick timing and the OS hint
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-8-the-reconnect-states-the-real-size-and-pane-sizes-are-re-asserted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 8: The reconnect states the real size, and pane sizes are re-asserted
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-9-re-vendor-core-cpp-and-wire-the-os-hint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 9: Re-vendor core-cpp and wire the OS hint
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-10-finish" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 10: Finish
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/contour-terminal/contour/edit/master/docs/superpowers/plans/2026-11-03-wake-resize-after-reconnect.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"></path></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/contour-terminal/contour/raw/master/docs/superpowers/plans/2026-11-03-wake-resize-after-reconnect.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"></path></svg>
+    </a>
+  
+
+
+<div><h1 id="wake-resize-after-reconnect-implementation-plan">Wake-Resize After Reconnect Implementation Plan</h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> A daemon-hosted pane is never left at the profile size after a reconnect, and opening the lid no longer drops a healthy daemon connection.</p>
+<p><strong>Architecture:</strong> core-cpp gains <code>core::platform</code> system sleep/wake notifications (IOKit, logind via sd-bus, Win32) behind an injectable interface. Contour's liveness check treats a late tick or an OS wake as "we were frozen" and probes with a short deadline instead of declaring the connection lost. The reconnect hello states the window's real client area, and the per-pane sizes are re-sent once after the reconnect's layout is reconciled.</p>
+<p><strong>Tech Stack:</strong> C++23, CMake presets, Catch2, Qt6 (GUI tests), IOKit, libsystemd (sd-bus), Win32 power API.</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-11-03-wake-resize-after-reconnect-design.md</code></p>
+<h2 id="global-constraints">Global Constraints</h2>
+<ul>
+<li>Contour work: worktree <code>/Users/christianparpart/projects/contour-wake-resize</code>, branch <code>fix/wake-resize-after-reconnect</code>. core-cpp work: create worktree <code>/Users/christianparpart/projects/core-cpp-system-power</code> from <code>origin/master</code>, branch <code>feature/system-power</code>.</li>
+<li>Both repos follow <code>AGENT.md</code> (Contour) / core-cpp's own <code>AGENT.md</code>/<code>CLAUDE.md</code>: C++23, <code>enum class : uint8_t</code> with the off/default case at zero, no <code>bool</code> in API surface, <code>std::expected</code> for fallible setup, Doxygen on public API, <code>.hpp</code>, <code>#pragma once</code>, no <code>NOLINT</code>, <code>-Werror</code> clean, clang-format C++ only.</li>
+<li><strong>Never edit <code>vendor/core-cpp</code> by hand.</strong> Re-vendor with the procedure in <code>vendor/README.md</code>.</li>
+<li>No AI attribution trailers. Every commit ends with <code>Signed-off-by: Christian Parpart &lt;christian@parpart.family&gt;</code>.</li>
+<li>Liveness defaults: <code>awakeGap = 5 s</code>, <code>wakeDeadline = 5 s</code>; existing <code>idleBeforeProbe = 5 s</code>, <code>deadAfter = 15 s</code> unchanged.</li>
+<li>CMake option: <code>option(CORE_CPP_WITH_SYSTEMD "Notify of system sleep/wake on Linux through logind (libsystemd)" ON)</code>, Linux only, <code>pkg-config libsystemd</code>, ON-but-missing is a configure error.</li>
+<li>No sleep inhibition and no blocking of <code>IOAllowPowerChange</code> beyond the handlers' return.</li>
+<li>Split panes may receive one extra resize after a reconnect (accepted; per-pane hello sizes are a follow-up).</li>
+<li>Build/test Contour: <code>cmake --build --preset clang-asan</code> (on this Mac: the preset the tree is configured with, e.g. <code>appleclang-debug</code>), <code>ctest --preset=clang-asan</code>.</li>
+</ul>
+<h2 id="review-focus">Review Focus</h2>
+<ol>
+<li><strong>Sleep announced, then cancelled</strong> (macOS <code>kIOMessageSystemWillNotSleep</code>, logind <code>PrepareForSleep(false)</code> without a sleep): liveness must not stay disabled. Expect: on-time ticks for <code>awakeGap</code> after <code>noteSleep</code> resume normal liveness. Pinned in Task 6.</li>
+<li><strong>Monitor or subscription destroyed while a handler runs</strong> on the monitor's thread (quit during wake): no use-after-free, destructor waits. Pinned in Task 1.</li>
+<li><strong>A wake while no connection is up</strong> (Reconnecting): the event is dropped, nothing dereferences a null client. Pinned in Task 9.</li>
+<li><strong>A remote daemon that died during the sleep</strong>: lost within <code>wakeDeadline</code>, not <code>deadAfter</code>. Pinned in Task 7.</li>
+<li><strong>A reconnect to a restarted daemon</strong>: the hello still states the real area. Pinned in Task 8.</li>
+</ol>
+<hr>
+<h2 id="part-a-core-cpp-userschristianparpartprojectscore-cpp-system-power">Part A — core-cpp (<code>/Users/christianparpart/projects/core-cpp-system-power</code>)</h2>
+<h3 id="task-1-systempower-api-dispatch-registry-fake-unavailable-fallback">Task 1: <code>SystemPower</code> API, dispatch registry, fake, unavailable fallback</h3>
+<p>Mirror the existing <code>CpuCounters</code> layout (<code>CpuCounters.hpp</code>, <code>UnavailableCpuCounters.cpp</code>, <code>testing/FakeCpuCounterSource.hpp</code>, the per-platform source chosen once in <code>src/core/platform/CMakeLists.txt</code>).</p>
+<p><strong>Files:</strong>
+- Create: <code>src/core/platform/SystemPower.hpp</code>, <code>src/core/platform/SystemPower.cpp</code>, <code>src/core/platform/UnavailableSystemPower.cpp</code>, <code>src/core/platform/testing/FakeSystemPowerMonitor.hpp</code>, <code>src/core/platform/SystemPower_test.cpp</code>
+- Modify: <code>src/core/platform/CMakeLists.txt</code> (headers, sources, test; add <code>_coreCppPlatformSystemPowerSource</code> chosen like <code>_coreCppPlatformCpuCounterSource</code>, <code>UnavailableSystemPower.cpp</code> for every platform until Tasks 2–4 replace it)</p>
+<p><strong>Interfaces:</strong>
+- Produces (namespace <code>core::platform</code>):
+  </p><div class="language-cpp highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">SystemPowerEvent</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">WillSleep</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">DidWake</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">};</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1">/// Move-only; unsubscribes on destruction and waits out a handler running for it.</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">class</span><span class="w"> </span><span class="nc">PowerSubscription</span><span class="p">;</span><span class="w">  </span><span class="c1">// default-constructible empty token, move ctor/assign, ~PowerSubscription()</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="k">class</span><span class="w"> </span><span class="nc">ISystemPowerMonitor</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="k">public</span><span class="o">:</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="k">using</span><span class="w"> </span><span class="n">Handler</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">function</span><span class="o">&lt;</span><span class="kt">void</span><span class="p">(</span><span class="n">SystemPowerEvent</span><span class="p">)</span><span class="o">&gt;</span><span class="p">;</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">    </span><span class="k">virtual</span><span class="w"> </span><span class="o">~</span><span class="n">ISystemPowerMonitor</span><span class="p">()</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">default</span><span class="p">;</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="c1">/// Handlers run on a thread the monitor owns; marshal to your own loop.</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">    </span><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="k">virtual</span><span class="w"> </span><span class="n">PowerSubscription</span><span class="w"> </span><span class="n">subscribe</span><span class="p">(</span><span class="n">Handler</span><span class="w"> </span><span class="n">handler</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="p">};</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="k">namespace</span><span class="w"> </span><span class="nn">detail</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="c1">/// Thread-safe handler table every implementation dispatches through.</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="k">class</span><span class="w"> </span><span class="nc">PowerHandlerRegistry</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">  </span><span class="k">public</span><span class="o">:</span>
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">    </span><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">PowerSubscription</span><span class="w"> </span><span class="n">subscribe</span><span class="p">(</span><span class="n">ISystemPowerMonitor</span><span class="o">::</span><span class="n">Handler</span><span class="w"> </span><span class="n">handler</span><span class="p">);</span>
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="nf">dispatch</span><span class="p">(</span><span class="n">SystemPowerEvent</span><span class="w"> </span><span class="n">event</span><span class="p">);</span><span class="w">   </span><span class="c1">// calls every live handler, in subscription order</span>
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">    </span><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">size_t</span><span class="w"> </span><span class="n">size</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="p">;</span>
+</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="p">};</span>
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="p">}</span>
+</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>
+</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">expected</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">ISystemPowerMonitor</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="n">PlatformError</span><span class="o">&gt;</span>
+</span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="n">makeNativeSystemPowerMonitor</span><span class="p">();</span>
+</span></code></pre></div>
+- <code>testing::FakeSystemPowerMonitor : ISystemPowerMonitor</code> with <code>void emit(SystemPowerEvent)</code> (dispatches on the calling thread) and <code>[[nodiscard]] std::size_t subscriberCount() const</code>.
+- <code>UnavailableSystemPower.cpp</code> defines <code>makeNativeSystemPowerMonitor()</code> returning <code>std::unexpected(PlatformError::NotImplemented)</code>.
+<ul>
+<li>[ ] <strong>Step 1: Write failing tests</strong> in <code>SystemPower_test.cpp</code> (tag <code>[platform][power]</code>):</li>
+<li><code>"a subscriber receives each power event"</code>: fake, subscribe collecting into a vector, <code>emit(WillSleep)</code>, <code>emit(DidWake)</code> → vector <code>== {WillSleep, DidWake}</code>.</li>
+<li><code>"a destroyed subscription receives nothing"</code>: subscribe, reset the subscription, <code>emit(DidWake)</code> → nothing received, <code>subscriberCount() == 0</code>.</li>
+<li><code>"a moved subscription stays subscribed"</code>: move-construct into another token, emit → received once.</li>
+<li><code>"unsubscribing waits out a running handler"</code>: registry; an atomic sequence counter; the handler signals <code>entered</code>, waits on <code>release</code> (a <code>std::latch</code>), then records <code>handlerDone = ++seq</code>. <code>dispatch</code> on a <code>std::jthread</code>; main waits for <code>entered</code>; a second <code>std::jthread</code> destroys the subscription and records <code>destructorDone = ++seq</code>; main sleeps 50 ms, <code>CHECK(destructorDone == 0)</code> (still blocked), counts down <code>release</code>, joins both, <code>CHECK(handlerDone &lt; destructorDone)</code>.</li>
+<li><code>"a handler may drop its own subscription"</code>: the handler resets the token it was subscribed with; <code>emit</code> returns (no deadlock); a second <code>emit</code> reaches nothing.</li>
+<li><code>"the native monitor constructs or says why not"</code>: <code>makeNativeSystemPowerMonitor()</code> either has a value (subscribe + destroy cleanly) or <code>error() == PlatformError::NotImplemented</code>.</li>
+<li>[ ] <strong>Step 2:</strong> Build and run <code>platform_test "[power]"</code> → fails to compile (no header).</li>
+<li>[ ] <strong>Step 3:</strong> Implement. Registry: <code>std::mutex</code>, entries <code>{ std::uint64_t id; std::shared_ptr&lt;Handler&gt; handler; }</code>, a set of <code>(id, std::thread::id)</code> currently dispatching, and a <code>std::condition_variable</code>. <code>dispatch</code>: under the lock snapshot the <code>shared_ptr</code>s; then for each, re-check under the lock that it is still subscribed, mark it dispatching on this thread, unlock, invoke, relock, unmark, <code>notify_all</code>. <code>unsubscribe</code> (the token's destructor): erase the entry, then wait on the cv while that id is dispatching on <strong>another</strong> thread (on the dispatching thread itself — a handler destroying its own token — do not wait). Subscribing from inside a handler is safe because dispatch iterates the snapshot. Add <code>UnavailableSystemPower.cpp</code> to <code>SOURCES_EMSCRIPTEN</code> too (the module is part of the wasm subset; the header must compile standalone there).</li>
+<li>[ ] <strong>Step 4:</strong> Run <code>platform_test "[power]"</code> → PASS. Full <code>ctest</code> for core-cpp → PASS.</li>
+<li>[ ] <strong>Step 5:</strong> Commit <code>platform: add system sleep/wake notifications API</code>.</li>
+</ul>
+<h3 id="task-2-macos-backend-iokit">Task 2: macOS backend (IOKit)</h3>
+<p><strong>Files:</strong>
+- Create: <code>src/core/platform/darwin/DarwinSystemPower.cpp</code>
+- Modify: <code>src/core/platform/CMakeLists.txt</code> (APPLE selects it; link <code>"-framework IOKit"</code> <code>"-framework CoreFoundation"</code> via <code>_coreCppPlatformLibs</code>)</p>
+<p><strong>Interfaces:</strong> Consumes Task 1's <code>detail::PowerHandlerRegistry</code>; defines <code>makeNativeSystemPowerMonitor()</code> for APPLE.</p>
+<ul>
+<li>[ ] <strong>Step 1:</strong> The Task 1 native test now must take the value branch on macOS: add <code>#if defined(__APPLE__)</code> <code>REQUIRE(monitor.has_value())</code> to it (the only platform <code>#if</code> in the test; the CMake source choice stays the single platform switch for code).</li>
+<li>[ ] <strong>Step 2:</strong> Run → FAIL (<code>NotImplemented</code>).</li>
+<li>[ ] <strong>Step 3:</strong> Implement: <code>IORegisterForSystemPower</code>, <code>IONotificationPortSetDispatchQueue</code> on a private serial <code>dispatch_queue_t</code>. <code>kIOMessageSystemWillSleep</code> → dispatch <code>WillSleep</code>, then <code>IOAllowPowerChange</code>. <code>kIOMessageCanSystemSleep</code> → <code>IOAllowPowerChange</code>, no event. <code>kIOMessageSystemWillNotSleep</code> → dispatch <code>DidWake</code> (sleep cancelled). <code>kIOMessageSystemHasPoweredOn</code> → <code>DidWake</code>. Destructor: <code>IODeregisterForSystemPower</code>, <code>IOServiceClose</code>, <code>IONotificationPortDestroy</code>, then drain the queue with <code>dispatch_sync(queue, ^{})</code> before releasing it. Registration failure → <code>PlatformError::NotImplemented</code> is wrong; add <code>PlatformError::NotificationRegistrationFailed</code> at the end of the enum (keeping earlier values) with its <code>std::string_view</code> description wherever the enum is described.</li>
+<li>[ ] <strong>Step 4:</strong> Run <code>platform_test "[power]"</code> → PASS. Manual: a tiny scratch program (not committed) printing events across <code>pmset sleepnow</code> + wake shows <code>WillSleep</code>, <code>DidWake</code>.</li>
+<li>[ ] <strong>Step 5:</strong> Commit <code>platform: notify of system sleep/wake on macOS</code>.</li>
+</ul>
+<h3 id="task-3-linux-backend-logind-over-sd-bus-and-the-cmake-option">Task 3: Linux backend (logind over sd-bus) and the CMake option</h3>
+<p><strong>Files:</strong>
+- Create: <code>src/core/platform/linux/LinuxSystemPower.cpp</code>
+- Modify: <code>cmake/CoreCppOptions.cmake</code> (the option), <code>src/core/platform/CMakeLists.txt</code> (LINUX + option selects it, else <code>UnavailableSystemPower.cpp</code>; <code>pkg_check_modules(LIBSYSTEMD libsystemd)</code> <strong>without</strong> <code>IMPORTED_TARGET</code>, <code>FATAL_ERROR</code> naming <code>CORE_CPP_WITH_SYSTEMD</code> when not found, and link <strong>by value</strong> — <code>${LIBSYSTEMD_LINK_LIBRARIES}</code> into <code>_coreCppPlatformLibs</code>, <code>${LIBSYSTEMD_INCLUDE_DIRS}</code> as a PRIVATE include — exactly as Contour's <code>src/vtpty/CMakeLists.txt:88-131</code> does. A <code>PkgConfig::libsystemd</code> target would pass <code>CoreCppInstall.cmake</code>'s classify but break <code>tests/consumer-install</code> on link, since the installed config never re-creates it), <code>cmake/CoreCppDependencies.cmake</code> (one sentence in the table's header comment: libsystemd is linked by value and takes no row, with the reason), <code>.github/workflows/build.yml</code> (add <code>libsystemd-dev</code> to every Linux <code>apt-get install</code> incl. the container leg; one Linux leg configures <code>-DCORE_CPP_WITH_SYSTEMD=OFF</code>), core-cpp docs listing options.</p>
+<ul>
+<li>[ ] <strong>Step 1:</strong> Extend the native test: on Linux with the option ON (expose <code>CORE_CPP_WITH_SYSTEMD</code> to the test as a compile definition <code>CORE_CPP_HAS_SYSTEMD=1</code>), <code>REQUIRE</code> either a value, or <code>error() == NotificationRegistrationFailed</code> when <code>sd_bus_open_system</code> fails (CI containers without a system bus).</li>
+<li>[ ] <strong>Step 2:</strong> Run on Linux (CI or a container) → FAIL.</li>
+<li>[ ] <strong>Step 3:</strong> Implement: <code>sd_bus_open_system</code>, <code>sd_bus_match_signal(bus, …, "org.freedesktop.login1", "/org/freedesktop/login1", "org.freedesktop.login1.Manager", "PrepareForSleep", cb, this)</code>, read the <code>b</code> argument: <code>true</code> → <code>WillSleep</code>, <code>false</code> → <code>DidWake</code>. A <code>std::jthread</code> loops: drain <code>sd_bus_process</code> until it returns 0, then <code>poll</code> on <code>sd_bus_get_fd</code> (events from <code>sd_bus_get_events</code>, timeout from <code>sd_bus_get_timeout</code>, converted from absolute µs) together with a shutdown <code>eventfd</code>. Destructor signals the eventfd, joins, <code>sd_bus_flush_close_unref</code>.</li>
+<li>[ ] <strong>Step 4:</strong> Configure with ON and libsystemd missing → configure error naming the option. Build + tests pass with ON (installed) and OFF, including <code>consumer-install</code> / <code>check-install</code> with ON.</li>
+<li>[ ] <strong>Step 5:</strong> Commit <code>platform: notify of system sleep/wake on Linux through logind</code>.</li>
+</ul>
+<h3 id="task-4-windows-backend">Task 4: Windows backend</h3>
+<p><strong>Files:</strong>
+- Create: <code>src/core/platform/windows/WindowsSystemPower.cpp</code>
+- Modify: <code>src/core/platform/CMakeLists.txt</code> (WIN32 selects it; link <code>powrprof</code>)</p>
+<ul>
+<li>[ ] <strong>Step 1:</strong> Native test: on Windows <code>REQUIRE(monitor.has_value())</code>.</li>
+<li>[ ] <strong>Step 2:</strong> Run (Windows CI) → FAIL.</li>
+<li>[ ] <strong>Step 3:</strong> Implement with <code>PowerRegisterSuspendResumeNotification(DEVICE_NOTIFY_CALLBACK, &amp;params, &amp;handle)</code>: <code>PBT_APMSUSPEND</code> → <code>WillSleep</code>, <code>PBT_APMRESUMEAUTOMATIC</code> → <code>DidWake</code>, ignore <code>PBT_APMRESUMESUSPEND</code>. Destructor: <code>PowerUnregisterSuspendResumeNotification</code>, then the registry's wait covers an in-flight callback.</li>
+<li>[ ] <strong>Step 4:</strong> Windows CI green.</li>
+<li>[ ] <strong>Step 5:</strong> Commit <code>platform: notify of system sleep/wake on Windows</code>.</li>
+</ul>
+<h3 id="task-5-document-and-release-core-cpp">Task 5: Document and release core-cpp</h3>
+<ul>
+<li>[ ] <strong>Step 1:</strong> Module docs (<code>docs/modules/…platform…</code>): the API, threading contract, backends, the option. Changelog entry.</li>
+<li>[ ] <strong>Step 2:</strong> PR via <code>/create-pr</code>; CI green on every leg.</li>
+<li>[ ] <strong>Step 3:</strong> <strong>Ask the user before merging and publishing.</strong> Then merge, <code>/draft-release</code> as the next minor (0.13.0), <code>/publish-release</code> once all artifacts are attached.</li>
+</ul>
+<hr>
+<h2 id="part-bc-contour-userschristianparpartprojectscontour-wake-resize">Part B/C — Contour (<code>/Users/christianparpart/projects/contour-wake-resize</code>)</h2>
+<p>Tasks 6–8 need nothing from core-cpp and may start in parallel with Part A.</p>
+<h3 id="task-6-liveness-survives-a-frozen-process">Task 6: Liveness survives a frozen process</h3>
+<p><strong>Files:</strong>
+- Modify: <code>src/vthost/client/Liveness.hpp</code>
+- Test: <code>src/vthost/client/Liveness_test.cpp</code></p>
+<p><strong>Interfaces:</strong>
+- Produces:
+  </p><div class="language-cpp highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">struct</span><span class="w"> </span><span class="nc">LivenessPolicy</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">    </span><span class="c1">// existing three fields unchanged, then:</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="c1">/// A tick this much later than due means the process was frozen (sleep, VM pause, SIGSTOP).</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">milliseconds</span><span class="w"> </span><span class="n">awakeGap</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="mi">5000</span><span class="w"> </span><span class="p">};</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="c1">/// After a wake, how long the probe may go unanswered before the connection is lost.</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">milliseconds</span><span class="w"> </span><span class="n">wakeDeadline</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="mi">5000</span><span class="w"> </span><span class="p">};</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="p">};</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="k">class</span><span class="w"> </span><span class="nc">LivenessTracker</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="c1">// existing members unchanged, plus:</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="c1">/// The tick due at @p due ran at @p now: a late tick enters the wake state; an on-time tick</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="c1">/// awakeGap after noteSleep() leaves the sleep state (a sleep that was announced and never came).</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="nf">noteTick</span><span class="p">(</span><span class="n">core</span><span class="o">::</span><span class="n">platform</span><span class="o">::</span><span class="n">SteadyTimePoint</span><span class="w"> </span><span class="n">due</span><span class="p">,</span><span class="w"> </span><span class="n">core</span><span class="o">::</span><span class="n">platform</span><span class="o">::</span><span class="n">SteadyTimePoint</span><span class="w"> </span><span class="n">now</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">    </span><span class="c1">/// The OS announced a sleep: decide() returns None until a wake or the fallback above.</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="nf">noteSleep</span><span class="p">(</span><span class="n">core</span><span class="o">::</span><span class="n">platform</span><span class="o">::</span><span class="n">SteadyTimePoint</span><span class="w"> </span><span class="n">at</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">    </span><span class="c1">/// The OS announced a wake, or a late tick showed one: silence restarts at @p at, a probe is due</span>
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">    </span><span class="c1">/// at once, and wakeDeadline applies until the daemon speaks.</span>
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="nf">noteWake</span><span class="p">(</span><span class="n">core</span><span class="o">::</span><span class="n">platform</span><span class="o">::</span><span class="n">SteadyTimePoint</span><span class="w"> </span><span class="n">at</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="w">    </span><span class="c1">/// @return The silence after which decide() says DeclareLost now: wakeDeadline while waking,</span>
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="w">    </span><span class="c1">///         deadAfter otherwise. For the loss message.</span>
+</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="w">    </span><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">milliseconds</span><span class="w"> </span><span class="n">silenceLimit</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+</span><span id="__span-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="p">};</span>
+</span></code></pre></div>
+  Replace <code>ProbeState</code> alone with it plus a private <code>enum class Phase : uint8_t { Awake = 0, Asleep = 1, Waking = 2 }</code> and <code>std::optional&lt;SteadyTimePoint&gt; _asleepSince</code>. <code>noteInbound</code> sets <code>Phase::Awake</code> (from <code>Waking</code>; it does not end <code>Asleep</code>). A late <code>noteTick</code> enters <code>Waking</code> from <strong>any</strong> phase, <code>Asleep</code> included (on macOS the reactor can see [WillSleep] → late tick → [DidWake]). <code>noteWake</code> clears an outstanding probe, so the wake probe goes out even if one was out before the sleep; a <code>noteWake</code> while already <code>Waking</code> restarts the wake deadline. <code>decide</code>: <code>Asleep</code> → <code>None</code>; <code>Waking</code> with no probe out → <code>SendHeartbeat</code>; silence <code>&gt;= silenceLimit()</code> → <code>DeclareLost</code>; else as today. <code>decide</code> stays <code>const</code>.
+<ul>
+<li>[ ] <strong>Step 1: Write failing tests</strong> (tag <code>[vthost][liveness]</code>), policy <code>{ .idleBeforeProbe = 5s, .deadAfter = 15s, .awakeGap = 5s, .wakeDeadline = 5s }</code>, <code>t0 = SteadyTimePoint{} + 100s</code>, <code>noteInbound(t0)</code> first:</li>
+<li><code>"a tick late by a sleep probes instead of giving up"</code>: <code>noteTick(t0 + 1s, t0 + 1000s)</code>; <code>decide(t0 + 1000s) == SendHeartbeat</code>; after <code>noteProbeSent(t0 + 1000s)</code>: <code>decide(t0 + 1004s) == None</code>, <code>decide(t0 + 1005s) == DeclareLost</code>, <code>silenceLimit() == 5s</code>.</li>
+<li><code>"an answer after a wake restores the normal limits"</code>: as above, then <code>noteInbound(t0 + 1001s)</code>; <code>silenceLimit() == 15s</code>; <code>decide(t0 + 1005s) == None</code>; <code>decide(t0 + 1006s) == SendHeartbeat</code>.</li>
+<li><code>"an on-time tick changes nothing"</code>: <code>noteTick(t0 + 1s, t0 + 1s + 100ms)</code>; <code>decide(t0 + 2s) == None</code>.</li>
+<li><code>"an announced sleep silences the verdict until the wake"</code>: <code>noteSleep(t0 + 1s)</code>; <code>decide(t0 + 500s) == None</code>; <code>noteWake(t0 + 500s)</code>; <code>decide(t0 + 500s) == SendHeartbeat</code>.</li>
+<li><code>"a sleep announced and never taken does not disable liveness"</code> (Review Focus 1): <code>noteSleep(t0 + 1s)</code>; on-time ticks <code>noteTick(t0 + Ns, t0 + Ns)</code> for N = 2..7; <code>decide(t0 + 7s) == SendHeartbeat</code> (left <code>Asleep</code> at N = 6, entered <code>Waking</code>).</li>
+<li>The existing case stays unchanged and passing.</li>
+<li>[ ] <strong>Step 2:</strong> Run <code>vthost_test "[liveness]"</code> → compile failure.</li>
+<li>[ ] <strong>Step 3:</strong> Implement as specified in Interfaces.</li>
+<li>[ ] <strong>Step 4:</strong> Run <code>vthost_test "[liveness]"</code> → PASS.</li>
+<li>[ ] <strong>Step 5:</strong> Commit <code>vthost: a frozen client probes the daemon instead of giving it up</code>.</li>
+</ul>
+<h3 id="task-7-nativeclient-feeds-the-tick-timing-and-the-os-hint">Task 7: <code>NativeClient</code> feeds the tick timing and the OS hint</h3>
+<p><strong>Files:</strong>
+- Modify: <code>src/vthost/client/NativeClient.hpp</code>, <code>src/vthost/client/NativeClient.cpp</code> (<code>armLivenessTick</code>, <code>livenessTick</code>)
+- Test: <code>src/vthost/client/NativeClient_test.cpp</code> (the <code>ManualClockAttach</code> harness)</p>
+<p><strong>Interfaces:</strong>
+- Consumes Task 6.
+- Produces (reactor thread only, documented as such):
+  </p><div class="language-cpp highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1">/// The system is about to sleep: no liveness verdict until it wakes.</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="kt">void</span><span class="w"> </span><span class="nf">noteSystemSleep</span><span class="p">();</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1">/// The system woke: the daemon is probed now and must answer within LivenessPolicy::wakeDeadline.</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="kt">void</span><span class="w"> </span><span class="nf">noteSystemWake</span><span class="p">();</span>
+</span></code></pre></div>
+  <code>armLivenessTick()</code> records <code>_livenessTickDue</code>; <code>livenessTick</code> calls <code>_liveness.noteTick(_livenessTickDue, now)</code> before deciding. Extract the switch into private <code>[[nodiscard]] LivenessOutcome applyLivenessDecision(core::platform::SteadyTimePoint now)</code> with <code>enum class LivenessOutcome : uint8_t { Continue = 0, Closed = 1 }</code> (Closed: the tick must not re-arm). Both <code>noteSystemSleep()</code> and <code>noteSystemWake()</code> return immediately unless liveness is live — the same condition that arms the tick: not <code>_closing</code>, not <code>_detached</code>, <code>_negotiated</code>, and <code>shares(Capability::Heartbeat)</code> (a declared-lost client is still current until Reconnecting arrives; a daemon without Heartbeat must never be sent one). <code>noteSystemWake()</code> then calls <code>_liveness.noteWake(now)</code> and <code>std::ignore = applyLivenessDecision(now)</code>. Loss reason: the existing message, with <code>_liveness.silenceLimit()</code> in place of <code>policy().deadAfter</code>.
+  <code>heartbeatClient()</code> in the test sets <code>.awakeGap = 5s, .wakeDeadline = 5s</code> explicitly.
+<ul>
+<li>[ ] <strong>Step 1: Write failing tests</strong> (tag <code>[vthost][attach][liveness]</code>), each with <code>ManualClockAttach</code>:</li>
+<li><code>"a client frozen past the deadline probes its daemon instead of dropping it"</code>: answering daemon — a script that echoes each <code>Heartbeat</code> (reuse the existing echoing script if one exists, else add <code>echoingAfterHello()</code> beside <code>silentAfterHello()</code>). Connected; <code>h.clock.advance(1000s)</code> in one step (do <strong>not</strong> call <code>h.settle()</code> — it detaches the client); then <code>h.letTimePass(10)</code>. <code>CHECK_FALSE(h.clientEnded)</code>; a <code>Heartbeat</code> was seen after the jump (record <code>h.seen.size()</code> before the jump).</li>
+<li><code>"a daemon gone during a sleep is given up on within the wake deadline"</code> (Review Focus 4): <code>silentAfterHello()</code>; connected; <code>advance(1000s)</code>; <code>letTimePass(6)</code>; <code>CHECK(turnUntil(h.loop, [&amp;h] { return h.clientEnded; }))</code>; <code>lossReason() == "no answer from the daemon for 5 s"</code>; <code>h.settle()</code>.</li>
+<li><code>"an announced sleep and wake keep the connection"</code>: echoing daemon; <code>client-&gt;noteSystemSleep()</code>; <code>advance(1000s)</code>; <code>std::ignore = turnUntil(h.loop, [] { return false; }, 20)</code>; <code>client-&gt;noteSystemWake()</code>; <code>letTimePass(10)</code>; not ended; a <code>Heartbeat</code> seen.</li>
+<li>The existing <code>"a client whose daemon stops answering ends with a loss reason"</code> still passes (15 s message).</li>
+<li>[ ] <strong>Step 2:</strong> Run <code>vthost_test "[liveness]"</code> → FAIL (the first two: client ends with the 15 s reason / compile failure).</li>
+<li>[ ] <strong>Step 3:</strong> Implement per Interfaces.</li>
+<li>[ ] <strong>Step 4:</strong> Run <code>vthost_test "[liveness]"</code> and <code>ctest --preset=clang-asan -L daemon</code> → PASS.</li>
+<li>[ ] <strong>Step 5:</strong> Commit <code>vthost: a client probes after a late tick or an OS wake instead of reconnecting</code>.</li>
+</ul>
+<h3 id="task-8-the-reconnect-states-the-real-size-and-pane-sizes-are-re-asserted">Task 8: The reconnect states the real size, and pane sizes are re-asserted</h3>
+<p><strong>Files:</strong>
+- Modify: <code>src/contour/remote/NativeController.hpp</code>, <code>src/contour/remote/NativeController.cpp</code> (<code>makeClient</code>, <code>adoptReconnect</code>, <code>flushGeometry</code>), <code>src/contour/remote/RemoteLayout.cpp</code> (end of the 6-parameter <code>applyRemoteLayout</code>)
+- Test: <code>src/contour/remote/NativeController_test.cpp</code></p>
+<p><strong>Interfaces:</strong>
+- Produces:
+  </p><div class="language-cpp highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1">/// GUI thread. After a reconnect, once the GUI reconciled a layout of the new connection: re-sends every</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1">/// bound pane's size once, even though no display geometry changed. No-op otherwise.</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="kt">void</span><span class="w"> </span><span class="nf">reassertGeometryAfterReconcile</span><span class="p">();</span>
+</span></code></pre></div>
+  New private members, all under <code>_geometryMutex</code>:
+  - <code>std::optional&lt;vtpty::PageSize&gt; _lastStatedArea</code> — the last area stated to any connection (hello or <code>requestResize</code>); never reset, not even for a restarted daemon.
+  - <code>std::optional&lt;vtpty::PageSize&gt; _helloArea</code> — the area this connection's hello stated; consumed by its first <code>flushGeometry()</code>.
+  - <code>GeometryReassert _geometryReassert</code> with <code>enum class GeometryReassert : uint8_t { Idle = 0, Pending = 1 }</code>; set <code>Pending</code> in <code>adoptReconnect()</code>.
+- Behaviour:
+  - <code>makeClient()</code>: hello area = <code>composedClientArea()</code> if <code>_acceptedConnections &gt; 0</code> and it has a value; else <code>_lastStatedArea</code>; else the profile size (today's expression). Record it in <code>_helloArea</code> and <code>_lastStatedArea</code>. Lock order <code>_mutex</code> then <code>_geometryMutex</code>; first confirm no caller of <code>makeClient</code> holds either (it is called from <code>ClientSupervisor::attempt</code> via the factory on the reactor thread).
+  - <code>flushGeometry()</code>: if <code>_helloArea</code> is set, take it; when the composed area equals it, set <code>_lastReportedArea</code> to it and send no area, but re-send <strong>all</strong> panes (the daemon re-projected them on the hello). Whenever an area is sent, record <code>_lastStatedArea</code>.
+  - <code>reassertGeometryAfterReconcile()</code>: reads <code>_geometryReassert</code> under a scoped <code>_geometryMutex</code> lock, <strong>releases it</strong>, and calls <code>flushGeometry()</code> only if <code>Pending</code> (calling it under the lock would self-deadlock and invert the <code>_mutex</code> → <code>_geometryMutex</code> order).
+  - <code>flushGeometry()</code>, inside its existing locked block: if <code>_geometryReassert == Pending</code>, set <code>Idle</code> and force <code>resendAll = true</code> — independent of <code>_helloArea</code>, which an earlier flush (e.g. a status-line toggle firing the resize sink before the layout arrived) may already have consumed.
+  - <code>applyRemoteLayout(... 6 params ...)</code> calls <code>controller.reassertGeometryAfterReconcile()</code> as its last statement.
+<ul>
+<li>[ ] <strong>Step 0: Give the fixture a profile size.</strong> <code>makeNativeController</code> (<code>NativeController_test.cpp:110-118</code>) passes <code>std::nullopt</code> attach settings, so today's hello states no area and the daemon never re-projects on reconnect — the bug would not reproduce. Add an optional <code>attachSettings</code> parameter (defaulting to today's <code>std::nullopt</code> so other tests are unchanged); every case below passes settings with <code>.pageSize = cells(100, 30)</code>.</li>
+<li>[ ] <strong>Step 0b: A ResizeRequest counter.</strong> Add a read-side decorator to the fixture's native connection socket (beside <code>GatedSocket</code>, which decorates writes only) that feeds the plaintext bytes into the proto frame decoder (keeping partial frames across reads) and counts decoded client <code>ResizeRequest</code> PDUs in an atomic the test reads. Test code only.</li>
+<li>[ ] <strong>Step 1: Write failing tests</strong> (tag <code>[attach][controller][reconnect]</code>), modelled on <code>"attach sizes remote panes to the panes the GUI renders"</code> (DaemonFixture, TestApp, ScopedController, <code>clientArea()</code>/<code>remoteSize()</code> lambdas), each using the Step 0 profile size.</li>
+<li><code>"a reconnect states the window's real size in its hello"</code>: attach, reconcile, local pty <code>resizeScreen(cells(120, 40))</code>, wait <code>clientArea() == cells(120, 40)</code>. <code>daemon.holdNewConnectionsAtLayout(); daemon.dropConnections();</code> wait Reconnecting then Connected. While the layout is still held: <code>CHECK(clientArea() == cells(120, 40))</code>.</li>
+<li><code>"a second drop before the layout states the last area"</code>: as above, but after the first reconnect is Connected and before <code>releaseHeld()</code>, drop again; wait Connected; <code>CHECK(clientArea() == cells(120, 40))</code>.</li>
+<li><code>"a reconnect re-asserts a split pane's size once reconciled"</code>: the split setup of the model test; resize the left pane's pty to a width that differs from the 0.5-ratio estimate; wait <code>remoteSize(left) == local</code>. Drop connections (no hold); wait Connected and a settled layout; <code>applyRemoteLayout(...)</code>; <code>CHECK(waitUntil([&amp;]{ return remoteSize(leftSession) == leftLocalSize; }))</code>.</li>
+<li><code>"a reconnect to a restarted daemon states the real size"</code> (Review Focus 5): <code>daemon.restartHost()</code> instead of <code>dropConnections()</code>; after Connected, <code>CHECK(clientArea() == cells(120, 40))</code>.</li>
+<li><code>"the hello's area is not sent again after the layout"</code>: count client-area <code>ResizeRequest</code>s the daemon receives across a reconnect + reconcile with an unchanged window; expect 0. If <code>DaemonFixture</code> has no frame tap, add a counter in its native connection handler (test code only).</li>
+<li>[ ] <strong>Step 2:</strong> Run the test target holding <code>NativeController_test.cpp</code> with <code>"[reconnect]"</code> → the first, second and fourth fail with <code>clientArea() == cells(100, 30)</code>; the third fails on the left pane (re-projected by ratio, never re-asserted); the fifth passes or fails depending on timing and is kept as a regression guard.</li>
+<li>[ ] <strong>Step 3:</strong> Implement per Interfaces.</li>
+<li>[ ] <strong>Step 4:</strong> Run the <code>[reconnect]</code> and <code>[attach]</code> tags, then <code>ctest --preset=clang-asan -L daemon</code> → PASS. Run the <code>[attach][controller]</code> tests under <code>clang-tsan</code> (cross-thread <code>_geometryMutex</code> use).</li>
+<li>[ ] <strong>Step 5:</strong> Commit <code>remote: a reconnect states the window's real size and re-asserts every pane</code>.</li>
+</ul>
+<h3 id="task-9-re-vendor-core-cpp-and-wire-the-os-hint">Task 9: Re-vendor core-cpp and wire the OS hint</h3>
+<p>Starts once Task 5's release is published.</p>
+<p><strong>Files:</strong>
+- Modify: <code>vendor/core-cpp/**</code> (only via the <code>vendor/README.md</code> command), <code>cmake/ContourThirdParties.cmake</code> (set <code>CORE_CPP_WITH_SYSTEMD</code> from <code>CONTOUR_WITH_SYSTEMD</code>, beside the other core-cpp options at ~454-457), top-level <code>CMakeLists.txt</code> (the option is defined at ~158; move the non-Linux/Flatpak force-OFF that today lives in <code>src/vtpty/CMakeLists.txt:15-18</code> up to before <code>include(ContourThirdParties)</code> at ~358, so core-cpp sees the final value), <code>src/contour/remote/NativeController.hpp/.cpp</code>, <code>src/contour/ContourGuiApp.hpp/.cpp</code>, <code>metainfo.xml</code> (release note via <code>/add-release-note</code>)
+- Test: <code>src/contour/remote/NativeController_test.cpp</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes Task 1 (<code>ISystemPowerMonitor</code>, <code>PowerSubscription</code>, <code>testing::FakeSystemPowerMonitor</code>), Task 7 (<code>noteSystemSleep/Wake</code>).
+- <code>NativeController</code> takes <code>core::platform::ISystemPowerMonitor* powerMonitor</code> (nullable) as a constructor parameter, subscribes in the constructor, holds the <code>PowerSubscription</code> as a member; the handler <code>_reactor.post</code>s to <code>_client-&gt;noteSystemSleep()</code> / <code>noteSystemWake()</code> when <code>_client != nullptr</code>. Note at the member: <code>~NativeController()</code> stops and joins the reactor before members die, so a handler may still post onto the stopped loop — safe because <code>ReactorThread::post</code> only queues; member order is not what protects it.
+- <code>ContourGuiApp</code> owns <code>std::unique_ptr&lt;core::platform::ISystemPowerMonitor&gt; _powerMonitor</code>, created once with <code>makeNativeSystemPowerMonitor()</code>; on error, log it (display/attach log category) and pass <code>nullptr</code>. Created before, destroyed after, the <code>NativeController</code>.</p>
+<ul>
+<li>[ ] <strong>Step 1:</strong> Re-vendor; <code>ctest -L lint</code> (<code>core-cpp-vendored-copy</code>) → PASS; full build → PASS. Commit <code>vendor: core-cpp 0.13.0</code>.</li>
+<li>[ ] <strong>Step 2: Write failing tests:</strong></li>
+<li><code>"a controller subscribes to power events for its lifetime"</code>: fake monitor; construct controller → <code>subscriberCount() == 1</code>; destroy → <code>0</code>.</li>
+<li><code>"a wake while reconnecting is dropped"</code> (Review Focus 3): fake; attach; <code>refuseConnections()</code>; wait Reconnecting; <code>fake.emit(DidWake)</code>; drain; no crash; <code>serveAgain()</code>; reconnects.</li>
+<li><code>"a wake probes the daemon"</code>: fake; attach; connect <code>connectionStateChanged</code> to record every <code>connectionState()</code>; <code>fake.emit(WillSleep); fake.emit(DidWake)</code>; pump for 1 s; the recorded states contain no <code>Reconnecting</code>, and the daemon side received a <code>Heartbeat</code> (via the Task 8 read decorator, extended to count <code>Heartbeat</code> too).</li>
+<li>[ ] <strong>Step 3:</strong> Run → FAIL (constructor signature).</li>
+<li>[ ] <strong>Step 4:</strong> Implement per Interfaces; update every <code>NativeController</code> construction (tests pass <code>nullptr</code> unless testing power).</li>
+<li>[ ] <strong>Step 5:</strong> Run the tests → PASS; configure with <code>CONTOUR_WITH_SYSTEMD=OFF</code> → builds.</li>
+<li>[ ] <strong>Step 6:</strong> <code>/add-release-note</code> (one entry: daemon-hosted panes no longer shrink to the profile size after the machine wakes). Commit <code>contour: probe the daemon on system wake instead of reconnecting</code>.</li>
+</ul>
+<h3 id="task-10-finish">Task 10: Finish</h3>
+<ul>
+<li>[ ] <strong>Step 1:</strong> <code>/simplify</code>, then <code>/code-review</code>; address every finding.</li>
+<li>[ ] <strong>Step 2:</strong> <code>cmake --build --preset clang-asan &amp;&amp; ctest --preset=clang-asan</code> → all pass; <code>ctest --preset=clang-tsan -L daemon</code> → pass.</li>
+<li>[ ] <strong>Step 3:</strong> Manual on macOS: a daemon-hosted tab running Claude Code at full window size; close the lid &gt; 30 s; open. Layout stays full size. With the <code>vthost</code> log category raised, no "Lost the connection" line.</li>
+<li>[ ] <strong>Step 4:</strong> <code>/create-pr</code> with performance impact (none: one timestamp per 1 s tick), risk assessment, coverage.</li>
+</ul></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden="">
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"></path></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["content.action.edit", "content.action.view", "content.code.copy", "content.tabs.link", "navigation.expand", "navigation.footer", "navigation.indexes", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.sections", "navigation.tracking", "search.highlight", "search.share", "search.suggest", "toc.follow"], "search": "../../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>

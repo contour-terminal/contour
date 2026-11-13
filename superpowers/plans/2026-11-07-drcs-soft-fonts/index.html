@@ -1,0 +1,3600 @@
+<!DOCTYPE html><html lang="en" class="no-js"><head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+      
+      
+        <meta name="author" content="Christian Parpart">
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="/assets/contour-logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>DECDLD Soft Fonts, Finished — Implementation Plan - Contour Terminal Emulator</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  <link href="../../../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../../../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-red" data-md-color-accent="deep-red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#decdld-soft-fonts-finished-implementation-plan" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="Contour Terminal Emulator" class="md-header__button md-logo" aria-label="Contour Terminal Emulator" data-md-component="logo">
+      
+  <img src="/assets/contour-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Contour Terminal Emulator
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              DECDLD Soft Fonts, Finished — Implementation Plan
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-red" data-md-color-accent="deep-red" aria-label="Switch to dark mode" type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"></path></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-red" data-md-color-accent="red" aria-label="Switch to light mode" type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"></path></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required="">
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard="" data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"></path></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix="">
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/contour-terminal/contour/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    contour-terminal/contour
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  Home
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../install/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Getting started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../configuration/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Configuration
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../features/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../vt-sequence/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  VT sequence reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../vt-extensions/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  VT extensions
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../internals/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Internals
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="Contour Terminal Emulator" class="md-nav__button md-logo" aria-label="Contour Terminal Emulator" data-md-component="logo">
+      
+  <img src="/assets/contour-logo.png" alt="logo">
+
+    </a>
+    Contour Terminal Emulator
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/contour-terminal/contour/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    contour-terminal/contour
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix="">
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Home
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contribution Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2">
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../release-notes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../../configuration/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Profiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The Settings Window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Links in Terminal Output
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/layouts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Layouts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/hosts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hosts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/colors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Colors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/indicator-statusline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Indicator Statusline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/paths/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Path Handling in Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../configuration/key-mapping/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Key Mapping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4">
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    List of features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../persistent-sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Persistent sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../remote-hosts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Remote hosts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../control-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/font-ligatures/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Font ligatures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/regis-graphics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ReGIS vector graphics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/ime/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Input method editor (IME)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/line-marks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Line marks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/command-blocks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command blocks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/statusline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status line
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../extensions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status-line extensions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/hint-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hint mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../input-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Input modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../accessibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accessibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../secure-input/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secure input
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/drag-and-drop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Drag and drop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../quick-terminal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick terminal
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/size_indicator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Size indicator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../demo/git-branch-drawings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Git branch drawings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../../vt-sequence/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VT sequence reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    VT sequence reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../../vt-extensions/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VT extensions
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    VT extensions
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/clickable-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Clickable Links
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/unicode-core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unicode Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/vertical-line-marks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vertical Line Markers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/color-palette-update-notifications/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dark and Light Mode detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/synchronized-output/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synchronized Output
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/buffer-capture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Buffer Capture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/font-settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Query or Change Font Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/line-reflow-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Line Reflow Reconfiguration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/save-and-restore-sgr-attributes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Save and Restore SGR attributes.
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/osc-133-shell-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OSC 133 - Shell Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/osc-3008-context/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OSC 3008 — Hierarchical Context Signalling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/osc-9-4-progress/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Progress indicator (OSC 9;4)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/program-status/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Program status (OSC 7501)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/semantic-block-query/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Semantic Block Query (DEC Mode 2034)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../vt-extensions/private-use-glyphs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Private Use Glyphs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../../internals/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internals
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Internals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/CODING_STYLE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding Style Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/native-chrome/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The native chrome
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/vthost/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Daemon mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/session-oom-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Session OOM isolation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/text-stack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    A terminal emulator's text stack.
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/vt-conformance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VT conformance testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/macos-code-signing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    macOS code signing, notarization and packaging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/releasing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/release-signing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Windows code signing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../internals/release-builds/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release builds
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#global-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global Constraints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#review-focus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Review Focus
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#file-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Structure
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="File Structure">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#task-1-the-soft-font-model-pure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 1: The soft font model (pure)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-2-the-per-cell-soft-glyph-reference-in-the-grid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 2: The per-cell soft-glyph reference in the grid
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-3-wire-decdld-designation-and-the-write-path-to-the-new-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 3: Wire DECDLD, designation and the write path to the new model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-4-resolve-soft-glyphs-into-the-render-buffer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 4: Resolve soft glyphs into the render buffer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-5-softfontrenderer-crisp-alpha-tiles-coloured-at-draw-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 5: SoftFontRenderer — crisp alpha tiles coloured at draw time
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-6-persist-soft-fonts-and-references-across-a-live-upgrade" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 6: Persist soft fonts and references across a live upgrade
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-7-mirror-soft-fonts-to-daemon-clients" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 7: Mirror soft fonts to daemon clients
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-8-verify-on-real-fonts-measure-document" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 8: Verify on real fonts, measure, document
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/contour-terminal/contour/edit/master/docs/superpowers/plans/2026-11-07-drcs-soft-fonts.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"></path></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/contour-terminal/contour/raw/master/docs/superpowers/plans/2026-11-07-drcs-soft-fonts.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"></path></svg>
+    </a>
+  
+
+
+<div><h1 id="decdld-soft-fonts-finished-implementation-plan">DECDLD Soft Fonts, Finished — Implementation Plan</h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Real-world DECDLD soft fonts load correctly, are sized for the cell they were designed for, render as
+crisp monochrome masks coloured from each cell's real attributes, keep the underlying characters for
+copy and search, and work in daemon-hosted sessions and across a live upgrade.</p>
+<p><strong>Architecture:</strong> A pure, table-driven font model in <code>vtbackend/vt/</code> (decoding, sixel accumulation, target-cell
+detection ported from Windows Terminal, error glyph) is owned by <code>Terminal</code> as a copy-on-write <code>SoftFontStore</code>.
+A grid cell stores its real codepoint plus a <code>SoftGlyphRef {font, position}</code> in a sparse per-line side table.
+<code>RenderBufferBuilder</code> resolves that reference to an immutable <code>shared_ptr&lt;SoftGlyph const&gt;</code> under the state
+lock. A new <code>SoftFontRenderer</code> in <code>vtrasterizer</code>, a sibling of <code>BoxDrawingRenderer</code>, uploads nearest-neighbour
+scaled alpha tiles to the shared atlas. The daemon mirrors the store with one capability-gated PDU and the
+references with an appended <code>Delta</code> field.</p>
+<p><strong>Tech Stack:</strong> C++23, Catch2, Qt6 (offscreen verification only), CMake presets.</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-11-07-drcs-soft-fonts-design.md</code>. Read it first. It holds every
+ruling this plan relies on.</p>
+<p><strong>Primary references:</strong>
+- Windows Terminal <code>src/terminal/adapter/FontBuffer.cpp</code>, <code>FontBuffer.hpp</code>, <code>DispatchTypes.hpp</code> and
+  <code>terminalOutput.cpp</code>, pinned at commit <code>cbc857bdf7749981890c5b561ee44ea31948bfb1</code>
+  (<code>https://raw.githubusercontent.com/microsoft/terminal/&lt;sha&gt;/src/terminal/adapter/FontBuffer.cpp</code>).
+- The VT510 DECDLD page: https://vt100.net/docs/vt510-rm/DECDLD.html</p>
+<h2 id="global-constraints">Global Constraints</h2>
+<ul>
+<li>Follow <code>AGENT.md</code>: C++23, no C-style loops, <code>[[nodiscard]]</code>, Doxygen on new public API, <code>.hpp</code> with
+  <code>#pragma once</code>, <code>enum class</code> with an explicit <code>: uint8_t</code> and the zero value as the off/default case, no
+  <code>bool</code> parameters, configuration at construction time, <code>std::expected</code> for fallible decoding.</li>
+<li>Zero warnings under <code>-Werror</code>, with clang-tidy clean. No <code>NOLINT</code>. clang-format all C++ files, but never
+  <code>.qml</code> files.</li>
+<li><code>vtbackend</code> layering: <code>core/</code> includes only <code>core/</code>, and <code>vt/</code> includes nothing above <code>vt/</code>. <code>vthost</code>
+  links no Qt.</li>
+<li><strong>Never edit <code>vendor/core-cpp</code>.</strong></li>
+<li>Build with <code>cmake --build --preset clang-asan</code> (on macOS the existing tree is <code>out/appleclang-debug</code>, so use
+  whichever preset is configured). Run tests with <code>ctest --preset=clang-asan</code>.</li>
+<li>Crisp scaling only: nearest-neighbour, filling the cell exactly on each axis. No filtering.</li>
+<li><code>bench-headless</code> instruction counts on <code>ascii</code>, <code>utf8</code> and <code>tui</code> must not move (spec anti-goal).</li>
+<li><strong>Do not commit third-party font data</strong> (the vt100.net fonts carry no stated licence, and cmatrix is
+  GPL-3). Test fixtures are <em>synthetic</em> sequences that reproduce each real font's header and geometry. The
+  real files are used only in the Task 8 visual check, from a scratch directory.</li>
+<li>Commits end with <code>Signed-off-by: Christian Parpart &lt;christian@parpart.family&gt;</code>, with no AI trailers.</li>
+</ul>
+<h2 id="review-focus">Review Focus</h2>
+<ol>
+<li><strong>Reflow and resize with soft-glyph cells in scrollback.</strong> The side table must move with its cells
+   exactly as <code>imageFragments</code> does (<code>LineSoA.cpp</code> copy at ~204). Covered by a test in Task 2.</li>
+<li><strong>Overwriting a soft-glyph cell with ordinary text</strong>, including the bulk ASCII path and erase
+   (ED/EL/ECH), must drop its reference. Otherwise a stale glyph draws over new text. Covered by tests in
+   Tasks 2 and 3.</li>
+<li><strong>ICH/DCH and scrolling regions shifting cells sideways</strong> carry the reference with the cell. Covered by a
+   test in Task 2.</li>
+<li><strong>Copying a selection across mixed soft and ordinary cells</strong> yields the underlying characters. Covered by
+   a test in Task 3.</li>
+<li><strong>Font-size change while soft glyphs are on screen, including DECDWL/DECDHL rows.</strong> The tiles must
+   regenerate at the new cell size, and the halves must be correct. Covered by a test in Task 5.</li>
+</ol>
+<p>Known and out of scope: larsbrinkhoff's <code>twit.txt</code>/<code>ictech.txt</code> rely on VT220 sixel-column overflow into the
+next character. Windows Terminal does not support this either.</p>
+<hr>
+<h2 id="file-structure">File Structure</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>src/vtbackend/core/SoftGlyphRef.hpp</code> (new)</td>
+<td><code>SoftGlyphRef {font, position}</code>: the per-cell reference. It sits in <code>core/</code> because <code>grid/</code>, <code>vt/</code>, <code>state/</code> and <code>vthost</code> all name it.</td>
+</tr>
+<tr>
+<td><code>src/vtbackend/vt/SoftFont.hpp/.cpp</code> (new)</td>
+<td>Parameter decoding, <code>SoftGlyph</code>, <code>SoftFont</code>, target-cell detection table, sixel accumulation, packing and centring, error glyph. Pure.</td>
+</tr>
+<tr>
+<td><code>src/vtbackend/vt/SoftFontStore.hpp/.cpp</code> (new)</td>
+<td>Copy-on-write fonts by number, designator lookup, erase semantics, resolution, generation counter. Pure.</td>
+</tr>
+<tr>
+<td><code>src/vtbackend/vt/SoftFont_test.cpp</code>, <code>SoftFontStore_test.cpp</code> (new)</td>
+<td>Table-driven unit tests.</td>
+</tr>
+<tr>
+<td><code>src/vtbackend/grid/LineSoA.hpp/.cpp</code>, <code>CellProxy.hpp</code>, <code>Line.cpp</code>, <code>SoAClusterWriter.*</code></td>
+<td>The <code>softGlyphs</code> side table, mirroring every <code>imageFragments</code> site.</td>
+</tr>
+<tr>
+<td><code>src/vtbackend/screen/Terminal.hpp/.cpp</code>, <code>Screen.hpp/.cpp</code></td>
+<td>DECDLD dispatch, SCS precedence, write path. <code>DRCSGlyph</code>, <code>DRCSCharset</code>, <code>defineDRCS</code> and <code>createDRCSImage</code> are removed.</td>
+</tr>
+<tr>
+<td><code>src/vtbackend/render/RenderBuffer.hpp</code>, <code>screen/RenderBufferBuilder.cpp</code></td>
+<td><code>RenderCell::softGlyph</code>, resolved under the lock.</td>
+</tr>
+<tr>
+<td><code>src/vtrasterizer/SoftFontRenderer.hpp/.cpp</code> (new), <code>TextRenderer.*</code>, <code>TextClusterGrouper.*</code></td>
+<td>Mask tiles, scaling, dispatch.</td>
+</tr>
+<tr>
+<td><code>src/vtbackend/state/TerminalState.*</code>, <code>GridState.cpp</code></td>
+<td>Persistence.</td>
+</tr>
+<tr>
+<td><code>src/vthost/proto/Negotiation.hpp</code>, <code>Pdu.hpp/.cpp</code>, <code>NativeSession.cpp</code>, <code>GridWire.*</code>, <code>client/ScreenMirror.*</code>, <code>testing/GridParity.cpp</code></td>
+<td>Daemon mirroring.</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3 id="task-1-the-soft-font-model-pure">Task 1: The soft font model (pure)</h3>
+<p><strong>Files:</strong>
+- Create: <code>src/vtbackend/core/SoftGlyphRef.hpp</code>, <code>src/vtbackend/vt/SoftFont.hpp</code>, <code>src/vtbackend/vt/SoftFont.cpp</code>,
+  <code>src/vtbackend/vt/SoftFontStore.hpp</code>, <code>src/vtbackend/vt/SoftFontStore.cpp</code>,
+  <code>src/vtbackend/vt/SoftFont_test.cpp</code>, <code>src/vtbackend/vt/SoftFontStore_test.cpp</code>
+- Modify: <code>src/vtbackend/CMakeLists.txt</code> (sources and test sources)</p>
+<p><strong>Interfaces (Produces):</strong></p>
+<div class="language-cpp highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1">// core/SoftGlyphRef.hpp</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">struct</span><span class="w"> </span><span class="nc">SoftGlyphRef</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">{</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">font</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">     </span><span class="c1">///&lt; Pfn, 0..2.</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">position</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="c1">///&lt; 7-bit position in the set, 0x20..0x7F.</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="k">operator</span><span class="o">&lt;=&gt;</span><span class="p">(</span><span class="n">SoftGlyphRef</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">default</span><span class="p">;</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">};</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1">// vt/SoftFont.hpp</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">SoftFontUsage</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">Text</span><span class="p">,</span><span class="w"> </span><span class="n">FullCell</span><span class="w"> </span><span class="p">};</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">SoftCharsetSize</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">Size94</span><span class="p">,</span><span class="w"> </span><span class="n">Size96</span><span class="w"> </span><span class="p">};</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">SoftFontErase</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">AllChars</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">ReloadedChars</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">AllRenditions</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="p">};</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">SoftFontError</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">FontNumber</span><span class="p">,</span><span class="w"> </span><span class="n">EraseControl</span><span class="p">,</span><span class="w"> </span><span class="n">CellMatrix</span><span class="p">,</span><span class="w"> </span><span class="n">FontSet</span><span class="p">,</span><span class="w"> </span><span class="n">Usage</span><span class="p">,</span><span class="w"> </span><span class="n">CharsetSize</span><span class="p">,</span><span class="w"> </span><span class="n">TooLarge</span><span class="p">,</span><span class="w"> </span><span class="n">Designator</span><span class="w"> </span><span class="p">};</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="k">struct</span><span class="w"> </span><span class="nc">DecdldParameters</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">pfn</span><span class="p">,</span><span class="w"> </span><span class="n">pcn</span><span class="p">,</span><span class="w"> </span><span class="n">pe</span><span class="p">,</span><span class="w"> </span><span class="n">pcmw</span><span class="p">,</span><span class="w"> </span><span class="n">pss</span><span class="p">,</span><span class="w"> </span><span class="n">pt</span><span class="p">,</span><span class="w"> </span><span class="n">pcmh</span><span class="p">,</span><span class="w"> </span><span class="n">pcss</span><span class="p">;</span><span class="w"> </span><span class="p">};</span><span class="w">  </span><span class="c1">///&lt; raw, absent = 0</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">SoftFontSizeSource</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">Pixels</span><span class="p">,</span><span class="w"> </span><span class="n">Matrix</span><span class="w"> </span><span class="p">};</span><span class="w">  </span><span class="c1">///&lt; Matrix = Pcmw 2/3/4</span>
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="k">struct</span><span class="w"> </span><span class="nc">SoftFontDeclaration</span><span class="w">      </span><span class="c1">///&lt; validated</span>
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="p">{</span>
+</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">fontNumber</span><span class="p">;</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">startPosition</span><span class="p">;</span><span class="w"> </span><span class="n">SoftFontErase</span><span class="w"> </span><span class="n">erase</span><span class="p">;</span>
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">declaredWidth</span><span class="p">;</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">declaredHeight</span><span class="p">;</span><span class="w">     </span><span class="c1">///&lt; 0 = not declared</span>
+</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="w">    </span><span class="n">SoftFontSizeSource</span><span class="w"> </span><span class="n">sizeSource</span><span class="p">;</span>
+</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="w">    </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">columnsPerPage</span><span class="p">;</span><span class="w">                           </span><span class="c1">///&lt; 80 or 132</span>
+</span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">linesPerPage</span><span class="p">;</span><span class="w">                              </span><span class="c1">///&lt; 24, 36 or 48</span>
+</span><span id="__span-0-26"><a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a><span class="w">    </span><span class="n">SoftFontUsage</span><span class="w"> </span><span class="n">usage</span><span class="p">;</span><span class="w"> </span><span class="n">SoftCharsetSize</span><span class="w"> </span><span class="n">charsetSize</span><span class="p">;</span>
+</span><span id="__span-0-27"><a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="k">operator</span><span class="o">&lt;=&gt;</span><span class="p">(</span><span class="n">SoftFontDeclaration</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">default</span><span class="p">;</span>
+</span><span id="__span-0-28"><a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="p">};</span>
+</span><span id="__span-0-29"><a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>
+</span><span id="__span-0-30"><a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">expected</span><span class="o">&lt;</span><span class="n">SoftFontDeclaration</span><span class="p">,</span><span class="w"> </span><span class="n">SoftFontError</span><span class="o">&gt;</span><span class="w"> </span><span class="n">decodeDecdld</span><span class="p">(</span><span class="n">DecdldParameters</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="p">);</span>
+</span><span id="__span-0-31"><a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>
+</span><span id="__span-0-32"><a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="k">struct</span><span class="w"> </span><span class="nc">SoftCellGeometry</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">fullWidth</span><span class="p">;</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">fullHeight</span><span class="p">;</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">textWidth</span><span class="p">;</span><span class="w"> </span><span class="p">};</span><span class="w"> </span><span class="c1">///&lt; textWidth 0 = unclipped</span>
+</span><span id="__span-0-33"><a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">SoftCellGeometry</span><span class="w"> </span><span class="n">detectTargetCell</span><span class="p">(</span><span class="n">SoftFontDeclaration</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="p">,</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">usedWidth</span><span class="p">,</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">usedHeight</span><span class="p">);</span>
+</span><span id="__span-0-34"><a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>
+</span><span id="__span-0-35"><a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a><span class="k">struct</span><span class="w"> </span><span class="nc">SoftGlyph</span>
+</span><span id="__span-0-36"><a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a><span class="p">{</span>
+</span><span id="__span-0-37"><a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a><span class="w">    </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">                </span><span class="c1">///&lt; content hash of (width, height, coverage); the atlas key</span>
+</span><span id="__span-0-38"><a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a><span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">width</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">height</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">  </span><span class="c1">///&lt; == the font's SoftCellGeometry full size</span>
+</span><span id="__span-0-39"><a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a><span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">coverage</span><span class="p">;</span><span class="w">  </span><span class="c1">///&lt; row-major, top row first, 0 or 1</span>
+</span><span id="__span-0-40"><a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a><span class="p">};</span>
+</span><span id="__span-0-41"><a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>
+</span><span id="__span-0-42"><a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a><span class="k">struct</span><span class="w"> </span><span class="nc">SoftFont</span>
+</span><span id="__span-0-43"><a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a><span class="p">{</span>
+</span><span id="__span-0-44"><a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a><span class="w">    </span><span class="n">SoftFontDeclaration</span><span class="w"> </span><span class="n">declaration</span><span class="p">;</span>
+</span><span id="__span-0-45"><a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a><span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="n">designator</span><span class="p">;</span><span class="w">                                   </span><span class="c1">///&lt; Dscs: 0-2 intermediates + final</span>
+</span><span id="__span-0-46"><a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a><span class="w">    </span><span class="n">SoftCellGeometry</span><span class="w"> </span><span class="n">geometry</span><span class="p">;</span>
+</span><span id="__span-0-47"><a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a><span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">array</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">shared_ptr</span><span class="o">&lt;</span><span class="n">SoftGlyph</span><span class="w"> </span><span class="k">const</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="mi">96</span><span class="o">&gt;</span><span class="w"> </span><span class="n">glyphs</span><span class="p">;</span><span class="w">  </span><span class="c1">///&lt; index = position - 0x20; null = undefined</span>
+</span><span id="__span-0-48"><a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a><span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">shared_ptr</span><span class="o">&lt;</span><span class="n">SoftGlyph</span><span class="w"> </span><span class="k">const</span><span class="o">&gt;</span><span class="w"> </span><span class="n">errorGlyph</span><span class="p">;</span><span class="w">              </span><span class="c1">///&lt; reverse '?', at geometry size</span>
+</span><span id="__span-0-49"><a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a><span class="p">};</span>
+</span><span id="__span-0-50"><a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>
+</span><span id="__span-0-51"><a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a><span class="c1">/// Makes a glyph and stamps its content-hash id. The one factory the decoder, the state codec</span>
+</span><span id="__span-0-52"><a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a><span class="c1">/// and the daemon mirror all use, so identity never needs persisting or sending.</span>
+</span><span id="__span-0-53"><a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">shared_ptr</span><span class="o">&lt;</span><span class="n">SoftGlyph</span><span class="w"> </span><span class="k">const</span><span class="o">&gt;</span><span class="w"> </span><span class="n">makeSoftGlyph</span><span class="p">(</span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">width</span><span class="p">,</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">height</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">coverage</span><span class="p">);</span>
+</span><span id="__span-0-54"><a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>
+</span><span id="__span-0-55"><a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a><span class="c1">/// Assembles a font from already-built glyphs (codec and mirror path; no sixel decoding).</span>
+</span><span id="__span-0-56"><a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">SoftFont</span><span class="w"> </span><span class="n">makeSoftFont</span><span class="p">(</span><span class="n">SoftFontDeclaration</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="n">designator</span><span class="p">,</span>
+</span><span id="__span-0-57"><a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a><span class="w">                                    </span><span class="n">std</span><span class="o">::</span><span class="n">array</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">shared_ptr</span><span class="o">&lt;</span><span class="n">SoftGlyph</span><span class="w"> </span><span class="k">const</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="mi">96</span><span class="o">&gt;</span><span class="w"> </span><span class="n">glyphs</span><span class="p">);</span>
+</span><span id="__span-0-58"><a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>
+</span><span id="__span-0-59"><a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a><span class="c1">/// Builds a font from a DECDLD body (Dscs + sixel data). @p previous is the font</span>
+</span><span id="__span-0-60"><a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a><span class="c1">/// currently under this number (for Pe=1 merging), or null.</span>
+</span><span id="__span-0-61"><a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">expected</span><span class="o">&lt;</span><span class="n">SoftFont</span><span class="p">,</span><span class="w"> </span><span class="n">SoftFontError</span><span class="o">&gt;</span><span class="w"> </span><span class="n">buildSoftFont</span><span class="p">(</span><span class="n">SoftFontDeclaration</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="p">,</span>
+</span><span id="__span-0-62"><a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a><span class="w">                                                                   </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">body</span><span class="p">,</span>
+</span><span id="__span-0-63"><a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a><span class="w">                                                                   </span><span class="n">SoftFont</span><span class="w"> </span><span class="k">const</span><span class="o">*</span><span class="w"> </span><span class="n">previous</span><span class="p">);</span>
+</span><span id="__span-0-64"><a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>
+</span><span id="__span-0-65"><a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a><span class="c1">// vt/SoftFontStore.hpp</span>
+</span><span id="__span-0-66"><a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">SoftGlyphLookup</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">FontGone</span><span class="p">,</span><span class="w"> </span><span class="n">Undefined</span><span class="p">,</span><span class="w"> </span><span class="n">Defined</span><span class="w"> </span><span class="p">};</span>
+</span><span id="__span-0-67"><a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a><span class="k">struct</span><span class="w"> </span><span class="nc">SoftGlyphResolution</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">SoftGlyphLookup</span><span class="w"> </span><span class="n">lookup</span><span class="p">;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">shared_ptr</span><span class="o">&lt;</span><span class="n">SoftGlyph</span><span class="w"> </span><span class="k">const</span><span class="o">&gt;</span><span class="w"> </span><span class="n">glyph</span><span class="p">;</span><span class="w"> </span><span class="p">};</span><span class="w"> </span><span class="c1">///&lt; glyph = error glyph when Undefined</span>
+</span><span id="__span-0-68"><a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>
+</span><span id="__span-0-69"><a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a><span class="k">class</span><span class="w"> </span><span class="nc">SoftFontStore</span>
+</span><span id="__span-0-70"><a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a><span class="p">{</span>
+</span><span id="__span-0-71"><a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a><span class="w">  </span><span class="k">public</span><span class="o">:</span>
+</span><span id="__span-0-72"><a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a><span class="w">    </span><span class="c1">/// Applies one DECDLD. An invalid sequence leaves the store unchanged and reports why.</span>
+</span><span id="__span-0-73"><a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a><span class="w">    </span><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">expected</span><span class="o">&lt;</span><span class="kt">void</span><span class="p">,</span><span class="w"> </span><span class="n">SoftFontError</span><span class="o">&gt;</span><span class="w"> </span><span class="n">define</span><span class="p">(</span><span class="n">DecdldParameters</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">body</span><span class="p">);</span>
+</span><span id="__span-0-74"><a id="__codelineno-0-74" name="__codelineno-0-74" href="#__codelineno-0-74"></a><span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="nf">clear</span><span class="p">()</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w">                       </span><span class="c1">///&lt; RIS</span>
+</span><span id="__span-0-75"><a id="__codelineno-0-75" name="__codelineno-0-75" href="#__codelineno-0-75"></a><span class="w">    </span><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">shared_ptr</span><span class="o">&lt;</span><span class="n">SoftFont</span><span class="w"> </span><span class="k">const</span><span class="o">&gt;</span><span class="w"> </span><span class="n">font</span><span class="p">(</span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">number</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+</span><span id="__span-0-76"><a id="__codelineno-0-76" name="__codelineno-0-76" href="#__codelineno-0-76"></a><span class="w">    </span><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">optional</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">fontForDesignator</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">dscs</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w"> </span><span class="c1">///&lt; most recently loaded wins</span>
+</span><span id="__span-0-77"><a id="__codelineno-0-77" name="__codelineno-0-77" href="#__codelineno-0-77"></a><span class="w">    </span><span class="c1">/// An out-of-range ref (font &gt; 2, position outside 0x20..0x7F) resolves as FontGone.</span>
+</span><span id="__span-0-78"><a id="__codelineno-0-78" name="__codelineno-0-78" href="#__codelineno-0-78"></a><span class="w">    </span><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">SoftGlyphResolution</span><span class="w"> </span><span class="n">resolve</span><span class="p">(</span><span class="n">SoftGlyphRef</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+</span><span id="__span-0-79"><a id="__codelineno-0-79" name="__codelineno-0-79" href="#__codelineno-0-79"></a><span class="w">    </span><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">generation</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w">  </span><span class="c1">///&lt; bumps on every change</span>
+</span><span id="__span-0-80"><a id="__codelineno-0-80" name="__codelineno-0-80" href="#__codelineno-0-80"></a><span class="w">    </span><span class="c1">/// Replaces every font, used by the daemon mirror and the state codec.</span>
+</span><span id="__span-0-81"><a id="__codelineno-0-81" name="__codelineno-0-81" href="#__codelineno-0-81"></a><span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="nf">replaceAll</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">array</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">shared_ptr</span><span class="o">&lt;</span><span class="n">SoftFont</span><span class="w"> </span><span class="k">const</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="o">&gt;</span><span class="w"> </span><span class="n">fonts</span><span class="p">);</span>
+</span><span id="__span-0-82"><a id="__codelineno-0-82" name="__codelineno-0-82" href="#__codelineno-0-82"></a><span class="w">    </span><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">array</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">shared_ptr</span><span class="o">&lt;</span><span class="n">SoftFont</span><span class="w"> </span><span class="k">const</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="o">&gt;</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="w"> </span><span class="n">fonts</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+</span><span id="__span-0-83"><a id="__codelineno-0-83" name="__codelineno-0-83" href="#__codelineno-0-83"></a><span class="w">  </span><span class="k">private</span><span class="o">:</span><span class="w"> </span><span class="p">...</span>
+</span><span id="__span-0-84"><a id="__codelineno-0-84" name="__codelineno-0-84" href="#__codelineno-0-84"></a><span class="p">};</span>
+</span></code></pre></div>
+<p><strong>Semantics to implement (each pinned by a test below):</strong></p>
+<ul>
+<li><code>decodeDecdld</code>:</li>
+<li><code>Pfn</code> must be 0..2.</li>
+<li><code>Pe</code> must be 0..2.</li>
+<li><code>Pcmw</code>: 0 means default, 1 is an error, 2/3/4 are the 5×10, 6×10 and 7×10 matrices
+    (<code>SoftFontSizeSource::Matrix</code>), and 5..16 is a pixel width. A matrix requires usage Text, except 6×10
+    with 132 columns.</li>
+<li><code>Pss</code>: 0/1 = 80×24, 2 = 132×24, 11 = 80×36, 12 = 132×36, 21 = 80×48, 22 = 132×48. Anything else is an
+    error.</li>
+<li><code>Pt</code>: 0/1 = Text, 2 = FullCell.</li>
+<li><code>Pcmh</code> must be ≤ 32.</li>
+<li><code>Pcss</code>: 0 = 94-character set, 1 = 96-character set.</li>
+<li><code>Pcn</code>: in a 94-set an absent value means 1, in a 96-set it means 0. Start position = 0x20 + Pcn, which must
+    be ≤ 0x7F.</li>
+<li><code>detectTargetCell</code>: port <code>FontBuffer::_calculateDimensions</code> as a <strong>data table</strong>, one row per known terminal.
+  Do not copy its <code>if</code> ladder.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>cols</th>
+<th>candidate (w×h)</th>
+<th>result (full w, full h, text w)</th>
+<th>only when no size declared</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>80</td>
+<td>8×10</td>
+<td>10, 10, 8</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>80</td>
+<td>15×12</td>
+<td>15, 12, tw</td>
+<td>no</td>
+</tr>
+<tr>
+<td>80</td>
+<td>10×16</td>
+<td>10, 16, tw</td>
+<td>no</td>
+</tr>
+<tr>
+<td>80</td>
+<td>10×20</td>
+<td>10, 20, tw</td>
+<td>no</td>
+</tr>
+<tr>
+<td>80</td>
+<td>12×30</td>
+<td>12, 30, tw</td>
+<td>no</td>
+</tr>
+<tr>
+<td>132</td>
+<td>6×10</td>
+<td>6, 10, 0</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>132</td>
+<td>9×12</td>
+<td>9, 12, tw</td>
+<td>no</td>
+</tr>
+<tr>
+<td>132</td>
+<td>6×16</td>
+<td>6, 16, tw</td>
+<td>no</td>
+</tr>
+<tr>
+<td>132</td>
+<td>6×20</td>
+<td>6, 20, tw</td>
+<td>no</td>
+</tr>
+<tr>
+<td>132</td>
+<td>7×30</td>
+<td>7, 30, tw</td>
+<td>no</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Fallback: 16, 32, tw.</li>
+<li><code>tw</code> = declared width for Text, 0 for FullCell.</li>
+<li>The table is preceded by three overrides:<ul>
+<li>Matrix → (6, 10, 0) if 132 columns and width ≤ 6, else (10, 10, 8).</li>
+<li>Declared width and height on a FullCell font → (w, h, 0).</li>
+<li>Lines ≠ 24 → width 6 at 132 columns / 10 at 80, height 8 at 48 lines / 10 at 36, then tw.</li>
+</ul>
+</li>
+<li>A row is in range when: declared height ≤ h if one is declared, else used height ≤ round-up-to-6(h); and
+    declared width ≤ w if one is declared, else used width ≤ w.</li>
+<li><code>buildSoftFont</code>:</li>
+<li>Dscs is 0..2 bytes in 0x20–0x2F followed by one final in 0x30–0x7E. A missing final is a
+    <code>SoftFontError::Designator</code>.</li>
+<li>Sixel data: <code>?</code>..<code>~</code> add a column, <code>/</code> moves down 6 rows, <code>;</code> ends the character. Every other byte,
+    CR/LF included, is ignored.</li>
+<li>Accumulate into a 16×32 scratch per character, ignoring columns ≥ 16 and rows ≥ 32. Track the used
+    width and height, then <code>detectTargetCell</code>.</li>
+<li>Clip text fonts to <code>textWidth</code> and centre them in <code>fullWidth</code> (offset = (fullWidth − textWidth) / 2),
+    as in <code>_packAndCenterBitPatterns</code>.</li>
+<li>Positions past 0x7F are dropped.</li>
+<li>Pe=1 with an unchanged declaration, designator and charset size starts from <code>previous-&gt;glyphs</code>.
+    Otherwise every glyph starts undefined. Pe=2 is handled by the store.</li>
+<li>Error glyph: Windows Terminal's 15×23 reverse-question-mark pattern (<code>_generateErrorGlyph</code>'s
+  <code>inputBitPattern</code>), scaled nearest-neighbour to <code>fullWidth × fullHeight</code>.</li>
+<li><code>SoftFontStore::define</code>:</li>
+<li>Pe=2 drops every font before loading.</li>
+<li>Each new <code>SoftFont</code> is a fresh <code>shared_ptr&lt;SoftFont const&gt;</code> (copy-on-write: existing pointers held by
+    render buffers stay valid and unchanged).</li>
+<li><code>fontForDesignator</code> picks the most recently loaded match.</li>
+<li>
+<p><code>generation()</code> increments on <code>define</code>, <code>clear</code> and <code>replaceAll</code>.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 1: Write the failing tests</strong> in <code>SoftFont_test.cpp</code>, all <code>[SoftFont]</code>:</p>
+</li>
+<li><code>TEST_CASE("decodeDecdld: Pcn is a position, not a code point")</code>:
+    <code>decodeDecdld({.pfn=0,.pcn=1,...}).value().startPosition == 0x21</code>; with <code>.pcss=1,.pcn=0</code> → <code>0x20</code>.</li>
+<li><code>TEST_CASE("decodeDecdld: rejects what DEC rejects")</code>: a table with a <code>GENERATE</code> row for each of:
+    <code>pfn=3</code> → <code>FontNumber</code>, <code>pcmw=1</code> → <code>CellMatrix</code>, <code>pss=5</code> → <code>FontSet</code>, <code>pt=3</code> → <code>Usage</code>, <code>pcss=2</code> →
+    <code>CharsetSize</code>, <code>pcmw=2,pt=2</code> → <code>CellMatrix</code>, <code>pcmw=17</code> → <code>TooLarge</code>.</li>
+<li><code>TEST_CASE("detectTargetCell: one row per terminal")</code>: a <code>GENERATE</code> table covering every row above plus the
+    three overrides. The real-font rows are mandatory:<ul>
+<li>vt100.net / cmatrix header <code>Pfn=0/1;Pcn=1;Pe=1;Pcmw=0;Pss=0;Pt=2</code>, used 15×12 → <code>{15,12,0}</code>.</li>
+<li>larsbrinkhoff <code>P1;1;1{ @</code>, used 8×12 → <code>{10,10,8}</code>.</li>
+</ul>
+</li>
+<li><code>TEST_CASE("buildSoftFont: a VT320 full-cell glyph is stored at 15x12 and at position 0x21")</code>, using a
+    synthetic <code>B</code> font with two 15-column, two-sixel-row glyphs separated by <code>;</code> and containing CR/LF.
+    Assert <code>glyphs[1]-&gt;width == 15</code>, <code>height == 12</code>, and exact <code>coverage</code> rows for glyph 1.</li>
+<li><code>TEST_CASE("buildSoftFont: columns past 16 do not spill into the next row")</code>.</li>
+<li><code>TEST_CASE("buildSoftFont: a VT220 text glyph is clipped to 8 and centred in 10")</code>: column 0 of the
+    coverage is empty, and the input's column 0 appears in column 1.</li>
+<li><code>TEST_CASE("buildSoftFont: two-intermediate designator")</code>: <code>" @"</code> and <code>"%5"</code> round-trip into
+    <code>designator</code>. A body with no final byte → <code>Designator</code>.</li>
+<li><code>TEST_CASE("buildSoftFont: Pe=1 keeps other glyphs, Pe=0 drops them")</code>.</li>
+<li><code>TEST_CASE("buildSoftFont: undefined positions are null and the error glyph is full-size")</code>.</li>
+</ul>
+<p>In <code>SoftFontStore_test.cpp</code> (<code>[SoftFontStore]</code>):
+  - <code>"define then resolve"</code>: Defined. Undefined with the error glyph. <code>FontGone</code> for an unloaded font.
+  - <code>"Pe=2 erases every font"</code>.
+  - <code>"most recently loaded designator wins"</code>: font 1 <code>B</code>, then font 2 <code>B</code> → 2.
+  - <code>"redefinition is copy-on-write"</code>: hold <code>resolve(ref).glyph</code>, redefine with different pixels, and check
+    that the held pointer's <code>coverage</code> is unchanged while the new resolution has a different <code>id</code>.
+  - <code>"identical glyphs share an id, different ones do not"</code> (the id is a content hash; it is the atlas key
+    across every session one renderer draws).
+  - <code>"an out-of-range ref resolves as FontGone"</code>: <code>{3, 0x21}</code>, <code>{0, 0x10}</code>, <code>{0, 0x80}</code>.
+  - <code>"an invalid DECDLD leaves the store unchanged"</code>: <code>generation()</code> is unchanged.</p>
+<ul>
+<li>
+<p>[ ] <strong>Step 2: Run them and verify they fail to compile or fail.</strong>
+  Hash: <code>crispy::StrongHash</code> over width, height and coverage, folded to 64 bits; any collision-resistant
+  64-bit hash already in the tree is fine.
+  <code>cmake --build --preset clang-asan --target vtbackend_test &amp;&amp; out/clang-asan/src/vtbackend/vtbackend_test "[SoftFont],[SoftFontStore]"</code></p>
+</li>
+<li>
+<p>[ ] <strong>Step 3: Implement</strong> the interfaces above. Use <code>std::views::iota</code> and ranges, with no index loops.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 4: Run the tests and confirm they pass.</strong> Same command as Step 2: all pass, with no warnings.</p>
+</li>
+<li>
+<p>[ ] <strong>Step 5: Commit</strong> <code>vtbackend: add a pure DECDLD soft font model with target-cell detection</code></p>
+</li>
+</ul>
+<hr>
+<h3 id="task-2-the-per-cell-soft-glyph-reference-in-the-grid">Task 2: The per-cell soft-glyph reference in the grid</h3>
+<p><strong>Files:</strong>
+- Modify: <code>src/vtbackend/grid/LineSoA.hpp</code> (beside <code>imageFragments</code>, ~line 146), <code>LineSoA.cpp</code> (every
+  <code>imageFragments</code> site: lines ~41, 111-116, 157, 204-212, 408), <code>CellProxy.hpp</code> (~118-130, 220, 302-360),
+  <code>Line.cpp:221</code>, <code>SoAClusterWriter.hpp/.cpp</code>, and <code>src/vtbackend/screen/StatusLineExtensions.cpp</code> /
+  <code>src/vtextension/Surface.cpp</code> wherever they reset or copy <code>imageFragments</code>.
+- Test: <code>src/vtbackend/grid/LineSoA_test.cpp</code> (or the existing grid/line test file holding the
+  <code>imageFragments</code> tests, so new cases sit beside their siblings).
+- Create: <code>src/vtbackend/screen/Screen_softfont_test.cpp</code> (add to CMake), for the column-move cases.</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>SoftGlyphRef</code> (Task 1).
+- Produces:
+  - <code>LineSoA::SoftGlyphMap = std::unordered_map&lt;uint16_t, SoftGlyphRef&gt;</code>
+  - <code>std::unique_ptr&lt;SoftGlyphMap&gt; LineSoA::softGlyphs</code>: 8 bytes on every line, not an <code>optional&lt;map&gt;</code>'s
+    48–64, so lines without soft fonts pay nearly nothing (spec anti-goal). Deep-copy it wherever <code>LineSoA</code> is
+    copied.
+  - <code>CellProxy::softGlyph() const -&gt; std::optional&lt;SoftGlyphRef&gt;</code>
+  - <code>CellProxy::setSoftGlyph(SoftGlyphRef)</code>, which degrades the line to <code>LineShape::Spanning</code> exactly as
+    <code>setImageFragment</code> does
+  - <code>CellProxy::clearSoftGlyph()</code></p>
+<p><strong>Rule:</strong> at every place <code>imageFragments</code> is reset, erased per column, cleared on a cell write, copied or
+shifted, or tested in an emptiness or trivial-line check, <code>softGlyphs</code> gets the same treatment.</p>
+<p><strong>Plus one site <code>imageFragments</code> lacks:</strong> <code>moveColumns</code> (<code>LineSoA.cpp:234-237</code>, used by ICH/DCH/DECIC/DECDC at
+<code>Screen.cpp:2161, 2202, 2225, 2449</code>) moves no side table at all. Add a shared helper that re-indexes a column
+map for a move: drop destination entries not sourced from the move, shift <code>[src, src+count)</code> by <code>dst − src</code>.
+Apply it to <strong>both</strong> <code>softGlyphs</code> and <code>imageFragments</code>. Fixing the latent image bug in the same helper is a call
+made in this plan; say so in the commit.</p>
+<p><strong>Hot path:</strong> both side tables imply <code>LineShape::Spanning</code>, so put one <code>shape == Spanning</code> test in front of both
+clears in <code>writeCellToSoA</code>, <code>writeAsciiToSoA</code>, <code>resetCell</code> and <code>setCharacter</code>. Ordinary lines then pay less than
+they do today.
+<code>CellProxy::empty()</code> stays codepoint-based, because a soft-glyph cell always carries a codepoint.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests</strong> (<code>[LineSoA][SoftGlyph]</code>):</li>
+<li><code>"setSoftGlyph degrades the line to Spanning"</code>.</li>
+<li><code>"writing a cell drops its soft glyph"</code>: set a ref at column 3, write <code>'x'</code> there through <code>CellProxy::write</code>,
+    and check that <code>softGlyph()</code> is empty.</li>
+<li><code>"reset drops all soft glyphs"</code>.</li>
+<li><code>"copy/reflow carries soft glyphs with their cells"</code>: use the same helper the <code>imageFragments</code> reflow test
+    uses. The ref at source column 5 lands at the shifted destination column. (Review Focus 1)</li>
+<li>Screen-level, in <code>src/vtbackend/screen/Screen_softfont_test.cpp</code> (created here, extended in Task 3), set
+    up with <code>CellProxy::setSoftGlyph</code> directly: <code>"ICH and DCH shift soft glyphs with their cells"</code> (ICH 2 at
+    column 0 moves the ref from 3 to 5, DCH 2 moves it back, and no ref is left at the vacated column);
+    <code>"DECIC and DECDC shift soft glyphs"</code>; and <code>"ICH shifts image fragments too"</code> for the shared fix.
+    (Review Focus 3)</li>
+<li>[ ] <strong>Step 2: Run</strong> <code>vtbackend_test "[SoftGlyph]"</code> and confirm the tests fail.</li>
+<li>[ ] <strong>Step 3: Implement</strong> by mirroring each <code>imageFragments</code> site. Factor shared column-map helpers
+  (<code>clearReplacedImageFragment</code>/<code>…Fragments</code> in <code>LineSoA.hpp:189-208</code>) into a template over the map type,
+  rather than duplicating them.</li>
+<li>[ ] <strong>Step 4: Run</strong> <code>vtbackend_test</code> (the whole suite, since grid changes are broad) and confirm it is green.</li>
+<li>[ ] <strong>Step 5: Measure.</strong> <code>bench-headless</code> instruction counts on <code>ascii</code>, <code>utf8</code>, <code>tui</code> before and after this
+  task: unchanged within ±0.1%, or better. Record the table in the commit message.</li>
+<li>[ ] <strong>Step 6: Commit</strong> <code>vtbackend: carry a soft-glyph reference per cell beside image fragments</code></li>
+</ul>
+<hr>
+<h3 id="task-3-wire-decdld-designation-and-the-write-path-to-the-new-model">Task 3: Wire DECDLD, designation and the write path to the new model</h3>
+<p><strong>Files:</strong>
+- Modify: <code>src/vtbackend/screen/Terminal.hpp</code> (remove <code>DRCSGlyph</code>, <code>DRCSCharset</code>, <code>defineDRCS</code>, <code>drcsCharset</code>,
+  <code>clearDRCS</code>, <code>drcsDesignatorToFont</code>, <code>createDRCSImage</code>, <code>_drcsCharsets</code> and <code>_drcsDesignatorMap</code>; add
+  <code>SoftFontStore _softFonts</code> with <code>softFonts() const</code>, <code>SoftFontStore&amp; softFonts()</code>), <code>Terminal.cpp</code>
+  (~8959-9060), <code>Screen.cpp</code> (<code>hookDECDLD</code> ~9137, <code>tryHandleSCS</code> ~3000-3090, <code>writeSoftFontGlyph</code> ~925, the
+  RIS path that called <code>clearDRCS</code>), <code>Screen.hpp</code>.
+- Modify: <code>src/vtbackend/screen/Screen_charset_test.cpp:713-838</code>, <code>BulkScan_test.cpp:368</code>,
+  <code>state/InFlightTail_test.cpp:116-120</code> (fix their <code>Pcn=0</code>/<code>Pw=10</code> sequences to valid ones, so they keep
+  testing what they meant to), and <code>examples/drcs-demo.cpp</code> (valid parameters).
+- Test: <code>src/vtbackend/screen/Screen_softfont_test.cpp</code> (created in Task 2).</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>SoftFontStore</code> (Task 1), <code>CellProxy::setSoftGlyph</code> (Task 2).
+- Produces: <code>Terminal::softFonts()</code> (const and non-const). Cells written through a soft set hold their source
+  codepoint plus a <code>SoftGlyphRef</code>.</p>
+<p><strong>Behaviour:</strong>
+- <code>hookDECDLD</code> collects the body and calls <code>_terminal-&gt;softFonts().define(params, body)</code>, then
+  <code>_terminal-&gt;markScreenDirty()</code> so live redefinition reaches the next frame.
+- <code>tryHandleSCS</code> consults <code>softFonts().fontForDesignator(designator)</code> <strong>before</strong> the standard-charset table.
+  The two-byte fallback path stays.
+- <code>writeSoftFontGlyph(font, sourceCodepoint)</code>:
+  - If <code>softFonts().font(font)</code> is null, return <code>Absent</code> (the existing fall-through prints the mapped
+    character).
+  - Otherwise write <code>sourceCodepoint</code> as an ordinary width-1 cell in the current rendition, call
+    <code>setSoftGlyph({font, position = sourceCodepoint &amp; 0x7F})</code>, advance, mark dirty, consume the single
+    shift, and return <code>Written</code>. This happens even if the position is undefined: the renderer shows the error
+    glyph.
+  - Keep the inline <code>activeDRCSFont()</code> gate from <code>582854fb4</code> unchanged.
+- RIS calls <code>softFonts().clear()</code>. Soft reset leaves fonts alone (existing test at
+  <code>Screen_charset_test.cpp:756</code>).
+- The bulk text path seeds the grapheme run with <code>U' '</code> after a soft glyph (<code>Screen.cpp:826-828</code>), because
+  the cell used to hold a space. Seed the stored codepoint instead, so the bulk path and
+  <code>seedGraphemeStateFromLastCell</code> agree. Fix the stale comment at <code>BulkScan_test.cpp:368</code>.
+- <code>Screen_charset_test.cpp:844-878</code> calls <code>drcsCharset(1)</code> and documents the ASCII fallback the spec replaces
+  for a loaded font. Rewrite it to the new rule: an undefined position in a loaded font writes a reference.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests</strong> in <code>Screen_softfont_test.cpp</code> (<code>[screen][softfont]</code>), using <code>MockTerm</code>:</li>
+<li><code>"a VT320 font loaded at Pcn=1 renders at '!'"</code>: send a synthetic <code>ESC P0;1;1;0;0;2;0;0{B&lt;two glyphs&gt;ESC \</code>,
+    then <code>ESC ( B</code>, then <code>!</code>. Assert that cell (0,0) has codepoint <code>'!'</code> and <code>softGlyph() == SoftGlyphRef{0, 0x21}</code>.</li>
+<li><code>"a raw 8-bit DECDLD (0x90 ... 0x9C) loads like the 7-bit form"</code>: the same font framed with <code>\x90</code> and
+    <code>\x9c</code> with CR/LF inside the body, as the vt100.net <code>.fnt</code> files are. The resulting store is identical.</li>
+<li><code>"a loaded font takes over a standard designator"</code>: after loading <code>B</code>, <code>ESC ( B</code> selects the soft font.
+    After RIS, <code>ESC ( B</code> is ASCII again.</li>
+<li><code>"copy yields the underlying characters"</code>: write <code>A!B</code> with <code>!</code> soft, select the line, and check that the
+    selected text is <code>"A!B"</code>. Use the same selection-text helper other screen tests use. (Review Focus 4)</li>
+<li><code>"overwriting a soft cell with plain text drops the reference"</code>: write a soft <code>!</code>, then <code>ESC ( B</code> with the
+    font erased (Pe=2 with no data), CUP to the cell, and write ASCII through the bulk path. <code>softGlyph()</code> is
+    empty. (Review Focus 2)</li>
+<li><code>"erase drops the reference"</code>: ECH 1 over the soft cell.</li>
+<li><code>"an undefined position in a loaded font still writes a reference"</code>: <code>"</code> (0x22) with only <code>!</code> defined →
+    <code>SoftGlyphRef{0,0x22}</code>.</li>
+<li><code>"a designated but erased font falls back to the plain character"</code>: Pe=2 with no glyphs, then <code>!</code> → no
+    reference, codepoint <code>'!'</code>.</li>
+<li>[ ] <strong>Step 2: Run</strong> <code>vtbackend_test "[softfont]"</code> and confirm the tests fail.</li>
+<li>[ ] <strong>Step 3: Implement</strong> the behaviour above and delete the old DRCS members and <code>createDRCSImage</code>. Update
+  the existing tests listed under Files. Update every remaining <code>drcsCharset</code>/<code>drcsDesignatorToFont</code> call site
+  (<code>grep -rn "drcs" src/vtbackend</code>) except the state codec, which Task 6 owns. <strong>Keep <code>KeyStringsState</code>
+  fields 6 and 7</strong> with their current types, always written empty (the old <code>DRCSCharset</code> shape moves into
+  <code>TerminalState.hpp</code> as a codec-private placeholder struct). The v1 encoding then stays byte-identical, and
+  <code>Golden_test.cpp</code> stays green until Task 6.</li>
+<li>[ ] <strong>Step 4: Run</strong> the full <code>vtbackend_test</code> and <code>vtconformance</code> (<code>ctest --preset=clang-asan -R "vtbackend|vtconformance"</code>)
+  and confirm they are green. <code>vttest.11.2.vt320.cmd</code> must still pass.</li>
+<li>[ ] <strong>Step 5: Commit</strong> <code>vtbackend: route DECDLD through the soft font store and keep the real characters</code></li>
+</ul>
+<hr>
+<h3 id="task-4-resolve-soft-glyphs-into-the-render-buffer">Task 4: Resolve soft glyphs into the render buffer</h3>
+<p><strong>Files:</strong>
+- Modify: <code>src/vtbackend/render/RenderBuffer.hpp:73-93</code> (add the field), <code>src/vtbackend/screen/RenderBufferBuilder.cpp:430-452</code>,
+  <code>RenderBufferBuilder.hpp:195</code>. <code>makeRenderCell</code> is <code>static</code>: pass it the <code>SoftFontStore const&amp;</code> and the
+  line's <code>softGlyphs</code> map (or null), so the per-line skip is one pointer test.
+- Test: <code>src/vtbackend/screen/Screen_softfont_test.cpp</code> (render-buffer cases), plus a <code>[threading]</code> case.</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>CellProxy::softGlyph()</code>, <code>Terminal::softFonts().resolve()</code>.
+- Produces: <code>std::shared_ptr&lt;SoftGlyph const&gt; RenderCell::softGlyph</code>. It is non-null exactly when the cell's
+  font exists (the defined glyph, or the font's error glyph when undefined). It is null when the font is gone,
+  in which case the cell renders its codepoint as normal text.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests:</strong></li>
+<li><code>"render cell carries the defined glyph"</code>.</li>
+<li><code>"render cell carries the error glyph for an undefined position"</code>.</li>
+<li><code>"render cell has no soft glyph after RIS, and shows its codepoint"</code>.</li>
+<li><code>"redefinition shows on the next render buffer"</code>: the glyph <code>id</code> changes.</li>
+<li><code>TEST_CASE("soft font redefinition races rendering", "[softfont][threading]")</code>: one thread loops DECDLD
+    redefinitions through <code>MockTerm</code>, and the other loops <code>refreshRenderBuffer</code> and reads every
+    <code>softGlyph-&gt;coverage</code>. Run 1000 iterations each. It must be clean under TSan
+    (<code>ctest --preset=clang-tsan -R vtbackend</code>).</li>
+<li>[ ] <strong>Step 2: Run</strong> and confirm the tests fail.</li>
+<li>[ ] <strong>Step 3: Implement</strong> in <code>makeRenderCell</code>. The builder runs under the state lock, so <code>resolve()</code> there is
+  safe. Skip the lookup entirely when the line has no <code>softGlyphs</code> (one <code>optional</code> test per line).</li>
+<li>[ ] <strong>Step 4: Run</strong> the <code>[softfont]</code> tests and the TSan <code>[threading]</code> test and confirm both pass.</li>
+<li>[ ] <strong>Step 5: Commit</strong> <code>vtbackend: resolve soft glyphs into render cells under the state lock</code></li>
+</ul>
+<hr>
+<h3 id="task-5-softfontrenderer-crisp-alpha-tiles-coloured-at-draw-time">Task 5: <code>SoftFontRenderer</code> — crisp alpha tiles coloured at draw time</h3>
+<p><strong>Files:</strong>
+- Create: <code>src/vtrasterizer/SoftFontRenderer.hpp</code>, <code>SoftFontRenderer.cpp</code>, <code>SoftFontRenderer_test.cpp</code>
+- Modify: <code>src/vtrasterizer/TextRenderer.hpp/.cpp</code> (own a <code>SoftFontRenderer</code> beside <code>_boxDrawingRenderer</code>, and
+  wire <code>setRenderTarget</code>/<code>setTextureAtlas</code>/<code>clearCache</code>/<code>inspect</code> the same way, ~282-330), <code>TextRenderer::renderCell</code>
+  (~473), and <code>CMakeLists.txt</code>. <code>TextClusterGrouper</code> needs no change: <code>forceGroupStart()</code>/<code>forceGroupEnd()</code>
+  exist (<code>TextClusterGrouper.hpp:47-48</code>).</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>RenderCell::softGlyph</code> (Task 4).
+- Produces:</p>
+<div class="language-cpp highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1">/// Scales a soft glyph to @p target with nearest-neighbour sampling; coverage 1 -&gt; 0xFF.</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">scaleSoftGlyph</span><span class="p">(</span><span class="n">vtbackend</span><span class="o">::</span><span class="n">SoftGlyph</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="p">,</span><span class="w"> </span><span class="n">vtbackend</span><span class="o">::</span><span class="n">ImageSize</span><span class="w"> </span><span class="n">target</span><span class="p">);</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">SoftGlyphDraw</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">AtlasFull</span><span class="p">,</span><span class="w"> </span><span class="n">Drawn</span><span class="w"> </span><span class="p">};</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="k">class</span><span class="w"> </span><span class="nc">SoftFontRenderer</span><span class="o">:</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="n">Renderable</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="p">{</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">  </span><span class="k">public</span><span class="o">:</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="k">explicit</span><span class="w"> </span><span class="n">SoftFontRenderer</span><span class="p">(</span><span class="n">GridMetrics</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="p">);</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="c1">/// @return Drawn, or AtlasFull, in which case the caller falls back to drawing the cell's text.</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="p">[[</span><span class="na">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">SoftGlyphDraw</span><span class="w"> </span><span class="n">render</span><span class="p">(</span><span class="n">vtbackend</span><span class="o">::</span><span class="n">CellLocation</span><span class="p">,</span><span class="w"> </span><span class="n">vtbackend</span><span class="o">::</span><span class="n">SoftGlyph</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="p">,</span><span class="w"> </span><span class="n">vtbackend</span><span class="o">::</span><span class="n">RGBColor</span><span class="p">,</span><span class="w"> </span><span class="n">vtbackend</span><span class="o">::</span><span class="n">LineFlags</span><span class="p">);</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="p">};</span>
+</span></code></pre></div>
+<p><strong>Behaviour:</strong>
+- <code>dst(x, y) = src(x * w / W, y * h / H)</code>, where w×h is the glyph size and W×H is the target.
+- The target is the cell size. With <code>DoubleWidth</code>, the width is doubled and two tiles are emitted
+  (<code>subIndex</code> 0/1). With <code>DoubleHeightTop</code>/<code>Bottom</code>, the height is doubled and the matching half is taken.
+  Mirror <code>BoxDrawingRenderer::render</code>/<code>createTileData</code>, including its Y-flip (<code>invertY</code>).
+- Tiles use <code>atlas::Format::Red</code> with <code>FRAGMENT_SELECTOR_GLYPH_ALPHA</code>, and the colour comes from
+  <code>RenderTile::color</code> at draw time.
+- Atlas key: <code>crispy::StrongHash { 0x534F4654 /* 'SOFT' */, uint32(id &gt;&gt; 32), uint32(id), (flags &amp; DW|DHT|DHB) &lt;&lt; 1 | subIndex }</code>.
+  The tag word keeps it disjoint from box-drawing keys. No colour goes in the key.
+- <code>TextRenderer::renderCell</code>: if <code>cell.softGlyph</code>, call <code>forceGroupEnd()</code>, then <code>_softFontRenderer.render(position,
+  *cell.softGlyph, cell.attributes.foregroundColor, cell.attributes.lineFlags)</code>, then <code>forceGroupStart()</code> for
+  the next cell. On <code>AtlasFull</code>, fall through to the normal text path, as <code>BoxDrawingRenderer::render</code>'s
+  failure does (<code>BoxDrawingRenderer.cpp:2107-2119</code>). <code>foregroundColor</code> already reflects reverse video, selection and so on, because
+  <code>RenderBufferBuilder</code> resolves it, which is the whole point of goal 3.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests</strong> (<code>[SoftFontRenderer]</code>, using <code>MockAtlasBackend</code> and <code>bitmapRows</code> from
+  <code>RendererTestHelpers.hpp</code>):</li>
+<li><code>"scaleSoftGlyph is nearest-neighbour and fills the target"</code>: a 2×2 checkerboard scaled to 4×6 gives exact
+    rows, and every value is 0 or 0xFF (no intermediate values).</li>
+<li><code>"a 15x12 glyph fills a 9x18 cell exactly"</code>: the dimensions match, and the first and last rows and columns
+    sample the source edges.</li>
+<li><code>"one upload for many cells"</code>: rendering the same glyph in 100 cells with 3 colours gives 1 upload command
+    and 100 render commands, with per-command colours matching.</li>
+<li><code>"double-width emits two tiles from a doubled glyph"</code>; <code>"double-height top and bottom take the right halves"</code>.</li>
+<li><code>"cell size change regenerates the tile"</code>: reconfigure the atlas with a new cell size and render again. The
+    upload bitmap has the new size. (Review Focus 5)</li>
+<li>[ ] <strong>Step 2: Run</strong> <code>vtrasterizer_test "[SoftFontRenderer]"</code> and confirm the tests fail.</li>
+<li>[ ] <strong>Step 3: Implement.</strong></li>
+<li>[ ] <strong>Step 4: Run</strong> the full <code>vtrasterizer_test</code> and confirm it is green.</li>
+<li>[ ] <strong>Step 5: Commit</strong> <code>vtrasterizer: render soft font glyphs as crisp alpha tiles coloured at draw time</code></li>
+</ul>
+<hr>
+<h3 id="task-6-persist-soft-fonts-and-references-across-a-live-upgrade">Task 6: Persist soft fonts and references across a live upgrade</h3>
+<p><strong>Files:</strong>
+- Modify: <code>src/vtbackend/state/TerminalState.hpp:349-369</code> and <code>TerminalState.cpp:368-369, 691-694</code>,
+  <code>src/vtbackend/state/GridState.cpp</code> (~463-480 encode, ~541 decode: add a <code>LineField::SoftGlyphs</code> beside
+  <code>LineField::ImageFragments</code>).
+- Test: <code>src/vtbackend/state/ScreenState_test.cpp</code> (or the codec round-trip test that covers image fragments),
+  <code>InFlightTail_test.cpp</code>.</p>
+<p><strong>Rules (calls made in this plan):</strong>
+- <strong>This task bumps <code>TerminalStateFormatVersion</code> to 2.</strong> <code>FieldEncoder</code> writes every field unconditionally
+  (<code>StateFields.hpp:273-276</code>), and <code>Golden_test.cpp:82-90</code> pins v1 byte for byte, so the remedy it prescribes is
+  a new version with a new golden, never an edit of the old one. Record a v2 golden beside the v1 one, and keep
+  decoding v1.
+- Fields 6 and 7 (<code>drcsCharsets</code>, <code>drcsDesignators</code>) are <strong>retired</strong> in v2: they are no longer written, and a
+  v1 decode ignores their contents. Fonts written by the old code were stored under wrong positions and never
+  displayed, so dropping them loses nothing visible. Remove the Task 3 placeholder struct.
+- The fonts travel in a new field 8, holding per font: number, designator, the raw <code>DecdldParameters</code>-derived
+  declaration, geometry, and per defined position the width, height and coverage. Encode coverage packed at
+  1 bit per pixel. Ids are content hashes, so nothing about identity is persisted: the decoder rebuilds glyphs
+  with <code>makeSoftGlyph</code>/<code>makeSoftFont</code>, then calls <code>SoftFontStore::replaceAll</code>.
+- Line field <code>SoftGlyphs</code> (<code>LineField</code> 30) holds (column, font, position) triples, sorted by column, the same
+  way <code>ImageFragments</code> is encoded. The decoder rejects a font &gt; 2 or a position outside 0x20..0x7F, as
+  <code>getFragments</code> (<code>GridState.cpp:541-562</code>) rejects bad columns.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests:</strong></li>
+<li><code>"soft fonts and per-cell references round-trip"</code>: load a font, write soft cells into the page and
+    scrollback, capture, restore into a fresh terminal, and compare <code>fonts()</code> coverage and every cell's
+    <code>softGlyph()</code>.</li>
+<li><code>"a v1 state with DECDLD fields still decodes"</code> (the v1 golden) and <code>"the v2 golden is byte for byte"</code>.</li>
+<li><code>"an out-of-range soft-glyph triple is rejected"</code>.</li>
+<li>Extend the existing <code>InFlightTail</code> DECDLD case to use the corrected sequence (Task 3) and to still be exact
+    at every byte offset.</li>
+<li>[ ] <strong>Step 2: Run</strong> and confirm the tests fail.</li>
+<li>[ ] <strong>Step 3: Implement.</strong></li>
+<li>[ ] <strong>Step 4: Run</strong> <code>ctest --preset=clang-asan -R vtbackend</code> and confirm it is green.</li>
+<li>[ ] <strong>Step 5: Commit</strong> <code>vtbackend: carry soft fonts and soft-glyph cells through the state codec</code></li>
+</ul>
+<hr>
+<h3 id="task-7-mirror-soft-fonts-to-daemon-clients">Task 7: Mirror soft fonts to daemon clients</h3>
+<p><strong>Files:</strong>
+- Modify:
+  - <code>src/vthost/proto/Negotiation.hpp</code>: add <code>SoftFonts = 21</code> after <code>CellPixelSize = 20</code>, with its row in the
+    capability table.
+  - <code>src/vthost/proto/Pdu.hpp/.cpp</code>: add <code>PduType::SoftFontState = 45</code>, new structs, encode/decode table rows,
+    and an appended <code>Delta::softGlyphCells</code> field.
+  - <code>src/vthost/NativeSession.cpp</code>: emit the PDU and the cells beside <code>appendImageCells</code> (~213).
+  - <code>src/vthost/GridWire.*</code>.
+  - <code>src/vthost/client/ScreenMirror.hpp/.cpp</code>: apply both, as <code>applyImages</code> does (~911).
+  - The <code>RemoteScreen</code> holder of <code>imageCells</code>.
+  - <code>src/vthost/testing/GridParity.cpp</code>.
+- Test: <code>src/vthost/proto/Pdu_test.cpp</code> (round-trip), a new <code>src/vthost/DaemonSoftFont_test.cpp</code> modelled on
+  <code>DaemonImage_test.cpp</code>, and <code>client/ScreenMirror_test.cpp</code>.</p>
+<p><strong>Interfaces:</strong></p>
+<div class="language-cpp highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">struct</span><span class="w"> </span><span class="nc">WireSoftGlyph</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">position</span><span class="p">;</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">width</span><span class="p">;</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">height</span><span class="p">;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">byte</span><span class="o">&gt;</span><span class="w"> </span><span class="n">bits</span><span class="p">;</span><span class="w"> </span><span class="p">};</span><span class="w"> </span><span class="c1">///&lt; 1 bpp, rows byte-aligned</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">struct</span><span class="w"> </span><span class="nc">WireSoftFont</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="p">{</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">fontNumber</span><span class="p">;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="n">designator</span><span class="p">;</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">charsetSize</span><span class="p">;</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">usage</span><span class="p">;</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">fullWidth</span><span class="p">;</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">fullHeight</span><span class="p">;</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">textWidth</span><span class="p">;</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">WireSoftGlyph</span><span class="o">&gt;</span><span class="w"> </span><span class="n">glyphs</span><span class="p">;</span><span class="w"> </span><span class="n">WireSoftGlyph</span><span class="w"> </span><span class="n">errorGlyph</span><span class="p">;</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="p">};</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="k">struct</span><span class="w"> </span><span class="nc">SoftFontState</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">session</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">generation</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">WireSoftFont</span><span class="o">&gt;</span><span class="w"> </span><span class="n">fonts</span><span class="p">;</span><span class="w"> </span><span class="p">};</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="k">struct</span><span class="w"> </span><span class="nc">SoftGlyphCellEntry</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kt">int64_t</span><span class="w"> </span><span class="n">stableId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">column</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">font</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">position</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="p">};</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="c1">// Delta: std::vector&lt;SoftGlyphCellEntry&gt; softGlyphCells;   // appended at the END of Delta's fields</span>
+</span></code></pre></div>
+<p><strong>Behaviour:</strong>
+- <strong>Gating:</strong> only when both ends negotiated <code>Capability::SoftFonts</code>. Without it, the daemon sends neither,
+  and the client shows the cells' real codepoints, which are already in the wire lines (spec call).
+- <strong>Sending fonts:</strong> the daemon sends <code>SoftFontState</code> on attach, and whenever <code>softFonts().generation()</code>
+  differs from the last one sent to that connection. It is always queued <strong>before</strong> the <code>Delta</code> that might
+  reference it. An empty <code>fonts</code> vector means none.
+- <strong>Applying fonts on the client:</strong> the mirror rebuilds <code>SoftFont</code>s with <code>makeSoftGlyph</code>/<code>makeSoftFont</code>, and
+  calls <code>terminal.softFonts().replaceAll(...)</code> <strong>under the terminal lock</strong>, as <code>applyImages</code> does
+  (<code>ScreenMirror.cpp:988</code>), then marks the screen dirty.
+- <strong>Validation:</strong> the decoder rejects a <code>SoftGlyphCellEntry</code> with font &gt; 2 or a position outside 0x20..0x7F,
+  and a <code>WireSoftGlyph</code> whose <code>bits</code> size does not match its width and height.
+- <strong>Chunked snapshots:</strong> regroup <code>softGlyphCells</code> per row into each snapshot piece exactly as <code>imageCells</code> are
+  (<code>NativeSession.cpp:1569-1589</code>). The mirror clears a row's side-table entries when it takes the row, so a ref
+  must travel in the same piece as its row.
+- <strong>Cell references:</strong> <code>softGlyphCells</code> are applied after the wire lines, with <code>setSoftGlyph</code>. <code>GridParity</code>
+  compares <code>softGlyph()</code> per cell.</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the failing tests:</strong></li>
+<li>PDU round-trip for <code>SoftFontState</code>. A <code>Delta</code> with and without <code>softGlyphCells</code> decodes on an old-layout
+    reader (the appended-field rule).</li>
+<li><code>DaemonSoftFont_test</code>:<ul>
+<li><code>"a font defined before attach reaches the client"</code>.</li>
+<li><code>"redefinition after attach updates the client's glyph"</code>.</li>
+<li><code>"a client without the capability sees the underlying characters"</code>.</li>
+<li><code>"RIS on the server makes the client fall back to text"</code>.</li>
+<li><code>"soft-glyph cells in a chunked snapshot survive"</code>: a scrollback larger than <code>_snapshotPieceBytes</code>, with
+  soft cells on rows in the second and later pieces.</li>
+<li><code>"an out-of-range soft-glyph entry is rejected"</code>.</li>
+</ul>
+</li>
+<li><code>ScreenMirror_test</code>: <code>"soft glyph cells mirror with parity"</code>.</li>
+<li>[ ] <strong>Step 2: Run</strong> <code>ctest --preset=clang-asan -L daemon</code> and confirm the new tests fail.</li>
+<li>[ ] <strong>Step 3: Implement.</strong></li>
+<li>[ ] <strong>Step 4: Run</strong> <code>ctest --preset=clang-asan -L daemon</code> and confirm it is green.</li>
+<li>[ ] <strong>Step 5: Commit</strong> <code>vthost: mirror soft fonts and soft-glyph cells to attached clients</code></li>
+</ul>
+<hr>
+<h3 id="task-8-verify-on-real-fonts-measure-document">Task 8: Verify on real fonts, measure, document</h3>
+<p><strong>Files:</strong>
+- Modify: <code>metainfo.xml</code> (release note, via <code>/add-release-note</code>), <code>docs/</code> VT sequence reference if DECDLD is
+  listed there (<code>grep -rn DECDLD docs</code>), and <code>examples/drcs-demo.cpp</code>.</p>
+<ul>
+<li>[ ] <strong>Step 1: Visual check, offscreen</strong> (<code>QT_QPA_PLATFORM=offscreen</code>, captured with <code>grabWindow()</code> to PNG,
+  never OS screenshots).</li>
+<li>Download into a fresh scratch directory: <code>https://vt100.net/dec/vt320/{boothill,future,gothic,jetpac,mercy,powerslave}.fnt</code>,
+    <code>https://github.com/larsbrinkhoff/sixel</code> (<code>vt220.txt</code>, <code>birger.txt</code>), and cmatrix's <code>vt320-font.h</code> from
+    <code>https://github.com/jhamby/cmatrix</code>.</li>
+<li>For each, render the font file followed by <code>ESC ( B</code> (or <code>ESC ( @</code>/<code>ESC ( SP @</code>) and all 94 positions,
+    once at the default font size and once after a font-size change, plus one DECDWL line.</li>
+<li>Compare by eye against the vt100.net previews. Then change SGR (reverse video, a colour) and select a range,
+    and confirm the glyphs recolour.</li>
+<li>Do this with a <em>display test once per phase</em>. This is the only window-opening run.</li>
+<li>[ ] <strong>Step 2: Performance.</strong> Run <code>bench-headless</code> and Callgrind before (on <code>origin/master</code>) and after.
+  <code>ascii</code>, <code>utf8</code> and <code>tui</code> instruction counts must be unchanged (±0.1%). Record the table for the PR.</li>
+<li>[ ] <strong>Step 3: Docs.</strong> Add a release note entry ("Soft fonts (DECDLD) now render real-world fonts…, #467")
+  and fix <code>drcs-demo</code> if it still uses invalid parameters.</li>
+<li>[ ] <strong>Step 4: Full suite.</strong> <code>ctest --preset=clang-asan</code> and <code>ctest --preset=clang-tsan -R "vtbackend|vthost"</code>
+  must both be green, with zero warnings.</li>
+<li>[ ] <strong>Step 5: Run <code>/simplify</code>, then <code>/code-review</code>.</strong> Address every finding.</li>
+<li>[ ] <strong>Step 6: Commit</strong> <code>docs: release note and demo for finished soft fonts (#467)</code></li>
+</ul></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden="">
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"></path></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["content.action.edit", "content.action.view", "content.code.copy", "content.tabs.link", "navigation.expand", "navigation.footer", "navigation.indexes", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.sections", "navigation.tracking", "search.highlight", "search.share", "search.suggest", "toc.follow"], "search": "../../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>
