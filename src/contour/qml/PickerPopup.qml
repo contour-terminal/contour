@@ -37,10 +37,16 @@ Popup {
     property string fieldName: ""
     /// What the list says when it has no row.
     property string emptyText: ""
+    /// Whether the empty text shows above rows the list still has: the switcher keeps New Workspace “query”
+    /// when nothing matches. A QML-only flag, hence a bool.
+    property bool emptyBesideRows: false
     /// The footer's leading text: what the selected row does.
     property string footerDescription: ""
     /// The footer's trailing text: the keys for the selected row.
     property string footerHints: ""
+    /// The footer's hints for every width, widest first (the switcher's); empty for footerHints alone. The
+    /// footer shows the widest that leaves the description its room (size.paletteFooterDescription).
+    property var footerHintSets: []
     /// What the picker shows between the query row and the list (the switcher's New Daemon prompt), or null.
     property alias body: bodyLoader.sourceComponent
     /// The rows.
@@ -335,6 +341,21 @@ Popup {
             visible: item !== null
         }
 
+        // What was typed matches nothing: said above the rows that remain (an owner's create action), or in
+        // place of the list.
+        Label {
+            id: empty
+            objectName: root.namePrefix + "Empty"
+            visible: root.emptyText !== "" && (listView.count === 0 || root.emptyBesideRows)
+            width: parent.width
+            height: visible ? chromeStyle.size.paletteRow : 0
+            leftPadding: root.textInset
+            verticalAlignment: Text.AlignVCenter
+            text: root.emptyText
+            font: chromeStyle.type.body
+            color: chromeStyle.colors.paletteSecondaryText
+        }
+
         // {{{ The rows
         ListView {
             id: listView
@@ -369,28 +390,19 @@ Popup {
                     if (scene.x === listHover.lastPosition.x && scene.y === listHover.lastPosition.y)
                         return;
                     listHover.lastPosition = Qt.point(scene.x, scene.y);
-                    const position = listHover.point.position;
-                    const index = listView.indexAt(position.x + listView.contentX, position.y + listView.contentY);
+                    // In the list's content coordinates, mapped from the window's: the handler's own item is the
+                    // Flickable's content item, and a list whose rows changed above the top no longer starts its
+                    // content at 0 (originY), so neither its position nor position + contentY is one.
+                    const position = listView.contentItem.mapFromItem(null, scene.x, scene.y);
+                    const index = listView.indexAt(position.x, position.y);
                     const item = index >= 0 ? listView.itemAtIndex(index) : null;
                     // Over a group header, no row: only the row below it is selectable.
-                    const overRow = item && position.y + listView.contentY >= item.y + item.headerHeight;
+                    const overRow = item && position.y >= item.y + item.headerHeight;
                     root.pointerMoved(overRow ? index : -1);
                 }
             }
         }
 
-        Label {
-            id: empty
-            objectName: root.namePrefix + "Empty"
-            visible: listView.count === 0
-            width: parent.width
-            height: visible ? chromeStyle.size.paletteRow : 0
-            leftPadding: root.textInset
-            verticalAlignment: Text.AlignVCenter
-            text: root.emptyText
-            font: chromeStyle.type.body
-            color: chromeStyle.colors.paletteSecondaryText
-        }
         // }}}
 
         // {{{ The footer: the selected row's description, and its keys.
@@ -407,17 +419,42 @@ Popup {
             width: parent.width
             height: chromeStyle.size.paletteFooter
 
+            // What the hints may take: the footer less its insets, the gap, and the description's room (all of a
+            // short description, else size.paletteFooterDescription).
+            readonly property real hintsRoom: Math.max(0, footer.width - root.textInset - root.textInset
+                - chromeStyle.space.s4
+                - Math.min(footerDescriptionLabel.implicitWidth, chromeStyle.size.paletteFooterDescription))
+
+            FontMetrics {
+                id: footerMetrics
+                font: chromeStyle.type.footnote
+            }
+
             Label {
                 id: footerHintsLabel
                 objectName: root.namePrefix + "FooterHints"
+                // The widest set that fits; the narrowest where none does, cut at its end rather than spilled
+                // past the picker's left edge.
+                width: Math.min(implicitWidth, footer.hintsRoom)
                 x: parent.width - width - root.textInset
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.footerHints
+                elide: Text.ElideRight
+                text: {
+                    const sets = root.footerHintSets;
+                    if (!sets || sets.length === 0)
+                        return root.footerHints;
+                    for (const each of sets) {
+                        if (footerMetrics.advanceWidth(each) <= footer.hintsRoom)
+                            return each;
+                    }
+                    return sets[sets.length - 1];
+                }
                 font: chromeStyle.type.footnote
                 color: chromeStyle.colors.paletteSecondaryText
             }
 
             Label {
+                id: footerDescriptionLabel
                 objectName: root.namePrefix + "FooterDescription"
                 x: root.textInset
                 width: Math.max(0, footerHintsLabel.x - chromeStyle.space.s4 - x)

@@ -28,8 +28,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <format>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -750,4 +752,152 @@ TEST_CASE("Switcher: its rows stay drawn while it fades out", "[contour][switche
         test::PopupSettleMs));
     CHECK(fewest == rows);
     CHECK(f.host.switcher() == nullptr);
+}
+
+TEST_CASE("Switcher: hover finds the row under the pointer in a list scrolled down",
+          "[contour][switcher][qml]")
+{
+    // A list scrolled, or one whose rows changed above its top, no longer starts its content at 0.
+    auto f = Fixture {};
+    f.openCentred();
+    auto many = workWorkspaces();
+    for (auto const id: std::views::iota(uint64_t { 10 }, uint64_t { 40 }))
+        many.push_back(workspace(id, std::format("ws-{}", id)));
+    f.switcher->updateWindowWorkspaces(many);
+    QCoreApplication::processEvents();
+    auto* list = f.scene->part(QStringLiteral("switcherList"));
+    REQUIRE(list != nullptr);
+    QMetaObject::invokeMethod(list, "positionViewAtEnd");
+    QCoreApplication::processEvents();
+    REQUIRE(list->property("contentY").toDouble() > 0);
+    auto const last = list->property("count").toInt() - 1;
+    REQUIRE(QTest::qWaitFor([&] { return f.scene->rowAt(last) != nullptr; }, test::PopupSettleMs));
+
+    hoverRow(f, last);
+    auto* hover = partOfRow(f, last, "switcherHover");
+    REQUIRE(hover != nullptr);
+    CHECK((hover->isVisible() || last == f.switcher->currentIndex()));
+    CHECK(f.scene->popup->property("hoveredIndex").toInt() == last);
+}
+
+TEST_CASE("Switcher: a row without a status glyph keeps its column, so every title lines up",
+          "[contour][switcher][qml]")
+{
+    auto f = Fixture {};
+    f.openCentred();
+    auto const titleX = [&](int index) {
+        auto const* title = partOfRow(f, index, "switcherTitle");
+        REQUIRE(title != nullptr);
+        return title->mapToScene(QPointF {}).x();
+    };
+    // contour has no glyph, api-docs the failed one.
+    REQUIRE(f.switcher->rows()[0].status.glyph == window::TabBadgeKind::None);
+    REQUIRE(f.switcher->rows()[1].status.glyph == window::TabBadgeKind::Error);
+    CHECK(titleX(0) == Catch::Approx(titleX(1)));
+}
+
+TEST_CASE("Switcher: in a narrow picker a long detail gives way to the title", "[contour][switcher][qml]")
+{
+    // The Terminal row's picker is narrow: a failed command's reason and time must not cut the title.
+    auto f = Fixture { config::ChromeStyle::Terminal };
+    f.openCentred();
+    auto own = workWorkspaces();
+    own[1].status.gitText = "feature/a-rather-long-branch-name";
+    own[1].status.reason = { .label = "exit 1",
+                             .separator = " · ",
+                             .command = "make deploy-everything-to-production" };
+    f.switcher->updateWindowWorkspaces(own);
+    QCoreApplication::processEvents();
+    auto* title = partOfRow(f, 1, "switcherTitle");
+    REQUIRE(title != nullptr);
+    CHECK(title->width() == Catch::Approx(title->implicitWidth()));
+    // The detail stays inside the row.
+    auto const* detail = partOfRow(f, 1, "switcherDetail");
+    auto const* entry = partOfRow(f, 1, "switcherRow");
+    REQUIRE(detail != nullptr);
+    REQUIRE(entry != nullptr);
+    CHECK(detail->mapToScene(QPointF {}).x() >= title->mapToScene(QPointF { title->width(), 0 }).x());
+    // The command gives way, and its separator with it: the words do not end in a dangling ` · `.
+    auto const* command = partOfRow(f, 1, "switcherDetailCommand");
+    auto const* separator = partOfRow(f, 1, "switcherDetailSeparator");
+    auto const* words = partOfRow(f, 1, "switcherDetailText");
+    REQUIRE(command != nullptr);
+    REQUIRE(separator != nullptr);
+    REQUIRE(words != nullptr);
+    CHECK_FALSE(command->isVisible());
+    CHECK_FALSE(separator->isVisible());
+    CHECK_FALSE(words->property("text").toString().endsWith(QStringLiteral(" · ")));
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Switcher: a detail with room shows the separator before its command", "[contour][switcher][qml]")
+{
+    auto f = Fixture { config::ChromeStyle::ContourLinux };
+    f.openCentred();
+    auto own = workWorkspaces();
+    own[1].status.reason = { .label = "exit 1", .separator = " · ", .command = "make" };
+    f.switcher->updateWindowWorkspaces(own);
+    QCoreApplication::processEvents();
+    auto const* command = partOfRow(f, 1, "switcherDetailCommand");
+    auto const* separator = partOfRow(f, 1, "switcherDetailSeparator");
+    REQUIRE(command != nullptr);
+    REQUIRE(separator != nullptr);
+    CHECK(command->isVisible());
+    CHECK(separator->isVisible());
+    CHECK(separator->property("text").toString() == QStringLiteral(" · "));
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Switcher: a narrow footer gives hints up before the description loses its room",
+          "[contour][switcher][qml]")
+{
+    // The Terminal row's picker is the narrowest: the full set would cut the description to nothing.
+    auto f = Fixture { config::ChromeStyle::Terminal };
+    f.openCentred();
+    auto const* hints = f.scene->part(QStringLiteral("switcherFooterHints"));
+    auto const* description = f.scene->part(QStringLiteral("switcherFooterDescription"));
+    REQUIRE(hints != nullptr);
+    REQUIRE(description != nullptr);
+    auto const sets = f.switcher->footerHintSets();
+    REQUIRE(sets.size() > 1);
+    auto const shown = hints->property("text").toString();
+    CHECK(sets.contains(shown));
+    CHECK(shown != sets.front());
+    // Whole, and ending in Escape's hint, which no set gives up.
+    CHECK(hints->width() == Catch::Approx(hints->implicitWidth()));
+    CHECK(shown.endsWith(sets.back().section(QStringLiteral(" · "), -1)));
+    auto const room =
+        test::qmlSupport::providerOf(f.engine).size()->property("paletteFooterDescription").toReal();
+    REQUIRE(room > 0);
+    CHECK(description->width() >= std::min(description->implicitWidth(), room) - 1);
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Switcher: a wide footer shows every hint", "[contour][switcher][qml]")
+{
+    auto f = Fixture { config::ChromeStyle::ContourLinux };
+    f.openCentred();
+    auto const* hints = f.scene->part(QStringLiteral("switcherFooterHints"));
+    REQUIRE(hints != nullptr);
+    CHECK(hints->property("text").toString() == f.switcher->footerHints());
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Switcher: a filter that matches nothing says so above New Workspace", "[contour][switcher][qml]")
+{
+    auto f = Fixture {};
+    f.openCentred();
+    for (auto const character: std::string_view { "zzz" })
+        QTest::keyClick(f.scene->window, character);
+    QCoreApplication::processEvents();
+    auto* empty = f.scene->part(QStringLiteral("switcherEmpty"));
+    REQUIRE(empty != nullptr);
+    CHECK(empty->isVisible());
+    CHECK(empty->property("text").toString() == f.switcher->emptyText());
+    REQUIRE(f.switcher->rowCount() == 1);
+    auto* list = f.scene->part(QStringLiteral("switcherList"));
+    REQUIRE(list != nullptr);
+    // Above the rows.
+    CHECK(empty->mapToScene(QPointF {}).y() < list->mapToScene(QPointF {}).y());
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
 }

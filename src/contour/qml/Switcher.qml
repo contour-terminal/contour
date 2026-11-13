@@ -29,6 +29,7 @@ PickerPopup {
     levelTitle: root.switcher ? root.switcher.levelTitle : ""
     hintText: root.switcher ? root.switcher.hintText : ""
     emptyText: root.switcher ? root.switcher.emptyText : ""
+    emptyBesideRows: true
     footerDescription: root.switcher ? root.switcher.footerDescription : ""
     footerHints: root.switcher ? root.switcher.footerHints : ""
     footerHintSets: root.switcher ? root.switcher.footerHintSets : []
@@ -91,6 +92,14 @@ PickerPopup {
         Qt.callLater(root.syncFromSwitcher);
     }
 
+    // Selected while the popup still grew into its height, the list scrolled to keep the row in a viewport
+    // smaller than the one it ends with: once open, it starts at its first group's header again.
+    onOpened: {
+        root.list.positionViewAtBeginning();
+        if (root.switcher)
+            root.select(root.switcher.currentIndex);
+    }
+
     // However it closed, the window lets go of the switcher: after a choice or Escape it has already, and a
     // click outside is a dismissal it cancels. A row menu's pick runs from onPicked, once the keyboard is back.
     onClosed: {
@@ -150,6 +159,7 @@ PickerPopup {
         required property int kind
         required property int glyph
         required property string detailText
+        required property string detailSeparator
         required property string detailCommand
         required property string detailTail
         required property string pillText
@@ -213,15 +223,21 @@ PickerPopup {
                 height: parent.height
                 spacing: chromeStyle.space.s3
 
-                // The status glyph the sidebar shows; its column is kept when there is none, so titles align.
-                TabBadgeSlot {
-                    id: badge
-                    objectName: "switcherRowGlyph"
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: chromeStyle.snapToCells(implicitWidth)
-                    kind: row.glyph
-                    shaped: !root.cellTree
-                    Accessible.ignored: true
+                // The status glyph the sidebar shows. Its column is kept when there is none (the slot hides
+                // itself then), so an idle row's title lines up with the others.
+                Item {
+                    id: glyphColumn
+                    width: chromeStyle.snapToCells(badge.edge)
+                    height: parent.height
+                    TabBadgeSlot {
+                        id: badge
+                        objectName: "switcherRowGlyph"
+                        anchors.centerIn: parent
+                        width: chromeStyle.snapToCells(implicitWidth)
+                        kind: row.glyph
+                        shaped: !root.cellTree
+                        Accessible.ignored: true
+                    }
                 }
 
                 MatchedLabel {
@@ -244,35 +260,63 @@ PickerPopup {
                 height: parent.height
                 spacing: chromeStyle.space.s3
 
-                // The detail: words, then the reason's command in monospace, then the time.
+                // The detail: words, then the reason's command in monospace, then the time. The title comes
+                // first: where both do not fit (a narrow picker, the Terminal row's), the command and the time
+                // go, and the words are cut at their end.
                 Row {
+                    id: detail
                     objectName: "switcherDetail"
+                    // What the title, its glyph and the trail's other parts leave of the row.
+                    readonly property real room: Math.max(0, entry.width - root.textInset - root.textInset
+                        - glyphColumn.width - lead.spacing - titleLabel.implicitWidth - chromeStyle.space.s4
+                        - (pill.visible ? pill.width + trail.spacing : 0)
+                        - (newWindowButton.visible ? newWindowButton.width + trail.spacing : 0)
+                        - (drillIn.visible ? drillIn.width + trail.spacing : 0))
+                    readonly property bool fits: detailText.implicitWidth + detailSeparator.implicitWidth
+                                                 + detailCommand.implicitWidth + detailTail.implicitWidth
+                                                 <= detail.room
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 0
                     Text {
+                        id: detailText
                         objectName: "switcherDetailText"
                         textFormat: Text.PlainText
                         Accessible.ignored: true
                         text: row.detailText
                         visible: text !== ""
+                        width: detail.fits ? implicitWidth : Math.min(implicitWidth, detail.room)
+                        elide: Text.ElideRight
+                        font: chromeStyle.type.footnote
+                        color: selection.secondaryInk
+                    }
+                    // The separator goes with the command: where the command gives way, the words end clean.
+                    Text {
+                        id: detailSeparator
+                        objectName: "switcherDetailSeparator"
+                        textFormat: Text.PlainText
+                        Accessible.ignored: true
+                        text: row.detailSeparator
+                        visible: text !== "" && detailCommand.visible
                         font: chromeStyle.type.footnote
                         color: selection.secondaryInk
                     }
                     Text {
+                        id: detailCommand
                         objectName: "switcherDetailCommand"
                         textFormat: Text.PlainText
                         Accessible.ignored: true
                         text: row.detailCommand
-                        visible: text !== ""
+                        visible: text !== "" && detail.fits
                         font: chromeStyle.type.monospaceFootnote
                         color: selection.secondaryInk
                     }
                     Text {
+                        id: detailTail
                         objectName: "switcherDetailTail"
                         textFormat: Text.PlainText
                         Accessible.ignored: true
                         text: row.detailTail
-                        visible: text !== ""
+                        visible: text !== "" && detail.fits
                         font: chromeStyle.type.footnote
                         color: selection.secondaryInk
                     }
@@ -280,6 +324,7 @@ PickerPopup {
 
                 // The pill: Current, Other window, the daemon a match is on, or a host's transport.
                 Rectangle {
+                    id: pill
                     objectName: "switcherPill"
                     visible: row.pillText !== ""
                     anchors.verticalCenter: parent.verticalCenter
@@ -314,6 +359,7 @@ PickerPopup {
                 }
 
                 Label {
+                    id: drillIn
                     objectName: "switcherDrillIn"
                     visible: row.drillsIn
                     anchors.verticalCenter: parent.verticalCenter

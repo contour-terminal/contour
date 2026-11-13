@@ -576,6 +576,57 @@ void checkToolTipScript(contour::test::snapshot::ChromeSnapshotScene const& scen
            || sidebar == SnapshotSidebar::Collapsed || sidebar == SnapshotSidebar::TopTabs;
 }
 
+/// What each switcher script shows: the rows of the board it reproduces, the selection, and what it opened.
+void checkSwitcherScript(contour::test::snapshot::ChromeSnapshotScene const& scene,
+                         contour::test::snapshot::SnapshotScript script)
+{
+    using contour::test::snapshot::SnapshotScript;
+    auto const* popup = scene.workspaceDropdown();
+    REQUIRE(popup != nullptr);
+    CHECK(popup->property("visible").toBool());
+    auto const* switcher = scene.switcher();
+    REQUIRE(switcher != nullptr);
+    auto const titles = std::ranges::to<std::vector<std::string>>(
+        switcher->rows() | std::views::transform(&contour::window::SwitcherRow::title));
+    auto const has = [&](std::string_view title) {
+        return std::ranges::contains(titles, title);
+    };
+    switch (script)
+    {
+        case SnapshotScript::Switcher:
+            CHECK(has("api-gateway"));
+            CHECK(has("home"));
+            CHECK(has("ci-box"));
+            CHECK(has("New Daemon…"));
+            break;
+        case SnapshotScript::SwitcherFiltered:
+            CHECK(has("api-gateway"));
+            CHECK(has("api-docs"));
+            CHECK(has("New Workspace “api”"));
+            break;
+        case SnapshotScript::SwitcherDaemonLevel:
+            CHECK(switcher->levelTitle() == "home");
+            CHECK(has("api-docs"));
+            CHECK(has("music"));
+            break;
+        case SnapshotScript::SwitcherNewDaemon:
+            CHECK(switcher->isAskingLabel());
+            CHECK(switcher->labelCommand() == "contour daemon --label research");
+            break;
+        case SnapshotScript::SwitcherNoMatch:
+            CHECK_FALSE(switcher->emptyText().isEmpty());
+            CHECK(has("New Workspace “zzz”"));
+            break;
+        case SnapshotScript::SwitcherDiscovering:
+            CHECK(switcher->isDiscovering());
+            CHECK(has("api-gateway"));
+            break;
+        case SnapshotScript::SwitcherRowMenu:
+        case SnapshotScript::SwitcherHover: CHECK(has("docs")); break;
+        default: FAIL("not a switcher script"); break;
+    }
+}
+
 /// Checks what a sidebar script drew: the sidebar present or absent, the workspace chip standing in for a
 /// hidden one, and the one selected row the script displays.
 /// @param scene The scene the script ran in.
@@ -1136,8 +1187,34 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 auto const* dropdown = scene.workspaceDropdown();
                 REQUIRE(dropdown != nullptr);
                 CHECK(dropdown->property("visible").toBool());
+                // All daemons… names ShowSwitcher's chord as the picture's platform binds and spells it,
+                // whichever machine renders it.
+                auto const* switcher = scene.switcher();
+                REQUIRE(switcher != nullptr);
+                auto const& rows = switcher->rows();
+                auto const all =
+                    std::ranges::find(rows, "All daemons…", &contour::window::SwitcherRow::title);
+                REQUIRE(all != rows.end());
+                auto const index = switcher->index(static_cast<int>(std::distance(rows.begin(), all)));
+                auto const chord =
+                    switcher
+                        ->data(index,
+                               static_cast<int>(contour::window::SwitcherController::Roles::DetailTextRole))
+                        .toString();
+                CHECK(chord
+                      == (variantHost(variant) == contour::config::HostPlatform::MacOS
+                              ? QStringLiteral("⇧⌘R")
+                              : QStringLiteral("Ctrl+Shift+R")));
                 break;
             }
+            case SnapshotScript::Switcher:
+            case SnapshotScript::SwitcherFiltered:
+            case SnapshotScript::SwitcherDaemonLevel:
+            case SnapshotScript::SwitcherNewDaemon:
+            case SnapshotScript::SwitcherNoMatch:
+            case SnapshotScript::SwitcherDiscovering:
+            case SnapshotScript::SwitcherRowMenu:
+            case SnapshotScript::SwitcherHover: checkSwitcherScript(scene, variant.script); break;
             case SnapshotScript::QuickTerminal: {
                 // The panel's frame, and a role that made the window a frameless tool window.
                 CHECK(scene.window().size() == ChromeSnapshotScene::quickTerminalPanelSize());
