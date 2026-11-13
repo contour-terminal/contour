@@ -11,6 +11,7 @@
         <file alias="lock-symbolic.svg">res/icons/lock-symbolic.svg</file>
         <file alias="edit-find-symbolic.svg">res/icons/edit-find-symbolic.svg</file>
         <file alias="folder-new-symbolic.svg">res/icons/folder-new-symbolic.svg</file>
+        <file alias="window-new-symbolic.svg">res/icons/window-new-symbolic.svg</file>
         <file alias="open-menu-symbolic.svg">res/icons/open-menu-symbolic.svg</file>
         <file alias="pan-down-symbolic.svg">res/icons/pan-down-symbolic.svg</file>
         <file alias="pane-toggle-symbolic.svg">res/icons/pane-toggle-symbolic.svg</file>

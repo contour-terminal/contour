@@ -41,6 +41,8 @@ Popup {
     property string footerDescription: ""
     /// The footer's trailing text: the keys for the selected row.
     property string footerHints: ""
+    /// What the picker shows between the query row and the list (the switcher's New Daemon prompt), or null.
+    property alias body: bodyLoader.sourceComponent
     /// The rows.
     property alias model: listView.model
     /// The row delegate. It reports `headerHeight` (the group header above its row, 0 for none), so the pointer
@@ -95,8 +97,10 @@ Popup {
     // Fits its content, up to the placement's height.
     height: Math.min(root.placement.maxHeight, root.fixedHeight + listView.contentHeight)
 
-    // Everything in the column but the list: the query row, the two rules, the empty label and the footer.
-    readonly property real fixedHeight: queryRow.height + topRule.height + empty.height + bottomRule.height
+    // Everything in the column but the list: the query row, the two rules, the body, the empty label and the
+    // footer.
+    readonly property real fixedHeight: queryRow.height + topRule.height + bodyLoader.height + empty.height
+                                        + bottomRule.height
                                         + footer.height
 
     background: PopupSurface {
@@ -322,6 +326,14 @@ Popup {
             color: chromeStyle.colors.paletteSeparator
         }
         // }}}
+
+        Loader {
+            id: bodyLoader
+            objectName: root.namePrefix + "Body"
+            width: parent.width
+            height: item ? item.implicitHeight : 0
+            visible: item !== null
+        }
 
         // {{{ The rows
         ListView {

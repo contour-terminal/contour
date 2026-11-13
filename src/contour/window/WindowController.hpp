@@ -33,6 +33,7 @@
 #include <contour/window/SidebarMenuState.hpp>
 #include <contour/window/SidebarModel.hpp>
 #include <contour/window/SidebarToggle.hpp>
+#include <contour/window/SwitcherPresenter.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabBarDropPolicy.hpp>
@@ -152,6 +153,7 @@ class WindowController:
     public QAbstractListModel,
     public command::TabTitleProvider,
     public command::DaemonRowsProvider,
+    public SwitcherHost,
     public display::WindowHost,
     public session::InProcessWindow
 {
@@ -787,12 +789,17 @@ class WindowController:
     /// from the window that presented it before (withdrawSwitcher()).
     /// @param switcher The switcher, opened already; borrowed, it outlives this window's hold on it.
     /// @param anchor The control it hangs from, in the scene's coordinates; none to centre it.
-    void presentSwitcher(SwitcherController* switcher, std::optional<QRectF> anchor);
+    void presentSwitcher(SwitcherController* switcher, std::optional<QRectF> anchor) override;
 
-    /// Closes the switcher this window presents, if any, and lets go of it.
-    void withdrawSwitcher();
+    /// Closes the switcher this window presents, if any, and lets go of it at once: the popup keeps drawing
+    /// what it showed through its exit transition.
+    void withdrawSwitcher() override;
 
-    /// Lets go of the switcher once its popup has closed, however it closed.
+    /// @return This window.
+    [[nodiscard]] QObject& switcherHostObject() noexcept override { return *this; }
+
+    /// The popup closed. Still presented, it was dismissed (a click outside it) rather than withdrawn after a
+    /// choice or Escape: the switcher is cancelled, so nothing it started lands later.
     Q_INVOKABLE void closeSwitcher();
 
     /// @return The switcher this window presents; null for none.
@@ -2004,6 +2011,9 @@ class WindowController:
     void openSidebarContextMenu(SidebarRow const& row, QPointF windowPosition);
     /// Tells the sidebar whether anyone can see it: it is shown, in an exposed window.
     void refreshSidebarPresence();
+
+    /// Forgets the switcher presented, telling QML and the sidebar.
+    void letGoOfSwitcher();
     class SidebarHost;
     /// Builds the sidebar and its host, once the window exists.
     void initSidebar();

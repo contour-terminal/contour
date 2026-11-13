@@ -1669,7 +1669,9 @@ TEST_CASE("chromeTokens.legibleOnBarReadsOnEveryScheme", "[chrometokens]")
 TEST_CASE("chromeTokens.paletteColourRoles", "[chrometokens]")
 {
     using namespace contour::config;
+    using contour::config::detail::fill;
     using contour::config::detail::label;
+    using contour::config::detail::noColor;
     using contour::config::detail::schemeColor;
     using contour::config::detail::schemeOnBar;
     using contour::config::detail::separator;
@@ -1697,6 +1699,7 @@ TEST_CASE("chromeTokens.paletteColourRoles", "[chrometokens]")
         PaletteColorRow { .role = PaletteSelectionText,
                           .native = sourceOf(ColorSourceKind::PaletteHighlightedText),
                           .terminal = schemeColor(SchemeSlot::BarSelectionText) },
+        PaletteColorRow { .role = PaletteHoverFill, .native = fill(4), .terminal = noColor() },
         PaletteColorRow {
             .role = PaletteSeparator, .native = separator(), .terminal = schemeColor(SchemeSlot::Secondary) },
     };

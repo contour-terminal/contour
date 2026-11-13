@@ -258,6 +258,7 @@ set(_header_files
     window/SidebarDropPolicy.hpp
     window/SidebarSelection.hpp
     window/CloseDialogTable.hpp
+    window/PickerAccessory.hpp
     window/SidebarControls.hpp
     window/SidebarToggle.hpp
     window/PopupAnchor.hpp
@@ -335,6 +336,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsBackdrop.hpp
         window/ConnectPickerController.hpp
         window/SwitcherController.hpp
+        window/SwitcherPresenter.hpp
         window/SettingsWindowHost.hpp
         session/PreviewTranscript.hpp
         session/PastePreview.hpp
@@ -418,6 +420,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsPreview.cpp
         window/ConnectPickerController.cpp
         window/SwitcherController.cpp
+        window/SwitcherPresenter.cpp
         window/SettingsWindowHost.cpp
         session/Permission.cpp
         session/PermissionPrompt.cpp
@@ -1779,6 +1782,7 @@ if(CONTOUR_TESTING)
         window/SwitcherStatus_test.cpp
         window/SwitcherRows.cpp
         window/SwitcherRows_test.cpp
+        window/PickerAccessory_test.cpp
         window/SwitcherKeys_test.cpp
         window/SwitcherText.cpp
         window/SwitcherText_test.cpp

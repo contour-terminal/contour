@@ -302,6 +302,8 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QVariantList headerBarItems READ headerBarItems CONSTANT)
     /// The workspace sidebar's own buttons on this row (window::SidebarControlRows), by name.
     Q_PROPERTY(QVariantMap sidebarControls READ sidebarControls CONSTANT)
+    /// A picker row's "open in new window" button on this row (window::PickerAccessoryRows).
+    Q_PROPERTY(QVariantMap pickerAccessory READ pickerAccessory CONSTANT)
 
     // {{{ Panes (Step 2)
     /// The configured chrome density: "comfortable" or "minimal".
@@ -829,6 +831,10 @@ class UiStyleProvider: public QObject
     /// @return The sidebar's own buttons on this row: `{ toggle, newWorkspace, filter }`, each
     ///         `{ iconName, bundledIcon, glyph }` (window::sidebarControlFace).
     [[nodiscard]] QVariantMap sidebarControls() const;
+
+    /// @return A picker row's "open in new window" button on this row: `{ iconName, bundledIcon, glyph }`
+    ///         (window::pickerAccessoryFace).
+    [[nodiscard]] QVariantMap pickerAccessory() const;
 
     /// The tab well's widths for @p tabCount tabs in @p available logical pixels (window::layoutTabWell).
     /// @param available The width the band leaves the well.

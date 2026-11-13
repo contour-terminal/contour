@@ -10,10 +10,13 @@
 #include <contour/test/AppFixture.hpp>
 #include <contour/test/CoreFixtures.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/window/SwitcherController.hpp>
+#include <contour/window/SwitcherPresenter.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <QtCore/QPointF>
+#include <QtCore/QRectF>
 #include <QtCore/QVariantList>
 #include <QtCore/QVariantMap>
 #include <QtGui/QWindow>
@@ -24,6 +27,7 @@
 #include <algorithm>
 #include <optional>
 #include <ranges>
+#include <string>
 #include <vector>
 
 #include <QtTest/QSignalSpy>
@@ -667,3 +671,141 @@ TEST_CASE("a one-tab workspace's menu merges its tab into another tab", "[contou
     CHECK(window->ownedWorkspaces().size() == 1);
     CHECK(window->displayedWorkspace() == firstWorkspace);
 }
+
+// {{{ The switcher over a window: the real WindowController hosting it, through the real presenter.
+
+namespace
+{
+
+/// @return The window's own workspace @p id, named @p name.
+[[nodiscard]] contour::window::SwitcherWorkspace ownWorkspace(uint64_t id, std::string name)
+{
+    return contour::window::SwitcherWorkspace { .ref = {},
+                                                .position = static_cast<uint32_t>(id),
+                                                .name = std::move(name),
+                                                .tabs = 1,
+                                                .state = contour::window::SwitcherWorkspaceState::Hidden,
+                                                .status = {},
+                                                .id = id };
+}
+
+/// What the workspace chip's dropdown opens with over @p window: its own daemon's workspaces alone.
+[[nodiscard]] contour::window::SwitcherOpening chipOpening(vtworkspace::WorkspaceId window)
+{
+    return contour::window::SwitcherOpening {
+        .window = window,
+        .windowDaemon = contour::session::SwitchTarget { .kind = vthost::proto::SwitchDaemonKind::Label,
+                                                         .daemon = "work",
+                                                         .workspace = {} },
+        .mode = contour::session::SwitchMode::Switch,
+        .prompt = contour::window::SwitcherPrompt::Browse,
+        .pick = std::nullopt,
+        .scope = contour::window::SwitcherScope::OneDaemon,
+        .windowWorkspaces = { ownWorkspace(1, "contour") },
+        .origin = contour::window::SwitcherOrigin::Chip,
+    };
+}
+
+} // namespace
+
+TEST_CASE("a window hosts the switcher: the chip's dropdown opens, shows the sidebar's rows, and closes",
+          "[contour][sidebar][controller][switcher]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto window = contour::test::ScopedControllerWithOsWindow { app.manager() };
+    window->bindWindow(window.osWindow.get());
+    window.osWindow->show();
+    REQUIRE(window->sidebarVisibility() == asQml(SidebarVisibility::Hidden));
+    REQUIRE(window->sidebar().presence() == SidebarPresence::Hidden);
+
+    auto switcher = contour::window::SwitcherController { contour::window::SwitcherServices {} };
+    auto presenter = contour::window::SwitcherPresenter { switcher };
+    auto changed = QSignalSpy { &*window, &contour::window::WindowController::switcherChanged };
+    auto withdrawn = QSignalSpy { &*window, &contour::window::WindowController::switcherWithdrawn };
+    auto cancelled = QSignalSpy { &switcher, &contour::window::SwitcherController::cancelled };
+
+    presenter.open(*window, chipOpening(window.id), QRectF { 10, 0, 80, 24 });
+    CHECK(window->presentedSwitcher() == &switcher);
+    CHECK(window->isWorkspaceDropdownOpen());
+    CHECK(window->workspaceChipDescription() == QStringLiteral("expanded"));
+    CHECK(changed.count() == 1);
+    // The dropdown shows the sidebar's running times, so the hidden sidebar's rows are kept live.
+    CHECK(window->sidebar().presence() == SidebarPresence::Shown);
+
+    SECTION("a choice or a cancel withdraws it")
+    {
+        switcher.cancel();
+        CHECK(window->presentedSwitcher() == nullptr);
+        CHECK_FALSE(window->isWorkspaceDropdownOpen());
+        CHECK(window->workspaceChipDescription() == QStringLiteral("collapsed"));
+        CHECK(withdrawn.count() == 1);
+        CHECK(window->sidebar().presence() == SidebarPresence::Hidden);
+    }
+    SECTION("a click outside closes it, as a cancel")
+    {
+        window->closeSwitcher();
+        CHECK(cancelled.count() == 1);
+        CHECK(window->presentedSwitcher() == nullptr);
+        CHECK_FALSE(window->isWorkspaceDropdownOpen());
+        CHECK(window->sidebar().presence() == SidebarPresence::Hidden);
+        // Closed already: a second close does nothing.
+        window->closeSwitcher();
+        CHECK(cancelled.count() == 1);
+    }
+    SECTION("centred, it is no dropdown")
+    {
+        presenter.open(*window, chipOpening(window.id), std::nullopt);
+        CHECK(window->presentedSwitcher() == &switcher);
+        CHECK_FALSE(window->isWorkspaceDropdownOpen());
+        CHECK(window->sidebar().presence() == SidebarPresence::Shown);
+    }
+}
+
+TEST_CASE("the switcher follows its window's sidebar while it is presented there, and no longer",
+          "[contour][sidebar][controller][switcher]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto window = contour::test::ScopedController { app.manager() };
+    auto switcher = contour::window::SwitcherController { contour::window::SwitcherServices {} };
+    auto presenter = contour::window::SwitcherPresenter { switcher };
+    auto reads = 0;
+    auto const follow = [&] {
+        presenter.followSidebar(window->sidebar(), [&] {
+            ++reads;
+            return std::vector { ownWorkspace(1, "contour"), ownWorkspace(2, "renamed") };
+        });
+    };
+
+    presenter.open(*window, chipOpening(window.id), QRectF { 10, 0, 80, 24 });
+    follow();
+    emit window->sidebar().workspaceRowsChanged();
+    CHECK(reads == 1);
+    auto const titles = [&] {
+        auto list = std::vector<std::string> {};
+        for (auto const& row: switcher.rows())
+            list.push_back(row.title);
+        return list;
+    };
+    CHECK(std::ranges::contains(titles(), "renamed"));
+
+    // Withdrawn, a rebuild is read for nobody.
+    switcher.cancel();
+    emit window->sidebar().workspaceRowsChanged();
+    CHECK(reads == 1);
+
+    // Opened again, it follows only once told to.
+    presenter.open(*window, chipOpening(window.id), QRectF { 10, 0, 80, 24 });
+    emit window->sidebar().workspaceRowsChanged();
+    CHECK(reads == 1);
+    follow();
+    emit window->sidebar().workspaceRowsChanged();
+    CHECK(reads == 2);
+
+    // Not presented: nothing to follow.
+    switcher.cancel();
+    follow();
+    emit window->sidebar().workspaceRowsChanged();
+    CHECK(reads == 2);
+}
+
+// }}}

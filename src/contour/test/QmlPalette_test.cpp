@@ -1891,6 +1891,53 @@ TEST_CASE("ActionContextMenu shows a header row as a disabled label", "[contour]
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("ActionContextMenu draws a row's chord in its trailing column", "[contour][gui][qml]")
+{
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto const row = [](char const* title, QString const& shortcut) {
+        return QVariantMap { { QStringLiteral("kind"), QStringLiteral("command") },
+                             { QStringLiteral("title"), QString::fromLatin1(title) },
+                             { QStringLiteral("enabled"), true },
+                             { QStringLiteral("checkable"), false },
+                             { QStringLiteral("checked"), false },
+                             { QStringLiteral("actionId"), 0 },
+                             { QStringLiteral("shortcut"), shortcut } };
+    };
+    auto const model =
+        QVariantList { row("Switch to docs", QStringLiteral("↩")), row("Rename…", QString {}) };
+
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/ActionContextMenu.qml")));
+    INFO("component errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    std::unique_ptr<QObject> menu(component.createWithInitialProperties({ { "entries", model } }));
+    REQUIRE(menu != nullptr);
+    REQUIRE(menu->property("count").toInt() == model.size());
+
+    auto const itemAt = [&](int index) {
+        QQuickItem* item = nullptr;
+        REQUIRE(QMetaObject::invokeMethod(
+            menu.get(), "itemAt", Q_RETURN_ARG(QQuickItem*, item), Q_ARG(int, index)));
+        REQUIRE(item != nullptr);
+        return item;
+    };
+    auto* const withChord = itemAt(0);
+    auto* const without = itemAt(1);
+    auto const* chord = withChord->findChild<QQuickItem*>(QStringLiteral("menuItemShortcut"));
+    REQUIRE(chord != nullptr);
+    CHECK(chord->property("text").toString() == QStringLiteral("↩"));
+    // The label makes room for it: the row is wider than the same row without a chord would be.
+    CHECK(withChord->property("rightPadding").toReal() > without->property("rightPadding").toReal());
+    auto const* none = without->findChild<QQuickItem*>(QStringLiteral("menuItemShortcut"));
+    REQUIRE(none != nullptr);
+    CHECK(none->property("text").toString().isEmpty());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("SessionChrome puts the block's ⋯ button in its strip, and the tooltip is gone",
           "[contour][gui][qml][blocks]")
 {

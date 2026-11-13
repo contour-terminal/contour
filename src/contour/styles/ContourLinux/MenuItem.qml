@@ -3,7 +3,7 @@
 // rounded corners, inset from the menu's edge by the menu's own padding.
 //
 // A checkable item reserves an indicator column so the labels below it stay aligned, and a sub-menu row
-// carries an arrow, as ContourTui's do. In-scene menus show no chords. See ToolButton.qml for what a
+// carries an arrow, as ContourTui's do. A row's chord is ContourMenuItem's trailing column. See ToolButton.qml for what a
 // style file is.
 import QtQuick
 import QtQuick.Templates as T

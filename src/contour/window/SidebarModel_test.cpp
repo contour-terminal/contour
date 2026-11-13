@@ -946,3 +946,18 @@ TEST_CASE("the footer's counts take their shorter wording only when the full one
     footer = { .needYou = 3, .working = 0 };
     CHECK(footerCompactTextOf(footer) == "3 waiting");
 }
+
+TEST_CASE("SidebarModel: the rows' times run while the sidebar or the switcher over the window shows them",
+          "[contour][sidebar]")
+{
+    using contour::config::SidebarVisibility;
+    // The chip's dropdown with the sidebar hidden shows the same running times: they must not stand still.
+    CHECK(sidebarPresenceOf(SidebarVisibility::Hidden, WindowExposure::Exposed, SwitcherOverWindow::Yes)
+          == SidebarPresence::Shown);
+    CHECK(sidebarPresenceOf(SidebarVisibility::Hidden, WindowExposure::Exposed, SwitcherOverWindow::No)
+          == SidebarPresence::Hidden);
+    CHECK(sidebarPresenceOf(SidebarVisibility::Shown, WindowExposure::Exposed, SwitcherOverWindow::No)
+          == SidebarPresence::Shown);
+    CHECK(sidebarPresenceOf(SidebarVisibility::Shown, WindowExposure::Hidden, SwitcherOverWindow::Yes)
+          == SidebarPresence::Hidden);
+}

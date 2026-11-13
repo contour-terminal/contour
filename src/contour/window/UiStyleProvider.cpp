@@ -11,6 +11,7 @@
 #include <contour/window/LinkPillPlacement.hpp>
 #include <contour/window/PalettePlacement.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/PickerAccessory.hpp>
 #include <contour/window/PopupAnchor.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/SecureLockPlacement.hpp>
@@ -592,6 +593,14 @@ QVariantMap UiStyleProvider::sidebarControls() const
                                         face.drop == SidebarControlDrop::NewWorkspace } });
     }
     return controls;
+}
+
+QVariantMap UiStyleProvider::pickerAccessory() const
+{
+    auto const& face = pickerAccessoryFace(_groups.layout.sidebar);
+    return QVariantMap { { QStringLiteral("iconName"), nameOf(face.iconName) },
+                         { QStringLiteral("bundledIcon"), nameOf(face.bundledIcon) },
+                         { QStringLiteral("glyph"), nameOf(face.glyph) } };
 }
 
 QVariantMap UiStyleProvider::sidebarToggle(int sidebarVisibility,

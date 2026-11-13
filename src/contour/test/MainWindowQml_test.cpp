@@ -39,6 +39,7 @@
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/PickerAccessory.hpp>
 #include <contour/window/SidebarControls.hpp>
 #include <contour/window/StickyHeaderPlacement.hpp>
 #include <contour/window/TabBadge.hpp>
@@ -1834,6 +1835,13 @@ namespace
                               static_cast<qsizetype>(contour::config::SidebarChevronIcon.size()));
         !icons.contains(chevron.mid(3)))
         icons.append(chevron.mid(3));
+    // A picker row's "open in new window" button, the same way.
+    for (auto const& row: contour::window::PickerAccessoryRows)
+        if (auto const url =
+                QString::fromUtf8(row.openInNewWindow.bundledIcon.data(),
+                                  static_cast<qsizetype>(row.openInNewWindow.bundledIcon.size()));
+            !url.isEmpty() && !icons.contains(url.mid(3)))
+            icons.append(url.mid(3));
     // The secure-input lock names its icon in SecureInputLock.qml, not in a table.
     add("lock-symbolic");
     return icons;

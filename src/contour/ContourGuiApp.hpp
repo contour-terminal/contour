@@ -194,6 +194,7 @@ namespace window
     class QuickTerminalController;
     class SettingsController;
     class SwitcherController;
+    class SwitcherPresenter;
     struct SwitcherOpening;
     struct SwitcherServices;
     class WindowControlStyleProvider;
@@ -1874,10 +1875,8 @@ class ContourGuiApp:
     /// The daemon and workspace switcher popup's controller, created on first use; presented in the scene of
     /// the window it is over (WindowController::presentSwitcher).
     std::unique_ptr<window::SwitcherController> _switcher;
-    /// The window presenting it now; null while none does.
-    QPointer<window::WindowController> _switcherHost;
-    /// The host's sidebar rebuilds, pushed into the switcher while it is presented.
-    QMetaObject::Connection _switcherSidebar;
+    /// Moves _switcher between the windows it is opened over; built with it, destroyed before it.
+    std::unique_ptr<window::SwitcherPresenter> _switcherPresenter;
 
     // Build the two OS appearance sources, each bound to its change handler. The app keeps these
     // factories and builds each source the first time it is read, not at construction (ruling R-i): the

@@ -629,12 +629,16 @@ class MainWindowControllerMock: public QAbstractListModel
         emit switcherChanged();
         emit switcherRequested(anchor ? QVariant { *anchor } : QVariant {});
     }
-    /// Mirrors WindowController::closeSwitcher().
+    /// Mirrors WindowController::closeSwitcher(): a popup that closed while still presented was dismissed.
     Q_INVOKABLE void closeSwitcher()
     {
+        auto* const dismissed = _switcher.data();
+        if (dismissed == nullptr)
+            return;
         _switcher = nullptr;
         _switcherAnchor.reset();
         emit switcherChanged();
+        QMetaObject::invokeMethod(dismissed, "cancel");
     }
     [[nodiscard]] QObject* switcher() const { return _switcher.data(); }
     [[nodiscard]] bool isWorkspaceDropdownOpen() const { return _switcher && _switcherAnchor.has_value(); }

@@ -299,7 +299,10 @@ namespace detail
         label(2),                                          // PaletteSecondaryText
         sourceOf(ColorSourceKind::PaletteHighlight),       // PaletteSelectionFill
         sourceOf(ColorSourceKind::PaletteHighlightedText), // PaletteSelectionText
-        separator(),                                       // PaletteSeparator
+        // Hover is lighter than the selection (libadwaita's row hover under its selected row): the kit's
+        // faintest fill, where ContourLinux and Fluent select with fill.3.
+        fill(4),     // PaletteHoverFill
+        separator(), // PaletteSeparator
         // A lit toggle is accent-tinted, its 22 % wash a mark (1c's text/mark split). Its glyph is the
         // primary label, not the accent: the accent is the user's, and a dark one on its own wash on a dark
         // chrome falls to 1.3:1.
@@ -1287,7 +1290,9 @@ namespace detail
                     // A selected row on the bar-coloured surface must also stand off it (BarSelection).
                     schemeColor(SchemeSlot::BarSelection),     // PaletteSelectionFill
                     schemeColor(SchemeSlot::BarSelectionText), // PaletteSelectionText
-                    schemeColor(SchemeSlot::Secondary),        // PaletteSeparator
+                    // A cell row has no hover: the selection alone moves.
+                    detail::noColor(),                  // PaletteHoverFill
+                    schemeColor(SchemeSlot::Secondary), // PaletteSeparator
                     // A lit toggle is its cells in inverse video -- the bar's ink as the fill, the bar as the
                     // glyph -- which stands off an unlit one on the bar at the ink's own 4.5:1; the scheme's
                     // selection on the bar can fall to 1.9:1. An unlit one and the count, the bar's inks.

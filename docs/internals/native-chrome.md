@@ -170,7 +170,9 @@ bar), `window/TabWellLayout.hpp` and `window/TitleBandGeometry.hpp`. Keep the ke
   `Native` realises the tree as a `QMenu` (an NSMenu on macOS), `InScene` uses the QML menus. The
   `QMenu` realisation is only exercised by display tests; the tree builder is unit tested.
 - **Command palette** (`CommandPalette.qml`, `command/CommandPaletteTree.hpp`): rows grouped by category,
-  parameterised actions collapse to one drill-in row.
+  parameterised actions collapse to one drill-in row. A picker row under a pointer that moved (the
+  switcher's) takes `paletteHoverFill`, the kit's faintest fill: lighter than the selection on every native
+  row, as libadwaita's hover is, and none on the Terminal row, where the selection alone moves.
 - **No title bar and full screen**: with `show_title_bar: true` the server frame is used and the tabs sit
   in a strip below it; in full screen the band reveals when the pointer reaches the top edge.
 

@@ -223,6 +223,7 @@ enum class ChromeColorRole : uint8_t
     PaletteSecondaryText, //!< Group headers, shortcuts, the footer and the placeholder.
     PaletteSelectionFill, //!< The selected row's fill.
     PaletteSelectionText, //!< The selected row's title and accessory.
+    PaletteHoverFill,     //!< A row's fill under a pointer that moved: lighter than the selection's.
     PaletteSeparator,     //!< The rules below the query and above the footer.
 
     // The find bar.

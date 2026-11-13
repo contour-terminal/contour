@@ -6,6 +6,7 @@
 /// stand there; this adapter owns what only Qt can: the role names, the change signals, the coalescing of a
 /// burst of events into one rebuild, the one-second timer behind the running times, and the announcement of
 /// a pane that starts to need the user in a workspace the window is not showing.
+#include <contour/config/TabBarMode.hpp>
 #include <contour/platform/Announcer.hpp>
 #include <contour/window/CloseDialogTable.hpp>
 #include <contour/window/NodeDrag.hpp>
@@ -230,6 +231,36 @@ enum class SidebarPresence : uint8_t
     Hidden = 0, ///< The sidebar is hidden, or the window is not exposed.
     Shown,      ///< The sidebar is shown in an exposed window.
 };
+
+/// Whether the window is on screen.
+enum class WindowExposure : uint8_t
+{
+    Hidden = 0, ///< Minimized, or not mapped yet.
+    Exposed,    ///< On screen.
+};
+
+/// Whether the switcher popup is presented over the window: the chip's dropdown shows the sidebar's rows,
+/// times and all, whether or not the sidebar is shown.
+enum class SwitcherOverWindow : uint8_t
+{
+    No = 0,
+    Yes,
+};
+
+/// @param visibility Whether the window shows its sidebar.
+/// @param exposure Whether the window is on screen.
+/// @param switcher Whether the switcher popup is presented over it.
+/// @return Shown when the window is on screen and its sidebar or the switcher over it shows the rows.
+[[nodiscard]] constexpr SidebarPresence sidebarPresenceOf(config::SidebarVisibility visibility,
+                                                          WindowExposure exposure,
+                                                          SwitcherOverWindow switcher) noexcept
+{
+    if (exposure == WindowExposure::Hidden)
+        return SidebarPresence::Hidden;
+    return visibility == config::SidebarVisibility::Shown || switcher == SwitcherOverWindow::Yes
+               ? SidebarPresence::Shown
+               : SidebarPresence::Hidden;
+}
 
 /// Whether the window has the user's attention, which is when a background pane that starts to need them
 /// is worth saying aloud.

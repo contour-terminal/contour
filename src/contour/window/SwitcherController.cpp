@@ -94,28 +94,6 @@ namespace
         return held;
     }
 
-    /// What a row's kind is called to assistive technology, per SwitcherRowKind.
-    constexpr auto KindWords = std::array<std::string_view, 9> {
-        "workspace", "daemon", "action", "action", "action", "in progress", "in progress", "action", "error",
-    };
-    static_assert(KindWords.size() == static_cast<std::size_t>(SwitcherRowKind::Failure) + 1,
-                  "every SwitcherRowKind needs its words");
-
-    /// What a workspace's state adds to its description, per SwitcherWorkspaceState.
-    constexpr auto StateWords = std::array<std::string_view, 3> { "", "in another window", "current" };
-    static_assert(StateWords.size() == static_cast<std::size_t>(SwitcherWorkspaceState::ThisWindow) + 1,
-                  "every SwitcherWorkspaceState needs its words");
-
-    [[nodiscard]] std::string accessibleDescriptionOf(SwitcherRow const& row)
-    {
-        auto text = std::string { KindWords.at(static_cast<std::size_t>(row.kind)) };
-        for (auto const part: { urgencyText(row.status.urgency),
-                                std::string_view { StateWords.at(static_cast<std::size_t>(row.state)) } })
-            if (!part.empty())
-                text += std::format(", {}", part);
-        return text;
-    }
-
     [[nodiscard]] QVariantList utf16Matches(SwitcherRow const& row)
     {
         auto list = QVariantList {};
@@ -132,6 +110,15 @@ namespace
             return switcherRowIdentity(x) == switcherRowIdentity(y) && x.groupTitle == y.groupTitle;
         });
     }
+
+    /// @return @p sets for QML.
+    [[nodiscard]] QStringList footerHintSetsOf(std::vector<std::string> const& sets)
+    {
+        auto list = QStringList {};
+        for (auto const& each: sets)
+            list.push_back(QString::fromStdString(each));
+        return list;
+    }
 } // namespace
 
 SwitcherController::SwitcherController(SwitcherServices services, QObject* parent):
@@ -143,13 +130,23 @@ SwitcherController::~SwitcherController() = default;
 
 SwitcherInputs SwitcherController::inputs() const
 {
-    return SwitcherInputs { .daemons = _daemons, .windowDaemon = _windowDaemon, .discovery = _discovery };
+    return SwitcherInputs { .daemons = _daemons,
+                            .windowDaemon = _windowDaemon,
+                            .discovery = _discovery,
+                            .showSwitcherShortcut = _showSwitcherShortcut };
+}
+
+std::size_t SwitcherController::indexOf(session::SwitchTarget const& address) const
+{
+    return static_cast<std::size_t>(
+        std::distance(_daemons.begin(),
+                      std::ranges::find_if(_daemons, [&](auto const& each) { return isAt(each, address); })));
 }
 
 SwitcherView SwitcherController::view() const
 {
     return SwitcherView { .level = _level,
-                          .daemon = _level == SwitcherLevel::Daemon ? _levelDaemon : _scopeDaemon,
+                          .daemon = indexOf(_level == SwitcherLevel::Daemon ? _levelAddress : _scopeAddress),
                           .origin = _opening.origin,
                           .scope = _scope,
                           .filter = _filterText };
@@ -210,7 +207,9 @@ void SwitcherController::open(SwitcherOpening opening)
     _pendingListings.clear();
     _labelFailure.clear();
     _rowMenu = {};
-    setBusy(false);
+    _showSwitcherShortcut =
+        _services.showSwitcherShortcut ? _services.showSwitcherShortcut() : std::string {};
+    dropStart();
 
     // The window's own daemon is not listed: its workspaces are its sidebar's.
     auto const& own = _opening.windowDaemon;
@@ -221,7 +220,7 @@ void SwitcherController::open(SwitcherOpening opening)
                                       .failure = {},
                                       .workspaces = _opening.windowWorkspaces };
     _daemons.clear();
-    _discovery = SwitcherDiscovery::Settled;
+    setDiscovery(SwitcherDiscovery::Settled);
     if (_opening.pick)
     {
         // A pick: the one daemon a switch asked about, listed already; the window's own beside it, for the
@@ -232,7 +231,7 @@ void SwitcherController::open(SwitcherOpening opening)
         else
             _daemons = { std::move(ownDaemon), *_opening.pick };
         _windowDaemon = 0;
-        _scopeDaemon = _daemons.size() - 1;
+        _scopeAddress = _daemons.back().address;
     }
     else
     {
@@ -253,12 +252,12 @@ void SwitcherController::open(SwitcherOpening opening)
         _windowDaemon = static_cast<std::size_t>(
             std::distance(_daemons.begin(),
                           std::ranges::find_if(_daemons, [&](auto const& each) { return isAt(each, own); })));
-        _scopeDaemon = _windowDaemon;
+        _scopeAddress = daemonOf(own);
         // The chip's dropdown looks for the others once it is widened.
         if (_scope == SwitcherScope::Everything)
             discoverDaemons();
     }
-    _level = _opening.prompt == SwitcherPrompt::NewDaemon ? SwitcherLevel::NewDaemon : SwitcherLevel::Top;
+    setLevel(_opening.prompt == SwitcherPrompt::NewDaemon ? SwitcherLevel::NewDaemon : SwitcherLevel::Top);
     rebuild(std::nullopt);
     emit filterChanged();
 }
@@ -275,7 +274,7 @@ void SwitcherController::updateWindowWorkspaces(std::vector<SwitcherWorkspace> w
 
 void SwitcherController::discoverDaemons()
 {
-    _discovery = SwitcherDiscovery::Running;
+    setDiscovery(SwitcherDiscovery::Running);
     // A reopening (the workspace chip clicked again) while one runs takes over its answer rather than start a
     // second: what the daemons are does not depend on the opening, and each discovery holds a worker.
     _discoveryFor = _openings;
@@ -335,14 +334,9 @@ void SwitcherController::mergeLocalDaemons(std::vector<cli::DiscoveredDaemon> co
         if (daemon.address.kind == SwitchDaemonKind::Host)
             merged.push_back(std::move(daemon));
     _daemons = std::move(merged);
-    auto const indexOf = [this](session::SwitchTarget const& address) {
-        return static_cast<std::size_t>(std::distance(
-            _daemons.begin(),
-            std::ranges::find_if(_daemons, [&](auto const& each) { return isAt(each, address); })));
-    };
+    // The scope and the level hold their daemons by address: found again wherever the merge put them.
     _windowDaemon = indexOf(own);
-    _scopeDaemon = _windowDaemon;
-    _discovery = SwitcherDiscovery::Settled;
+    setDiscovery(SwitcherDiscovery::Settled);
     // Every local daemon is listed now, so typing finds their workspaces; a saved host waits to be drilled
     // into (connecting may ask for credentials, which no keystroke may trigger).
     for (auto const index: std::views::iota(std::size_t { 0 }, _daemons.size()))
@@ -445,8 +439,11 @@ void SwitcherController::updatePresentation()
     auto const matchesSomething = std::ranges::any_of(_rows, [](SwitcherRow const& each) {
         return each.kind == SwitcherRowKind::Workspace || each.kind == SwitcherRowKind::Daemon;
     });
+    auto const title =
+        QString::fromStdString(switcherLevelTitle(currentView, daemonName(indexOf(_levelAddress))));
     auto next = Presentation {
-        .levelTitle = QString::fromStdString(switcherLevelTitle(currentView, daemonName(_levelDaemon))),
+        .fieldName = fieldNameOf(title),
+        .levelTitle = title,
         .hintText = QString::fromStdString(switcherHintText(currentView, daemonName(currentView.daemon))),
         .emptyText = !_filterText.empty() && _level != SwitcherLevel::NewDaemon && !matchesSomething
                          ? QString::fromStdString(switcherEmptyText(_filterText))
@@ -455,7 +452,7 @@ void SwitcherController::updatePresentation()
             row != nullptr
                 ? QString::fromStdString(switcherDescription(*row, currentInputs, currentView, _opening.mode))
                 : QString {},
-        .footerHints = QString::fromStdString(switcherFooterHints(
+        .footerHintSets = footerHintSetsOf(switcherFooterHintSets(
             subject, switcherEscapeCommand(keyContext(0)), _services.style, _opening.mode)),
     };
     if (std::exchange(_presentation, std::move(next)) != _presentation)
@@ -464,6 +461,9 @@ void SwitcherController::updatePresentation()
 
 void SwitcherController::replaceFilter(std::string text)
 {
+    // Another label than the one a start runs for: that start is no longer what was asked for.
+    if (text != _filterText)
+        dropStart();
     _filterText = std::move(text);
     _filter = QString::fromStdString(_filterText);
     _labelFailure.clear();
@@ -579,14 +579,14 @@ void SwitcherController::drillIn(SwitcherRow const& row)
     switch (row.kind)
     {
         case SwitcherRowKind::Daemon:
-            _level = SwitcherLevel::Daemon;
-            _levelDaemon = row.daemon;
+            setLevel(SwitcherLevel::Daemon);
+            _levelAddress = daemonOf(row.target);
             // A saved host connects now; a daemon whose listing failed is asked again.
             if (row.daemon < _daemons.size() && _daemons[row.daemon].listing != SwitcherListing::Listed
                 && _daemons[row.daemon].listing != SwitcherListing::Listing)
                 listDaemon(row.daemon);
             break;
-        case SwitcherRowKind::NewDaemon: _level = SwitcherLevel::NewDaemon; break;
+        case SwitcherRowKind::NewDaemon: setLevel(SwitcherLevel::NewDaemon); break;
         case SwitcherRowKind::AllDaemons:
             _scope = SwitcherScope::Everything;
             // The chip's dropdown did not look for the other daemons as it opened.
@@ -607,18 +607,21 @@ void SwitcherController::drillIn(SwitcherRow const& row)
 
 void SwitcherController::back()
 {
-    if (_level == SwitcherLevel::Daemon && _levelDaemon < _daemons.size())
+    if (auto const level = indexOf(_levelAddress); _level == SwitcherLevel::Daemon && level < _daemons.size())
     {
         // A saved host still connecting is not waited for: its answer is dropped, and it reads as before.
-        auto& left = _daemons[_levelDaemon];
+        auto& left = _daemons[level];
         if (left.address.kind == SwitchDaemonKind::Host && left.listing == SwitcherListing::Listing)
         {
             std::erase_if(_pendingListings, [&](auto const& each) { return each.first == left.address; });
             left.listing = SwitcherListing::NotListed;
         }
     }
+    // Leaving the New Daemon level leaves its start: it is dropped as a host's listing is.
+    if (_level == SwitcherLevel::NewDaemon)
+        dropStart();
     if (_level != SwitcherLevel::Top)
-        _level = SwitcherLevel::Top;
+        setLevel(SwitcherLevel::Top);
     else if (_opening.origin == SwitcherOrigin::Chip && _scope == SwitcherScope::Everything)
         _scope = SwitcherScope::OneDaemon;
     else
@@ -793,20 +796,21 @@ void SwitcherController::submitLabel(QString const& label, int mode)
     setBusy(true);
     // Started off the GUI thread: the spawn waits for the daemon to serve. The worker never touches this
     // object; its answer is posted back (as discovery's is).
-    auto const opening = _openings;
+    auto const start = ++_starts;
     _jobs.run([job = _services.startDaemon(text)] { return job(); },
-              [this, opening, text, switchMode](std::expected<cli::NamedDaemonStart, std::string> result) {
-                  finishStart(opening, text, switchMode, std::move(result));
+              [this, start, text, switchMode](std::expected<cli::NamedDaemonStart, std::string> result) {
+                  finishStart(start, text, switchMode, std::move(result));
               });
 }
 
-void SwitcherController::finishStart(std::uint64_t opening,
+void SwitcherController::finishStart(std::uint64_t start,
                                      std::string const& label,
                                      session::SwitchMode mode,
                                      std::expected<cli::NamedDaemonStart, std::string> result)
 {
-    // Cancelled, or the popup opened again: nothing is waiting for this answer, and it must not switch.
-    if (opening != _openings)
+    // Dropped (cancelled, dismissed, left, relabelled, or the popup opened again): nothing is waiting for
+    // this answer, and it must not switch.
+    if (start != _starts)
         return;
     setBusy(false);
     if (!result)
@@ -822,13 +826,94 @@ void SwitcherController::finishStart(std::uint64_t opening,
 void SwitcherController::abandon()
 {
     ++_openings; // whatever is in flight is no longer wanted
+    dropStart();
+}
+
+void SwitcherController::dropStart()
+{
+    ++_starts;
     setBusy(false);
+}
+
+void SwitcherController::setLevel(SwitcherLevel level)
+{
+    if (std::exchange(_level, level) != level)
+        emit levelChanged();
+}
+
+void SwitcherController::setDiscovery(SwitcherDiscovery discovery)
+{
+    if (std::exchange(_discovery, discovery) != discovery)
+        emit discoveringChanged();
+}
+
+QString SwitcherController::fieldNameOf(QString const& levelTitle) const
+{
+    switch (_level)
+    {
+        case SwitcherLevel::Top: return tr("Switch workspace or daemon");
+        case SwitcherLevel::Daemon: return tr("Switch to a workspace of %1").arg(levelTitle);
+        case SwitcherLevel::NewDaemon: return tr("Label of the new daemon");
+    }
+    return {};
+}
+
+QString SwitcherController::accessibleDescriptionOf(SwitcherRow const& row) const
+{
+    auto parts = QStringList {};
+    switch (switcherRowKindRule(row.kind).role)
+    {
+        case SwitcherRowRole::Workspace: parts << tr("workspace"); break;
+        case SwitcherRowRole::Daemon: parts << tr("daemon"); break;
+        case SwitcherRowRole::Action: parts << tr("action"); break;
+        case SwitcherRowRole::Progress: parts << tr("in progress"); break;
+        case SwitcherRowRole::Error: parts << tr("error"); break;
+    }
+    if (auto const urgency = urgencyText(row.status.urgency); !urgency.empty())
+        parts << QString::fromUtf8(urgency.data(), static_cast<qsizetype>(urgency.size()));
+    switch (row.state)
+    {
+        case SwitcherWorkspaceState::Hidden: break;
+        case SwitcherWorkspaceState::ShownElsewhere: parts << tr("in another window"); break;
+        case SwitcherWorkspaceState::ThisWindow: parts << tr("current"); break;
+    }
+    // What the row's trailing detail draws -- git, the tabs, a failed command's reason and time -- which the
+    // delegate keeps from assistive technology so it is not read twice.
+    auto const detail =
+        switcherDetail(row, inputs(), _services.now ? _services.now() : std::chrono::system_clock::now());
+    if (auto const said = detail.text + detail.separator + detail.command + detail.tail; !said.empty())
+        parts << QString::fromStdString(said);
+    return parts.join(QStringLiteral(", "));
 }
 
 void SwitcherController::cancel()
 {
     abandon();
     emit cancelled();
+}
+
+QString SwitcherController::labelCaption() const
+{
+    return tr("Label — names the daemon in the switcher, the sidebar and --label");
+}
+
+QString SwitcherController::labelCommandCaption() const
+{
+    return tr("Equivalent command");
+}
+
+int SwitcherController::labelVerdictGlyph() const noexcept
+{
+    if (!_labelFailure.empty())
+        return static_cast<int>(std::to_underlying(TabBadgeKind::Error));
+    switch (_labelState.verdict)
+    {
+        case LabelVerdict::Empty: return static_cast<int>(std::to_underlying(TabBadgeKind::None));
+        case LabelVerdict::Available: return static_cast<int>(std::to_underlying(TabBadgeKind::Done));
+        case LabelVerdict::Running:
+        case LabelVerdict::Invalid: return static_cast<int>(std::to_underlying(TabBadgeKind::Error));
+    }
+    return 0;
 }
 
 QString SwitcherController::labelMessage() const
@@ -861,7 +946,12 @@ QVariant SwitcherController::data(QModelIndex const& modelIndex, int role) const
         case Roles::TitleMatchesRole: return utf16Matches(*row);
         case Roles::GroupTitleRole: return QString::fromStdString(row->groupTitle);
         case Roles::KindRole: return static_cast<int>(std::to_underlying(row->kind));
-        case Roles::GlyphRole: return static_cast<int>(std::to_underlying(row->status.glyph));
+        case Roles::GlyphRole: {
+            // A row waiting for an answer turns the Working ring (still under Reduce Motion, as everywhere).
+            auto const waiting = switcherRowKindRule(row->kind).awaits == AwaitsAnswer::Yes
+                                 || (row->kind == SwitcherRowKind::LabelAction && _isBusy);
+            return static_cast<int>(std::to_underlying(waiting ? TabBadgeKind::Working : row->status.glyph));
+        }
         case Roles::DetailTextRole:
         case Roles::DetailSeparatorRole:
         case Roles::DetailCommandRole:
@@ -878,11 +968,12 @@ QVariant SwitcherController::data(QModelIndex const& modelIndex, int role) const
         }
         case Roles::PillTextRole: return QString::fromStdString(row->pillText);
         case Roles::PillKindRole: return static_cast<int>(std::to_underlying(row->pill));
-        case Roles::AccessibleDescriptionRole: return QString::fromStdString(accessibleDescriptionOf(*row));
+        case Roles::AccessibleDescriptionRole: return accessibleDescriptionOf(*row);
         case Roles::DrillsInRole: return switcherRowKindRule(row->kind).drillsIn == DrillsIn::Yes;
+        case Roles::NewWindowNameRole:
+            return tr("Open %1 in a new window").arg(QString::fromStdString(row->title));
         case Roles::OpensInNewWindowRole:
-            return row->kind == SwitcherRowKind::Workspace
-                   && switcherRowKindRule(row->kind).newWindow == OpensInNewWindow::Yes;
+            return switcherRowKindRule(row->kind).button == NewWindowButton::Yes;
     }
     return {};
 }
@@ -909,6 +1000,7 @@ QHash<int, QByteArray> SwitcherController::roleNames() const
         { static_cast<int>(Roles::AccessibleDescriptionRole), "accessibleDescription" },
         { static_cast<int>(Roles::DrillsInRole), "drillsIn" },
         { static_cast<int>(Roles::OpensInNewWindowRole), "opensInNewWindow" },
+        { static_cast<int>(Roles::NewWindowNameRole), "newWindowName" },
     };
 }
 

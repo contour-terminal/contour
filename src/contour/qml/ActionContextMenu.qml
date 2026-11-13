@@ -19,7 +19,8 @@ ContourMenu {
 
     // The menu, as data. One row is
     //   { kind: "command" | "separator" | "submenu" | "swatches",
-    //     title, enabled, checkable, checked, actionId, children: [rows], swatches: [swatch] }
+    //     title, enabled, checkable, checked, actionId, shortcut, children: [rows], swatches: [swatch] }
+    // where `shortcut`, optional, is the chord drawn in the row's trailing column.
     // and a swatch is { title, color, actionId, enabled, checked }.
     property var entries: []
 
@@ -160,7 +161,8 @@ ContourMenu {
                     "enabled": row.enabled,
                     "checkable": row.checkable,
                     "checked": row.checked,
-                    "actionId": row.actionId
+                    "actionId": row.actionId,
+                    "shortcutText": row.shortcut || ""
                 });
                 menu.addItem(item);
                 created.push(item);

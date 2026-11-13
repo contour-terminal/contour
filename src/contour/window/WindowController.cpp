@@ -298,9 +298,9 @@ void WindowController::refreshSidebarPresence()
 {
     if (!_sidebar)
         return;
-    _sidebar->setPresence(_sidebarVisibility == config::SidebarVisibility::Shown && isExposed()
-                              ? SidebarPresence::Shown
-                              : SidebarPresence::Hidden);
+    _sidebar->setPresence(sidebarPresenceOf(_sidebarVisibility,
+                                            isExposed() ? WindowExposure::Exposed : WindowExposure::Hidden,
+                                            _switcher ? SwitcherOverWindow::Yes : SwitcherOverWindow::No));
     _sidebar->setActivity(_osWindow != nullptr && _osWindow->isActive() ? WindowActivity::Active
                                                                         : WindowActivity::Inactive);
 }
@@ -715,6 +715,7 @@ void WindowController::presentSwitcher(SwitcherController* switcher, std::option
     _switcher = switcher;
     _switcherAnchor = anchor;
     emit switcherChanged();
+    refreshSidebarPresence(); // the chip's dropdown shows the sidebar's running times
     emit switcherRequested(anchor ? QVariant { *anchor } : QVariant {});
 }
 
@@ -722,17 +723,25 @@ void WindowController::withdrawSwitcher()
 {
     if (!_switcher)
         return;
+    letGoOfSwitcher();
     emit switcherWithdrawn();
-    closeSwitcher();
 }
 
 void WindowController::closeSwitcher()
 {
-    if (!_switcher && !_switcherAnchor)
+    auto* const dismissed = _switcher.data();
+    if (dismissed == nullptr)
         return;
+    letGoOfSwitcher();
+    dismissed->cancel();
+}
+
+void WindowController::letGoOfSwitcher()
+{
     _switcher = nullptr;
     _switcherAnchor.reset();
     emit switcherChanged();
+    refreshSidebarPresence();
 }
 
 SwitcherController* WindowController::presentedSwitcher() const noexcept

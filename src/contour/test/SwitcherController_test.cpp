@@ -167,6 +167,26 @@ struct Switcher
 
 } // namespace
 
+TEST_CASE("Switcher: the field's name is notified with the daemon level's title", "[contour][switcher]")
+{
+    auto s = Switcher {};
+    s.open();
+    s.select("home", SwitcherRowKind::Daemon);
+    // What a binding reads when it is told: the level is entered before its title is decided.
+    auto heard = std::vector<QString> {};
+    QObject::connect(s.controller.get(), &window::SwitcherController::presentationChanged, [&] {
+        heard.push_back(s.controller->fieldName());
+    });
+
+    CHECK(s.press(Qt::Key_Return));
+    REQUIRE_FALSE(heard.empty());
+    CHECK(heard.back() == "Switch to a workspace of home");
+    CHECK(s.controller->fieldName() == "Switch to a workspace of home");
+
+    CHECK(s.press(Qt::Key_Escape));
+    CHECK(heard.back() == "Switch workspace or daemon");
+}
+
 TEST_CASE("Switcher: Return on a daemon drills in; Escape comes back to the daemon row",
           "[contour][switcher]")
 {
@@ -638,4 +658,135 @@ TEST_CASE("Switcher: a discovery answering after the popup closed adds nothing",
     switcher.reset();
     QTest::qWait(20);
     CHECK(discovery->calls() == 2);
+}
+
+TEST_CASE("Switcher: the daemon drilled into stays it while a discovery reorders the daemons",
+          "[contour][switcher][threading]")
+{
+    // [work, ci-box] while discovery runs; drilled into ci-box; then discovery puts home and lab before it.
+    auto s = Switcher {};
+    auto services = s.world.services();
+    auto const discovery = std::make_shared<test::GatedDiscovery>(s.world.found);
+    services.discovery = discovery;
+    s.controller = std::make_unique<window::SwitcherController>(std::move(services));
+    s.world.heldBack = { "ci-box" };
+    s.controller->open(window::SwitcherOpening { .window = ThisWindow,
+                                                 .windowDaemon = switcherLabelled("work"),
+                                                 .mode = SwitchMode::Switch,
+                                                 .prompt = window::SwitcherPrompt::Browse,
+                                                 .pick = std::nullopt,
+                                                 .scope = window::SwitcherScope::Everything,
+                                                 .windowWorkspaces = workWorkspaces(),
+                                                 .origin = window::SwitcherOrigin::Centred });
+    REQUIRE(discovery->awaitCalls(1));
+    s.select("ci-box", SwitcherRowKind::Daemon);
+    CHECK(s.press(Qt::Key_Return));
+    CHECK(s.controller->levelTitle() == "ci-box");
+
+    discovery->releaseOne();
+    REQUIRE(switcherWaitUntil([&] { return !s.controller->isDiscovering(); }));
+    CHECK(s.controller->levelTitle() == "ci-box");
+    CHECK(s.titles() == std::vector<std::string> { "Connecting to ci-box…", "New Workspace" });
+
+    // Escape leaves ci-box, wherever it is listed now: its late answer is dropped.
+    CHECK(s.press(Qt::Key_Escape));
+    CHECK(s.controller->level() == static_cast<int>(window::SwitcherLevel::Top));
+    s.world.answer("ci-box");
+    QCoreApplication::processEvents();
+    CHECK(
+        s.role(s.rowOf("ci-box", SwitcherRowKind::Daemon), window::SwitcherController::Roles::DetailTextRole)
+        == "Not connected");
+}
+
+TEST_CASE("Switcher: All daemons… shows the chord bound to ShowSwitcher", "[contour][switcher]")
+{
+    auto const bound = GENERATE(as<std::string> {}, "Ctrl+Shift+R", "");
+    auto s = Switcher {};
+    auto services = s.world.services();
+    services.showSwitcherShortcut = [bound] {
+        return std::string { bound };
+    };
+    s.controller = std::make_unique<window::SwitcherController>(std::move(services));
+    s.open(window::SwitcherOrigin::Chip, window::SwitcherScope::OneDaemon);
+    CHECK(s.role(s.rowOf("All daemons…", SwitcherRowKind::AllDaemons),
+                 window::SwitcherController::Roles::DetailTextRole)
+          == QString::fromStdString(bound));
+}
+
+TEST_CASE("Switcher: the level and discovery tell QML of their own changes", "[contour][switcher]")
+{
+    auto s = Switcher {};
+    auto levels = QSignalSpy { s.controller.get(), &window::SwitcherController::levelChanged };
+    auto discovering = QSignalSpy { s.controller.get(), &window::SwitcherController::discoveringChanged };
+    s.open();
+    CHECK(discovering.count() >= 2); // looking, then settled
+    CHECK(s.controller->fieldName() == "Switch workspace or daemon");
+
+    s.select("New Daemon…", SwitcherRowKind::NewDaemon);
+    CHECK(s.press(Qt::Key_Return));
+    CHECK(levels.count() == 1);
+    CHECK(s.controller->isAskingLabel());
+    CHECK(s.controller->fieldName() == "Label of the new daemon");
+
+    CHECK(s.press(Qt::Key_Escape));
+    CHECK(levels.count() == 2);
+    s.select("home", SwitcherRowKind::Daemon);
+    CHECK(s.press(Qt::Key_Return));
+    CHECK(levels.count() == 3);
+    CHECK(s.controller->fieldName() == "Switch to a workspace of home");
+}
+
+TEST_CASE("Switcher: a row's description says its git, its reason and its place", "[contour][switcher]")
+{
+    auto s = Switcher {};
+    auto own = workWorkspaces();
+    own[1].status.gitText = "main ↑2";
+    own[1].status.reason = { .label = "exit 1", .separator = " · ", .command = "make deploy" };
+    own[1].status.urgency = Urgency::Failed;
+    s.open();
+    s.controller->updateWindowWorkspaces(own);
+    auto const description =
+        s.role(s.rowOf("api-gateway"), window::SwitcherController::Roles::AccessibleDescriptionRole);
+    CHECK(description.startsWith("workspace"));
+    CHECK(description.contains("main ↑2"));
+    CHECK(description.contains("exit 1 · make deploy"));
+    CHECK(s.role(s.rowOf("contour"), window::SwitcherController::Roles::AccessibleDescriptionRole)
+              .contains("current"));
+}
+
+TEST_CASE("Switcher: a start is dropped once its level is left or its label changed",
+          "[contour][switcher][threading]")
+{
+    auto s = Switcher {};
+    auto start = test::GatedStart {};
+    auto services = s.world.services();
+    services.startDaemon = [&start](std::string const&) {
+        return start.job();
+    };
+    s.controller = std::make_unique<window::SwitcherController>(std::move(services));
+    s.open(window::SwitcherOrigin::Centred,
+           window::SwitcherScope::Everything,
+           window::SwitcherPrompt::NewDaemon);
+    s.controller->checkLabel("research");
+    CHECK(s.press(Qt::Key_Return));
+    REQUIRE(start.awaitStarted());
+    CHECK(s.controller->isBusy());
+
+    auto const how = GENERATE(as<std::string> {}, "left", "relabelled", "abandoned");
+    if (how == "left")
+    {
+        CHECK(s.press(Qt::Key_Escape)); // the label first
+        CHECK(s.press(Qt::Key_Escape)); // then the level
+        CHECK(s.controller->level() == static_cast<int>(window::SwitcherLevel::Top));
+    }
+    else if (how == "relabelled")
+        s.controller->checkLabel("research2");
+    else
+        s.controller->abandon();
+    CHECK_FALSE(s.controller->isBusy());
+
+    start.release();
+    QTest::qWait(100);
+    QCoreApplication::processEvents();
+    CHECK(s.world.requested.empty());
 }

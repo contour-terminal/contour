@@ -1386,6 +1386,7 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor paletteSecondaryText READ paletteSecondaryText NOTIFY changed)
     Q_PROPERTY(QColor paletteSelectionFill READ paletteSelectionFill NOTIFY changed)
     Q_PROPERTY(QColor paletteSelectionText READ paletteSelectionText NOTIFY changed)
+    Q_PROPERTY(QColor paletteHoverFill READ paletteHoverFill NOTIFY changed)
     Q_PROPERTY(QColor paletteSeparator READ paletteSeparator NOTIFY changed)
     Q_PROPERTY(QColor findToggleOnFill READ findToggleOnFill NOTIFY changed)
     Q_PROPERTY(QColor findToggleOnText READ findToggleOnText NOTIFY changed)
@@ -1527,6 +1528,7 @@ class ChromeColorTokens: public QObject
     {
         return color(config::ChromeColorRole::PaletteSelectionText);
     }
+    [[nodiscard]] QColor paletteHoverFill() const { return color(config::ChromeColorRole::PaletteHoverFill); }
     [[nodiscard]] QColor paletteSeparator() const { return color(config::ChromeColorRole::PaletteSeparator); }
     [[nodiscard]] QColor findToggleOnFill() const { return color(config::ChromeColorRole::FindToggleOnFill); }
     [[nodiscard]] QColor findToggleOnText() const { return color(config::ChromeColorRole::FindToggleOnText); }

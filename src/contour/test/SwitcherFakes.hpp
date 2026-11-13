@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -83,6 +84,14 @@ class FixedDiscovery final: public cli::IDaemonDiscovery
 class GatedDiscovery final: public cli::IDaemonDiscovery
 {
   public:
+    /// @param found What each discovery answers once released.
+    explicit GatedDiscovery(std::vector<cli::DiscoveredDaemon> found = { { .label = "admin",
+                                                                           .socket = "/run/contour/admin",
+                                                                           .workspaces = 2 } }):
+        _found(std::move(found))
+    {
+    }
+
     [[nodiscard]] std::vector<cli::DiscoveredDaemon> discover() override
     {
         auto lock = std::unique_lock { _mutex };
@@ -93,7 +102,7 @@ class GatedDiscovery final: public cli::IDaemonDiscovery
         _changed.wait(lock, [this] { return _released > 0; });
         --_released;
         --_running;
-        return { { .label = "admin", .socket = "/run/contour/admin", .workspaces = 2 } };
+        return _found;
     }
 
     /// Lets one held discovery answer.
@@ -124,12 +133,52 @@ class GatedDiscovery final: public cli::IDaemonDiscovery
     }
 
   private:
+    std::vector<cli::DiscoveredDaemon> _found;
     mutable std::mutex _mutex;
     std::condition_variable _changed;
     int _calls = 0;
     int _running = 0;
     int _mostAtOnce = 0;
     int _released = 0;
+};
+
+/// A daemon start ("New Daemon…") that holds its worker until released, then succeeds: a spawn that takes its
+/// time, so the popup can be closed, left or relabelled while it runs.
+class GatedStart
+{
+  public:
+    /// @return The job SwitcherServices::startDaemon returns; it waits for release().
+    [[nodiscard]] std::function<std::expected<cli::NamedDaemonStart, std::string>()> job()
+    {
+        return [this] {
+            auto lock = std::unique_lock { _mutex };
+            ++_started;
+            _changed.notify_all();
+            _changed.wait(lock, [this] { return _released; });
+            return std::expected<cli::NamedDaemonStart, std::string> { cli::NamedDaemonStart::Started };
+        };
+    }
+
+    /// @return Whether a job started within three seconds.
+    [[nodiscard]] bool awaitStarted()
+    {
+        auto lock = std::unique_lock { _mutex };
+        return _changed.wait_for(lock, std::chrono::seconds(3), [this] { return _started > 0; });
+    }
+
+    /// Lets every job, held or to come, answer.
+    void release()
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _released = true;
+        _changed.notify_all();
+    }
+
+  private:
+    std::mutex _mutex;
+    std::condition_variable _changed;
+    int _started = 0;
+    bool _released = false;
 };
 
 /// A spawner that records what it starts and has the daemon serve once started: "New Daemon…"'s real start
@@ -199,6 +248,9 @@ struct SwitcherWorld
     std::vector<SwitcherRequested> requested;
     std::vector<SwitcherCreated> created;
     std::vector<SwitcherRan> ran;
+    std::function<void()> onRan; ///< What running a sidebar menu row does besides being recorded.
+    /// Each start's job instead of the real one's, when set: a test's GatedStart.
+    std::function<std::function<std::expected<cli::NamedDaemonStart, std::string>()>()> startJob;
     std::vector<std::string> startedLabels;
     RecordingSpawner spawner;
     vthost::InstalledDaemonBinary binary { "contour" };
@@ -253,18 +305,20 @@ struct SwitcherWorld
             .request = [this](vtworkspace::WorkspaceId,
                               session::SwitchTarget target,
                               session::SwitchMode mode) { requested.push_back({ std::move(target), mode }); },
-            .startDaemon =
-                [this](std::string const& label) {
-                    startedLabels.push_back(label);
-                    return [this, label] {
-                        return cli::startNamedDaemon("/run/contour/" + label,
-                                                     { .spawner = spawner,
-                                                       .binary = binary,
-                                                       .placement = placement,
-                                                       .options = {},
-                                                       .timeout = std::chrono::seconds { 1 } });
-                    };
-                },
+            .startDaemon = [this](std::string const& label)
+                -> std::function<std::expected<cli::NamedDaemonStart, std::string>()> {
+                startedLabels.push_back(label);
+                if (startJob)
+                    return startJob();
+                return [this, label] {
+                    return cli::startNamedDaemon("/run/contour/" + label,
+                                                 { .spawner = spawner,
+                                                   .binary = binary,
+                                                   .placement = placement,
+                                                   .options = {},
+                                                   .timeout = std::chrono::seconds { 1 } });
+                };
+            },
             .createWorkspace =
                 [this](vtworkspace::WorkspaceId,
                        session::SwitchTarget const& daemon,
@@ -279,6 +333,8 @@ struct SwitcherWorld
             .runWorkspaceAction =
                 [this](vtworkspace::WorkspaceId, uint64_t workspace, actions::Action const& action) {
                     ran.push_back({ workspace, action });
+                    if (onRan)
+                        onRan();
                 },
         };
     }

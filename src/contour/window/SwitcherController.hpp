@@ -71,6 +71,9 @@ struct SwitcherServices
     std::function<std::chrono::system_clock::time_point()> now {};
     /// How the footer, the row menu and the label prompt spell keys.
     command::ShortcutStyle style = command::ShortcutStyle::Text;
+    /// The chord bound to ShowSwitcher, spelled in @c style, from the bindings as they are now; empty while
+    /// nothing binds it. Read as the popup opens: `All daemons…` shows it.
+    std::function<std::string()> showSwitcherShortcut {};
     /// The sidebar's view of one of the window's own daemon's workspaces, by its daemon id, for its row menu.
     std::function<command::WorkspaceMenuState(vtworkspace::WorkspaceId window, uint64_t workspace)>
         workspaceMenu {};
@@ -104,7 +107,9 @@ class SwitcherController: public QAbstractListModel
     /// The selected row, or -1 for an empty list.
     Q_PROPERTY(int currentIndex READ currentIndex WRITE setCurrentIndex NOTIFY currentIndexChanged)
     /// The level shown, a SwitcherLevel's underlying value.
-    Q_PROPERTY(int level READ level NOTIFY presentationChanged)
+    Q_PROPERTY(int level READ level NOTIFY levelChanged)
+    /// The field's accessible name on the level shown: what it is for there.
+    Q_PROPERTY(QString fieldName READ fieldName NOTIFY presentationChanged)
     /// The level chip before the field: the daemon drilled into, `New Daemon`, or empty.
     Q_PROPERTY(QString levelTitle READ levelTitle NOTIFY presentationChanged)
     /// The field's drawn hint.
@@ -115,10 +120,22 @@ class SwitcherController: public QAbstractListModel
     Q_PROPERTY(QString footerDescription READ footerDescription NOTIFY presentationChanged)
     /// The footer's key hints for the selected row.
     Q_PROPERTY(QString footerHints READ footerHints NOTIFY presentationChanged)
+    /// The footer's hints for every width, widest first (switcherFooterHintSets).
+    Q_PROPERTY(QStringList footerHintSets READ footerHintSets NOTIFY presentationChanged)
     /// Whether other local daemons are still looked for. A QML-facing predicate, hence a bool.
-    Q_PROPERTY(bool isDiscovering READ isDiscovering NOTIFY presentationChanged)
+    Q_PROPERTY(bool isDiscovering READ isDiscovering NOTIFY discoveringChanged)
     /// Whether a daemon is being started. A QML-facing predicate, hence a bool.
     Q_PROPERTY(bool isBusy READ isBusy NOTIFY busyChanged)
+    /// Whether the New Daemon level is shown, which draws the label's body. A QML-facing predicate, hence a
+    /// bool.
+    Q_PROPERTY(bool isAskingLabel READ isAskingLabel NOTIFY levelChanged)
+    /// What a label is, over the verdict.
+    Q_PROPERTY(QString labelCaption READ labelCaption CONSTANT)
+    /// The caption over the equivalent command.
+    Q_PROPERTY(QString labelCommandCaption READ labelCommandCaption CONSTANT)
+    /// The verdict's glyph, a TabBadgeKind's underlying value: Done for an available label, Error for one
+    /// that cannot start, None while nothing is typed.
+    Q_PROPERTY(int labelVerdictGlyph READ labelVerdictGlyph NOTIFY labelChanged)
     /// What the label typed amounts to, a LabelVerdict's underlying value.
     Q_PROPERTY(int labelVerdict READ labelVerdict NOTIFY labelChanged)
     /// The verdict line under the label, or why a start failed.
@@ -148,6 +165,7 @@ class SwitcherController: public QAbstractListModel
         AccessibleDescriptionRole,    ///< Its kind and status in words, for assistive technology.
         DrillsInRole,                 ///< Whether it leads into a level: it wears the drill-in glyph.
         OpensInNewWindowRole,         ///< Whether it can open in a new window: it wears that button.
+        NewWindowNameRole,            ///< That button's accessible name: `Open docs in a new window`.
     };
 
     /// @param services What the popup reaches outside itself through.
@@ -230,13 +248,19 @@ class SwitcherController: public QAbstractListModel
     [[nodiscard]] int currentIndex() const noexcept { return _current; }
     void setCurrentIndex(int index);
     [[nodiscard]] int level() const noexcept { return static_cast<int>(_level); }
+    [[nodiscard]] QString fieldName() const { return _presentation.fieldName; }
     [[nodiscard]] QString levelTitle() const { return _presentation.levelTitle; }
     [[nodiscard]] QString hintText() const { return _presentation.hintText; }
     [[nodiscard]] QString emptyText() const { return _presentation.emptyText; }
     [[nodiscard]] QString footerDescription() const { return _presentation.footerDescription; }
-    [[nodiscard]] QString footerHints() const { return _presentation.footerHints; }
+    [[nodiscard]] QString footerHints() const { return _presentation.footerHintSets.value(0); }
+    [[nodiscard]] QStringList footerHintSets() const { return _presentation.footerHintSets; }
     [[nodiscard]] bool isDiscovering() const noexcept { return _discovery == SwitcherDiscovery::Running; }
     [[nodiscard]] bool isBusy() const noexcept { return _isBusy; }
+    [[nodiscard]] bool isAskingLabel() const noexcept { return _level == SwitcherLevel::NewDaemon; }
+    [[nodiscard]] QString labelCaption() const;
+    [[nodiscard]] QString labelCommandCaption() const;
+    [[nodiscard]] int labelVerdictGlyph() const noexcept;
     [[nodiscard]] int labelVerdict() const noexcept { return static_cast<int>(_labelState.verdict); }
     [[nodiscard]] QString labelMessage() const;
     [[nodiscard]] QString labelAction() const { return QString::fromStdString(_labelState.actionTitle); }
@@ -255,8 +279,12 @@ class SwitcherController: public QAbstractListModel
   signals:
     void filterChanged();
     void currentIndexChanged();
-    /// The level, its texts or the footer changed.
+    /// The level's texts (its field name too) or the footer changed.
     void presentationChanged();
+    /// The level shown changed.
+    void levelChanged();
+    /// Discovery started or settled.
+    void discoveringChanged();
     void labelChanged();
     void busyChanged();
     /// Menu or Shift+F10 asked for the selected row's menu.
@@ -271,11 +299,12 @@ class SwitcherController: public QAbstractListModel
     /// What the field, the chip and the footer show, decided on each rebuild and selection move.
     struct Presentation
     {
+        QString fieldName; ///< Names the level, its title included: notified with it.
         QString levelTitle;
         QString hintText;
         QString emptyText;
         QString footerDescription;
-        QString footerHints;
+        QStringList footerHintSets; ///< Widest first; the first is the footer's whole hints.
 
         bool operator==(Presentation const&) const = default;
     };
@@ -315,12 +344,32 @@ class SwitcherController: public QAbstractListModel
     /// Lists the workspaces of daemon @p index, unless they are being listed.
     void listDaemon(std::size_t index);
 
+    /// @param address A daemon's address.
+    /// @return Its index in _daemons; _daemons.size() for one not there.
+    [[nodiscard]] std::size_t indexOf(session::SwitchTarget const& address) const;
+
+    /// Shows @p level, telling QML when it changed.
+    void setLevel(SwitcherLevel level);
+
+    /// Sets whether other daemons are looked for, telling QML when it changed.
+    void setDiscovery(SwitcherDiscovery discovery);
+
+    /// Drops the start in flight, if any: its answer is no longer wanted.
+    void dropStart();
+
+    /// @return What @p row is to assistive technology: its kind, status, place and detail, in words.
+    [[nodiscard]] QString accessibleDescriptionOf(SwitcherRow const& row) const;
+
     /// Rebuilds the rows: in place when they are the same rows, else in one model reset; the selection stays
     /// on @p keep while the user holds it.
     void rebuild(std::optional<SwitcherRowIdentity> const& keep);
 
     /// Decides the texts the field, the chip and the footer show, telling QML when they changed.
     void updatePresentation();
+
+    /// @return What the field is called on the level shown.
+    /// @param levelTitle The level's title, which a daemon's level names it by.
+    [[nodiscard]] QString fieldNameOf(QString const& levelTitle) const;
 
     /// Enters the level the drill row @p row leads to, remembering where the user was.
     void drillIn(SwitcherRow const& row);
@@ -338,7 +387,7 @@ class SwitcherController: public QAbstractListModel
     void replaceFilter(std::string text);
 
     /// The worker's answer to a start: switches to the daemon, or says why not.
-    void finishStart(std::uint64_t opening,
+    void finishStart(std::uint64_t start,
                      std::string const& label,
                      session::SwitchMode mode,
                      std::expected<cli::NamedDaemonStart, std::string> result);
@@ -356,8 +405,10 @@ class SwitcherController: public QAbstractListModel
     SwitcherOpening _opening;
     std::vector<SwitcherDaemon> _daemons; ///< What the list is made of, in display order.
     std::size_t _windowDaemon = 0;        ///< The window's own daemon, an index into _daemons.
-    std::size_t _scopeDaemon = 0;         ///< The daemon of the OneDaemon scope: the window's, or a pick's.
-    std::size_t _levelDaemon = 0;         ///< The daemon of the Daemon level.
+    /// The daemon of the OneDaemon scope (the window's, or a pick's) and of the Daemon level, by address: a
+    /// discovery reorders _daemons while either is shown, so each is found again as it is read (view()).
+    session::SwitchTarget _scopeAddress;
+    session::SwitchTarget _levelAddress;
     SwitcherLevel _level = SwitcherLevel::Top;
     SwitcherScope _scope = SwitcherScope::Everything;
     SwitcherDiscovery _discovery = SwitcherDiscovery::Settled;
@@ -367,6 +418,7 @@ class SwitcherController: public QAbstractListModel
     DiscoveryJob _discoveryJob = DiscoveryJob::Idle;
     std::uint64_t _discoveryFor = 0; ///< The opening the running discovery's answer serves.
     std::uint64_t _listings = 0;     ///< Counts listings; a host's answer is dropped once backed out of.
+    std::uint64_t _starts = 0; ///< Counts starts; one left (or relabelled) before it answered is dropped.
     /// The listing each daemon waits for, by address; a host left before it answered has none.
     std::vector<std::pair<session::SwitchTarget, std::uint64_t>> _pendingListings;
     QString _filter;
@@ -375,8 +427,9 @@ class SwitcherController: public QAbstractListModel
     SwitcherSelectionOrigin _selectionOrigin = SwitcherSelectionOrigin::Opening;
     Presentation _presentation;
     SwitcherLabelState _labelState;
-    std::string _labelFailure; ///< Why the last start failed; cleared as the label changes.
-    bool _isBusy = false;      ///< @see isBusy(); the QML-facing predicate's member.
+    std::string _labelFailure;         ///< Why the last start failed; cleared as the label changes.
+    std::string _showSwitcherShortcut; ///< SwitcherServices::showSwitcherShortcut, as of the opening.
+    bool _isBusy = false;              ///< @see isBusy(); the QML-facing predicate's member.
     RowMenu _rowMenu;
     /// The discoveries and starts under way, their answers handed back here; joined first, as the controller
     /// goes, and the ones that ended as the next one starts.

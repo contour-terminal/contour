@@ -21,6 +21,7 @@
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/LinkPillPlacement.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/PickerAccessory.hpp>
 #include <contour/window/StickyHeaderChrome.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TitleBandLayout.hpp>
@@ -691,6 +692,32 @@ TEST_CASE("UiStyleProvider publishes the header bar's items", "[contour][uistyle
         CHECK(map["iconName"].toString().toStdString() == row.iconName);
         CHECK(map["bundledIcon"].toString().toStdString() == row.bundledIcon);
         CHECK(map["menu"].toString().toStdString() == headerBarMenuName(row.menu));
+    }
+}
+
+TEST_CASE("UiStyleProvider publishes the picker row's open-in-new-window face",
+          "[contour][uistyle][switcher]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::SidebarLook;
+    struct Case
+    {
+        ChromeStyle row;
+        SidebarLook look;
+    };
+    for (auto const& [row, look]: { Case { ChromeStyle::MacOS, SidebarLook::SourceList },
+                                    Case { ChromeStyle::Fluent, SidebarLook::NavigationPane },
+                                    Case { ChromeStyle::ContourLinux, SidebarLook::HeaderPane },
+                                    Case { ChromeStyle::Terminal, SidebarLook::CellTree } })
+    {
+        INFO("row " << static_cast<int>(row));
+        auto const provider =
+            contour::window::UiStyleProvider(contour::window::chromeInputsFor(row, QGuiApplication::font()));
+        auto const map = provider.pickerAccessory();
+        auto const& face = contour::window::pickerAccessoryFace(look);
+        CHECK(map["iconName"].toString().toStdString() == face.iconName);
+        CHECK(map["bundledIcon"].toString().toStdString() == face.bundledIcon);
+        CHECK(map["glyph"].toString().toStdString() == face.glyph);
     }
 }
 
@@ -2448,7 +2475,9 @@ TEST_CASE("UiStyleProvider: the command palette's inks read on every row, appear
     // popover's border. They are decorative: the query, the list and the footer are told apart by their
     // content and position, and the popover from the window by its surface and its elevation shadow, so no
     // component depends on them being seen (WCAG 1.4.11 asks 3:1 of what identifies a component or state).
-    auto const decorative = std::array { PaletteSeparator };
+    // Nor is PaletteHoverFill: it echoes the pointer, and the row it marks is found by the pointer itself;
+    // the selection, which the keyboard moves, is the state (checked above).
+    auto const decorative = std::array { PaletteSeparator, PaletteHoverFill };
 
     // Every palette role is either checked or documented as decorative here, so a new one cannot slip by.
     auto covered = std::vector<ChromeColorRole> { decorative.begin(), decorative.end() };

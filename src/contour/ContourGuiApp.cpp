@@ -11,7 +11,9 @@
 #include <contour/cli/Hosting.hpp>
 #include <contour/cli/NewDaemon.hpp>
 #include <contour/cli/WorkspaceListing.hpp>
+#include <contour/command/Command.hpp>
 #include <contour/command/LauncherEntries.hpp>
+#include <contour/command/Shortcut.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/ChromeTokenRows.hpp>
 #include <contour/config/Config.hpp>
@@ -74,6 +76,7 @@
 #include <contour/window/SettingsWindowRules.hpp>
 #include <contour/window/SidebarModel.hpp>
 #include <contour/window/SwitcherController.hpp>
+#include <contour/window/SwitcherPresenter.hpp>
 #include <contour/window/TabBarHitValue.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
 #include <contour/window/WindowController.hpp>
@@ -4502,6 +4505,13 @@ window::SwitcherServices ContourGuiApp::switcherServices()
             },
         .now = [] { return std::chrono::system_clock::now(); },
         .style = command::platformShortcutStyle(),
+        .showSwitcherShortcut =
+            [this] {
+                // The bindings as they are now: a ReloadConfig may have rebound it.
+                auto const index = command::shortcutIndex(_config, command::platformShortcutStyle());
+                auto const found = index.find(command::commandId(actions::ShowSwitcher {}));
+                return found != index.end() ? found->second : std::string {};
+            },
         .workspaceMenu =
             [this](vtworkspace::WorkspaceId window, uint64_t workspace) {
                 auto const* const controller = _sessionManager.controllerDisplaying(window);
@@ -4541,30 +4551,13 @@ std::expected<void, std::string> ContourGuiApp::openSwitcher(window::SwitcherOpe
     if (!_switcher)
     {
         _switcher = std::make_unique<window::SwitcherController>(switcherServices());
-        // Both a choice and a cancel close it; the choice was handed to the window switcher already.
-        auto const withdraw = [this] {
-            if (_switcherHost)
-                _switcherHost->withdrawSwitcher();
-            _switcherHost = nullptr;
-            QObject::disconnect(_switcherSidebar);
-        };
-        connect(_switcher.get(), &window::SwitcherController::finished, this, withdraw);
-        connect(_switcher.get(), &window::SwitcherController::cancelled, this, withdraw);
+        _switcherPresenter = std::make_unique<window::SwitcherPresenter>(*_switcher);
     }
-    // One switcher for the application: shown over another window, it leaves the first.
-    if (_switcherHost && _switcherHost != &host)
-        _switcherHost->withdrawSwitcher();
-    QObject::disconnect(_switcherSidebar);
-    _switcherHost = &host;
-    // The window's own workspaces follow its sidebar while the popup is up: the status changes, the
-    // selection stays.
-    _switcherSidebar = connect(
-        &host.sidebar(), &window::SidebarModel::workspaceRowsChanged, this, [this, window = opening.window] {
-            if (_switcherHost && _switcherHost->presentedSwitcher() == _switcher.get())
-                _switcher->updateWindowWorkspaces(windowWorkspacesOf(*_switcherHost, window));
-        });
-    _switcher->open(std::move(opening));
-    host.presentSwitcher(_switcher.get(), anchor);
+    auto const window = opening.window;
+    _switcherPresenter->open(host, std::move(opening), anchor);
+    // The window's own workspaces follow its sidebar while the popup is up there.
+    _switcherPresenter->followSidebar(host.sidebar(),
+                                      [this, &host, window] { return windowWorkspacesOf(host, window); });
     return {};
 }
 

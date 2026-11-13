@@ -17,8 +17,9 @@ PickerPopup {
     // The WindowController. Null-guarded everywhere: it is destroyed before the QML tree on window close.
     required property var controller
 
-    // The switcher this window presents, or null while it presents none.
-    readonly property var switcher: root.controller && root.controller.switcher ? root.controller.switcher : null
+    // The switcher shown: taken as the window presents it, and kept until the popup has closed. The window
+    // lets go of it as it is withdrawn, while the exit transition still draws its rows.
+    property var switcher: null
     // Whether the rows' status glyphs are cells (the Terminal row) rather than shapes.
     readonly property bool cellTree: chromeStyle.sidebar.look === chromeStyle.sidebar.cellTree
 
@@ -30,10 +31,43 @@ PickerPopup {
     emptyText: root.switcher ? root.switcher.emptyText : ""
     footerDescription: root.switcher ? root.switcher.footerDescription : ""
     footerHints: root.switcher ? root.switcher.footerHints : ""
-    fieldName: qsTr("Switch workspace or daemon")
+    footerHintSets: root.switcher ? root.switcher.footerHintSets : []
+    fieldName: root.switcher ? root.switcher.fieldName : ""
+    body: root.switcher && root.switcher.isAskingLabel ? labelBody : null
+
+    // The row under a pointer that moved, or -1: it wears the hover fill and its button, and the selection
+    // stays where the keys put it (board 6; unlike the palette, hover does not select).
+    property int hoveredIndex: -1
+    // The row the open row menu was built for, or -1.
+    property int _menuRow: -1
+    // Whether the popup closes for a row menu pick, which runs once it has closed: no dismissal then.
+    property bool _closingForPick: false
+
+    onPointerMoved: (index) => { root.hoveredIndex = index; }
+
+    /// Opens the menu of row @p index below the pointer, or at the row for a key.
+    function openRowMenu(index, atPointer) {
+        if (!root.switcher)
+            return;
+        const entries = root.switcher.rowMenu(index);
+        if (entries.length === 0)
+            return;
+        root._menuRow = index;
+        rowMenu.entries = entries;
+        if (atPointer) {
+            rowMenu.popup();
+            return;
+        }
+        const item = root.list.itemAtIndex(index);
+        if (item)
+            rowMenu.popup(item, root.textInset, item.height);
+        else
+            rowMenu.popup();
+    }
 
     /// Shows the switcher, centred, or hanging below @p anchor (a rect in the window's coordinates).
     function present(anchor) {
+        root.switcher = root.controller ? root.controller.switcher : null;
         root.anchorRect = anchor ? anchor : null;
         if (!root.opened)
             root.open();
@@ -49,12 +83,29 @@ PickerPopup {
         root.select(root.switcher.currentIndex);
     }
 
-    onOpening: Qt.callLater(root.syncFromSwitcher)
+    onOpening: {
+        // Reopened during a row menu pick's exit, which Qt then cancels without closed(): that pick is dropped
+        // (PickerPopup's onAboutToShow), and this close is a dismissal again.
+        root._closingForPick = false;
+        root.hoveredIndex = -1;
+        Qt.callLater(root.syncFromSwitcher);
+    }
 
-    // However it closed -- a choice, Escape, a click outside -- the window lets go of the switcher.
+    // However it closed, the window lets go of the switcher: after a choice or Escape it has already, and a
+    // click outside is a dismissal it cancels. A row menu's pick runs from onPicked, once the keyboard is back.
     onClosed: {
-        if (root.controller)
+        if (root.controller && !root._closingForPick)
             root.controller.closeSwitcher();
+        if (!root._closingForPick)
+            root.switcher = null;
+    }
+
+    onPicked: (payload) => {
+        root._closingForPick = false;
+        const switcher = root.switcher;
+        root.switcher = null;
+        if (switcher)
+            switcher.triggerRowMenu(payload.row, payload.actionId);
     }
 
     onQueryEdited: (text) => {
@@ -74,7 +125,11 @@ PickerPopup {
             if (root.field.text !== root.switcher.filter)
                 root.field.text = root.switcher.filter;
         }
-        function onModelReset() { root.select(root.switcher.currentIndex); }
+        function onModelReset() {
+            root.hoveredIndex = -1;
+            root.select(root.switcher.currentIndex);
+        }
+        function onRowMenuRequested(row) { root.openRowMenu(row, false); }
     }
 
     Connections {
@@ -102,8 +157,10 @@ PickerPopup {
         required property string accessibleDescription
         required property bool drillsIn
         required property bool opensInNewWindow
+        required property string newWindowName
 
         readonly property bool isCurrent: row.index === root.list.currentIndex
+        readonly property bool isHovered: row.index === root.hoveredIndex
 
         width: ListView.view.width
         height: header.height + entry.height
@@ -128,6 +185,18 @@ PickerPopup {
             Accessible.name: row.title
             Accessible.description: row.accessibleDescription
             Accessible.selected: row.isCurrent
+
+            // The hover fill, under a pointer that moved, lighter than the selection, which draws over it. The
+            // Terminal row has none: a cell row's selection alone moves.
+            Rectangle {
+                objectName: "switcherHover"
+                anchors.fill: parent
+                anchors.leftMargin: chromeStyle.space.paletteInset
+                anchors.rightMargin: chromeStyle.space.paletteInset
+                radius: chromeStyle.radii.control
+                visible: row.isHovered && !row.isCurrent
+                color: chromeStyle.colors.paletteHoverFill
+            }
 
             PickerRowSelection {
                 id: selection
@@ -229,6 +298,21 @@ PickerPopup {
                     }
                 }
 
+                // Opens the row's workspace in a new window: on the selected and the hovered row.
+                ToolbarButton {
+                    id: newWindowButton
+                    objectName: "switcherNewWindowButton"
+                    readonly property var face: chromeStyle.pickerAccessory
+                    visible: row.opensInNewWindow && (row.isCurrent || row.isHovered)
+                    anchors.verticalCenter: parent.verticalCenter
+                    glyph: newWindowButton.face.glyph ?? ""
+                    iconName: newWindowButton.face.iconName ?? ""
+                    iconSource: newWindowButton.face.bundledIcon ?? ""
+                    glyphColor: selection.secondaryInk
+                    accessibleName: row.newWindowName
+                    onClicked: if (root.switcher) root.switcher.activateInNewWindow(row.index)
+                }
+
                 Label {
                     objectName: "switcherDrillIn"
                     visible: row.drillsIn
@@ -240,6 +324,13 @@ PickerPopup {
                 }
             }
 
+            // The secondary button opens the row's menu where the pointer is.
+            TapHandler {
+                acceptedButtons: Qt.RightButton
+                onTapped: root.openRowMenu(row.index, true)
+            }
+
+            // A click chooses on release inside the row: a drag out of it chooses nothing.
             TapHandler {
                 gesturePolicy: TapHandler.ReleaseWithinBounds
                 onTapped: {
@@ -247,6 +338,84 @@ PickerPopup {
                         return;
                     root.switcher.currentIndex = row.index;
                     root.switcher.activate(row.index);
+                }
+            }
+        }
+    }
+
+    ActionContextMenu {
+        id: rowMenu
+        objectName: "switcherRowMenu"
+        parent: root.contentItem
+        // Run once the popup has closed and handed the keyboard back: Rename… focuses the sidebar's editor,
+        // which the hand-back would otherwise take straight back.
+        onPicked: (actionId) => {
+            if (!root.switcher || root._menuRow < 0)
+                return;
+            root._closingForPick = true;
+            root.closeThen({ row: root._menuRow, actionId: actionId });
+        }
+    }
+
+    // The New Daemon level's body: what a label is, the verdict on the one typed, and the command that does
+    // the same from a shell.
+    Component {
+        id: labelBody
+        Column {
+            objectName: "switcherLabelBody"
+            spacing: chromeStyle.space.s2
+            topPadding: chromeStyle.space.s3
+            bottomPadding: chromeStyle.space.s3
+            leftPadding: root.textInset
+            rightPadding: root.textInset
+
+            Text {
+                objectName: "switcherLabelCaption"
+                width: parent.width - parent.leftPadding - parent.rightPadding
+                textFormat: Text.PlainText
+                wrapMode: Text.WordWrap
+                text: root.switcher ? root.switcher.labelCaption : ""
+                font: chromeStyle.type.footnote
+                color: chromeStyle.colors.paletteSecondaryText
+            }
+
+            Row {
+                spacing: chromeStyle.space.s2
+                visible: verdictText.text !== ""
+                TabBadgeSlot {
+                    objectName: "switcherLabelVerdictGlyph"
+                    anchors.verticalCenter: parent.verticalCenter
+                    kind: root.switcher ? root.switcher.labelVerdictGlyph : 0
+                    shaped: !root.cellTree
+                    Accessible.ignored: true
+                }
+                Text {
+                    id: verdictText
+                    objectName: "switcherLabelVerdict"
+                    textFormat: Text.PlainText
+                    text: root.switcher ? root.switcher.labelMessage : ""
+                    font: chromeStyle.type.footnote
+                    color: chromeStyle.colors.paletteText
+                }
+            }
+
+            Column {
+                visible: commandText.text !== ""
+                spacing: chromeStyle.space.s1
+                Text {
+                    objectName: "switcherLabelCommandCaption"
+                    textFormat: Text.PlainText
+                    text: root.switcher ? root.switcher.labelCommandCaption : ""
+                    font: chromeStyle.type.footnote
+                    color: chromeStyle.colors.paletteSecondaryText
+                }
+                Text {
+                    id: commandText
+                    objectName: "switcherLabelCommand"
+                    textFormat: Text.PlainText
+                    text: root.switcher ? root.switcher.labelCommand : ""
+                    font: chromeStyle.type.monospaceFootnote
+                    color: chromeStyle.colors.paletteText
                 }
             }
         }

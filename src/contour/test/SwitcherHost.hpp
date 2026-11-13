@@ -9,6 +9,7 @@
 #include <contour/test/PopupWaits.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/window/SwitcherController.hpp>
+#include <contour/window/SwitcherPresenter.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QObject>
@@ -30,8 +31,9 @@ namespace contour::test
 {
 
 /// Mirrors WindowController's switcher hosting: presentSwitcher(), withdrawSwitcher(), closeSwitcher(), the
-/// chip's dropdown state, and showWorkspaceDropdown(), which a test answers.
-class MockSwitcherHost: public QObject
+/// chip's dropdown state, and showWorkspaceDropdown(), which a test answers. Presented in by the production
+/// SwitcherPresenter.
+class MockSwitcherHost: public QObject, public window::SwitcherHost
 {
     Q_OBJECT
     Q_PROPERTY(QObject* switcher READ switcher NOTIFY switcherChanged)
@@ -40,7 +42,7 @@ class MockSwitcherHost: public QObject
 
   public:
     /// Mirrors WindowController::presentSwitcher().
-    void presentSwitcher(window::SwitcherController* switcher, std::optional<QRectF> anchor)
+    void presentSwitcher(window::SwitcherController* switcher, std::optional<QRectF> anchor) override
     {
         _switcher = switcher;
         _anchor = anchor;
@@ -49,21 +51,25 @@ class MockSwitcherHost: public QObject
     }
 
     /// Mirrors WindowController::withdrawSwitcher().
-    void withdrawSwitcher()
+    void withdrawSwitcher() override
     {
         if (!_switcher)
             return;
+        letGo();
         emit switcherWithdrawn();
-        closeSwitcher();
     }
 
-    /// Mirrors WindowController::closeSwitcher().
+    [[nodiscard]] QObject& switcherHostObject() noexcept override { return *this; }
+
+    /// Mirrors WindowController::closeSwitcher(): a popup that closed while still presented was dismissed.
     Q_INVOKABLE void closeSwitcher()
     {
         ++closes;
-        _switcher = nullptr;
-        _anchor.reset();
-        emit switcherChanged();
+        auto* const dismissed = _switcher.data();
+        if (dismissed == nullptr)
+            return;
+        letGo();
+        dismissed->cancel();
     }
 
     /// Mirrors WindowController::showWorkspaceDropdown(): counted, and answered by @c onDropdown.
@@ -91,6 +97,13 @@ class MockSwitcherHost: public QObject
     void switcherWithdrawn();
 
   private:
+    void letGo()
+    {
+        _switcher = nullptr;
+        _anchor.reset();
+        emit switcherChanged();
+    }
+
     QPointer<window::SwitcherController> _switcher;
     std::optional<QRectF> _anchor;
 };
@@ -103,6 +116,7 @@ struct SwitcherWindow
     QQuickWindow* window = nullptr;
     QObject* popup = nullptr;
     QQuickItem* chip = nullptr;
+    QQuickItem* editor = nullptr; ///< The stand-in for the sidebar's rename field.
 
     SwitcherWindow(QQmlEngine& engine, MockSwitcherHost& host)
     {
@@ -117,7 +131,12 @@ Window {
     property int focusRestores: 0
     property alias switcherItem: popup
     property alias chipItem: chip
-    function restoreTerminalFocus() { hostWindow.focusRestores++; }
+    property alias editorItem: editor
+    // As the real window does: the keyboard goes back to the terminal.
+    function restoreTerminalFocus() { hostWindow.focusRestores++; terminal.forceActiveFocus(); }
+    Item { id: terminal; objectName: "terminal"; focus: true }
+    // Where a sidebar row's Rename… types: what a row menu's pick may focus.
+    TextInput { id: editor; objectName: "sidebarEditor"; x: 40; y: 600; width: 200; height: 20 }
     WorkspaceChip {
         id: chip
         x: 40; y: 8
@@ -146,6 +165,7 @@ Window {
         window = qobject_cast<QQuickWindow*>(root.get());
         REQUIRE(window != nullptr);
         popup = root->property("switcherItem").value<QObject*>();
+        editor = root->property("editorItem").value<QQuickItem*>();
         chip = root->property("chipItem").value<QQuickItem*>();
         REQUIRE(popup != nullptr);
         REQUIRE(chip != nullptr);
