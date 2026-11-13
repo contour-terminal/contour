@@ -111,6 +111,32 @@ Task<void> feedBytes(core::net::ISocket* client, std::vector<std::byte> const* b
 /// the count.
 constexpr auto CollectBudget = std::chrono::milliseconds { 60'000 };
 
+/// How long a test client waits for what it counts on, and from when.
+///
+/// A case that waits for something that must NOT come -- a PDU a session should never send -- spends its
+/// budget in full, so it wants a short one. Counted from the start, a short budget is also all the time
+/// the frames that DO come have, and a loaded machine fails the case on their count instead. Counted from
+/// the @ref from'th frame, the budget times only the absence the case is about.
+struct CollectBound
+{
+    std::chrono::milliseconds budget = CollectBudget; ///< How long to wait.
+    std::size_t from = 0; ///< How many frames must have arrived before the budget starts; 0: at once.
+};
+
+/// Sleeps out @p bound: its budget, once @p out holds CollectBound::from frames. Waiting for those
+/// frames is bounded too, by CollectBudget, so a session that sends fewer still ends the collection.
+Task<void> spendBound(core::net::EventLoop* loop,
+                      std::vector<proto::DecodedFrame> const* out,
+                      CollectBound bound)
+{
+    if (bound.from != 0)
+        std::ignore = co_await core::net::testing::waitUntil(
+            loop,
+            [out, from = bound.from] { return out->size() >= from; },
+            static_cast<int>(CollectBudget.count()));
+    co_await loop->delay(bound.budget);
+}
+
 /// How a test client reads: as fast as the transport delivers, unless it is told to pause.
 ///
 /// A client that pauses before every read keeps a frame larger than a bounded transport in flight
@@ -164,28 +190,28 @@ Task<void> decodeUntil(core::net::ISocket* client,
 /// @param loop What the budget is timed on.
 /// @param done Consulted after each decoded frame; the collector stops when it returns true.
 /// @param pacing How fast the client reads.
-/// @param budget How long to wait for @p done before giving up on it, with what arrived so far.
+/// @param bound How long to wait for @p done before giving up on it, with what arrived so far.
 Task<void> collectUntil(core::net::EventLoop* loop,
                         core::net::ISocket* client,
                         CollectDone done,
                         std::vector<proto::DecodedFrame>* out,
                         ReadPacing pacing = {},
-                        std::chrono::milliseconds budget = CollectBudget)
+                        CollectBound bound = {})
 {
     co_await core::net::testing::anyOf(decodeUntil(client, std::move(done), out, pacing),
-                                       core::net::testing::sleepFor(loop, budget));
+                                       spendBound(loop, out, bound));
     client->close();
 }
 
-/// Collects exactly @p expected PDUs, or what arrived within @p budget.
+/// Collects exactly @p expected PDUs, or what arrived within @p bound.
 Task<void> collectPdus(core::net::EventLoop* loop,
                        core::net::ISocket* client,
                        std::size_t expected,
                        std::vector<proto::DecodedFrame>* out,
-                       std::chrono::milliseconds budget = CollectBudget)
+                       CollectBound bound = {})
 {
     co_await collectUntil(
-        loop, client, [expected](auto const& got) { return got.size() >= expected; }, out, {}, budget);
+        loop, client, [expected](auto const& got) { return got.size() >= expected; }, out, {}, bound);
 }
 
 /// @return Whether @p frame terminates a snapshot run.
@@ -331,7 +357,7 @@ struct HarnessOptions
     vtbackend::HostIdentity identity {};               ///< The machine the host says it runs on.
     uint64_t instance = 0;                             ///< Which run of the daemon the host is.
     /// The longest an exchange waits for the PDUs it counts on before it gives up on them.
-    std::chrono::milliseconds collectBudget = CollectBudget;
+    CollectBound collectBound = {};
     /// Who feeds the hosted terminals from their PTYs: the case itself, unless it asks for the pumps.
     vthost::SessionPumping pumping = vthost::SessionPumping::Manual;
     /// What makes each session's PTY; unset, a MockPty.
@@ -511,7 +537,7 @@ struct NativeHarness
         loop.blockOn(core::net::testing::allOf(
             session->run(),
             feedBytes(pair.second.get(), &bytes),
-            collectUntil(&loop, pair.second.get(), std::move(done), &received, {}, options.collectBudget),
+            collectUntil(&loop, pair.second.get(), std::move(done), &received, {}, options.collectBound),
             std::move(alongside)...));
         return received;
     }
@@ -1322,7 +1348,9 @@ TEST_CASE("an exchange counting on more PDUs than the session sends ends instead
     // of as a suite that never ends. Not through std::async: its future joins the thread when
     // destroyed, so the failing REQUIRE would unwind straight into the hang it reports.
     auto exchange = std::packaged_task<std::size_t()> { [] {
-        auto h = NativeHarness { { .collectBudget = 200ms } };
+        // The budget starts once the four PDUs the session does send are in, so it times only the fifth's
+        // absence: from the start, a loaded machine spends it before the four arrive and fails the count.
+        auto h = NativeHarness { { .collectBound = { .budget = 200ms, .from = 4 } } };
         std::ignore = newSession(h.host);
         return h.exchange({ proto::ClientHello {} }, 5).size();
     } };
@@ -2212,7 +2240,10 @@ TEST_CASE("a viewer sharing ProgramStatus receives the set", "[vthost][native][p
 
     SECTION("a viewer without the capability gets none")
     {
-        auto h = NativeHarness { HarnessOptions { .collectBudget = std::chrono::milliseconds { 300 } } };
+        // The budget starts once the attach snapshot is in -- when the status is written -- so it times only
+        // the absence of the ProgramStatus, not the snapshot's arrival as well.
+        auto h = NativeHarness { HarnessOptions {
+            .collectBound = { .budget = std::chrono::milliseconds { 300 }, .from = AttachSnapshotFrames } } };
         auto const sessionId = newSession(h.host);
         auto const received = h.exchangeUntil({ proto::DecodedPdu { proto::ClientHello {} } },
                                               hasProgramStatus,
