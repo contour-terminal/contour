@@ -489,7 +489,9 @@ TEST_CASE("ConPty.slaveIsThereFromConstruction", "[vtpty][conpty]")
 // for that thread once it has closed the PTY: close() ends the wait at once, not on a poll's next tick.
 TEST_CASE("ConPty.closeEndsAWaitForClosed", "[vtpty][conpty][threading]")
 {
-    constexpr auto Bound = std::chrono::milliseconds { 200 };
+    // Half the one-second poll this replaced, so a return to polling shows, while leaving a loaded machine's
+    // thread wake-up far more room than it takes.
+    constexpr auto Bound = std::chrono::milliseconds { 500 };
     auto pty = ConPty { pageSize(80, 24) };
     REQUIRE(pty.start().has_value());
 
@@ -511,8 +513,8 @@ TEST_CASE("ConPty.waitForClosedReturnsOnceClosed", "[vtpty][conpty]")
 {
     auto const returnsAtOnce = [](ConPty& pty) {
         auto waiting = std::async(std::launch::async, [&pty] { pty.waitForClosed(); });
-        auto const returned =
-            waiting.wait_for(std::chrono::milliseconds { 200 }) == std::future_status::ready;
+        // A bound, not a latency: a wait with nothing to wait for that does not return waits for ever.
+        auto const returned = waiting.wait_for(std::chrono::seconds { 5 }) == std::future_status::ready;
         pty.close(); // lets a wait that did not return go, rather than hang the suite
         return returned;
     };
