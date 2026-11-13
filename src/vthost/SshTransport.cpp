@@ -452,7 +452,12 @@ core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> Ss
     }
     if (mode == SshPromptMode::Askpass)
     {
-        if (auto opened = _broker->open(_target); opened)
+        auto const serving = co_await _broker->whenServing();
+        auto opened = serving ? _broker->open(_target)
+                              : std::expected<std::unique_ptr<IAskpassSession>, std::string> {
+                                    std::unexpected { serving.error() }
+                                };
+        if (opened)
             session = *std::move(opened);
         else
         {

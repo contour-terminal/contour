@@ -7,6 +7,7 @@
 
 #include <contour/askpass/AskpassPromptRouter.hpp>
 #include <contour/askpass/AskpassPromptSink.hpp>
+#include <contour/platform/ApplicationReadiness.hpp>
 
 #include <core/Random.hpp>
 #include <core/platform/Clock.hpp>
@@ -46,10 +47,16 @@ struct AskpassBrokerConfig
 /// that every request must repeat: a process that is not ssh's child of this attempt cannot make the
 /// sink ask anything. The server closes when the session is destroyed.
 ///
-/// The servers live on a thread of the broker's own, which runs an event loop of its own from the broker's
-/// construction to its destruction and never waits for anyone: open() makes and starts a session's server
+/// The servers live on a thread of the broker's own, which runs an event loop of its own from the first
+/// session to the broker's destruction and never waits for anyone: open() makes and starts a session's server
 /// there before it returns, from whichever thread it is called on (so a failure to listen is its error, and
 /// the transport runs without prompts), and a session closes its server there when destroyed on any thread.
+///
+/// The thread starts only once the application object exists: Qt runs no event loop without it, and
+/// `contour client --host` makes the broker, and gets to its first session, while the GUI is still booting --
+/// a thread started then warned "QEventLoop: Cannot be used without QCoreApplication" and on Linux crashed
+/// the process now and again. whenServing() waits for that object without holding up the awaiting loop, and
+/// starts the thread; open() never waits, and fails while the object is not there.
 /// All socket work (reading requests, the nonce check, the caps and timeouts, the writing of answers) runs
 /// on that thread; only the sink is asked, and told of a helper's going, on the thread the broker was made
 /// on, by queued calls. A helper that connects before that thread serves events waits for its answer, and so
@@ -60,27 +67,35 @@ class AskpassBroker final: public QObject, public vthost::IAskpassBroker
     /// @param router Finds the window that shows each prompt; shared, so that neither the broker nor a
     ///        window's sink has to outlive the other. Asked on the thread this object is made on, which must
     ///        run an event loop for any prompt to be asked.
+    /// @param promptIds Hands out each prompt's id; shared with the prompts the application asks itself.
+    /// @param application Whether the application object exists, which the broker's thread waits for; not
+    ///        null.
     /// @param executablePath The program ssh runs as its askpass helper: this application's own.
     /// @param random Where each session's nonce and endpoint name come from; borrowed. Called from whichever
     ///        thread open() is.
     /// @param clock Measures how long prompts stay open; borrowed.
     /// @param config How the servers are set up.
     AskpassBroker(std::shared_ptr<AskpassPromptRouter> router,
+                  std::shared_ptr<AskpassPromptIds> promptIds,
+                  std::shared_ptr<platform::ApplicationReadiness> application,
                   QString executablePath,
                   core::IRandom& random,
                   core::platform::IClock const& clock = core::platform::defaultSteadyClock(),
                   AskpassBrokerConfig config = {});
 
     /// A broker with one sink that shows every prompt, whichever window asked: the sink is attached to a
-    /// router of the broker's own as AnyWindow.
+    /// router of the broker's own as AnyWindow; its prompt ids are its own too.
     /// @param sink Shows the prompts; borrowed, until the broker's shutdown() or destruction. May be gone
     ///        before the broker is, once shutdown() ran.
+    /// @param application Whether the application object exists, which the broker's thread waits for; not
+    ///        null.
     /// @param executablePath The program ssh runs as its askpass helper: this application's own.
     /// @param random Where each session's nonce and endpoint name come from; borrowed. Called from whichever
     ///        thread open() is.
     /// @param clock Measures how long prompts stay open; borrowed.
     /// @param config How the servers are set up.
     AskpassBroker(IAskpassPromptSink& sink,
+                  std::shared_ptr<platform::ApplicationReadiness> application,
                   QString executablePath,
                   core::IRandom& random,
                   core::platform::IClock const& clock = core::platform::defaultSteadyClock(),
@@ -97,9 +112,12 @@ class AskpassBroker final: public QObject, public vthost::IAskpassBroker
     /// transport factories hold it too.
     void shutdown();
 
-    /// @return An id no prompt of this broker has, for a prompt the application asks itself (the router holds
-    ///         every prompt by its id). Any thread.
-    [[nodiscard]] AskpassPromptId nextPromptId() noexcept { return ++_lastPromptId; }
+    /// @return Whether the broker's thread runs, serving sessions. Any thread.
+    [[nodiscard]] bool isServing() const noexcept { return _state.load() == State::Serving; }
+
+    /// @copydoc vthost::IAskpassBroker::whenServing
+    /// Waits for the application object, then starts the broker's thread.
+    [[nodiscard]] core::async::Task<std::expected<void, std::string>> whenServing() override;
 
     /// @copydoc vthost::IAskpassBroker::open
     /// The prompts go to whichever window comes first (AnyWindow).
@@ -114,7 +132,14 @@ class AskpassBroker final: public QObject, public vthost::IAskpassBroker
         vthost::SshTarget const& target, AskpassRouteId route);
 
   private:
+    /// Starts the broker's thread if the application object exists and nobody started it yet; never waits for
+    /// the object.
+    /// @return Why no session can be served, if none can.
+    [[nodiscard]] std::expected<void, std::string> startServing();
+
     std::shared_ptr<AskpassPromptRouter> _router;
+    std::shared_ptr<AskpassPromptIds> _promptIds;
+    std::shared_ptr<platform::ApplicationReadiness> _application;
     QString _executablePath;
     core::platform::IClock const& _clock;
     AskpassBrokerConfig _config;
@@ -122,13 +147,14 @@ class AskpassBroker final: public QObject, public vthost::IAskpassBroker
     /// Where the broker's life stands.
     enum class State : std::uint8_t
     {
-        NotStarted = 0, ///< The broker's thread did not start: no session can be served.
-        Serving,
-        ShutDown, ///< shutdown() ran: nothing is served any more.
+        NotStarted = 0, ///< The broker's thread has not started yet: the first startServing() starts it.
+        Starting,       ///< One startServing() is starting the thread; the others wait for it.
+        Serving,        ///< The thread runs: sessions are served.
+        Failed,         ///< The thread did not start: no session can be served.
+        ShutDown,       ///< shutdown() ran: nothing is served any more.
     };
     std::atomic<State> _state { State::NotStarted };
-    std::atomic<AskpassPromptId> _lastPromptId { 0 }; ///< The id of the latest prompt any session asked.
-    QThread _thread;                                  ///< Serves the sessions' servers.
+    QThread _thread; ///< Serves the sessions' servers.
     /// Lives on _thread; the context the work for it is posted to. Declared after the thread, which is
     /// stopped and joined by the destructor's body, before it is destroyed.
     std::unique_ptr<QObject> _worker;
@@ -144,6 +170,12 @@ class RoutedAskpassBroker final: public vthost::IAskpassBroker
     RoutedAskpassBroker(std::shared_ptr<AskpassBroker> broker, AskpassRouteId route):
         _broker { std::move(broker) }, _route { route }
     {
+    }
+
+    /// @copydoc vthost::IAskpassBroker::whenServing
+    [[nodiscard]] core::async::Task<std::expected<void, std::string>> whenServing() override
+    {
+        return _broker->whenServing();
     }
 
     /// @copydoc vthost::IAskpassBroker::open

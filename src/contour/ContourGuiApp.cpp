@@ -664,6 +664,8 @@ ContourGuiApp::~ContourGuiApp()
     _askpassRouter->shutdown();
     if (_askpassBroker)
         _askpassBroker->shutdown();
+    // A link stopped below may wait for a QApplication that will not come now.
+    _applicationReadiness->abandon();
     // While the session manager they release their windows from still exists: the links outlive it.
     for (auto const& link: _daemonLinks)
         link->stop();
@@ -1440,10 +1442,13 @@ std::shared_ptr<askpass::AskpassBroker> const& ContourGuiApp::askpassBroker()
     Q_ASSERT(std::this_thread::get_id() == _guiThread);
     if (!_askpassBroker)
     {
-        // Qt-free, as the broker may be made before the application object exists (`contour client --host`).
+        // Before the application object exists, too (`contour client --host`): the broker starts no thread
+        // until the object exists (whenServing()).
         auto const executable = vtpty::currentExecutablePath();
         _askpassBroker = std::make_shared<askpass::AskpassBroker>(
             _askpassRouter,
+            _askpassPromptIds,
+            _applicationReadiness,
             QString::fromStdString(executable ? core::pathToUtf8(*executable) : programPath()),
             core::systemRandom());
     }
@@ -1456,9 +1461,9 @@ std::shared_ptr<vthost::IPinPrompt> ContourGuiApp::pinPromptFor(askpass::Askpass
     // A batch transport asks the user nothing: a probe must not put a dialog up.
     if (prompting == cli::SshPrompts::Batch)
         return nullptr;
-    auto const& broker = askpassBroker();
+    // No broker: a prompt id is all it needs of askpass, and a broker made for it would serve nothing.
     return std::make_shared<askpass::AskpassPinPrompt>(
-        _askpassRouter, route, *this, [broker] { return broker->nextPromptId(); });
+        _askpassRouter, route, *this, [ids = _askpassPromptIds] { return ids->next(); });
 }
 
 std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::transportOf(
@@ -1752,6 +1757,9 @@ namespace
 
 void ContourGuiApp::releaseHosting()
 {
+    // Released before the QApplication was made, the hosting will never have one: a link's ssh attempt that
+    // waits for it to serve its prompts gives up. After it was made, this does nothing.
+    _applicationReadiness->abandon();
     _startupAttachPlan.reset();
     _deferredNativeAttach.reset();
     _onGuiBooted = nullptr;
@@ -3239,6 +3247,8 @@ int ContourGuiApp::terminalGuiAction()
         return likelyWayland && !wmClass.isEmpty() ? wmClass : QStringLiteral(CONTOUR_APP_ID);
     }());
     QApplication const app(qtArgsCount, (char**) qtArgsPtr.data());
+    // The attach above may wait to serve ssh's prompts: Qt can run that thread's event loop now.
+    _applicationReadiness->markReady();
     // The platform Qt runs on is known now; a test injected its own probe at construction.
     if (!_dragEndProbe)
         _dragEndProbe = window::makeDragEndProbe(QGuiApplication::platformName());

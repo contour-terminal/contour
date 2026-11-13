@@ -16,6 +16,7 @@ add_library(contour_platform STATIC
     AccessibilityPreferenceSource.cpp AccessibilityPreferenceSource.hpp
     Announcer.hpp
     AppearanceServices.hpp
+    ApplicationReadiness.hpp
     Audio.cpp Audio.hpp
     AudioNote.hpp
     MenuBarIntegration.cpp MenuBarIntegration.hpp

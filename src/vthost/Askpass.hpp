@@ -6,6 +6,8 @@
 /// dialogs or sockets: it asks a broker for one session per attempt, runs ssh with the environment the
 /// session names, and reads back whether the user cancelled and how long prompts held the attempt up.
 
+#include <core/async/Task.hpp>
+
 #include <chrono>
 #include <expected>
 #include <functional>
@@ -49,6 +51,16 @@ class IAskpassBroker
 {
   public:
     virtual ~IAskpassBroker() = default;
+
+    /// Completes once open() can serve, without holding up the loop it is awaited on; awaited before each
+    /// open(). A broker whose servers need something that is not there yet -- the GUI's, the application
+    /// object, which `contour client` makes only after its attach has started -- waits for it here. A wrapper
+    /// forwards it to the broker it wraps. Cancelled as the awaiting coroutine is.
+    /// @return Why open() cannot serve, if it cannot; ready at once by default.
+    [[nodiscard]] virtual core::async::Task<std::expected<void, std::string>> whenServing()
+    {
+        co_return std::expected<void, std::string> {};
+    }
 
     /// @param target The host the attempt logs in to; what the prompts name.
     /// @return The session, or why it cannot be set up.
