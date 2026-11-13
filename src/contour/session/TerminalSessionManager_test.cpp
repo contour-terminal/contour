@@ -5983,6 +5983,26 @@ TEST_CASE("TerminalSessionManager: an in-process window reorders its workspaces"
     CHECK(f.listed() == std::vector { f.second.value, f.first.value });
 }
 
+TEST_CASE("TerminalSessionManager: an in-process window lists the title a pane's program sets",
+          "[manager][workspace]")
+{
+    auto f = TwoWorkspaces {};
+    auto const before = f.controller().directorySource()->directory();
+    auto const& tab = before.workspaces.front().tabs.front();
+    REQUIRE(!tab.panes.empty());
+    auto* const session = f.manager().sessionForId(vtworkspace::SessionId { tab.panes.front().key.value });
+    REQUIRE(session != nullptr);
+    auto const changed =
+        QSignalSpy { &f.controller(), &contour::window::WindowController::workspaceDirectoryChanged };
+
+    // As a daemon window's list does: told of the change, it names the tab after its pane's new title.
+    session->terminal().writeToScreen("\033]2;build\007");
+    drainPosted();
+
+    CHECK(changed.count() >= 1);
+    CHECK(f.controller().directorySource()->directory().workspaces.front().tabs.front().label == "build");
+}
+
 TEST_CASE("TerminalSessionManager: an in-process window moves a tab into another workspace",
           "[manager][workspace]")
 {

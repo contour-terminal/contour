@@ -609,6 +609,9 @@ TerminalSession* TerminalSessionManager::createBackingSession(
         refreshGitOfSession(session->modelSessionId());
         notifyDirectoriesChanged();
     });
+    // The lists name a tab after its pane's title, as a daemon window's do: told of a new one, they read it.
+    // Emitted on the parser thread, so queued to this one.
+    connect(session, &TerminalSession::titleChanged, this, [this] { notifyDirectoriesChanged(); });
     watchConfigFile();
 
     // Nor is it QML's to collect: QQmlEngine took sessions it was handed for garbage at random times, while
