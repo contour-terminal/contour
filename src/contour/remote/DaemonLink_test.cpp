@@ -1919,6 +1919,42 @@ TEST_CASE("DaemonLink: a window switched to another workspace and back shows the
     CHECK(activeRow() == 1);
 }
 
+TEST_CASE("DaemonLink: a window switched to another workspace and back shows the pane it left active",
+          "[attach][link][switch]")
+{
+    auto daemon = DaemonFixture {};
+    auto const ids = seedWorkspaces(daemon, 2);
+    auto rig = LinkRig { daemon.endpoint(), {}, {}, selecting(ids[0]) };
+    auto& manager = rig.app.manager();
+    auto const boot = contour::test::ScopedController { manager };
+    REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
+    REQUIRE(waitUntil([&] { return rig.link->workspaceOf(boot.id) == ids[0]; }));
+    REQUIRE(waitUntil([&] { return !sessionsOf(manager, boot.id).empty(); }));
+
+    // The one tab split in two on the daemon.
+    daemon.onDaemon([&] {
+        auto* const tab = daemon.host->model().workspace(vtworkspace::WorkspaceId { ids[0] })->tabAt(0);
+        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        return 0;
+    });
+    auto const displayed = [&] {
+        return manager.controllerOf(boot.windowId)->displayedWorkspace();
+    };
+    auto const tabOf = [&] {
+        return manager.model().workspace(displayed())->tabAt(0);
+    };
+    REQUIRE(waitUntil([&] { return !tabOf()->rootPane()->isLeaf(); }));
+    // The window leaves the first pane active: the daemon made the second one, which a clobbering detach
+    // (panes closed in order, the last one activated) would leave active instead.
+    manager.model().setActivePane(tabOf()->id(), tabOf()->rootPane()->first()->id());
+    REQUIRE(tabOf()->activePane() == tabOf()->rootPane()->first());
+    drainGuiEvents();
+
+    switchAwayAndBack(rig, boot, ids);
+    REQUIRE(waitUntil([&] { return !tabOf()->rootPane()->isLeaf(); }));
+    CHECK(tabOf()->activePane() == tabOf()->rootPane()->first());
+}
+
 TEST_CASE("DaemonLink: a client started after one switched away and back shows and drives the pane",
           "[attach][link][switch]")
 {
