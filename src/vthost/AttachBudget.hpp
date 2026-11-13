@@ -153,7 +153,7 @@ core::async::Task<std::optional<T>> withAttachBudget(core::net::EventLoop* loop,
                                                      AttachBudget const& budget,
                                                      TransportReturnMark const* mark)
 {
-    return withDeadline<T>(std::move(work), detail::attachDeadline(loop, budget, mark));
+    return withDeadline<T>(std::move(work), detail::attachDeadline(loop, std::move(budget), mark));
 }
 
 /// A transport that says when it has handed out a connection, which is when the handshake phase begins.

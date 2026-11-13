@@ -26,7 +26,7 @@ ClientSupervisor::ClientSupervisor(core::net::EventLoop& loop,
     _loop(loop),
     _transport(std::move(transport)),
     _makeClient(std::move(makeClient)),
-    _firstIntent(std::move(firstIntent)),
+    _firstIntent(firstIntent),
     _backoff(backoff),
     _onState(std::move(onState))
 {
@@ -134,7 +134,7 @@ core::async::Task<ClientSupervisor::Outcome> ClientSupervisor::attempt(proto::At
         co_return Outcome { .ending = Ending::TransportFailed, .error = std::move(connection->error()) };
 
     _currentLifetime = (**connection)->lifetime;
-    _current = _makeClient(std::move(**connection), std::move(intent));
+    _current = _makeClient(std::move(**connection), intent);
     // Once the daemon accepted the hello: what it follows now is what a reconnect resumes.
     _current->setHandshakeHandler([this] {
         endUpgradeHold();

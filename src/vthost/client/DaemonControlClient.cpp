@@ -335,7 +335,8 @@ namespace
         // Each call connects afresh: what an earlier one saw says nothing about this one.
         if (transportReturned != nullptr)
             transportReturned->reset();
-        auto result = loop.blockOn(withAttachBudget(&loop, std::move(work), budget, transportReturned));
+        auto result =
+            loop.blockOn(withAttachBudget(&loop, std::move(work), std::move(budget), transportReturned));
         if (!result)
             return std::unexpected(fail(ControlErrorCode::Timeout, ""));
         return std::move(*result);
@@ -365,7 +366,7 @@ namespace
             _inner(
                 _loop,
                 [loop = &_loop, transport = _transport] { return connectControl(loop, transport.get()); },
-                budget,
+                std::move(budget),
                 &_transportReturned)
         {
         }
@@ -438,7 +439,10 @@ SocketDaemonControl::SocketDaemonControl(core::net::EventLoop& loop,
                                          Connector connect,
                                          AttachBudget budget,
                                          TransportReturnMark* transportReturned):
-    _loop(loop), _connect(std::move(connect)), _budget(budget), _transportReturned(transportReturned)
+    _loop(loop),
+    _connect(std::move(connect)),
+    _budget(std::move(budget)),
+    _transportReturned(transportReturned)
 {
     if (!_budget.connect && _transportReturned == nullptr)
         throw std::invalid_argument("a control call with no connect bound needs to be told when the "
@@ -463,7 +467,7 @@ std::expected<proto::UpgradeDaemonReply, ControlError> SocketDaemonControl::upgr
 std::unique_ptr<DaemonControlPort> makeDaemonControl(std::shared_ptr<ITransportFactory> transport,
                                                      AttachBudget timeout)
 {
-    return std::make_unique<OwnedLoopDaemonControl>(std::move(transport), timeout);
+    return std::make_unique<OwnedLoopDaemonControl>(std::move(transport), std::move(timeout));
 }
 
 } // namespace vthost::client
