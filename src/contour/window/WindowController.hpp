@@ -1361,11 +1361,14 @@ class WindowController:
     /// @return Whether a sidebar action waits for a workspace to be shown, or for its pane to appear in it.
     [[nodiscard]] bool rowActionPending() const noexcept { return _pendingRowAction.has_value(); }
     /// Shows the workspace a daemon makes for @p pane, once its push lists it there: the first directory that
-    /// lists @p pane in a workspace the directory does not list now. A move into a new workspace is followed
-    /// so, as an in-process window shows the workspace it made. A jump elsewhere, a later follow, or
+    /// lists @p pane in a workspace @p asked does not list. A move into a new workspace is followed so, as an
+    /// in-process window shows the workspace it made. A jump elsewhere, a later follow, or
     /// session::TerminalSessionManager::RemoteMoveTimeout passing gives it up.
     /// @param pane The pane moved, by the daemon's key.
-    void followIntoNewWorkspace(PaneKey pane);
+    /// @param asked The directory the move was resolved against, read before its request went out: the
+    ///        daemon's push listing the new workspace may settle before this is called, and what it lists
+    ///        then must not count as listed already.
+    void followIntoNewWorkspace(PaneKey pane, WorkspaceDirectory const& asked);
     /// @return Whether a move into a new workspace waits to be followed there.
     [[nodiscard]] bool followPending() const noexcept { return _pendingFollow.has_value(); }
     /// Gives up every look that waits: a jump, a row action and a follow.
@@ -1966,7 +1969,7 @@ class WindowController:
     struct PendingFollow
     {
         PaneKey pane;                 ///< The pane moved.
-        std::vector<uint64_t> listed; ///< The workspaces listed when it was asked: none of them is new.
+        std::vector<uint64_t> listed; ///< The workspaces listed before it was asked: none of them is new.
         core::platform::SteadyTimePoint giveUp; ///< When it is no longer waited for.
     };
     std::optional<PendingFollow> _pendingFollow; ///< @see followIntoNewWorkspace

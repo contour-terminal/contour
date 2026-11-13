@@ -1799,10 +1799,11 @@ void TerminalSessionManager::moveSidebarNodeRemotely(window::WindowController& w
     if (routing == RemoteRouting::Refused)
         postMoveRefused(window, window::MoveRefusedText);
     // The daemon makes the workspace and its push lists it: the window shows it then, as an in-process window
-    // shows the one it made.
+    // shows the one it made. What is new is judged against the directory read before the request went out:
+    // the request is sent at once, and the push listing the new workspace may settle before this line runs.
     else if (routing == RemoteRouting::Routed
              && std::holds_alternative<window::IntoNewWorkspace>(destination))
-        window.followIntoNewWorkspace(window::PaneKey { sources.front() });
+        window.followIntoNewWorkspace(window::PaneKey { sources.front() }, directory);
 }
 
 void TerminalSessionManager::moveSidebarNodeInProcess(window::WindowController& window,
