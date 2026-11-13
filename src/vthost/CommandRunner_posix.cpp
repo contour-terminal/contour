@@ -6,6 +6,7 @@
     #include <vtpty/EnvironmentBlock.hpp>
     #include <vtpty/PosixSpawn.hpp>
     #include <vtpty/ProgramLookup.hpp>
+    #include <vtpty/UnixUtils.hpp>
 
     #include <core/platform/NativeFileSystem.hpp>
 
@@ -27,14 +28,6 @@
     #include <poll.h>
     #include <spawn.h>
     #include <unistd.h>
-
-// POSIX requires no header to declare `environ`; src/vtpty/Process_unix.cpp explains the per-platform story.
-    #ifdef __APPLE__
-        #include <crt_externs.h>
-        #define environ (*_NSGetEnviron())
-    #elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-extern "C" char** environ;
-    #endif
 
 namespace vthost
 {
@@ -194,7 +187,7 @@ namespace
                                           actions->get(),
                                           attributes->get(),
                                           arguments.data(),
-                                          environ);
+                                          vtpty::util::processEnvironment());
                 // posix_spawnp() would search the live PATH, not the given environment's: looked up here
                 // instead, and the result spawned as it is, so nothing of the live environment is read.
                 auto const image = imageFor(argv.front());

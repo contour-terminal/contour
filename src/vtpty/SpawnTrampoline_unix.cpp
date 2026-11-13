@@ -49,14 +49,6 @@
 #include <poll.h>
 #include <unistd.h>
 
-// POSIX requires no header to declare `environ`; see Process_unix.cpp for why each platform is spelled out.
-#ifdef __APPLE__
-    #include <crt_externs.h>
-    #define environ (*_NSGetEnviron())
-#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-extern "C" char** environ;
-#endif
-
 using namespace std::string_view_literals;
 
 namespace vtpty
@@ -272,7 +264,7 @@ namespace
     [[nodiscard]] int execute(ProgramImage& program, ExecLookup lookup) noexcept
     {
         if (program.envp)
-            environ = program.envp->data();
+            util::processEnvironment() = program.envp->data();
         switch (lookup)
         {
             case ExecLookup::ExactPath: ::execv(program.image.c_str(), program.argv.data()); break;
@@ -582,7 +574,8 @@ std::expected<PreparedSpawn, std::error_code> prepareTrampoline(SpawnSpec spec,
 
 std::expected<pid_t, std::error_code> launchTrampoline(PreparedSpawn& prepared)
 {
-    return withSelfImage([&](std::string const& image) { return spawnPrepared(image, prepared, environ); });
+    return withSelfImage(
+        [&](std::string const& image) { return spawnPrepared(image, prepared, util::processEnvironment()); });
 }
 
 std::expected<void, std::error_code> writeSpawnSpec(PreparedSpawn& prepared)
@@ -615,7 +608,7 @@ std::expected<pid_t, std::error_code> spawnTrampolineImage(std::string const& im
     auto prepared = prepareTrampoline(std::move(spec), fds);
     if (!prepared)
         return std::unexpected(prepared.error());
-    auto const pid = spawnPrepared(image, *prepared, envp ? envp->data() : environ);
+    auto const pid = spawnPrepared(image, *prepared, envp ? envp->data() : util::processEnvironment());
     if (!pid)
         return pid;
 

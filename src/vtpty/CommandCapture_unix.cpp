@@ -2,6 +2,7 @@
 #include <vtpty/CommandCapture.hpp>
 #include <vtpty/CommandCaptureStop.hpp>
 #include <vtpty/OwnedFd.hpp>
+#include <vtpty/UnixUtils.hpp>
 
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -25,14 +26,6 @@
 #include <poll.h>
 #include <spawn.h>
 #include <unistd.h>
-
-// POSIX requires no header to declare `environ`; Process_unix.cpp explains the per-platform story.
-#ifdef __APPLE__
-    #include <crt_externs.h>
-    #define environ (*_NSGetEnviron())
-#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-extern "C" char** environ;
-#endif
 
 namespace vtpty
 {
@@ -193,8 +186,12 @@ namespace
         auto const argv =
             std::array<char*, 4> { shellArg.data(), flagArg.data(), commandArg.data(), nullptr };
         auto pid = pid_t { 0 };
-        if (auto const rc =
-                posix_spawn(&pid, shell.c_str(), actions.get(), attributes.get(), argv.data(), environ);
+        if (auto const rc = posix_spawn(&pid,
+                                        shell.c_str(),
+                                        actions.get(),
+                                        attributes.get(),
+                                        argv.data(),
+                                        util::processEnvironment());
             rc != 0)
             return std::unexpected(errnoError(rc));
 

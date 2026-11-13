@@ -2,6 +2,7 @@
 #include <vthost/testing/KeeperFixture.hpp>
 
 #include <vtpty/ExecutablePath.hpp>
+#include <vtpty/UnixUtils.hpp>
 
 #include <core/codec/Stream.hpp>
 #include <core/log/LogSink.hpp>
@@ -49,14 +50,6 @@
 #include <vthost/keeper/PosixPorts.hpp>
 #include <vthost/keeperlink/KeeperAttachment.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
-
-// POSIX requires no header to declare `environ`; src/vtpty/Process_unix.cpp explains the per-platform story.
-#ifdef __APPLE__
-    #include <crt_externs.h>
-    #define environ (*_NSGetEnviron())
-#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-extern "C" char** environ;
-#endif
 
 namespace vthost::testing
 {
@@ -609,7 +602,8 @@ int KeeperFixture::spawnKeeper() const
         lowered.rlim_cur = std::min<rlim_t>(static_cast<rlim_t>(*_softDescriptorLimit), original.rlim_max);
         ::setrlimit(RLIMIT_NOFILE, &lowered);
     }
-    auto const spawned = ::posix_spawn(&pid, image.c_str(), &actions, nullptr, argv.data(), environ);
+    auto const spawned =
+        ::posix_spawn(&pid, image.c_str(), &actions, nullptr, argv.data(), vtpty::util::processEnvironment());
     ::setrlimit(RLIMIT_NOFILE, &original);
     ::posix_spawn_file_actions_destroy(&actions);
     if (spawned != 0)

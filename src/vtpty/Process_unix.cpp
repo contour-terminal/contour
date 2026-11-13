@@ -64,22 +64,6 @@
 #include <poll.h>
 #include <unistd.h>
 
-// POSIX requires no header to declare `environ`; each platform is left to differ, and all three we
-// build on do.
-//
-// macOS: a shared library cannot link against the symbol directly, so it goes through
-// _NSGetEnviron(). Linux: glibc's <unistd.h> declares it, so nothing is needed. FreeBSD: its
-// <unistd.h> does NOT declare it in the configuration this tree builds with, which is why the
-// FreeBSD job failed with "use of undeclared identifier 'environ'" -- so the declaration is
-// supplied here, as POSIX intends. `extern "C"` rather than a bare `extern`: the symbol has C
-// linkage, and declaring it with C++ linkage would name a different entity and fail to link.
-#ifdef __APPLE__
-    #include <crt_externs.h>
-    #define environ (*_NSGetEnviron())
-#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-extern "C" char** environ;
-#endif
-
 using namespace std;
 using namespace std::string_view_literals;
 using core::trimRight;
@@ -109,18 +93,6 @@ namespace
             case Process::TerminationHint::Kill: return SIGKILL;
         }
         return SIGTERM;
-    }
-
-    /// @return The current process environment's entries; none when it has been cleared.
-    [[nodiscard]] vector<string_view> inheritedEnvironment()
-    {
-        auto entries = vector<string_view> {};
-        if (environ == nullptr) // clearenv() leaves no array at all
-            return entries;
-        for (auto const index: std::views::iota(std::size_t { 0 })
-                                   | std::views::take_while([](auto i) { return environ[i] != nullptr; }))
-            entries.emplace_back(environ[index]);
-        return entries;
     }
 
 } // anonymous namespace
@@ -269,7 +241,7 @@ std::expected<PreparedSpawn, StartFailure> prepareTrampolineSpawn(Pty& startedPt
             removed = exec.removedEnvironment;
         }
         return buildEnvironmentBlock(
-            inheritedEnvironment(), overrides, removed, EnvironmentNames::CaseSensitive);
+            util::environmentEntries(), overrides, removed, EnvironmentNames::CaseSensitive);
     }();
 
     // What runs: the program as configured -- or, where it names no program but holds whitespace

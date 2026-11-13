@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <vector>
 
 #ifdef __APPLE__
     #include <util.h>
@@ -53,6 +54,15 @@ void configureTerminal(int fd) noexcept;
         return InputEcho::Hidden;
     return InputEcho::Raw;
 }
+
+/// This process's `environ`, the one place it is declared: POSIX requires no header to declare it, and each
+/// platform differs (UnixUtils.cpp says how). Async-signal-safe, so a forked child may set it before an exec.
+/// @return The variable itself, to read or to assign.
+[[nodiscard]] char**& processEnvironment() noexcept;
+
+/// @return The entries of this process's environment, `NAME=value` each, viewing `environ`: valid until the
+///         environment next changes; none when it has been cleared.
+[[nodiscard]] std::vector<std::string_view> environmentEntries();
 
 /// Marks @p fd close-on-exec -- a descriptor flag, set with F_SETFD -- so that no process this one spawns
 /// inherits it.

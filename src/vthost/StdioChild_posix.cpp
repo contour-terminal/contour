@@ -5,6 +5,7 @@
 
     #include <vtpty/OwnedFd.hpp>
     #include <vtpty/PosixSpawn.hpp>
+    #include <vtpty/UnixUtils.hpp>
 
     #include <core/net/Sockets.hpp>
 
@@ -28,14 +29,6 @@
     #include <unistd.h>
 
     #include <vthost/StderrTail.hpp>
-
-// POSIX requires no header to declare `environ`; src/vtpty/Process_unix.cpp explains the per-platform story.
-    #ifdef __APPLE__
-        #include <crt_externs.h>
-        #define environ (*_NSGetEnviron())
-    #elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-extern "C" char** environ;
-    #endif
 
 namespace vthost
 {
@@ -267,7 +260,8 @@ namespace
         [[nodiscard]] static std::vector<std::string> mergedEnvironment(SpawnEnvironment const& environment)
         {
             auto inherited = std::vector<std::string> {};
-            for (auto const* entry = environ; entry != nullptr && *entry != nullptr; ++entry)
+            for (auto const* entry = vtpty::util::processEnvironment(); entry != nullptr && *entry != nullptr;
+                 ++entry)
                 inherited.emplace_back(*entry);
             return mergeEnvironment<char>(
                 inherited, environment.set, NameComparison::CaseSensitive, EntryOrder::AsFound);

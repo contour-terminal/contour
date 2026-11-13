@@ -35,6 +35,22 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+// POSIX requires no header to declare `environ`; each platform is left to differ, and all three we
+// build on do.
+//
+// macOS: a shared library cannot link against the symbol directly, so it goes through
+// _NSGetEnviron(). Linux: glibc's <unistd.h> declares it, so nothing is needed. FreeBSD: its
+// <unistd.h> does NOT declare it in the configuration this tree builds with, which is why the
+// FreeBSD job failed with "use of undeclared identifier 'environ'" -- so the declaration is
+// supplied here, as POSIX intends. `extern "C"` rather than a bare `extern`: the symbol has C
+// linkage, and declaring it with C++ linkage would name a different entity and fail to link.
+#ifdef __APPLE__
+    #include <crt_externs.h>
+    #define environ (*_NSGetEnviron())
+#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+extern "C" char** environ;
+#endif
+
 namespace vtpty
 {
 
@@ -308,6 +324,23 @@ std::optional<std::string> workingDirectoryOf(pid_t pid)
     std::ignore = pid;
     return std::nullopt;
 #endif
+}
+
+char**& processEnvironment() noexcept
+{
+    return environ;
+}
+
+std::vector<std::string_view> environmentEntries()
+{
+    auto entries = std::vector<std::string_view> {};
+    auto const* const variables = processEnvironment();
+    if (variables == nullptr) // clearenv() leaves no array at all
+        return entries;
+    for (auto const index: std::views::iota(std::size_t { 0 })
+                               | std::views::take_while([&](auto i) { return variables[i] != nullptr; }))
+        entries.emplace_back(variables[index]);
+    return entries;
 }
 
 } // namespace vtpty::util
