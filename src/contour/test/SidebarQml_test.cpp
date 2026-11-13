@@ -1909,6 +1909,12 @@ TEST_CASE("every sidebar control's tooltip names the chord its action is bound t
             auto const toggleDefault = row == ChromeStyle::MacOS
                                            ? spelled(vtbackend::Modifiers { Modifier::Super }, U'\\')
                                            : QStringLiteral("Ctrl+Shift+B");
+            // New Workspace's default: Shift+Command+N on a Mac, Ctrl+Shift+Alt+N elsewhere.
+            auto const newWorkspaceDefault =
+                row == ChromeStyle::MacOS
+                    ? spelled(vtbackend::Modifiers { Modifier::Super, Modifier::Shift }, U'N')
+                    : spelled(vtbackend::Modifiers { Modifier::Control, Modifier::Shift, Modifier::Alt },
+                              U'N');
             // Primary+Alt: Command+Option on a Mac, Ctrl+Shift+Alt elsewhere.
             auto const primaryAlt =
                 row == ChromeStyle::MacOS
@@ -1923,7 +1929,7 @@ TEST_CASE("every sidebar control's tooltip names the chord its action is bound t
             }));
 
             for (auto const& [mapping, toggle, newWorkspace, filter]:
-                 { std::tuple { Predating, toggleDefault, QString {}, QString {} },
+                 { std::tuple { Predating, toggleDefault, newWorkspaceDefault, QString {} },
                    std::tuple { Rebound,
                                 spelled(primaryAlt, U'B'),
                                 spelled(primaryAlt, U'N'),

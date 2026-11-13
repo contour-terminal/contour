@@ -13,6 +13,7 @@
 [defaults classic] char modes=[Any] mods=[Super] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Shift|Super] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Shift|Super] input=U+0052 clicks=- -> ShowSwitcher declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Super] input=U+004E clicks=- -> NewWorkspace declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Control|Super] input=U+004F clicks=- -> OpenFileManager declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Control|Super] input=U+002E clicks=- -> ToggleStatusLine declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Super] input=U+0046 clicks=- -> SearchReverse declined=pass gated=no
@@ -34,6 +35,7 @@
 [defaults native2026] char modes=[Any] mods=[Super] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Shift|Super] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Shift|Super] input=U+0052 clicks=- -> ShowSwitcher declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Super] input=U+004E clicks=- -> NewWorkspace declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Super] input=U+005C clicks=- -> ToggleSidebar declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Super] input=U+004A clicks=- -> JumpToNextAttention declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Shift|Super] input=U+0045 clicks=- -> FocusSidebar declined=pass gated=no
@@ -58,6 +60,7 @@
 [fallbacks] char modes=[Any] mods=[Control|Super] input=U+0053 clicks=- -> ScreenshotVT declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+0057 clicks=- -> ClosePane declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
+[fallbacks] char modes=[Any] mods=[Shift|Super] input=U+004E clicks=- -> NewWorkspace declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+005C clicks=- -> ToggleSidebar declined=pass gated=yes
 [fallbacks] char modes=[Any] mods=[Super] input=U+004A clicks=- -> JumpToNextAttention declined=pass gated=yes
 [fallbacks] char modes=[Any] mods=[Shift|Super] input=U+0045 clicks=- -> FocusSidebar declined=pass gated=yes

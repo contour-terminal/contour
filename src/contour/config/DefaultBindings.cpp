@@ -371,6 +371,11 @@ namespace
             written(All, PrimaryShift, U'P', Any, { actions::OpenCommandPalette {} }),
             // The daemon and workspace switcher, beside the palette: Shift+Command+R, Ctrl+Shift+R.
             written(All, PrimaryShift, U'R', Any, { actions::ShowSwitcher {} }),
+            // A new workspace: "new window" (N) one tier up. Shift+Command+N on macOS, Finder's New Folder,
+            // whose icon the sidebar's button draws; Ctrl+Shift+Alt+N elsewhere, a home-row reach where
+            // Ctrl+Shift+Alt+T would not be. Fallbacks too, so a configuration that predates them has them.
+            both(DesktopOnly, CtrlShiftAlt, U'N', Any, { actions::NewWorkspace {} }),
+            both(MacOnly, SuperShift, U'N', Any, { actions::NewWorkspace {} }),
             written(All, CtrlShift, U'\\', Any, { actions::ToggleSplitOrientation {} }),
             // The workspace sidebar (Native2026 only): Command+\ toggles it on a Mac, Ctrl+Shift+B elsewhere
             // Jump to the next pane that needs you: Command+J, Ctrl+Shift+J. Focus: Shift+Command+E,

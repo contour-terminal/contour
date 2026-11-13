@@ -85,11 +85,12 @@ The footer shows the key, so you find it again.
 | `FocusSidebar`: move keyboard focus into it, showing it first when hidden | ⌘⇧E | Ctrl+Shift+D |
 | `JumpToNextAttention` | ⌘J | Ctrl+Shift+J |
 | `CycleWorkspace`: show the next / previous workspace | ⌃⌘↓ / ⌃⌘↑ | Ctrl+Shift+Alt+PageDown / PageUp |
+| `NewWorkspace`: create a workspace and show it | ⇧⌘N | Ctrl+Shift+Alt+N |
 | `FilterWorkspaces`: open the filter, showing the sidebar first when hidden | none | none |
 
-These are bound in the `native2026` defaults only, except `CycleWorkspace`, which every defaults edition binds,
-one level up from the tab chords (Ctrl+PageUp/PageDown). `FilterWorkspaces` and `NewWorkspace` have no default chord;
-bind one in `input_mapping`. Each control's tooltip names the chord its action is bound to at the time, so a
+These are bound in the `native2026` defaults only, except `CycleWorkspace` and `NewWorkspace`, which every defaults
+edition binds, one level up from the tab and window chords (Ctrl+PageUp/PageDown, Ctrl+Shift+N). `FilterWorkspaces`
+has no default chord; bind one in `input_mapping`. Each control's tooltip names the chord its action is bound to at the time, so a
 binding you add shows there at once.
 
 By pointer, the **sidebar toggle** at the start of the title band (beside the traffic lights on macOS, at the
@@ -175,7 +176,7 @@ filter is only a view: it never changes what a drag or a rename acts on.
 
 ## A new workspace
 
-The **＋** button, and the `NewWorkspace` action (not bound by default), create a
+The **＋** button, and the `NewWorkspace` action (⇧⌘N, Ctrl+Shift+Alt+N), create a
 workspace and show it. The button stands where each platform keeps a sidebar's "add": in the sidebar's footer
 on macOS, Windows and the Terminal style, and as a "new folder" icon in the header bar on Linux, so it is never
 the title band's new-tab **+**. It is named after the **folder** the current pane is in, or, inside a git worktree,
