@@ -1585,6 +1585,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         window no binding serves, whose sessions run in-process.
     [[nodiscard]] std::optional<SwitchTarget> daemonTargetOf(vtworkspace::WorkspaceId window) const;
 
+    /// @param window A window of this manager.
+    /// @return Whether @p window is served by no binding at all: its sessions run in this process and it
+    ///         shows the workspaces it owns. (A tmux window has a binding without a daemon, and is not.)
+    [[nodiscard]] bool isInProcessWindow(vtworkspace::WorkspaceId window) const noexcept
+    {
+        return bindingOf(window) == nullptr;
+    }
+
     /// @param window A window.
     /// @return Whether the daemon the window is bound to runs on this machine; Local for a window with none.
     [[nodiscard]] window::DaemonLocality daemonLocalityOf(vtworkspace::WorkspaceId window) const;

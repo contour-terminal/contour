@@ -574,3 +574,41 @@ TEST_CASE("switcherWorkspacesOf makes a workspace's name fit for a row", "[switc
     CHECK(listed[1].name == contour::window::rowTextOf(rows[1].name));
     CHECK(listed[1].name.size() < rows[1].name.size());
 }
+
+TEST_CASE("an in-process window's rows name each workspace it owns and resolve a choice among them",
+          "[switch][plan][inprocess]")
+{
+    using contour::remote::SwitchNoop;
+    using contour::remote::SwitchTo;
+    auto const tabOf = [](uint64_t id) {
+        return contour::window::DirectoryTab { .id = id, .title = {}, .label = "sh", .panes = {} };
+    };
+    auto const directory = std::optional { contour::window::WorkspaceDirectory {
+        .workspaces = { contour::window::DirectoryWorkspace { .id = 4, .label = "one", .tabs = { tabOf(1) } },
+                        contour::window::DirectoryWorkspace {
+                            .id = 9, .label = "two", .tabs = { tabOf(1), tabOf(2) } } } } };
+    auto const window = vtworkspace::WorkspaceId { 4 };
+
+    auto const rows = contour::remote::inProcessWorkspaceRowsOf(directory, window);
+    REQUIRE(rows.size() == 2);
+    CHECK(rows[0].shownByWindowHere == window);
+    CHECK_FALSE(rows[1].shownByWindowHere.has_value());
+    CHECK(rows[1].tabs == 2);
+    CHECK(rows[0].ref != rows[1].ref);
+
+    // Choosing the row of the workspace the window does not show switches to it, by the id made of its own.
+    auto const choose = [&](vtcontrol::ObjectRef ref) {
+        return contour::remote::planSwitch(
+            contour::session::SwitchTarget {
+                .kind = vthost::proto::SwitchDaemonKind::Same, .daemon = {}, .workspace = ref },
+            rows,
+            window.value,
+            contour::remote::SameDaemon::Yes);
+    };
+    auto const other = choose(rows[1].ref);
+    REQUIRE(std::holds_alternative<SwitchTo>(other));
+    CHECK(std::get<SwitchTo>(other).workspace == 9);
+    CHECK(std::holds_alternative<SwitchNoop>(choose(rows[0].ref)));
+
+    CHECK(contour::remote::inProcessWorkspaceRowsOf(std::nullopt, window).empty());
+}

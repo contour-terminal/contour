@@ -4486,6 +4486,11 @@ window::SwitcherServices ContourGuiApp::switcherServices()
             },
         .request =
             [this](vtworkspace::WorkspaceId window, session::SwitchTarget target, session::SwitchMode mode) {
+                if (_sessionManager.isInProcessWindow(window))
+                {
+                    switchInProcess(window, target);
+                    return;
+                }
                 _windowSwitching->request(
                     window,
                     std::move(target),
@@ -4528,6 +4533,15 @@ window::SwitcherServices ContourGuiApp::switcherServices()
                    session::SwitchTarget const& daemon,
                    std::string label,
                    session::SwitchMode mode) {
+                if (_sessionManager.isInProcessWindow(window))
+                {
+                    switchInProcess(window,
+                                    session::SwitchTarget { .kind = vthost::proto::SwitchDaemonKind::Same,
+                                                            .daemon = {},
+                                                            .workspace = session::NewWorkspace {} },
+                                    label);
+                    return;
+                }
                 _windowSwitching->createWorkspace(
                     window,
                     daemon,
@@ -4596,11 +4610,54 @@ std::expected<void, std::string> ContourGuiApp::openSwitcher(window::SwitcherOpe
     return {};
 }
 
+namespace
+{
+    /// @param host A window's controller.
+    /// @return What its directory source lists; none while it has none.
+    [[nodiscard]] std::optional<window::WorkspaceDirectory> directoryOf(window::WindowController const& host)
+    {
+        auto const* const source = host.directorySource();
+        if (source == nullptr)
+            return std::nullopt;
+        return source->directory();
+    }
+} // namespace
+
+void ContourGuiApp::switchInProcess(vtworkspace::WorkspaceId window,
+                                    session::SwitchTarget const& target,
+                                    std::string_view label)
+{
+    auto* const controller = _sessionManager.controllerDisplaying(window);
+    if (controller == nullptr)
+        return;
+    auto const rows = remote::inProcessWorkspaceRowsOf(directoryOf(*controller), window);
+    auto const decision = remote::planSwitch(target, rows, window.value, remote::SameDaemon::Yes);
+    if (auto const* const to = std::get_if<remote::SwitchTo>(&decision))
+    {
+        if (to->workspace == 0)
+        {
+            controller->newWorkspace();
+            // The one it made is the one the window shows now.
+            if (!label.empty())
+                _sessionManager.setWorkspaceLabel(controller->displayedWorkspace(), std::string { label });
+        }
+        else
+            controller->showWorkspace(to->workspace);
+    }
+    else if (!std::holds_alternative<remote::SwitchNoop>(decision))
+        attachLog()("switch within an in-process window not made: it names no workspace of the window");
+    // What the user chose is what they type into next.
+    controller->focusActiveDisplay();
+}
+
 std::vector<window::SwitcherWorkspace> ContourGuiApp::windowWorkspacesOf(window::WindowController& host,
                                                                          vtworkspace::WorkspaceId window)
 {
-    return remote::windowWorkspacesOf(
-        _windowSwitching->windowWorkspaceRows(window), host.sidebar().workspaceRows(), window);
+    // An in-process window lists the workspaces it owns, from its own directory.
+    auto rows = _sessionManager.isInProcessWindow(window)
+                    ? remote::inProcessWorkspaceRowsOf(directoryOf(host), window)
+                    : _windowSwitching->windowWorkspaceRows(window);
+    return remote::windowWorkspacesOf(rows, host.sidebar().workspaceRows(), window);
 }
 
 std::expected<void, std::string> ContourGuiApp::showSwitchPick(remote::SwitchPickRequest const& pick)

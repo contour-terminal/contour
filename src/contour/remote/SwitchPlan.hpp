@@ -173,6 +173,15 @@ using ShownHere = std::function<std::optional<vtworkspace::WorkspaceId>(uint64_t
 [[nodiscard]] std::vector<WorkspaceRow> workspaceRowsOf(window::WorkspaceDirectory const& directory,
                                                         ShownHere const& shownHere);
 
+/// The rows of a window that runs in this process: the workspaces it owns, none of them carrying a control
+/// id (so each is named by an id made of its own, which only this process reads), and only the one the
+/// window shows counted as shown.
+/// @param directory What the window lists, as its directory source gives it; none lists nothing.
+/// @param window The workspace the window shows.
+/// @return The rows, in the directory's order.
+[[nodiscard]] std::vector<WorkspaceRow> inProcessWorkspaceRowsOf(
+    std::optional<window::WorkspaceDirectory> const& directory, vtworkspace::WorkspaceId window);
+
 /// @param workspace What a switch names.
 /// @return Whether it names the workspace by its control id, which only a listing, or a directory carrying
 ///         control ids, resolves.

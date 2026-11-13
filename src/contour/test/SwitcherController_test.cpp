@@ -221,6 +221,28 @@ TEST_CASE("Switcher: Return on a daemon drills in; Escape comes back to the daem
     }
 }
 
+TEST_CASE("Switcher: a window reaching no other daemon lists its own workspaces and looks for none",
+          "[contour][switcher]")
+{
+    auto s = Switcher {};
+    s.controller->open(window::SwitcherOpening { .window = ThisWindow,
+                                                 .windowDaemon = switcherLabelled("work"),
+                                                 .mode = SwitchMode::Switch,
+                                                 .prompt = window::SwitcherPrompt::Browse,
+                                                 .pick = std::nullopt,
+                                                 .scope = window::SwitcherScope::Everything,
+                                                 .windowWorkspaces = workWorkspaces(),
+                                                 .origin = window::SwitcherOrigin::Chip,
+                                                 .reach = window::SwitcherReach::WindowOnly });
+    auto const titles = s.titles();
+    CHECK(std::ranges::contains(titles, "contour"));
+    CHECK(std::ranges::contains(titles, "New Workspace"));
+    CHECK_FALSE(std::ranges::contains(titles, "All daemons…"));
+    CHECK_FALSE(std::ranges::contains(titles, "Looking for other daemons…"));
+    CHECK_FALSE(std::ranges::contains(titles, "home"));
+    CHECK(s.world.listed.empty());
+}
+
 TEST_CASE("Switcher: typing lists the matches of every listed local daemon", "[contour][switcher]")
 {
     auto s = Switcher {};

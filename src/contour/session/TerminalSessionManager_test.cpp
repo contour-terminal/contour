@@ -13,6 +13,7 @@
 #include <contour/config/SecureInputMode.hpp>
 #include <contour/platform/FreeDesktopNotifier.hpp>
 #include <contour/platform/QtInvoke.hpp>
+#include <contour/remote/SwitchPlan.hpp>
 #include <contour/session/EndReason.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/TerminalSession.hpp>
@@ -5321,6 +5322,35 @@ TEST_CASE("an in-process window holds two workspaces and switches between them",
     CHECK(window->displayedWorkspace() == first);
     window->displayWorkspace(contour::test::ScopedController { manager }.id);
     CHECK(window->displayedWorkspace() == first);
+}
+
+TEST_CASE("an in-process window's switcher choice shows the workspace it names",
+          "[manager][window][workspace]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedControllerWithOsWindow const window { manager };
+    window->bindWindow(window.osWindow.get());
+    window->createNewTab();
+    auto const first = window->displayedWorkspace();
+    std::ignore = manager.createWorkspaceIn(window->windowId());
+    manager.selectWorkspace(window->windowId(), 1);
+    window->createNewTab(); // a workspace with no tab is not listed
+    manager.selectWorkspace(window->windowId(), 0);
+    REQUIRE(window->displayedWorkspace() == first);
+    REQUIRE(manager.isInProcessWindow(first));
+
+    // The row the popup lists for the second workspace names it by the id made of its own.
+    auto const rows =
+        contour::remote::inProcessWorkspaceRowsOf(window->directorySource()->directory(), first);
+    auto const named =
+        std::ranges::find(rows, window->ownedWorkspaces()[1].value, &contour::remote::WorkspaceRow::id);
+    REQUIRE(named != rows.end());
+    app.app().switchInProcess(first,
+                              contour::session::SwitchTarget { .kind = vthost::proto::SwitchDaemonKind::Same,
+                                                               .daemon = {},
+                                                               .workspace = named->ref });
+    CHECK(window->displayedWorkspace() == window->ownedWorkspaces()[1]);
 }
 
 TEST_CASE("jumping to the next attention shows the pane in its workspace and marks it seen",

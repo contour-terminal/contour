@@ -218,7 +218,8 @@ namespace
                     add(std::move(row), group, title);
             }
             add(newWorkspaceRow(index), SwitcherGroup::Actions, "Actions");
-            if (_view.level == SwitcherLevel::Top && _view.origin == SwitcherOrigin::Chip)
+            if (_view.level == SwitcherLevel::Top && _view.origin == SwitcherOrigin::Chip
+                && _view.reach == SwitcherReach::AnyDaemon)
                 add(plainRow(SwitcherRowKind::AllDaemons, "All daemons…"), SwitcherGroup::Actions, "Actions");
         }
 

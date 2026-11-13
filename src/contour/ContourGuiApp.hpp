@@ -532,6 +532,15 @@ class ContourGuiApp:
                                                                 window::WindowController& host,
                                                                 std::optional<QRectF> anchor = std::nullopt);
 
+    /// Carries out a choice of the switcher for a window that runs in this process: it shows one of the
+    /// workspaces it owns, or makes a new one, and takes the keyboard back to the terminal.
+    /// @param window The window's displayed workspace, as the popup names the window.
+    /// @param target What was chosen.
+    /// @param label The name a new workspace is to have; empty for none.
+    void switchInProcess(vtworkspace::WorkspaceId window,
+                         session::SwitchTarget const& target,
+                         std::string_view label = {});
+
     /// @param host A window's controller.
     /// @param window That window.
     /// @return Its own daemon's workspaces, with the status its sidebar showed at its last rebuild

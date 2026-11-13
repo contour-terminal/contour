@@ -184,6 +184,16 @@ std::vector<WorkspaceRow> workspaceRowsOf(window::WorkspaceDirectory const& dire
     return rows;
 }
 
+std::vector<WorkspaceRow> inProcessWorkspaceRowsOf(std::optional<window::WorkspaceDirectory> const& directory,
+                                                   vtworkspace::WorkspaceId window)
+{
+    if (!directory)
+        return {};
+    return workspaceRowsOf(*directory, [window](uint64_t id) {
+        return id == window.value ? std::optional { window } : std::nullopt;
+    });
+}
+
 bool namesControlId(session::WorkspaceTarget const& workspace)
 {
     if (std::holds_alternative<vtcontrol::ObjectRef>(workspace))
