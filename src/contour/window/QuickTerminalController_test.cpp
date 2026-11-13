@@ -8,6 +8,7 @@
 #include <contour/window/QuickTerminalController.hpp>
 #include <contour/window/WindowLivenessQt.hpp>
 
+#include <QtCore/QAbstractAnimation>
 #include <QtCore/QCoreApplication>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QWindow>
@@ -55,6 +56,48 @@ constexpr auto CornerRadius = 14;
     motion.style = style;
     return motion;
 }
+
+/// The animation clock, in the case's hand. Installed, it is the only time Qt's animations see on this
+/// thread, and they move only when advanceBy() says so: "halfway through the slide" is then an instant the
+/// case chooses, not a guess at how far a loaded machine got in a wall-clock wait.
+class ManualAnimationClock final: public QAnimationDriver
+{
+  public:
+    ManualAnimationClock() { install(); }
+    ~ManualAnimationClock() override { uninstall(); }
+    ManualAnimationClock(ManualAnimationClock const&) = delete;
+    ManualAnimationClock& operator=(ManualAnimationClock const&) = delete;
+    ManualAnimationClock(ManualAnimationClock&&) = delete;
+    ManualAnimationClock& operator=(ManualAnimationClock&&) = delete;
+
+    [[nodiscard]] qint64 elapsed() const override { return _elapsedMs; }
+
+    /// Moves every running animation @p milliseconds forward, once the one just started has reached the
+    /// clock: Qt registers a started animation with the clock in posted events, two of them deep, which a
+    /// clock already running for another animation does not wait for.
+    /// @return Whether an animation was running to be moved.
+    [[nodiscard]] bool advanceBy(qint64 milliseconds)
+    {
+        QCoreApplication::sendPostedEvents();
+        QCoreApplication::sendPostedEvents();
+        if (!QTest::qWaitFor([this] { return isRunning(); }, WaitMilliseconds))
+            return false;
+        _elapsedMs += milliseconds;
+        advance();
+        return true;
+    }
+
+  protected:
+    void start() override
+    {
+        // The timer measures from the start, and adds what this reports to the time it started at.
+        _elapsedMs = 0;
+        QAnimationDriver::start();
+    }
+
+  private:
+    qint64 _elapsedMs = 0;
+};
 
 /// A controller over recording doubles and plain windows.
 struct Fixture
@@ -161,15 +204,18 @@ TEST_CASE("QuickTerminalController.aPressDuringTheSlideReversesIt", "[quicktermi
 {
     auto motion = quickMotion();
     motion.emphasizedMs = 400; // Long enough to press in the middle of.
+    auto clock = ManualAnimationClock {};
     auto fixture = Fixture { { .hotkey = ControlGrave }, motion };
     fixture.hotkey.press();
     REQUIRE(fixture.controller->state() == QuickTerminalState::Showing);
-    QTest::qWait(150);
+    REQUIRE(clock.advanceBy(motion.emphasizedMs / 2));
+    REQUIRE(fixture.controller->state() == QuickTerminalState::Showing);
     auto const midway = fixture.windows.front()->y();
     CHECK(midway > contour::window::quickTerminalFrames(TheScreen).hidden.y);
 
     fixture.hotkey.press();
     CHECK(fixture.controller->state() == QuickTerminalState::Hiding);
+    REQUIRE(clock.advanceBy(motion.emphasizedMs));
     REQUIRE(fixture.waitFor(QuickTerminalState::Hidden));
     // It went back to where it came from, rather than finishing the slide down first.
     CHECK(fixture.windows.front()->y() == contour::window::quickTerminalFrames(TheScreen).hidden.y);
@@ -319,10 +365,12 @@ TEST_CASE("QuickTerminalController.underWaylandOrReducedMotionItFadesInPlace", "
     {
         auto motion = quickMotion(row.style);
         motion.emphasizedMs = 400; // Long enough to look at the window in the middle of.
+        auto clock = ManualAnimationClock {};
         auto fixture = Fixture { { .hotkey = ControlGrave }, motion, row.placement };
         fixture.hotkey.press();
         REQUIRE(fixture.controller->state() == QuickTerminalState::Showing);
-        QTest::qWait(150);
+        REQUIRE(clock.advanceBy(motion.emphasizedMs / 2));
+        REQUIRE(fixture.controller->state() == QuickTerminalState::Showing);
         auto const shown = contour::window::quickTerminalFrames(TheScreen).shown;
         // In the middle of it the window has not travelled -- its frame is the shown one -- and is only
         // part way opaque.
@@ -330,6 +378,7 @@ TEST_CASE("QuickTerminalController.underWaylandOrReducedMotionItFadesInPlace", "
         CHECK(fixture.windows.front()->opacity() > 0.0);
         CHECK(fixture.windows.front()->opacity() < 1.0);
 
+        REQUIRE(clock.advanceBy(motion.emphasizedMs));
         REQUIRE(fixture.waitFor(QuickTerminalState::Shown));
         CHECK(fixture.windows.front()->opacity() == 1.0);
     }
@@ -366,25 +415,31 @@ TEST_CASE("QuickTerminalController.aScreenAboveMakesItFadeInsteadOfSlide", "[qui
 {
     auto motion = quickMotion();
     motion.emphasizedMs = 400;
+    auto clock = ManualAnimationClock {};
     auto fixture = Fixture { { .hotkey = ControlGrave }, motion };
     // Stacked above the target: a window parked over its top edge would show on that screen.
     fixture.others = { ScreenRect { .x = 0, .y = -1080, .width = 800, .height = 1080 } };
     fixture.hotkey.press();
     REQUIRE(fixture.controller->state() == QuickTerminalState::Showing);
-    QTest::qWait(150);
+    REQUIRE(clock.advanceBy(motion.emphasizedMs / 2));
+    REQUIRE(fixture.controller->state() == QuickTerminalState::Showing);
     auto const shown = contour::window::quickTerminalFrames(TheScreen).shown;
     CHECK(fixture.windows.front()->y() == shown.y);
     CHECK(fixture.windows.front()->opacity() < 1.0);
 
+    REQUIRE(clock.advanceBy(motion.emphasizedMs));
     REQUIRE(fixture.waitFor(QuickTerminalState::Shown));
     CHECK(fixture.windows.front()->opacity() == 1.0);
 
     // With the screen beside it instead, the slide is back.
+    REQUIRE(QTest::qWaitFor([&] { return fixture.windows.front()->isActive(); }, WaitMilliseconds));
     fixture.hotkey.press();
+    REQUIRE(clock.advanceBy(motion.emphasizedMs));
     REQUIRE(fixture.waitFor(QuickTerminalState::Hidden));
     fixture.others = { ScreenRect { .x = 800, .y = 0, .width = 800, .height = 600 } };
     fixture.hotkey.press();
-    QTest::qWait(150);
+    REQUIRE(clock.advanceBy(motion.emphasizedMs / 2));
+    REQUIRE(fixture.controller->state() == QuickTerminalState::Showing);
     CHECK(fixture.windows.front()->y() < shown.y);
 }
 
@@ -392,10 +447,12 @@ TEST_CASE("QuickTerminalController.aScreenChangeMidSlideSettlesOnTheNewScreen", 
 {
     auto motion = quickMotion();
     motion.emphasizedMs = 600;
+    auto clock = ManualAnimationClock {};
     auto fixture = Fixture { { .hotkey = ControlGrave }, motion };
     fixture.hotkey.press();
     REQUIRE(fixture.controller->state() == QuickTerminalState::Showing);
-    QTest::qWait(100);
+    REQUIRE(clock.advanceBy(motion.emphasizedMs / 6));
+    REQUIRE(fixture.controller->state() == QuickTerminalState::Showing); // mid-slide, as the case requires
 
     // The offscreen platform's one screen has another geometry than the one the frame was laid out for,
     // as if the window had been carried to a screen of its own size.
@@ -423,6 +480,9 @@ TEST_CASE("QuickTerminalController.focusLostDuringTheSlideInHidesIt", "[quickter
 {
     auto motion = quickMotion();
     motion.emphasizedMs = 600;
+    // The slide stands still until the clock is moved, so the focus is lost DURING it however slowly the
+    // window manager hands the focus around.
+    auto clock = ManualAnimationClock {};
     auto fixture = Fixture { { .hotkey = ControlGrave }, motion };
     fixture.hotkey.press();
     REQUIRE(fixture.controller->state() == QuickTerminalState::Showing);
@@ -434,6 +494,7 @@ TEST_CASE("QuickTerminalController.focusLostDuringTheSlideInHidesIt", "[quickter
     other.requestActivate();
     REQUIRE(QTest::qWaitFor([&] { return !fixture.windows.front()->isActive(); }, WaitMilliseconds));
     CHECK(fixture.controller->state() == QuickTerminalState::Hiding);
+    REQUIRE(clock.advanceBy(motion.emphasizedMs));
     REQUIRE(fixture.waitFor(QuickTerminalState::Hidden));
 }
 
