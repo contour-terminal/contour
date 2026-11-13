@@ -18,6 +18,7 @@
 #include <ranges>
 #include <set>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 using vtbackend::operator""_rgb;
@@ -731,12 +732,17 @@ TEST_CASE("snapshot.scriptTable.linuxHeaderBar", "[snapshot]")
     CHECK(static_cast<int>(SnapshotScript::ButtonsLeading)
           == static_cast<int>(SnapshotScript::InactiveWindow) + 1);
     CHECK(static_cast<int>(SnapshotScript::MainMenu) == static_cast<int>(SnapshotScript::NoButtons) + 1);
-    // The Hosts page's Settings row comes after the quick terminal, and the two tooltip rows close the table.
+    // The Hosts page's Settings row comes after the quick terminal, the two tooltip rows follow it and the
+    // sidebar's five close the table.
     CHECK(static_cast<int>(SnapshotScript::SettingsHost)
           == static_cast<int>(SnapshotScript::QuickTerminal) + 1);
     CHECK(static_cast<int>(SnapshotScript::ToolTipNewTab)
           == static_cast<int>(SnapshotScript::SettingsHost) + 1);
-    CHECK(SnapshotScripts.back().script == SnapshotScript::ToolTipTab);
+    CHECK(static_cast<int>(SnapshotScript::SidebarTree) == static_cast<int>(SnapshotScript::ToolTipTab) + 1);
+    CHECK(static_cast<int>(SnapshotScript::Switcher)
+          == static_cast<int>(SnapshotScript::SidebarChipDropdown) + 1);
+    CHECK(scriptRow(SnapshotScript::SidebarChipDropdown).action == ScriptAction::OpenWorkspaceDropdown);
+    CHECK(scriptRow(SnapshotScript::SidebarChipDropdown).sidebar == SnapshotSidebar::Hidden);
     struct Expected
     {
         SnapshotScript script;
@@ -813,4 +819,35 @@ TEST_CASE("snapshot plan: the quick terminal is one Minimal tab in the panel's f
     for (auto const& other: SnapshotScripts)
         CHECK((other.mode == SnapshotWindowMode::QuickTerminalPanel)
               == (other.script == SnapshotScript::QuickTerminal));
+}
+
+TEST_CASE("ChromeSnapshotPlan: the switcher's eight scripts close the table, each its own action",
+          "[snapshot]")
+{
+    using namespace contour::test::snapshot;
+    CHECK(SnapshotScripts.back().script == SnapshotScript::SwitcherHover);
+    for (auto const& [script, name, action]: std::array {
+             std::tuple { SnapshotScript::Switcher, "switcher", ScriptAction::OpenSwitcher },
+             std::tuple {
+                 SnapshotScript::SwitcherFiltered, "switcher-filtered", ScriptAction::FilterSwitcher },
+             std::tuple { SnapshotScript::SwitcherDaemonLevel,
+                          "switcher-daemon-level",
+                          ScriptAction::DrillInSwitcher },
+             std::tuple {
+                 SnapshotScript::SwitcherNewDaemon, "switcher-new-daemon", ScriptAction::NewDaemonSwitcher },
+             std::tuple {
+                 SnapshotScript::SwitcherNoMatch, "switcher-no-match", ScriptAction::SwitcherNoMatch },
+             std::tuple { SnapshotScript::SwitcherDiscovering,
+                          "switcher-discovering",
+                          ScriptAction::SwitcherDiscovering },
+             std::tuple {
+                 SnapshotScript::SwitcherRowMenu, "switcher-row-menu", ScriptAction::SwitcherRowMenu },
+             std::tuple { SnapshotScript::SwitcherHover, "switcher-hover", ScriptAction::HoverSwitcherRow },
+         })
+    {
+        INFO(name);
+        CHECK(scriptRow(script).name == std::string_view { name });
+        CHECK(scriptRow(script).action == action);
+        CHECK(scriptRow(script).sidebar == SnapshotSidebar::None);
+    }
 }

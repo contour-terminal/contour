@@ -225,8 +225,9 @@ TEST_CASE("no default chord fires twice", "[bindings]")
 
 TEST_CASE("the daemon and workspace switching actions are bound by no default chord", "[bindings][switch]")
 {
-    // Deliberately unbound: every plausible chord is a shell, editor or tmux key somewhere, and the
-    // palette, the title bar and the switcher reach them. A user binds the ones they want.
+    // Deliberately unbound, the switcher and CycleWorkspace aside (their own cases below): every plausible
+    // chord is a shell, editor or tmux key somewhere, and the palette, the title bar and the switcher reach
+    // them. A user binds the ones they want.
     using namespace contour::actions;
     for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
         for (auto const kind: AllKinds)
@@ -237,11 +238,9 @@ TEST_CASE("the daemon and workspace switching actions are bound by no default ch
                 return std::ranges::any_of(mapping.binding, [](auto const& action) {
                     return std::holds_alternative<SwitchToWorkspace>(action)
                            || std::holds_alternative<OpenWorkspace>(action)
-                           || std::holds_alternative<CycleWorkspace>(action)
                            || std::holds_alternative<CycleDaemon>(action)
                            || std::holds_alternative<SwitchToDaemon>(action)
                            || std::holds_alternative<OpenDaemon>(action)
-                           || std::holds_alternative<ShowSwitcher>(action)
                            || std::holds_alternative<NewDaemon>(action)
                            || std::holds_alternative<UpgradeDaemon>(action);
                 });
@@ -250,6 +249,43 @@ TEST_CASE("the daemon and workspace switching actions are bound by no default ch
             CHECK(std::ranges::none_of(mappings.charMappings, switching));
             CHECK(std::ranges::none_of(mappings.mouseMappings, switching));
         }
+}
+
+TEST_CASE("every edition and platform cycles workspaces one level up from the tab chords",
+          "[bindings][switch]")
+{
+    // Ctrl+PageUp/PageDown cycle the tabs; Shift and Alt added cycle the workspaces (Ctrl+Alt alone is
+    // Emacs's C-M-prior/next). macOS takes Control+Command with the vertical arrows. In the written defaults
+    // and the fallbacks alike, so a configuration that predates them still has them.
+    using actions::CycleDirection;
+    using actions::CycleWorkspace;
+    using vtbackend::Key;
+    auto const cycles = [](auto const& mappings, Modifiers mods, Key key, CycleDirection direction) {
+        return std::ranges::any_of(mappings, [&](auto const& mapping) {
+            return mapping.modifiers == mods && mapping.input == key && mapping.binding.size() == 1
+                   && std::holds_alternative<CycleWorkspace>(mapping.binding.front())
+                   && std::get<CycleWorkspace>(mapping.binding.front()).direction == direction;
+        });
+    };
+    for (auto const kind: AllKinds)
+    {
+        auto const mac = kind == KeyboardPlatformKind::Mac;
+        auto const mods = mac ? Modifiers { Modifier::Control, Modifier::Super }
+                              : Modifiers { Modifier::Control, Modifier::Shift, Modifier::Alt };
+        auto const nextKey = mac ? Key::DownArrow : Key::PageDown;
+        auto const previousKey = mac ? Key::UpArrow : Key::PageUp;
+        INFO("platform " << std::to_underlying(kind));
+        for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        {
+            INFO("edition " << token);
+            auto const& mappings = defaultInputMappings(edition, kind).keyMappings;
+            CHECK(cycles(mappings, mods, nextKey, CycleDirection::Next));
+            CHECK(cycles(mappings, mods, previousKey, CycleDirection::Previous));
+        }
+        auto const fallbacks = mappingsOf(builtinFallbackKeyMappings(kind));
+        CHECK(cycles(fallbacks, mods, nextKey, CycleDirection::Next));
+        CHECK(cycles(fallbacks, mods, previousKey, CycleDirection::Previous));
+    }
 }
 
 TEST_CASE("a bare F6 is bound in no edition", "[bindings]")
@@ -487,6 +523,24 @@ TEST_CASE("macOS opens the command palette with Command+P and Shift+Command+P", 
     CHECK(fallbackCharActions(mac, Modifiers { Modifier::Super }, U'P') == Names { "OpenCommandPalette" });
 }
 
+TEST_CASE("the switcher opens with Shift+Command+R on macOS and Ctrl+Shift+R elsewhere, in every edition",
+          "[bindings][switch]")
+{
+    // Owner ruling: beside every defaults row that opens the command palette, in both editions.
+    for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        for (auto const kind: AllKinds)
+        {
+            INFO("edition " << token << ", platform " << std::to_underlying(kind));
+            auto const chord = kind == KeyboardPlatformKind::Mac
+                                   ? Modifiers { Modifier::Super, Modifier::Shift }
+                                   : Modifiers { Modifier::Control, Modifier::Shift };
+            auto names = Names {};
+            appendActions(
+                defaultInputMappings(edition, kind).charMappings, chord, U'R', MatchModes {}, names);
+            CHECK(names == Names { "ShowSwitcher" });
+        }
+}
+
 TEST_CASE("every platform closes the active pane with Primary+W", "[bindings][panes]")
 {
     auto const ctrlShift = Modifiers { Modifier::Control, Modifier::Shift };
@@ -615,4 +669,85 @@ TEST_CASE("portablePrimarySpellings respells whichever row of a folding pair hol
     };
     CHECK(portablePrimarySpellings(std::span<CharInputMapping const> { rows }, KeyboardPlatformKind::Mac)
           == std::vector { PrimarySpelling::Literal, PrimarySpelling::Canonical });
+}
+
+namespace
+{
+/// Whether @p mappings binds the character @p input with @p modifiers to exactly one action, of type @p A.
+template <typename A>
+bool bindsChar(InputMappings const& mappings, char32_t input, Modifiers modifiers)
+{
+    return std::ranges::any_of(mappings.charMappings, [&](auto const& mapping) {
+        return mapping.input == input && mapping.modifiers == modifiers && mapping.binding.size() == 1
+               && std::holds_alternative<A>(mapping.binding.front());
+    });
+}
+} // namespace
+
+TEST_CASE("default chords: Command+\\ and Ctrl+Shift+B toggle the sidebar, Command+J and Ctrl+Shift+J jump, "
+          "only in Native2026",
+          "[bindings][sidebar]")
+{
+    auto const& mac = defaultInputMappings(DefaultsEdition::Native2026, KeyboardPlatformKind::Mac);
+    auto const& desktop = defaultInputMappings(DefaultsEdition::Native2026, KeyboardPlatformKind::Xkb);
+    constexpr auto Command = Modifiers { Modifier::Super };
+    constexpr auto CommandShift = Modifiers { Modifier::Super, Modifier::Shift };
+    constexpr auto CtrlShift = Modifiers { Modifier::Control, Modifier::Shift };
+
+    CHECK(bindsChar<actions::ToggleSidebar>(mac, U'\\', Command));
+    CHECK(bindsChar<actions::JumpToNextAttention>(mac, U'J', Command));
+    CHECK(bindsChar<actions::FocusSidebar>(mac, U'E', CommandShift));
+    CHECK(bindsChar<actions::ToggleSidebar>(desktop, U'B', CtrlShift));
+    CHECK(bindsChar<actions::JumpToNextAttention>(desktop, U'J', CtrlShift));
+    CHECK(bindsChar<actions::FocusSidebar>(desktop, U'D', CtrlShift));
+
+    for (auto const kind: AllKinds)
+    {
+        auto const& classic = defaultInputMappings(DefaultsEdition::Classic, kind);
+        CHECK(std::ranges::none_of(classic.charMappings, [](auto const& mapping) {
+            auto const& action = mapping.binding.front();
+            return std::holds_alternative<actions::ToggleSidebar>(action)
+                   || std::holds_alternative<actions::JumpToNextAttention>(action)
+                   || std::holds_alternative<actions::FocusSidebar>(action);
+        }));
+    }
+}
+
+TEST_CASE("the sidebar's chords reach a Native2026 configuration written before them, and no Classic one",
+          "[bindings][sidebar]")
+{
+    // A contour.yml written before the sidebar existed lacks its rows; the fallback tables carry them, gated
+    // by the defaults edition, since those tables serve every edition.
+    auto const sidebarRowsOf = [](KeyboardPlatformKind kind) {
+        auto rows = std::vector<FallbackCharMapping> {};
+        for (auto const& row: builtinFallbackCharMappings(kind))
+        {
+            auto const& action = row.mapping.binding.front();
+            if (std::holds_alternative<actions::ToggleSidebar>(action)
+                || std::holds_alternative<actions::JumpToNextAttention>(action)
+                || std::holds_alternative<actions::FocusSidebar>(action))
+                rows.push_back(row);
+        }
+        return rows;
+    };
+    for (auto const kind: AllKinds)
+    {
+        INFO("kind " << static_cast<int>(kind));
+        auto const rows = sidebarRowsOf(kind);
+        CHECK(rows.size() == 3);
+        auto const native =
+            Config { .defaultsEdition = DefaultsEdition::Native2026, .keyboardPlatformKind = kind };
+        auto const classic =
+            Config { .defaultsEdition = DefaultsEdition::Classic, .keyboardPlatformKind = kind };
+        for (auto const& row: rows)
+        {
+            CHECK(row.enabled(native));
+            CHECK_FALSE(row.enabled(classic));
+        }
+    }
+    constexpr auto CtrlShift = Modifiers { Modifier::Control, Modifier::Shift };
+    CHECK(std::ranges::any_of(sidebarRowsOf(KeyboardPlatformKind::Xkb), [&](auto const& row) {
+        return row.mapping.input == U'B' && row.mapping.modifiers == CtrlShift
+               && std::holds_alternative<actions::ToggleSidebar>(row.mapping.binding.front());
+    }));
 }

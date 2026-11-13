@@ -12,6 +12,7 @@
 #include <contour/platform/ShellRcEditor.hpp>
 #include <contour/platform/TaskbarProgressRouter.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
+#include <contour/session/InProcessDirectory.hpp>
 #include <contour/session/NodeDragSession.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/SessionRole.hpp>
@@ -26,6 +27,7 @@
 #include <contour/window/PaneKey.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
+#include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SwitcherRows.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TaskbarAttentionTally.hpp>
@@ -39,6 +41,8 @@
 #include <QtCore/QObject>
 #include <QtCore/QPoint>
 #include <QtCore/QPointer>
+#include <QtCore/QRect>
+#include <QtCore/QRectF>
 #include <QtCore/QTimer>
 #include <QtGui/QColor>
 #include <QtQml/QQmlEngine>
@@ -60,6 +64,7 @@
 #include <vector>
 
 #include <vthost/RestoredCounts.hpp>
+#include <vthost/WorkspaceGit.hpp>
 #include <vtworkspace/ModelEvents.hpp>
 #include <vtworkspace/Move.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -96,9 +101,11 @@ enum class SessionEnd : uint8_t
     /// The user ended these sessions for good (a pane or tab close). A daemon-hosted session is
     /// closed upstream too, via SessionFactory::requestRemoteClose, so it does not linger headless.
     Destroy,
-    /// Only the local view goes away (a window close, an app quit, a lost connection). A
-    /// daemon-hosted session keeps running and returns on the next attach — that is the whole point
-    /// of daemon mode, so nothing is authored upstream here.
+    /// Only the local view goes away (a window close, an app quit, a lost connection, a window's switch
+    /// to another workspace, a pane its window's layout no longer names). A daemon-hosted session keeps
+    /// running and returns on the next attach — that is the whole point of daemon mode, so nothing is
+    /// authored upstream here. It is let go of, though (SessionFactory::releaseRemoteSession): it may
+    /// return over the very connection it was shown through.
     Detach,
 };
 
@@ -136,6 +143,13 @@ enum class ReconnectRun : uint8_t
 {
     Idle = 0, ///< None is: a connection that fails now was not asked for from a footer.
     Running,  ///< reconnectHost() started one, and the daemon has not come back or refused yet.
+};
+
+/// Whether showPane() found the pane it was asked to show.
+enum class PaneShowing : uint8_t
+{
+    NotHeld = 0, ///< The window's displayed workspace holds no such pane; nothing changed.
+    Shown,       ///< Its tab is active and the pane focused and seen.
 };
 
 /// Why restartSession() started no new session.
@@ -254,11 +268,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param profileName Profile to launch the session with, or std::nullopt for the app default.
     /// @param command     A command to run instead of the profile's shell, or std::nullopt.
     /// @param role        What the session's program is to the user.
+    /// @param startDirectory Where the shell starts when @p window has no active pane to inherit that from
+    ///        (a workspace made just now), as UTF-8; std::nullopt for the profile's.
     TerminalSession* createSessionInBackground(
         vtworkspace::WorkspaceId window,
         std::optional<std::string> const& profileName = std::nullopt,
         std::optional<vtpty::Process::ExecInfo> const& command = std::nullopt,
-        SessionRole role = SessionRole::Shell);
+        SessionRole role = SessionRole::Shell,
+        std::optional<std::string> startDirectory = std::nullopt);
 
     /// Creates the terminal Settings previews a profile in: a SessionRole::Preview session over a mock
     /// device, showing PreviewTranscript at PreviewPageSize, under @p config's @p profileName. It is the
@@ -396,11 +413,114 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param acting The session that triggered the action.
     void showSwitcher(TerminalSession const& acting);
 
+    /// Opens the switcher as the workspace chip's dropdown: hanging below the chip, listing the workspaces of
+    /// the daemon the window hosting @p acting is on, and nothing else.
+    /// @param acting The session of the window whose chip was clicked.
+    /// @param chip The chip, in its window's scene coordinates.
+    void showWorkspaceDropdown(TerminalSession const& acting, QRectF chip);
+
     /// (In-process) Gives the window hosting @p acting a workspace of its own with one new tab and shows it;
     /// the workspace shown until now keeps running, hidden. Does nothing for a window a daemon serves, which
     /// has its workspaces from the daemon.
     /// @param acting The session that triggered the action.
     void newWorkspace(TerminalSession const& acting);
+
+    /// (In-process) What newWorkspace() does once it knows where the new workspace starts: a workspace of its
+    /// own for the window hosting @p acting, shown, whose first shell starts in @p cwd and which is named
+    /// after that folder (@see vtbackend::defaultWorkspaceName) -- once, so a later cd renames nothing. A
+    /// failed first session drops the workspace again.
+    /// @param acting The session that triggered the action.
+    /// @param cwd The folder the first shell starts in, as UTF-8; empty or "." for the profile's.
+    void newWorkspaceStartingIn(TerminalSession const& acting, std::string const& cwd);
+
+    /// (In-process) Labels @p workspace, which the in-process directory of its window lists
+    /// (InProcessDirectory); an empty label removes it. Not for a daemon's workspace, whose label is its
+    /// daemon's.
+    /// @param workspace The workspace.
+    /// @param label Its label.
+    void setWorkspaceLabel(vtworkspace::WorkspaceId workspace, std::string label);
+
+    /// Renames the workspace @p workspace that @p window lists: in its daemon for a window a daemon serves
+    /// (the daemon's WorkspaceMeta then reaches every window), in this process otherwise. A workspace the
+    /// window does not own is left alone.
+    /// @param window The window the user acts in.
+    /// @param workspace The workspace's id, as the window's directory lists it (DirectoryWorkspace::id).
+    /// @param label Its new label; empty clears it.
+    void renameWorkspace(window::WindowController& window, uint64_t workspace, std::string label);
+
+    /// Sets the title of the tab @p tab, whichever workspace of @p window's directory holds it, shown or not:
+    /// in its daemon for a window a daemon serves (named by a session it holds), in this process's model
+    /// otherwise. A tab the window does not list is left alone.
+    /// @param window The window the user acts in.
+    /// @param tab The tab's id, as the window's directory lists it (DirectoryTab::id).
+    /// @param title Its new title; empty returns it to its automatic one.
+    void renameTab(window::WindowController& window, uint64_t tab, std::string title);
+
+    /// Moves the workspace @p workspace that @p window lists to place @p toPosition of its directory, where
+    /// a daemon (or this process's model) orders it. The place is clamped.
+    /// @param window The window the user acts in.
+    /// @param workspace The workspace's id, as the window's directory lists it.
+    /// @param toPosition The 0-based place in the directory.
+    void moveWorkspace(window::WindowController& window, uint64_t workspace, int toPosition);
+
+    /// Moves the tab @p tab, whichever workspace of @p window's directory holds it, to place @p toPosition
+    /// of the workspace @p toWorkspace; none of its sessions closes. A tab of another host's, or into another
+    /// host's workspace, stays where it is.
+    /// @param window The window the user acts in.
+    /// @param tab The tab's id, as the window's directory lists it (DirectoryTab::id).
+    /// @param toWorkspace The destination workspace's id, as the directory lists it.
+    /// @param toPosition The 0-based place among the destination's tabs.
+    void moveTabToWorkspace(window::WindowController& window,
+                            uint64_t tab,
+                            uint64_t toWorkspace,
+                            int toPosition);
+
+    /// Moves a pane or a whole tab of @p window's directory: into a workspace as a tab, into a tab as its
+    /// splits (beside that tab's active pane), or into a workspace of its own, which the window then shows.
+    /// None of its sessions closes; a tab or a workspace it empties closes. A tab into a workspace is
+    /// moveTabToWorkspace(). On a daemon the daemon moves it (MoveNode), and its push brings the result.
+    /// @param window The window the user acts in.
+    /// @param node The pane, by its key, or the tab, as the directory names them.
+    /// @param destination Where it goes; a MoveTab's position is the 0-based place it ends at.
+    void moveSidebarNode(window::WindowController& window,
+                         window::SidebarNode const& node,
+                         window::NodeDestination const& destination);
+
+    /// @param window A window.
+    /// @return What the host of the workspace @p window shows can move (SessionFactory::hostMoves()).
+    [[nodiscard]] window::HostMoves hostMovesOf(window::WindowController const& window) const noexcept;
+
+    /// @param window The window the user acts in.
+    /// @param subject What moves: a tab or a pane.
+    /// @param landing What the move does.
+    /// @return Why @p window's host would not make the move (window::sidebarHostTakes()); None where it
+    /// would.
+    [[nodiscard]] window::MoveRefusal sidebarMoveRefusal(window::WindowController const& window,
+                                                         window::DragSubject subject,
+                                                         window::SidebarLanding landing) const noexcept;
+
+    /// Closes the workspace @p workspace that @p window lists, with all its tabs and panes. A workspace that
+    /// may be running a program is asked about first, as a tab is: the window raises
+    /// closeWorkspaceConfirmationRequested(), and confirmCloseWorkspace() closes it. An in-process window's
+    /// last workspace is kept: closing it would leave the window with nothing to show.
+    /// @param window The window the user acts in.
+    /// @param workspace The workspace's id, as the window's directory lists it.
+    void closeWorkspace(window::WindowController& window, uint64_t workspace);
+
+    /// Closes the workspace @p workspace that @p window lists without asking: the answer to
+    /// closeWorkspaceConfirmationRequested(). One that is gone already closes nothing.
+    /// @param window The window the user acts in.
+    /// @param workspace The workspace's id, as the window's directory lists it.
+    void confirmCloseWorkspace(window::WindowController& window, uint64_t workspace);
+
+    /// @return The labels of the in-process workspaces.
+    [[nodiscard]] WorkspaceLabels const& workspaceLabels() const noexcept { return _workspaceLabels; }
+
+    /// Tells the windows bound to @p binding that what its directory lists changed
+    /// (window::WindowController::workspaceDirectoryChanged), as a daemon's connection announces it. GUI
+    /// thread.
+    /// @param binding The binding whose directory changed.
+    void notifyWorkspaceDirectoryChanged(WindowBinding const& binding) const;
 
     /// Asks for a label (the switcher popup's label prompt), starts a new local daemon under it, and opens a
     /// new window on it, for the window hosting @p acting.
@@ -586,6 +706,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param action Where focus goes.
     /// @return Moved when focus changed area; Stayed otherwise, and the key then reaches the terminal.
     window::FocusMove moveChromeFocus(TerminalSession const& session, window::ChromeFocusAction action);
+    /// The window controller a sidebar action of @p session acts on.
+    /// @param session The session that received the action.
+    /// @return The controller of the window hosting @p session, or nullptr when it has none.
+    [[nodiscard]] window::WindowController* windowOf(TerminalSession const& session) const noexcept
+    {
+        return controllerHostingSession(&session);
+    }
     /// Opens the color picker for the active tab of the window hosting @p acting (a `SetTabColor`
     /// keybinding that names no color), routed exactly like beginTabTitleEdit().
     /// @param acting The session that received the keybinding; its hosting window is the target.
@@ -608,6 +735,16 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     // {{{ Tab-strip operations (window-routed; called by WindowController with its own WorkspaceId)
     void activateTab(vtworkspace::WorkspaceId window, int index);
+    /// Shows the pane a window's ledger knows as @p key in @p window's displayed workspace: activates its
+    /// tab, focuses it, and counts it as seen.
+    /// @param window The window's displayed workspace.
+    /// @param key    The pane's key (paneKeyOf).
+    /// @return Shown, or NotHeld when the displayed workspace holds no such pane, and nothing changed.
+    [[nodiscard]] PaneShowing showPane(vtworkspace::WorkspaceId window, window::PaneKey key);
+    /// Counts @p window's active pane as seen: its output, bell and finished marks clear and its
+    /// program-status records up to the newest count as seen.
+    /// @param window The window's displayed workspace.
+    void markActivePaneSeen(vtworkspace::WorkspaceId window);
     void moveTab(vtworkspace::WorkspaceId window, int fromIndex, int toIndex);
     /// Moves the tab at row @p fromIndex of window @p from into window @p to at row @p toIndex,
     /// transplanting it intact (its sessions survive). Drives the drag of a tab between windows.
@@ -1271,6 +1408,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param window The window whose sessions to look at.
     void markVisibleSessionsSeen(vtworkspace::WorkspaceId window);
 
+    /// Counts @p session, a pane of @p window, as seen: the window's ledger clears its marks and takes the
+    /// session's newest program-status generation as seen.
+    /// @param window  The window displaying the session's workspace.
+    /// @param session The pane's session.
+    void markPaneSeen(vtworkspace::WorkspaceId window, vtworkspace::SessionId session);
+
     /// Tells every session of @p window that its display's exposure may have changed (a window-state change).
     /// @param window The window.
     void notifyDisplaysExposureChanged(vtworkspace::WorkspaceId window) const;
@@ -1648,6 +1791,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
                   vtworkspace::TabId tab,
                   int fromIndex,
                   int toIndex) override;
+    void workspaceMoved(vtworkspace::WorkspaceId workspace, int fromIndex, int toIndex) override;
     void tabAboutToBeMovedToWorkspace(vtworkspace::WorkspaceId from,
                                       int fromIndex,
                                       vtworkspace::WorkspaceId to,
@@ -1700,14 +1844,68 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     void contextMenuRequested(TerminalSession* acting);
 
   private:
+    /// Points @p controller at the source of the workspaces it lists: its binding's, else its own process's.
+    /// @param controller The window.
+    void updateDirectorySource(window::WindowController& controller) const;
+
+    /// @param directory The folder a new workspace's first pane starts in.
+    /// @return The name the workspace gets once, at creation (@see vtbackend::defaultWorkspaceName).
+    [[nodiscard]] std::string defaultWorkspaceName(std::filesystem::path const& directory);
+
+    /// Names a new workspace after the folder @p directory, once (@see defaultWorkspaceName()); an unknown
+    /// (empty) folder names nothing.
+    /// @param workspace The new workspace.
+    /// @param directory The folder of the pane it starts with.
+    void nameNewWorkspace(vtworkspace::WorkspaceId workspace, std::filesystem::path const& directory);
+
+    /// moveSidebarNode() in a window that lists a daemon's workspaces: one MoveNode, named by the daemon's
+    /// sessions the directory lists. A pane or a tab sent into a new workspace is followed there once the
+    /// daemon's push lists it (WindowController::followIntoNewWorkspace()).
+    void moveSidebarNodeRemotely(window::WindowController& window,
+                                 window::SidebarNode const& node,
+                                 window::NodeDestination const& destination);
+
+    /// moveSidebarNode() in a window that lists this process's workspaces: a model move, which a node of
+    /// another host's, or one into a workspace of another host's, does not make.
+    void moveSidebarNodeInProcess(window::WindowController& window,
+                                  window::SidebarNode const& node,
+                                  window::NodeDestination const& destination);
+
+    /// Moves @p moving into a workspace of its own, made in @p window as a new workspace is, named after its
+    /// folder and shown there. Nothing for what already is all its workspace holds.
+    /// @param window The window the user acts in.
+    /// @param moving The pane or tab, in the model.
+    void moveIntoNewWorkspace(window::WindowController& window, vtworkspace::MoveSource const& moving);
+
+    /// Drops what an in-process directory holds of @p workspace, which is gone: its label and its git state.
+    /// @param workspace The workspace.
+    void forgetDirectoryState(vtworkspace::WorkspaceId workspace);
+
+    /// Tells every in-process window that what its directory lists changed.
+    void notifyDirectoriesChanged() const;
+
+    /// Looks the git state of @p workspace up again, for the directory of its active pane. There is no timer
+    /// behind it, unlike a daemon's: an in-process workspace is refreshed when its active pane's working
+    /// directory changes, when its active tab or pane does, and when a command finishes (OSC 133;D).
+    /// @param workspace The workspace.
+    void refreshWorkspaceGit(vtworkspace::WorkspaceId workspace);
+
+    /// refreshWorkspaceGit() for the workspace of @p session, if the session is its active pane's.
+    /// @param session A session.
+    void refreshGitOfSession(vtworkspace::SessionId session);
+
     /// Opens the switcher popup over the window hosting @p acting, showing @p prompt; a logged no-op for a
     /// window with no daemon behind it.
     /// @param acting The session that triggered the action.
     /// @param prompt The list, or the "New daemon…" label prompt.
     /// @param what The action's name, for the log.
+    /// @param scope Every daemon, or the window's own alone.
+    /// @param control The control it drops down from, in its window's scene coordinates; none centres it.
     void openSwitcherOver(TerminalSession const& acting,
                           window::SwitcherPrompt prompt,
-                          std::string_view what);
+                          std::string_view what,
+                          window::SwitcherScope scope,
+                          std::optional<QRectF> control);
 
     /// Repaints the tab hosting @p session for its lock (WindowController::Roles::SecureRole), if it has one.
     void notifySecureTab(TerminalSession const& session);
@@ -1837,6 +2035,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param source What a move moves.
     /// @return The window it is in; WorkspaceId {} for a pane no window shows.
     [[nodiscard]] vtworkspace::WorkspaceId windowOfSource(vtworkspace::MoveSource const& source) const;
+    /// @return Whether the model still holds what @p source names: a move made once a drag ended may find it
+    ///         closed.
+    [[nodiscard]] bool holdsMoveSource(vtworkspace::MoveSource const& source) const;
 
     /// @param session A session of this manager.
     /// @return The factory of the window @p session is in (@see factoryFor); the one this manager was
@@ -1916,6 +2117,22 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @return The backing sessions, in pane-tree order.
     [[nodiscard]] std::vector<TerminalSession*> sessionsInTab(vtworkspace::Tab* tab) const;
 
+    /// @return The sessions of every pane of every tab of @p workspace, in tab order.
+    [[nodiscard]] std::vector<TerminalSession*> sessionsInWorkspace(
+        vtworkspace::Workspace const& workspace) const;
+
+    /// @return Whether @p window lists the workspaces of a daemon (or another host), whose labels, order and
+    ///         tabs that host owns, rather than its own process's.
+    [[nodiscard]] bool listsRemotely(window::WindowController const& window) const noexcept;
+
+    /// @return Whether @p window owns one workspace or none: an in-process window keeps its last one, so
+    ///         closeWorkspace() and confirmCloseWorkspace() refuse to close it.
+    [[nodiscard]] static bool ownsOneWorkspaceOnly(window::WindowController const& window);
+
+    /// @return Whether @p window holds @p workspace among the workspaces it owns.
+    [[nodiscard]] static bool ownsWorkspace(window::WindowController const& window,
+                                            vtworkspace::WorkspaceId workspace) noexcept;
+
     /// Gathers the backing sessions of every tab in @p window matching @p predicate, in row order.
     /// Shared by the bulk-close operations (closeOtherTabs / closeTabsToRight), which snapshot the doomed
     /// sessions before the model mutates.
@@ -1949,6 +2166,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// its pty, and the teardown that follows destroys it.
     /// @param session The session being ended for good.
     void authorRemoteEnd(TerminalSession* session);
+
+    /// Tells the factory of @p session that the session ends as @p end says: authorRemoteEnd() for a
+    /// Destroy, SessionFactory::releaseRemoteSession() for a Detach. Under the same rule as
+    /// authorRemoteEnd(): while @p session holds its pty and sits in its tab.
+    /// @param session The session whose pane goes; none is a no-op.
+    /// @param end Why it goes.
+    void endRemotely(TerminalSession* session, SessionEnd end);
 
     /// authorRemoteEnd() for each of @p sessions. Must run while each still sits in its tab: the window
     /// holding the tab names the host to tell (@see factoryOf), so a caller about to close those tabs in the
@@ -2251,6 +2475,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     // row/signal emission to the controller for the event's window. Owned via QQmlEngine CppOwnership.
     std::unordered_map<window::WindowId, window::WindowController*> _controllersByWindow;
     uint64_t _nextWindowId = 1; ///< The next WindowId to mint.
+    // What an in-process window lists of its workspaces (InProcessDirectory): their labels, the status of
+    // their panes' sessions and their git state, which one tracker looks up for every window. The directories
+    // come last, so that they go before what they read.
+    WorkspaceLabels _workspaceLabels;
+    std::unique_ptr<window::PaneStatusLookup> _paneStatus;
+    std::unique_ptr<vthost::WorkspaceGitTracker> _gitTracker; ///< Null where git is not tracked.
+    std::unordered_map<window::WindowId, std::unique_ptr<InProcessDirectory>> _inProcessDirectories;
     /// What the next createWindowController() window is for. @see stageWindowRole
     window::WindowRole _stagedRole = window::WindowRole::Normal;
     // Registry mapping a vtworkspace session id to the Qt TerminalSession that backs it. The reverse

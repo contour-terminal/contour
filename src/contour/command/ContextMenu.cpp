@@ -50,6 +50,11 @@ namespace
         return state.hasLocalWorkingDirectory;
     }
 
+    bool offersSidebar(ContextMenuState const& state) noexcept
+    {
+        return state.sidebarRecovery == SidebarRecovery::Offered;
+    }
+
     bool hasSplits(ContextMenuState const& state) noexcept
     {
         return state.hasSplits;
@@ -168,6 +173,10 @@ namespace
             Table::command(ToggleSplitOrientation {}, "Toggle Split Orientation").shownWhen(hasSplits),
             Table::command(ClosePane {}, "Close Pane"),
             Table::command(CreateNewTab {}, "New Tab"),
+            // The way back to a sidebar hidden while no band holds its toggle: the pane is all that is left
+            // under the pointer, so whatever hid it can be undone from here (a band, when there is one,
+            // holds the toggle instead).
+            Table::command(ToggleSidebar {}, "Show Sidebar").shownWhen(offersSidebar),
 
             Table::separator(),
 

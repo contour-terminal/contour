@@ -1360,6 +1360,32 @@ TEST_CASE("SettingsController: the tab bar fields are global and offer their tab
     CHECK(!profileKeys.contains("tab_bar_visibility"));
 }
 
+TEST_CASE("SettingsController: tab placement is a global field offering its table's tokens", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+
+    auto expected = QStringList {};
+    for (auto const& info: config::configEnumValues<config::TabPlacement>())
+        expected.push_back(QString::fromUtf8(info.token.data(), static_cast<qsizetype>(info.token.size())));
+
+    auto options = QStringList {};
+    auto type = QString {};
+    for (auto const& row: fx.controller->globalFields())
+        if (row.toMap().value("key").toString() == "tab_placement")
+        {
+            type = row.toMap().value("type").toString();
+            options = row.toMap().value("options").toStringList();
+        }
+    CHECK(type == "enum");
+    CHECK(options == expected);
+
+    // The row is the only way to change placement, and it writes the configuration.
+    fx.commitGlobal("tab_placement", "Sidebar");
+    CHECK(fx.cfg.tabPlacement.value() == config::TabPlacement::Sidebar);
+    fx.commitGlobal("tab_placement", "Top");
+    CHECK(fx.cfg.tabPlacement.value() == config::TabPlacement::Top);
+}
+
 TEST_CASE("SettingsController: the chrome style is a global field offering its table's tokens", "[settings]")
 {
     auto fx = Fixture(BasicConfig);

@@ -17,6 +17,8 @@ add_library(contour_command STATIC
     ContextMenuTable.hpp
     MenuBarTable.cpp MenuBarTable.hpp
     MenuTree.cpp MenuTree.hpp
+    SidebarMenus.cpp SidebarMenus.hpp
+    SwitcherMenus.cpp SwitcherMenus.hpp
     TabMenus.cpp TabMenus.hpp
     FuzzyFilter.cpp FuzzyFilter.hpp
     Shortcut.cpp Shortcut.hpp

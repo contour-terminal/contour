@@ -223,6 +223,7 @@ enum class ChromeColorRole : uint8_t
     PaletteSecondaryText, //!< Group headers, shortcuts, the footer and the placeholder.
     PaletteSelectionFill, //!< The selected row's fill.
     PaletteSelectionText, //!< The selected row's title and accessory.
+    PaletteHoverFill,     //!< A row's fill under a pointer that moved: lighter than the selection's.
     PaletteSeparator,     //!< The rules below the query and above the footer.
 
     // The find bar.
@@ -278,6 +279,18 @@ enum class ChromeColorRole : uint8_t
     TooltipText,          //!< A tooltip's label, and the first line of a multi-line one.
     TooltipTextSecondary, //!< A tooltip's shortcut, and the lines after the first.
     TooltipEdge,          //!< A tooltip's hairline edge; none where the box is drawn in cells.
+
+    // The workspace sidebar.
+    SidebarFill,          //!< The sidebar's fill.
+    SidebarSelectionFill, //!< The selected row's fill.
+    SidebarSelectionInk,  //!< The selected row's label and glyph.
+    SidebarSecondaryInk,  //!< A row's secondary line: its directory, its git state.
+    SidebarDivider,       //!< The rule between the sidebar and the content, and above its footer.
+    SidebarAccentPill,    //!< The accent mark beside the selected row; none where the fill alone marks it.
+    /// The selected row's fill while the keyboard is elsewhere: macOS's unemphasized selection, a quiet grey
+    /// rather than the accent; the active fill on the rows whose platform keeps the accent.
+    SidebarSelectionFillInactive,
+    SidebarSelectionInkInactive, //!< The selected row's label and glyph on that fill.
 };
 
 /// Where a chrome colour comes from.
@@ -381,7 +394,8 @@ inline constexpr std::array SchemeMarkChains {
 };
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
-inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::TooltipEdge) + 1;
+inline constexpr size_t ChromeColorRoleCount =
+    static_cast<size_t>(ChromeColorRole::SidebarSelectionInkInactive) + 1;
 
 // Each family of colour roles is counted by its own two ends, End - Begin, never from a neighbour's End: a
 // family added between two others then shifts no count.
@@ -417,6 +431,12 @@ inline constexpr size_t FocusColorRoleEnd = static_cast<size_t>(ChromeColorRole:
 inline constexpr size_t SettingsColorRoleBegin = static_cast<size_t>(ChromeColorRole::SettingsSidebarFill);
 /// One past the last Settings window colour role.
 inline constexpr size_t SettingsColorRoleEnd = static_cast<size_t>(ChromeColorRole::PreviewFrame) + 1;
+
+/// The first workspace sidebar colour role.
+inline constexpr size_t SidebarColorRoleBegin = static_cast<size_t>(ChromeColorRole::SidebarFill);
+/// One past the last workspace sidebar colour role.
+inline constexpr size_t SidebarColorRoleEnd =
+    static_cast<size_t>(ChromeColorRole::SidebarSelectionInkInactive) + 1;
 
 /// One chrome colour: a source kind plus the field that kind reads.
 struct ChromeColorSource
@@ -550,6 +570,8 @@ struct SizeTokens
     int paletteRow = 0;         ///< Height of a row (vertical units).
     int paletteGroupHeader = 0; ///< Height of a group header (vertical units).
     int paletteFooter = 0;      ///< Height of the footer (vertical units).
+    /// Width the footer keeps for the row's description before its key hints (horizontal units).
+    int paletteFooterDescription = 0;
 
     // The Connect picker.
     int connectWidth = 0;  ///< Default width of the picker's window (horizontal units).
@@ -890,6 +912,146 @@ struct SettingsTokens
     [[nodiscard]] bool operator==(SettingsTokens const&) const = default;
 };
 
+/// How the workspace sidebar looks; the row's @c layout.sidebar.
+enum class SidebarLook : uint8_t
+{
+    SourceList = 0, //!< An inset rounded selection on a translucent source list (macOS).
+    NavigationPane, //!< A subtle selection fill with an accent pill at its edge (Fluent).
+    HeaderPane,     //!< A solid accent selection under a header bar (ContourLinux).
+    CellTree,       //!< A tree of whole cell rows, the selection a run of cells (the Terminal style).
+};
+
+/// Where the workspace sidebar stands against the title band.
+enum class SidebarSpan : uint8_t
+{
+    UnderBand = 0, //!< Below the band, which spans the window: the band's controls stay where they are.
+    BesideBand,    //!< The window's full height, the band beside it: the OS's controls sit over its top.
+};
+
+/// Where the sidebar's own title row ("Workspaces" and its "+") is drawn.
+enum class SidebarTitle : uint8_t
+{
+    InSidebar = 0, //!< The sidebar's first row.
+    InHeaderBar,   //!< The header bar's part above the sidebar (the ContourLinux row).
+};
+
+/// Whether a sidebar row answers the pointer with a fill of its own.
+enum class SidebarRowFeedback : uint8_t
+{
+    None = 0,        //!< No hover or pressed fill: a macOS source list, a run of cells.
+    HoverAndPressed, //!< The band's hover fill under the pointer, the pressed fill while held (WinUI, GTK,
+                     //!< KDE).
+};
+
+/// Where the button that makes a new workspace stands, apart from the band's new-tab button.
+enum class SidebarAddPlace : uint8_t
+{
+    TitleRow = 0, //!< The sidebar's title row (the header bar's part above it, where that draws the row).
+    Footer,       //!< The sidebar's footer, leading: where a source list keeps its "+" (Finder, Mail).
+};
+
+/// Whether the sidebar's title row names the list.
+enum class SidebarHeading : uint8_t
+{
+    Unnamed = 0, //!< No "Workspaces" heading: a macOS source list, whose top row the traffic lights and the
+                 //!< toggle own.
+    Named,       //!< The row says "Workspaces".
+};
+
+/// How a workspace row's disclosure (its fold) is drawn.
+enum class SidebarDisclosure : uint8_t
+{
+    CellGlyph = 0, //!< A text glyph in one cell (▾ expanded, ▸ folded): the Terminal row's cells.
+    Chevron, //!< A symbolic chevron icon, centred on the title line and turned to fold (macOS, WinUI, GTK).
+};
+
+/// The chevron a SidebarDisclosure::Chevron row draws, pointing down (expanded): a bundled symbolic icon,
+/// tinted where it is drawn.
+inline constexpr std::string_view SidebarChevronIcon = "qrc:/contour/icons/pan-down-symbolic.svg";
+
+/// What a sidebar look implies for the window's layout.
+struct SidebarLookTraits
+{
+    SidebarLook look = SidebarLook::SourceList;   ///< The look the row describes.
+    SidebarSpan span = SidebarSpan::UnderBand;    ///< Where it stands against the band.
+    SidebarTitle title = SidebarTitle::InSidebar; ///< Where its title row is.
+    /// The glyph of the column that divides it from the content, one cell wide; empty draws a hairline.
+    std::string_view divider;
+    SidebarRowFeedback feedback = SidebarRowFeedback::None; ///< Whether a row shows hover and pressed fills.
+    SidebarAddPlace add = SidebarAddPlace::TitleRow;        ///< Where its new-workspace button stands.
+    SidebarHeading heading = SidebarHeading::Named;         ///< Whether its title row says "Workspaces".
+    SidebarDisclosure disclosure = SidebarDisclosure::CellGlyph; ///< How a workspace row's fold is drawn.
+};
+
+/// The traits of each SidebarLook, in enumerator order.
+inline constexpr auto SidebarLookRows = std::array {
+    SidebarLookTraits { .look = SidebarLook::SourceList,
+                        .span = SidebarSpan::BesideBand,
+                        .title = SidebarTitle::InSidebar,
+                        .divider = {},
+                        .feedback = SidebarRowFeedback::None,
+                        .add = SidebarAddPlace::Footer,
+                        .heading = SidebarHeading::Unnamed,
+                        .disclosure = SidebarDisclosure::Chevron },
+    SidebarLookTraits { .look = SidebarLook::NavigationPane,
+                        .span = SidebarSpan::UnderBand,
+                        .title = SidebarTitle::InSidebar,
+                        .divider = {},
+                        .feedback = SidebarRowFeedback::HoverAndPressed,
+                        .add = SidebarAddPlace::Footer,
+                        .heading = SidebarHeading::Named,
+                        .disclosure = SidebarDisclosure::Chevron },
+    SidebarLookTraits { .look = SidebarLook::HeaderPane,
+                        .span = SidebarSpan::UnderBand,
+                        .title = SidebarTitle::InHeaderBar,
+                        .divider = {},
+                        .feedback = SidebarRowFeedback::HoverAndPressed,
+                        .add = SidebarAddPlace::TitleRow,
+                        .heading = SidebarHeading::Named,
+                        .disclosure = SidebarDisclosure::Chevron },
+    SidebarLookTraits { .look = SidebarLook::CellTree,
+                        .span = SidebarSpan::UnderBand,
+                        .title = SidebarTitle::InSidebar,
+                        .divider = "│",
+                        .feedback = SidebarRowFeedback::None,
+                        .add = SidebarAddPlace::Footer,
+                        .heading = SidebarHeading::Named,
+                        .disclosure = SidebarDisclosure::CellGlyph },
+};
+
+static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SidebarLookRows.size()),
+                                  [](std::size_t i) {
+                                      return static_cast<std::size_t>(SidebarLookRows[i].look) == i;
+                                  }),
+              "SidebarLookRows lists every SidebarLook once, in enumerator order");
+
+/// @param look A sidebar look.
+/// @return What it implies for the layout.
+[[nodiscard]] constexpr SidebarLookTraits sidebarLookTraits(SidebarLook look) noexcept
+{
+    return SidebarLookRows[static_cast<std::size_t>(look)];
+}
+
+/// The workspace sidebar's extents, in the units of the row: logical pixels, and cells on the Terminal row.
+/// Widths, edges, gaps and radii are in horizontal units, heights in vertical ones.
+struct SidebarTokens
+{
+    int width = 0;            ///< The sidebar's default width.
+    int minWidth = 0;         ///< The narrowest it may be dragged to.
+    int maxWidth = 0;         ///< The widest it may be dragged to.
+    int rowHeight = 0;        ///< A one-line row's height.
+    int twoLineRowHeight = 0; ///< A two-line row's height.
+    int indent = 0;           ///< What a tab row is indented by beneath its workspace.
+    int glyph = 0;            ///< A row's glyph, its edge.
+    int gitGap = 0;           ///< The gap between a row's directory and its git state.
+    int footerHeight = 0;     ///< The footer's height.
+    int selectionRadius = 0;  ///< The selected row's corner radius; 0 squares it off.
+    int accentPillWidth = 0;  ///< The accent pill's width; 0 draws none.
+    int hoverCardWidth = 0;   ///< The width of the card a hovered row shows.
+
+    [[nodiscard]] bool operator==(SidebarTokens const&) const = default;
+};
+
 /// Layout choices that differ per style.
 struct LayoutTokens
 {
@@ -907,6 +1069,7 @@ struct LayoutTokens
     SettingsLayout settings = SettingsLayout::InsetGrouped;      ///< How the Settings window is laid out.
     HeaderBarArrangement headerBar = HeaderBarArrangement::Band; ///< How the window's top row is arranged.
     TabCloseMark tabClose = TabCloseMark::Glyph;                 ///< What a tab's close button shows.
+    SidebarLook sidebar = SidebarLook::SourceList;               ///< How the workspace sidebar looks.
 
     [[nodiscard]] bool operator==(LayoutTokens const&) const = default;
 };
@@ -981,6 +1144,7 @@ struct ChromeTokenRow
     MinimalDensityTokens minimal {}; ///< The extents the Minimal density replaces.
     BlockChipTokens blockChips {};   ///< The native rows' block chips and rail marks.
     SettingsTokens settings {};      ///< The Settings window's extents and type.
+    SidebarTokens sidebar {};        ///< The workspace sidebar's extents.
 };
 
 /// The WCAG AA ratio chrome text must reach against what it sits on: the terminal's own, one entity, so a

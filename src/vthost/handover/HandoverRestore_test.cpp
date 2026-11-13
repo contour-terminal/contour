@@ -3,6 +3,8 @@
 
 #include <vtpty/test/HandleTesting.hpp>
 
+#include <core/async/testing/ManualExecutor.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
@@ -34,10 +36,12 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -46,6 +50,7 @@
 #include <vector>
 
 #include <vthost/SessionHost.hpp>
+#include <vthost/WorkspaceGit.hpp>
 #include <vthost/handover/HandoverRestore.hpp>
 #include <vthost/testing/FakeProfileCatalog.hpp>
 #include <vthost/testing/HandoverTesting.hpp>
@@ -407,6 +412,67 @@ TEST_CASE("a restored session takes the scrollback limit of the configuration th
     CHECK(terminal.primaryScreen().renderMainPageText().contains("ready"));
 }
 
+TEST_CASE("a reordered daemon keeps its workspace order and its default workspace across an upgrade",
+          "[vthost][handover]")
+{
+    auto old = std::make_unique<LiveHost>(catDevice);
+    REQUIRE(old->host.createTab() != nullptr);
+    auto const defaultWorkspace = old->host.workspaceId();
+    auto* const other = old->host.createWorkspace();
+    REQUIRE(other != nullptr);
+    // The host's own workspace is no longer the first.
+    old->host.model().moveWorkspace(defaultWorkspace, 1);
+    auto const order = [](SessionHost& host) {
+        return std::ranges::to<std::vector>(
+            std::views::iota(0, host.model().workspaceCount())
+            | std::views::transform([&](int i) { return host.model().workspaceAt(i)->id().value; }));
+    };
+    auto const expected = order(old->host);
+    REQUIRE(expected == std::vector { other->id().value, defaultWorkspace.value });
+
+    auto const image = handOver(std::move(old));
+    auto const live = takeOver(image);
+
+    CHECK(order(live->host) == expected);
+    CHECK(live->host.workspaceId() == defaultWorkspace);
+}
+
+TEST_CASE(
+    "a workspace an older release kept empty after its last session ended is dropped as it is taken over",
+    "[vthost][handover]")
+{
+    auto old = std::make_unique<LiveHost>(catDevice);
+    REQUIRE(old->host.createTab() != nullptr);
+    auto const defaultWorkspace = old->host.workspaceId();
+    // What an older release left behind: a tabless workspace beside the one that holds a tab.
+    auto const ended = old->host.createEmptyWorkspace().id();
+    REQUIRE(old->host.model().workspaceCount() == 2);
+
+    auto const image = handOver(std::move(old));
+    auto const live = takeOver(image);
+
+    CHECK(live->host.model().workspaceCount() == 1);
+    CHECK(live->host.model().workspace(ended) == nullptr);
+    CHECK_FALSE(live->host.objects().uuidOf(ended).has_value());
+    CHECK(live->host.workspaceId() == defaultWorkspace);
+}
+
+TEST_CASE("a daemon whose every workspace is empty keeps its own one across an upgrade", "[vthost][handover]")
+{
+    auto old = std::make_unique<LiveHost>(catDevice);
+    auto const defaultWorkspace = old->host.workspaceId();
+    std::ignore = old->host.createEmptyWorkspace();
+    // The host's own workspace is not the first.
+    old->host.model().moveWorkspace(defaultWorkspace, 1);
+
+    auto const image = handOver(std::move(old));
+    auto const live = takeOver(image);
+
+    REQUIRE(live->host.model().workspaceCount() == 1);
+    CHECK(live->host.workspaceId() == defaultWorkspace);
+    CHECK(live->host.model().workspace(defaultWorkspace) != nullptr);
+}
+
 TEST_CASE("a refused workspace tree still adopts every session, each in a tab of its own",
           "[vthost][handover][threading]")
 {
@@ -462,6 +528,47 @@ TEST_CASE("a kitty animation playing as it is handed over keeps the daemon's fra
 
     // Armed by the restore alone: nothing the program sends from now re-arms it.
     CHECK(live->eventually([&] { return live->host.ticksKittyAnimations(id); }));
+}
+
+namespace
+{
+/// Answers every directory with a branch named after it, and records what it was asked.
+struct DirectoryNamingProbe final: IGitStatusProbe
+{
+    [[nodiscard]] std::optional<GitInfo> probe(std::filesystem::path const& cwd) const override
+    {
+        asked.push_back(cwd);
+        return GitInfo { .branch = cwd.filename().string() };
+    }
+
+    mutable std::vector<std::filesystem::path> asked;
+};
+} // namespace
+
+TEST_CASE("a restored daemon looks every workspace's git state up again and keeps polling it",
+          "[vthost][handover][threading][git]")
+{
+    // What git a workspace is on is looked up, not carried: the successor asks again for each one it takes
+    // over, at once, rather than waiting for a window, a new directory or a finished command that may never
+    // come -- and keeps asking on the poll, as a host whose workspaces were made in it does.
+    auto old = oneSession();
+    auto const workspace = old->host.workspaceId();
+    // The shell reports no directory (no OSC 7, whose restore would tell it anew): the process's own is the
+    // only one there is, and nothing about it changes across the upgrade.
+    auto const image = handOver(std::move(old));
+
+    auto probe = DirectoryNamingProbe {};
+    auto executor = core::async::testing::ManualExecutor {};
+    auto const live = takeOver(
+        image,
+        SessionHostConfig { .workspaceGit = WorkspaceGitServices { .probe = probe, .executor = executor } });
+
+    REQUIRE(live->eventually([&] {
+        executor.drain();
+        return live->host.gitInfoOf(workspace).has_value();
+    }));
+    CHECK(live->host.gitInfoOf(workspace)->branch == std::filesystem::current_path().filename().string());
+    CHECK(live->host.pollsWorkspaceGit());
 }
 
 namespace

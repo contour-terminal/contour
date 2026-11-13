@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/control/ControlService.hpp>
 
+#include <vtbackend/screen/GitHead.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 
 #include <core/Overloaded.hpp>
@@ -20,7 +21,9 @@
 #include <vtcontrol/Events.hpp>
 #include <vtcontrol/Json.hpp>
 #include <vtcontrol/ObjectRef.hpp>
+#include <vthost/NodeMove.hpp>
 #include <vthost/ViewRouting.hpp>
+#include <vthost/WorkspaceGit.hpp>
 #include <vthost/WorkspaceVisibility.hpp>
 #include <vthost/control/PaneText.hpp>
 #include <vthost/control/ProgramStatusConvert.hpp>
@@ -64,6 +67,19 @@ namespace
     constexpr auto ProgramStatusPermission =
         std::get<vtcontrol::EventRow<vtcontrol::ProgramStatusChangedEvent>>(vtcontrol::EventCatalog)
             .permission;
+
+    /// @param kind What a git HEAD names, as the host looked it up.
+    /// @return The same, as the API names it.
+    [[nodiscard]] constexpr vtcontrol::GitHeadKind gitHeadKindOf(vtbackend::GitHeadKind kind) noexcept
+    {
+        switch (kind)
+        {
+            case vtbackend::GitHeadKind::Branch: return vtcontrol::GitHeadKind::Branch;
+            case vtbackend::GitHeadKind::Detached: return vtcontrol::GitHeadKind::Detached;
+            case vtbackend::GitHeadKind::OtherRef: return vtcontrol::GitHeadKind::OtherRef;
+        }
+        return vtcontrol::GitHeadKind::Branch;
+    }
 
     [[nodiscard]] ControlError notFound(std::string message)
     {
@@ -167,6 +183,8 @@ ControlService::ControlService(SessionHost& host, ControlServiceConfig config):
     _waiters(_config.maxWaitsPerConnection),
     _streamSubscription(makeScopedStreamSubscription(host, *this)),
     _modelSubscription(makeScopedModelSubscription(host, *this)),
+    _labelSubscription(host.objects().onLabelChanged(
+        [this](ObjectRef const& ref, std::string_view label) { labelChanged(ref, label); })),
     _extensionControl(makeScopedExtensionControl(host, *this))
 {
 }
@@ -346,7 +364,13 @@ vtcontrol::PaneInfo ControlService::paneInfoOf(SessionId session,
         info.size = vtcontrol::Size { .columns = unbox<uint32_t>(size.columns),
                                       .lines = unbox<uint32_t>(size.lines) };
         if (grants.contains(ProgramStatusPermission))
+        {
             info.programStatus = toApi(terminal->programStatus());
+            // How the last command ended says what the program status says: what ran, and how it went.
+            auto const& blocks = terminal->commandBlocks();
+            if (auto const* last = blocks.lastFinished())
+                info.lastFinished = blockInfoOf(uuid, *last, blocks.idEpoch());
+        }
     }
     return info;
 }
@@ -365,6 +389,11 @@ vtcontrol::WorkspaceInfo ControlService::workspaceInfoOf(vtworkspace::Workspace 
     info.native = std::to_string(workspace.id().value);
     info.visibility = std::string { nameOf(_host.visibility(workspace.id().value)) };
     info.clients = static_cast<uint32_t>(_host.clientsShowing(workspace.id().value).size());
+    if (auto const git = _host.gitInfoOf(workspace.id()))
+        info.git = vtcontrol::WorkspaceGitInfo { .branch = git->branch,
+                                                 .kind = gitHeadKindOf(git->kind),
+                                                 .ahead = git->ahead,
+                                                 .behind = git->behind };
 
     auto const titleOf = [&](SessionId session) -> std::string {
         auto const* terminal = _host.terminal(session);
@@ -834,6 +863,185 @@ void ControlService::handle(vtcontrol::CallContext& context,
     }));
 }
 
+void ControlService::handle(vtcontrol::CallContext& /*context*/,
+                            vtcontrol::CreateWorkspaceRequest const& request,
+                            vtcontrol::Completion<vtcontrol::CreateWorkspaceReply> done)
+{
+    // Through the host's own path, which names the workspace after the folder its shell starts in.
+    auto* workspace = _host.createWorkspace(spawnRequestOf({}, request.cwd));
+    if (workspace == nullptr)
+    {
+        done(std::unexpected(failed("the new workspace's shell could not be started")));
+        return;
+    }
+    auto const uuid = _host.objects().uuidOf(workspace->id()).value_or(vtcontrol::Uuid {});
+    // A label stated outright replaces the default one.
+    if (!request.label.empty())
+        _host.objects().setLabel(ObjectRef { .kind = ObjectKind::Workspace, .uuid = uuid }, request.label);
+    auto const* tab = workspace->activeTab();
+    done(vtcontrol::CreateWorkspaceReply {
+        .workspace = idOf(ObjectKind::Workspace, uuid),
+        .tab = idOf(ObjectKind::Tab, _host.objects().uuidOf(tab->id()).value_or(vtcontrol::Uuid {})),
+        .pane = idOf(ObjectKind::Pane,
+                     _host.objects().uuidOf(tab->rootPane()->session()).value_or(vtcontrol::Uuid {})),
+    });
+}
+
+void ControlService::handle(vtcontrol::CallContext& context,
+                            vtcontrol::RenameWorkspaceRequest const& request,
+                            vtcontrol::Completion<vtcontrol::EmptyReply> done)
+{
+    // object.setLabel on a workspace, which publishes workspace.labelChanged and tells every window.
+    done(resolveWorkspace(context, request.workspace).transform([&](WorkspaceId workspace) {
+        _host.objects().setLabel(
+            ObjectRef { .kind = ObjectKind::Workspace,
+                        .uuid = _host.objects().uuidOf(workspace).value_or(vtcontrol::Uuid {}) },
+            request.label);
+        return vtcontrol::EmptyReply {};
+    }));
+}
+
+namespace
+{
+    /// @return How the control API reports @p error.
+    [[nodiscard]] ControlError controlErrorOf(WorkspaceCloseError error)
+    {
+        auto const code = [error] {
+            switch (error)
+            {
+                case WorkspaceCloseError::UnknownWorkspace: return ControlErrorCode::NotFound;
+                case WorkspaceCloseError::LastWorkspace: return ControlErrorCode::Unsupported;
+            }
+            return ControlErrorCode::Failed;
+        }();
+        return ControlError { .code = code, .message = std::string { describe(error) }, .candidates = {} };
+    }
+} // namespace
+
+void ControlService::handle(vtcontrol::CallContext& context,
+                            vtcontrol::CloseWorkspaceRequest const& request,
+                            vtcontrol::Completion<vtcontrol::EmptyReply> done)
+{
+    // In one step, as a window's close is: what the workspace holds now ends, and the workspace goes. The
+    // only one is not closed.
+    done(resolveWorkspace(context, request.workspace).and_then([&](WorkspaceId workspace) {
+        return _host.closeWorkspace(workspace)
+            .transform([] { return vtcontrol::EmptyReply {}; })
+            .transform_error(controlErrorOf);
+    }));
+}
+
+namespace
+{
+    /// @param position A position as the API counts them, from 1.
+    /// @return The model's 0-based index for it, or BadRequest for 0.
+    [[nodiscard]] std::expected<int, ControlError> indexOfPosition(uint32_t position)
+    {
+        if (position == 0)
+            return std::unexpected(ControlError { .code = ControlErrorCode::BadRequest,
+                                                  .message = "positions count from 1",
+                                                  .candidates = {} });
+        return static_cast<int>(std::min<uint32_t>(position - 1, std::numeric_limits<int>::max()));
+    }
+} // namespace
+
+void ControlService::handle(vtcontrol::CallContext& context,
+                            vtcontrol::MoveWorkspaceRequest const& request,
+                            vtcontrol::Completion<vtcontrol::EmptyReply> done)
+{
+    done(indexOfPosition(request.toPosition).and_then([&](int index) {
+        return resolveWorkspace(context, request.workspace).transform([&](WorkspaceId workspace) {
+            // Clamped by the model, which tells every window the new order.
+            _host.model().moveWorkspace(workspace, index);
+            return vtcontrol::EmptyReply {};
+        });
+    }));
+}
+
+void ControlService::handle(vtcontrol::CallContext& context,
+                            vtcontrol::MoveTabRequest const& request,
+                            vtcontrol::Completion<vtcontrol::EmptyReply> done)
+{
+    done(indexOfPosition(request.toPosition).and_then([&](int index) {
+        return resolveTab(context, request.tab).and_then([&](TabId tab) {
+            return resolveWorkspace(context, request.toWorkspace).transform([&](WorkspaceId target) {
+                auto const source = _host.model().workspaceOfTab(tab);
+                _host.model().moveTabToWorkspace(source, tab, target, index);
+                // A workspace that lost its last tab goes, as a move over the native protocol leaves none.
+                if (auto const* emptied = _host.model().workspace(source);
+                    emptied != nullptr && emptied->empty() && source != target)
+                    _host.discardWorkspace(source);
+                return vtcontrol::EmptyReply {};
+            });
+        });
+    }));
+}
+
+namespace
+{
+    /// @return The control API's error for a move the host refused.
+    [[nodiscard]] ControlError moveRefused(NodeMoveFailure const& failure)
+    {
+        auto const why = failure.model ? vtworkspace::describe(*failure.model) : describe(failure.error);
+        return ControlError { .code = ControlErrorCode::Failed,
+                              .message = std::format("the pane cannot move there: {}", why),
+                              .candidates = {} };
+    }
+} // namespace
+
+std::expected<vtworkspace::MoveTarget, ControlError> ControlService::paneDestination(
+    vtcontrol::CallContext const& context, vtcontrol::MovePaneRequest const& request) const
+{
+    using vtcontrol::PaneDestination;
+    switch (request.to)
+    {
+        case PaneDestination::Tab:
+            return resolveTab(context, request.toTab).transform([&](TabId tab) -> vtworkspace::MoveTarget {
+                return vtworkspace::TabTarget { .workspace = _host.model().workspaceOfTab(tab), .tab = tab };
+            });
+        case PaneDestination::Workspace: {
+            // From 1, as tab.move counts, and clamped by the model; none is the end.
+            auto const index = request.toPosition
+                                   ? indexOfPosition(*request.toPosition)
+                                   : std::expected<int, ControlError> { std::numeric_limits<int>::max() };
+            return index.and_then([&](int at) {
+                return resolveWorkspace(context, request.toWorkspace)
+                    .transform([&](WorkspaceId workspace) -> vtworkspace::MoveTarget {
+                        return vtworkspace::TabWellTarget { .workspace = workspace, .index = at };
+                    });
+            });
+        }
+        case PaneDestination::NewWorkspace: return vtworkspace::NewWorkspaceTarget {};
+    }
+    return std::unexpected(ControlError {
+        .code = ControlErrorCode::BadRequest, .message = "unknown destination", .candidates = {} });
+}
+
+void ControlService::handle(vtcontrol::CallContext& context,
+                            vtcontrol::MovePaneRequest const& request,
+                            vtcontrol::Completion<vtcontrol::MovePaneReply> done)
+{
+    done(resolvePane(context, request.pane).and_then([&](PaneTarget const& pane) {
+        return paneDestination(context, request).and_then([&](vtworkspace::MoveTarget const& target) {
+            // The same move a client's MoveNode makes: a workspace it empties goes, a new one is the host's.
+            auto const hooks = MoveWorkspaceHooks {
+                .create = [this] { return _host.createEmptyWorkspace().id(); },
+                .discard = [this](WorkspaceId workspace) { _host.discardWorkspace(workspace); }
+            };
+            return applyMove(_host.model(), vtworkspace::PaneSource { pane.session }, target, hooks)
+                .transform_error(moveRefused)
+                .transform([&](vtworkspace::MoveResult const& moved) {
+                    auto const& objects = _host.objects();
+                    return vtcontrol::MovePaneReply {
+                        .workspace = idOf(ObjectKind::Workspace,
+                                          objects.uuidOf(moved.workspace).value_or(vtcontrol::Uuid {})),
+                        .tab = idOf(ObjectKind::Tab, objects.uuidOf(moved.tab).value_or(vtcontrol::Uuid {})),
+                    };
+                });
+        });
+    }));
+}
+
 namespace
 {
     /// How the control API names a window's answer to a switch.
@@ -1223,6 +1431,15 @@ void ControlService::sinkClosed(vtcontrol::EventSink& sink)
     _hub.forget(sink);
     _waiters.forget(sink);
     std::erase_if(_switchCalls->waiting, [&sink](auto const& call) { return call.second == &sink; });
+}
+
+void ControlService::labelChanged(ObjectRef const& ref, std::string_view label)
+{
+    if (ref.kind != ObjectKind::Workspace)
+        return;
+    _hub.publish(vtcontrol::Event {
+        .origin = { .workspace = idOf(ObjectKind::Workspace, ref.uuid), .tab = {}, .pane = {} },
+        .payload = vtcontrol::WorkspaceLabelChangedEvent { .label = vtcontrol::toValidUtf8(label) } });
 }
 
 vtcontrol::EventOrigin ControlService::originOf(SessionId session) const

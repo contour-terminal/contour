@@ -14,6 +14,8 @@
 #include <contour/window/WindowController.hpp>
 
 #include <core/Utils.hpp>
+#include <core/platform/FileUri.hpp>
+#include <core/platform/PathUtils.hpp>
 
 #include <QtCore/QPointer>
 #include <QtGui/QGuiApplication>
@@ -466,6 +468,50 @@ TEST_CASE("DaemonLink: a window closed while it switches to a new workspace leav
     drainGuiEvents();
     CHECK(rig.host.opened.empty());
     CHECK_FALSE(link.windowShowing(made).has_value());
+}
+
+// What NewWorkspace sends: the pane the window has active, so the daemon starts the new workspace's shell in
+// that pane's folder and names the workspace after it. A link that sent no session would leave both empty.
+TEST_CASE("DaemonLink: a new workspace starts in the folder of the window's active pane",
+          "[attach][link][switch]")
+{
+    auto const root = std::filesystem::temp_directory_path() / "contour-link-new-workspace";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root / "repo" / ".git");
+    std::filesystem::create_directories(root / "repo" / "src");
+    std::ofstream { root / "repo" / ".git" / "HEAD" } << "ref: refs/heads/main\n";
+    auto daemon = DaemonFixture {};
+    auto const ids = seedWorkspaces(daemon, 1);
+    auto rig = LinkRig { daemon.endpoint(), {}, {}, launch() };
+    auto& link = *rig.link;
+    auto& manager = rig.app.manager();
+    auto const local = contour::test::ScopedController { manager };
+    auto const boot = contour::test::ScopedController { manager };
+    REQUIRE(pollUntilAttached(link, 10s).has_value());
+    REQUIRE(link.bindPendingWindow(*boot.controller) == contour::remote::WindowAdoption::Adopted);
+    REQUIRE(waitUntil([&] { return !sessionsOf(manager, boot.id).empty(); }));
+    // The shell of the pane the window shows is in the repository's src.
+    daemon.onDaemon([&] {
+        auto const pane =
+            daemon.host->model().workspace(vtworkspace::WorkspaceId { ids[0] })->tabAt(0)->rootPane();
+        daemon.host->terminal(pane->session())
+            ->writeToScreen(std::format(
+                "\033]7;{}\033\\",
+                core::platform::fileUri(core::platform::normalizePath(root / "repo" / "src"), "localhost")));
+        return 0;
+    });
+
+    REQUIRE(link.selectWorkspace(0).has_value());
+    REQUIRE(daemon.waitUntilOnDaemon([&daemon] { return daemon.host->model().workspaceCount() == 2; }));
+
+    auto const label = daemon.onDaemon([&daemon] {
+        auto const made = daemon.host->model().workspaceAt(1)->id();
+        auto const uuid = daemon.host->objects().uuidOf(made);
+        return std::string { daemon.host->objects().labelOf(
+            vtcontrol::ObjectRef { vtcontrol::ObjectKind::Workspace, uuid.value() }) };
+    });
+    CHECK(label == "repo");
+    std::filesystem::remove_all(root);
 }
 
 TEST_CASE("DaemonLink: a closed window's workspace stays on the daemon, selected by no connection",
@@ -1548,6 +1594,61 @@ TEST_CASE("DaemonLink: the raise holder notifies a finished command in an unsele
     CHECK(rig.host.notifier.raised.size() == 1);
 }
 
+TEST_CASE("DaemonLink: a jump to a bell in an unselected workspace shows its pane once the switch lands",
+          "[attach][link][attention]")
+{
+    auto daemon = DaemonFixture {};
+    auto const ids = seedWorkspaces(daemon, 2);
+    auto rig = LinkRig {
+        daemon.endpoint(), {}, {}, { .kind = vthost::proto::AttachIntentKind::Select, .workspace = ids[0] }
+    };
+    auto& link = *rig.link;
+    auto& manager = rig.app.manager();
+    auto const boot = contour::test::ScopedController { manager };
+    REQUIRE(pollUntilAttached(link, 10s).has_value());
+    REQUIRE(waitUntil([&] { return link.workspaceOf(boot.id) == ids[0]; }));
+    auto* const controller = manager.controllerOf(boot.windowId);
+    REQUIRE(controller != nullptr);
+
+    // The bell of a pane in the workspace the window does not show.
+    daemon.onDaemon([&] {
+        auto const pane = daemon.host->model()
+                              .workspace(vtworkspace::WorkspaceId { ids[1] })
+                              ->tabAt(0)
+                              ->rootPane()
+                              ->session();
+        daemon.host->terminal(pane)->writeToScreen("\a");
+        return 0;
+    });
+    auto belled = std::optional<contour::window::DirectoryPane> {};
+    REQUIRE(waitUntil(
+        [&] {
+            for (auto const& workspace: link.directory().workspaces)
+                if (workspace.id == ids[1])
+                    for (auto const& tab: workspace.tabs)
+                        for (auto const& pane: tab.panes)
+                            if (pane.bellSerial > 0)
+                                belled = pane;
+            return belled.has_value();
+        },
+        3000));
+
+    // The pane is not shown, and not seen, until the switch lands.
+    controller->jumpToNextAttention();
+    CHECK(controller->jumpPending());
+    CHECK(controller->tabAttention().of(belled->key).seenBellSerial == 0);
+    REQUIRE(waitUntil([&] { return displayedBy(manager, link, boot.windowId) == ids[1]; }, 3000));
+    REQUIRE(waitUntil([&] { return !controller->jumpPending(); }, 3000));
+    CHECK(controller->tabAttention().of(belled->key).seenBellSerial == belled->bellSerial);
+    auto const* const active = controller->activeSession();
+    REQUIRE(active != nullptr);
+    CHECK(manager.paneKeyOf(active->modelSessionId()) == belled->key);
+
+    // The bell is seen in this window now: nothing more to jump to.
+    controller->jumpToNextAttention();
+    CHECK_FALSE(controller->jumpPending());
+}
+
 TEST_CASE("DaemonLink: a switch back to the shown workspace while another is under way stays",
           "[attach][link][switch]")
 {
@@ -1582,6 +1683,197 @@ TEST_CASE("DaemonLink: a switch back to the shown workspace while another is und
     }
     CHECK(link.workspaceOf(manager.controllerOf(boot.windowId)->displayedWorkspace()) == ids[0]);
     CHECK(daemon.onDaemon([&] { return showing(daemon, ids[0]); }) == 1);
+}
+
+namespace
+{
+/// @return The session of the first pane @p window displays, if it displays any.
+[[nodiscard]] contour::session::TerminalSession* firstDisplayedSession(
+    contour::session::TerminalSessionManager& manager, contour::window::WindowId window)
+{
+    drainGuiEvents();
+    auto const* const controller = manager.controllerOf(window);
+    if (controller == nullptr)
+        return nullptr;
+    auto const sessions = sessionsOf(manager, controller->displayedWorkspace());
+    return sessions.empty() ? nullptr : sessions.front();
+}
+
+/// Checks that @p window displays the daemon's @p pane as a live pane: what its program prints lands in the
+/// window, and what is typed into the window reaches the program.
+/// @param tag Makes the printed and typed text unique to the caller.
+void requireDrivesPane(DaemonFixture& daemon,
+                       contour::session::TerminalSessionManager& manager,
+                       contour::window::WindowId window,
+                       vtworkspace::SessionId pane,
+                       std::string_view tag)
+{
+    REQUIRE(waitUntil([&] { return firstDisplayedSession(manager, window) != nullptr; }, 3000));
+    auto const printed = std::format("printed-{}", tag);
+    daemon.onDaemon([&] {
+        daemon.host->terminal(pane)->writeToScreen(printed);
+        return 0;
+    });
+    CHECK(waitUntil(
+        [&] {
+            auto* const session = firstDisplayedSession(manager, window);
+            if (session == nullptr)
+                return false;
+            auto const guard = std::lock_guard { session->terminal() };
+            return session->terminal().primaryScreen().grid().renderMainPageText().contains(printed);
+        },
+        3000));
+    auto* const session = firstDisplayedSession(manager, window);
+    REQUIRE(session != nullptr);
+    auto const typed = std::format("typed-{}", tag);
+    std::ignore = session->terminal().device().write(typed);
+    CHECK(waitUntil([&] { return daemon.ptyInput(pane).contains(typed); }, 3000));
+}
+
+/// Has @p link's window show @p workspace, and waits until it does.
+void switchShownWorkspace(contour::remote::DaemonLink& link,
+                          contour::session::TerminalSessionManager& manager,
+                          contour::window::WindowId window,
+                          uint64_t workspace)
+{
+    auto landed = std::optional<std::expected<uint64_t, std::string>> {};
+    REQUIRE(link.selectWorkspace(workspace, [&](auto outcome) { landed = std::move(outcome); }).has_value());
+    REQUIRE(waitUntil([&] { return landed.has_value(); }, 3000));
+    REQUIRE(*landed == workspace);
+    REQUIRE(waitUntil([&] { return displayedBy(manager, link, window) == workspace; }, 3000));
+}
+
+/// @return The one pane of @p daemon's @p workspace. Not on the daemon thread.
+[[nodiscard]] vtworkspace::SessionId onlyPaneOf(DaemonFixture& daemon, uint64_t workspace)
+{
+    return daemon.onDaemon([&] {
+        return daemon.host->model()
+            .workspace(vtworkspace::WorkspaceId { workspace })
+            ->tabAt(0)
+            ->rootPane()
+            ->session();
+    });
+}
+
+/// @return What a link's first connection follows to select @p workspace.
+[[nodiscard]] vthost::proto::AttachIntent selecting(uint64_t workspace)
+{
+    return vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Select,
+                                         .workspace = workspace };
+}
+
+/// Has the window @p boot of @p rig attach to the first of @p workspaces, show the second, then the first
+/// again, with the panes the first switch let go of ended as their exit watcher ends them.
+void switchAwayAndBack(LinkRig& rig,
+                       contour::test::ScopedController const& boot,
+                       std::span<uint64_t const> workspaces)
+{
+    auto& link = *rig.link;
+    auto& manager = rig.app.manager();
+    REQUIRE(pollUntilAttached(link, 10s).has_value());
+    REQUIRE(waitUntil([&] { return link.workspaceOf(boot.id) == workspaces[0]; }));
+    REQUIRE(waitUntil([&] { return !sessionsOf(manager, boot.id).empty(); }));
+    auto const firstPanes = watchedSessionsOf(manager, boot.id);
+    switchShownWorkspace(link, manager, boot.windowId, workspaces[1]);
+    endClosedSessions(firstPanes);
+    REQUIRE(waitUntil([&] {
+        drainGuiEvents();
+        return std::ranges::all_of(firstPanes, [](auto const& pane) { return pane.isNull(); });
+    }));
+    switchShownWorkspace(link, manager, boot.windowId, workspaces[0]);
+}
+} // namespace
+
+TEST_CASE("DaemonLink: a window switched to another workspace and back shows and drives its pane again",
+          "[attach][link][switch]")
+{
+    auto daemon = DaemonFixture {};
+    auto const ids = seedWorkspaces(daemon, 2);
+    auto const pane = onlyPaneOf(daemon, ids[0]);
+    auto rig = LinkRig { daemon.endpoint(), {}, {}, selecting(ids[0]) };
+    auto const boot = contour::test::ScopedController { rig.app.manager() };
+    switchAwayAndBack(rig, boot, ids);
+    requireDrivesPane(daemon, rig.app.manager(), boot.windowId, pane, "back");
+}
+
+TEST_CASE("DaemonLink: a window switched back before the panes it left ended shows and drives its pane again",
+          "[attach][link][switch]")
+{
+    auto daemon = DaemonFixture {};
+    auto const ids = seedWorkspaces(daemon, 2);
+    auto const pane = onlyPaneOf(daemon, ids[0]);
+    auto rig = LinkRig { daemon.endpoint(), {}, {}, selecting(ids[0]) };
+    auto& link = *rig.link;
+    auto& manager = rig.app.manager();
+    auto const boot = contour::test::ScopedController { manager };
+    REQUIRE(pollUntilAttached(link, 10s).has_value());
+    REQUIRE(waitUntil([&] { return link.workspaceOf(boot.id) == ids[0]; }));
+    REQUIRE(waitUntil([&] { return !sessionsOf(manager, boot.id).empty(); }));
+    auto const firstPanes = watchedSessionsOf(manager, boot.id);
+
+    // Back again while the pane the first switch detached is still alive: it holds the session no more.
+    switchShownWorkspace(link, manager, boot.windowId, ids[1]);
+    switchShownWorkspace(link, manager, boot.windowId, ids[0]);
+    requireDrivesPane(daemon, manager, boot.windowId, pane, "quick");
+    endClosedSessions(firstPanes);
+    drainGuiEvents();
+}
+
+TEST_CASE("DaemonLink: a client started after one switched away and back shows and drives the pane",
+          "[attach][link][switch]")
+{
+    auto daemon = DaemonFixture {};
+    auto const ids = seedWorkspaces(daemon, 2);
+    auto const pane = onlyPaneOf(daemon, ids[0]);
+    {
+        auto rig = LinkRig { daemon.endpoint(), {}, {}, selecting(ids[0]) };
+        auto const boot = contour::test::ScopedController { rig.app.manager() };
+        switchAwayAndBack(rig, boot, ids);
+    }
+    REQUIRE(daemon.waitUntilOnDaemon([&daemon] { return daemon.live.empty(); }));
+
+    // The client restarts: a new one attaches as a launch does, and shows the workspace selected last.
+    auto rig = LinkRig { daemon.endpoint(), {}, {}, launch() };
+    auto const boot = contour::test::ScopedController { rig.app.manager() };
+    REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
+    REQUIRE(waitUntil([&] { return rig.link->workspaceOf(boot.id) == ids[0]; }));
+    requireDrivesPane(daemon, rig.app.manager(), boot.windowId, pane, "restarted");
+}
+
+TEST_CASE("DaemonLink: a tab moved into a new workspace is followed there and shows and drives its pane",
+          "[attach][link][switch][move]")
+{
+    auto daemon = DaemonFixture {};
+    auto const ids = seedWorkspaces(daemon, 1);
+    auto rig = LinkRig { daemon.endpoint(), {}, {}, selecting(ids[0]) };
+    auto& link = *rig.link;
+    auto& manager = rig.app.manager();
+    auto const boot = contour::test::ScopedController { manager };
+    REQUIRE(pollUntilAttached(link, 10s).has_value());
+    REQUIRE(waitUntil([&] { return link.workspaceOf(boot.id) == ids[0]; }));
+    auto const first = onlyPaneOf(daemon, ids[0]);
+    auto const moved =
+        daemon.onDaemon([&] { return daemon.host->createTab({}, first)->rootPane()->session(); });
+    REQUIRE(waitUntil([&] { return sessionsOf(manager, boot.id).size() == 2; }));
+    auto const listedTab = [&]() -> std::optional<contour::window::TabRef> {
+        for (auto const& workspace: link.liveController()->directory().workspaces)
+            for (auto const& listed: workspace.tabs)
+                if (std::ranges::contains(listed.panes,
+                                          contour::window::PaneKey { moved.value },
+                                          &contour::window::DirectoryPane::key))
+                    return contour::window::TabRef { .workspace = workspace.id, .tab = listed.id };
+        return std::nullopt;
+    };
+    REQUIRE(waitUntil([&] { return listedTab().has_value(); }));
+
+    // The daemon takes the tab out of the shown workspace -- the window's next push no longer names its pane,
+    // and the window lets the pane go -- then lists it in a workspace of its own, which the window follows.
+    manager.moveSidebarNode(*boot.controller, *listedTab(), contour::window::IntoNewWorkspace {});
+    REQUIRE(waitUntil([&] {
+        auto const shown = displayedBy(manager, link, boot.windowId);
+        return shown.has_value() && *shown != ids[0];
+    }));
+    requireDrivesPane(daemon, manager, boot.windowId, moved, "followed");
 }
 
 TEST_CASE("DaemonLink: seen marks survive a reconnect", "[attach][link][reconnect]")

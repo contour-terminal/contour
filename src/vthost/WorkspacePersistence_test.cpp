@@ -495,3 +495,19 @@ TEST_CASE("a tab moved to another workspace is a layout change on its own",
     h.pass(Interval);
     CHECK(h.writes > before);
 }
+
+TEST_CASE("a workspace moved in the order is a layout change on its own",
+          "[vthost][snapshot][persistence][move]")
+{
+    auto h = PersistenceHarness {};
+    REQUIRE(h.host->createTab() != nullptr);
+    auto* const other = h.host->createWorkspace();
+    REQUIRE(other != nullptr);
+    h.persist();
+    h.pass(Interval);
+    auto const before = h.writes;
+
+    h.host->model().moveWorkspace(other->id(), 0);
+    h.pass(Interval);
+    CHECK(h.writes > before);
+}

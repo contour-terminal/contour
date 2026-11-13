@@ -50,7 +50,9 @@
 #include <optional>
 #include <ranges>
 #include <set>
+#include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -377,7 +379,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param workspace The daemon workspace; 0 asks the daemon to create one and select it.
     /// @return The request's number, which its answer names (takeSelectAnswers()); why nothing was sent
     ///         otherwise: the connection is not up, or the daemon predates the selection.
-    [[nodiscard]] std::expected<uint64_t, std::string> select(uint64_t workspace);
+    /// @param directoryFrom The daemon session of the pane asking for a new workspace (@p workspace 0): the
+    ///        new workspace's first shell starts in that pane's working directory. Ignored otherwise.
+    [[nodiscard]] std::expected<uint64_t, std::string> select(
+        uint64_t workspace, std::optional<uint64_t> directoryFrom = std::nullopt);
 
     /// GUI thread. Tells the daemon whether this window has the user's focus; it decides from the reports of
     /// every attached window which one raises for a bell (raiseRole()). Stated again to every connection that
@@ -502,6 +507,17 @@ class NativeController final: public QObject, public contour::session::SessionFa
     [[nodiscard]] contour::session::RemoteRouting requestRemoteMove(
         contour::session::RemoteMove const& move) override;
 
+    /// SessionFactory: the daemon's workspace verbs. Refused where the daemon does not share
+    /// Capability::WorkspaceMeta, which it must to serve them.
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteRenameWorkspace(
+        uint64_t workspace, std::string_view label) override;
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteMoveWorkspace(uint64_t workspace,
+                                                                             uint32_t position) override;
+    /// SessionFactory: titles the daemon's tab holding @p session (proto::EditTab), mirrored here or not.
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabTitle(uint64_t session,
+                                                                        std::string_view title) override;
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteCloseWorkspace(uint64_t workspace) override;
+
     /// SessionFactory: the toggle of a split's axis in a daemon-hosted window is made by the daemon, whose
     /// layout push brings it in (a local flip would be reverted by the next one). Local when the daemon does
     /// not serve MoveNode, so an older daemon keeps the local toggle, and while the reconciler applies a
@@ -591,6 +607,14 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// rather than leave the session running there with nothing showing it. The counterpart of
     /// `unbind()`, which merely forgets a binding and cannot tell why the pty went away.
     void requestRemoteClose(vtpty::Pty const* pty) override;
+
+    /// SessionFactory: the pane backed by @p pty is detached while its daemon session runs on -- its window
+    /// switched to another workspace, or its workspace's layout no longer names it, as a move took it to
+    /// another -- so the binding goes now, and, unlike the pty's own end (unbind()), leaves no tombstone. A
+    /// session still bound, or tombstoned, is not realized again, and the pane's session may be destroyed
+    /// only after a switch back, or the switch that follows the move, has realized the workspace that holds
+    /// it. GUI thread; takes _mutex. A pty that is not one of this controller's is left alone.
+    void releaseRemoteSession(vtpty::Pty const* pty) override;
 
     /// SessionFactory: every pane's terminal mirrors one the daemon hosts, so an operation on the engine is
     /// sent there (proto::PerformOperation) and the mirror follows through its deltas. A pty that is not
@@ -850,6 +874,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// Reactor thread. Takes the role the daemon gives this connection.
     void onRaiseRole(vthost::proto::RaiseRole role);
 
+    /// Reactor thread. Merges what the daemon states of a workspace field by field into the metadata store.
+    void onWorkspaceMeta(vthost::proto::WorkspaceMeta const& meta);
+
     /// _mutex held. Has the GUI thread announce directoryChanged() once for every change of
     /// the status store until then.
     void scheduleStatusFlush();
@@ -936,6 +963,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// unbind() under _mutex: the pty is counted gone whether or not its binding is still there to forget.
     void forgetBinding(uint64_t session, uint64_t serial);
+
+    /// Drops @p binding and what its pane owned of the composed geometry. Under _mutex.
+    void dropBinding(std::unordered_map<uint64_t, Binding>::iterator binding);
 
     /// @return Whether @p session is bound, by the binding @p serial names. Takes _mutex.
     [[nodiscard]] bool isBinding(uint64_t session, uint64_t serial) const;
@@ -1151,6 +1181,12 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// pushes for every session, and the fields of its PaneSummary for the panes of the workspaces this
     /// window does not select. Under _mutex.
     std::map<uint64_t, window::PaneStatus> _paneStatus;
+    /// The last serial a pane flag took (window::DirectoryPane::activitySerial), one counter for every pane
+    /// and kind so that a pane forgotten and met again cannot repeat one. Under _mutex.
+    uint64_t _flagSerial = 0;
+    /// What the daemon stated of each workspace (label, control id, git state), by daemon workspace id, as
+    /// WorkspaceMeta merged it. Under _mutex.
+    std::map<uint64_t, window::WorkspaceMetadata> _workspaceMeta;
     /// Whether a flush of _paneStatus is queued for the GUI thread. Under _mutex.
     enum class StatusFlush : uint8_t
     {

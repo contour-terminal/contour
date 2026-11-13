@@ -91,6 +91,22 @@ class ModelEvents
         (void) from, (void) tab, (void) fromIndex, (void) to, (void) toIndex;
     }
 
+    /// The workspace @p workspace moved in the model's workspace order, from @p fromIndex to @p toIndex.
+    ///
+    /// Defaulted to a no-op: hosts that only react to a workspace's own content ignore a pure reorder. The
+    /// daemon re-states every client's workspace order on it; an in-process host re-reads the order.
+    /// @param workspace The workspace that moved.
+    /// @param fromIndex Its position before.
+    /// @param toIndex   Its position now.
+    virtual void workspaceMoved(WorkspaceId workspace, int fromIndex, int toIndex)
+    {
+        (void) workspace, (void) fromIndex, (void) toIndex;
+    }
+
+    /// The workspace @p workspace was removed from the model; it was at @p index. The workspaces behind it
+    /// moved up one place. Defaulted to a no-op, as workspaceMoved().
+    virtual void workspaceRemoved(WorkspaceId workspace, int index) { (void) workspace, (void) index; }
+
     /// The active tab of @p workspace changed to @p tab (at @p index).
     virtual void activeTabChanged(WorkspaceId workspace, TabId tab, int index) = 0;
 

@@ -136,6 +136,10 @@ namespace
                 [](AttachToHost const& a) { return std::format(", name: '{}'", a.name); },
                 [](SwitchToWorkspace const& a) { return std::format(", index: {}", a.index); },
                 [](OpenWorkspace const& a) { return std::format(", index: {}", a.index); },
+                [](MoveTabToWorkspace const& a) { return std::format(", index: {}", a.index); },
+                [](MoveToTab const& a) {
+                    return std::format(", workspace: {}, tab: {}", a.workspace, a.tab);
+                },
                 [](CycleWorkspace const& a) { return std::format(", direction: {}", a.direction); },
                 [](CycleDaemon const& a) { return std::format(", direction: {}", a.direction); },
                 [](SwitchToDaemon const& a) { return formatDaemonRef(a.daemon); },
@@ -429,6 +433,27 @@ span<ActionCatalogEntry const> actionCatalog()
         ActionCatalogEntry {
             "FocusPreviousArea", Action { FocusPreviousArea {} }, documentation::FocusPreviousArea },
         ActionCatalogEntry { "FocusToolbar", Action { FocusToolbar {} }, documentation::FocusToolbar },
+        ActionCatalogEntry { "ToggleSidebar", Action { ToggleSidebar {} }, documentation::ToggleSidebar },
+        ActionCatalogEntry { "FocusSidebar", Action { FocusSidebar {} }, documentation::FocusSidebar },
+        ActionCatalogEntry {
+            "FilterWorkspaces", Action { FilterWorkspaces {} }, documentation::FilterWorkspaces },
+        ActionCatalogEntry {
+            "JumpToNextAttention", Action { JumpToNextAttention {} }, documentation::JumpToNextAttention },
+        ActionCatalogEntry { "MarkSeen", Action { MarkSeen {} }, documentation::MarkSeen },
+        ActionCatalogEntry {
+            "RenameWorkspace", Action { RenameWorkspace {} }, documentation::RenameWorkspace },
+        ActionCatalogEntry {
+            "MoveWorkspaceUp", Action { MoveWorkspaceUp {} }, documentation::MoveWorkspaceUp },
+        ActionCatalogEntry {
+            "MoveWorkspaceDown", Action { MoveWorkspaceDown {} }, documentation::MoveWorkspaceDown },
+        ActionCatalogEntry { "CloseWorkspace", Action { CloseWorkspace {} }, documentation::CloseWorkspace },
+        ActionCatalogEntry { "GoToPane", Action { GoToPane {} }, documentation::GoToPane },
+        ActionCatalogEntry {
+            "MoveTabToWorkspace", Action { MoveTabToWorkspace {} }, documentation::MoveTabToWorkspace },
+        ActionCatalogEntry { "MoveToTab", Action { MoveToTab {} }, documentation::MoveToTab },
+        ActionCatalogEntry { "MoveToNewTab", Action { MoveToNewTab {} }, documentation::MoveToNewTab },
+        ActionCatalogEntry {
+            "MoveToNewWorkspace", Action { MoveToNewWorkspace {} }, documentation::MoveToNewWorkspace },
         ActionCatalogEntry {
             "SwitchToWorkspace", Action { SwitchToWorkspace {} }, documentation::SwitchToWorkspace },
         ActionCatalogEntry { "OpenWorkspace", Action { OpenWorkspace {} }, documentation::OpenWorkspace },

@@ -11,7 +11,7 @@ editor. A search field above them finds a row by its label, then its help text, 
 | Section           | What it holds                                                                                  |
 | ----------------- | ---------------------------------------------------------------------------------------------- |
 | General           | Windows, the command palette, and the advanced global options such as the rendering GPU.       |
-| Appearance        | Window chrome and the tab bar.                                                                 |
+| Appearance        | Window chrome, the tab bar, and whether tabs sit in it or in the workspace sidebar.            |
 | Keyboard          | Key bindings, as a list.                                                                       |
 | Shell Integration | What shell integration draws: the gutter, command blocks and folding.                          |
 | Profiles          | One page per profile: colors, window, text, scrolling, behaviour, cursor, bell, background, links, status line and more. |

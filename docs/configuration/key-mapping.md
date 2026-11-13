@@ -21,6 +21,7 @@ A small number of bindings are built in and do **not** appear in `input_mapping`
 |---------|--------|
 | `Ctrl+Tab` / `Ctrl+PageDown` | Switch to the tab on the right (wrapping around) |
 | `Ctrl+Shift+Tab` / `Ctrl+PageUp` | Switch to the tab on the left (wrapping around) |
+| `Ctrl+Shift+Alt+PageDown` / `Ctrl+Shift+Alt+PageUp` (Linux, Windows) / `Ctrl+Cmd+Down` / `Ctrl+Cmd+Up` (macOS) | Show the next / previous workspace of the window's daemon (`CycleWorkspace`, wrapping around) |
 | `Ctrl+Shift+G` (Linux, Windows) / `Cmd+Shift+O` (macOS) | Open the last command's output in the pager named by `command_blocks.pager` (needs a shell that marks its commands with [OSC 133](../vt-extensions/osc-133-shell-integration.md)). With nothing to open the chord is swallowed rather than sent to the shell as `^G`; on the alternate screen it goes to the application |
 | `Ctrl+Shift+L` (Linux, Windows) / `Cmd+K` (macOS) | Clear the scrollback and the screen above the current prompt (`ClearToPrompt`). On the primary screen only; with nothing to clear the chord is swallowed rather than typed |
 | `Alt+Shift+Arrow` (Linux, Windows) / `Cmd+Option+Arrow` (macOS) | Move the focus to the pane on that side. Some desktops and keyboard-layout switchers grab `Alt+Shift`; if the chord never reaches Contour, bind another one to `FocusPaneLeft`/`Right`/`Up`/`Down` in `input_mapping` |
@@ -61,6 +62,7 @@ Shift or moves, and the table says why.
 | Command | Linux / Windows | macOS | Note |
 |---------|-----------------|-------|------|
 | Command palette (`OpenCommandPalette`) | `Ctrl+Shift+P` | `⌘P`, `⇧⌘P` | `⇧⌘P` for VS Code, Zed and Ghostty habits |
+| Daemon and workspace switcher (`ShowSwitcher`) | `Ctrl+Shift+R` | `⇧⌘R` | |
 | Copy (`CopySelection`) | `Ctrl+Shift+C`; `Ctrl+C` while selecting | `⌘C` | |
 | Paste (`PasteClipboard`) | `Ctrl+Shift+V` | `⌘V` | |
 | Paste without control characters | `Ctrl+Alt+V` | `⌃⌘V` | Option composes characters on a Mac, so the `Ctrl+Alt` chords become `⌃⌘` |
@@ -72,12 +74,16 @@ Shift or moves, and the table says why.
 | Select tab 1…9 (`SwitchToTab`) | `Alt+1` … `Alt+9`, `Alt+0` for the tenth | `⌘1` … `⌘9` | `⌘0` resets the font size |
 | Previous / next tab | `Ctrl+PageUp` / `Ctrl+PageDown`, `Ctrl+Shift+Tab` / `Ctrl+Tab`, `Shift+←` / `Shift+→` | the same, and `⇧⌘[` / `⇧⌘]` | |
 | Move tab left / right | `Ctrl+Shift+PageUp` / `PageDown` | `⌘PageUp` / `⌘PageDown` | |
+| Previous / next workspace (`CycleWorkspace`) | `Ctrl+Shift+Alt+PageUp` / `Ctrl+Shift+Alt+PageDown` | `⌃⌘↑` / `⌃⌘↓` | `Ctrl+Alt+PageUp`/`PageDown` stay Emacs's `C-M-prior`/`C-M-next` |
 | Split side by side / stacked | `Ctrl+Shift+E` / `Ctrl+Shift+O` | `⌘D` / `⇧⌘D` | iTerm2's chords |
 | Focus the pane on that side | `Alt+Shift+Arrow` | `⌥⌘Arrow` | |
 | Swap with the pane on that side | `Ctrl+Alt+Arrow` | `⌃⌥Arrow` | |
 | Resize the pane | `Ctrl+Shift+Alt+Arrow` | `⌃⇧⌥Arrow` | |
 | Zoom the pane (`TogglePaneZoom`) | `Ctrl+Shift+Z` | `⇧⌘↩` | iTerm2's chord |
 | Toggle split orientation | `Ctrl+Shift+\` | `⌃⇧\` | |
+| Show or hide the workspace sidebar (`ToggleSidebar`) | `Ctrl+Shift+B` | `⌘\` | `native2026` only |
+| Jump to the next pane that needs you (`JumpToNextAttention`) | `Ctrl+Shift+J` | `⌘J` | `native2026` only |
+| Focus the workspace sidebar (`FocusSidebar`) | `Ctrl+Shift+D` | `⇧⌘E` | `native2026` only |
 | Find (`SearchReverse`) | `Ctrl+Shift+F` | `⌘F` | |
 | Next / previous match | `F3` / `Shift+F3` | `⌘G` / `⇧⌘G`, and `F3` / `Shift+F3` | |
 | Find the selection (`SearchSelection`) | — | `⌘E` | A macOS convention; `Ctrl+Shift+E` splits |
@@ -222,8 +228,9 @@ the reason is reported on startup.
 ## Switching daemons and workspaces
 
 These actions re-point the window they fire in at another workspace or daemon (see
-[Switching a window](../persistent-sessions.md#switching-a-window)). None is bound by default; the command
-palette lists them under **Daemons**. They need a window that shows a daemon.
+[Switching a window](../persistent-sessions.md#switching-a-window)). Only `CycleWorkspace` is bound by default:
+`Ctrl+Shift+Alt+PageDown` / `PageUp` (Linux, Windows) and `⌃⌘↓` / `⌃⌘↑` (macOS) show the next / previous
+workspace, beside the tab chords one level down. The command palette lists them all under **Daemons**. They need a window that shows a daemon.
 
 | Action | Key | What it does |
 | --- | --- | --- |
@@ -238,7 +245,7 @@ palette lists them under **Daemons**. They need a window that shows a daemon.
 ```yaml
 input_mapping:
   - { mods: [Control, Alt], key: '2', action: SwitchToWorkspace, index: 2 }
-  - { mods: [Control, Alt], key: RightArrow, action: CycleWorkspace, direction: next }
+  - { mods: [Control, Shift, Alt], key: PageDown, action: CycleWorkspace, direction: next }
   - { mods: [Control, Alt, Shift], key: RightArrow, action: CycleDaemon, direction: next }
   - { mods: [Control, Alt], key: A, action: SwitchToDaemon, label: admin }
   - { mods: [Control, Alt], key: H, action: OpenDaemon, host: home }
@@ -276,3 +283,28 @@ same release, to pick up a rebuilt binary. It asks nothing, as an upgrade keeps 
 for the local daemon this client launched on (one started with **New daemon…** is not); for a remote daemon, one a switch reached, a daemon
 too old to upgrade in place, or one newer than this client it does nothing but tell you why in a notice. It
 is not bound to a key by default.
+
+## Workspace sidebar
+
+The [workspace sidebar](../sidebar.md) is shown and started by the `native2026` defaults (`defaults_edition`),
+which also bind its chords. A configuration with `defaults_edition: classic` binds none of them. A `native2026`
+configuration written before the sidebar existed still gets them, unless it binds the same chord itself.
+
+| Action | Default (Linux / Windows) | Default (macOS) | What it does |
+| --- | --- | --- | --- |
+| `ToggleSidebar` | `Ctrl+Shift+B` | `⌘\` | Shows the sidebar when hidden, hides it when shown. |
+| `FocusSidebar` | `Ctrl+Shift+D` | `⇧⌘E` | Moves keyboard focus into the sidebar, showing it first when hidden. |
+| `FilterWorkspaces` | none | none | Opens the sidebar's filter with the keyboard in it, showing the sidebar first when hidden. |
+| `JumpToNextAttention` | `Ctrl+Shift+J` | `⌘J` | Shows the next pane that needs you: blocked or bell first, then failed, then done and not seen. |
+| `MarkSeen` | none | none | Marks the active pane's output as seen. |
+| `RenameWorkspace` | none | none | Renames the current workspace inline. |
+| `MoveWorkspaceUp`, `MoveWorkspaceDown` | none | none | Moves the current workspace one place in the sidebar's list. |
+| `CloseWorkspace` | none | none | Closes the current workspace and everything in it, after asking. The last workspace of an in-process window cannot be closed. |
+| `GoToPane` | none | none | Shows the pane a sidebar row names; a row of the pane menu. |
+| `MoveTabToWorkspace` | `index:` (1-based, required) | | Moves the current tab into the Nth workspace. |
+
+`NewWorkspace` is listed under [Switching daemons and workspaces](#switching-daemons-and-workspaces); the
+sidebar's **＋** button runs it.
+
+The settings are `sidebar: { visible, width }` and `tab_placement: sidebar | top`; see
+[the sidebar guide](../sidebar.md#configuration).

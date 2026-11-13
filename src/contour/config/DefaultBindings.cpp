@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <ranges>
+#include <stdexcept>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -175,6 +176,29 @@ namespace
             both(All, Ctrl, Key::PageDown, Any, { actions::SwitchToTabRight {} }),
             both(All, Ctrl, Key::Tab, Any, { actions::SwitchToTabRight {} }),
             both(All, CtrlShift, Key::Tab, Any, { actions::SwitchToTabLeft {} }),
+            // One level up from the tabs: the next and previous workspace of the window's daemon. Ctrl+Alt
+            // alone would shadow Emacs's C-M-next/prior, so Shift joins it; macOS takes Control+Command with
+            // the vertical arrows, free there. Fallbacks too, so a configuration that predates them has them.
+            both(DesktopOnly,
+                 CtrlShiftAlt,
+                 Key::PageDown,
+                 Any,
+                 { actions::CycleWorkspace { .direction = actions::CycleDirection::Next } }),
+            both(DesktopOnly,
+                 CtrlShiftAlt,
+                 Key::PageUp,
+                 Any,
+                 { actions::CycleWorkspace { .direction = actions::CycleDirection::Previous } }),
+            both(MacOnly,
+                 CtrlSuper,
+                 Key::DownArrow,
+                 Any,
+                 { actions::CycleWorkspace { .direction = actions::CycleDirection::Next } }),
+            both(MacOnly,
+                 CtrlSuper,
+                 Key::UpArrow,
+                 Any,
+                 { actions::CycleWorkspace { .direction = actions::CycleDirection::Previous } }),
             written(All, CtrlAlt, Key::LeftArrow, Any, { actions::SwapPaneLeft {} }),
             written(All, CtrlAlt, Key::RightArrow, Any, { actions::SwapPaneRight {} }),
             written(All, CtrlAlt, Key::UpArrow, Any, { actions::SwapPaneUp {} }),
@@ -345,7 +369,25 @@ namespace
             // muscle memory. This row comes first, so the menus and the palette show Command+P.
             both(PlatformScope::MacOnly, Primary, U'P', Any, { actions::OpenCommandPalette {} }),
             written(All, PrimaryShift, U'P', Any, { actions::OpenCommandPalette {} }),
+            // The daemon and workspace switcher, beside the palette: Shift+Command+R, Ctrl+Shift+R.
+            written(All, PrimaryShift, U'R', Any, { actions::ShowSwitcher {} }),
+            // A new workspace: "new window" (N) one tier up. Shift+Command+N on macOS, Finder's New Folder,
+            // whose icon the sidebar's button draws; Ctrl+Shift+Alt+N elsewhere, a home-row reach where
+            // Ctrl+Shift+Alt+T would not be. Fallbacks too, so a configuration that predates them has them.
+            both(DesktopOnly, CtrlShiftAlt, U'N', Any, { actions::NewWorkspace {} }),
+            both(MacOnly, SuperShift, U'N', Any, { actions::NewWorkspace {} }),
             written(All, CtrlShift, U'\\', Any, { actions::ToggleSplitOrientation {} }),
+            // The workspace sidebar (Native2026 only): Command+\ toggles it on a Mac, Ctrl+Shift+B elsewhere
+            // Jump to the next pane that needs you: Command+J, Ctrl+Shift+J. Focus: Shift+Command+E,
+            // Ctrl+Shift+D. Fallbacks too, so a contour.yml written before the sidebar existed still has
+            // them, and its controls' tooltips name them.
+            native2026Only(both(PlatformScope::MacOnly, Super, U'\\', Any, { actions::ToggleSidebar {} })),
+            native2026Only(both(DesktopOnly, CtrlShift, U'B', Any, { actions::ToggleSidebar {} })),
+            native2026Only(
+                both(PlatformScope::MacOnly, Super, U'J', Any, { actions::JumpToNextAttention {} })),
+            native2026Only(both(DesktopOnly, CtrlShift, U'J', Any, { actions::JumpToNextAttention {} })),
+            native2026Only(both(PlatformScope::MacOnly, SuperShift, U'E', Any, { actions::FocusSidebar {} })),
+            native2026Only(both(DesktopOnly, CtrlShift, U'D', Any, { actions::FocusSidebar {} })),
             written(DesktopOnly, Primary, U'Z', Any, { actions::TogglePaneZoom {} }),
             written(DesktopOnly, Alt, U'1', Any, { actions::SwitchToTab { .position = 1 } }),
             written(DesktopOnly, Alt, U'2', Any, { actions::SwitchToTab { .position = 2 } }),
@@ -567,6 +609,32 @@ namespace
         return result;
     }
 
+    /// Whether @p config is of the newest defaults edition.
+    [[nodiscard]] bool isNative2026Edition(Config const& config) noexcept
+    {
+        return config.defaultsEdition == DefaultsEdition::Native2026;
+    }
+
+    /// Whether @p config is of the oldest defaults edition.
+    [[nodiscard]] bool isClassicEdition(Config const& config) noexcept
+    {
+        return config.defaultsEdition == DefaultsEdition::Classic;
+    }
+
+    /// The predicate @p row's fallback matches under. The fallback tables serve every edition, so a row of
+    /// one edition is gated by that edition where it matches.
+    /// @throw std::logic_error for a row of one edition that is gated by a predicate of its own as well: one
+    ///        function pointer cannot hold both, and the table must not quietly drop either.
+    template <typename Input>
+    [[nodiscard]] auto fallbackGateOf(DefaultBindingRow<Input> const& row) -> bool (*)(Config const&) noexcept
+    {
+        if (row.edition == EditionScope::Both)
+            return row.enabled;
+        if (row.enabled != alwaysEnabled)
+            throw std::logic_error("a fallback row is gated by both an edition and a predicate");
+        return row.edition == EditionScope::Native2026Only ? isNative2026Edition : isClassicEdition;
+    }
+
     /// The fallback rows of @p rows on @p kind.
     template <typename Input>
     [[nodiscard]] std::vector<FallbackMapping<Input>> fallbackMappings(
@@ -581,7 +649,7 @@ namespace
                                                           .input = row.input,
                                                           .binding = row.binding,
                                                           .clickCount = row.clickCount },
-                                             .enabled = row.enabled,
+                                             .enabled = fallbackGateOf(row),
                                              .declined = row.declined });
         return result;
     }

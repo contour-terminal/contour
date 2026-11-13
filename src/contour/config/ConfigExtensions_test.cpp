@@ -486,6 +486,37 @@ input_mapping:
     CHECK(mappings.size() == 7);
 }
 
+TEST_CASE("Config: MoveToTab parses both places, and drops a binding missing one or naming 0",
+          "[config][sidebar]")
+{
+    using namespace contour::actions;
+
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control, Shift], key: F1, action: MoveToTab, workspace: 2, tab: 3 }
+    - { mods: [Control, Shift], key: F2, action: MoveToTab, workspace: 2 }
+    - { mods: [Control, Shift], key: F3, action: MoveToTab, tab: 3 }
+    - { mods: [Control, Shift], key: F4, action: MoveToTab, workspace: 0, tab: 3 }
+    - { mods: [Control, Shift], key: F5, action: MoveToTab, workspace: 2, tab: 0 }
+    - { mods: [Control, Shift], key: F6, action: MoveToNewTab }
+    - { mods: [Control, Shift], key: F7, action: MoveToNewWorkspace }
+)"sv);
+
+    auto const& mappings = config.inputMappings.value().keyMappings;
+    REQUIRE(mappings.size() == 3);
+    auto const* const moveToTab = std::get_if<MoveToTab>(&mappings[0].binding.at(0));
+    REQUIRE(moveToTab != nullptr);
+    CHECK(moveToTab->workspace == 2);
+    CHECK(moveToTab->tab == 3);
+    CHECK(std::holds_alternative<MoveToNewTab>(mappings[1].binding.at(0)));
+    CHECK(std::holds_alternative<MoveToNewWorkspace>(mappings[2].binding.at(0)));
+}
+
 TEST_CASE("Config: font features, text shaping engine, frozen DEC modes and hint patterns load", "[config]")
 {
     QTemporaryDir dir;
@@ -2156,6 +2187,88 @@ TEST_CASE("Config: loadConfigFromFile creates the file when it does not exist", 
     auto const config = contour::config::loadConfigFromFile(path);
     CHECK(std::filesystem::exists(path));
     CHECK(config.profile(config.defaultProfileName.value()) != nullptr);
+}
+
+TEST_CASE("Classic edition hides the sidebar and keeps tabs on top", "[config][sidebar]")
+{
+    using contour::config::SidebarVisibility;
+    using contour::config::TabPlacement;
+    QTemporaryDir dir;
+    auto const config = contour::config::loadConfigFromFile(writeConfig(dir, PartialConfigWithoutEdition));
+    CHECK(config.sidebar.value().visibility == SidebarVisibility::Hidden);
+    CHECK_FALSE(config.sidebar.value().width.has_value());
+    CHECK(config.tabPlacement.value() == TabPlacement::Top);
+}
+
+TEST_CASE("Native2026 shows the sidebar with sidebar placement", "[config][sidebar]")
+{
+    using contour::config::SidebarVisibility;
+    using contour::config::TabPlacement;
+    auto const config = contour::config::Config {};
+    CHECK(config.sidebar.value().visibility == SidebarVisibility::Shown);
+    CHECK(config.tabPlacement.value() == TabPlacement::Sidebar);
+}
+
+TEST_CASE("the sidebar and the tab placement are read from the file", "[config][sidebar]")
+{
+    using contour::config::SidebarVisibility;
+    using contour::config::TabPlacement;
+
+    SECTION("each value is read, and a key not named leaves its sibling alone")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+tab_placement: top
+sidebar:
+    visible: false
+    width: 300
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        CHECK(config.tabPlacement.value() == TabPlacement::Top);
+        CHECK(config.sidebar.value().visibility == SidebarVisibility::Hidden);
+        CHECK(config.sidebar.value().width == 300);
+    }
+
+    SECTION("a file stating one key keeps the edition's default for the other")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+sidebar:
+    width: 260
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        CHECK(config.sidebar.value().visibility == SidebarVisibility::Shown);
+        CHECK(config.sidebar.value().width == 260);
+    }
+
+    SECTION("a width that is no positive number is refused, null is the style's own width")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+sidebar:
+    width: -4
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        CHECK_FALSE(config.sidebar.value().width.has_value());
+        auto const reset = loadFromYaml(dir, R"(
+default_profile: main
+sidebar:
+    width: null
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        CHECK_FALSE(reset.sidebar.value().width.has_value());
+    }
 }
 
 TEST_CASE("Config.firstLaunchDefaults", "[config]")

@@ -345,7 +345,6 @@ class RoutingMockController: public contour::test::MainWindowControllerMock
     Q_INVOKABLE void closeWindow() {}
     Q_INVOKABLE [[nodiscard]] bool canCloseWindow() const noexcept { return true; }
     Q_INVOKABLE void toggleTitleBar() {}
-    Q_INVOKABLE void toggleMaximized() {}
     Q_INVOKABLE void minimizeWindow() {}
     Q_INVOKABLE [[nodiscard]] QVariantList tabColorPalette() const { return {}; }
     Q_INVOKABLE void activateTab(int) {}

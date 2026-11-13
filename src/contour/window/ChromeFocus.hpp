@@ -14,6 +14,7 @@ namespace contour::window
 enum class ChromeArea : uint8_t
 {
     Terminal = 0, ///< The terminal: no chrome has focus.
+    Sidebar,      ///< The workspace sidebar's tree.
     Tabs,         ///< The tab well (the pills, or the flat strip).
     Toolbar,      ///< The band's toolbar items, in visual order.
 };
@@ -31,6 +32,7 @@ enum class AreaPresence : uint8_t
 /// Which chrome areas the window shows. The terminal is always there, so it has no member.
 struct ChromeAreaPresence
 {
+    AreaPresence sidebar = AreaPresence::Absent; ///< Whether the workspace sidebar is shown.
     AreaPresence tabs = AreaPresence::Absent;    ///< Whether the tab well is shown.
     AreaPresence toolbar = AreaPresence::Absent; ///< Whether the band has at least one toolbar item.
 
@@ -38,7 +40,9 @@ struct ChromeAreaPresence
 };
 
 /// The order Ctrl+F6 walks the areas in; it wraps around.
-inline constexpr std::array ChromeAreaCycle { ChromeArea::Terminal, ChromeArea::Tabs, ChromeArea::Toolbar };
+inline constexpr std::array ChromeAreaCycle {
+    ChromeArea::Terminal, ChromeArea::Sidebar, ChromeArea::Tabs, ChromeArea::Toolbar
+};
 
 static_assert(ChromeAreaCycle.size() == ChromeAreaCount, "the cycle must name every area exactly once");
 
@@ -66,6 +70,7 @@ enum class FocusMove : uint8_t
     switch (area)
     {
         case ChromeArea::Terminal: return true;
+        case ChromeArea::Sidebar: return presence.sidebar == AreaPresence::Present;
         case ChromeArea::Tabs: return presence.tabs == AreaPresence::Present;
         case ChromeArea::Toolbar: return presence.toolbar == AreaPresence::Present;
     }

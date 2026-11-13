@@ -8,6 +8,7 @@
 #include <contour/remote/NativeController.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <future>
 #include <memory>
@@ -103,6 +104,13 @@ struct NativeControllerTestAccess
             controller.onRaiseRole(role);
             controller.onPaneSummary(summary);
         });
+    }
+
+    /// @return How many workspaces the controller holds metadata of (WorkspaceMeta), the removed ones pruned.
+    [[nodiscard]] static std::size_t workspaceMetaCount(contour::remote::NativeController const& controller)
+    {
+        auto const lock = std::lock_guard { controller._mutex };
+        return controller._workspaceMeta.size();
     }
 
     /// Ends the current client's connection and, in the same reactor turn, closes @p session's pane.

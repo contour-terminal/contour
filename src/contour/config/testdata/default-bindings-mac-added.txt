@@ -1,3 +1,5 @@
+[defaults classic] key modes=[Any] mods=[Control|Super] input=DownArrow clicks=- -> CycleWorkspace, direction: next declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Control|Super] input=UpArrow clicks=- -> CycleWorkspace, direction: previous declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Control|Super] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Super] input=U+003D clicks=- -> IncreaseFontSize declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Super] input=U+002B clicks=- -> IncreaseFontSize declined=pass gated=no
@@ -10,12 +12,16 @@
 [defaults classic] char modes=[Any] mods=[Super] input=U+0057 clicks=- -> ClosePane declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Super] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Shift|Super] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Super] input=U+0052 clicks=- -> ShowSwitcher declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Super] input=U+004E clicks=- -> NewWorkspace declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Control|Super] input=U+004F clicks=- -> OpenFileManager declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Control|Super] input=U+002E clicks=- -> ToggleStatusLine declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Super] input=U+0046 clicks=- -> SearchReverse declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Shift|Super] input=U+0048 clicks=- -> NoSearchHighlight declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Super] input=U+0055 clicks=- -> HintMode(url, 1) declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Shift|Super] input=U+0057 clicks=- -> CloseTab declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Control|Super] input=DownArrow clicks=- -> CycleWorkspace, direction: next declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Control|Super] input=UpArrow clicks=- -> CycleWorkspace, direction: previous declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Control|Super] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Super] input=U+003D clicks=- -> IncreaseFontSize declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Super] input=U+002B clicks=- -> IncreaseFontSize declined=pass gated=no
@@ -28,12 +34,19 @@
 [defaults native2026] char modes=[Any] mods=[Super] input=U+0057 clicks=- -> ClosePane declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Super] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Shift|Super] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Super] input=U+0052 clicks=- -> ShowSwitcher declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Super] input=U+004E clicks=- -> NewWorkspace declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Super] input=U+005C clicks=- -> ToggleSidebar declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Super] input=U+004A clicks=- -> JumpToNextAttention declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Super] input=U+0045 clicks=- -> FocusSidebar declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Control|Super] input=U+004F clicks=- -> OpenFileManager declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Control|Super] input=U+002E clicks=- -> ToggleStatusLine declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Super] input=U+0046 clicks=- -> SearchReverse declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Shift|Super] input=U+0048 clicks=- -> NoSearchHighlight declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Super] input=U+0055 clicks=- -> HintMode(url, 1) declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Shift|Super] input=U+0057 clicks=- -> CloseTab declined=pass gated=no
+[fallbacks] key modes=[Any] mods=[Control|Super] input=DownArrow clicks=- -> CycleWorkspace, direction: next declined=pass gated=no
+[fallbacks] key modes=[Any] mods=[Control|Super] input=UpArrow clicks=- -> CycleWorkspace, direction: previous declined=pass gated=no
 [fallbacks] key modes=[~AltScreen] mods=[Alt] input=LeftArrow clicks=- -> SendChars("\u{1b}b") declined=pass gated=no
 [fallbacks] key modes=[~AltScreen] mods=[Alt] input=RightArrow clicks=- -> SendChars("\u{1b}f") declined=pass gated=no
 [fallbacks] key modes=[~AltScreen] mods=[Super] input=LeftArrow clicks=- -> SendChars("\u{1}") declined=pass gated=no
@@ -47,6 +60,10 @@
 [fallbacks] char modes=[Any] mods=[Control|Super] input=U+0053 clicks=- -> ScreenshotVT declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+0057 clicks=- -> ClosePane declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
+[fallbacks] char modes=[Any] mods=[Shift|Super] input=U+004E clicks=- -> NewWorkspace declined=pass gated=no
+[fallbacks] char modes=[Any] mods=[Super] input=U+005C clicks=- -> ToggleSidebar declined=pass gated=yes
+[fallbacks] char modes=[Any] mods=[Super] input=U+004A clicks=- -> JumpToNextAttention declined=pass gated=yes
+[fallbacks] char modes=[Any] mods=[Shift|Super] input=U+0045 clicks=- -> FocusSidebar declined=pass gated=yes
 [fallbacks] char modes=[Any] mods=[Control|Super] input=U+004F clicks=- -> OpenFileManager declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Control|Super] input=U+002E clicks=- -> ToggleStatusLine declined=pass gated=no
 [fallbacks] char modes=[~AltScreen] mods=[Shift|Super] input=U+004F clicks=- -> OpenCommandOutput, target: last, placement: split declined=consume gated=no

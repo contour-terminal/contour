@@ -1,448 +1,469 @@
 // vim:syntax=qml
-// The daemon and workspace switcher popup: a filterable list of the daemons -- grouped This computer and
-// Saved hosts -- each expanding to its workspaces with their tab count and state, and "+ new workspace on
-// X"; or, for a pick a switch asked for, the one daemon's workspaces. "New daemon…" turns the field into a
-// label prompt.
+// The daemon and workspace switcher: a member of the command palette's family, drawn in the window's scene on
+// the palette's frame (PickerPopup). Its top level lists the window's daemon's workspaces, the other daemons
+// and the actions; typing finds the workspaces of every listed local daemon; a daemon row drills into that
+// daemon's level, and "New Daemon…" into the label prompt. Opened by ShowSwitcher, NewDaemon or a switch's
+// pick it is centred like the palette; opened by the workspace chip it hangs below the chip.
 //
-// The rows, their order, their names and what choosing one does all come from the switcher controller
-// (window/SwitcherController.hpp), so this file decides none of them. The keyboard does the work: the field
-// keeps focus, the arrows move the selection, Right expands a daemon and Left collapses it (with the caret
-// at the field's end or start, so editing the text still moves it), Return switches this window,
-// Shift+Return opens a new one, Escape cancels and changes nothing.
-//
-// It follows the Connect picker's visual language: every size, colour and glyph comes from chromeStyle.
-import QtQml
+// It decides nothing: the rows, their groups, what each says, the footer, what a key does and what choosing a
+// row does are the switcher controller's (window/SwitcherController.hpp), presented here by the window it is
+// over (WindowController.switcher). Every size, colour and glyph comes from chromeStyle.
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Layouts
 
-ThemedWindow {
+PickerPopup {
     id: root
-    objectName: "switcherWindow"
 
-    // The SwitcherController. Null-guarded everywhere: it may be destroyed before the QML tree.
-    required property var switcher
+    // The WindowController. Null-guarded everywhere: it is destroyed before the QML tree on window close.
+    required property var controller
 
-    // Where a row's text starts: the selection's inset from the list, then the same again inside it.
-    readonly property real textInset: chromeStyle.space.paletteInset + chromeStyle.space.paletteInset
-    readonly property bool isAskingLabel: root.switcher !== null && root.switcher.isAskingLabel
+    // The switcher shown: taken as the window presents it, and kept until the popup has closed. The window
+    // lets go of it as it is withdrawn, while the exit transition still draws its rows.
+    property var switcher: null
+    // Whether the rows' status glyphs are cells (the Terminal row) rather than shapes.
+    readonly property bool cellTree: chromeStyle.sidebar.look === chromeStyle.sidebar.cellTree
 
-    title: qsTr("Switch")
-    visible: false
-    width: chromeStyle.size.connectWidth
-    height: chromeStyle.size.connectHeight
-    minimumWidth: chromeStyle.size.connectWidth
-    minimumHeight: chromeStyle.size.connectHeight
+    namePrefix: "switcher"
+    model: root.switcher
+    ownsSelection: false
+    levelTitle: root.switcher ? root.switcher.levelTitle : ""
+    hintText: root.switcher ? root.switcher.hintText : ""
+    emptyText: root.switcher ? root.switcher.emptyText : ""
+    emptyBesideRows: true
+    footerDescription: root.switcher ? root.switcher.footerDescription : ""
+    footerHints: root.switcher ? root.switcher.footerHints : ""
+    footerHintSets: root.switcher ? root.switcher.footerHintSets : []
+    fieldName: root.switcher ? root.switcher.fieldName : ""
+    body: root.switcher && root.switcher.isAskingLabel ? labelBody : null
 
-    /// Puts the caret in the field the popup shows now.
-    function focusField() {
-        if (root.isAskingLabel) {
-            labelField.forceActiveFocus();
-            labelField.selectAll();
-        } else {
-            filterField.forceActiveFocus();
-            filterField.selectAll();
+    // The row under a pointer that moved, or -1: it wears the hover fill and its button, and the selection
+    // stays where the keys put it (board 6; unlike the palette, hover does not select).
+    property int hoveredIndex: -1
+    // The row the open row menu was built for, or -1.
+    property int _menuRow: -1
+    // Whether the popup closes for a row menu pick, which runs once it has closed: no dismissal then.
+    property bool _closingForPick: false
+
+    onPointerMoved: (index) => { root.hoveredIndex = index; }
+
+    /// Opens the menu of row @p index below the pointer, or at the row for a key.
+    function openRowMenu(index, atPointer) {
+        if (!root.switcher)
+            return;
+        const entries = root.switcher.rowMenu(index);
+        if (entries.length === 0)
+            return;
+        root._menuRow = index;
+        rowMenu.entries = entries;
+        if (atPointer) {
+            rowMenu.popup();
+            return;
         }
+        const item = root.list.itemAtIndex(index);
+        if (item)
+            rowMenu.popup(item, root.textInset, item.height);
+        else
+            rowMenu.popup();
     }
 
-    // Selects @p index and keeps it in view.
-    function select(index) {
-        list.currentIndex = index;
-        if (index >= 0)
-            list.positionViewAtIndex(index, ListView.Contain);
+    /// Shows the switcher, centred, or hanging below @p anchor (a rect in the window's coordinates).
+    function present(anchor) {
+        root.switcher = root.controller ? root.controller.switcher : null;
+        root.anchorRect = anchor ? anchor : null;
+        if (!root.opened)
+            root.open();
+        root.syncFromSwitcher();
     }
 
-    // Closed by the window manager: a start still running must not open a window afterwards.
-    onClosing: if (root.switcher) root.switcher.abandon()
-
-    // Where the pointer was at its last event in the list; NaN until one: the first only records it. A popup
-    // opening under a pointer at rest, rows scrolled or recreated under it, are no hover and must not take the
-    // selection from the keys or from the popup's own choice; only a pointer whose position changed does.
-    property real lastPointerX: NaN
-    property real lastPointerY: NaN
-
-    // Focus goes to the field whenever the window is shown again.
-    onVisibleChanged: if (visible) {
-        root.lastPointerX = NaN
-        root.lastPointerY = NaN
-        root.focusField()
+    // The field and the selection follow the controller, whoever moved them.
+    function syncFromSwitcher() {
+        if (!root.switcher)
+            return;
+        if (root.field.text !== root.switcher.filter)
+            root.field.text = root.switcher.filter;
+        root.select(root.switcher.currentIndex);
     }
-    onIsAskingLabelChanged: {
-        labelField.text = "";
-        root.focusField();
+
+    onOpening: {
+        // Reopened during a row menu pick's exit, which Qt then cancels without closed(): that pick is dropped
+        // (PickerPopup's onAboutToShow), and this close is a dismissal again.
+        root._closingForPick = false;
+        root.hoveredIndex = -1;
+        Qt.callLater(root.syncFromSwitcher);
+    }
+
+    // Selected while the popup still grew into its height, the list scrolled to keep the row in a viewport
+    // smaller than the one it ends with: once open, it starts at its first group's header again.
+    onOpened: {
+        root.list.positionViewAtBeginning();
+        if (root.switcher)
+            root.select(root.switcher.currentIndex);
+    }
+
+    // However it closed, the window lets go of the switcher: after a choice or Escape it has already, and a
+    // click outside is a dismissal it cancels. A row menu's pick runs from onPicked, once the keyboard is back.
+    onClosed: {
+        if (root.controller && !root._closingForPick)
+            root.controller.closeSwitcher();
+        if (!root._closingForPick)
+            root.switcher = null;
+    }
+
+    onPicked: (payload) => {
+        root._closingForPick = false;
+        const switcher = root.switcher;
+        root.switcher = null;
+        if (switcher)
+            switcher.triggerRowMenu(payload.row, payload.actionId);
+    }
+
+    onQueryEdited: (text) => {
+        if (root.switcher && root.switcher.filter !== text)
+            root.switcher.filter = text;
+    }
+
+    onKeyPressed: (event) => {
+        if (root.switcher && root.switcher.handleKey(event.key, event.modifiers, root.field.cursorPosition))
+            event.accepted = true;
     }
 
     Connections {
         target: root.switcher
-        function onCurrentIndexChanged() {
+        function onCurrentIndexChanged() { root.select(root.switcher.currentIndex); }
+        function onFilterChanged() {
+            if (root.field.text !== root.switcher.filter)
+                root.field.text = root.switcher.filter;
+        }
+        function onModelReset() {
+            root.hoveredIndex = -1;
             root.select(root.switcher.currentIndex);
         }
-        function onFilterChanged() {
-            if (filterField.text !== root.switcher.filter)
-                filterField.text = root.switcher.filter;
-        }
+        function onRowMenuRequested(row) { root.openRowMenu(row, false); }
     }
 
-    // {{{ Browse: the daemons and their workspaces
-    ColumnLayout {
-        anchors.fill: parent
-        spacing: 0
-        visible: !root.isAskingLabel
+    Connections {
+        target: root.controller
+        // A stand-in controller in a test may not present a switcher at all.
+        ignoreUnknownSignals: true
+        function onSwitcherRequested(anchor) { root.present(anchor); }
+        function onSwitcherWithdrawn() { root.close(); }
+    }
+
+    delegate: Item {
+        id: row
+
+        required property int index
+        required property string title
+        required property var titleMatches
+        required property string groupTitle
+        required property int kind
+        required property int glyph
+        required property string detailText
+        required property string detailSeparator
+        required property string detailCommand
+        required property string detailTail
+        required property string pillText
+        required property int pillKind
+        required property string accessibleDescription
+        required property bool drillsIn
+        required property bool opensInNewWindow
+        required property string newWindowName
+
+        readonly property bool isCurrent: row.index === root.list.currentIndex
+        readonly property bool isHovered: row.index === root.hoveredIndex
+
+        width: ListView.view.width
+        height: header.height + entry.height
+        readonly property real headerHeight: header.height
+
+        PickerGroupHeader {
+            id: header
+            width: parent.width
+            namePrefix: root.namePrefix
+            title: row.groupTitle
+            textInset: root.textInset
+        }
 
         Item {
-            Layout.fillWidth: true
-            Layout.preferredHeight: chromeStyle.size.paletteField
+            id: entry
+            objectName: "switcherRow"
+            anchors.top: header.bottom
+            width: parent.width
+            height: chromeStyle.size.paletteRow
 
-            TextField {
-                id: filterField
-                objectName: "switcherFilter"
+            Accessible.role: Accessible.ListItem
+            Accessible.name: row.title
+            Accessible.description: row.accessibleDescription
+            Accessible.selected: row.isCurrent
+
+            // The hover fill, under a pointer that moved, lighter than the selection, which draws over it. The
+            // Terminal row has none: a cell row's selection alone moves.
+            Rectangle {
+                objectName: "switcherHover"
+                anchors.fill: parent
+                anchors.leftMargin: chromeStyle.space.paletteInset
+                anchors.rightMargin: chromeStyle.space.paletteInset
+                radius: chromeStyle.radii.control
+                visible: row.isHovered && !row.isCurrent
+                color: chromeStyle.colors.paletteHoverFill
+            }
+
+            PickerRowSelection {
+                id: selection
+                anchors.fill: parent
+                anchors.leftMargin: chromeStyle.space.paletteInset
+                anchors.rightMargin: chromeStyle.space.paletteInset
+                namePrefix: root.namePrefix
+                selected: row.isCurrent
+            }
+
+            Row {
+                id: lead
                 x: root.textInset
-                width: parent.width - x - root.textInset
-                anchors.verticalCenter: parent.verticalCenter
-                Accessible.role: Accessible.EditableText
-                Accessible.name: qsTr("Search daemons and workspaces")
-                placeholderText: qsTr("Search daemons and workspaces")
-                font: chromeStyle.type.paletteInput
-                color: chromeStyle.colors.paletteText
-                placeholderTextColor: chromeStyle.colors.paletteSecondaryText
-                background: Item {}
-                padding: 0
-                inputMethodHints: Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
+                height: parent.height
+                spacing: chromeStyle.space.s3
 
-                onTextChanged: if (root.switcher) root.switcher.filter = text
-
-                Keys.onDownPressed: root.switcher.step(1)
-                Keys.onUpPressed: root.switcher.step(-1)
-                Keys.onReturnPressed: (event) => {
-                    if (event.modifiers & Qt.ShiftModifier)
-                        root.switcher.openCurrent();
-                    else
-                        root.switcher.activateCurrent();
-                }
-                Keys.onEnterPressed: (event) => {
-                    if (event.modifiers & Qt.ShiftModifier)
-                        root.switcher.openCurrent();
-                    else
-                        root.switcher.activateCurrent();
-                }
-                Keys.onEscapePressed: root.switcher.cancel()
-                Keys.onRightPressed: (event) => {
-                    if (cursorPosition === length)
-                        root.switcher.expandCurrent();
-                    else
-                        event.accepted = false;
-                }
-                Keys.onLeftPressed: (event) => {
-                    if (cursorPosition === 0)
-                        root.switcher.collapseCurrent();
-                    else
-                        event.accepted = false;
-                }
-            }
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: chromeStyle.borderWidth
-            color: chromeStyle.colors.paletteSeparator
-        }
-
-        ListView {
-            id: list
-            objectName: "switcherList"
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            clip: true
-            model: root.switcher
-            currentIndex: root.switcher ? root.switcher.currentIndex : -1
-            highlightMoveDuration: 0
-            ScrollBar.vertical: ScrollBar {}
-
-            // Moving the pointer over a row selects it. One handler for the list rather than one per row: Qt
-            // re-delivers hover to rows that appear or move under a pointer at rest, and a row cannot tell
-            // that from the pointer arriving; the position can.
-            HoverHandler {
-                onPointChanged: {
-                    const at = point.scenePosition
-                    const moved = !isNaN(root.lastPointerX)
-                                  && (at.x !== root.lastPointerX || at.y !== root.lastPointerY)
-                    root.lastPointerX = at.x
-                    root.lastPointerY = at.y
-                    if (!moved || !hovered || !root.switcher)
-                        return
-                    const inList = list.mapFromItem(null, at.x, at.y)
-                    const index = list.indexAt(inList.x + list.contentX, inList.y + list.contentY)
-                    if (index >= 0)
-                        root.switcher.currentIndex = index
-                }
-            }
-
-            delegate: Item {
-                id: row
-
-                required property int index
-
-                required property string title
-                required property string detail
-                required property string tag
-                required property string groupTitle
-                required property string kind
-                required property bool expanded
-
-                readonly property bool isCurrent: row.index === list.currentIndex
-                // Workspaces and the new-workspace row sit under their daemon.
-                readonly property real indent: row.kind === "workspace" || row.kind === "new-workspace"
-                                               ? chromeStyle.space.s8 : 0
-
-                width: ListView.view.width
-                height: header.height + entry.height
-
+                // The status glyph the sidebar shows. Its column is kept when there is none (the slot hides
+                // itself then), so an idle row's title lines up with the others.
                 Item {
-                    id: header
-                    objectName: "switcherGroupHeader"
-                    width: parent.width
-                    height: visible ? chromeStyle.size.paletteGroupHeader : 0
-                    visible: row.groupTitle !== ""
+                    id: glyphColumn
+                    width: chromeStyle.snapToCells(badge.edge)
+                    height: parent.height
+                    TabBadgeSlot {
+                        id: badge
+                        objectName: "switcherRowGlyph"
+                        anchors.centerIn: parent
+                        width: chromeStyle.snapToCells(implicitWidth)
+                        kind: row.glyph
+                        shaped: !root.cellTree
+                        Accessible.ignored: true
+                    }
+                }
 
-                    Accessible.role: Accessible.Heading
-                    Accessible.name: row.groupTitle
+                MatchedLabel {
+                    id: titleLabel
+                    objectName: "switcherTitle"
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.max(0, Math.min(implicitWidth, trail.x - chromeStyle.space.s4 - lead.x - x))
+                    plainText: row.title
+                    matches: row.titleMatches
+                    horizontalAlignment: Text.AlignLeft
+                    elide: Text.ElideRight
+                    font: chromeStyle.type.body
+                    color: selection.ink
+                }
+            }
 
-                    Label {
-                        x: root.textInset
-                        width: parent.width - x - root.textInset
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: row.groupTitle
-                        font: chromeStyle.type.footnoteSemibold
+            Row {
+                id: trail
+                x: parent.width - width - root.textInset
+                height: parent.height
+                spacing: chromeStyle.space.s3
+
+                // The detail: words, then the reason's command in monospace, then the time. The title comes
+                // first: where both do not fit (a narrow picker, the Terminal row's), the command and the time
+                // go, and the words are cut at their end.
+                Row {
+                    id: detail
+                    objectName: "switcherDetail"
+                    // What the title, its glyph and the trail's other parts leave of the row.
+                    readonly property real room: Math.max(0, entry.width - root.textInset - root.textInset
+                        - glyphColumn.width - lead.spacing - titleLabel.implicitWidth - chromeStyle.space.s4
+                        - (pill.visible ? pill.width + trail.spacing : 0)
+                        - (newWindowButton.visible ? newWindowButton.width + trail.spacing : 0)
+                        - (drillIn.visible ? drillIn.width + trail.spacing : 0))
+                    readonly property bool fits: detailText.implicitWidth + detailSeparator.implicitWidth
+                                                 + detailCommand.implicitWidth + detailTail.implicitWidth
+                                                 <= detail.room
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 0
+                    Text {
+                        id: detailText
+                        objectName: "switcherDetailText"
+                        textFormat: Text.PlainText
+                        Accessible.ignored: true
+                        text: row.detailText
+                        visible: text !== ""
+                        width: detail.fits ? implicitWidth : Math.min(implicitWidth, detail.room)
                         elide: Text.ElideRight
-                        color: chromeStyle.colors.paletteSecondaryText
+                        font: chromeStyle.type.footnote
+                        color: selection.secondaryInk
+                    }
+                    // The separator goes with the command: where the command gives way, the words end clean.
+                    Text {
+                        id: detailSeparator
+                        objectName: "switcherDetailSeparator"
+                        textFormat: Text.PlainText
                         Accessible.ignored: true
+                        text: row.detailSeparator
+                        visible: text !== "" && detailCommand.visible
+                        font: chromeStyle.type.footnote
+                        color: selection.secondaryInk
+                    }
+                    Text {
+                        id: detailCommand
+                        objectName: "switcherDetailCommand"
+                        textFormat: Text.PlainText
+                        Accessible.ignored: true
+                        text: row.detailCommand
+                        visible: text !== "" && detail.fits
+                        font: chromeStyle.type.monospaceFootnote
+                        color: selection.secondaryInk
+                    }
+                    Text {
+                        id: detailTail
+                        objectName: "switcherDetailTail"
+                        textFormat: Text.PlainText
+                        Accessible.ignored: true
+                        text: row.detailTail
+                        visible: text !== "" && detail.fits
+                        font: chromeStyle.type.footnote
+                        color: selection.secondaryInk
                     }
                 }
 
-                Item {
-                    id: entry
-                    objectName: "switcherRow"
-                    anchors.top: header.bottom
-                    width: parent.width
-                    height: chromeStyle.size.connectRow
-
-                    property string rowKind: row.kind
-
-                    Accessible.role: Accessible.ListItem
-                    Accessible.name: row.title
-                    Accessible.description: row.detail
-
-                    readonly property color textColor: row.isCurrent ? chromeStyle.colors.paletteSelectionText
-                                                                     : chromeStyle.colors.paletteText
-                    readonly property color secondaryColor: row.isCurrent
-                                                            ? chromeStyle.colors.paletteSelectionText
-                                                            : chromeStyle.colors.paletteSecondaryText
-
-                    Rectangle {
-                        anchors.fill: parent
-                        anchors.leftMargin: chromeStyle.space.paletteInset
-                        anchors.rightMargin: chromeStyle.space.paletteInset
-                        radius: chromeStyle.radii.control
-                        visible: row.isCurrent
-                        color: chromeStyle.colors.paletteSelectionFill
+                // The pill: Current, Other window, the daemon a match is on, or a host's transport.
+                Rectangle {
+                    id: pill
+                    objectName: "switcherPill"
+                    visible: row.pillText !== ""
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: pillLabel.implicitWidth + chromeStyle.space.s4
+                    height: pillLabel.implicitHeight + chromeStyle.space.s1
+                    radius: chromeStyle.radii.hostChip
+                    color: chromeStyle.colors.chipFill
+                    Accessible.ignored: true
+                    Text {
+                        id: pillLabel
+                        textFormat: Text.PlainText
+                        anchors.centerIn: parent
+                        text: row.pillText
+                        font: chromeStyle.type.footnote
+                        color: chromeStyle.colors.chipText
                     }
+                }
 
-                    // A daemon's disclosure: ▸ collapsed, ▾ expanded; a tap toggles it.
-                    Label {
-                        id: disclosure
-                        objectName: "switcherDisclosure"
-                        x: root.textInset
-                        width: chromeStyle.space.s8
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: row.kind === "daemon"
-                        text: row.expanded ? "▾" : "▸"
-                        font: chromeStyle.type.body
-                        color: entry.secondaryColor
-                        Accessible.ignored: true
+                // Opens the row's workspace in a new window: on the selected and the hovered row.
+                ToolbarButton {
+                    id: newWindowButton
+                    objectName: "switcherNewWindowButton"
+                    readonly property var face: chromeStyle.pickerAccessory
+                    visible: row.opensInNewWindow && (row.isCurrent || row.isHovered)
+                    anchors.verticalCenter: parent.verticalCenter
+                    glyph: newWindowButton.face.glyph ?? ""
+                    iconName: newWindowButton.face.iconName ?? ""
+                    iconSource: newWindowButton.face.bundledIcon ?? ""
+                    glyphColor: selection.secondaryInk
+                    accessibleName: row.newWindowName
+                    onClicked: if (root.switcher) root.switcher.activateInNewWindow(row.index)
+                }
 
-                        TapHandler {
-                            onTapped: if (root.switcher) root.switcher.toggle(row.index)
-                        }
-                    }
+                Label {
+                    id: drillIn
+                    objectName: "switcherDrillIn"
+                    visible: row.drillsIn
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: chromeStyle.drillInGlyph
+                    font: chromeStyle.type.body
+                    color: selection.secondaryInk
+                    Accessible.ignored: true
+                }
+            }
 
-                    Column {
-                        x: root.textInset + chromeStyle.space.s8 + row.indent
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: Math.max(0, accessory.x - chromeStyle.space.s4 - x)
+            // The secondary button opens the row's menu where the pointer is.
+            TapHandler {
+                acceptedButtons: Qt.RightButton
+                onTapped: root.openRowMenu(row.index, true)
+            }
 
-                        Label {
-                            objectName: "switcherTitle"
-                            width: parent.width
-                            text: row.title
-                            elide: Text.ElideRight
-                            textFormat: Text.PlainText
-                            font: chromeStyle.type.body
-                            color: entry.textColor
-                        }
-                        Label {
-                            objectName: "switcherDetail"
-                            width: parent.width
-                            visible: row.detail !== ""
-                            text: row.detail
-                            elide: Text.ElideRight
-                            textFormat: Text.PlainText
-                            font: chromeStyle.type.footnote
-                            color: entry.secondaryColor
-                        }
-                    }
-
-                    Rectangle {
-                        id: accessory
-                        objectName: "switcherTag"
-                        visible: row.tag !== ""
-                        x: parent.width - width - root.textInset
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: visible ? tagLabel.implicitWidth + chromeStyle.space.s4 + chromeStyle.space.s4 : 0
-                        height: tagLabel.implicitHeight + chromeStyle.space.s1 + chromeStyle.space.s1
-                        radius: chromeStyle.radii.toolbarChip
-                        color: chromeStyle.colors.chipFill
-
-                        Label {
-                            id: tagLabel
-                            anchors.centerIn: parent
-                            text: row.tag
-                            font: chromeStyle.type.caption
-                            color: chromeStyle.colors.chipText
-                            Accessible.ignored: true
-                        }
-                    }
-
-                    // A tap chooses the row; the list's HoverHandler selects it as the pointer moves over it.
-                    TapHandler {
-                        onTapped: {
-                            root.switcher.currentIndex = row.index;
-                            root.switcher.activate(row.index);
-                        }
-                    }
+            // A click chooses on release inside the row: a drag out of it chooses nothing.
+            TapHandler {
+                gesturePolicy: TapHandler.ReleaseWithinBounds
+                onTapped: {
+                    if (!root.switcher)
+                        return;
+                    root.switcher.currentIndex = row.index;
+                    root.switcher.activate(row.index);
                 }
             }
         }
+    }
 
-        Label {
-            objectName: "switcherEmpty"
-            visible: list.count === 0
-            Layout.fillWidth: true
-            Layout.preferredHeight: visible ? chromeStyle.size.paletteRow : 0
+    ActionContextMenu {
+        id: rowMenu
+        objectName: "switcherRowMenu"
+        parent: root.contentItem
+        // Run once the popup has closed and handed the keyboard back: Rename… focuses the sidebar's editor,
+        // which the hand-back would otherwise take straight back.
+        onPicked: (actionId) => {
+            if (!root.switcher || root._menuRow < 0)
+                return;
+            root._closingForPick = true;
+            root.closeThen({ row: root._menuRow, actionId: actionId });
+        }
+    }
+
+    // The New Daemon level's body: what a label is, the verdict on the one typed, and the command that does
+    // the same from a shell.
+    Component {
+        id: labelBody
+        Column {
+            objectName: "switcherLabelBody"
+            spacing: chromeStyle.space.s2
+            topPadding: chromeStyle.space.s3
+            bottomPadding: chromeStyle.space.s3
             leftPadding: root.textInset
-            verticalAlignment: Text.AlignVCenter
-            text: qsTr("No matching daemons or workspaces")
-            font: chromeStyle.type.body
-            color: chromeStyle.colors.paletteSecondaryText
-        }
+            rightPadding: root.textInset
 
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: chromeStyle.borderWidth
-            color: chromeStyle.colors.paletteSeparator
-        }
-
-        Label {
-            objectName: "switcherKeys"
-            Layout.fillWidth: true
-            Layout.leftMargin: root.textInset
-            Layout.rightMargin: root.textInset
-            Layout.topMargin: chromeStyle.space.s4
-            Layout.bottomMargin: chromeStyle.space.s4
-            text: qsTr("Return = Switch here · Shift+Return = Open in new window · Esc = cancel")
-            elide: Text.ElideRight
-            font: chromeStyle.type.footnote
-            color: chromeStyle.colors.paletteSecondaryText
-        }
-    }
-    // }}}
-
-    // {{{ New daemon…: the label prompt
-    ColumnLayout {
-        objectName: "switcherLabelPrompt"
-        anchors.fill: parent
-        anchors.leftMargin: root.textInset
-        anchors.rightMargin: root.textInset
-        anchors.topMargin: chromeStyle.space.s4
-        spacing: chromeStyle.space.s4
-        visible: root.isAskingLabel
-
-        Label {
-            Layout.fillWidth: true
-            text: qsTr("New daemon")
-            font: chromeStyle.type.footnoteSemibold
-            color: chromeStyle.colors.paletteSecondaryText
-            Accessible.role: Accessible.Heading
-            Accessible.name: text
-        }
-
-        TextField {
-            id: labelField
-            objectName: "switcherLabelField"
-            Layout.fillWidth: true
-            Accessible.role: Accessible.EditableText
-            Accessible.name: qsTr("Label of the new daemon")
-            placeholderText: qsTr("Label, such as work2")
-            font: chromeStyle.type.paletteInput
-            color: chromeStyle.colors.paletteText
-            placeholderTextColor: chromeStyle.colors.paletteSecondaryText
-            inputMethodHints: Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
-            enabled: root.switcher !== null && !root.switcher.isBusy
-
-            onTextChanged: if (root.switcher) root.switcher.checkLabel(text)
-            Keys.onReturnPressed: root.switcher.submitLabel(text)
-            Keys.onEnterPressed: root.switcher.submitLabel(text)
-            Keys.onEscapePressed: root.switcher.cancel()
-        }
-
-        Label {
-            objectName: "switcherLabelError"
-            Layout.fillWidth: true
-            visible: root.switcher !== null && root.switcher.labelError !== ""
-            text: root.switcher ? root.switcher.labelError : ""
-            wrapMode: Text.Wrap
-            textFormat: Text.PlainText
-            font: chromeStyle.type.footnote
-            color: chromeStyle.statusInk(chromeStyle.statusDanger)
-            Accessible.role: Accessible.AlertMessage
-            Accessible.name: text
-        }
-
-        Label {
-            objectName: "switcherLabelBusy"
-            Layout.fillWidth: true
-            visible: root.switcher !== null && root.switcher.isBusy
-            text: qsTr("Starting the daemon…")
-            font: chromeStyle.type.footnote
-            color: chromeStyle.colors.paletteSecondaryText
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            visible: root.switcher !== null && root.switcher.runningLabel !== ""
-            spacing: chromeStyle.space.s4
-
-            Label {
-                Layout.fillWidth: true
-                text: root.switcher ? qsTr("Daemon \"%1\" is already running.").arg(root.switcher.runningLabel)
-                                    : ""
-                elide: Text.ElideRight
+            Text {
+                objectName: "switcherLabelCaption"
+                width: parent.width - parent.leftPadding - parent.rightPadding
                 textFormat: Text.PlainText
+                wrapMode: Text.WordWrap
+                text: root.switcher ? root.switcher.labelCaption : ""
                 font: chromeStyle.type.footnote
-                color: chromeStyle.colors.paletteText
+                color: chromeStyle.colors.paletteSecondaryText
             }
 
-            Button {
-                objectName: "switcherSwitchOffer"
-                text: root.switcher ? qsTr("Switch to daemon %1").arg(root.switcher.runningLabel) : ""
-                font: chromeStyle.type.footnote
-                highlighted: true
-                onClicked: root.switcher.switchToRunning()
+            Row {
+                spacing: chromeStyle.space.s2
+                visible: verdictText.text !== ""
+                TabBadgeSlot {
+                    objectName: "switcherLabelVerdictGlyph"
+                    anchors.verticalCenter: parent.verticalCenter
+                    kind: root.switcher ? root.switcher.labelVerdictGlyph : 0
+                    shaped: !root.cellTree
+                    Accessible.ignored: true
+                }
+                Text {
+                    id: verdictText
+                    objectName: "switcherLabelVerdict"
+                    textFormat: Text.PlainText
+                    text: root.switcher ? root.switcher.labelMessage : ""
+                    font: chromeStyle.type.footnote
+                    color: chromeStyle.colors.paletteText
+                }
             }
-        }
 
-        Item {
-            Layout.fillHeight: true
+            Column {
+                visible: commandText.text !== ""
+                spacing: chromeStyle.space.s1
+                Text {
+                    objectName: "switcherLabelCommandCaption"
+                    textFormat: Text.PlainText
+                    text: root.switcher ? root.switcher.labelCommandCaption : ""
+                    font: chromeStyle.type.footnote
+                    color: chromeStyle.colors.paletteSecondaryText
+                }
+                Text {
+                    id: commandText
+                    objectName: "switcherLabelCommand"
+                    textFormat: Text.PlainText
+                    text: root.switcher ? root.switcher.labelCommand : ""
+                    font: chromeStyle.type.monospaceFootnote
+                    color: chromeStyle.colors.paletteText
+                }
+            }
         }
     }
-    // }}}
 }

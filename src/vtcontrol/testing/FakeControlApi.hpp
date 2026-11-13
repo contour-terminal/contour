@@ -58,6 +58,12 @@ struct FakeControlApi final: public ControlApi
     void handle(CallContext& /*context*/, CaptureRequest const& request, Completion<CaptureReply> done) override { lastCapture = request; done(captureReply); }
     void handle(CallContext& /*context*/, ClosePaneRequest const& request, Completion<EmptyReply> done) override { lastClosePane = request; done(EmptyReply {}); }
     void handle(CallContext& /*context*/, CloseTabRequest const& request, Completion<EmptyReply> done) override { lastCloseTab = request; if (closeTabFailure) done(std::unexpected(*closeTabFailure)); else done(EmptyReply {}); }
+    void handle(CallContext& /*context*/, CreateWorkspaceRequest const& request, Completion<CreateWorkspaceReply> done) override { lastCreateWorkspace = request; done(createWorkspaceReply); }
+    void handle(CallContext& /*context*/, RenameWorkspaceRequest const& request, Completion<EmptyReply> done) override { lastRenameWorkspace = request; done(EmptyReply {}); }
+    void handle(CallContext& /*context*/, CloseWorkspaceRequest const& request, Completion<EmptyReply> done) override { lastCloseWorkspace = request; done(EmptyReply {}); }
+    void handle(CallContext& /*context*/, MoveWorkspaceRequest const& request, Completion<EmptyReply> done) override { lastMoveWorkspace = request; done(EmptyReply {}); }
+    void handle(CallContext& /*context*/, MoveTabRequest const& request, Completion<EmptyReply> done) override { lastMoveTab = request; done(EmptyReply {}); }
+    void handle(CallContext& /*context*/, MovePaneRequest const& request, Completion<MovePaneReply> done) override { lastMovePane = request; done(MovePaneReply {}); }
     void handle(CallContext& /*context*/, SwitchWorkspaceRequest const& request, Completion<SwitchWorkspaceReply> done) override { lastSwitchWorkspace = request; if (switchWorkspaceFailure) done(std::unexpected(*switchWorkspaceFailure)); else done(switchWorkspaceReply); }
     void handle(CallContext& /*context*/, SetLabelRequest const& request, Completion<EmptyReply> done) override { lastSetLabel = request; done(EmptyReply {}); }
     void handle(CallContext& /*context*/, ReportStatusRequest const& request, Completion<EmptyReply> done) override { lastReportStatus = request; done(EmptyReply {}); }
@@ -79,6 +85,7 @@ struct FakeControlApi final: public ControlApi
     DaemonUpgradeReply daemonUpgradeReply { .started = true, .toRelease = "9.9.9" };
     ListReply listReply;
     CreateTabReply createTabReply;
+    CreateWorkspaceReply createWorkspaceReply;
     SplitReply splitReply;
     SendReply sendReply;
     CaptureReply captureReply;
@@ -94,6 +101,12 @@ struct FakeControlApi final: public ControlApi
     std::optional<DaemonUpgradeRequest> lastDaemonUpgrade;
     std::optional<ListRequest> lastList;
     std::optional<CreateTabRequest> lastCreateTab;
+    std::optional<CreateWorkspaceRequest> lastCreateWorkspace;
+    std::optional<RenameWorkspaceRequest> lastRenameWorkspace;
+    std::optional<CloseWorkspaceRequest> lastCloseWorkspace;
+    std::optional<MoveWorkspaceRequest> lastMoveWorkspace;
+    std::optional<MoveTabRequest> lastMoveTab;
+    std::optional<MovePaneRequest> lastMovePane;
     std::optional<SplitRequest> lastSplit;
     std::optional<SendRequest> lastSend;
     std::optional<ReportStatusRequest> lastReportStatus;

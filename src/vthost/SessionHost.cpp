@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/SessionHost.hpp>
 
+#include <vtbackend/screen/WorkspaceName.hpp>
+
 #include <vtpty/Process.hpp>
 
 #include <core/Assert.hpp>
@@ -533,6 +535,16 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     // A handover brings its workspaces back with the ids they had, into a model that holds none yet.
     _workspace(config.handover ? vtworkspace::WorkspaceId {} : _model.createWorkspace()->id())
 {
+    if (config.workspaceGit)
+        _workspaceGit = std::make_unique<WorkspaceGitTracker>(
+            config.workspaceGit->probe,
+            config.workspaceGit->executor,
+            [&loop = _loop](std::function<void()> job) { loop.post(std::move(job)); },
+            [this](WorkspaceId workspace, std::optional<GitInfo> const& git) {
+                auto const signal = WorkspaceGitChangedSignal { .workspace = workspace, .git = git };
+                for (auto* observer: _streamSubscribers)
+                    observer->workspaceGitChanged(signal);
+            });
     // 0 is SessionId{}, the sentinel for none: a session minted with it could never be named.
     Require(config.firstSessionId != 0);
     Require(_defaultCellPixelSize.area() > 0);
@@ -564,6 +576,9 @@ SessionHost::~SessionHost()
 {
     // No frame timer may tick a terminal the teardown below destroys, nor fire in the drain it turns.
     _animationTicks.clear();
+    // Nor may a git lookup tell the host the drain below turns.
+    _workspaceGitPoll.reset();
+    _workspaceGit.reset();
     // Close every PTY first so all pump threads unblock and join promptly.
     for (auto& [id, session]: _sessions)
         session->terminate(TerminationReason::Teardown);
@@ -798,7 +813,17 @@ std::unique_ptr<HostedSession> SessionHost::makeHostedSession(SessionId id,
         },
         /*onSignal=*/
         [this, id](SessionSignal signal) {
-            postStreamEvent(id, &SessionStreamEvents::sessionSignal, std::move(signal));
+            postFromPump([this, id, signal = std::move(signal)] {
+                if (!_sessions.contains(id.value))
+                    return;
+                for (auto* observer: _streamSubscribers)
+                    observer->sessionSignal(id, signal);
+                // A new directory, or a finished command (it may have switched branch or committed), is
+                // when the workspace showing this pane has its git state looked up again.
+                if (std::holds_alternative<WorkingDirectoryChangedSignal>(signal)
+                    || std::holds_alternative<CommandBlockFinishedSignal>(signal))
+                    refreshWorkspaceGitOf(id);
+            });
         },
         makeSessionExtensions(id),
         std::move(profileName),
@@ -1223,6 +1248,35 @@ Tab* SessionHost::createTab(SessionSpawnRequest const& request, std::optional<Se
     return tab;
 }
 
+std::string SessionHost::defaultWorkspaceLabel(SessionSpawnRequest const& request, SessionId seeded) const
+{
+    // The directory the shell was started in, as settleStartDirectory settled it: a stated or inherited one
+    // that is no directory here (a foreign path from another machine's hello) was dropped, and names nothing.
+    auto start = std::optional<std::filesystem::path> {};
+    auto const consider = [&](std::optional<std::filesystem::path> candidate) {
+        if (!start && candidate && !candidate->empty() && _fileSystem.isDirectory(*candidate))
+            start = std::move(candidate);
+    };
+    if (request.commandOverride)
+        consider(request.commandOverride->workingDirectory);
+    if (request.directoryFrom)
+        consider(workingDirectoryOf(*request.directoryFrom));
+    // Else where the profile starts a shell, which is settled and so cannot race the child's chdir the way
+    // the child's own directory can; that one is the last resort, for a host with no profiles.
+    if (!start && _profiles)
+        consider(_profiles->resolve(request.profileName).shell.workingDirectory);
+    if (!start && !_profiles)
+        consider(workingDirectoryOf(seeded));
+    if (!start)
+        return {};
+    // Runs on the calling thread: the walk up to the repository root is a few stats, once per creation, which
+    // is acceptable where the creation itself spawns a process.
+    // Where the host looks up `{Git}`, or this machine's files when it was given none.
+    if (auto const services = _git.services())
+        return vtbackend::defaultWorkspaceName(services->fileSystem, *start);
+    return vtbackend::defaultWorkspaceName(vtbackend::NativeGitFileSystem { _fileSystem }, *start);
+}
+
 vtworkspace::Workspace* SessionHost::createWorkspace(SessionSpawnRequest const& request)
 {
     auto const pane = paneUuidFor(request);
@@ -1235,9 +1289,13 @@ vtworkspace::Workspace* SessionHost::createWorkspace(SessionSpawnRequest const& 
         return nullptr;
 
     auto* workspace = &createEmptyWorkspace(newWorkspace);
+    // A restored or handed-over workspace keeps the label it had; any other is named once, after where its
+    // first shell starts, and stays so after a cd.
     if (request.presetIds)
         _objects.setLabel(ObjectRef { ObjectKind::Workspace, newWorkspace },
                           request.presetIds->workspaceLabel);
+    else if (auto name = defaultWorkspaceLabel(request, *seeded); !name.empty())
+        _objects.setLabel(ObjectRef { ObjectKind::Workspace, newWorkspace }, std::move(name));
     _stagedTab = StagedTab { .uuid = tabUuid,
                              .label = request.presetIds ? request.presetIds->tabLabel : std::string {} };
     auto* tab = _model.createTab(workspace->id());
@@ -1271,14 +1329,32 @@ vtworkspace::Workspace& SessionHost::createEmptyWorkspace(vtcontrol::Uuid name)
 void SessionHost::discardWorkspace(WorkspaceId workspace)
 {
     auto const* found = _model.workspace(workspace);
-    if (found == nullptr || found->tabCount() != 0)
+    if (found == nullptr || found->tabCount() != 0 || _model.workspaceCount() == 1)
         return;
     _objects.forget(workspace);
+    if (_workspaceGit)
+        _workspaceGit->forget(workspace);
     _model.removeWorkspace(workspace);
-    // The host's own workspace is what a creation naming no workspace lands in: another takes its place. A
-    // move empties a workspace only by filling another, so one is left.
-    if (workspace == _workspace && _model.workspaceCount() > 0)
+    // The host's own workspace is what a creation naming no workspace lands in: another takes its place. One
+    // is always left, as the only one is never removed.
+    if (workspace == _workspace)
         _workspace = _model.workspaceAt(0)->id();
+}
+
+void SessionHost::discardEmptyWorkspaces()
+{
+    // Collected first: removing one changes the order being walked. The host's own goes last, so it is the
+    // one kept when none holds a tab.
+    auto empty = std::ranges::to<std::vector>(
+        std::views::iota(0, _model.workspaceCount())
+        | std::views::transform([this](int index) { return _model.workspaceAt(index); })
+        | std::views::filter([](vtworkspace::Workspace const* workspace) {
+              return workspace != nullptr && workspace->tabCount() == 0;
+          })
+        | std::views::transform(&vtworkspace::Workspace::id));
+    std::ranges::stable_partition(empty, [this](WorkspaceId id) { return id != _workspace; });
+    for (auto const id: empty)
+        discardWorkspace(id);
 }
 
 void SessionHost::settleSwitch(uint32_t request, proto::SwitchReply reply)
@@ -1307,6 +1383,10 @@ void SessionHost::noteClientAttached(SessionStreamEvents* client)
         return;
     _attachedClients.push_back(client);
     settleRaiseRole();
+    // A window that follows shows the sidebar: bring it up to date now. The poll is armed by the refresh,
+    // once a workspace's directory is known, follower or not.
+    if (client->followsDaemon())
+        refreshAllWorkspaceGit();
 }
 
 void SessionHost::noteClientDetached(SessionStreamEvents const* client)
@@ -2239,6 +2319,7 @@ std::expected<QuiescedHost, HostQuiesceError> SessionHost::quiesceAll()
         return QuiescedHost { .tree = _model.captureTree(),
                               .modelIds = _model.idState(),
                               .nextSessionId = SessionId { _nextSessionId },
+                              .defaultWorkspace = _workspace,
                               .sessions = std::move(sessions) };
     });
 }
@@ -2257,6 +2338,28 @@ void SessionHost::handleSessionExit(SessionId session)
 void SessionHost::closeSession(SessionId session)
 {
     endSession(session, SessionEnd::Requested);
+}
+
+std::expected<void, WorkspaceCloseError> SessionHost::closeWorkspace(WorkspaceId workspace)
+{
+    auto const* const found = _model.workspace(workspace);
+    if (found == nullptr)
+        return std::unexpected(WorkspaceCloseError::UnknownWorkspace);
+    // A creation naming no workspace, and an attach, need somewhere to land.
+    if (_model.workspaceCount() == 1)
+        return std::unexpected(WorkspaceCloseError::LastWorkspace);
+    // Collected first: ending a session changes the trees being walked.
+    auto sessions = std::vector<SessionId> {};
+    for (auto const index: std::views::iota(0, found->tabCount()))
+        found->tabAt(index)->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+            if (pane.isLeaf())
+                sessions.push_back(pane.session());
+        });
+    for (auto const session: sessions)
+        endSession(session, SessionEnd::Requested);
+    // The last session ending removed it already; one that held no tab goes now.
+    discardWorkspace(workspace);
+    return {};
 }
 
 std::optional<std::filesystem::path> SessionHost::workingDirectoryOf(SessionId session) const
@@ -2311,8 +2414,8 @@ void SessionHost::endSession(SessionId session, SessionEnd cause)
     {
         auto const id = workspace->id();
         _model.closePane(id, tab->id(), leaf->id());
-        if (auto const* const left = _model.workspace(id); left != nullptr && left->tabCount() == 0)
-            _endedWorkspaces.insert(id.value);
+        // A workspace ends with its last tab: it goes, unless it is the only one.
+        discardWorkspace(id);
     }
 
     auto const hadExtensions = it->second->hasExtensions();
@@ -2556,6 +2659,66 @@ void SessionHost::pollForegroundProcesses(void* host)
     self.armForegroundPoll();
 }
 
+std::optional<GitInfo> SessionHost::gitInfoOf(WorkspaceId workspace) const
+{
+    return _workspaceGit ? _workspaceGit->infoOf(workspace) : std::nullopt;
+}
+
+void SessionHost::refreshWorkspaceGit(WorkspaceId workspace)
+{
+    if (!_workspaceGit)
+        return;
+    auto const* found = _model.workspace(workspace);
+    auto const* tab = found ? found->activeTab() : nullptr;
+    auto const* pane = tab ? tab->activePane() : nullptr;
+    if (pane == nullptr)
+        return;
+    if (auto directory = workingDirectoryOf(pane->session()))
+    {
+        _workspaceGit->refresh(workspace, *std::move(directory));
+        // A workspace whose directory is known is looked up again on the poll from now on, window or not:
+        // workspace.list states it to every client, and another daemon's switcher shows it.
+        armWorkspaceGitPoll();
+    }
+}
+
+void SessionHost::refreshAllWorkspaceGit()
+{
+    for (auto const index: std::views::iota(0, _model.workspaceCount()))
+        refreshWorkspaceGit(_model.workspaceAt(index)->id());
+}
+
+void SessionHost::refreshWorkspaceGitOf(SessionId session)
+{
+    if (!_workspaceGit)
+        return;
+    for (auto const index: std::views::iota(0, _model.workspaceCount()))
+    {
+        auto const* workspace = _model.workspaceAt(index);
+        auto const* tab = workspace->activeTab();
+        auto const* pane = tab ? tab->activePane() : nullptr;
+        if (pane != nullptr && pane->session() == session)
+            refreshWorkspaceGit(workspace->id());
+    }
+}
+
+void SessionHost::armWorkspaceGitPoll()
+{
+    if (!_workspaceGit || pollsWorkspaceGit() || _model.workspaceCount() == 0)
+        return;
+    _workspaceGitPoll.reset();
+    _workspaceGitPoll.emplace(_loop, _loop.clock().now() + WorkspaceGitPollInterval, &pollWorkspaceGit, this);
+}
+
+void SessionHost::pollWorkspaceGit(void* host)
+{
+    auto& self = *static_cast<SessionHost*>(host);
+    // Re-armed from inside its own callback, which DeadlineTimer allows: it is settled before it is called.
+    self._workspaceGitPoll.reset();
+    self.refreshAllWorkspaceGit();
+    self.armWorkspaceGitPoll();
+}
+
 void SessionHost::armAnimationTick(SessionId session)
 {
     auto const hosted = _sessions.find(session.value);
@@ -2654,9 +2817,6 @@ void SessionHost::tabAdded(WorkspaceId workspace, TabId tab, int index)
     // A tab a move made (a pane extracted into a tab of its own) was named by no creation path; every
     // workspace was, a move's own included (MoveWorkspaceHooks).
     bindUnnamed(tab);
-    // A workspace that ended and holds a tab again (a creation naming no workspace lands in the host's own)
-    // is a workspace to select again.
-    _endedWorkspaces.erase(workspace.value);
     // Re-fitted first: the pane may come from a split and be half the size its new tab gives it.
     reprojectTab(tab);
     fanOut(&vtworkspace::ModelEvents::tabAdded, workspace, tab, index);
@@ -2674,6 +2834,16 @@ void SessionHost::tabMoved(WorkspaceId workspace, TabId tab, int fromIndex, int 
     fanOut(&vtworkspace::ModelEvents::tabMoved, workspace, tab, fromIndex, toIndex);
 }
 
+void SessionHost::workspaceMoved(WorkspaceId workspace, int fromIndex, int toIndex)
+{
+    fanOut(&vtworkspace::ModelEvents::workspaceMoved, workspace, fromIndex, toIndex);
+}
+
+void SessionHost::workspaceRemoved(WorkspaceId workspace, int index)
+{
+    fanOut(&vtworkspace::ModelEvents::workspaceRemoved, workspace, index);
+}
+
 void SessionHost::tabAboutToBeMovedToWorkspace(WorkspaceId from, int fromIndex, WorkspaceId to, int toIndex)
 {
     fanOut(&vtworkspace::ModelEvents::tabAboutToBeMovedToWorkspace, from, fromIndex, to, toIndex);
@@ -2683,12 +2853,12 @@ void SessionHost::tabMovedToWorkspace(WorkspaceId from, TabId tab, int fromIndex
 {
     // The tab lands in a workspace of another size: its shells are resized before observers advertise it.
     reprojectTab(tab);
-    _endedWorkspaces.erase(to.value);
     fanOut(&vtworkspace::ModelEvents::tabMovedToWorkspace, from, tab, fromIndex, to, toIndex);
 }
 
 void SessionHost::activeTabChanged(WorkspaceId workspace, TabId tab, int index)
 {
+    refreshWorkspaceGit(workspace);
     fanOut(&vtworkspace::ModelEvents::activeTabChanged, workspace, tab, index);
 }
 
@@ -2704,6 +2874,10 @@ void SessionHost::paneClosed(TabId tab, PaneId closed, PaneId survivor)
 
 void SessionHost::activePaneChanged(TabId tab, PaneId leaf)
 {
+    for (auto const index: std::views::iota(0, _model.workspaceCount()))
+        if (auto const* active = _model.workspaceAt(index)->activeTab();
+            active != nullptr && active->id() == tab)
+            refreshWorkspaceGit(_model.workspaceAt(index)->id());
     fanOut(&vtworkspace::ModelEvents::activePaneChanged, tab, leaf);
 }
 

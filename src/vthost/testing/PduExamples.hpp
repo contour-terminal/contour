@@ -223,7 +223,8 @@ namespace vthost::testing
         { proto::PduType::SwitchReply,
           proto::DecodedPdu { proto::SwitchReply {
               .request = 7, .outcome = proto::SwitchOutcome::Failed, .detail = "no such host" } } },
-        { proto::PduType::SelectWorkspace, proto::DecodedPdu { proto::SelectWorkspace { .workspace = 2 } } },
+        { proto::PduType::SelectWorkspace,
+          proto::DecodedPdu { proto::SelectWorkspace { .workspace = 2, .directoryFromSession = 7 } } },
         { proto::PduType::ReportFocus,
           proto::DecodedPdu { proto::ReportFocus { .focus = proto::WindowFocus::Focused } } },
         { proto::PduType::NotifyRole,
@@ -244,6 +245,21 @@ namespace vthost::testing
         { proto::PduType::AuthChallenge,
           proto::DecodedPdu {
               proto::AuthChallenge { .nonce = {}, .methods = std::to_underlying(proto::AuthMethod::Key) } } },
+        { proto::PduType::WorkspaceMeta,
+          proto::DecodedPdu { proto::WorkspaceMeta {
+              .workspace = 3,
+              .controlId = { 0x5e, 0xc7, 0xe7, 0x00, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, 0x01 },
+              .label = "secret-label",
+              .git = proto::WireGitInfo { .branch = "secret-branch",
+                                          .kind = proto::GitHeadKindWire::Branch,
+                                          .ahead = 1,
+                                          .behind = 2 },
+              .position = 4 } } },
+        { proto::PduType::MoveWorkspace,
+          proto::DecodedPdu { proto::MoveWorkspace { .workspace = 3, .toPosition = 1 } } },
+        { proto::PduType::CloseWorkspace, proto::DecodedPdu { proto::CloseWorkspace { .workspace = 3 } } },
+        { proto::PduType::SetWorkspaceLabel,
+          proto::DecodedPdu { proto::SetWorkspaceLabel { .workspace = 3, .label = "secret-label" } } },
     };
 }
 

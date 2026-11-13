@@ -53,6 +53,20 @@ namespace
                 [done = std::move(done)](auto listed) mutable { done(std::move(listed)); });
         }
 
+        void create(ListTarget target, std::string label, WorkspaceCreated done) override
+        {
+            _jobs.run(
+                [timeout = _timeout, transport = std::move(target.transport), label = std::move(label)] {
+                    auto const answer = vthost::client::runControlCall(
+                        *transport, "workspace.create", cli::encodeCreateWorkspace(label), "", timeout);
+                    if (!answer)
+                        return std::expected<vtcontrol::ObjectRef, std::string> { std::unexpected(
+                            answer.error().message) };
+                    return cli::decodeCreatedWorkspace(*answer);
+                },
+                [done = std::move(done)](auto created) mutable { done(std::move(created)); });
+        }
+
       private:
         std::chrono::milliseconds _timeout;
         /// The listings under way; the ones that ended are joined as the next starts, which the switch

@@ -140,6 +140,12 @@ class SessionModel
     /// Creates a new, empty workspace and returns it.
     [[nodiscard]] Workspace* createWorkspace();
 
+    /// Moves @p workspace to position @p toIndex in the workspace order. @p toIndex is clamped to the order's
+    /// bounds; an unknown workspace, or a move to where it already is, changes nothing and announces nothing.
+    /// @param workspace The workspace to move.
+    /// @param toIndex   Its new 0-based position.
+    void moveWorkspace(WorkspaceId workspace, int toIndex);
+
     /// Removes a workspace and everything in it. Each contained session is reported closed.
     void removeWorkspace(WorkspaceId workspace);
 
@@ -215,7 +221,8 @@ class SessionModel
     // {{{ Moves
 
     /// Moves a pane or a whole tab to a new place: beside another pane, onto another pane (trading
-    /// places), into a workspace's tab strip, or into a workspace of its own. No session is closed; the moved
+    /// places), into another tab as a split (beside its active pane), into a workspace's tab strip, or into a
+    /// workspace of its own. No session is closed; the moved
     /// node keeps its sessions, and the pane keeps its PaneId except when it swaps (only the sessions
     /// trade places then) or becomes a tab of its own.
     ///

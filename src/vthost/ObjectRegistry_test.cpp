@@ -2,6 +2,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 #include <vtcontrol/testing/SequentialUuidSource.hpp>
 #include <vthost/ObjectRegistry.hpp>
@@ -102,4 +107,49 @@ TEST_CASE("ObjectRegistry rebinding replaces", "[vthost][ids]")
     CHECK(registry.uuidOf(SessionId { 1 }) == second);
     CHECK_FALSE(registry.find(ObjectRef { ObjectKind::Pane, first }));
     CHECK(registry.find(ObjectRef { ObjectKind::Pane, second }));
+}
+
+TEST_CASE("ObjectRegistry tells its label observers of each change, until they unsubscribe", "[vthost][ids]")
+{
+    auto registry = makeRegistry();
+    auto const workspace = registry.mint();
+    auto const ref = ObjectRef { ObjectKind::Workspace, workspace };
+    registry.bind(WorkspaceId { 2 }, workspace);
+    auto told = std::vector<std::pair<ObjectRef, std::string>> {};
+    auto subscription = std::optional { registry.onLabelChanged(
+        [&told](ObjectRef const& object, std::string_view label) { told.emplace_back(object, label); }) };
+
+    registry.setLabel(ref, "ops");
+    registry.setLabel(ref, "ops"); // unchanged: nothing to tell
+    registry.setLabel(ObjectRef { ObjectKind::Workspace, registry.mint() }, "unbound"); // ignored
+    registry.setLabel(ref, "");
+    registry.setLabel(ref, ""); // cleared already
+
+    REQUIRE(told.size() == 2);
+    CHECK(told[0] == std::pair { ref, std::string { "ops" } });
+    CHECK(told[1] == std::pair { ref, std::string {} });
+
+    subscription.reset();
+    registry.setLabel(ref, "after");
+    CHECK(told.size() == 2);
+}
+
+TEST_CASE("ObjectRegistry: a label subscription outlives a moved registry, and the registry itself",
+          "[vthost][ids]")
+{
+    auto told = 0;
+    auto original = makeRegistry();
+    auto subscription = original.onLabelChanged([&told](ObjectRef const&, std::string_view) { ++told; });
+    auto moved = std::move(original);
+    auto const tab = moved.mint();
+    moved.bind(TabId { 1 }, tab);
+
+    moved.setLabel(ObjectRef { ObjectKind::Tab, tab }, "logs");
+    CHECK(told == 1);
+
+    {
+        auto const gone = std::move(moved);
+    }
+    // Unsubscribing from a registry that is gone is a no-op.
+    auto const dropped = std::move(subscription);
 }

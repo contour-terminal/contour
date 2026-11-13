@@ -23,10 +23,12 @@
 #include <vtcontrol/ControlError.hpp>
 #include <vtcontrol/Target.hpp>
 #include <vthost/DaemonControl.hpp>
+#include <vthost/ObjectRegistry.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/control/BlockWaiters.hpp>
 #include <vthost/control/EventHub.hpp>
 #include <vtworkspace/ModelEvents.hpp>
+#include <vtworkspace/Move.hpp>
 #include <vtworkspace/Primitives.hpp>
 
 namespace vthost::control
@@ -104,6 +106,12 @@ class ControlService final:
     void handle(vtcontrol::CallContext& context, vtcontrol::CaptureRequest const& request, vtcontrol::Completion<vtcontrol::CaptureReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ClosePaneRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::CloseTabRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::CreateWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::CreateWorkspaceReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::RenameWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::CloseWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::MoveWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::MoveTabRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::MovePaneRequest const& request, vtcontrol::Completion<vtcontrol::MovePaneReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::SwitchWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::SwitchWorkspaceReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::SetLabelRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ReportStatusRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
@@ -198,6 +206,13 @@ class ControlService final:
     [[nodiscard]] std::expected<vtworkspace::TabId, vtcontrol::ControlError> resolveTab(
         vtcontrol::CallContext const& context, std::string_view spec) const;
 
+    /// Where a `pane.move` takes its pane, as the model names it.
+    /// @param context The call.
+    /// @param request The request.
+    /// @return The target, or `NotFound` naming the tab or workspace it asked for.
+    [[nodiscard]] std::expected<vtworkspace::MoveTarget, vtcontrol::ControlError> paneDestination(
+        vtcontrol::CallContext const& context, vtcontrol::MovePaneRequest const& request) const;
+
     /// The workspace a call is about: @p spec, else the caller pane's workspace, else the host's.
     [[nodiscard]] std::expected<vtworkspace::WorkspaceId, vtcontrol::ControlError> resolveWorkspace(
         vtcontrol::CallContext const& context, std::string_view spec) const;
@@ -264,6 +279,11 @@ class ControlService final:
                                                  vtworkspace::Tab const& tab,
                                                  vtcontrol::ControlGrants grants) const;
 
+    /// Publishes `workspace.labelChanged` when @p ref is a workspace; other objects' labels have no event.
+    /// @param ref The object whose label changed.
+    /// @param label Its label now; empty when it was cleared.
+    void labelChanged(vtcontrol::ObjectRef const& ref, std::string_view label);
+
     /// @return The ids of @p session's pane, tab and workspace, as far as they still exist.
     [[nodiscard]] vtcontrol::EventOrigin originOf(vtworkspace::SessionId session) const;
 
@@ -314,6 +334,8 @@ class ControlService final:
     /// Last, so that they end first: no event reaches a service being destroyed.
     ScopedStreamSubscription _streamSubscription;
     ScopedModelSubscription _modelSubscription;
+    /// Publishes `workspace.labelChanged` for each workspace label the registry changes.
+    ObjectRegistry::Subscription _labelSubscription;
     /// Serves the host's extensions while the service lives. Last: it is what reaches the rest.
     ScopedExtensionControl _extensionControl;
 };

@@ -153,11 +153,17 @@ probe() {
 # handover on the screen: the alternate screen keeps no history, and the run is checked for gaps there. At a
 # tick every 200 ms that is over 11 s of them, however slowly a loaded machine upgrades.
 mkdir -p "$XDG_CONFIG_HOME/contour"
+# Started in a repository, which the listing names a branch for: what git a workspace is on is looked up by
+# whichever image serves it, and must be the same on both sides of the upgrade. A HEAD file is repository
+# enough for the branch; it has no upstream, so no git runs for counts.
+mkdir -p "$OUT/repo/.git"
+printf 'ref: refs/heads/upgrade-test\n' > "$OUT/repo/.git/HEAD"
 cat > "$CONFIG" <<YAML
 default_profile: main
 profiles:
   main:
     shell: sh
+    initial_working_directory: $OUT/repo
     terminal_size:
       columns: 91
       lines: 57
@@ -242,7 +248,12 @@ grep -qF 'i=31;OK' "$OUT/probe-before.image" || fail "baseline: image 31 is not 
 [ "$(tr -d ' \n' < "$OUT/probe-before.size")" = "5791" ] \
     || fail "baseline: the pty is '$(cat "$OUT/probe-before.size")', not the profile's 57 91"
 
-contour ls daemon "$SOCKET" json
+# The listing once the workspace's git state is looked up: it is the same one after the upgrade.
+listed_git() {
+    contour ls daemon "$SOCKET" json
+    grep -qF '"git":{"branch":"upgrade-test","kind":"branch"}' "$OUT/last.txt"
+}
+wait_for 200 listed_git || fail "the workspace in $OUT/repo is not listed on branch upgrade-test"
 PANES_BEFORE="$(cat "$OUT/last.txt")"
 contour daemon status --socket "$SOCKET"
 [ "$status" -eq 0 ] || fail "daemon status exited $status"
@@ -291,7 +302,8 @@ awk '/live upgrade to / { announced = 1 } announced && /took over 1 of 1 session
     || fail "the daemon log has no handover taken over after the upgrade was announced"
 kill -0 "$PROGRAM_PID" 2>/dev/null || fail "the hosted program $PROGRAM_PID died in the upgrade"
 [ "$(cat "$OUT/program.pid")" = "$PROGRAM_PID" ] || fail "the program pid file changed"
-contour ls daemon "$SOCKET" json
+# Looked up again by the new image, as it takes the session over: not carried, and not left to the poll.
+wait_for 50 listed_git || fail "the upgraded daemon does not list the workspace's branch within 5s"
 PANES_AFTER="$(cat "$OUT/last.txt")"
 [ "$PANES_BEFORE" = "$PANES_AFTER" ] || fail "the workspaces, tabs and panes differ after the upgrade: $PANES_BEFORE / $PANES_AFTER"
 

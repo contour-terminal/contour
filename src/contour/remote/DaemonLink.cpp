@@ -433,6 +433,7 @@ void DaemonLink::connectController()
                 return;
             raiseElsewhere();
             _sessions.refreshTaskbarAttention();
+            _sessions.notifyWorkspaceDirectoryChanged(*this);
         },
         Qt::QueuedConnection);
     QObject::connect(
@@ -467,7 +468,7 @@ std::optional<std::expected<void, std::string>> DaemonLink::pollAttached(vthost:
     requireGuiThread();
     if (_controller == nullptr)
         return std::unexpected(std::string { "the attach was given up" });
-    auto polled = _controller->pollConnected(budget);
+    auto polled = _controller->pollConnected(std::move(budget));
     if (!polled)
         return std::nullopt;
     if (!*polled)
@@ -677,6 +678,15 @@ std::optional<vtworkspace::WorkspaceId> DaemonLink::windowShowing(uint64_t daemo
     return _shown->local;
 }
 
+std::optional<uint64_t> DaemonLink::activePaneSession() const
+{
+    if (!_shown)
+        return std::nullopt;
+    auto const* const controller = _sessions.controllerDisplaying(_shown->local);
+    auto* const session = controller != nullptr ? controller->activeSession() : nullptr;
+    return session != nullptr ? _controller->sessionForPty(&session->pty()) : std::nullopt;
+}
+
 std::expected<void, std::string> DaemonLink::selectWorkspace(uint64_t workspace, SwitchLanded landed)
 {
     requireGuiThread();
@@ -696,7 +706,8 @@ std::expected<void, std::string> DaemonLink::selectWorkspace(uint64_t workspace,
     // Taken before the request goes out: the controller's reactor sends it at once, and the daemon's answer
     // may settle -- the workspace it made among the layouts -- before this thread reads them.
     auto before = std::ranges::to<std::set>(_controller->settledLayouts() | std::views::keys);
-    auto const sent = _controller->select(workspace);
+    // A new workspace starts where the pane that asked is, as a tab made from it does.
+    auto const sent = _controller->select(workspace, workspace == 0 ? activePaneSession() : std::nullopt);
     if (!sent)
         return std::unexpected(sent.error());
     // Only the latest switch of the window lands.
@@ -822,6 +833,29 @@ void DaemonLink::reportFocus(vthost::proto::WindowFocus focus)
 vthost::proto::RaiseRole DaemonLink::raiseRole() const noexcept
 {
     return _controller != nullptr ? _controller->raiseRole() : vthost::proto::RaiseRole::Raise;
+}
+
+window::WorkspaceDirectory DaemonLink::directory() const
+{
+    return _controller != nullptr ? _controller->directory() : window::WorkspaceDirectory {};
+}
+
+window::SelectResult DaemonLink::select(uint64_t workspace)
+{
+    auto const local = _shown ? std::optional { _shown->local } : std::nullopt;
+    auto const selected =
+        selectWorkspace(workspace, [this, local](std::expected<uint64_t, std::string> const& outcome) {
+            if (outcome || !local)
+                return;
+            if (auto* const controller = _sessions.controllerOwning(*local))
+                controller->cancelPendingJump();
+        });
+    if (!selected)
+    {
+        errorLog()("Cannot show workspace {}: {}", workspace, selected.error());
+        return window::SelectResult::Refused;
+    }
+    return window::SelectResult::Requested;
 }
 
 unsigned DaemonLink::tabsWaitingElsewhere() const
@@ -1000,6 +1034,9 @@ void DaemonLink::applyShownLayout()
                 _sessions.model().activateTab(local, *tab);
     }
     _sessions.deliverRestoreSummaryTo(local);
+    // A jump that selected this workspace shows its pane now that the layout is here.
+    if (auto* const controller = _sessions.controllerDisplaying(local))
+        controller->completePendingJump();
 }
 
 void DaemonLink::openWindowForMovedPanes()

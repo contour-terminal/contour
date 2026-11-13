@@ -98,10 +98,11 @@ struct MenuBarState
     std::vector<std::string> tabTitles {}; ///< One per tab, in order.
     config::TabBarVisibility tabBarVisibility = config::TabBarVisibility::Always; ///< Mode in force.
     config::TabBarPosition tabBarPosition = config::TabBarPosition::Top;          ///< Placement in force.
-    std::string activeProfile {};                             ///< The active pane's profile.
-    std::vector<std::string> profileNames {};                 ///< Configured profiles, sorted.
-    std::vector<std::string> hostNames {};                    ///< Saved hosts, sorted.
-    std::vector<std::string> layoutNames {};                  ///< Saved layouts, sorted.
+    config::SidebarVisibility sidebar = config::SidebarVisibility::Hidden; ///< Whether the sidebar shows.
+    std::string activeProfile {};                                          ///< The active pane's profile.
+    std::vector<std::string> profileNames {};                              ///< Configured profiles, sorted.
+    std::vector<std::string> hostNames {};                                 ///< Saved hosts, sorted.
+    std::vector<std::string> layoutNames {};                               ///< Saved layouts, sorted.
     DaemonSwitching switching = DaemonSwitching::Unavailable; ///< Whether the window has a daemon to switch.
     /// The palette's "Switch to daemon" commands for this window (the SwitchToDaemon ones of
     /// DaemonCommandSource): every other local daemon and saved host. One source, so the menu and the palette
@@ -142,6 +143,43 @@ inline constexpr std::array MenuReachabilityExemptions {
                                 .reason = "moves keyboard focus into the window's chrome" },
     MenuReachabilityExemption { .action = "FocusToolbar",
                                 .reason = "moves keyboard focus into the window's chrome" },
+    MenuReachabilityExemption { .action = "FocusSidebar",
+                                .reason = "moves keyboard focus into the window's chrome" },
+    MenuReachabilityExemption {
+        .action = "FilterWorkspaces",
+        .reason = "reached from the palette, key bindings and the sidebar's filter button" },
+    MenuReachabilityExemption {
+        .action = "JumpToNextAttention",
+        .reason = "reached from the palette and key bindings; it needs the attention ledger" },
+    MenuReachabilityExemption { .action = "MarkSeen",
+                                .reason =
+                                    "reached from the palette, key bindings and the sidebar's row menus" },
+    MenuReachabilityExemption {
+        .action = "RenameWorkspace",
+        .reason = "reached from the palette, key bindings and the sidebar's workspace menu" },
+    MenuReachabilityExemption {
+        .action = "MoveWorkspaceUp",
+        .reason = "reached from the palette, key bindings and the sidebar's workspace menu" },
+    MenuReachabilityExemption {
+        .action = "MoveWorkspaceDown",
+        .reason = "reached from the palette, key bindings and the sidebar's workspace menu" },
+    MenuReachabilityExemption { .action = "CloseWorkspace",
+                                .reason =
+                                    "reached from the sidebar's workspace menu, which asks before closing" },
+    MenuReachabilityExemption { .action = "GoToPane",
+                                .reason = "a row of the sidebar's pane menu, which knows which pane" },
+    MenuReachabilityExemption {
+        .action = "MoveTabToWorkspace",
+        .reason = "the rows of the sidebar's \"Move to Workspace\" submenu, one per workspace" },
+    MenuReachabilityExemption {
+        .action = "MoveToTab",
+        .reason = "the rows of the sidebar's Move to Tab and Merge into Tab submenus, one per tab" },
+    MenuReachabilityExemption { .action = "MoveToNewTab",
+                                .reason =
+                                    "reached from the palette, key bindings and the sidebar's pane menu" },
+    MenuReachabilityExemption {
+        .action = "MoveToNewWorkspace",
+        .reason = "reached from the palette, key bindings and the sidebar's pane and tab menus" },
     MenuReachabilityExemption { .action = "ClearCommandBlockFocus",
                                 .reason = "it is the Escape of a focused block, which a row would need the "
                                           "focus to run" },

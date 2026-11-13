@@ -1646,6 +1646,7 @@ namespace
         GlobalFieldGroupRow { .key = "ui_font_size", .group = SettingsGroup::AppearanceChrome },
         GlobalFieldGroupRow { .key = "tab_bar_position", .group = SettingsGroup::AppearanceTabBar },
         GlobalFieldGroupRow { .key = "tab_bar_visibility", .group = SettingsGroup::AppearanceTabBar },
+        GlobalFieldGroupRow { .key = "tab_placement", .group = SettingsGroup::AppearanceTabBar },
         GlobalFieldGroupRow { .key = "gutter.", .group = SettingsGroup::ShellGutter },
         GlobalFieldGroupRow { .key = "command_blocks.", .group = SettingsGroup::ShellCommandBlocks },
         GlobalFieldGroupRow { .key = "folding.", .group = SettingsGroup::ShellFolding },
@@ -1759,6 +1760,11 @@ std::vector<GlobalFieldDescriptor> const& globalFieldDescriptors()
                 "Tab bar visibility",
                 "When the tab strip is shown: always, never, or only once a window has more than one tab.",
                 [](config::Config const& c) { return c.tabBarVisibility.value(); }),
+            globalEnumFieldFromTable<config::TabPlacement>(
+                "tab_placement",
+                "Tab placement",
+                "Whether the tabs sit in the tab strip, or under their workspace in the workspace sidebar.",
+                [](config::Config const& c) { return c.tabPlacement.value(); }),
             // Reads its options and its accepted set from contour/UiStyle.h, like the tab bar rows
             // above. The restart note is part of the help text rather than a separate affordance
             // because the limitation is Qt's: the Quick Controls style is chosen once, before the

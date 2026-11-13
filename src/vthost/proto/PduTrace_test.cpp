@@ -168,6 +168,9 @@ TEST_CASE("the PDU trace never reveals payload contents", "[vthost][proto]")
         // The daemon's machine id and host name: they say which machine a session runs on.
         CHECK_FALSE(text.contains("secret-machine-id"));
         CHECK_FALSE(text.contains("secret-host"));
+        // A workspace's label and the branch its repository is on: the user's words.
+        CHECK_FALSE(text.contains("secret-label"));
+        CHECK_FALSE(text.contains("secret-branch"));
     }
 
     // The token's PRESENCE is still reported — that is what makes an auth failure diagnosable, and
@@ -367,6 +370,18 @@ TEST_CASE("the trace names the new PDUs without revealing a title", "[vthost][pr
         ClientHello { .keyProof = KeyProof { .publicKey = { std::byte { 9 } }, .signature = "SECRET" } } });
     CHECK(proven.contains("key-proof=yes"));
     CHECK_FALSE(proven.contains("SECRET"));
+    CHECK(toString(PduType::WorkspaceMeta) == "WorkspaceMeta");
+    CHECK(summarize(DecodedPdu { WorkspaceMeta { .workspace = 2 } }) == "workspace=2");
+    // The label and the branch are told by presence only: both are the user's words.
+    CHECK(summarize(DecodedPdu { WorkspaceMeta { .workspace = 2,
+                                                 .label = "secret",
+                                                 .git = WireGitInfo { .branch = "secret",
+                                                                      .kind = GitHeadKindWire::Branch,
+                                                                      .ahead = 1,
+                                                                      .behind = 0 } } })
+          == "workspace=2 label=yes git=branch,ahead:1,behind:0");
+    CHECK(summarize(DecodedPdu { WorkspaceMeta { .workspace = 2, .git = WireGitInfo {} } })
+          == "workspace=2 git=none");
     CHECK(summarize(DecodedPdu { CreateTab { .session = 3, .profileName = "ssh" } })
           == "session=3 profile=\"ssh\"");
 }

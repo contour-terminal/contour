@@ -5626,3 +5626,114 @@ TEST_CASE("requestSwitch fails when the window stays silent", "[vthost][host][sw
     CHECK(outcomes.front().detail == "no answer from the window");
     host.noteClientDetached(&window);
 }
+
+namespace
+{
+/// A folder tree on this machine's disk: a repository `repo` with a `src` in it, and a plain `plain`.
+struct NamedFolders
+{
+    NamedFolders()
+    {
+        std::filesystem::create_directories(root / "repo" / ".git");
+        std::filesystem::create_directories(root / "repo" / "src");
+        std::filesystem::create_directories(root / "plain");
+        std::ofstream { root / "repo" / ".git" / "HEAD" } << "ref: refs/heads/main\n";
+    }
+
+    NamedFolders(NamedFolders const&) = delete;
+    NamedFolders(NamedFolders&&) = delete;
+    NamedFolders& operator=(NamedFolders const&) = delete;
+    NamedFolders& operator=(NamedFolders&&) = delete;
+
+    ~NamedFolders()
+    {
+        auto ignored = std::error_code {};
+        std::filesystem::remove_all(root, ignored);
+    }
+
+    std::filesystem::path root =
+        std::filesystem::temp_directory_path() / std::format("contour-workspace-name-{}", ::getpid());
+};
+
+/// @return The label of the workspace @p workspace of @p host.
+std::string labelOfWorkspace(SessionHost const& host, vtworkspace::WorkspaceId workspace)
+{
+    auto const uuid = host.objects().uuidOf(workspace);
+    REQUIRE(uuid.has_value());
+    return std::string { host.objects().labelOf(
+        vtcontrol::ObjectRef { vtcontrol::ObjectKind::Workspace, *uuid }) };
+}
+
+/// @return A request whose first shell starts in @p directory.
+vthost::SessionSpawnRequest startingIn(std::filesystem::path directory)
+{
+    auto request = vthost::SessionSpawnRequest {};
+    request.commandOverride.emplace();
+    request.commandOverride->workingDirectory = std::move(directory);
+    return request;
+}
+} // namespace
+
+TEST_CASE("a created workspace gets its default label once and keeps it after a cd",
+          "[vthost][host][workspace-name]")
+{
+    auto const folders = NamedFolders {};
+    auto h = HostHarness {};
+    auto const* const workspace = h.host.createWorkspace(startingIn(folders.root / "repo" / "src"));
+    REQUIRE(workspace != nullptr);
+    CHECK(labelOfWorkspace(h.host, workspace->id()) == "repo");
+
+    // The shell moves on: the name was written once, at creation.
+    auto* const terminal = h.host.terminal(workspace->activeTab()->activePane()->session());
+    REQUIRE(terminal != nullptr);
+    terminal->writeToScreen(
+        std::format("\033]7;{}\033\\", vtbackend::test::fileUrlOf(folders.root / "plain")));
+    CHECK(labelOfWorkspace(h.host, workspace->id()) == "repo");
+
+    auto const* const plain = h.host.createWorkspace(startingIn(folders.root / "plain"));
+    REQUIRE(plain != nullptr);
+    CHECK(labelOfWorkspace(h.host, plain->id()) == "plain");
+}
+
+TEST_CASE("a preset label wins over the default", "[vthost][host][workspace-name]")
+{
+    auto const folders = NamedFolders {};
+    auto h = HostHarness {};
+    auto request = startingIn(folders.root / "repo");
+    request.presetIds = vthost::PresetObjectIds { .workspaceLabel = "restored" };
+    auto const* const workspace = h.host.createWorkspace(request);
+    REQUIRE(workspace != nullptr);
+    CHECK(labelOfWorkspace(h.host, workspace->id()) == "restored");
+}
+
+TEST_CASE("a workspace made from a session starts in that session's cwd", "[vthost][host][workspace-name]")
+{
+    auto const folders = NamedFolders {};
+    auto h = HostHarness {};
+    auto const* const first = h.host.createWorkspace(startingIn(folders.root / "plain"));
+    REQUIRE(first != nullptr);
+    auto const from = first->activeTab()->activePane()->session();
+    auto* const terminal = h.host.terminal(from);
+    REQUIRE(terminal != nullptr);
+    terminal->writeToScreen(
+        std::format("\033]7;{}\033\\", vtbackend::test::fileUrlOf(folders.root / "repo" / "src")));
+
+    auto request = vthost::SessionSpawnRequest {};
+    request.directoryFrom = from;
+    auto const* const created = h.host.createWorkspace(request);
+
+    REQUIRE(created != nullptr);
+    CHECK(h.seen.back().workingDirectory == folders.root / "repo" / "src");
+    CHECK(labelOfWorkspace(h.host, created->id()) == "repo");
+}
+
+TEST_CASE("a start directory that is no directory here names no workspace", "[vthost][host][workspace-name]")
+{
+    auto const folders = NamedFolders {};
+    auto h = HostHarness {};
+    // As a foreign path from another machine's hello: settled away, so it names nothing either.
+    auto const* const workspace = h.host.createWorkspace(startingIn(folders.root / "not" / "here" / "repo"));
+    REQUIRE(workspace != nullptr);
+    CHECK(h.seen.back().workingDirectory.empty());
+    CHECK(labelOfWorkspace(h.host, workspace->id()).empty());
+}

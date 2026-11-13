@@ -64,6 +64,12 @@ Each verb needs one of them, and some requests a second:
 | `workspace-list`     | `read`     |                                  |
 | `tab-create`         | `write`    | `input`, for running a command   |
 | `pane-split`         | `write`    | `input`, for running a command   |
+| `workspace-create`   | `write`    |                                  |
+| `workspace-rename`   | `write`    |                                  |
+| `workspace-close`    | `write`    |                                  |
+| `workspace-move`     | `write`    |                                  |
+| `tab-move`           | `write`    |                                  |
+| `pane-move`          | `write`    |                                  |
 | `pane-send`          | `input`    |                                  |
 | `pane-capture`       | `screen`   |                                  |
 | `pane-close`         | `write`    |                                  |

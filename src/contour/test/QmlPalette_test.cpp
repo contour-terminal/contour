@@ -575,6 +575,125 @@ TEST_CASE("The palette is 640 wide, 18 % down, with 32-tall rows (offscreen)", "
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("the palette's selected row wears the platform's selection (offscreen)",
+          "[contour][gui][qml][palette]")
+{
+    // One rule for every list (ui-ux rule 1.4, the owner's ruling): the palette's list always has the
+    // keyboard, so its selection is what the sidebar's focused list wears -- the accent on macOS, a neutral
+    // fill on Linux, a grey fill with the accent pill on Fluent, inverse video on the Terminal. The keyboard
+    // is in the search field, not on a row, so no row draws the focus ring on any of them (ui-ux rule 6.1).
+    using contour::config::ChromeStyle;
+    for (auto const row:
+         { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+    {
+        INFO("row: " << contour::config::chromeStyleName(row));
+        contour::test::QmlMessageCapture const warnings;
+        QQmlEngine engine;
+        MockPaletteController controller;
+        auto setup = contour::test::defaultChromeSetup();
+        setup.row = row;
+        auto const host = openPalette(engine, controller, setup, QSize { 1280, 800 });
+        REQUIRE(host.palette != nullptr);
+        auto const* colors = providerOf(engine).colors();
+        REQUIRE(colors != nullptr);
+
+        auto* list = palettePart(host, QStringLiteral("commandPaletteList"));
+        REQUIRE(list != nullptr);
+        REQUIRE(list->property("currentIndex").toInt() == 0);
+        auto* current = paletteRowAt(list, 0);
+        REQUIRE(current != nullptr);
+        auto* fill = current->findChild<QQuickItem*>(QStringLiteral("commandPaletteSelection"));
+        REQUIRE(fill != nullptr);
+        CHECK(fill->isVisible());
+        auto const emphasized = row == ChromeStyle::MacOS || row == ChromeStyle::Terminal;
+        CHECK(fill->property("color").value<QColor>()
+              == colors->property(emphasized ? "sidebarSelectionFill" : "sidebarSelectionFillInactive")
+                     .value<QColor>());
+        auto* pill = current->findChild<QQuickItem*>(QStringLiteral("commandPaletteAccentPill"));
+        REQUIRE(pill != nullptr);
+        CHECK(pill->isVisible() == (row == ChromeStyle::Fluent));
+        auto* ring = current->findChild<QQuickItem*>(QStringLiteral("focusRing"));
+        REQUIRE(ring != nullptr);
+        CHECK_FALSE(ring->isVisible());
+        auto* title = current->findChild<QQuickItem*>(QStringLiteral("commandPaletteTitle"));
+        REQUIRE(title != nullptr);
+        // Compared as RGBA: the ink reaches the label through a colour binding, which may change its spec.
+        CHECK(title->property("color").value<QColor>().rgba()
+              == colors->property(emphasized ? "sidebarSelectionInk" : "sidebarSelectionInkInactive")
+                     .value<QColor>()
+                     .rgba());
+
+        // Any other row wears none of it.
+        auto* other = paletteRowAt(list, 1);
+        REQUIRE(other != nullptr);
+        auto* otherFill = other->findChild<QQuickItem*>(QStringLiteral("commandPaletteSelection"));
+        REQUIRE(otherFill != nullptr);
+        CHECK_FALSE(otherFill->isVisible());
+        auto* otherRing = other->findChild<QQuickItem*>(QStringLiteral("focusRing"));
+        REQUIRE(otherRing != nullptr);
+        CHECK_FALSE(otherRing->isVisible());
+
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("a picker given an anchor hangs below it, kept inside the window (offscreen)",
+          "[contour][gui][qml][palette]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+    auto const windowSize = QSize { 1280, 800 };
+    auto const host = openPalette(engine, controller, contour::test::defaultChromeSetup(), windowSize);
+    REQUIRE(host.palette != nullptr);
+    auto const& style = providerOf(engine);
+    auto const position = [&] {
+        QCoreApplication::processEvents();
+        return QPointF { host.palette->property("x").toReal(), host.palette->property("y").toReal() };
+    };
+    auto const expectedBelow = [&](QRectF anchor) {
+        auto const placed = style.popupBelow(anchor,
+                                             host.palette->property("width").toReal(),
+                                             host.palette->property("height").toReal(),
+                                             windowSize.width(),
+                                             windowSize.height());
+        return QPointF { placed.value(QStringLiteral("x")).toReal(),
+                         placed.value(QStringLiteral("y")).toReal() };
+    };
+    auto const centred = position();
+    auto const centredPlacement = style.palettePlacement(windowSize.width(), windowSize.height());
+    CHECK(centred.x() == centredPlacement.value(QStringLiteral("x")).toReal());
+
+    SECTION("under the control, its leading edge on the control's")
+    {
+        auto const anchor = QRectF { 100, 10, 80, 24 };
+        host.palette->setProperty("anchorRect", anchor);
+        auto const hanging = position();
+        CHECK(hanging == expectedBelow(anchor));
+        CHECK(hanging.x() == anchor.x());
+        CHECK(hanging.y() > anchor.bottom());
+    }
+
+    SECTION("pushed in from the right edge")
+    {
+        auto const anchor = QRectF { 1200, 10, 60, 24 };
+        host.palette->setProperty("anchorRect", anchor);
+        auto const hanging = position();
+        CHECK(hanging == expectedBelow(anchor));
+        CHECK(hanging.x() + host.palette->property("width").toReal() <= windowSize.width());
+    }
+
+    SECTION("without an anchor again, centred")
+    {
+        host.palette->setProperty("anchorRect", QRectF { 100, 10, 80, 24 });
+        std::ignore = position();
+        host.palette->setProperty("anchorRect", QVariant {});
+        CHECK(position() == centred);
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("Rows are grouped, and only the first row of a group draws a header (offscreen)",
           "[contour][gui][qml][palette]")
 {
@@ -813,6 +932,16 @@ TEST_CASE("Backspace in an empty field leaves the level (offscreen)", "[contour]
     {
         pressPaletteKey(window, Qt::Key_Backspace);
         CHECK(controller.model().depth() == controller.model().topDepth());
+        CHECK(host.palette->property("opened").toBool());
+    }
+
+    SECTION("empty, a Backspace with a modifier stays in the level")
+    {
+        for (auto const modifier: { Qt::ControlModifier, Qt::ShiftModifier, Qt::AltModifier })
+        {
+            pressPaletteKey(window, Qt::Key_Backspace, modifier);
+            CHECK(controller.model().depth() == static_cast<int>(contour::command::PaletteDepth::Level));
+        }
         CHECK(host.palette->property("opened").toBool());
     }
 
@@ -1762,6 +1891,53 @@ TEST_CASE("ActionContextMenu shows a header row as a disabled label", "[contour]
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("ActionContextMenu draws a row's chord in its trailing column", "[contour][gui][qml]")
+{
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto const row = [](char const* title, QString const& shortcut) {
+        return QVariantMap { { QStringLiteral("kind"), QStringLiteral("command") },
+                             { QStringLiteral("title"), QString::fromLatin1(title) },
+                             { QStringLiteral("enabled"), true },
+                             { QStringLiteral("checkable"), false },
+                             { QStringLiteral("checked"), false },
+                             { QStringLiteral("actionId"), 0 },
+                             { QStringLiteral("shortcut"), shortcut } };
+    };
+    auto const model =
+        QVariantList { row("Switch to docs", QStringLiteral("↩")), row("Rename…", QString {}) };
+
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/ActionContextMenu.qml")));
+    INFO("component errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    std::unique_ptr<QObject> menu(component.createWithInitialProperties({ { "entries", model } }));
+    REQUIRE(menu != nullptr);
+    REQUIRE(menu->property("count").toInt() == model.size());
+
+    auto const itemAt = [&](int index) {
+        QQuickItem* item = nullptr;
+        REQUIRE(QMetaObject::invokeMethod(
+            menu.get(), "itemAt", Q_RETURN_ARG(QQuickItem*, item), Q_ARG(int, index)));
+        REQUIRE(item != nullptr);
+        return item;
+    };
+    auto* const withChord = itemAt(0);
+    auto* const without = itemAt(1);
+    auto const* chord = withChord->findChild<QQuickItem*>(QStringLiteral("menuItemShortcut"));
+    REQUIRE(chord != nullptr);
+    CHECK(chord->property("text").toString() == QStringLiteral("↩"));
+    // The label makes room for it: the row is wider than the same row without a chord would be.
+    CHECK(withChord->property("rightPadding").toReal() > without->property("rightPadding").toReal());
+    auto const* none = without->findChild<QQuickItem*>(QStringLiteral("menuItemShortcut"));
+    REQUIRE(none != nullptr);
+    CHECK(none->property("text").toString().isEmpty());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("SessionChrome puts the block's ⋯ button in its strip, and the tooltip is gone",
           "[contour][gui][qml][blocks]")
 {
@@ -2055,12 +2231,12 @@ TEST_CASE("A resize-border press over the title bar does not start a window move
     auto* window = qobject_cast<QQuickWindow*>(host.get());
     REQUIRE(window != nullptr);
 
-    auto* moveHandler = host->findChild<QObject*>(QStringLiteral("titleBarDragHandler"));
-    REQUIRE(moveHandler != nullptr);
     // Read the region's real geometry rather than guessing an x: it starts after however wide the tab strip
     // and the new-tab button happen to be, and ends before the window controls.
     auto* dragRegion = host->findChild<QQuickItem*>(QStringLiteral("dragRegion"));
     REQUIRE(dragRegion != nullptr);
+    auto* moveHandler = dragRegion->findChild<QObject*>(QStringLiteral("titleBarGesturesDrag"));
+    REQUIRE(moveHandler != nullptr);
     REQUIRE(dragRegion->width() > 0);
     auto const regionCentreX =
         static_cast<int>(dragRegion->mapToScene(QPointF(0, 0)).x() + (dragRegion->width() / 2));

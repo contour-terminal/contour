@@ -110,6 +110,7 @@ nav:
   - Features:
     - List of features: features.md
     - Persistent sessions: persistent-sessions.md
+    - Workspace sidebar: sidebar.md
     - Remote hosts: remote-hosts.md
     - Control API: control-api.md
     - Font ligatures: demo/font-ligatures.md
@@ -154,6 +155,7 @@ nav:
     - internals/native-chrome.md
     - internals/vthost.md
     - internals/session-oom-isolation.md
+    - internals/sanitizers.md
     - internals/text-stack.md
     - internals/vt-conformance.md
     - internals/macos-code-signing.md

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <optional>
 
@@ -105,6 +106,41 @@ TEST_CASE("a request that runs a command needs input beside write", "[vtcontrol]
     CHECK(api.lastSplit);
 }
 
+TEST_CASE("the workspace and tab mutations need the write grant", "[vtcontrol][dispatch]")
+{
+    struct Call
+    {
+        std::string_view method;
+        std::string_view params;
+    };
+    auto const verb = GENERATE(Call { "workspace.create", R"({"cwd":"/tmp","label":"x"})" },
+                               Call { "workspace.rename", R"({"workspace":"1","label":"x"})" },
+                               Call { "workspace.close", R"({"workspace":"1"})" },
+                               Call { "workspace.move", R"({"workspace":"1","toPosition":2})" },
+                               Call { "tab.move", R"({"tab":"1","toWorkspace":"2","toPosition":1})" },
+                               Call { "pane.move", R"({"pane":"1","to":"tab","toTab":"2"})" });
+    auto api = vtcontrol::testing::FakeControlApi {};
+    api.context.granted = vtcontrol::ControlGrants::of(
+        { vtcontrol::Permission::Read, vtcontrol::Permission::Screen, vtcontrol::Permission::Input });
+    auto const refused = call(api, api.context, vtcontrol::Caller::Socket, verb.method, verb.params);
+    REQUIRE(refused);
+    REQUIRE_FALSE(*refused);
+    CHECK(refused->error().code == vtcontrol::ControlErrorCode::Forbidden);
+    CHECK_FALSE(api.lastCreateWorkspace);
+    CHECK_FALSE(api.lastRenameWorkspace);
+    CHECK_FALSE(api.lastMoveWorkspace);
+    CHECK_FALSE(api.lastCloseWorkspace);
+    CHECK_FALSE(api.lastMoveTab);
+    CHECK_FALSE(api.lastMovePane);
+
+    api.context.granted = api.context.granted.with(vtcontrol::Permission::Write);
+    auto const served = call(api, api.context, vtcontrol::Caller::Socket, verb.method, verb.params);
+    REQUIRE(served);
+    CHECK(*served);
+    CHECK((api.lastCreateWorkspace || api.lastRenameWorkspace || api.lastMoveWorkspace || api.lastMoveTab
+           || api.lastCloseWorkspace || api.lastMovePane));
+}
+
 TEST_CASE("a handler's failure reaches the caller as the same error", "[vtcontrol][dispatch]")
 {
     auto api = vtcontrol::testing::FakeControlApi {};
@@ -157,4 +193,50 @@ TEST_CASE("api.list and api.describe are answered from the catalog by default", 
         call(api, api.context, vtcontrol::Caller::Socket, "api.describe", R"({"name":"nope"})");
     REQUIRE(missing);
     CHECK(missing->error().code == vtcontrol::ControlErrorCode::MethodNotFound);
+}
+
+TEST_CASE("a move that names no position decodes to the refused 0, not to the front", "[vtcontrol][dispatch]")
+{
+    auto api = vtcontrol::testing::FakeControlApi {};
+    auto const workspace =
+        call(api, api.context, vtcontrol::Caller::Socket, "workspace.move", R"({"workspace":"1"})");
+    REQUIRE(workspace);
+    REQUIRE(*workspace);
+    REQUIRE(api.lastMoveWorkspace);
+    CHECK(api.lastMoveWorkspace->toPosition == 0);
+    auto const tab =
+        call(api, api.context, vtcontrol::Caller::Socket, "tab.move", R"({"tab":"1","toWorkspace":"2"})");
+    REQUIRE(tab);
+    REQUIRE(*tab);
+    REQUIRE(api.lastMoveTab);
+    CHECK(api.lastMoveTab->toPosition == 0);
+}
+
+TEST_CASE("pane.move reads its destination by name and refuses one it does not know", "[vtcontrol][dispatch]")
+{
+    struct Case
+    {
+        std::string_view params;
+        vtcontrol::PaneDestination to;
+    };
+    auto const row =
+        GENERATE(Case { R"({"pane":"1","to":"tab","toTab":"2"})", vtcontrol::PaneDestination::Tab },
+                 Case { R"({"pane":"1","to":"workspace","toWorkspace":"2","toPosition":3})",
+                        vtcontrol::PaneDestination::Workspace },
+                 Case { R"({"pane":"1","to":"newWorkspace"})", vtcontrol::PaneDestination::NewWorkspace });
+    auto api = vtcontrol::testing::FakeControlApi {};
+    auto const served = call(api, api.context, vtcontrol::Caller::Socket, "pane.move", row.params);
+    REQUIRE(served);
+    REQUIRE(*served);
+    REQUIRE(api.lastMovePane);
+    CHECK(api.lastMovePane->pane == "1");
+    CHECK(api.lastMovePane->to == row.to);
+
+    auto other = vtcontrol::testing::FakeControlApi {};
+    auto const refused =
+        call(other, other.context, vtcontrol::Caller::Socket, "pane.move", R"({"pane":"1","to":"window"})");
+    REQUIRE(refused);
+    REQUIRE_FALSE(*refused);
+    CHECK(refused->error().code == vtcontrol::ControlErrorCode::BadRequest);
+    CHECK_FALSE(other.lastMovePane);
 }

@@ -290,3 +290,20 @@ TEST_CASE("the tab bar submenu is buildTabBarMenu", "[contour][titlebar][menu]")
         CHECK(actual.check == wanted.check);
     }
 }
+
+TEST_CASE("titleBarContextMenu: the sidebar can be hidden and shown from the title bar",
+          "[contour][titlebar][menu]")
+{
+    auto state = populatedState();
+    state.sidebar = contour::config::SidebarVisibility::Hidden;
+    auto const hidden = buildTitleBarContextMenu(state);
+    auto const* show = find(hidden, "Show Sidebar");
+    REQUIRE(show != nullptr);
+    CHECK(std::holds_alternative<actions::ToggleSidebar>(show->action));
+    CHECK(find(hidden, "Hide Sidebar") == nullptr);
+
+    state.sidebar = contour::config::SidebarVisibility::Shown;
+    auto const shown = buildTitleBarContextMenu(state);
+    CHECK(find(shown, "Show Sidebar") == nullptr);
+    CHECK(find(shown, "Hide Sidebar") != nullptr);
+}

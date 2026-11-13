@@ -9,6 +9,7 @@
 #include <core/Random.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/async/WhenAll.hpp>
+#include <core/async/testing/ManualExecutor.hpp>
 #include <core/log/LogSink.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
@@ -65,6 +66,7 @@
 #include <vthost/SessionHost.hpp>
 #include <vthost/TabMerge.hpp>
 #include <vthost/TappingPty.hpp>
+#include <vthost/WorkspaceGit.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/control/ControlService.hpp>
 #include <vthost/proto/PduTrace.hpp>
@@ -353,6 +355,8 @@ struct HarnessOptions
     /// The endpoint the connection was accepted on, as its ConnectionId says ("native-tcp" for a network
     /// one).
     std::string endpoint = "test";
+    /// Where the host looks up its workspaces' git state; none tracks none.
+    std::optional<vthost::WorkspaceGitServices> workspaceGit = std::nullopt;
 };
 
 /// @param options What the harness is built with.
@@ -420,6 +424,7 @@ struct NativeHarness
                                                    .startupLayout = options.startupLayout,
                                                    .identity = options.identity,
                                                    .fileSystem = files,
+                                                   .workspaceGit = options.workspaceGit,
                                                    .inputWatermarks = options.inputWatermarks,
                                                    .extensions = options.extensions,
                                                    .profiles = options.profiles,
@@ -4939,9 +4944,11 @@ struct FlushClient
 /// through run(), whose waits are on the frozen clock — so each flush deadline is an exact instant.
 struct FlushHarness
 {
+    /// Where the host looks up its workspaces' git state; none tracks none.
+    std::optional<vthost::WorkspaceGitServices> workspaceGit = std::nullopt;
     core::platform::ManualClock clock { core::platform::SteadyTimePoint {} + 10s };
-    NativeHarness h { HarnessOptions { .clock = &clock } };
-    std::deque<FlushClient> clients;
+    NativeHarness h { HarnessOptions { .clock = &clock, .workspaceGit = workspaceGit } };
+    std::deque<FlushClient> clients {};
     /// Last: every client is let go, and its reader run out, before anything it reaches is destroyed.
     core::Finally settle { [this] {
         for (auto& client: clients)
@@ -5666,6 +5673,28 @@ TEST_CASE("a CreateTab's profile overrides the connection's", "[vthost][native][
             return layout != nullptr && layout->tabs.size() == 3;
         });
     CHECK(profilesOf(h.host) == std::vector<std::string> { "build", "ops", "build" });
+}
+
+TEST_CASE("an attach after the only workspace's last tab ended lands in that workspace, kept empty",
+          "[vthost][native][workspace-meta]")
+{
+    auto h = NativeHarness {};
+    auto const only = h.host.workspaceId();
+    REQUIRE(h.host.createTab() != nullptr);
+    h.host.closeSession(h.host.model().workspace(only)->tabAt(0)->rootPane()->session());
+    // Kept, not replaced: no second empty workspace is made.
+    REQUIRE(h.host.model().workspaceCount() == 1);
+    REQUIRE(h.host.workspaceId() == only);
+    REQUIRE(h.host.model().workspace(only)->tabCount() == 0);
+
+    std::ignore = h.exchangeUntil({ proto::ClientHello {}, proto::CreateTab { .session = 0 } },
+                                  [workspace = only.value](auto const& got) {
+                                      auto const* layout = lastLayoutOf(got, workspace);
+                                      return layout != nullptr && layout->tabs.size() == 2;
+                                  });
+    // The attach gave the empty workspace its first tab; the CreateTab, naming no session, the second.
+    CHECK(h.host.model().workspaceCount() == 1);
+    CHECK(h.host.model().workspace(only)->tabCount() == 2);
 }
 
 TEST_CASE("a client without ProfileByName keeps the session-settings path", "[vthost][native][profiles]")
@@ -8007,7 +8036,7 @@ TEST_CASE("SelectWorkspace naming no workspace keeps the selection, and one from
     {
         auto const ended = h.host.createWorkspace()->id();
         h.host.closeSession(h.host.model().workspace(ended)->tabAt(0)->rootPane()->session());
-        REQUIRE(h.host.model().workspace(ended) != nullptr); // kept, emptied
+        REQUIRE(h.host.model().workspace(ended) == nullptr); // removed with its last session
         auto const select = encodeRequest({ proto::SelectWorkspace { .workspace = ended.value } });
         auto const answered = [](std::vector<proto::DecodedFrame> const& got) {
             return std::ranges::any_of(got, [](proto::DecodedFrame const& frame) {
@@ -8110,42 +8139,28 @@ TEST_CASE("a connection whose only workspace ends selects none and creates none"
     CHECK(h.session->selectedWorkspace() == 0);
 }
 
-TEST_CASE("a workspace whose last session ended is selectable again once it holds a tab",
+TEST_CASE("the only workspace, kept empty when its last session ended, is selectable once it holds a tab",
           "[vthost][native][daemon-follow]")
 {
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
     auto const own = h.host.workspaceId();
-    auto const other = h.host.createWorkspace()->id();
-    auto const endLastSession = [&h](vtworkspace::WorkspaceId workspace) {
-        h.host.closeSession(h.host.model().workspace(workspace)->tabAt(0)->rootPane()->session());
-        REQUIRE(h.host.hasEnded(workspace));
-    };
+    h.host.closeSession(h.host.model().workspace(own)->tabAt(0)->rootPane()->session());
+    REQUIRE(h.host.model().workspaceCount() == 1);
+    REQUIRE(h.host.workspaceId() == own);
 
-    auto refilled = vtworkspace::WorkspaceId {};
-    SECTION("by a tab created naming no workspace, which lands in the host's own")
-    {
-        endLastSession(own);
-        REQUIRE(h.host.createTab() != nullptr);
-        refilled = own;
-    }
-    SECTION("by a tab moved there")
-    {
-        REQUIRE(h.host.createTab() != nullptr); // a second tab in the host's own, to move
-        endLastSession(other);
-        auto& model = h.host.model();
-        model.moveTabToWorkspace(own, model.workspace(own)->tabAt(1)->id(), other, 0);
-        refilled = other;
-    }
-    CHECK_FALSE(h.host.hasEnded(refilled));
+    // A tab created naming no workspace lands in it.
+    REQUIRE(h.host.createTab() != nullptr);
+    REQUIRE(h.host.model().workspace(own)->tabCount() == 1);
+    auto const other = h.host.createWorkspace()->id();
 
     // Selected: the batch answering the request states it.
-    auto const select = encodeRequest({ proto::SelectWorkspace { .workspace = refilled.value } });
+    auto const select = encodeRequest({ proto::SelectWorkspace { .workspace = own.value } });
     std::ignore = h.exchangeUntil(
-        { daemonFollowHello(proto::AttachIntentKind::Select, refilled == own ? other.value : own.value) },
-        [&](auto const& got) { return batchEndSelects(got, refilled.value); },
+        { daemonFollowHello(proto::AttachIntentKind::Select, other.value) },
+        [&](auto const& got) { return batchEndSelects(got, own.value); },
         sendOnce(&h, &select, [&] { return snapshotRunCount(h.received) >= 1; }));
-    CHECK(h.session->selectedWorkspace() == refilled.value);
+    CHECK(h.session->selectedWorkspace() == own.value);
 }
 
 TEST_CASE("an attach selecting a workspace whose last session ended selects as a launch does",
@@ -8156,7 +8171,7 @@ TEST_CASE("an attach selecting a workspace whose last session ended selects as a
     auto const first = h.host.workspaceId().value;
     auto const ended = h.host.createWorkspace()->id();
     h.host.closeSession(h.host.model().workspace(ended)->tabAt(0)->rootPane()->session());
-    REQUIRE(h.host.model().workspace(ended) != nullptr); // kept, emptied
+    REQUIRE(h.host.model().workspace(ended) == nullptr); // removed with its last session
 
     std::ignore = h.exchangeUntil({ daemonFollowHello(proto::AttachIntentKind::Select, ended.value) },
                                   [](auto const& got) { return snapshotRunCount(got) >= 1; });
@@ -9245,4 +9260,550 @@ TEST_CASE("a TLS peer that stalls its handshake is closed at the pre-authenticat
     clock.advance(2s);
     CHECK(turnUntil(h.loop, [&] { return served && clientSawEnd; }));
     CHECK(capture.contains("TLS handshake was not finished"));
+}
+
+// {{{ workspace metadata
+namespace
+{
+
+/// Whether a test window offers Capability::WorkspaceMeta.
+enum class OffersMeta : uint8_t
+{
+    No = 0,
+    Yes,
+};
+
+/// Two workspaces of one session each, and windows on a ManualClock handshaken by hand.
+struct MetaFixture
+{
+    FlushHarness flush {};
+    vtworkspace::SessionId inFirst = newSession(flush.h.host);
+    uint64_t first = flush.h.host.workspaceId().value;
+    uint64_t second = flush.h.host.createWorkspace()->id().value;
+    vtworkspace::SessionId inSecond { *sessionsOf(flush.h.host, second).begin() };
+
+    /// Attaches a window selecting @p workspace, offering the metadata as @p offers says.
+    FlushClient& attachSelecting(uint64_t workspace, OffersMeta offers = OffersMeta::Yes)
+    {
+        auto hello =
+            proto::ClientHello { .capabilities = proto::CapabilitySet::of(
+                                     { proto::Capability::AttachIntent, proto::Capability::DaemonFollow }),
+                                 .attachIntent = { .kind = proto::AttachIntentKind::Select,
+                                                   .workspace = workspace } };
+        if (offers == OffersMeta::Yes)
+            hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::WorkspaceMeta));
+        return flush.attach(workspace == first ? inFirst : inSecond, std::move(hello));
+    }
+
+    /// Lets what is due go out, and the windows read it.
+    void settle()
+    {
+        turnIdle(flush.h.loop);
+        flush.clock.advance(30ms);
+        turnIdle(flush.h.loop);
+    }
+
+    /// @return The control reference of the daemon's workspace @p workspace.
+    [[nodiscard]] vtcontrol::ObjectRef refOf(uint64_t workspace) const
+    {
+        return vtcontrol::ObjectRef {
+            .kind = vtcontrol::ObjectKind::Workspace,
+            .uuid = *flush.h.host.objects().uuidOf(vtworkspace::WorkspaceId { workspace }),
+        };
+    }
+
+    /// @return The WorkspaceMeta PDUs @p client received after its first @p skip frames.
+    [[nodiscard]] static std::vector<proto::WorkspaceMeta> metasOf(FlushClient const& client,
+                                                                   std::size_t skip = 0)
+    {
+        auto found = std::vector<proto::WorkspaceMeta> {};
+        for (auto const& frame: client.received | std::views::drop(skip))
+            if (auto const* meta = std::get_if<proto::WorkspaceMeta>(&frame.pdu))
+                found.push_back(*meta);
+        return found;
+    }
+};
+
+} // namespace
+
+TEST_CASE("a client with WorkspaceMeta gets one WorkspaceMeta per workspace after the hello",
+          "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    f.flush.h.host.objects().setLabel(f.refOf(f.second), "ops");
+    auto& client = f.attachSelecting(f.first);
+    f.settle();
+
+    auto const metas = MetaFixture::metasOf(client);
+    REQUIRE(metas.size() == 2);
+    CHECK(metas[0]
+          == proto::WorkspaceMeta { .workspace = f.first,
+                                    .controlId = f.refOf(f.first).uuid.bytes,
+                                    .label = std::string {},
+                                    .git = std::nullopt,
+                                    .position = 0 });
+    CHECK(metas[1]
+          == proto::WorkspaceMeta { .workspace = f.second,
+                                    .controlId = f.refOf(f.second).uuid.bytes,
+                                    .label = "ops",
+                                    .git = std::nullopt,
+                                    .position = 1 });
+    // Each comes after its workspace's layout, so the client knows the workspace by then.
+    auto const layoutAt = std::ranges::find_if(client.received, [&](auto const& frame) {
+        auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu);
+        return layout != nullptr && layout->workspace == f.second;
+    });
+    auto const metaAt = std::ranges::find_if(client.received, [&](auto const& frame) {
+        auto const* meta = std::get_if<proto::WorkspaceMeta>(&frame.pdu);
+        return meta != nullptr && meta->workspace == f.second;
+    });
+    CHECK(layoutAt < metaAt);
+
+    SECTION("and one for a workspace created since, once")
+    {
+        auto const skip = client.received.size();
+        auto const third = f.flush.h.host.createWorkspace()->id().value;
+        f.settle();
+        auto const created = MetaFixture::metasOf(client, skip);
+        REQUIRE(created.size() == 1);
+        CHECK(created[0].workspace == third);
+        CHECK(created[0].controlId == f.refOf(third).uuid.bytes);
+        CHECK(created[0].label == std::optional<std::string> { "" });
+        CHECK(created[0].position == std::optional<uint32_t> { 2 });
+    }
+}
+
+TEST_CASE("a moved workspace reaches every client in the new order", "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& one = f.attachSelecting(f.first);
+    auto& other = f.attachSelecting(f.second);
+    f.settle();
+    auto const skipOne = one.received.size();
+    auto const skipOther = other.received.size();
+
+    // The window that asked for the move is no different from the one that did not.
+    NativeSessionFlushTester::serveWorkspaceVerb(
+        *one.session, proto::MoveWorkspace { .workspace = f.first, .toPosition = 1 });
+    f.settle();
+
+    auto const model = f.flush.h.host.model().workspaceAt(0)->id().value;
+    CHECK(model == f.second);
+    auto const positions = [](FlushClient const& client, std::size_t skip) {
+        auto order = std::map<uint64_t, std::optional<uint32_t>> {};
+        for (auto const& meta: MetaFixture::metasOf(client, skip))
+            order[meta.workspace] = meta.position;
+        return order;
+    };
+    auto const expected = std::map<uint64_t, std::optional<uint32_t>> { { f.second, 0 }, { f.first, 1 } };
+    CHECK(positions(one, skipOne) == expected);
+    CHECK(positions(other, skipOther) == expected);
+
+    SECTION("and a position beyond the end is clamped")
+    {
+        NativeSessionFlushTester::serveWorkspaceVerb(
+            *one.session, proto::MoveWorkspace { .workspace = f.second, .toPosition = 99 });
+        f.settle();
+        CHECK(f.flush.h.host.model().workspaceAt(1)->id().value == f.second);
+    }
+    SECTION("and an unknown workspace changes nothing")
+    {
+        NativeSessionFlushTester::serveWorkspaceVerb(
+            *one.session, proto::MoveWorkspace { .workspace = 987654, .toPosition = 0 });
+        CHECK(f.flush.h.host.model().workspaceAt(0)->id().value == f.second);
+    }
+}
+
+TEST_CASE("a closed workspace goes from every client, with a tab another client added just before",
+          "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& one = f.attachSelecting(f.first);
+    auto& other = f.attachSelecting(f.first);
+    f.settle();
+    // Another client's tab, added in the workspace a moment before the close.
+    auto const beside = vtworkspace::SessionId { f.inSecond };
+    REQUIRE(f.flush.h.host.createTab(vthost::SessionSpawnRequest {}, beside) != nullptr);
+    REQUIRE(f.flush.h.host.model().workspace(vtworkspace::WorkspaceId { f.second })->tabCount() == 2);
+    auto const before = f.flush.h.host.sessionIds().size();
+    auto const skipOne = one.received.size();
+    auto const skipOther = other.received.size();
+
+    NativeSessionFlushTester::serveWorkspaceVerb(*one.session,
+                                                 proto::CloseWorkspace { .workspace = f.second });
+    f.settle();
+
+    CHECK(f.flush.h.host.model().workspace(vtworkspace::WorkspaceId { f.second }) == nullptr);
+    CHECK(f.flush.h.host.sessionIds().size() == before - 2);
+    for (auto const* client: { &one, &other })
+    {
+        auto const skip = client == &one ? skipOne : skipOther;
+        auto emptied = false;
+        for (auto const& frame: client->received | std::views::drop(skip))
+            if (auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu))
+                emptied = emptied || (layout->workspace == f.second && layout->tabs.empty());
+        CHECK(emptied);
+    }
+
+    SECTION("an unknown workspace changes nothing, and the capability is needed")
+    {
+        NativeSessionFlushTester::serveWorkspaceVerb(*one.session,
+                                                     proto::CloseWorkspace { .workspace = 987654 });
+        CHECK(f.flush.h.host.model().workspaceCount() == 1);
+        auto& plain = f.attachSelecting(f.first, OffersMeta::No);
+        f.settle();
+        NativeSessionFlushTester::serveWorkspaceVerb(*plain.session,
+                                                     proto::CloseWorkspace { .workspace = f.first });
+        CHECK(f.flush.h.host.model().workspace(vtworkspace::WorkspaceId { f.first }) != nullptr);
+    }
+}
+
+TEST_CASE("positions are sent again after a workspace ahead of others is removed",
+          "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& client = f.attachSelecting(f.second);
+    f.settle();
+    auto const skip = client.received.size();
+
+    // The first workspace goes: the second is the first now.
+    NativeSessionFlushTester::serveWorkspaceVerb(*client.session,
+                                                 proto::CloseWorkspace { .workspace = f.first });
+    f.settle();
+
+    auto told = std::optional<uint32_t> {};
+    for (auto const& meta: MetaFixture::metasOf(client, skip))
+        if (meta.workspace == f.second && meta.position)
+            told = meta.position;
+    CHECK(told == std::optional<uint32_t> { 0 });
+}
+
+namespace
+{
+/// @return Whether @p client was sent @p workspace's layout emptied after its first @p skip frames.
+[[nodiscard]] bool toldEmptied(FlushClient const& client, uint64_t workspace, std::size_t skip)
+{
+    return std::ranges::any_of(client.received | std::views::drop(skip), [&](auto const& frame) {
+        auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu);
+        return layout != nullptr && layout->workspace == workspace && layout->tabs.empty();
+    });
+}
+} // namespace
+
+TEST_CASE("a workspace goes from the model and every client once its last tab ends",
+          "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& one = f.attachSelecting(f.first);
+    auto& other = f.attachSelecting(f.second);
+    f.settle();
+    auto const removed = vtworkspace::WorkspaceId { f.first };
+    auto const skipOne = one.received.size();
+    auto const skipOther = other.received.size();
+
+    // The first workspace's one pane ends: the second is the only one, and the first now.
+    f.flush.h.host.closeSession(f.inFirst);
+    f.settle();
+
+    auto& host = f.flush.h.host;
+    CHECK(host.model().workspace(removed) == nullptr);
+    CHECK_FALSE(host.objects().uuidOf(removed).has_value());
+    CHECK(host.workspaceId().value == f.second);
+    for (auto const& [client, skip]: { std::pair { &one, skipOne }, std::pair { &other, skipOther } })
+    {
+        CHECK(toldEmptied(*client, f.first, skip));
+        auto told = std::optional<uint32_t> {};
+        for (auto const& meta: MetaFixture::metasOf(*client, skip))
+            if (meta.workspace == f.second && meta.position)
+                told = meta.position;
+        CHECK(told == std::optional<uint32_t> { 0 });
+    }
+}
+
+TEST_CASE("the only workspace stays, empty, once its last tab ends", "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    // The second workspace closed first: the first is the only one.
+    REQUIRE(f.flush.h.host.closeWorkspace(vtworkspace::WorkspaceId { f.second }).has_value());
+    f.flush.h.host.closeSession(f.inFirst);
+    f.settle();
+
+    auto& host = f.flush.h.host;
+    REQUIRE(host.model().workspaceCount() == 1);
+    CHECK(host.workspaceId().value == f.first);
+    CHECK(host.model().workspace(host.workspaceId())->tabCount() == 0);
+    CHECK(host.objects().uuidOf(host.workspaceId()).has_value());
+}
+
+TEST_CASE("the only workspace is never closed", "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& host = f.flush.h.host;
+    REQUIRE(host.closeWorkspace(vtworkspace::WorkspaceId { f.second }).has_value());
+
+    auto const refused = host.closeWorkspace(vtworkspace::WorkspaceId { f.first });
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error() == vthost::WorkspaceCloseError::LastWorkspace);
+    CHECK(host.model().workspace(vtworkspace::WorkspaceId { f.first }) != nullptr);
+    CHECK(host.sessionIds().size() == 1); // its tab runs on
+}
+
+TEST_CASE("a workspace that holds no tab is closed, and every client told",
+          "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& client = f.attachSelecting(f.first);
+    f.settle();
+    auto const empty = f.flush.h.host.createEmptyWorkspace().id().value;
+    f.settle();
+    auto const skip = client.received.size();
+
+    NativeSessionFlushTester::serveWorkspaceVerb(*client.session,
+                                                 proto::CloseWorkspace { .workspace = empty });
+    f.settle();
+
+    CHECK(f.flush.h.host.model().workspace(vtworkspace::WorkspaceId { empty }) == nullptr);
+    CHECK(toldEmptied(client, empty, skip));
+}
+
+TEST_CASE("a client's label for a workspace is every client's", "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& one = f.attachSelecting(f.first);
+    auto& other = f.attachSelecting(f.second);
+    f.settle();
+    auto const skipOther = other.received.size();
+
+    NativeSessionFlushTester::serveWorkspaceVerb(
+        *one.session, proto::SetWorkspaceLabel { .workspace = f.second, .label = "ops" });
+    f.settle();
+
+    CHECK(f.flush.h.host.objects().labelOf(f.refOf(f.second)) == "ops");
+    auto const metas = MetaFixture::metasOf(other, skipOther);
+    REQUIRE(metas.size() == 1);
+    CHECK(metas[0].label == std::optional<std::string> { "ops" });
+}
+
+TEST_CASE("workspace verbs are refused without the capability", "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& client = f.attachSelecting(f.first, OffersMeta::No);
+    f.settle();
+    NativeSessionFlushTester::serveWorkspaceVerb(
+        *client.session, proto::MoveWorkspace { .workspace = f.first, .toPosition = 1 });
+    NativeSessionFlushTester::serveWorkspaceVerb(
+        *client.session, proto::SetWorkspaceLabel { .workspace = f.first, .label = "x" });
+    CHECK(f.flush.h.host.model().workspaceAt(0)->id().value == f.first);
+    CHECK(f.flush.h.host.objects().labelOf(f.refOf(f.first)).empty());
+}
+
+TEST_CASE("a label change reaches every client", "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& one = f.attachSelecting(f.first);
+    auto& other = f.attachSelecting(f.second);
+    f.settle();
+    auto const skipOne = one.received.size();
+    auto const skipOther = other.received.size();
+
+    f.flush.h.host.objects().setLabel(f.refOf(f.second), "build");
+    f.flush.h.host.objects().setLabel(f.refOf(f.second), "");
+    // A tab's label is no workspace's.
+    auto const* tab = f.flush.h.host.model().workspace(vtworkspace::WorkspaceId { f.first })->activeTab();
+    f.flush.h.host.objects().setLabel(
+        vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Tab,
+                               .uuid = *f.flush.h.host.objects().uuidOf(tab->id()) },
+        "tab");
+    f.settle();
+
+    auto const expected = std::vector {
+        proto::WorkspaceMeta { .workspace = f.second,
+                               .controlId = f.refOf(f.second).uuid.bytes,
+                               .label = "build",
+                               .git = std::nullopt },
+        proto::WorkspaceMeta { .workspace = f.second,
+                               .controlId = f.refOf(f.second).uuid.bytes,
+                               .label = std::string {},
+                               .git = std::nullopt },
+    };
+    CHECK(MetaFixture::metasOf(one, skipOne) == expected);
+    CHECK(MetaFixture::metasOf(other, skipOther) == expected);
+}
+
+TEST_CASE("a client without the capability gets none", "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& client = f.attachSelecting(f.first, OffersMeta::No);
+    f.flush.h.host.objects().setLabel(f.refOf(f.first), "ops");
+    client.session->sendWorkspaceGit(f.first,
+                                     proto::WireGitInfo { .branch = "main",
+                                                          .kind = proto::GitHeadKindWire::Branch,
+                                                          .ahead = std::nullopt,
+                                                          .behind = std::nullopt });
+    std::ignore = f.flush.h.host.createWorkspace();
+    f.settle();
+    CHECK(MetaFixture::metasOf(client).empty());
+}
+
+namespace
+{
+/// Answers every look-up with one state.
+struct FixedGitProbe final: vthost::IGitStatusProbe
+{
+    [[nodiscard]] std::optional<vthost::GitInfo> probe(std::filesystem::path const& /*cwd*/) const override
+    {
+        return answer;
+    }
+    vthost::GitInfo answer {};
+};
+
+/// @return The git state of the WorkspaceMeta deltas of @p workspace @p client received after @p skip frames.
+[[nodiscard]] std::vector<std::optional<proto::WireGitInfo>> gitDeltasOf(FlushClient const& client,
+                                                                         uint64_t workspace,
+                                                                         std::size_t skip)
+{
+    auto found = std::vector<std::optional<proto::WireGitInfo>> {};
+    for (auto const& meta: MetaFixture::metasOf(client, skip))
+        if (meta.workspace == workspace)
+            found.push_back(meta.git);
+    return found;
+}
+} // namespace
+
+TEST_CASE("a git change reaches a client", "[vthost][native][workspace-meta][git]")
+{
+    auto f = MetaFixture {};
+    auto& following = f.attachSelecting(f.first);
+    f.settle();
+    auto const skip = following.received.size();
+
+    following.session->workspaceGitChanged(
+        vthost::WorkspaceGitChangedSignal { .workspace = vtworkspace::WorkspaceId { f.second },
+                                            .git = vthost::GitInfo { .kind = vtbackend::GitHeadKind::Detached,
+                                                                     .branch = "abc1234",
+                                                                     .ahead = 2,
+                                                                     .behind = std::nullopt } });
+    following.session->sendWorkspaceGit(9999, std::nullopt); // no workspace the client was told of
+    f.settle();
+
+    auto const metas = MetaFixture::metasOf(following, skip);
+    REQUIRE(metas.size() == 1);
+    CHECK(metas[0]
+          == proto::WorkspaceMeta { .workspace = f.second,
+                                    .controlId = f.refOf(f.second).uuid.bytes,
+                                    .label = std::nullopt,
+                                    .git = proto::WireGitInfo { .branch = "abc1234",
+                                                                .kind = proto::GitHeadKindWire::Detached,
+                                                                .ahead = 2,
+                                                                .behind = std::nullopt } });
+}
+
+TEST_CASE("leaving a repo sends kind None", "[vthost][native][workspace-meta][git]")
+{
+    auto f = MetaFixture {};
+    auto& following = f.attachSelecting(f.first);
+    f.settle();
+    auto const skip = following.received.size();
+
+    following.session->workspaceGitChanged(vthost::WorkspaceGitChangedSignal {
+        .workspace = vtworkspace::WorkspaceId { f.first }, .git = std::nullopt });
+    f.settle();
+
+    // None, not absent: absent would say nothing changed.
+    auto const deltas = gitDeltasOf(following, f.first, skip);
+    REQUIRE(deltas.size() == 1);
+    REQUIRE(deltas[0].has_value());
+    CHECK(deltas[0]->kind == proto::GitHeadKindWire::None);
+    CHECK(deltas[0]->branch.empty());
+}
+
+TEST_CASE("only a following client is told the git state", "[vthost][native][workspace-meta][git]")
+{
+    auto f = MetaFixture {};
+    auto& plain = f.flush.attach(
+        f.inFirst,
+        proto::ClientHello {
+            .capabilities = proto::CapabilitySet::of(
+                { proto::Capability::AttachIntent, proto::Capability::WorkspaceMeta }),
+            .attachIntent = { .kind = proto::AttachIntentKind::Select, .workspace = f.first } });
+    f.settle();
+    REQUIRE_FALSE(MetaFixture::metasOf(plain).empty()); // labels and control ids it is told
+    auto const skip = plain.received.size();
+
+    plain.session->workspaceGitChanged(vthost::WorkspaceGitChangedSignal {
+        .workspace = vtworkspace::WorkspaceId { f.first }, .git = vthost::GitInfo { .branch = "main" } });
+    f.settle();
+
+    CHECK(MetaFixture::metasOf(plain, skip).empty());
+}
+
+TEST_CASE("the first metadata carries the current git", "[vthost][native][workspace-meta][git]")
+{
+    auto probe = FixedGitProbe {};
+    probe.answer =
+        vthost::GitInfo { .kind = vtbackend::GitHeadKind::Branch, .branch = "main", .ahead = 1, .behind = 0 };
+    auto executor = core::async::testing::ManualExecutor {};
+    auto flush = FlushHarness { .workspaceGit =
+                                    vthost::WorkspaceGitServices { .probe = probe, .executor = executor } };
+    auto const session = newSession(flush.h.host);
+    auto const workspace = flush.h.host.workspaceId().value;
+    flush.h.host.terminal(session)->writeToScreen("\033]7;file:///r/a\033\\");
+    auto const hello = [workspace] {
+        return proto::ClientHello {
+            .capabilities = proto::CapabilitySet::of({ proto::Capability::AttachIntent,
+                                                       proto::Capability::DaemonFollow,
+                                                       proto::Capability::WorkspaceMeta }),
+            .attachIntent = { .kind = proto::AttachIntentKind::Select, .workspace = workspace }
+        };
+    };
+    auto const settle = [&] {
+        turnIdle(flush.h.loop);
+        while (executor.pending() > 0)
+        {
+            executor.drain();
+            turnIdle(flush.h.loop);
+        }
+        flush.clock.advance(30ms);
+        turnIdle(flush.h.loop);
+    };
+
+    // The first window to follow has the host look the workspace up, and is told what it found as it changes.
+    auto& first = flush.attach(session, hello());
+    settle();
+    REQUIRE(flush.h.host.gitInfoOf(vtworkspace::WorkspaceId { workspace }) == std::optional { probe.answer });
+    auto const wire = proto::WireGitInfo {
+        .branch = "main", .kind = proto::GitHeadKindWire::Branch, .ahead = 1, .behind = 0
+    };
+    CHECK(gitDeltasOf(first, workspace, 0).back() == std::optional { wire });
+
+    // A window attaching since is told it in its first metadata.
+    auto& second = flush.attach(session, hello());
+    settle();
+    auto const metas = MetaFixture::metasOf(second);
+    auto const announced = std::ranges::find(metas, workspace, &proto::WorkspaceMeta::workspace);
+    REQUIRE(announced != metas.end());
+    CHECK(announced->git == std::optional { wire });
+}
+// }}}
+
+TEST_CASE("SelectWorkspace 0 with a session starts the first pane in that session's cwd",
+          "[vthost][native][daemon-follow][cwd]")
+{
+    auto const spawned = std::make_shared<std::vector<std::filesystem::path>>();
+    auto h = NativeHarness { recordingSpawnDirectories(spawned) };
+    h.files.addDirectory(statedDirectory());
+    auto const* const tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const from = tab->activePane()->session();
+    auto* const terminal = h.host.terminal(from);
+    REQUIRE(terminal != nullptr);
+    terminal->writeToScreen(std::format("\033]7;{}\033\\", vtbackend::test::fileUrlOf(statedDirectory())));
+    spawned->clear();
+
+    std::ignore =
+        h.exchangeUntil({ followingHello(proto::AttachIntentKind::Default),
+                          proto::SelectWorkspace { .workspace = 0, .directoryFromSession = from.value } },
+                        [](auto const& got) { return layoutWorkspaces(got).size() == 2; });
+
+    CHECK(*spawned == std::vector { statedDirectory() });
 }

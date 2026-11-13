@@ -156,6 +156,14 @@ struct GitHeadServices
 [[nodiscard]] std::optional<std::filesystem::path> findGitHeadFile(GitFileSystem const& fileSystem,
                                                                    std::filesystem::path const& directory);
 
+/// Reads where HEAD points for @p directory's repository.
+/// @param fileSystem Where to look.
+/// @param directory Where to start.
+/// @return The head, its name made safe to show; nullopt outside a repository, for a reftable one, or when
+///         HEAD cannot be read.
+[[nodiscard]] std::optional<GitHead> readGitHead(GitFileSystem const& fileSystem,
+                                                 std::filesystem::path const& directory);
+
 /// What `{Git}` shows for @p directory: the branch, ref or short object id, made safe to show.
 /// @param fileSystem Where to look.
 /// @param directory The directory whose repository to describe.

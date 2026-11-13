@@ -13,6 +13,9 @@
 
     #include <array>
     #include <cerrno>
+    #include <chrono>
+    #include <csignal>
+    #include <cstdint>
     #include <memory>
     #include <optional>
     #include <string>
@@ -21,6 +24,7 @@
     #include <vector>
 
     #include <fcntl.h>
+    #include <poll.h>
     #include <spawn.h>
     #include <unistd.h>
 
@@ -108,6 +112,56 @@ namespace
         [[nodiscard]] std::expected<CommandOutcome, std::error_code> run(
             std::span<std::string const> argv) override
         {
+            return execute(argv, std::nullopt);
+        }
+
+        [[nodiscard]] std::expected<CommandOutcome, std::error_code> runWithin(
+            std::span<std::string const> argv, std::chrono::milliseconds deadline) override
+        {
+            return execute(argv, deadline);
+        }
+
+      private:
+        using Clock = std::chrono::steady_clock;
+
+        /// Kills @p pid and reaps it.
+        static void killAndReap(pid_t pid) noexcept
+        {
+            ::kill(pid, SIGKILL);
+            auto status = 0;
+            while (::waitpid(pid, &status, 0) < 0 && errno == EINTR)
+                ;
+        }
+
+        /// Whether a child ended by itself before its deadline.
+        enum class ChildEnd : uint8_t
+        {
+            Running = 0, ///< It was still running at the deadline, and is not reaped.
+            Ended,       ///< It ended, and is reaped (or was gone already).
+        };
+
+        /// Reaps @p pid if it ends by itself before @p end.
+        /// @param status Its wait status, once it Ended.
+        /// @return Whether it ended in time.
+        [[nodiscard]] static ChildEnd reapBefore(pid_t pid, Clock::time_point end, int& status)
+        {
+            using namespace std::chrono_literals;
+            while (true)
+            {
+                auto const reaped = ::waitpid(pid, &status, WNOHANG);
+                if (reaped == pid)
+                    return ChildEnd::Ended;
+                if (reaped < 0 && errno != EINTR)
+                    return ChildEnd::Ended; // Gone already; nothing to wait for.
+                if (Clock::now() >= end)
+                    return ChildEnd::Running;
+                ::poll(nullptr, 0, 5);
+            }
+        }
+
+        [[nodiscard]] std::expected<CommandOutcome, std::error_code> execute(
+            std::span<std::string const> argv, std::optional<std::chrono::milliseconds> deadline)
+        {
             if (argv.empty())
                 return std::unexpected(std::make_error_code(std::errc::invalid_argument));
 
@@ -158,10 +212,25 @@ namespace
                 return std::unexpected(std::error_code { spawned, std::generic_category() });
             writeEnd.reset();
 
+            auto const end = deadline ? Clock::now() + *deadline : Clock::time_point::max();
             auto outcome = CommandOutcome {};
             auto buffer = std::array<char, 4096> {};
             while (true)
             {
+                if (deadline)
+                {
+                    auto const left =
+                        std::chrono::ceil<std::chrono::milliseconds>(end - Clock::now()).count();
+                    auto waiting = pollfd { .fd = readEnd.get(), .events = POLLIN, .revents = 0 };
+                    auto const ready = left > 0 ? ::poll(&waiting, 1, static_cast<int>(left)) : 0;
+                    if (ready < 0 && errno == EINTR)
+                        continue;
+                    if (ready <= 0)
+                    {
+                        killAndReap(pid);
+                        return std::unexpected(std::make_error_code(std::errc::timed_out));
+                    }
+                }
                 auto const count = ::read(readEnd.get(), buffer.data(), buffer.size());
                 if (count > 0)
                     outcome.standardOutput.append(buffer.data(), static_cast<size_t>(count));
@@ -172,14 +241,23 @@ namespace
             }
 
             auto status = 0;
-            while (::waitpid(pid, &status, 0) < 0)
-                if (errno != EINTR)
-                    return std::unexpected(lastError());
+            if (deadline)
+            {
+                // The output is complete, but the command may still not end: the deadline bounds it too.
+                if (reapBefore(pid, end, status) == ChildEnd::Running)
+                {
+                    killAndReap(pid);
+                    return std::unexpected(std::make_error_code(std::errc::timed_out));
+                }
+            }
+            else
+                while (::waitpid(pid, &status, 0) < 0)
+                    if (errno != EINTR)
+                        return std::unexpected(lastError());
             outcome.exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
             return outcome;
         }
 
-      private:
         /// @param program The program as named, a bare name or a path.
         /// @return The file to spawn for @p program, looked up on the given environment's PATH as execvp()
         ///         would; std::nullopt for a bare name found nowhere on it.

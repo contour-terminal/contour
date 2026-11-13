@@ -97,6 +97,13 @@ namespace
         return value ? std::format(" {}=yes", name) : std::string {};
     }
 
+    constexpr auto GitHeadKindNames = std::array {
+        EnumName { .value = GitHeadKindWire::None, .name = "none" },
+        EnumName { .value = GitHeadKindWire::Branch, .name = "branch" },
+        EnumName { .value = GitHeadKindWire::Detached, .name = "detached" },
+        EnumName { .value = GitHeadKindWire::OtherRef, .name = "other-ref" },
+    };
+
     constexpr auto SwitchDaemonNames = std::array {
         EnumName { .value = SwitchDaemonKind::Same, .name = "same" },
         EnumName { .value = SwitchDaemonKind::Label, .name = "label" },
@@ -117,6 +124,20 @@ namespace
     {
         auto const found = std::ranges::find(table, value, &EnumName<E>::value);
         return found != table.end() ? found->name : "?";
+    }
+
+    /// @return @p git as ` git=branch,ahead:1,behind:0`, with only its kind and counts -- never the branch,
+    ///         which is payload.
+    [[nodiscard]] std::string formatGit(std::optional<WireGitInfo> const& git)
+    {
+        if (!git)
+            return {};
+        auto text = std::string { nameIn(GitHeadKindNames, git->kind) };
+        if (git->ahead)
+            text += std::format(",ahead:{}", *git->ahead);
+        if (git->behind)
+            text += std::format(",behind:{}", *git->behind);
+        return std::format(" git={}", text);
     }
 
     /// One row of the table naming a TabEditKind in a trace.
@@ -613,7 +634,11 @@ namespace
         TraceRow { PduType::SelectWorkspace,
                    "SelectWorkspace",
                    +[](DecodedPdu const& pdu) {
-                       return std::format("workspace={}", std::get<SelectWorkspace>(pdu).workspace);
+                       auto const& select = std::get<SelectWorkspace>(pdu);
+                       return select.directoryFromSession ? std::format("workspace={} from={}",
+                                                                        select.workspace,
+                                                                        *select.directoryFromSession)
+                                                          : std::format("workspace={}", select.workspace);
                    } },
         TraceRow { PduType::ReportFocus,
                    "ReportFocus",
@@ -646,6 +671,36 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        // The nonce is public (it travels in the clear inside TLS) but says nothing useful.
                        return std::format("methods={:#04b}", std::get<AuthChallenge>(pdu).methods);
+                   } },
+        TraceRow { PduType::WorkspaceMeta,
+                   "WorkspaceMeta",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<WorkspaceMeta>(pdu);
+                       // The label and the branch are told by presence only: both are the user's words.
+                       return std::format("workspace={}{}{}{}",
+                                          value.workspace,
+                                          value.position ? std::format(" position={}", *value.position)
+                                                         : std::string {},
+                                          formatPresence("label", value.label),
+                                          formatGit(value.git));
+                   } },
+        TraceRow { PduType::MoveWorkspace,
+                   "MoveWorkspace",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<MoveWorkspace>(pdu);
+                       return std::format("workspace={} to={}", value.workspace, value.toPosition);
+                   } },
+        TraceRow { PduType::CloseWorkspace,
+                   "CloseWorkspace",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("workspace={}", std::get<CloseWorkspace>(pdu).workspace);
+                   } },
+        TraceRow { PduType::SetWorkspaceLabel,
+                   "SetWorkspaceLabel",
+                   +[](DecodedPdu const& pdu) {
+                       // The label is the user's words: told by its length only.
+                       auto const& value = std::get<SetWorkspaceLabel>(pdu);
+                       return std::format("workspace={} label={} bytes", value.workspace, value.label.size());
                    } },
     };
 

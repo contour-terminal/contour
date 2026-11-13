@@ -11,7 +11,9 @@
 #include <contour/cli/Hosting.hpp>
 #include <contour/cli/NewDaemon.hpp>
 #include <contour/cli/WorkspaceListing.hpp>
+#include <contour/command/Command.hpp>
 #include <contour/command/LauncherEntries.hpp>
+#include <contour/command/Shortcut.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/ChromeTokenRows.hpp>
 #include <contour/config/Config.hpp>
@@ -59,9 +61,12 @@
 #include <contour/window/ChromeStyleHost.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ConnectPickerController.hpp>
+#include <contour/window/GeometryDump.hpp>
 #include <contour/window/HotkeyRefusals.hpp>
 #include <contour/window/NewDefaultsNotice.hpp>
 #include <contour/window/NoticeModel.hpp>
+#include <contour/window/PopupAnchor.hpp>
+#include <contour/window/PopupParent.hpp>
 #include <contour/window/PopupShadowImageProvider.hpp>
 #include <contour/window/QtSaveScheduler.hpp>
 #include <contour/window/QuickTerminalController.hpp>
@@ -69,7 +74,9 @@
 #include <contour/window/SettingsPreview.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
+#include <contour/window/SidebarModel.hpp>
 #include <contour/window/SwitcherController.hpp>
+#include <contour/window/SwitcherPresenter.hpp>
 #include <contour/window/TabBarHitValue.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
 #include <contour/window/WindowController.hpp>
@@ -99,6 +106,7 @@
 
 #include <crispy/ScopedTimer.hpp>
 
+#include <core/Environment.hpp>
 #include <core/Random.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
@@ -142,6 +150,7 @@
 #include <QtCore/QtPlugin>
 #include <QtDBus/QtDBus>
 #include <QtGui/QCursor>
+#include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
 #include <QtGui/QStyleHints>
@@ -234,6 +243,8 @@ namespace
     /// Worker threads every session's path probes run on: one, so that a probe blocked on a hung mount stalls
     /// only the other probes.
     constexpr auto LinkProbeThreads = std::size_t { 1 };
+    /// One, so that probes of several workspaces queue rather than start a `git` each.
+    constexpr auto GitProbeThreads = std::size_t { 1 };
 
     /// How long a window switch waits for the target daemon to list its workspaces: an ssh connect's worth.
     constexpr auto SwitchListingTimeout = std::chrono::milliseconds { std::chrono::seconds { 15 } };
@@ -473,7 +484,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<session::SwitchDirectory> switchDirectory,
                              std::function<void(int)> exitEventLoop,
                              window::BootstrapPromptFactory bootstrapPromptFactory,
-                             std::unique_ptr<remote::IWorkspaceLister> startupLister):
+                             std::unique_ptr<remote::IWorkspaceLister> startupLister,
+                             std::unique_ptr<vthost::IGitStatusProbe> workspaceGitProbe):
     ContourApp { env },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
     _exitEventLoop { exitEventLoop ? std::move(exitEventLoop)
@@ -484,7 +496,12 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _commandExecutor(cli::makeBackgroundExecutor(StatusLineCommandThreads)),
     _processPlacement(processPlacement ? std::move(processPlacement) : vtpty::makeDefaultProcessPlacement()),
     _gitFileSystem(fileSystem ? *fileSystem : core::platform::NativeFileSystem::instance()),
+    _gitProbeSource(workspaceGitProbe ? GitProbeSource::Injected : GitProbeSource::Native),
+    _gitCommands(vthost::makeNativeCommandRunner(vthost::gitProbeEnvironment(core::defaultEnvironment()))),
+    _gitProbe(workspaceGitProbe ? std::move(workspaceGitProbe)
+                                : vthost::makeGitStatusProbe(_gitFileSystem, *_gitCommands)),
     _linkProbeExecutor(cli::makeBackgroundExecutor(LinkProbeThreads)),
+    _workspaceGitExecutor(cli::makeBackgroundExecutor(GitProbeThreads)),
     _injectedLinkServices { std::move(linkServices) },
     _sessionFactory(sessionFactory ? std::move(sessionFactory)
                                    : std::make_unique<session::AppSessionFactory>(*this, _processPlacement)),
@@ -619,6 +636,21 @@ std::optional<vtbackend::GitHeadServices> ContourGuiApp::gitHeadServices() noexc
     if (&_fileSystem != &core::platform::NativeFileSystem::instance())
         return std::nullopt;
     return vtbackend::GitHeadServices { .executor = _linkProbeExecutor, .fileSystem = _gitFileSystem };
+}
+
+std::optional<vthost::WorkspaceGitServices> ContourGuiApp::workspaceGitServices() noexcept
+{
+    // As gitHeadServices(): a test's injected files are not to be paired with this machine's disk; a probe a
+    // test injected reads none.
+    if (_gitProbeSource == GitProbeSource::Native
+        && &_fileSystem != &core::platform::NativeFileSystem::instance())
+        return std::nullopt;
+    return vthost::WorkspaceGitServices { .probe = *_gitProbe, .executor = _workspaceGitExecutor };
+}
+
+void ContourGuiApp::postToGui(std::function<void()> job)
+{
+    QMetaObject::invokeMethod(this, std::move(job), Qt::QueuedConnection);
 }
 
 ContourGuiApp::~ContourGuiApp()
@@ -886,6 +918,21 @@ void ContourGuiApp::relaunchOnAutomaticGpu()
     _exitEventLoop(EXIT_SUCCESS);
 }
 
+void ContourGuiApp::startGeometryDump()
+{
+    auto const name = std::string(window::GeometryDumpVariable);
+    auto const file = window::geometryDumpFileOf(qEnvironmentVariable(name.c_str()));
+    if (!file)
+        return;
+    _geometryDump = make_unique<window::GeometryDump>(*file, std::chrono::milliseconds { 100 }, [] {
+        auto windows = std::vector<QQuickWindow*> {};
+        for (auto* const window: QGuiApplication::topLevelWindows())
+            if (auto* const quick = qobject_cast<QQuickWindow*>(window))
+                windows.push_back(quick);
+        return windows;
+    });
+}
+
 void ContourGuiApp::takeGpuFallbackRequest()
 {
     auto const nameStore = std::string(display::GpuFallbackEnvironmentName);
@@ -1005,8 +1052,8 @@ void ContourGuiApp::applyOpenGlGpuSelection()
 #endif
 }
 
-std::optional<std::expected<void, std::string>> ContourGuiApp::pollNativeAttach(remote::DaemonLink& link,
-                                                                                vthost::AttachBudget budget)
+std::optional<std::expected<void, std::string>> ContourGuiApp::pollNativeAttach(
+    remote::DaemonLink& link, vthost::AttachBudget const& budget)
 {
     auto attached = link.pollAttached(budget);
     if (!attached)
@@ -2516,6 +2563,15 @@ window::TitleBandTokens ContourGuiApp::titleBandTokens(window::BarCentre centre)
     };
 }
 
+geometry::SidebarMetrics ContourGuiApp::sidebarMetrics() const
+{
+    if (_chromeStyleHost)
+        return _chromeStyleHost->provider().sidebarMetrics();
+    return geometry::SidebarMetrics { .tokens = resolvedChromeTokens().sidebar,
+                                      .scale = { .unit = config::uiStyleTokens(_chromeStyle).unit,
+                                                 .unitPixels = 1.0 } };
+}
+
 window::TitleBand ContourGuiApp::titleBandOf(window::TitleBandInputs const& inputs) const
 {
     if (_chromeStyleHost)
@@ -2546,6 +2602,7 @@ window::ChromeInputs ContourGuiApp::chromeInputs() const
     return window::ChromeInputs {
         .row = _chromeStyle,
         .font = window::resolveChromeFont(_config, _chromeStyle, profileName()),
+        .fixedFont = QFontDatabase::systemFont(QFontDatabase::FixedFont),
         .accessibility = accessibilityPreferences(),
         .appearance = window::chromeAppearanceOf(platformAppearance()),
         .scheme = config::chromeSchemeColorsOf(palette ? *palette : vtbackend::ColorPalette {}),
@@ -3207,6 +3264,7 @@ int ContourGuiApp::terminalGuiAction()
         _settingsController.reset();
         // The QML engine next: its context properties point at the style providers, and the windows
         // the helpers below served are gone with it.
+        _geometryDump.reset();
         _qmlEngine.reset();
         // Its window went with the engine; the host cancels the prompts it still holds, so that none targets
         // a sink that is gone.
@@ -3310,6 +3368,7 @@ int ContourGuiApp::terminalGuiAction()
     qmlRegisterUncreatableType<window::SettingsPreview>("Contour.Terminal", 1, 0, "SettingsPreview", "Created by the Settings window host.");
     session::registerPermissionQmlTypes();
     window::registerTabBarQmlTypes();
+    window::registerSidebarQmlTypes();
     qRegisterMetaType<session::TerminalSession*>("TerminalSession*");
     qRegisterMetaType<session::PaneProxy*>("PaneProxy*");
     qRegisterMetaType<window::WindowController*>("WindowController*");
@@ -3334,6 +3393,7 @@ int ContourGuiApp::terminalGuiAction()
     {
         auto const timer = crispy::ScopedTimer(startupLog, "QML engine setup");
         _qmlEngine = make_unique<QQmlApplicationEngine>();
+        startGeometryDump();
         // A prompt that arrived before the engine existed (a startup attach reaching ssh first) found no
         // stand-in to show it; it waits in the router, so show it now.
         if (_askpassRouter->waitingCount() > 0)
@@ -4339,7 +4399,8 @@ void ContourGuiApp::openConnectPicker(PickerPresentation presentation, QScreen* 
             _connectPickerWindow->setModality(Qt::NonModal);
             break;
         case PickerPresentation::Sheet:
-            _connectPickerWindow->setTransientParent(QGuiApplication::focusWindow());
+            _connectPickerWindow->setTransientParent(
+                window::popupParentFor(QGuiApplication::focusWindow(), *_connectPickerWindow));
             _connectPickerWindow->setModality(
                 _connectPickerWindow->transientParent() != nullptr ? Qt::WindowModal : Qt::NonModal);
             break;
@@ -4366,7 +4427,6 @@ window::SwitcherServices ContourGuiApp::switcherServices()
                                      .workspace = {} },
                         .workspaceCount = std::nullopt,
                         .tag = cli::schemeTag(entry.url.scheme),
-                        .expansion = window::SwitcherExpansion::Collapsed,
                         .listing = window::SwitcherListing::NotListed,
                         .failure = {},
                         .workspaces = {},
@@ -4428,6 +4488,41 @@ window::SwitcherServices ContourGuiApp::switcherServices()
                                                    .timeout = NamedDaemonStartTimeout });
                 };
             },
+        .createWorkspace =
+            [this](vtworkspace::WorkspaceId window,
+                   session::SwitchTarget const& daemon,
+                   std::string label,
+                   session::SwitchMode mode) {
+                _windowSwitching->createWorkspace(
+                    window,
+                    daemon,
+                    std::move(label),
+                    mode,
+                    [](std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome) {
+                        if (!outcome)
+                            attachLog()("new workspace from the switcher failed: {}", outcome.error());
+                    });
+            },
+        .now = [] { return std::chrono::system_clock::now(); },
+        .style = command::platformShortcutStyle(),
+        .showSwitcherShortcut =
+            [this] {
+                // The bindings as they are now: a ReloadConfig may have rebound it.
+                auto const index = command::shortcutIndex(_config, command::platformShortcutStyle());
+                auto const found = index.find(command::commandId(actions::ShowSwitcher {}));
+                return found != index.end() ? found->second : std::string {};
+            },
+        .workspaceMenu =
+            [this](vtworkspace::WorkspaceId window, uint64_t workspace) {
+                auto const* const controller = _sessionManager.controllerDisplaying(window);
+                return controller != nullptr ? controller->workspaceMenuStateOf(workspace)
+                                             : command::WorkspaceMenuState {};
+            },
+        .runWorkspaceAction =
+            [this](vtworkspace::WorkspaceId window, uint64_t workspace, actions::Action const& action) {
+                if (auto* const controller = _sessionManager.controllerDisplaying(window))
+                    controller->runWorkspaceMenuAction(workspace, action);
+            },
     };
 }
 
@@ -4447,44 +4542,30 @@ void ContourGuiApp::returnFocusTo(FocusReturn const& target)
         controller->focusActiveDisplay();
 }
 
-std::expected<void, std::string> ContourGuiApp::openSwitcher(window::SwitcherOpening opening, QScreen* anchor)
+std::expected<void, std::string> ContourGuiApp::openSwitcher(window::SwitcherOpening opening,
+                                                             window::WindowController& host,
+                                                             std::optional<QRectF> anchor)
 {
     if (!_qmlEngine)
         return std::unexpected(std::string { "there is no window to show the switcher in" });
     if (!_switcher)
     {
         _switcher = std::make_unique<window::SwitcherController>(switcherServices());
-        _switcherWindow = window::loadSwitcherWindow(*_qmlEngine, *_switcher);
-        if (!_switcherWindow)
-        {
-            _switcher.reset();
-            return std::unexpected(std::string { "the switcher popup could not be loaded" });
-        }
-        // Both a choice and a cancel close it; the choice was handed to the window switcher already.
-        connect(_switcher.get(), &window::SwitcherController::finished, this, [this] {
-            if (_switcherWindow)
-                _switcherWindow->close();
-        });
-        connect(_switcher.get(), &window::SwitcherController::cancelled, this, [this] {
-            if (_switcherWindow)
-                _switcherWindow->close();
-        });
-        connect(_switcherWindow.get(), &QWindow::visibleChanged, this, [this](bool isVisible) {
-            if (!isVisible)
-                returnFocusTo(_switcherReturn);
-        });
+        _switcherPresenter = std::make_unique<window::SwitcherPresenter>(*_switcher);
     }
-    _switcherReturn = focusReturnPoint();
-    _switcher->open(std::move(opening));
-    _switcherWindow->setTransientParent(QGuiApplication::focusWindow());
-    _switcherWindow->setModality(_switcherWindow->transientParent() != nullptr ? Qt::WindowModal
-                                                                               : Qt::NonModal);
-    if (anchor != nullptr)
-        _switcherWindow->setScreen(anchor);
-    _switcherWindow->show();
-    _switcherWindow->raise();
-    _switcherWindow->requestActivate();
+    auto const window = opening.window;
+    _switcherPresenter->open(host, std::move(opening), anchor);
+    // The window's own workspaces follow its sidebar while the popup is up there.
+    _switcherPresenter->followSidebar(host.sidebar(),
+                                      [this, &host, window] { return windowWorkspacesOf(host, window); });
     return {};
+}
+
+std::vector<window::SwitcherWorkspace> ContourGuiApp::windowWorkspacesOf(window::WindowController& host,
+                                                                         vtworkspace::WorkspaceId window)
+{
+    return remote::windowWorkspacesOf(
+        _windowSwitching->windowWorkspaceRows(window), host.sidebar().workspaceRows(), window);
 }
 
 std::expected<void, std::string> ContourGuiApp::showSwitchPick(remote::SwitchPickRequest const& pick)
@@ -4492,7 +4573,10 @@ std::expected<void, std::string> ContourGuiApp::showSwitchPick(remote::SwitchPic
     auto const daemon = _sessionManager.daemonTargetOf(pick.window);
     if (!daemon)
         return std::unexpected(std::string { "the window went away" });
-    auto const* const controller = _sessionManager.controllerDisplaying(pick.window);
+    auto* const controller = _sessionManager.controllerDisplaying(pick.window);
+    if (controller == nullptr)
+        return std::unexpected(std::string { "the window went away" });
+    controller->sidebar().refreshNow(); // its rows as of now, not as of its last rebuild
     return openSwitcher(
         window::SwitcherOpening {
             .window = pick.window,
@@ -4504,13 +4588,15 @@ std::expected<void, std::string> ContourGuiApp::showSwitchPick(remote::SwitchPic
                     .address = { .kind = pick.target.kind, .daemon = pick.target.daemon, .workspace = {} },
                     .workspaceCount = pick.workspaces.size(),
                     .tag = {},
-                    .expansion = window::SwitcherExpansion::Expanded,
                     .listing = window::SwitcherListing::Listed,
                     .failure = {},
                     .workspaces = remote::switcherWorkspacesOf(pick.workspaces, pick.window),
                 },
+            .scope = window::SwitcherScope::OneDaemon,
+            .windowWorkspaces = windowWorkspacesOf(*controller, pick.window),
+            .origin = window::SwitcherOrigin::Centred,
         },
-        controller != nullptr ? controller->screen() : nullptr);
+        *controller);
 }
 
 void ContourGuiApp::openSettingsPage(std::string const& page, QScreen* anchor)

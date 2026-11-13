@@ -49,15 +49,16 @@ struct HostIdentity
     bool operator==(HostIdentity const&) const = default;
 };
 
-/// A node drag: a pane, or a tab of two or more panes.
+/// A node drag: a pane, a tab of two or more panes, or a workspace.
 struct NodeDrag
 {
-    DropPayload payload = DropPayload::None; ///< Pane or Tab; nothing else is a node.
+    DropPayload payload = DropPayload::None; ///< Pane, Tab or Workspace; nothing else is a node.
     HostIdentity host;                       ///< Whose ids @c sessions are.
     vtworkspace::WorkspaceId window;         ///< The window the drag started in, in the dragging process.
     int tabIndex = 0;                        ///< The row of the tab the drag started in.
+    uint64_t workspace = 0; ///< Workspace payload: the id of the workspace dragged; 0 otherwise.
     /// The host's ids of what is dragged: a pane's one session; a tab's every session, the first naming the
-    /// tab. Local SessionId values in-process, daemon session ids when daemon-hosted.
+    /// tab; none for a workspace. Local SessionId values in-process, daemon session ids when daemon-hosted.
     std::vector<uint64_t> sessions;
 
     bool operator==(NodeDrag const&) const = default;

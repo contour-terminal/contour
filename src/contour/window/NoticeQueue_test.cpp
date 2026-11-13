@@ -263,3 +263,17 @@ TEST_CASE("moveRefusedText: a stale drag says so, a drop with nothing to tell sa
           == contour::window::MoveStaleText);
     STATIC_CHECK(moveRefusedText(host(NodeMoveError::Model), model(MoveError::NoOp)).empty());
 }
+
+TEST_CASE("NoticeQueue: an in-process move the model refused names the reason, or nothing", "[notices]")
+{
+    using contour::window::localMoveRefusedText;
+    using vtworkspace::MoveError;
+    CHECK(localMoveRefusedText(MoveError::UnknownSource) == contour::window::MoveStaleText);
+    CHECK(localMoveRefusedText(MoveError::UnknownTarget) == contour::window::MoveStaleText);
+    CHECK(localMoveRefusedText(MoveError::SelfTarget).empty());
+    CHECK(localMoveRefusedText(MoveError::NoOp).empty());
+    CHECK_FALSE(localMoveRefusedText(MoveError::TabIntoSwap).empty());
+    // None of them blames a daemon there is none of.
+    for (auto const text: contour::window::LocalMoveRefusalTexts)
+        CHECK_FALSE(text.contains("daemon"));
+}

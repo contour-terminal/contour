@@ -126,6 +126,62 @@ TEST_CASE("a whole tab moves into another workspace's tab well, the index clampe
     CHECK(h.model.workspace(h.other)->tabCount() == 2);
 }
 
+TEST_CASE("a tab move names the tab by any session of it, and the node joins it as a split", "[vthost][move]")
+{
+    SECTION("a pane joins the lone tab of another workspace, which keeps its own active pane's place")
+    {
+        auto h = TwoWorkspaces {};
+        auto const moved = applyMoveNode(h.model,
+                                         MoveNode { .sourceKind = raw(MoveSourceKind::Pane),
+                                                    .sourceSessions = { 1 },
+                                                    .targetKind = raw(MoveTargetKind::Tab),
+                                                    .targetSession = 4 },
+                                         h.hooks);
+        REQUIRE(moved.has_value());
+        CHECK(moved->tab == h.lone->id());
+        CHECK(h.lone->paneCount() == 2);
+        CHECK(h.lone->rootPane()->first()->session().value == 4);
+        CHECK(h.lone->rootPane()->second()->session().value == 1);
+        CHECK(h.pair->paneCount() == 1);
+    }
+    SECTION("the only tab of a workspace joins another tab, and the emptied workspace goes")
+    {
+        auto h = TwoWorkspaces {};
+        auto const workspaces = h.model.workspaceCount();
+        auto const moved = applyMoveNode(h.model,
+                                         MoveNode { .sourceKind = raw(MoveSourceKind::Tab),
+                                                    .sourceSessions = { 4 },
+                                                    .targetKind = raw(MoveTargetKind::Tab),
+                                                    .targetSession = 3 },
+                                         h.hooks);
+        REQUIRE(moved.has_value());
+        CHECK(h.model.workspace(h.other) == nullptr);
+        CHECK(h.model.workspaceCount() == workspaces - 1);
+        CHECK(h.single->paneCount() == 2);
+    }
+    SECTION("its own tab, or a session that is gone, is refused")
+    {
+        auto h = TwoWorkspaces {};
+        auto const own = applyMoveNode(h.model,
+                                       MoveNode { .sourceKind = raw(MoveSourceKind::Pane),
+                                                  .sourceSessions = { 1 },
+                                                  .targetKind = raw(MoveTargetKind::Tab),
+                                                  .targetSession = 2 },
+                                       h.hooks);
+        REQUIRE_FALSE(own.has_value());
+        CHECK(own.error().error == NodeMoveError::Model);
+        CHECK(own.error().model == vtworkspace::MoveError::SelfTarget);
+        auto const gone = applyMoveNode(h.model,
+                                        MoveNode { .sourceKind = raw(MoveSourceKind::Pane),
+                                                   .sourceSessions = { 1 },
+                                                   .targetKind = raw(MoveTargetKind::Tab),
+                                                   .targetSession = 99 },
+                                        h.hooks);
+        REQUIRE_FALSE(gone.has_value());
+        CHECK(gone.error().error == NodeMoveError::UnknownSession);
+    }
+}
+
 TEST_CASE("a pane moves to a new workspace and keeps its session", "[vthost][move]")
 {
     auto h = TwoWorkspaces {};

@@ -257,6 +257,7 @@ struct UiStyleTokens
     std::string_view submenuGlyph; ///< Marks a menu row that opens a sub-menu.
 
     std::string_view drillInGlyph {};       ///< Marks a command palette row that opens a list.
+    std::string_view breadcrumbGlyph {};    ///< Parts the title band's `workspace › tab`.
     std::string_view palettePromptGlyph {}; ///< Drawn before the palette's query; empty where there is none.
 };
 
@@ -474,6 +475,7 @@ namespace detail
         .menuGlyph = "▾",
         .submenuGlyph = "▸",
         .drillInGlyph = "›",
+        .breadcrumbGlyph = "›",
         .palettePromptGlyph = "",
     };
 
@@ -572,6 +574,7 @@ namespace detail
         .submenuGlyph = "▸",
         // A heavier triangle and a shell prompt: one cell each, set in the chrome's monospace font.
         .drillInGlyph = "▸",
+        .breadcrumbGlyph = "›",
         .palettePromptGlyph = "❯",
     };
 

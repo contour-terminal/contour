@@ -23,6 +23,26 @@ enum class TabBarPosition : uint8_t
 /// Number of @c TabBarPosition enumerators, derived from the last one.
 inline constexpr size_t TabBarPositionCount = static_cast<size_t>(TabBarPosition::Bottom) + 1;
 
+/// Where a window's tabs live: in the title band, or as the workspace sidebar's rows.
+enum class TabPlacement : uint8_t
+{
+    Top = 0, //!< The tab strip (see @c TabBarPosition) holds them: the historical layout.
+    Sidebar, //!< The workspace sidebar lists them under their workspace.
+};
+
+/// Number of @c TabPlacement enumerators, derived from the last one.
+inline constexpr size_t TabPlacementCount = static_cast<size_t>(TabPlacement::Sidebar) + 1;
+
+/// Whether the workspace sidebar is on screen.
+enum class SidebarVisibility : uint8_t
+{
+    Hidden = 0, //!< Not shown: it takes no width.
+    Shown,      //!< Shown at the window's left edge.
+};
+
+/// Number of @c SidebarVisibility enumerators, derived from the last one.
+inline constexpr size_t SidebarVisibilityCount = static_cast<size_t>(SidebarVisibility::Shown) + 1;
+
 /// When the GUI tab strip (tab bar) is shown.
 enum class TabBarVisibility : uint8_t
 {
@@ -38,6 +58,17 @@ namespace detail
     inline constexpr auto TabBarPositionTable = std::array {
         ConfigEnumInfo<TabBarPosition> { TabBarPosition::Top, "Top", "Top" },
         ConfigEnumInfo<TabBarPosition> { TabBarPosition::Bottom, "Bottom", "Bottom" },
+    };
+
+    inline constexpr auto TabPlacementTable = std::array {
+        ConfigEnumInfo<TabPlacement> { TabPlacement::Top, "Top", "Tab Strip" },
+        ConfigEnumInfo<TabPlacement> { TabPlacement::Sidebar, "Sidebar", "Workspace Sidebar" },
+    };
+
+    // The tokens the GUI state file spells the sidebar's last-used visibility by.
+    inline constexpr auto SidebarVisibilityTable = std::array {
+        ConfigEnumInfo<SidebarVisibility> { SidebarVisibility::Hidden, "hidden", "Hidden" },
+        ConfigEnumInfo<SidebarVisibility> { SidebarVisibility::Shown, "shown", "Shown" },
     };
 
     // The tokens are the ones already written into every existing contour.yml, so they are fixed;
@@ -69,6 +100,18 @@ template <>
 constexpr std::span<ConfigEnumInfo<TabBarPosition> const> configEnumValues() noexcept
 {
     return detail::TabBarPositionTable;
+}
+
+template <>
+constexpr std::span<ConfigEnumInfo<TabPlacement> const> configEnumValues() noexcept
+{
+    return detail::TabPlacementTable;
+}
+
+template <>
+constexpr std::span<ConfigEnumInfo<SidebarVisibility> const> configEnumValues() noexcept
+{
+    return detail::SidebarVisibilityTable;
 }
 
 template <>

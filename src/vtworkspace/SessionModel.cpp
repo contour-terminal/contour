@@ -278,6 +278,24 @@ Workspace* SessionModel::createWorkspace()
     return _workspaces.back().get();
 }
 
+void SessionModel::moveWorkspace(WorkspaceId workspaceId, int toIndex)
+{
+    auto const it =
+        std::ranges::find_if(_workspaces, [workspaceId](auto const& w) { return w->id() == workspaceId; });
+    if (it == _workspaces.end())
+        return;
+    auto const from = static_cast<int>(it - _workspaces.begin());
+    auto const to = std::clamp(toIndex, 0, static_cast<int>(_workspaces.size()) - 1);
+    if (from == to)
+        return;
+    // A rotation moves the one element and leaves the rest in their order, without a temporary owner.
+    if (from < to)
+        std::rotate(it, it + 1, _workspaces.begin() + to + 1);
+    else
+        std::rotate(_workspaces.begin() + to, it, it + 1);
+    _events.workspaceMoved(workspaceId, from, to);
+}
+
 void SessionModel::removeWorkspace(WorkspaceId workspaceId)
 {
     auto* win = workspace(workspaceId);
@@ -288,7 +306,11 @@ void SessionModel::removeWorkspace(WorkspaceId workspaceId)
     while (!win->_tabs.empty())
         closeTabAt(*win, static_cast<int>(win->_tabs.size()) - 1);
 
+    auto const index = static_cast<int>(
+        std::ranges::find_if(_workspaces, [workspaceId](auto const& w) { return w->id() == workspaceId; })
+        - _workspaces.begin());
     std::erase_if(_workspaces, [workspaceId](auto const& w) { return w->id() == workspaceId; });
+    _events.workspaceRemoved(workspaceId, index);
 }
 
 Workspace* SessionModel::workspace(WorkspaceId id) const noexcept
@@ -657,6 +679,14 @@ std::expected<SessionModel::MoveTargetNode, MoveError> SessionModel::resolveMove
             return std::unexpected(MoveError::UnknownTarget);
         return MoveTargetNode { .workspace = workspace };
     }
+    if (auto const* joined = std::get_if<TabTarget>(&target))
+    {
+        auto* workspace = this->workspace(joined->workspace);
+        auto* tab = workspace != nullptr ? workspace->tabAt(workspace->indexOf(joined->tab)) : nullptr;
+        if (tab == nullptr)
+            return std::unexpected(MoveError::UnknownTarget);
+        return MoveTargetNode { .workspace = workspace, .tab = tab, .leaf = tab->activePane() };
+    }
     return MoveTargetNode {};
 }
 
@@ -695,6 +725,9 @@ std::expected<MoveResult, MoveError> SessionModel::moveNode(MoveSource const& so
         if (std::holds_alternative<SwapTarget>(target) && src->leaf == nullptr)
             return std::unexpected(MoveError::TabIntoSwap);
     }
+    // A node joins another tab: into its own, a pane would only move beside itself or a tab into itself.
+    if (std::holds_alternative<TabTarget>(target) && dst->tab == src->tab)
+        return std::unexpected(MoveError::SelfTarget);
     if (auto const* well = std::get_if<TabWellTarget>(&target);
         well != nullptr && src->shape == SourceShape::WholeTab && dst->workspace == src->workspace)
     {
@@ -716,6 +749,8 @@ std::expected<MoveResult, MoveError> SessionModel::moveNode(MoveSource const& so
                 return swapWith(*src, *dst);
             else if constexpr (std::is_same_v<Drop, TabWellTarget>)
                 return moveIntoWell(*src, *dst->workspace, drop.index);
+            else if constexpr (std::is_same_v<Drop, TabTarget>)
+                return moveBeside(*src, *dst, JoinTabSide);
             else
                 return moveIntoWell(*src, *createWorkspace(), 0); // a workspace of its own, at its first slot
         },

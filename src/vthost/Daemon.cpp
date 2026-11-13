@@ -13,6 +13,7 @@
 #include <vthost/Daemon.hpp>
 
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/screen/GitHead.hpp>
 
 #include <vtpty/DetachedProcess.hpp>
 #include <vtpty/EnvironmentBlock.hpp>
@@ -26,6 +27,7 @@
 #include <core/Utils.hpp>
 #include <core/WideString.hpp>
 #include <core/async/Cancellation.hpp>
+#include <core/async/ThreadPoolExecutor.hpp>
 #include <core/async/WhenAll.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
@@ -787,7 +789,8 @@ namespace
                                                        proto::Capability::ClipboardTargets,
                                                        proto::Capability::SoftFonts,
                                                        proto::Capability::WorkspaceSwitch,
-                                                       proto::Capability::DaemonFollow });
+                                                       proto::Capability::DaemonFollow,
+                                                       proto::Capability::WorkspaceMeta });
         // Only a daemon with profiles resolves a name; one without keeps honouring a client's settings.
         if (config.profiles)
             capabilities.idents.push_back(std::to_underlying(proto::Capability::ProfileByName));
@@ -836,11 +839,15 @@ namespace
     /// AF_UNIX is a Windows citizen too (10 1803+ / afunix.h), so this needs no
     /// platform split — core::net::connectUnix owns the per-OS detail (winsock
     /// initialization, the SOCKET/int handle split, the path-length check).
-    /// @param loop The reactor driving the connect (not owned).
+    ///
+    /// The connect runs on a reactor of its own, made for this one probe: a loop is driven by exactly one
+    /// thread (core::net's G1), and a probe is a blocking call any thread may make, several at once.
     /// @param path The native socket file to probe.
     /// @return True if a daemon accepted the connection.
-    [[nodiscard]] bool daemonAccepts(core::net::EventLoop& loop, std::string const& path)
+    [[nodiscard]] bool daemonAccepts(std::string const& path)
     {
+        auto const source = core::net::makeDefaultBackend();
+        auto loop = core::net::EventLoop { *source };
         return loop.blockOn(core::net::connectUnix(&loop, path)).has_value();
     }
 
@@ -909,15 +916,14 @@ namespace
 #endif
     }
 
-    /// The operating system's DaemonSpawner: one reactor serves every probe it is asked.
+    /// The operating system's DaemonSpawner. Holds no reactor: each probe drives its own, so probes may run
+    /// on several threads at once.
     class NativeDaemonSpawner final: public DaemonSpawner
     {
       public:
         /// @param environment What every daemon it spawns runs under; std::nullopt for this process's own.
         explicit NativeDaemonSpawner(std::optional<std::vector<std::string>> environment):
-            _environment { std::move(environment) },
-            _source { core::net::makeDefaultBackend() },
-            _loop { *_source }
+            _environment { std::move(environment) }
         {
         }
 
@@ -929,15 +935,12 @@ namespace
 
         [[nodiscard]] DaemonPresence probe(std::filesystem::path const& socketPath) override
         {
-            return daemonAccepts(_loop, core::pathToUtf8(nativeSocketPath(socketPath)))
-                       ? DaemonPresence::Serving
-                       : DaemonPresence::Absent;
+            return daemonAccepts(core::pathToUtf8(nativeSocketPath(socketPath))) ? DaemonPresence::Serving
+                                                                                 : DaemonPresence::Absent;
         }
 
       private:
         std::optional<std::vector<std::string>> _environment;
-        std::unique_ptr<core::net::IoBackend> _source;
-        core::net::EventLoop _loop;
     };
 
     /// Spawns @p args detached, then blocks until a daemon serves at @p socketPath.
@@ -1181,25 +1184,36 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     // The same run of the daemon goes on across a live upgrade, one upgrade further.
     auto const lineage = lineageOf(config, image);
 
+    // The workspaces' git state: looked up by a `git` this daemon starts on a thread of its own, so a slow
+    // repository stalls the sidebar's branch and nothing else. Declared before the host, so the host goes
+    // first and the executor is joined next, while the probe it runs is still there. Started here, on the
+    // thread building the host, whose signal mask the thread inherits (as HostGitLookups does).
+    auto const gitFileSystem =
+        vtbackend::NativeGitFileSystem { core::platform::NativeFileSystem::instance() };
+    auto const gitCommands = makeNativeCommandRunner(gitProbeEnvironment(core::defaultEnvironment()));
+    auto const gitProbe = makeGitStatusProbe(gitFileSystem, *gitCommands);
+    auto gitExecutor = core::async::ThreadPoolExecutor { 1 };
+
     auto host = SessionHost {
         loop,
         makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath, config.placement),
         config.settings,
         core::defaultEnvironment(),
-        SessionHostConfig { .pumping = SessionPumping::Threaded,
-                            .sizePolicy = config.sizePolicy,
-                            .defaultCellPixelSize = config.defaultCellPixelSize,
-                            .startupLayout = config.startupLayout,
-                            .identity = thisHostIdentity(),
-                            .extensions = config.extensions ? config.extensions() : nullptr,
-                            .profiles = config.profiles,
-                            .profilePtys =
-                                config.profiles
-                                    ? makeProfilePtyFactory(config.shell, config.socketPath, config.placement)
-                                    : ProfilePtyFactory {},
-                            .instance = lineage.instance,
-                            .restore = std::move(restore),
-                            .handover = std::exchange(image, std::nullopt) }
+        SessionHostConfig {
+            .pumping = SessionPumping::Threaded,
+            .sizePolicy = config.sizePolicy,
+            .defaultCellPixelSize = config.defaultCellPixelSize,
+            .startupLayout = config.startupLayout,
+            .identity = thisHostIdentity(),
+            .workspaceGit = WorkspaceGitServices { .probe = *gitProbe, .executor = gitExecutor },
+            .extensions = config.extensions ? config.extensions() : nullptr,
+            .profiles = config.profiles,
+            .profilePtys = config.profiles
+                               ? makeProfilePtyFactory(config.shell, config.socketPath, config.placement)
+                               : ProfilePtyFactory {},
+            .instance = lineage.instance,
+            .restore = std::move(restore),
+            .handover = std::exchange(image, std::nullopt) }
     };
     if (auto const outcome = host.handoverOutcome(); !outcome)
         errorLog()("the handover was taken over in part (error {})", std::to_underlying(outcome.error()));

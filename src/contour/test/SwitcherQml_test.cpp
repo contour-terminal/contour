@@ -1,662 +1,903 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// The daemon and workspace switcher popup, offscreen: the controller over fake services, and its window as
-// the user drives it -- the rows and their states, the keys, a pick, and "New daemon…" -- under every chrome
-// row, as the sizes are tokens.
+// The daemon and workspace switcher popup, offscreen: Switcher.qml in a window's scene over a stand-in for
+// the WindowController that presents it, beside the workspace chip that opens it. Its controller's behaviour
+// is SwitcherController_test's; this file holds what needs a window.
 
-#include <contour/cli/NewDaemon.hpp>
 // The actions defined, not only declared: beside vthost::proto's ClosePane and ResizePane (through the switch
 // vocabulary), ActionsFwd's declarations alone read as a namespace mix-up to clang-tidy.
+#include <contour/command/SwitcherMenus.hpp>
 #include <contour/config/Actions.hpp>
+#include <contour/test/PopupWaits.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/QmlComponentsTestSupport.hpp>
+#include <contour/test/QmlMessageCapture.hpp>
+#include <contour/test/SwitcherFakes.hpp>
+#include <contour/test/SwitcherHost.hpp>
+#include <contour/window/StatusKinds.hpp>
 #include <contour/window/SwitcherController.hpp>
 
-#include <vtpty/ProcessPlacement.hpp>
-
 #include <QtCore/QCoreApplication>
-#include <QtGui/QGuiApplication>
+#include <QtGui/QAccessible>
+#include <QtGui/QColor>
+#include <QtGui/QFont>
 #include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickItem>
-#include <QtQuick/QQuickWindow>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
-#include <chrono>
-#include <map>
+#include <format>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <ranges>
-#include <span>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
-#include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
-#include <vtcontrol/ObjectRef.hpp>
-#include <vthost/DaemonBinary.hpp>
+#include <vthost/SocketPath.hpp>
 
 using namespace contour;
 using contour::session::SwitchMode;
-using contour::session::SwitchTarget;
+using contour::test::switcherLabelled;
+using contour::test::switcherWorkspaceRef;
 using contour::window::SwitcherWorkspaceState;
-using vthost::proto::SwitchDaemonKind;
+using contour::window::Urgency;
 
 namespace
 {
 
-/// Collects the visible items named @p name under @p root in the visual tree.
-void collectNamed(QQuickItem* root, QString const& name, QList<QQuickItem*>& found)
-{
-    if (root->objectName() == name && root->isVisible())
-        found.push_back(root);
-    for (auto* const child: root->childItems())
-        collectNamed(child, name, found);
-}
-
-/// Spins the event loop until @p predicate holds or three seconds have passed.
-template <typename Predicate>
-[[nodiscard]] bool waitUntil(Predicate const& predicate)
-{
-    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
-    while (!predicate() && std::chrono::steady_clock::now() < deadline)
-        QTest::qWait(10);
-    return predicate();
-}
-
-/// Types @p text into @p window, one key at a time.
-void typeText(QWindow* window, std::string_view text)
-{
-    for (auto const character: text)
-        QTest::keyClick(window, character);
-}
-
-/// @return A workspace's control id, made from @p name: equal for equal names.
-[[nodiscard]] vtcontrol::ObjectRef workspaceRef(std::string_view name)
-{
-    auto ref = vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace, .uuid = {} };
-    for (auto const [index, character]: std::views::zip(std::views::iota(std::size_t { 0 }), name))
-        ref.uuid.bytes.at(index % ref.uuid.bytes.size()) ^= static_cast<uint8_t>(character);
-    return ref;
-}
-
-[[nodiscard]] SwitchTarget labelled(std::string name, contour::session::WorkspaceTarget workspace = {})
-{
-    return SwitchTarget { .kind = SwitchDaemonKind::Label,
-                          .daemon = std::move(name),
-                          .workspace = std::move(workspace) };
-}
-
-/// Discovery that finds `default` and `admin` running.
-class FixedDiscovery final: public cli::IDaemonDiscovery
-{
-  public:
-    [[nodiscard]] std::vector<cli::DiscoveredDaemon> discover() override
-    {
-        return { { .label = "default", .socket = "/run/contour/default", .workspaces = 2 },
-                 { .label = "admin", .socket = "/run/contour/admin", .workspaces = 2 } };
-    }
-};
-
-/// A spawner that records what it starts and has the daemon serve once started: "New daemon…"'s real start
-/// (cli::startNamedDaemon) over it. Called on the controller's worker thread.
-class RecordingSpawner final: public vthost::DaemonSpawner
-{
-  public:
-    [[nodiscard]] std::expected<void, std::string> spawn(std::span<std::string const> argv,
-                                                         vtpty::ProcessPlacement& /*placement*/) override
-    {
-        auto const lock = std::lock_guard { _mutex };
-        _spawned.emplace_back(argv.begin(), argv.end());
-        return {};
-    }
-
-    [[nodiscard]] vthost::DaemonPresence probe(std::filesystem::path const& /*socketPath*/) override
-    {
-        auto const lock = std::lock_guard { _mutex };
-        return _spawned.empty() ? vthost::DaemonPresence::Absent : vthost::DaemonPresence::Serving;
-    }
-
-    [[nodiscard]] std::vector<std::vector<std::string>> spawned() const
-    {
-        auto const lock = std::lock_guard { _mutex };
-        return _spawned;
-    }
-
-  private:
-    mutable std::mutex _mutex;
-    std::vector<std::vector<std::string>> _spawned;
-};
-
-/// What the switcher was asked to do.
-struct Requested
-{
-    SwitchTarget target;
-    SwitchMode mode = SwitchMode::Switch;
-};
-
-/// The window the popup is over.
 constexpr auto ThisWindow = vtworkspace::WorkspaceId { 4 };
 
-/// The popup over fake services, in a window under one chrome row.
-struct SwitcherFixture
+[[nodiscard]] window::SwitcherWorkspace workspace(
+    uint64_t id,
+    std::string name,
+    SwitcherWorkspaceState state = SwitcherWorkspaceState::Hidden,
+    window::TabBadgeKind glyph = window::TabBadgeKind::None)
 {
-    QQmlEngine engine;
-    std::vector<Requested> requested;       ///< What the window switcher was asked, in order.
-    std::vector<std::string> listed;        ///< The daemons listed, by name, in order.
-    std::vector<std::string> startedLabels; ///< The labels a start was prepared for.
-    RecordingSpawner spawner;
-    vthost::InstalledDaemonBinary binary { "contour" };
-    vtpty::NoPlacement placement;
-    /// What each daemon's listing answers, by name.
-    std::map<std::string, std::vector<window::SwitcherWorkspace>> workspaces {
-        { "default",
-          { { .ref = workspaceRef("w1"),
-              .position = 1,
-              .name = "work",
-              .tabs = 4,
-              .state = SwitcherWorkspaceState::ThisWindow },
-            { .ref = workspaceRef("w3"),
-              .position = 3,
-              .name = "scratch",
-              .tabs = 1,
-              .state = SwitcherWorkspaceState::Hidden } } },
-        { "admin",
-          { { .ref = workspaceRef("a1"),
-              .position = 1,
-              .name = "ops",
-              .tabs = 3,
-              .state = SwitcherWorkspaceState::Hidden },
-            { .ref = workspaceRef("a2"),
-              .position = 2,
-              .name = "logs",
-              .tabs = 1,
-              .state = SwitcherWorkspaceState::ShownElsewhere } } },
-        { "studio",
-          { { .ref = workspaceRef("s1"),
-              .position = 1,
-              .name = "build",
-              .tabs = 2,
-              .state = SwitcherWorkspaceState::Hidden } } },
-    };
-    QObject receiver; ///< Where a listing is answered from, later, as the real one is.
-    std::unique_ptr<window::SwitcherController> switcher;
-    std::unique_ptr<QQuickWindow> window;
+    auto status = window::SwitcherStatus {};
+    status.glyph = glyph;
+    status.urgency = glyph == window::TabBadgeKind::Error ? Urgency::Failed : Urgency::Idle;
+    return window::SwitcherWorkspace { .ref = switcherWorkspaceRef(name),
+                                       .position = static_cast<uint32_t>(id),
+                                       .name = std::move(name),
+                                       .tabs = 1,
+                                       .state = state,
+                                       .status = std::move(status),
+                                       .id = id };
+}
 
-    explicit SwitcherFixture(config::ChromeStyle row = config::ChromeStyle::ContourLinux)
+[[nodiscard]] std::vector<window::SwitcherWorkspace> workWorkspaces()
+{
+    return { workspace(1, "contour", SwitcherWorkspaceState::ThisWindow),
+             workspace(2, "api-docs", SwitcherWorkspaceState::Hidden, window::TabBadgeKind::Error),
+             workspace(3, "docs") };
+}
+
+/// A switcher, the window that hosts it, and the wiring the application does: a choice or a cancel withdraws
+/// it from the window it is in; the chip opens it below itself.
+struct Fixture
+{
+    test::QmlMessageCapture warnings;
+    QQmlEngine engine;
+    test::SwitcherWorld world;
+    std::unique_ptr<window::SwitcherController> switcher;
+    /// The application's own wiring: a choice or a cancel withdraws it, a window gone abandons it.
+    std::unique_ptr<window::SwitcherPresenter> presenter;
+    test::MockSwitcherHost host;
+    std::unique_ptr<test::SwitcherWindow> scene;
+
+    explicit Fixture(config::ChromeStyle row = config::ChromeStyle::ContourLinux)
     {
         auto setup = test::defaultChromeSetup();
         setup.row = row;
         test::installChromeStyle(engine, setup);
-        switcher = std::make_unique<window::SwitcherController>(window::SwitcherServices {
-            .discovery = std::make_shared<FixedDiscovery>(),
-            .savedHosts =
-                [] {
-                    return std::vector<window::SwitcherDaemon> { window::SwitcherDaemon {
-                        .address = { .kind = SwitchDaemonKind::Host, .daemon = "studio", .workspace = {} },
-                        .workspaceCount = std::nullopt,
-                        .tag = "SSH",
-                        .expansion = window::SwitcherExpansion::Collapsed,
-                        .listing = window::SwitcherListing::NotListed,
-                        .failure = {},
-                        .workspaces = {} } };
-                },
-            .list =
-                [this](vtworkspace::WorkspaceId asking,
-                       SwitchTarget const& daemon,
-                       window::SwitcherListed done) {
-                    REQUIRE(asking == ThisWindow);
-                    listed.push_back(daemon.daemon);
-                    QMetaObject::invokeMethod(
-                        &receiver,
-                        [this, name = daemon.daemon, done = std::move(done)] { done(workspaces.at(name)); },
-                        Qt::QueuedConnection);
-                },
-            .request =
-                [this](vtworkspace::WorkspaceId asking, SwitchTarget target, SwitchMode mode) {
-                    REQUIRE(asking == ThisWindow);
-                    requested.push_back({ std::move(target), mode });
-                },
-            .startDaemon =
-                [this](std::string const& label) {
-                    startedLabels.push_back(label);
-                    return [this, label] {
-                        return cli::startNamedDaemon("/run/contour/" + label,
-                                                     { .spawner = spawner,
-                                                       .binary = binary,
-                                                       .placement = placement,
-                                                       .options = {},
-                                                       .timeout = std::chrono::seconds { 1 } });
-                    };
-                },
-        });
-        window = window::loadSwitcherWindow(engine, *switcher);
-        REQUIRE(window != nullptr);
+        switcher = std::make_unique<window::SwitcherController>(world.services());
+        presenter = std::make_unique<window::SwitcherPresenter>(*switcher);
+        host.onDropdown = [this](QRectF chip) {
+            open(host, chip);
+        };
+        scene = std::make_unique<test::SwitcherWindow>(engine, host);
     }
 
-    SwitcherFixture(SwitcherFixture const&) = delete;
-    SwitcherFixture& operator=(SwitcherFixture const&) = delete;
-    SwitcherFixture(SwitcherFixture&&) = delete;
-    SwitcherFixture& operator=(SwitcherFixture&&) = delete;
-    ~SwitcherFixture() = default;
-
-    /// Opens the popup over ThisWindow, which is on `default`, and shows it.
-    void open(window::SwitcherPrompt prompt = window::SwitcherPrompt::Browse,
-              std::optional<window::SwitcherDaemon> pick = std::nullopt,
-              SwitchMode mode = SwitchMode::Switch)
+    /// Opens the switcher in @p in: centred, or below @p chip as the chip's dropdown.
+    void open(test::MockSwitcherHost& in, std::optional<QRectF> chip = std::nullopt) const
     {
-        auto const picking = pick.has_value();
-        switcher->open(window::SwitcherOpening { .window = ThisWindow,
-                                                 .windowDaemon = labelled("default"),
-                                                 .mode = mode,
-                                                 .prompt = prompt,
-                                                 .pick = std::move(pick) });
-        window->show();
-        REQUIRE(QTest::qWaitForWindowExposed(window.get()));
-        if (prompt == window::SwitcherPrompt::NewDaemon)
-        {
-            REQUIRE(waitUntil([this] {
-                return named("switcherLabelField") != nullptr
-                       && named("switcherLabelField")->hasActiveFocus();
-            }));
-            return;
-        }
-        REQUIRE(waitUntil([this] {
-            return named("switcherFilter") != nullptr && named("switcherFilter")->hasActiveFocus();
-        }));
-        if (!picking)
-            // The window's own daemon is listed, and discovery found `admin`.
-            REQUIRE(waitUntil(
-                [this] { return titles().contains("admin") && titles().contains("3 \"scratch\""); }));
-        REQUIRE(waitUntil([this] { return all("switcherRow").size() == switcher->rowCount(); }));
+        presenter->open(in,
+                        window::SwitcherOpening { .window = ThisWindow,
+                                                  .windowDaemon = switcherLabelled("work"),
+                                                  .mode = SwitchMode::Switch,
+                                                  .prompt = window::SwitcherPrompt::Browse,
+                                                  .pick = std::nullopt,
+                                                  .scope = chip ? window::SwitcherScope::OneDaemon
+                                                                : window::SwitcherScope::Everything,
+                                                  .windowWorkspaces = workWorkspaces(),
+                                                  .origin = chip ? window::SwitcherOrigin::Chip
+                                                                 : window::SwitcherOrigin::Centred },
+                        chip);
     }
 
-    [[nodiscard]] QQuickItem* named(char const* name) const
+    /// Builds the switcher afresh, on the world as the test set it up.
+    void rebuild()
     {
-        auto const found = all(name);
-        return found.isEmpty() ? nullptr : found.front();
+        presenter.reset();
+        switcher = std::make_unique<window::SwitcherController>(world.services());
+        presenter = std::make_unique<window::SwitcherPresenter>(*switcher);
     }
 
-    /// The items named @p name, in on-screen order.
-    [[nodiscard]] QList<QQuickItem*> all(char const* name) const
+    /// Opens the switcher centred on its New Daemon level, as the NewDaemon action does.
+    void openNewDaemon()
     {
-        auto found = QList<QQuickItem*> {};
-        collectNamed(window->contentItem(), QString::fromLatin1(name), found);
-        std::ranges::sort(found, {}, [](QQuickItem const* item) { return item->mapToScene({}).y(); });
-        return found;
+        presenter->open(host,
+                        window::SwitcherOpening { .window = ThisWindow,
+                                                  .windowDaemon = switcherLabelled("work"),
+                                                  .mode = SwitchMode::Switch,
+                                                  .prompt = window::SwitcherPrompt::NewDaemon,
+                                                  .pick = std::nullopt,
+                                                  .scope = window::SwitcherScope::Everything,
+                                                  .windowWorkspaces = workWorkspaces(),
+                                                  .origin = window::SwitcherOrigin::Centred },
+                        std::nullopt);
+        test::waitForPopupOpened(*scene->popup);
     }
 
-    /// The rows' titles as drawn.
-    [[nodiscard]] QStringList titles() const
+    void openCentred()
     {
-        auto texts = QStringList {};
-        for (auto const* const item: all("switcherTitle"))
-            texts.push_back(item->property("text").toString());
-        return texts;
+        open(host);
+        test::waitForPopupOpened(*scene->popup);
     }
 
-    /// The rows' details as drawn.
-    [[nodiscard]] QStringList details() const
-    {
-        auto texts = QStringList {};
-        for (auto const* const item: all("switcherDetail"))
-            texts.push_back(item->property("text").toString());
-        return texts;
-    }
-
-    /// Selects the row titled @p title.
-    void selectTitled(QString const& title) const
-    {
-        auto const& rows = switcher->rows();
-        auto const found = std::ranges::find(rows, title.toStdString(), &window::SwitcherRow::title);
-        REQUIRE(found != rows.end());
-        switcher->setCurrentIndex(static_cast<int>(std::distance(rows.begin(), found)));
-    }
+    [[nodiscard]] QObject* colors() { return test::qmlSupport::providerOf(engine).colors(); }
 };
 
 } // namespace
 
-TEST_CASE("Switcher: the rows are grouped, with each workspace's tabs and state, under every chrome row",
+TEST_CASE("Switcher: the switcher opens in the window's scene, centred, and the chip's hangs below the chip",
           "[contour][switcher][qml]")
 {
-    auto const row = GENERATE(config::ChromeStyle::MacOS,
-                              config::ChromeStyle::Fluent,
-                              config::ChromeStyle::ContourLinux,
-                              config::ChromeStyle::Terminal);
-    INFO("row " << static_cast<int>(row));
-    auto fixture = SwitcherFixture { row };
-    fixture.open();
+    auto f = Fixture {};
+    f.openCentred();
+    auto* popupItem = qobject_cast<QQuickItem*>(f.scene->popup->property("contentItem").value<QObject*>());
+    REQUIRE(popupItem != nullptr);
+    CHECK(popupItem->window() == f.scene->window);
+    auto const placement = test::qmlSupport::providerOf(f.engine).palettePlacement(f.scene->window->width(),
+                                                                                   f.scene->window->height());
+    CHECK(f.scene->popup->property("x").toReal() == Catch::Approx(placement["x"].toReal()));
+    CHECK(f.scene->popup->property("y").toReal() == Catch::Approx(placement["y"].toReal()));
+    CHECK(f.host.isWorkspaceDropdownOpen() == false);
 
-    CHECK(fixture.titles()
-          == QStringList { "default",
-                           "1 \"work\"",
-                           "3 \"scratch\"",
-                           "+ new workspace on default",
-                           "admin",
-                           "New daemon…",
-                           "studio" });
-    auto const headers = fixture.all("switcherGroupHeader");
-    REQUIRE(headers.size() == 2);
-    auto const groupTitle = [&](int at) {
-        return fixture.switcher
-            ->data(fixture.switcher->index(at),
-                   static_cast<int>(window::SwitcherController::Roles::GroupTitleRole))
-            .toString();
+    QTest::keyClick(f.scene->window, Qt::Key_Escape);
+    test::waitForPopupClosed(*f.scene->popup);
+
+    // The chip's: below the chip, by the s1 gap.
+    QTest::mouseClick(f.scene->window,
+                      Qt::LeftButton,
+                      {},
+                      test::SwitcherWindow::sceneRectOf(*f.scene->chip).center().toPoint());
+    REQUIRE(f.host.dropdowns == 1);
+    test::waitForPopupOpened(*f.scene->popup);
+    auto const chip = test::SwitcherWindow::sceneRectOf(*f.scene->chip);
+    auto const gap = test::qmlSupport::providerOf(f.engine).space()->property("s1").toReal();
+    CHECK(f.scene->popup->property("y").toReal() == Catch::Approx(chip.bottom() + gap));
+    CHECK(f.host.isWorkspaceDropdownOpen());
+    CHECK(f.scene->chip->property("isOpen").toBool());
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Switcher: every row shows the shared status glyph", "[contour][switcher][qml]")
+{
+    for (auto const row: { config::ChromeStyle::MacOS,
+                           config::ChromeStyle::Fluent,
+                           config::ChromeStyle::ContourLinux,
+                           config::ChromeStyle::Terminal })
+    {
+        INFO("row " << static_cast<int>(row));
+        auto f = Fixture { row };
+        f.openCentred();
+        // api-docs, the second row, failed.
+        auto* item = f.scene->rowAt(1);
+        REQUIRE(item != nullptr);
+        auto* glyph = item->findChild<QQuickItem*>(QStringLiteral("switcherRowGlyph"));
+        REQUIRE(glyph != nullptr);
+        CHECK(glyph->property("kind").toInt() == static_cast<int>(window::TabBadgeKind::Error));
+        CHECK(glyph->property("known").toBool());
+        auto* calm = f.scene->rowAt(2)->findChild<QQuickItem*>(QStringLiteral("switcherRowGlyph"));
+        REQUIRE(calm != nullptr);
+        CHECK_FALSE(calm->property("known").toBool());
+        CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("Switcher: the selected row wears the platform's selection", "[contour][switcher][qml]")
+{
+    using config::ChromeStyle;
+    for (auto const row:
+         { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+    {
+        INFO("row " << static_cast<int>(row));
+        auto f = Fixture { row };
+        f.openCentred();
+        auto const current = f.switcher->currentIndex();
+        REQUIRE(current == 1); // the first workspace this window does not show
+        auto* selected = f.scene->rowAt(current);
+        REQUIRE(selected != nullptr);
+        auto* fill = selected->findChild<QQuickItem*>(QStringLiteral("switcherSelection"));
+        REQUIRE(fill != nullptr);
+        CHECK(fill->isVisible());
+        auto const emphasized = row == ChromeStyle::MacOS || row == ChromeStyle::Terminal;
+        CHECK(fill->property("color").value<QColor>()
+              == f.colors()
+                     ->property(emphasized ? "sidebarSelectionFill" : "sidebarSelectionFillInactive")
+                     .value<QColor>());
+        auto* pill = selected->findChild<QQuickItem*>(QStringLiteral("switcherAccentPill"));
+        REQUIRE(pill != nullptr);
+        CHECK(pill->isVisible() == (row == ChromeStyle::Fluent));
+        // The keyboard is in the field: no row wears the focus ring (ruling M3).
+        auto* ring = selected->findChild<QQuickItem*>(QStringLiteral("focusRing"));
+        REQUIRE(ring != nullptr);
+        CHECK_FALSE(ring->isVisible());
+
+        // The arrows move it, and the fill follows.
+        QTest::keyClick(f.scene->window, Qt::Key_Down);
+        CHECK(f.switcher->currentIndex() == current + 1);
+        CHECK(f.scene->part(QStringLiteral("switcherList"))->property("currentIndex").toInt() == current + 1);
+        CHECK_FALSE(f.scene->rowAt(current)
+                        ->findChild<QQuickItem*>(QStringLiteral("switcherSelection"))
+                        ->isVisible());
+        CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("Switcher: clicking the chip while its dropdown is open closes it and leaves it closed",
+          "[contour][switcher][qml]")
+{
+    auto f = Fixture {};
+    auto const chipCentre = test::SwitcherWindow::sceneRectOf(*f.scene->chip).center().toPoint();
+    QTest::mouseClick(f.scene->window, Qt::LeftButton, {}, chipCentre);
+    test::waitForPopupOpened(*f.scene->popup);
+    REQUIRE(f.host.dropdowns == 1);
+    CHECK(f.scene->chip->property("openDescription").toString() == "expanded");
+
+    QTest::mouseClick(f.scene->window, Qt::LeftButton, {}, chipCentre);
+    test::waitForPopupClosed(*f.scene->popup);
+    QTest::qWait(50);
+    CHECK_FALSE(f.scene->isOpen());
+    CHECK(f.host.dropdowns == 1);
+    CHECK_FALSE(f.host.isWorkspaceDropdownOpen());
+    CHECK(f.scene->chip->property("openDescription").toString() == "collapsed");
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Switcher: reopening over another window withdraws it from the first", "[contour][switcher][qml]")
+{
+    auto f = Fixture {};
+    auto other = test::MockSwitcherHost {};
+    auto otherScene = test::SwitcherWindow { f.engine, other };
+    f.openCentred();
+    auto const restoresBefore = f.scene->root->property("focusRestores").toInt();
+
+    f.open(other);
+    test::waitForPopupOpened(*otherScene.popup);
+    test::waitForPopupClosed(*f.scene->popup);
+    CHECK_FALSE(f.scene->isOpen());
+    CHECK(otherScene.isOpen());
+    CHECK(f.host.switcher() == nullptr);
+    CHECK(other.switcher() == f.switcher.get());
+    // The first window's keyboard went back to its terminal.
+    CHECK(f.scene->root->property("focusRestores").toInt() == restoresBefore + 1);
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Switcher: closing the window with the switcher open raises no QML error",
+          "[contour][switcher][qml]")
+{
+    auto f = Fixture {};
+    f.openCentred();
+    f.scene.reset();
+    QCoreApplication::processEvents();
+    // The controller outlives it, and opens elsewhere afterwards.
+    f.switcher->setFilter("doc");
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Switcher: Escape closes and hands the focus back", "[contour][switcher][qml]")
+{
+    auto f = Fixture {};
+    f.openCentred();
+    auto* field = f.scene->part(QStringLiteral("switcherFilter"));
+    REQUIRE(field != nullptr);
+    CHECK(field->hasActiveFocus());
+    auto const restores = f.scene->root->property("focusRestores").toInt();
+
+    // Typed text is cleared first, then Escape closes.
+    for (auto const character: std::string_view { "doc" })
+        QTest::keyClick(f.scene->window, character);
+    CHECK(f.switcher->filter() == "doc");
+    QTest::keyClick(f.scene->window, Qt::Key_Escape);
+    CHECK(f.switcher->filter().isEmpty());
+    CHECK(f.scene->isOpen());
+    QTest::keyClick(f.scene->window, Qt::Key_Escape);
+    test::waitForPopupClosed(*f.scene->popup);
+    CHECK(f.scene->root->property("focusRestores").toInt() == restores + 1);
+    CHECK(f.host.closes >= 1);
+    CHECK(f.world.requested.empty());
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+/// Moves the pointer over row @p index's entry, in two steps so the move counts as one.
+void hoverRow(Fixture& f, int index)
+{
+    auto* item = f.scene->rowAt(index);
+    REQUIRE(item != nullptr);
+    auto* entry = item->findChild<QQuickItem*>(QStringLiteral("switcherRow"));
+    REQUIRE(entry != nullptr);
+    auto const centre = test::SwitcherWindow::sceneRectOf(*entry).center().toPoint();
+    QTest::mouseMove(f.scene->window, centre - QPoint { 4, 0 });
+    QTest::mouseMove(f.scene->window, centre);
+    QCoreApplication::processEvents();
+}
+
+[[nodiscard]] QQuickItem* partOfRow(Fixture& f, int index, char const* name)
+{
+    auto* item = f.scene->rowAt(index);
+    return item != nullptr ? item->findChild<QQuickItem*>(QString::fromLatin1(name)) : nullptr;
+}
+} // namespace
+
+TEST_CASE("Switcher: hover fills the row under a moved pointer, shows its button, and leaves the selection",
+          "[contour][switcher][qml]")
+{
+    auto f = Fixture {};
+    f.openCentred();
+    REQUIRE(f.switcher->currentIndex() == 1);
+    // At rest after opening, nothing is hovered.
+    CHECK_FALSE(partOfRow(f, 2, "switcherHover")->isVisible());
+    CHECK_FALSE(partOfRow(f, 2, "switcherNewWindowButton")->isVisible());
+    // The selected row wears its button already.
+    CHECK(partOfRow(f, 1, "switcherNewWindowButton")->isVisible());
+
+    hoverRow(f, 2);
+    auto* hover = partOfRow(f, 2, "switcherHover");
+    REQUIRE(hover != nullptr);
+    CHECK(hover->isVisible());
+    CHECK(hover->property("color").value<QColor>()
+          == f.colors()->property("paletteHoverFill").value<QColor>());
+    CHECK(partOfRow(f, 2, "switcherNewWindowButton")->isVisible());
+    CHECK(f.switcher->currentIndex() == 1);
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Switcher: on every native row the hover fill is lighter than the selection's",
+          "[contour][switcher][qml]")
+{
+    // libadwaita's rule, which every native row follows: a hovered row never reads as the selected one.
+    for (auto const style:
+         { config::ChromeStyle::ContourLinux, config::ChromeStyle::Fluent, config::ChromeStyle::MacOS })
+    {
+        CAPTURE(static_cast<int>(style));
+        auto f = Fixture { style };
+        f.openCentred();
+        REQUIRE(f.switcher->currentIndex() == 1);
+        hoverRow(f, 2);
+        auto const* hover = partOfRow(f, 2, "switcherHover");
+        auto const* selection = partOfRow(f, 1, "switcherSelection");
+        REQUIRE(hover != nullptr);
+        REQUIRE(selection != nullptr);
+        REQUIRE(hover->isVisible());
+        REQUIRE(selection->isVisible());
+        auto const hoverFill = hover->property("color").value<QColor>();
+        auto const selectionFill = selection->property("color").value<QColor>();
+        CHECK(hoverFill != selectionFill);
+        CHECK(hoverFill.alpha() > 0);
+        // Lighter: a fainter wash of the same ink, or (macOS) a neutral one under the accent.
+        CHECK((hoverFill.alpha() < selectionFill.alpha()
+               || hoverFill.hslSaturation() < selectionFill.hslSaturation()));
+        CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("Switcher: the Terminal row draws no hover fill", "[contour][switcher][qml]")
+{
+    auto f = Fixture { config::ChromeStyle::Terminal };
+    f.openCentred();
+    hoverRow(f, 2);
+    auto const* hover = partOfRow(f, 2, "switcherHover");
+    REQUIRE(hover != nullptr);
+    CHECK(hover->property("color").value<QColor>().alpha() == 0);
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Switcher: the row's button opens that workspace in a new window", "[contour][switcher][qml]")
+{
+    auto f = Fixture {};
+    f.openCentred();
+    auto* button = partOfRow(f, 1, "switcherNewWindowButton");
+    REQUIRE(button != nullptr);
+    REQUIRE(button->isVisible());
+    QTest::mouseClick(
+        f.scene->window, Qt::LeftButton, {}, test::SwitcherWindow::sceneRectOf(*button).center().toPoint());
+    REQUIRE(f.world.requested.size() == 1);
+    CHECK(f.world.requested[0].target == switcherLabelled("work", switcherWorkspaceRef("api-docs")));
+    CHECK(f.world.requested[0].mode == SwitchMode::Open);
+    test::waitForPopupClosed(*f.scene->popup);
+}
+
+TEST_CASE("Switcher: a click switches on release inside the row; a drag out of it does nothing",
+          "[contour][switcher][qml]")
+{
+    auto f = Fixture {};
+    f.openCentred();
+    auto* entry = partOfRow(f, 2, "switcherRow");
+    REQUIRE(entry != nullptr);
+    auto const rect = test::SwitcherWindow::sceneRectOf(*entry);
+
+    SECTION("dragged out")
+    {
+        QTest::mousePress(f.scene->window, Qt::LeftButton, {}, rect.center().toPoint());
+        QTest::mouseMove(f.scene->window,
+                         rect.center().toPoint() + QPoint { 0, static_cast<int>(rect.height() * 3) });
+        QTest::mouseRelease(f.scene->window,
+                            Qt::LeftButton,
+                            {},
+                            rect.center().toPoint() + QPoint { 0, static_cast<int>(rect.height() * 3) });
+        CHECK(f.world.requested.empty());
+    }
+    SECTION("released inside")
+    {
+        QTest::mouseClick(f.scene->window, Qt::LeftButton, {}, rect.center().toPoint());
+        REQUIRE(f.world.requested.size() == 1);
+        CHECK(f.world.requested[0].target == switcherLabelled("work", switcherWorkspaceRef("docs")));
+        CHECK(f.world.requested[0].mode == SwitchMode::Switch);
+    }
+}
+
+TEST_CASE("Switcher: right-click, Menu and Shift+F10 open the row's menu from the sidebar's rows",
+          "[contour][switcher][qml]")
+{
+    auto f = Fixture {};
+    f.openCentred();
+    auto* menu = f.scene->popup->findChild<QObject*>(QStringLiteral("switcherRowMenu"));
+    REQUIRE(menu != nullptr);
+    auto const expected = [&] {
+        auto titles = QStringList {};
+        for (auto const& row: command::buildSwitcherRowMenu(
+                 command::SwitcherRowMenuState { .name = "api-docs",
+                                                 .owner = command::SwitcherMenuOwner::WindowDaemon,
+                                                 .workspace = f.world.services().workspaceMenu(ThisWindow, 2),
+                                                 .returnMode = command::SwitcherMenuReturn::Switch,
+                                                 .shown = command::SwitcherMenuShown::Elsewhere },
+                 f.world.style))
+            titles << QString::fromStdString(std::visit([](auto const& each) { return each.title; }, row));
+        return titles;
+    }();
+    auto const shownTitles = [&] {
+        auto titles = QStringList {};
+        for (auto const& entry: menu->property("entries").toList())
+            titles << entry.toMap()["title"].toString();
+        return titles;
     };
-    CHECK(groupTitle(0) == "This computer");
-    CHECK(groupTitle(1).isEmpty());
-    CHECK(groupTitle(6) == "Saved hosts");
-    CHECK(fixture.details().contains("running · 2 workspaces · this window"));
-    CHECK(fixture.details().contains("4 tabs · this window"));
-    CHECK(fixture.details().contains("1 tab · hidden"));
-    CHECK(fixture.details().contains("running · 2 workspaces"));
-    // A saved host not yet connected says so, and is not listed until expanded.
-    CHECK(fixture.details().contains("not yet connected"));
-    CHECK(fixture.listed == std::vector<std::string> { "default" });
-    CHECK(fixture.all("switcherTag").size() == 1);
-    CHECK(fixture.named("switcherKeys") != nullptr);
-    // The window takes its size from tokens, not from literals.
-    CHECK(fixture.window->width() > 0);
-    CHECK(fixture.window->minimumWidth() == fixture.window->width());
+
+    SECTION("Shift+F10")
+    {
+        QTest::keyClick(f.scene->window, Qt::Key_F10, Qt::ShiftModifier);
+    }
+    SECTION("Menu")
+    {
+        QTest::keyClick(f.scene->window, Qt::Key_Menu);
+    }
+    SECTION("right-click")
+    {
+        auto* entry = partOfRow(f, 1, "switcherRow");
+        REQUIRE(entry != nullptr);
+        QTest::mouseClick(f.scene->window,
+                          Qt::RightButton,
+                          {},
+                          test::SwitcherWindow::sceneRectOf(*entry).center().toPoint());
+    }
+    REQUIRE(QTest::qWaitFor([&] { return menu->property("visible").toBool(); }, test::PopupSettleMs));
+    CHECK(shownTitles() == expected);
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("Switcher: expanding a daemon lists its workspaces; a saved host connects then",
+TEST_CASE("Switcher: New Daemon shows the verdict, the equivalent command and one action row",
           "[contour][switcher][qml]")
 {
-    auto fixture = SwitcherFixture {};
-    fixture.open();
-
-    fixture.selectTitled("admin");
-    QTest::keyClick(fixture.window.get(), Qt::Key_Right);
-    REQUIRE(waitUntil([&] { return fixture.titles().contains("2 \"logs\""); }));
-    CHECK(fixture.details().contains("3 tabs · hidden"));
-    CHECK(fixture.details().contains("1 tab · shown elsewhere"));
-    CHECK(fixture.titles().contains("+ new workspace on admin"));
-
-    fixture.selectTitled("studio");
-    QTest::keyClick(fixture.window.get(), Qt::Key_Right);
-    REQUIRE(waitUntil([&] { return fixture.titles().contains("1 \"build\""); }));
-    CHECK(fixture.listed == std::vector<std::string> { "default", "admin", "studio" });
-
-    // Left collapses again, from a workspace row too.
-    fixture.selectTitled("1 \"build\"");
-    QTest::keyClick(fixture.window.get(), Qt::Key_Left);
-    REQUIRE(waitUntil([&] { return !fixture.titles().contains("1 \"build\""); }));
-    CHECK(fixture.switcher->rows()[static_cast<std::size_t>(fixture.switcher->currentIndex())].title
-          == "studio");
-}
-
-TEST_CASE("Switcher: it opens on the first daemon that is not the window's own", "[contour][switcher][qml]")
-{
-    auto fixture = SwitcherFixture {};
-    fixture.open();
-
-    REQUIRE(fixture.switcher->currentIndex() >= 0);
-    auto const& selected =
-        fixture.switcher->rows()[static_cast<std::size_t>(fixture.switcher->currentIndex())];
-    CHECK(selected.kind == window::SwitcherRowKind::Daemon);
-    CHECK(selected.title == "admin");
-
-    // A tap on another daemon's disclosure is the user's: the rebuild keeps the selection on that row rather
-    // than going back to where the popup started.
-    auto const rows = fixture.switcher->rows();
-    auto const ownRow = std::ranges::find_if(rows, [](auto const& row) {
-        return row.kind == window::SwitcherRowKind::Daemon && row.title == "default";
-    });
-    REQUIRE(ownRow != rows.end());
-    auto const ownIndex = static_cast<int>(std::distance(rows.begin(), ownRow));
-    fixture.switcher->toggle(ownIndex);
-    auto const& after = fixture.switcher->rows()[static_cast<std::size_t>(fixture.switcher->currentIndex())];
-    CHECK(after.title == "default");
-
-    // Asking for the discovery's answer again (a rebuild) keeps it there as well.
-    fixture.switcher->toggle(ownIndex);
-    CHECK(fixture.switcher->rows()[static_cast<std::size_t>(fixture.switcher->currentIndex())].title
-          == "default");
-}
-
-TEST_CASE("Switcher: a pointer at rest does not take the selection, a pointer that moves does",
-          "[contour][switcher][qml]")
-{
-    auto fixture = SwitcherFixture {};
-    fixture.open();
-    auto const initial = fixture.switcher->currentIndex();
-    auto const rows = fixture.all("switcherRow");
-    REQUIRE(rows.size() >= 3);
-    auto const centreOf = [](QQuickItem const* item) {
-        return item->mapToScene(QPointF { item->width() / 2, item->height() / 2 }).toPoint();
+    auto f = Fixture {};
+    f.world.found = { { .label = "work", .socket = "/run/contour/work", .workspaces = 3 } };
+    f.rebuild();
+    f.openNewDaemon();
+    REQUIRE(test::switcherWaitUntil([&] { return !f.switcher->isDiscovering(); }));
+    auto const typeLabel = [&](std::string_view label) {
+        f.switcher->setFilter({});
+        for (auto const character: label)
+            QTest::keyClick(f.scene->window, character);
+        QCoreApplication::processEvents();
     };
-    auto const other = std::ranges::find_if(
-        rows, [&](QQuickItem const* item) { return centreOf(item).y() != centreOf(rows[initial]).y(); });
-    REQUIRE(other != rows.end());
-    auto const otherIndex = static_cast<int>(std::distance(rows.begin(), other));
-
-    // The pointer shows up over a row: where it came to rest is no choice.
-    QTest::mouseMove(fixture.window.get(), centreOf(*other));
-    QCoreApplication::processEvents();
-    CHECK(fixture.switcher->currentIndex() == initial);
-
-    // Moving it is.
-    QTest::mouseMove(fixture.window.get(), centreOf(*other) + QPoint { 6, 1 });
-    QTest::mouseMove(fixture.window.get(), centreOf(*other) + QPoint { 12, 2 });
-    QCoreApplication::processEvents();
-    CHECK(fixture.switcher->currentIndex() == otherIndex);
-}
-
-TEST_CASE("Switcher: after the pointer moved once, keys and filtering still own the selection",
-          "[contour][switcher][qml]")
-{
-    auto fixture = SwitcherFixture {};
-    fixture.open();
-    auto const rows = fixture.all("switcherRow");
-    REQUIRE(rows.size() >= 4);
-    auto const centreOf = [](QQuickItem const* item) {
-        return item->mapToScene(QPointF { item->width() / 2, item->height() / 2 }).toPoint();
+    auto const text = [&](char const* name) {
+        auto* part = f.scene->part(QString::fromLatin1(name));
+        return part != nullptr && part->isVisible() ? part->property("text").toString() : QString {};
     };
-    auto const spot = centreOf(rows[3]);
 
-    // One nudge over a row, which selects it ...
-    QTest::mouseMove(fixture.window.get(), spot);
-    QTest::mouseMove(fixture.window.get(), spot + QPoint { 4, 0 });
-    QTest::mouseMove(fixture.window.get(), spot + QPoint { 8, 0 });
-    QCoreApplication::processEvents();
-    REQUIRE(fixture.switcher->currentIndex() == 3);
+    typeLabel("research");
+    CHECK(text("switcherLabelVerdict") == "Available");
+    CHECK(text("switcherLabelCommand") == "contour daemon --label research");
+    auto* command = f.scene->part(QStringLiteral("switcherLabelCommand"));
+    REQUIRE(command != nullptr);
+    CHECK(command->property("font").value<QFont>().family()
+          == test::qmlSupport::providerOf(f.engine)
+                 .type()
+                 ->property("monospaceFootnote")
+                 .value<QFont>()
+                 .family());
+    REQUIRE(f.switcher->rowCount() == 1);
+    CHECK(f.switcher->currentIndex() == 0);
+    CHECK(partOfRow(f, 0, "switcherSelection")->isVisible());
 
-    // ... then the keys step the selection, the pointer at rest where it is.
-    QTest::keyClick(fixture.window.get(), Qt::Key_Down);
-    QCoreApplication::processEvents();
-    CHECK(fixture.switcher->currentIndex() == 4);
-    QTest::keyClick(fixture.window.get(), Qt::Key_Up);
-    QTest::keyClick(fixture.window.get(), Qt::Key_Up);
-    QCoreApplication::processEvents();
-    CHECK(fixture.switcher->currentIndex() == 2);
+    typeLabel("work");
+    CHECK(text("switcherLabelVerdict").contains("already running"));
+    REQUIRE(f.switcher->rowCount() == 1);
+    CHECK(f.switcher->rows().front().title == "Switch this window to daemon “work”");
 
-    // Typing a filter rebuilds the rows under the pointer: the selection is the first match, not the row
-    // there.
-    for (auto const letter: { 'a', 'd', 'm' })
-        QTest::keyClick(fixture.window.get(), letter);
-    REQUIRE(waitUntil([&] { return fixture.switcher->filter() == QStringLiteral("adm"); }));
-    QCoreApplication::processEvents();
-    CHECK(fixture.switcher->currentIndex() == 0);
+    typeLabel("a b");
+    CHECK(text("switcherLabelVerdict").toStdString()
+          == vthost::describe(vthost::SocketLabelError::InvalidCharacter));
+    CHECK(text("switcherLabelCommand").isEmpty());
+    CHECK(f.switcher->rowCount() == 0);
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("Switcher: Return switches, Shift+Return opens, Esc changes nothing", "[contour][switcher][qml]")
+namespace
 {
-    auto fixture = SwitcherFixture {};
-    fixture.open();
-    QSignalSpy const finished { fixture.switcher.get(), &window::SwitcherController::finished };
-    QSignalSpy const cancelled { fixture.switcher.get(), &window::SwitcherController::cancelled };
-
-    SECTION("Return")
-    {
-        fixture.selectTitled("3 \"scratch\"");
-        QTest::keyClick(fixture.window.get(), Qt::Key_Return);
-        REQUIRE(fixture.requested.size() == 1);
-        CHECK(fixture.requested[0].target == labelled("default", workspaceRef("w3")));
-        CHECK(fixture.requested[0].mode == SwitchMode::Switch);
-        CHECK(finished.count() == 1);
-    }
-    SECTION("Shift+Return")
-    {
-        fixture.selectTitled("+ new workspace on default");
-        QTest::keyClick(fixture.window.get(), Qt::Key_Return, Qt::ShiftModifier);
-        REQUIRE(fixture.requested.size() == 1);
-        CHECK(fixture.requested[0].target == labelled("default", session::NewWorkspace {}));
-        CHECK(fixture.requested[0].mode == SwitchMode::Open);
-    }
-    SECTION("Return on an untouched popup switches to the first other daemon")
-    {
-        QTest::keyClick(fixture.window.get(), Qt::Key_Return);
-        REQUIRE(fixture.requested.size() == 1);
-        CHECK(fixture.requested[0].target == labelled("admin"));
-        CHECK(fixture.requested[0].mode == SwitchMode::Switch);
-    }
-    SECTION("a daemon row, arrived at with the arrows")
-    {
-        // The popup opens on the first daemon but the window's own; the list's top is the way to count from.
-        fixture.switcher->setCurrentIndex(0);
-        QTest::keyClick(fixture.window.get(), Qt::Key_Down);
-        QTest::keyClick(fixture.window.get(), Qt::Key_Down);
-        QTest::keyClick(fixture.window.get(), Qt::Key_Down);
-        QTest::keyClick(fixture.window.get(), Qt::Key_Down);
-        QTest::keyClick(fixture.window.get(), Qt::Key_Return);
-        REQUIRE(fixture.requested.size() == 1);
-        CHECK(fixture.requested[0].target == labelled("admin"));
-    }
-    SECTION("Esc")
-    {
-        QTest::keyClick(fixture.window.get(), Qt::Key_Escape);
-        CHECK(cancelled.count() == 1);
-        CHECK(finished.count() == 0);
-        CHECK(fixture.requested.empty());
-    }
-    SECTION("the filter narrows, and Return takes the match")
-    {
-        typeText(fixture.window.get(), "scratch");
-        REQUIRE(waitUntil([&] { return fixture.titles() == QStringList { "default", "3 \"scratch\"" }; }));
-        QTest::keyClick(fixture.window.get(), Qt::Key_Down);
-        QTest::keyClick(fixture.window.get(), Qt::Key_Return);
-        REQUIRE(fixture.requested.size() == 1);
-        CHECK(fixture.requested[0].target == labelled("default", workspaceRef("w3")));
-    }
-}
-
-TEST_CASE("Switcher: a pick lists the one daemon's workspaces and re-enters with the pick's mode",
-          "[contour][switcher][qml]")
+/// The Accessible attached object of @p item; null where it has none.
+[[nodiscard]] QObject* accessibleOf(QObject* item)
 {
-    auto fixture = SwitcherFixture {};
-    auto const mode = GENERATE(SwitchMode::Switch, SwitchMode::Open);
-    fixture.open(window::SwitcherPrompt::Browse,
-                 window::SwitcherDaemon { .address = labelled("admin"),
-                                          .workspaceCount = 2,
-                                          .tag = {},
-                                          .expansion = window::SwitcherExpansion::Expanded,
-                                          .listing = window::SwitcherListing::Listed,
-                                          .failure = {},
-                                          .workspaces = fixture.workspaces.at("admin") },
-                 mode);
+    if (item == nullptr)
+        return nullptr;
+    for (auto* child: item->findChildren<QObject*>(Qt::FindDirectChildrenOnly))
+        if (child->inherits("QQuickAccessibleAttached"))
+            return child;
+    return nullptr;
+}
+} // namespace
 
-    CHECK(fixture.titles() == QStringList { "1 \"ops\"", "2 \"logs\"", "+ new workspace on admin" });
-    REQUIRE(fixture.all("switcherGroupHeader").size() == 1);
-    CHECK(fixture.switcher->pickTitle() == "Workspaces on admin");
-    // Nothing is listed or discovered: the switch has listed it.
-    CHECK(fixture.listed.empty());
+TEST_CASE("Switcher: the field, rows, buttons and headers declare their roles; glyphs and pills are ignored",
+          "[contour][switcher][qml][a11y]")
+{
+    auto f = Fixture {};
+    f.openCentred();
+    auto const roleOf = [](QObject* item) {
+        auto const* attached = accessibleOf(item);
+        return attached != nullptr ? attached->property("role").toInt() : -1;
+    };
+    auto const nameOf = [](QObject* item) {
+        auto const* attached = accessibleOf(item);
+        return attached != nullptr ? attached->property("name").toString() : QString {};
+    };
 
-    SECTION("Return")
+    auto* field = f.scene->part(QStringLiteral("switcherFilter"));
+    CHECK(roleOf(field) == QAccessible::EditableText);
+    CHECK(nameOf(field) == "Switch workspace or daemon");
+
+    auto* selected = partOfRow(f, 1, "switcherRow");
+    CHECK(roleOf(selected) == QAccessible::ListItem);
+    CHECK(nameOf(selected) == "api-docs");
+    auto const* attached = accessibleOf(selected);
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("description").toString() == "workspace, failed, 1 tab");
+    CHECK(attached->property("selected").toBool());
+    auto* current = partOfRow(f, 0, "switcherRow");
+    CHECK(accessibleOf(current)->property("description").toString() == "workspace, current, 1 tab");
+
+    auto* button = partOfRow(f, 1, "switcherNewWindowButton");
+    CHECK(roleOf(button) == QAccessible::Button);
+    CHECK(nameOf(button) == "Open api-docs in a new window");
+
+    auto* header = partOfRow(f, 0, "switcherGroupHeader");
+    CHECK(roleOf(header) == QAccessible::Heading);
+
+    for (auto const* name: { "switcherRowGlyph", "switcherPill", "switcherDrillIn" })
     {
-        QTest::keyClick(fixture.window.get(), Qt::Key_Down);
-        QTest::keyClick(fixture.window.get(), Qt::Key_Return);
-        REQUIRE(fixture.requested.size() == 1);
-        CHECK(fixture.requested[0].target == labelled("admin", workspaceRef("a2")));
-        CHECK(fixture.requested[0].mode == mode);
+        INFO(name);
+        for (auto const index: { 0, 3 })
+            if (auto* part = partOfRow(f, index, name); part != nullptr)
+            {
+                auto const* ignored = accessibleOf(part);
+                REQUIRE(ignored != nullptr);
+                CHECK(ignored->property("ignored").toBool());
+            }
     }
-    SECTION("Esc cancels the switch")
-    {
-        QTest::keyClick(fixture.window.get(), Qt::Key_Escape);
-        CHECK(fixture.requested.empty());
-    }
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("Switcher: New daemon… starts a persistent daemon and opens a window on it",
+TEST_CASE(
+    "Switcher: reopened while a row menu's pick closes it, the pick is dropped and a dismissal closes it",
+    "[contour][switcher][qml]")
+{
+    // Reopened during its exit, a popup cancels the exit without closed() (QQuickPopup's transitionEnter):
+    // the pick then never ran, and must neither run on the next close nor keep that close from dismissing it.
+    auto f = Fixture {};
+    f.openCentred();
+    auto* const popup = f.scene->popup;
+    auto const closed = QSignalSpy { popup, SIGNAL(closed()) };
+    auto const picked = QSignalSpy { popup, SIGNAL(picked(QVariant)) };
+    popup->setProperty("_closingForPick", true);
+    auto const pick =
+        QVariant { QVariantMap { { QStringLiteral("row"), 1 }, { QStringLiteral("actionId"), 0 } } };
+    REQUIRE(QMetaObject::invokeMethod(popup, "closeThen", Q_ARG(QVariant, pick)));
+    REQUIRE(closed.isEmpty()); // still in its exit transition
+    f.openCentred();
+    CHECK(closed.isEmpty());
+
+    // Outside the popup, away from the chip.
+    QTest::mouseClick(f.scene->window, Qt::LeftButton, {}, QPoint { 1000, 620 });
+    test::waitForPopupClosed(*f.scene->popup);
+    QCoreApplication::processEvents(); // the deferred dispatch, were there one
+    CHECK(picked.isEmpty());
+    CHECK(f.host.switcher() == nullptr);
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Switcher: dismissing it by a click outside drops the daemon start under way",
           "[contour][switcher][qml][threading]")
 {
-    auto fixture = SwitcherFixture {};
-    QSignalSpy const finished { fixture.switcher.get(), &window::SwitcherController::finished };
+    auto f = Fixture {};
+    auto start = test::GatedStart {};
+    f.world.startJob = [&start] {
+        return start.job();
+    };
+    f.rebuild();
+    f.openNewDaemon();
+    for (auto const character: std::string_view { "research" })
+        QTest::keyClick(f.scene->window, character);
+    QTest::keyClick(f.scene->window, Qt::Key_Return);
+    REQUIRE(start.awaitStarted());
+    REQUIRE(f.switcher->isBusy());
 
-    SECTION("from the action")
-    {
-        fixture.open(window::SwitcherPrompt::NewDaemon);
-    }
-    SECTION("from its row")
-    {
-        fixture.open();
-        fixture.selectTitled("New daemon…");
-        QTest::keyClick(fixture.window.get(), Qt::Key_Return);
-        REQUIRE(waitUntil([&] {
-            return fixture.named("switcherLabelField") != nullptr
-                   && fixture.named("switcherLabelField")->hasActiveFocus();
-        }));
-    }
-    CHECK(fixture.switcher->isAskingLabel());
+    // Outside the popup, away from the chip.
+    QTest::mouseClick(f.scene->window, Qt::LeftButton, {}, QPoint { 1000, 620 });
+    test::waitForPopupClosed(*f.scene->popup);
+    CHECK_FALSE(f.switcher->isBusy());
+    CHECK(f.host.switcher() == nullptr);
 
-    typeText(fixture.window.get(), "work2");
-    QTest::keyClick(fixture.window.get(), Qt::Key_Return);
-    REQUIRE(waitUntil([&] { return !fixture.requested.empty(); }));
-
-    CHECK(fixture.startedLabels == std::vector<std::string> { "work2" });
-    auto const spawned = fixture.spawner.spawned();
-    REQUIRE(spawned.size() == 1);
-    CHECK(std::ranges::contains(spawned.front(), std::string { "--lifecycle=persistent" }));
-    REQUIRE(fixture.requested.size() == 1);
-    CHECK(fixture.requested[0].target == labelled("work2"));
-    CHECK(fixture.requested[0].mode == SwitchMode::Open);
-    CHECK(finished.count() == 1);
+    start.release();
+    QTest::qWait(100);
+    QCoreApplication::processEvents();
+    CHECK(f.world.requested.empty());
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("Switcher: New daemon… offers to switch to a label already running", "[contour][switcher][qml]")
+TEST_CASE("Switcher: the window it is presented in going away drops the daemon start under way",
+          "[contour][switcher][threading]")
 {
-    auto fixture = SwitcherFixture {};
-    fixture.open();
-    // Discovery has answered: `admin` is running.
-    fixture.selectTitled("New daemon…");
-    QTest::keyClick(fixture.window.get(), Qt::Key_Return);
-    REQUIRE(waitUntil([&] {
-        return fixture.named("switcherLabelField") != nullptr
-               && fixture.named("switcherLabelField")->hasActiveFocus();
-    }));
+    auto f = Fixture {};
+    auto start = test::GatedStart {};
+    f.world.startJob = [&start] {
+        return start.job();
+    };
+    f.rebuild();
+    auto other = std::make_unique<test::MockSwitcherHost>();
+    f.presenter->open(*other,
+                      window::SwitcherOpening { .window = ThisWindow,
+                                                .windowDaemon = switcherLabelled("work"),
+                                                .mode = SwitchMode::Switch,
+                                                .prompt = window::SwitcherPrompt::NewDaemon,
+                                                .pick = std::nullopt,
+                                                .scope = window::SwitcherScope::Everything,
+                                                .windowWorkspaces = workWorkspaces(),
+                                                .origin = window::SwitcherOrigin::Centred },
+                      std::nullopt);
+    f.switcher->submitLabel("research", static_cast<int>(SwitchMode::Switch));
+    REQUIRE(start.awaitStarted());
 
-    typeText(fixture.window.get(), "admin");
-    REQUIRE(waitUntil([&] { return fixture.named("switcherSwitchOffer") != nullptr; }));
-    CHECK(fixture.named("switcherSwitchOffer")->property("text").toString() == "Switch to daemon admin");
-    QTest::keyClick(fixture.window.get(), Qt::Key_Return);
-    QTest::qWait(50);
-    CHECK(fixture.startedLabels.empty());
-    CHECK(fixture.requested.empty());
-
-    QMetaObject::invokeMethod(fixture.named("switcherSwitchOffer"), "clicked");
-    REQUIRE(fixture.requested.size() == 1);
-    CHECK(fixture.requested[0].target == labelled("admin"));
-    CHECK(fixture.requested[0].mode == SwitchMode::Switch);
+    other.reset();
+    CHECK(f.presenter->host() == nullptr);
+    CHECK_FALSE(f.switcher->isBusy());
+    start.release();
+    QTest::qWait(100);
+    QCoreApplication::processEvents();
+    CHECK(f.world.requested.empty());
 }
 
-TEST_CASE("Switcher: New daemon… refuses an invalid label inline", "[contour][switcher][qml]")
+TEST_CASE("Switcher: a row menu's Rename… runs once the popup has closed, keeping the editor's focus",
+          "[contour][switcher][qml]")
 {
-    auto fixture = SwitcherFixture {};
-    fixture.open(window::SwitcherPrompt::NewDaemon);
-    CHECK(fixture.named("switcherLabelError") == nullptr);
+    auto f = Fixture {};
+    f.world.onRan = [&f] {
+        f.scene->editor->forceActiveFocus();
+    };
+    f.openCentred();
+    auto* menu = f.scene->popup->findChild<QObject*>(QStringLiteral("switcherRowMenu"));
+    REQUIRE(menu != nullptr);
+    QTest::keyClick(f.scene->window, Qt::Key_Menu);
+    REQUIRE(QTest::qWaitFor([&] { return menu->property("visible").toBool(); }, test::PopupSettleMs));
+    auto rename = -1;
+    for (auto const& entry: menu->property("entries").toList())
+        if (entry.toMap()["title"].toString().startsWith("Rename"))
+            rename = entry.toMap()["actionId"].toInt();
+    REQUIRE(rename >= 0);
 
-    typeText(fixture.window.get(), "a/b");
-    REQUIRE(waitUntil([&] { return fixture.named("switcherLabelError") != nullptr; }));
-    CHECK(fixture.named("switcherLabelError")->property("text").toString().contains("letters, digits"));
-    QTest::keyClick(fixture.window.get(), Qt::Key_Return);
+    QMetaObject::invokeMethod(menu, "picked", Q_ARG(int, rename));
+    test::waitForPopupClosed(*f.scene->popup);
+    REQUIRE(QTest::qWaitFor([&] { return !f.world.ran.empty(); }, test::PopupSettleMs));
     QTest::qWait(50);
-    CHECK(fixture.startedLabels.empty());
-    CHECK(fixture.requested.empty());
-    CHECK(fixture.window->isVisible());
-    // An empty label is refused on Return too.
-    fixture.switcher->submitLabel({});
-    CHECK(fixture.switcher->labelError().contains("Type a label"));
+    CHECK(f.scene->editor->hasActiveFocus());
+    CHECK(f.host.switcher() == nullptr);
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Switcher: its rows stay drawn while it fades out", "[contour][switcher][qml]")
+{
+    auto f = Fixture {};
+    f.openCentred();
+    auto* list = f.scene->part(QStringLiteral("switcherList"));
+    REQUIRE(list != nullptr);
+    auto const rows = list->property("count").toInt();
+    REQUIRE(rows > 0);
+
+    QTest::keyClick(f.scene->window, Qt::Key_Escape);
+    // Every frame of the exit transition still shows every row.
+    auto fewest = rows;
+    REQUIRE(QTest::qWaitFor(
+        [&] {
+            if (!f.scene->isOpen())
+                return true;
+            fewest = std::min(fewest, list->property("count").toInt());
+            return false;
+        },
+        test::PopupSettleMs));
+    CHECK(fewest == rows);
+    CHECK(f.host.switcher() == nullptr);
+}
+
+TEST_CASE("Switcher: hover finds the row under the pointer in a list scrolled down",
+          "[contour][switcher][qml]")
+{
+    // A list scrolled, or one whose rows changed above its top, no longer starts its content at 0.
+    auto f = Fixture {};
+    f.openCentred();
+    auto many = workWorkspaces();
+    for (auto const id: std::views::iota(uint64_t { 10 }, uint64_t { 40 }))
+        many.push_back(workspace(id, std::format("ws-{}", id)));
+    f.switcher->updateWindowWorkspaces(many);
+    QCoreApplication::processEvents();
+    auto* list = f.scene->part(QStringLiteral("switcherList"));
+    REQUIRE(list != nullptr);
+    QMetaObject::invokeMethod(list, "positionViewAtEnd");
+    QCoreApplication::processEvents();
+    REQUIRE(list->property("contentY").toDouble() > 0);
+    auto const last = list->property("count").toInt() - 1;
+    REQUIRE(QTest::qWaitFor([&] { return f.scene->rowAt(last) != nullptr; }, test::PopupSettleMs));
+
+    hoverRow(f, last);
+    auto* hover = partOfRow(f, last, "switcherHover");
+    REQUIRE(hover != nullptr);
+    CHECK((hover->isVisible() || last == f.switcher->currentIndex()));
+    CHECK(f.scene->popup->property("hoveredIndex").toInt() == last);
+}
+
+TEST_CASE("Switcher: a row without a status glyph keeps its column, so every title lines up",
+          "[contour][switcher][qml]")
+{
+    auto f = Fixture {};
+    f.openCentred();
+    auto const titleX = [&](int index) {
+        auto const* title = partOfRow(f, index, "switcherTitle");
+        REQUIRE(title != nullptr);
+        return title->mapToScene(QPointF {}).x();
+    };
+    // contour has no glyph, api-docs the failed one.
+    REQUIRE(f.switcher->rows()[0].status.glyph == window::TabBadgeKind::None);
+    REQUIRE(f.switcher->rows()[1].status.glyph == window::TabBadgeKind::Error);
+    CHECK(titleX(0) == Catch::Approx(titleX(1)));
+}
+
+TEST_CASE("Switcher: in a narrow picker a long detail gives way to the title", "[contour][switcher][qml]")
+{
+    // The Terminal row's picker is narrow: a failed command's reason and time must not cut the title.
+    auto f = Fixture { config::ChromeStyle::Terminal };
+    f.openCentred();
+    auto own = workWorkspaces();
+    own[1].status.gitText = "feature/a-rather-long-branch-name";
+    own[1].status.reason = { .label = "exit 1",
+                             .separator = " · ",
+                             .command = "make deploy-everything-to-production" };
+    f.switcher->updateWindowWorkspaces(own);
+    QCoreApplication::processEvents();
+    auto* title = partOfRow(f, 1, "switcherTitle");
+    REQUIRE(title != nullptr);
+    CHECK(title->width() == Catch::Approx(title->implicitWidth()));
+    // The detail stays inside the row.
+    auto const* detail = partOfRow(f, 1, "switcherDetail");
+    auto const* entry = partOfRow(f, 1, "switcherRow");
+    REQUIRE(detail != nullptr);
+    REQUIRE(entry != nullptr);
+    CHECK(detail->mapToScene(QPointF {}).x() >= title->mapToScene(QPointF { title->width(), 0 }).x());
+    // The command gives way, and its separator with it: the words do not end in a dangling ` · `.
+    auto const* command = partOfRow(f, 1, "switcherDetailCommand");
+    auto const* separator = partOfRow(f, 1, "switcherDetailSeparator");
+    auto const* words = partOfRow(f, 1, "switcherDetailText");
+    REQUIRE(command != nullptr);
+    REQUIRE(separator != nullptr);
+    REQUIRE(words != nullptr);
+    CHECK_FALSE(command->isVisible());
+    CHECK_FALSE(separator->isVisible());
+    CHECK_FALSE(words->property("text").toString().endsWith(QStringLiteral(" · ")));
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Switcher: a detail with room shows the separator before its command", "[contour][switcher][qml]")
+{
+    auto f = Fixture { config::ChromeStyle::ContourLinux };
+    f.openCentred();
+    auto own = workWorkspaces();
+    own[1].status.reason = { .label = "exit 1", .separator = " · ", .command = "make" };
+    f.switcher->updateWindowWorkspaces(own);
+    QCoreApplication::processEvents();
+    auto const* command = partOfRow(f, 1, "switcherDetailCommand");
+    auto const* separator = partOfRow(f, 1, "switcherDetailSeparator");
+    REQUIRE(command != nullptr);
+    REQUIRE(separator != nullptr);
+    CHECK(command->isVisible());
+    CHECK(separator->isVisible());
+    CHECK(separator->property("text").toString() == QStringLiteral(" · "));
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Switcher: a narrow footer gives hints up before the description loses its room",
+          "[contour][switcher][qml]")
+{
+    // The Terminal row's picker is the narrowest: the full set would cut the description to nothing.
+    auto f = Fixture { config::ChromeStyle::Terminal };
+    f.openCentred();
+    auto const* hints = f.scene->part(QStringLiteral("switcherFooterHints"));
+    auto const* description = f.scene->part(QStringLiteral("switcherFooterDescription"));
+    REQUIRE(hints != nullptr);
+    REQUIRE(description != nullptr);
+    auto const sets = f.switcher->footerHintSets();
+    REQUIRE(sets.size() > 1);
+    auto const shown = hints->property("text").toString();
+    CHECK(sets.contains(shown));
+    CHECK(shown != sets.front());
+    // Whole, and ending in Escape's hint, which no set gives up.
+    CHECK(hints->width() == Catch::Approx(hints->implicitWidth()));
+    CHECK(shown.endsWith(sets.back().section(QStringLiteral(" · "), -1)));
+    auto const room =
+        test::qmlSupport::providerOf(f.engine).size()->property("paletteFooterDescription").toReal();
+    REQUIRE(room > 0);
+    CHECK(description->width() >= std::min(description->implicitWidth(), room) - 1);
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Switcher: a wide footer shows every hint", "[contour][switcher][qml]")
+{
+    auto f = Fixture { config::ChromeStyle::ContourLinux };
+    f.openCentred();
+    auto const* hints = f.scene->part(QStringLiteral("switcherFooterHints"));
+    REQUIRE(hints != nullptr);
+    CHECK(hints->property("text").toString() == f.switcher->footerHints());
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Switcher: a filter that matches nothing says so above New Workspace", "[contour][switcher][qml]")
+{
+    auto f = Fixture {};
+    f.openCentred();
+    for (auto const character: std::string_view { "zzz" })
+        QTest::keyClick(f.scene->window, character);
+    QCoreApplication::processEvents();
+    auto* empty = f.scene->part(QStringLiteral("switcherEmpty"));
+    REQUIRE(empty != nullptr);
+    CHECK(empty->isVisible());
+    CHECK(empty->property("text").toString() == f.switcher->emptyText());
+    REQUIRE(f.switcher->rowCount() == 1);
+    auto* list = f.scene->part(QStringLiteral("switcherList"));
+    REQUIRE(list != nullptr);
+    // Above the rows.
+    CHECK(empty->mapToScene(QPointF {}).y() < list->mapToScene(QPointF {}).y());
+    CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
 }

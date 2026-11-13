@@ -48,6 +48,11 @@ struct SessionAttention
     FinishedBlockBadge finished = FinishedBlockBadge::None; ///< The strongest unseen finished command.
     BellMark bell = BellMark::None;                         ///< A bell the user has not seen.
     uint64_t seenStatusGeneration = 0; ///< The newest program-status generation the user has seen.
+    /// The newest serial of each flag a daemon stated for the pane that the user has seen
+    /// (DirectoryPane::activitySerial and its siblings); a flag with a newer serial is news again.
+    uint64_t seenActivitySerial = 0;
+    uint64_t seenBellSerial = 0;     ///< @see seenActivitySerial
+    uint64_t seenFinishedSerial = 0; ///< @see seenActivitySerial
 
     bool operator==(SessionAttention const&) const = default;
 };
@@ -161,9 +166,37 @@ class TabAttention
     [[nodiscard]] AttentionChange noteSeen(PaneKey session, uint64_t statusGeneration)
     {
         auto const held = of(session);
-        auto const next = SessionAttention { .seenStatusGeneration =
-                                                 std::max(held.seenStatusGeneration, statusGeneration) };
+        auto next = held;
+        next.activity = TabActivity::None;
+        next.finished = FinishedBlockBadge::None;
+        next.bell = BellMark::None;
+        next.seenStatusGeneration = std::max(held.seenStatusGeneration, statusGeneration);
         return store(session, next);
+    }
+
+    /// The flag serials a daemon stated for one pane (DirectoryPane).
+    struct FlagSerials
+    {
+        uint64_t activity = 0; ///< @see DirectoryPane::activitySerial
+        uint64_t bell = 0;     ///< @see DirectoryPane::bellSerial
+        uint64_t finished = 0; ///< @see DirectoryPane::finishedSerial
+    };
+
+    /// Notes that the user sees @p session, a pane listed from a daemon's directory: as noteSeen(), and the
+    /// output, bell and finished command the daemon stated so far count as seen too.
+    /// @param session The pane now seen.
+    /// @param statusGeneration The newest generation among its program-status records.
+    /// @param serials The serials its directory entry carries.
+    /// @return Changed when it held a mark or any seen value grew.
+    [[nodiscard]] AttentionChange noteSeen(PaneKey session, uint64_t statusGeneration, FlagSerials serials)
+    {
+        auto const first = noteSeen(session, statusGeneration);
+        auto next = of(session);
+        next.seenActivitySerial = std::max(next.seenActivitySerial, serials.activity);
+        next.seenBellSerial = std::max(next.seenBellSerial, serials.bell);
+        next.seenFinishedSerial = std::max(next.seenFinishedSerial, serials.finished);
+        auto const second = store(session, next);
+        return first == AttentionChange::Changed ? first : second;
     }
 
     /// Drops @p session's marks: it is gone.

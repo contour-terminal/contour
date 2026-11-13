@@ -61,6 +61,8 @@ namespace
         scalar<&Config::notificationCloseTimeout>("notification_close_timeout"),
         scalar<&Config::tabBarPosition>("tab_bar_position"),
         scalar<&Config::tabBarVisibility>("tab_bar_visibility"),
+        scalar<&Config::tabPlacement>("tab_placement"),
+        section<&Config::sidebar>("sidebar"),
         scalar<&Config::theme>("theme"),
         scalar<&Config::uiStyle>("ui_style"),
         scalar<&Config::windowControlStyle>("window_control_style"),

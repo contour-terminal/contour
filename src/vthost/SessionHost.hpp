@@ -74,6 +74,7 @@
 #include <vthost/SessionSnapshot.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
 #include <vthost/ViewRouting.hpp>
+#include <vthost/WorkspaceGit.hpp>
 #include <vthost/WorkspaceVisibility.hpp>
 #include <vthost/handover/HandoverCodec.hpp>
 #include <vthost/handover/HandoverImage.hpp>
@@ -132,6 +133,25 @@ enum class OperationError : uint8_t
     UnknownOperation,   ///< The operation is not one this host knows, as from a newer client.
 };
 
+/// Why the host closed no workspace.
+enum class WorkspaceCloseError : uint8_t
+{
+    UnknownWorkspace = 0, ///< No workspace of the host has that id.
+    LastWorkspace,        ///< It is the host's only workspace, which is never closed.
+};
+
+/// @param error The failure.
+/// @return A lower-case phrase for a log line.
+[[nodiscard]] constexpr std::string_view describe(WorkspaceCloseError error) noexcept
+{
+    switch (error)
+    {
+        case WorkspaceCloseError::UnknownWorkspace: return "there is no such workspace";
+        case WorkspaceCloseError::LastWorkspace: return "the last workspace cannot be closed";
+    }
+    return "unknown error";
+}
+
 /// @param error The failure.
 /// @return A lower-case phrase for a log line.
 [[nodiscard]] constexpr std::string_view describe(OperationError error) noexcept
@@ -171,6 +191,19 @@ struct WorkingDirectoryChangedSignal
 struct ProgramStatusChangedSignal
 {
     vtbackend::ProgramStatusReason reason = vtbackend::ProgramStatusReason::Report; ///< Why they changed.
+};
+
+/// How often the host looks the git state of its workspaces up again, while a window follows the daemon: a
+/// change a shell reports (a directory, a finished command) is looked up at once, so this only catches what
+/// no report tells, such as a fetch or a commit made elsewhere.
+inline constexpr auto WorkspaceGitPollInterval = std::chrono::seconds { 30 };
+
+/// A workspace's git state changed: it is in another branch, ahead or behind by another count, or left its
+/// repository. Unlike a SessionSignal it is of a workspace, not of a session.
+struct WorkspaceGitChangedSignal
+{
+    vtworkspace::WorkspaceId workspace {}; ///< The workspace.
+    std::optional<GitInfo> git {};         ///< Its state now; nullopt when it is in no repository.
 };
 
 /// One terminal event a hosted session forwards to the host beyond the bell and notifications: a value copy,
@@ -265,6 +298,10 @@ class SessionStreamEvents
     /// the most recently focused window does. Fires on the connection whose role changed, once per change.
     /// @param role The role the connection has now.
     virtual void raiseRoleChanged(proto::RaiseRole /*role*/) {}
+
+    /// A workspace's git state changed. Fires on the loop thread, only for a host given WorkspaceGitServices.
+    /// @param signal Which workspace, and its state now.
+    virtual void workspaceGitChanged(WorkspaceGitChangedSignal const& /*signal*/) {}
 
     /// @p session rang the bell (BEL).
     virtual void sessionBell(vtworkspace::SessionId /*session*/) {}
@@ -925,6 +962,9 @@ struct SessionHostConfig
     /// machine's, and none at all for any other (a test's in-memory files are not to be paired with the real
     /// disk's).
     std::optional<vtbackend::GitHeadServices> git {};
+    /// Where each workspace's git branch and ahead/behind are looked up, for a sidebar to show; nullopt for
+    /// none, which tracks nothing. Borrowed: it outlives the host.
+    std::optional<WorkspaceGitServices> workspaceGit {};
     /// Where a connection's reads pause while its input backs up in a session, and resume.
     InputWatermarks inputWatermarks {};
     /// The status-line extensions every session it spawns runs; null for none, which constructs, polls and
@@ -973,10 +1013,11 @@ struct QuiescedHostSession
 /// moment.
 struct QuiescedHost
 {
-    vtworkspace::WorkspaceTreeState tree {};    ///< The workspaces, tabs and panes.
-    vtworkspace::ModelIdState modelIds {};      ///< The model's id counters.
-    vtworkspace::SessionId nextSessionId { 1 }; ///< The id the host mints its next session with.
-    std::vector<QuiescedHostSession> sessions;  ///< Every session still running, by id ascending.
+    vtworkspace::WorkspaceTreeState tree {};      ///< The workspaces, tabs and panes.
+    vtworkspace::ModelIdState modelIds {};        ///< The model's id counters.
+    vtworkspace::SessionId nextSessionId { 1 };   ///< The id the host mints its next session with.
+    vtworkspace::WorkspaceId defaultWorkspace {}; ///< The workspace a creation naming none lands in.
+    std::vector<QuiescedHostSession> sessions;    ///< Every session still running, by id ascending.
 };
 
 /// Why a host's sessions could not all be quiesced. Every session runs on as before.
@@ -1064,7 +1105,8 @@ class SessionHost final: public vtworkspace::ModelEvents
 
     /// @return The host's workspace (the daemon starts with exactly one): where a creation naming no
     /// workspace lands.
-    ///         One a move emptied is removed, and another workspace takes this role (@see discardWorkspace).
+    ///         One emptied (by a move, or by its last session ending) is removed unless it is the only one,
+    ///         and another workspace takes this role (@see discardWorkspace).
     [[nodiscard]] vtworkspace::WorkspaceId workspaceId() const noexcept { return _workspace; }
 
     /// @return The UUIDs and labels of this host's workspaces, tabs and panes.
@@ -1198,11 +1240,17 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return The created, empty workspace.
     [[nodiscard]] vtworkspace::Workspace& createEmptyWorkspace();
 
-    /// Removes a workspace that holds no tab -- one createEmptyWorkspace() made and nothing filled, or one a
-    /// move emptied -- forgetting its name. The host's own workspace (workspaceId()) removed, the
-    /// first workspace left becomes it.
-    /// @param workspace The workspace; one that holds a tab is left alone.
+    /// Removes a workspace that holds no tab -- one createEmptyWorkspace() made and nothing filled, one a
+    /// move emptied, or one whose last session ended -- forgetting its name. The host's own workspace
+    /// (workspaceId()) removed, the first workspace left becomes it. The host's only workspace is kept,
+    /// empty, so a creation naming no workspace, and an attach, still have somewhere to land.
+    /// @param workspace The workspace; one that holds a tab, or the only one, is left alone.
     void discardWorkspace(vtworkspace::WorkspaceId workspace);
+
+    /// Removes every workspace that holds no tab, as discardWorkspace() does, keeping the host's own when
+    /// none holds one. Run as a handover is restored: a release before this one kept a workspace whose last
+    /// session ended.
+    void discardEmptyWorkspaces();
 
     /// Counts @p client as an attached native client (`ConnectionRole::Attach`), from its handshake on.
     /// Idempotent.
@@ -1236,17 +1284,14 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///         selecting the session's workspace; nullopt when none does, or the session is in none.
     [[nodiscard]] std::optional<ConnectionId> clipboardTargetOf(vtworkspace::SessionId session) const;
 
+    /// Closes workspace @p workspace in one step: ends every session it holds now, then removes it. The
+    /// host's only workspace is never closed: a creation naming no workspace, and an attach, land in it.
+    /// @param workspace The workspace.
+    /// @return Nothing once it is gone; else why nothing changed.
+    std::expected<void, WorkspaceCloseError> closeWorkspace(vtworkspace::WorkspaceId workspace);
+
     /// @return The workspace some window selected last; nullopt when none ever did.
     [[nodiscard]] std::optional<uint64_t> lastSelectedWorkspace() const noexcept { return _lastSelected; }
-
-    /// @param workspace A workspace.
-    /// @return Whether it ended: its last session ended and left it without a tab, and none was added or
-    ///         moved there since. The model may keep it, but it is no workspace to select, unlike an empty
-    ///         one that never held a tab (createEmptyWorkspace()).
-    [[nodiscard]] bool hasEnded(vtworkspace::WorkspaceId workspace) const
-    {
-        return _endedWorkspaces.contains(workspace.value);
-    }
 
     /// @param workspace A workspace.
     /// @return Shown while some attached client selects it, else Hidden.
@@ -1414,6 +1459,24 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return Whether a frame timer is armed for @p session's kitty animations: only while one on its page
     ///         on display is due to advance.
     [[nodiscard]] bool ticksKittyAnimations(vtworkspace::SessionId session) const noexcept;
+
+    /// @return Whether the git state of the workspaces is looked up every WorkspaceGitPollInterval: once a
+    ///         workspace's directory is known, while the host holds one.
+    [[nodiscard]] bool pollsWorkspaceGit() const noexcept
+    {
+        return _workspaceGitPoll.has_value() && !_workspaceGitPoll->settled();
+    }
+
+    /// Looks the git state of @p workspace up again, for the directory of its active pane, whether or not a
+    /// window follows the daemon (workspace.list states it to every client), and arms the poll. Does nothing
+    /// for a host that tracks none, or for a pane whose directory is unknown. Public so tests can name it.
+    /// @param workspace The workspace.
+    void refreshWorkspaceGit(vtworkspace::WorkspaceId workspace);
+
+    /// @param workspace A workspace of this host.
+    /// @return Its git state as last told (@see WorkspaceGitChangedSignal), for a client attaching now;
+    ///         nullopt when it is in no repository, or nothing is looked up yet, or the host tracks none.
+    [[nodiscard]] std::optional<GitInfo> gitInfoOf(vtworkspace::WorkspaceId workspace) const;
 
     /// @return Whether the hosted programs are asked who runs in the foreground: only while a session's
     ///         extensions follow it.
@@ -1584,6 +1647,8 @@ class SessionHost final: public vtworkspace::ModelEvents
                   vtworkspace::TabId tab,
                   int fromIndex,
                   int toIndex) override;
+    void workspaceMoved(vtworkspace::WorkspaceId workspace, int fromIndex, int toIndex) override;
+    void workspaceRemoved(vtworkspace::WorkspaceId workspace, int index) override;
     void tabAboutToBeMovedToWorkspace(vtworkspace::WorkspaceId from,
                                       int fromIndex,
                                       vtworkspace::WorkspaceId to,
@@ -1743,6 +1808,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// logged and dropped, leaving the profile's directory in force and the program and arguments alone.
     /// @param request A request whose commandOverride is engaged.
     void settleStartDirectory(SessionSpawnRequest& request) const;
+
+    /// @return The name a workspace made from @p request starts with: after the folder its first shell
+    ///         @p seeded starts in (@see vtbackend::defaultWorkspaceName); empty when that is unknown.
+    [[nodiscard]] std::string defaultWorkspaceLabel(SessionSpawnRequest const& request,
+                                                    vtworkspace::SessionId seeded) const;
 
     /// Destroys session @p session and forgets everything kept beside it, so no erase site can leave a
     /// stale entry behind.
@@ -1979,6 +2049,21 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Opens @p request for every client to answer, unless it is answered or open already.
     void offerPermission(vtworkspace::SessionId session, proto::PermissionRequest request);
 
+    /// Looks every workspace up again.
+    void refreshAllWorkspaceGit();
+
+    /// Looks up again every workspace whose active pane is in @p session.
+    /// @param session The session whose directory or command state just changed.
+    void refreshWorkspaceGitOf(vtworkspace::SessionId session);
+
+    /// Arms the poll of the workspaces' git state, unless it is armed, tracked by nobody, or the host holds
+    /// no workspace.
+    void armWorkspaceGitPoll();
+
+    /// What the git poll does: looks every workspace up again, and re-arms while the host holds a workspace.
+    /// @param host The SessionHost.
+    static void pollWorkspaceGit(void* host);
+
     /// Arms the once-a-second poll of the hosted programs, unless it is armed or no session's extensions
     /// follow the foreground process. Asked again whenever a session's extensions are replaced.
     void armForegroundPoll();
@@ -2196,6 +2281,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Asks the hosted programs who runs in the foreground, once a second; armed only while a session runs
     /// extensions.
     std::optional<core::net::DeadlineTimer> _foregroundPoll;
+    /// Looks the workspaces' git state up every WorkspaceGitPollInterval, once a workspace's directory is
+    /// known.
+    std::optional<core::net::DeadlineTimer> _workspaceGitPoll;
+    /// Looks the workspaces' git state up off the loop thread; null when the host tracks none.
+    std::unique_ptr<WorkspaceGitTracker> _workspaceGit;
     /// Releases what runners retired, a while after a session with extensions went. @see
     /// scheduleRetiredRelease
     std::optional<core::net::DeadlineTimer> _retiredRelease;
@@ -2230,11 +2320,6 @@ class SessionHost final: public vtworkspace::ModelEvents
                       proto::InputKind kind);
     /// The workspace some window selected last. @see noteSelected
     std::optional<uint64_t> _lastSelected;
-    /// The workspaces whose last session ended and that hold no tab since (@see hasEnded); a tab added or
-    /// moved there takes it out. Ids are not reused within a run. Not carried across a live upgrade: the new
-    /// process sees an ended workspace as an empty one, selectable again, which shows nothing worse than an
-    /// empty window.
-    std::set<uint64_t> _endedWorkspaces;
     /// Names the raise holder again, and tells the connection that gained the role and the one that lost it.
     void settleRaiseRole();
     /// The value the last focus report was stamped with. @see noteFocus

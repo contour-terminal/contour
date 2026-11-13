@@ -89,7 +89,9 @@ std::expected<void, HandoverError> SessionHost::restoreHandover(HandoverImage im
         std::max(image.nextSessionId.value, vtworkspace::firstUnusedSessionId(image.tree).value),
         [](uint64_t next, HandoverSession const& session) { return std::max(next, session.id.value + 1); });
 
-    if (_model.workspaceCount() > 0)
+    if (_model.workspace(vtworkspace::WorkspaceId { image.defaultWorkspace }) != nullptr)
+        _workspace = vtworkspace::WorkspaceId { image.defaultWorkspace };
+    else if (_model.workspaceCount() > 0)
         _workspace = _model.workspaceAt(0)->id();
     else
     {
@@ -106,6 +108,8 @@ std::expected<void, HandoverError> SessionHost::restoreHandover(HandoverImage im
         if (!_sessions.contains(session.value))
             if (auto const [workspace, tab, leaf] = _model.findSessionLeaf(session); leaf != nullptr)
                 _model.closePane(workspace->id(), tab->id(), leaf->id());
+
+    discardEmptyWorkspaces();
 
     // Each session crossed with the scrollback limit its terminal was built with, which its state restored:
     // the configuration this image loaded applies to it now, before any client sees it, as a reload would.

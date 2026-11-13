@@ -38,6 +38,16 @@ namespace
         return state.inputProtection == InputProtection::On;
     }
 
+    bool isSidebarShown(MenuBarState const& state) noexcept
+    {
+        return state.sidebar == config::SidebarVisibility::Shown;
+    }
+
+    bool isSidebarHidden(MenuBarState const& state) noexcept
+    {
+        return !isSidebarShown(state);
+    }
+
     bool isMouseForwarded(MenuBarState const& state) noexcept
     {
         return state.mouseForwarding == vtbackend::MouseForwarding::Forwarded;
@@ -318,6 +328,9 @@ namespace
             Table::command(ToggleStatusLine {}),
             windowCommand(ToggleMouseForwarding {}, "Mouse Forwarding").checkedWhen(isMouseForwarded),
             Table::command(ToggleTitleBar {}),
+            // Named for what picking it does, as macOS apps do, rather than a checkmark on "Show Sidebar".
+            inWindow(Table::command(ToggleSidebar {}, "Show Sidebar").shownWhen(isSidebarHidden)),
+            inWindow(Table::command(ToggleSidebar {}, "Hide Sidebar").shownWhen(isSidebarShown)),
             Table::command(ToggleFullscreen {}),
             Table::separator(),
             Table::submenu("Scroll", rowsOf<scrollTemplate>),

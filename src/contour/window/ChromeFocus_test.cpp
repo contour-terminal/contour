@@ -68,3 +68,30 @@ TEST_CASE("chromeFocusTarget always lands on a present area", "[chromefocus]")
                 CHECK(isPresent(target, presence));
             }
 }
+
+namespace
+{
+constexpr auto WithSidebar = ChromeAreaPresence { .sidebar = AreaPresence::Present,
+                                                  .tabs = AreaPresence::Present,
+                                                  .toolbar = AreaPresence::Present };
+} // namespace
+
+TEST_CASE("the focus cycle visits the sidebar when present", "[chromefocus]")
+{
+    CHECK(chromeFocusTarget(ChromeFocusAction::Next, ChromeArea::Terminal, WithSidebar)
+          == ChromeArea::Sidebar);
+    CHECK(chromeFocusTarget(ChromeFocusAction::Next, ChromeArea::Sidebar, WithSidebar) == ChromeArea::Tabs);
+    CHECK(chromeFocusTarget(ChromeFocusAction::Previous, ChromeArea::Tabs, WithSidebar)
+          == ChromeArea::Sidebar);
+    CHECK(chromeFocusTarget(ChromeFocusAction::Previous, ChromeArea::Sidebar, WithSidebar)
+          == ChromeArea::Terminal);
+}
+
+TEST_CASE("a hidden sidebar is skipped", "[chromefocus]")
+{
+    auto const hidden =
+        ChromeAreaPresence { .tabs = AreaPresence::Present, .toolbar = AreaPresence::Present };
+    CHECK_FALSE(isPresent(ChromeArea::Sidebar, hidden));
+    CHECK(chromeFocusTarget(ChromeFocusAction::Next, ChromeArea::Terminal, hidden) == ChromeArea::Tabs);
+    CHECK(chromeFocusTarget(ChromeFocusAction::Previous, ChromeArea::Tabs, hidden) == ChromeArea::Terminal);
+}

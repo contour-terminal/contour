@@ -9,6 +9,7 @@
 /// `SessionId`: it follows the shell, not the `PaneId` tree node, which changes under swaps.
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -93,8 +94,46 @@ class ObjectRegistry
     /// Any of the model's handles.
     using Handle = std::variant<vtworkspace::WorkspaceId, vtworkspace::TabId, vtworkspace::SessionId>;
 
+    /// Told that an object's label changed: the object, and its label now (empty when it was cleared).
+    using LabelObserver = std::function<void(vtcontrol::ObjectRef const&, std::string_view)>;
+
+  private:
+    struct LabelObservers;
+
+  public:
+    /// Keeps a label observer subscribed for its own lifetime. It may outlive the registry, and the registry
+    /// may move: the observers live apart from both.
+    class Subscription
+    {
+      public:
+        Subscription(Subscription const&) = delete;
+        Subscription& operator=(Subscription const&) = delete;
+        Subscription(Subscription&& other) noexcept;
+        Subscription& operator=(Subscription&& other) noexcept;
+        ~Subscription();
+
+      private:
+        friend class ObjectRegistry;
+        Subscription(std::weak_ptr<LabelObservers> observers, uint64_t id) noexcept;
+        void unsubscribe() noexcept;
+
+        std::weak_ptr<LabelObservers> _observers;
+        uint64_t _id = 0;
+    };
+
     /// @param uuids Where fresh UUIDs come from.
     explicit ObjectRegistry(std::shared_ptr<vtcontrol::UuidSource> uuids);
+
+    // Not copyable: a copy would share the label observers of the original.
+    ObjectRegistry(ObjectRegistry const&) = delete;
+    ObjectRegistry& operator=(ObjectRegistry const&) = delete;
+
+    /// Moves are noexcept, so a moved-from registry holds nothing at all -- not even its observer list or its
+    /// UUID source. It may only be destroyed or assigned to; any other call on it is undefined.
+    ObjectRegistry(ObjectRegistry&&) noexcept = default;
+    /// @copydoc ObjectRegistry(ObjectRegistry&&)
+    ObjectRegistry& operator=(ObjectRegistry&&) noexcept = default;
+    ~ObjectRegistry() = default;
 
     /// @return A fresh UUID, bound to nothing yet.
     [[nodiscard]] vtcontrol::Uuid mint();
@@ -128,10 +167,17 @@ class ObjectRegistry
     /// @return The model's handle for it, or nothing when it is gone or never was.
     [[nodiscard]] std::optional<Handle> find(vtcontrol::ObjectRef const& ref) const;
 
-    /// Labels an object; an empty label clears it. Ignored for an object that is not bound.
+    /// Labels an object; an empty label clears it. Ignored for an object that is not bound. A label that
+    /// changed is told to every label observer (@see onLabelChanged()).
     /// @param ref The object.
     /// @param label The label.
     void setLabel(vtcontrol::ObjectRef const& ref, std::string label);
+
+    /// Subscribes @p observer to every change of a label setLabel() makes, of any kind of object, in
+    /// subscription order. A label dropped with its object (forget()) is not a change: the object is gone.
+    /// @param observer Told of each change, on the loop thread.
+    /// @return The subscription; the observer is told nothing once it is destroyed.
+    [[nodiscard]] Subscription onLabelChanged(LabelObserver observer);
 
     /// @param ref The object.
     /// @return Its label, or an empty view for none. Valid until the next change of that label.
@@ -164,6 +210,7 @@ class ObjectRegistry
     Table _tabs;
     Table _panes;
     std::map<vtcontrol::ObjectRef, std::string> _labels;
+    std::shared_ptr<LabelObservers> _labelObservers; ///< @see onLabelChanged()
 };
 
 } // namespace vthost

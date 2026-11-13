@@ -7,7 +7,9 @@
 /// Pure, so every rule is a row of a table test.
 
 #include <contour/session/WindowSwitching.hpp>
+#include <contour/window/SidebarTree.hpp>
 #include <contour/window/SwitcherRows.hpp>
+#include <contour/window/SwitcherStatus.hpp>
 #include <contour/window/WorkspaceDirectory.hpp>
 
 #include <cstddef>
@@ -90,6 +92,9 @@ struct WorkspaceRow
     std::size_t tabs = 0;                                                         ///< How many tabs it holds.
     /// The window of this process that shows it; none when no window here does.
     std::optional<vtworkspace::WorkspaceId> shownByWindowHere;
+    /// What it asks of the user, as another daemon's listing states it (window::switcherStatusOf()); idle for
+    /// a row made from the window's own directory, whose status is the sidebar's (windowWorkspacesOf()).
+    window::SwitcherStatus status {};
 };
 
 /// Raise and focus the window of this process that already shows the workspace.
@@ -160,8 +165,8 @@ using ShownHere = std::function<std::optional<vtworkspace::WorkspaceId>(uint64_t
 
 /// The rows a switch on the window's own daemon decides on, from the directory its connection holds: no
 /// listing of the daemon is asked for. A workspace holding no tab is left out, as workspaceRowsOf() leaves it
-/// out; each carries a reference only this process uses, as a directory carries no control ids (@see
-/// namesControlId()).
+/// out. Each carries the control id the daemon stated for it, or, for one it stated none for, a reference
+/// only this process uses (@see resolvesFromDirectory()).
 /// @param directory Every workspace of the daemon, in its order.
 /// @param shownHere Which window here shows each.
 /// @return The rows, in the daemon's order.
@@ -169,8 +174,18 @@ using ShownHere = std::function<std::optional<vtworkspace::WorkspaceId>(uint64_t
                                                         ShownHere const& shownHere);
 
 /// @param workspace What a switch names.
-/// @return Whether it names the workspace by its control id, which only the daemon's listing resolves.
+/// @return Whether it names the workspace by its control id, which only a listing, or a directory carrying
+///         control ids, resolves.
 [[nodiscard]] bool namesControlId(session::WorkspaceTarget const& workspace);
+
+/// @param workspace What a switch on the window's own daemon names.
+/// @param directory The directory the window's connection holds.
+/// @return Whether @p directory resolves it without a listing of the daemon: always, unless it names a
+///         control id (or the end of one) that no workspace of the directory holding a tab carries -- a
+///         reconnect's empty directory, a workspace created before its batch settled, a daemon that states
+///         no control ids.
+[[nodiscard]] bool resolvesFromDirectory(session::WorkspaceTarget const& workspace,
+                                         window::WorkspaceDirectory const& directory);
 
 /// The switcher popup's rows of a daemon's workspaces (@see window::switcherRows).
 /// @param rows The daemon's workspaces, as workspaceRowsOf() made them.
@@ -178,6 +193,18 @@ using ShownHere = std::function<std::optional<vtworkspace::WorkspaceId>(uint64_t
 /// @return One per row, in their order: its control id to choose it by, and where it is shown.
 [[nodiscard]] std::vector<window::SwitcherWorkspace> switcherWorkspacesOf(std::span<WorkspaceRow const> rows,
                                                                           vtworkspace::WorkspaceId window);
+
+/// The switcher popup's rows of the window's own daemon: switcherWorkspacesOf() of @p rows, each with the
+/// status the window's sidebar shows for it (the workspace row of the same daemon id), so a workspace looks
+/// the same in the sidebar and the switcher; idle for one the sidebar does not list yet.
+/// @param rows The daemon's workspaces, as workspaceRowsOf() made them from the window's directory.
+/// @param sidebarWorkspaces The window's sidebar's workspace rows (SidebarListing::workspaces).
+/// @param window The window the popup is over.
+/// @return One per row, in their order.
+[[nodiscard]] std::vector<window::SwitcherWorkspace> windowWorkspacesOf(
+    std::span<WorkspaceRow const> rows,
+    std::span<window::SidebarRow const> sidebarWorkspaces,
+    vtworkspace::WorkspaceId window);
 
 /// How a workspace is named to the user: its label, else its active tab's title, else "workspace N".
 /// @param label The workspace's label; empty for none.

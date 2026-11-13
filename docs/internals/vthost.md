@@ -165,6 +165,7 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `PanesReprojected` | 19 | `panes-reprojected` | `PanesReprojected`: a client re-sends every pane's size when asked. The daemon no longer offers it (it restores the survivors' pane sizes itself, see "One grid, several clients"); the client keeps offering and answering it for daemons built while it was sent |
 | `WorkspaceSwitch` | 24 | `workspace-switch` | `SwitchRequest` / `SwitchReply`: the daemon asks one window (the caller's, else the raise holder) to switch to another daemon or workspace, and the client answers with the outcome |
 | `DaemonFollow` | 28 | `daemon-follow` | `SelectWorkspace` / `ReportFocus` / `NotifyRole` / `PaneSummary`: a connection selects one workspace and is sent it in full, the others as summaries, and the daemon routes bells, clipboard writes and switch requests by the windows' focus (see [which workspace a client selects](#which-workspace-a-client-selects)) |
+| `WorkspaceMeta` | 29 | `workspace-meta` | `WorkspaceMeta`: each workspace's label, control id and git state, in full after the hello and for a workspace created since, and as a delta on each change (see [workspace metadata](#workspace-metadata)) |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -385,6 +386,38 @@ on that axis fires nothing. On success the model fires `paneOrientationChanged`,
 pushed the layout in the same batch machinery a move uses; there is no reply PDU. The GUI sends it for
 "Toggle Split Orientation" when the daemon serves `MoveNode` and does not flip locally, because the next
 layout push would revert a local flip; against an older daemon it keeps the local toggle.
+
+<a id="workspace-metadata"></a>
+**Workspace metadata.** `WorkspaceMeta` (tag 56, server->client, gated on `Capability::WorkspaceMeta`) carries
+what a window lists of a workspace besides its layout: its control id (the UUID of `workspace.list`, so a
+window resolves a switch naming one from its own directory, with no listing), its label and its git state.
+The daemon sends every field once per workspace, right after that workspace's first layout on the connection,
+and from then on a delta: absent optionals are unchanged, an empty label clears it, and a git state of kind
+`None` says the workspace is in no repository anymore. A workspace's removal is told by its layout emptying.
+
+The workspace order travels in the same PDU: `position`, the workspace's 0-based place in the daemon's model,
+is sent with the full state and again for every workspace whose place changed (a reorder, a workspace created
+or removed ahead of it). A client lists its workspaces by it, not by the order layouts arrive in, which a
+batch that re-sends only some of them does not preserve.
+
+**`MoveWorkspace`** (tag 57, gated on `Capability::WorkspaceMeta`) moves a workspace in that order: `workspace`
+is the daemon's id and `toPosition` the 0-based place, which `SessionModel::moveWorkspace` clamps. An unknown
+workspace is a logged no-op. The model's `workspaceMoved` event makes every connection send the new positions.
+**`CloseWorkspace`** (tag 59, same gate) closes a workspace in one step: `SessionHost::closeWorkspace` ends every
+session the workspace holds at that moment, a tab another client added a moment ago included, and removes the
+workspace. The daemon's only workspace is never closed, and an unknown workspace is a logged no-op.
+
+A workspace ends with its last tab: once its tab count drops to zero (its last session ended, its last tab
+moved away), `SessionHost::discardWorkspace` removes it from the model, the object registry and so from the
+next snapshot, and every connection is pushed its layout emptied and the new positions. The one exception is
+the daemon's only workspace, kept empty as the one a creation naming no workspace, and an attach, land in. A
+client lists no workspace whose layout is empty. A handover drops the tabless workspaces an older release
+kept the same way.
+**`SetWorkspaceLabel`** (tag 58, same gate) sets a workspace's label through the object registry, so every
+window hears it as a `WorkspaceMeta` delta and every control subscriber as `workspace.labelChanged`. Neither
+has a reply.
+Label changes come from the object registry's label observer (`ObjectRegistry::onLabelChanged`), which also
+publishes the control event `workspace.labelChanged`.
 
 <a id="workspace-follow-and-switch"></a>
 **Workspace selection and switch.** `SelectWorkspace` (client->server, gated on `Capability::DaemonFollow`) names

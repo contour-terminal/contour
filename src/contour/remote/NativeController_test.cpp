@@ -7,6 +7,7 @@
 #include <contour/test/AppFixture.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/RecordingAnnouncer.hpp>
+#include <contour/window/AttentionJump.hpp>
 
 #include <vtbackend/testing/TestHelpers.hpp>
 
@@ -72,6 +73,8 @@
 #include <iterator>
 #include <span>
 
+#include <vtcontrol/ObjectRef.hpp>
+#include <vtcontrol/Uuid.hpp>
 #include <vthost/Askpass.hpp>
 #include <vthost/AuthorizedKeys.hpp>
 #include <vthost/ClientSizePolicy.hpp>
@@ -4465,6 +4468,243 @@ TEST_CASE("a PaneSummary updates the directory without a mirror", "[attach][cont
     controller.stop();
 }
 
+namespace
+{
+
+/// @return The workspace @p workspace as the controller's directory lists it; an empty one when it lists
+/// none.
+[[nodiscard]] contour::window::DirectoryWorkspace workspaceOf(
+    contour::remote::NativeController const& controller, uint64_t workspace)
+{
+    auto const directory = controller.directory();
+    auto const found =
+        std::ranges::find(directory.workspaces, workspace, &contour::window::DirectoryWorkspace::id);
+    return found != directory.workspaces.end() ? *found : contour::window::DirectoryWorkspace {};
+}
+
+/// Labels the daemon's workspace @p workspace @p label, as `object.setLabel` would.
+/// @return The workspace's control UUID.
+vtcontrol::Uuid labelOnDaemon(DaemonFixture& daemon, uint64_t workspace, std::string const& label)
+{
+    return daemon.onDaemon([&] {
+        auto const uuid = *daemon.host->objects().uuidOf(vtworkspace::WorkspaceId { workspace });
+        daemon.host->objects().setLabel(
+            vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace, .uuid = uuid }, label);
+        return uuid;
+    });
+}
+
+} // namespace
+
+TEST_CASE("directory carries label and control id from WorkspaceMeta", "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+    // Stated before the window attaches: it comes with the workspace.
+    auto const uuid = labelOnDaemon(daemon, second.id, "ops");
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+
+    REQUIRE(waitUntil([&] { return workspaceOf(controller, second.id).label == "ops"; }));
+    CHECK(workspaceOf(controller, second.id).controlId == uuid.bytes);
+    CHECK_FALSE(workspaceOf(controller, second.id).git.has_value());
+
+    // And one stated since reaches it as it changes.
+    std::ignore = labelOnDaemon(daemon, second.id, "build");
+    CHECK(waitUntil([&] { return workspaceOf(controller, second.id).label == "build"; }));
+}
+
+TEST_CASE("a workspace the daemon moved is listed in its new place", "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+    auto const first = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
+    REQUIRE(controller.directory().workspaces[0].id == first);
+
+    daemon.onDaemon([&] {
+        daemon.host->model().moveWorkspace(vtworkspace::WorkspaceId { second.id }, 0);
+        return 0;
+    });
+
+    CHECK(waitUntil([&] {
+        auto const directory = controller.directory();
+        return directory.workspaces.size() == 2 && directory.workspaces[0].id == second.id
+               && directory.workspaces[1].id == first;
+    }));
+}
+
+TEST_CASE("a window's move and rename of a workspace reach the daemon and come back in the directory",
+          "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+    auto const first = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
+
+    CHECK(controller.requestRemoteMoveWorkspace(second.id, 0) == contour::session::RemoteRouting::Routed);
+    CHECK(waitUntil([&] {
+        auto const directory = controller.directory();
+        return directory.workspaces.size() == 2 && directory.workspaces[0].id == second.id;
+    }));
+
+    CHECK(controller.requestRemoteRenameWorkspace(second.id, "ops")
+          == contour::session::RemoteRouting::Routed);
+    CHECK(waitUntil([&] { return workspaceOf(controller, second.id).label == "ops"; }));
+    CHECK(workspaceOf(controller, first).label.empty());
+}
+
+TEST_CASE("a window titles a tab of a workspace it does not show, and the directory follows",
+          "[attach][controller][directory][sidebar]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
+
+    CHECK(controller.requestRemoteTabTitle(second.session.value, "logs")
+          == contour::session::RemoteRouting::Routed);
+    CHECK(waitUntil([&] {
+        auto const& workspace = workspaceOf(controller, second.id);
+        return !workspace.tabs.empty() && workspace.tabs.front().title == "logs";
+    }));
+
+    // An empty title returns the tab to its automatic one.
+    CHECK(controller.requestRemoteTabTitle(second.session.value, "")
+          == contour::session::RemoteRouting::Routed);
+    CHECK(waitUntil([&] { return workspaceOf(controller, second.id).tabs.front().title.empty(); }));
+}
+
+TEST_CASE("the directory states a workspace's place in the daemon's count, tabless ones included",
+          "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    // A workspace that holds no tab sits between the two the window lists.
+    daemon.onDaemon([&] {
+        std::ignore = daemon.host->createEmptyWorkspace();
+        return 0;
+    });
+    auto const second = addWorkspace(daemon);
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+
+    REQUIRE(waitUntil([&] { return workspaceOf(controller, second.id).position.has_value(); }));
+    CHECK(workspaceOf(controller, second.id).position == std::optional<uint32_t> { 2 });
+}
+
+TEST_CASE("the metadata of a removed workspace is pruned", "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+    std::ignore = labelOnDaemon(daemon, second.id, "ops");
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return workspaceOf(controller, second.id).label == "ops"; }));
+    REQUIRE(contour::remote::NativeControllerTestAccess::workspaceMetaCount(controller) == 2);
+
+    // Its one pane ends, and the daemon removes the workspace.
+    daemon.onDaemon([&] {
+        daemon.host->closeSession(second.session);
+        return 0;
+    });
+
+    // Its layout empties, which takes it out of the directory, and its metadata goes with it.
+    REQUIRE(waitUntil([&] {
+        return std::ranges::none_of(controller.directory().workspaces,
+                                    [&](auto const& workspace) { return workspace.id == second.id; });
+    }));
+    CHECK(waitUntil(
+        [&] { return contour::remote::NativeControllerTestAccess::workspaceMetaCount(controller) == 1; }));
+}
+
+TEST_CASE("a labelled workspace that held no tab is stated in full once it holds one",
+          "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    // The daemon's own workspace holds no tab yet; the window shows another one.
+    auto const shown = addWorkspace(daemon);
+    auto const empty = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
+    REQUIRE(empty != shown.id);
+    auto const uuid = labelOnDaemon(daemon, empty, "ops");
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(),
+                             timeline,
+                             ControllerOptions { .intent = { .kind = vthost::proto::AttachIntentKind::Select,
+                                                             .workspace = shown.id } });
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return !workspaceOf(controller, shown.id).tabs.empty(); }));
+
+    // A tab lands in it: its label and control id reach the directory with it.
+    daemon.onDaemon([&daemon] {
+        std::ignore = daemon.host->createTab();
+        return 0;
+    });
+
+    REQUIRE(waitUntil([&] { return !workspaceOf(controller, empty).tabs.empty(); }));
+    CHECK(waitUntil([&] { return workspaceOf(controller, empty).label == "ops"; }));
+    CHECK(workspaceOf(controller, empty).controlId == uuid.bytes);
+}
+
+TEST_CASE("an empty label clears it", "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const first = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
+    auto const uuid = labelOnDaemon(daemon, first, "ops");
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return workspaceOf(controller, first).label == "ops"; }));
+
+    std::ignore = labelOnDaemon(daemon, first, "");
+
+    REQUIRE(waitUntil([&] { return workspaceOf(controller, first).label.empty(); }));
+    // The control id stays: clearing a label changes nothing else.
+    CHECK(workspaceOf(controller, first).controlId == uuid.bytes);
+}
+
 TEST_CASE("the program status of an unmirrored pane reaches the directory", "[attach][controller][directory]")
 {
     auto daemon = DaemonFixture {};
@@ -4511,7 +4751,9 @@ TEST_CASE("select() moves the mirrored sessions", "[attach][controller][director
     });
     REQUIRE(waitUntil(
         [&] { return paneOf(controller, second.id).activity == vthost::proto::OutputActivity::Output; }));
-
+    auto const firstSerial = paneOf(controller, second.id).activitySerial;
+    CHECK(firstSerial > 0);
+    CHECK(paneOf(controller, second.id).bellSerial == 0);
     REQUIRE(controller.select(second.id).has_value());
     REQUIRE(waitUntil([&] { return controller.selectedWorkspace() == second.id; }));
     CHECK(controller.directory().selected == std::optional<uint64_t> { second.id });
@@ -4531,6 +4773,59 @@ TEST_CASE("select() moves the mirrored sessions", "[attach][controller][director
     controller.stop();
     paneA.terminal.reset();
     paneB.terminal.reset();
+}
+
+TEST_CASE("a pane of a hidden workspace rings again for output and a bell after it was marked seen",
+          "[attach][controller][directory][attention]")
+{
+    using contour::window::Urgency;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("in the first");
+    auto const second = addWorkspace(daemon);
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
+    auto const write = [&](std::string_view text) {
+        daemon.onDaemon([&] {
+            daemon.host->terminal(second.session)->writeToScreen(text);
+            return 0;
+        });
+    };
+    auto attention = contour::window::TabAttention {};
+    auto const urgency = [&] {
+        auto const pane = paneOf(controller, second.id);
+        return contour::window::paneUrgency(pane, attention.of(pane.key));
+    };
+
+    // Output, marked seen here; the flag stays set on the daemon's side, but is old news.
+    write("\r\nfirst");
+    REQUIRE(waitUntil([&] { return paneOf(controller, second.id).activitySerial > 0; }));
+    CHECK(urgency() == Urgency::UnseenOutput);
+    std::ignore = contour::window::noteDirectoryPaneSeen(attention, paneOf(controller, second.id));
+    CHECK(urgency() == Urgency::Idle);
+
+    // The daemon marks again at most once per FlushPolicy::activityMarkInterval: more output after it is a
+    // second summary, and a new serial.
+    auto const seenSerial = paneOf(controller, second.id).activitySerial;
+    std::this_thread::sleep_for(1200ms);
+    write("\r\nsecond");
+    REQUIRE(waitUntil([&] { return paneOf(controller, second.id).activitySerial > seenSerial; }, 5000));
+    CHECK(urgency() == Urgency::UnseenOutput);
+
+    // A bell, then seen, then another bell: each is a summary of its own.
+    std::ignore = contour::window::noteDirectoryPaneSeen(attention, paneOf(controller, second.id));
+    write("\a");
+    REQUIRE(waitUntil([&] { return paneOf(controller, second.id).bellSerial > 0; }));
+    CHECK(urgency() == Urgency::NeedsYou);
+    std::ignore = contour::window::noteDirectoryPaneSeen(attention, paneOf(controller, second.id));
+    CHECK(urgency() == Urgency::Idle);
+    auto const seenBell = paneOf(controller, second.id).bellSerial;
+    write("\a");
+    REQUIRE(waitUntil([&] { return paneOf(controller, second.id).bellSerial > seenBell; }, 5000));
+    CHECK(urgency() == Urgency::NeedsYou);
+    controller.stop();
 }
 
 TEST_CASE("selecting a workspace the daemon does not have keeps the selection, and a later select works",
@@ -4866,6 +5161,39 @@ TEST_CASE("a pane closed while reconnecting is closed on the daemon once it answ
 
     controller.stop();
     pane.terminal.reset();
+}
+
+TEST_CASE("a pane detached while its session runs on lets the session go, to be shown again",
+          "[attach][controller]")
+{
+    // A pane goes while its daemon session runs on -- its window switched to another workspace, or a move
+    // took it to a workspace the window does not show -- and the session may be shown again over this
+    // connection: let go of at once, it is neither bound nor tombstoned, before or after the pane's pty goes.
+    // A pane that ends without that is tombstoned, so a delta of its session cannot bring it back.
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("detached");
+    std::ignore = daemon.seedSession("ended");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.pendingCount() == 2; }));
+    auto detachedPane = std::make_unique<MirrorPane>(controller, controller.createPty(std::nullopt));
+    auto endedPane = std::make_unique<MirrorPane>(controller, controller.createPty(std::nullopt));
+    auto const detached = controller.sessionForPty(&detachedPane->pty());
+    auto const ended = controller.sessionForPty(&endedPane->pty());
+    REQUIRE(detached.has_value());
+    REQUIRE(ended.has_value());
+    REQUIRE(controller.isClaimed(*detached));
+
+    controller.releaseRemoteSession(&detachedPane->pty());
+    CHECK_FALSE(controller.isClaimed(*detached));
+    detachedPane.reset();
+    endedPane.reset();
+    REQUIRE(waitUntil([&] { return !controller.bindsPanes(); }));
+    CHECK_FALSE(controller.isClaimed(*detached));
+    CHECK(controller.isClaimed(*ended));
+    controller.stop();
 }
 
 TEST_CASE("what a pane raised is judged by the raise role it arrived under", "[attach][controller][raise]")

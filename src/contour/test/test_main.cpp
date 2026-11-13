@@ -9,6 +9,7 @@
 #include <contour/test/NotificationFixtures.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/TestEnvironment.hpp>
+#include <contour/window/SidebarModel.hpp>
 
 #include <vtpty/SpawnTrampoline.hpp>
 
@@ -158,8 +159,10 @@ int main(int argc, char* argv[])
                          : std::make_unique<QGuiApplication>(argc, argv);
 
     // The QML types the application registers that the tested QML imports from Contour.Terminal: the
-    // permission enums (SessionChrome answers its question in them).
+    // permission enums (SessionChrome answers its question in them) and the sidebar rows' enums (a
+    // SidebarRow compares its roles with them).
     contour::session::registerPermissionQmlTypes();
+    contour::window::registerSidebarQmlTypes();
 
     // Pin a Qt Quick Controls style the way the app itself does (ContourGuiApp: a Fusion fallback, then
     // the row's style). The tests instantiate real Controls (SessionChrome's customized ScrollBar, the

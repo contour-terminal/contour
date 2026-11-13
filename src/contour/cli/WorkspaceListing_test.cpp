@@ -40,3 +40,14 @@ TEST_CASE("resolveWorkspaceSpec takes what the control verbs take", "[cli][switc
     CHECK(resolveWorkspaceSpec("workspace:00000000-0000-0000-0000-00000000beef", *listed) == 9);
     CHECK_FALSE(resolveWorkspaceSpec("nope", *listed).has_value());
 }
+
+TEST_CASE("workspace.create is asked with the label and answers the new workspace's id", "[cli][switch]")
+{
+    CHECK(contour::cli::encodeCreateWorkspace("q") == R"({"cwd":"","label":"q"})");
+    auto const made = contour::cli::decodeCreatedWorkspace(
+        R"({"workspace":"workspace:018f3c4e-9a1b-7c2d-8e3f-0123456789ab","tab":"tab:018f3c4e-9a1b-7c2d-8e3f-0123456789ac","pane":"pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ad"})");
+    REQUIRE(made.has_value());
+    CHECK(vtcontrol::toString(*made) == "workspace:018f3c4e-9a1b-7c2d-8e3f-0123456789ab");
+    CHECK_FALSE(contour::cli::decodeCreatedWorkspace(R"({"workspace":"","tab":"","pane":""})").has_value());
+    CHECK_FALSE(contour::cli::decodeCreatedWorkspace("not json").has_value());
+}

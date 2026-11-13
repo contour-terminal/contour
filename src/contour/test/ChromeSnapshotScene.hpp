@@ -32,12 +32,15 @@
 #include <contour/test/QmlMocks.hpp>
 #include <contour/test/RecordingShellRcEditor.hpp>
 #include <contour/test/SettingsDressingFixtures.hpp>
+#include <contour/test/SidebarFakes.hpp>
+#include <contour/test/SwitcherFakes.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/NoticeQueue.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/PopupAnchor.hpp>
 #include <contour/window/QuickTerminalPolicy.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/SettingsController.hpp>
@@ -45,12 +48,14 @@
 #include <contour/window/SettingsWindowRules.hpp>
 #include <contour/window/StickyHeaderChrome.hpp>
 #include <contour/window/StickyHeaderPlacement.hpp>
+#include <contour/window/SwitcherController.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/TitleBandSurface.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <vtbackend/shell/ScrollbarMarks.hpp>
+#include <vtbackend/vt/ProgramStatus.hpp>
 
 #include <core/platform/FileSystem.hpp>
 #include <core/platform/NativeFileSystem.hpp>
@@ -70,6 +75,7 @@
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
+#include <QtGui/QPainter>
 #include <QtGui/QWindow>
 #include <QtGui/qpa/qwindowsysteminterface.h>
 #include <QtQml/QQmlComponent>
@@ -81,6 +87,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -91,6 +98,8 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include <QtTest/QTest>
@@ -247,11 +256,28 @@ class ChromeSnapshotScene
                    : ClientFrameAffordances::None;
     }
 
+    /// @param host The platform the picture is rendered on.
+    /// @return The keyboard @p host speaks: what its default bindings, and so every chord a picture spells,
+    /// are
+    ///         made for, whichever machine renders it.
+    [[nodiscard]] static constexpr config::KeyboardPlatformKind keyboardPlatformFor(config::HostPlatform host)
+    {
+        switch (host)
+        {
+            case config::HostPlatform::MacOS: return config::KeyboardPlatformKind::Mac;
+            case config::HostPlatform::Windows: return config::KeyboardPlatformKind::Win32;
+            case config::HostPlatform::Other:
+            case config::HostPlatform::KdePlasma: break;
+        }
+        return config::KeyboardPlatformKind::Xkb;
+    }
+
     /// @param variant The picture to build: its script, chrome row, defaults edition and appearance.
     explicit ChromeSnapshotScene(SnapshotVariant variant):
         _appearance { variant.appearance },
         _variant { variant },
-        _config { .defaultsEdition = variant.edition },
+        _config { .defaultsEdition = variant.edition,
+                  .keyboardPlatformKind = keyboardPlatformFor(variantHost(variant)) },
         _look { snapshotLook(variant.edition, variant.appearance) },
         _chromeFont { window::resolveChromeFont(_config, variant.row, _config.defaultProfileName.value()) },
         _sessions { makeSessions(scriptRow(variant.script), _look) },
@@ -282,6 +308,7 @@ class ChromeSnapshotScene
             .nativeControlsInset = 0,
             .secure = scriptRow(variant.script).secure,
             .affordances = affordancesFor(variantHost(variant), scriptRow(variant.script).frame),
+            .shortcutStyle = command::shortcutStyleFor(variantHost(variant)),
         } },
         _newDefaults { newDefaultsOfferFor(scriptRow(variant.script).banner) },
         _settingsWindow { makeSettingsWindow() },
@@ -298,6 +325,8 @@ class ChromeSnapshotScene
     /// while a window is still on its way out of a full-screen space.
     ~ChromeSnapshotScene()
     {
+        if (_heldDiscovery)
+            _heldDiscovery->releaseOne();
         if (_root == nullptr || window().visibility() != QWindow::FullScreen)
             return;
         window().showNormal();
@@ -393,6 +422,15 @@ class ChromeSnapshotScene
                 break;
             case ScriptAction::DeactivateWindow: deactivateWindow(); break;
             case ScriptAction::OpenMainMenu: openMainMenu(); break;
+            case ScriptAction::OpenWorkspaceDropdown: openWorkspaceDropdown(); break;
+            case ScriptAction::OpenSwitcher:
+            case ScriptAction::FilterSwitcher:
+            case ScriptAction::DrillInSwitcher:
+            case ScriptAction::NewDaemonSwitcher:
+            case ScriptAction::SwitcherNoMatch:
+            case ScriptAction::SwitcherDiscovering:
+            case ScriptAction::SwitcherRowMenu:
+            case ScriptAction::HoverSwitcherRow: openSwitcher(scriptRow(_variant.script).action); break;
             case ScriptAction::ShowNewTabToolTip: showToolTips(ToolTipOf::NewTab); break;
             case ScriptAction::ShowTabToolTip: showToolTips(ToolTipOf::Tab); break;
         }
@@ -408,15 +446,28 @@ class ChromeSnapshotScene
         _incubation.settle();
         QCoreApplication::processEvents();
         QCoreApplication::processEvents();
+        // The rows' status rings are Canvas items, which paint on the frames after the window is shown.
+        if (scriptRow(_variant.script).sidebar != SnapshotSidebar::None)
+            QTest::qWait(SidebarCanvasSettleMs);
         // The inactive look is the picture: an activation the platform reported late must not have undone it.
         if (scriptRow(_variant.script).action == ScriptAction::DeactivateWindow)
             REQUIRE(QTest::qWaitFor([&] { return !window().isActive(); }, InactiveSettleMs));
     }
 
     /// The window the picture is of, as rendered. Needs a display: the offscreen platform grabs nothing
-    /// worth keeping.
+    /// worth keeping. The workspace chip's dropdown is in the window's scene, so it is in the picture.
     /// @return The grabbed frame of subject().
     [[nodiscard]] QImage grab() const { return subject().grabWindow(); }
+
+    /// @return The workspace chip's dropdown, the switcher popup in the scene, once OpenWorkspaceDropdown
+    ///         opened it; else null.
+    [[nodiscard]] QObject const* workspaceDropdown() const
+    {
+        return _switcher ? root().findChild<QObject*>(QStringLiteral("switcher")) : nullptr;
+    }
+
+    /// @return The switcher's controller, once a switcher script opened it; else null.
+    [[nodiscard]] window::SwitcherController const* switcher() const noexcept { return _switcher.get(); }
 
     /// The window the picture is of: the Settings window for SnapshotSurface::SettingsWindow, else window().
     /// @return That window.
@@ -533,6 +584,9 @@ class ChromeSnapshotScene
                 break;
         }
     }
+
+    /// How long the sidebar's Canvas status rings get to paint before the picture is taken.
+    static constexpr int SidebarCanvasSettleMs = 250;
 
     /// A cell of the stubbed terminal: StubContourTerminal's rows, and the width the link pill's clearance
     /// measures columns in.
@@ -1427,6 +1481,269 @@ class ChromeSnapshotScene
 
     /// Asks for the main menu as the header bar's button does, and waits for it where the row has one: the
     /// band rows have no main menu, and show the window as it is.
+    /// Clicks the workspace chip, and opens what the application opens for it: the switcher over the window's
+    /// own daemon alone, its workspaces listed (`billing` and `docs`, docs shown here).
+    void openWorkspaceDropdown()
+    {
+        auto* chip = root().findChild<QQuickItem*>(QStringLiteral("workspaceChip"));
+        REQUIRE(chip != nullptr);
+        // Clicked where the user would click it: once the band has settled, its place the same over a few
+        // frames (the band lays its row out over the first ones).
+        auto last = QPointF { -1, -1 };
+        auto steady = 0;
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                auto const at = chip->mapToScene(QPointF {});
+                steady = at == last ? steady + 1 : 0;
+                last = at;
+                return steady >= 5;
+            },
+            3000));
+        QMetaObject::invokeMethod(chip, "clicked");
+        REQUIRE(_controller.workspaceDropdownAnchor.has_value());
+        auto const workspaceOf =
+            [](uint32_t position, char const* name, std::size_t tabs, window::SwitcherWorkspaceState state) {
+                return window::SwitcherWorkspace {
+                    .ref = {}, .position = position, .name = name, .tabs = tabs, .state = state
+                };
+            };
+        auto workspaces = std::vector {
+            workspaceOf(1, "billing", 5, window::SwitcherWorkspaceState::Hidden),
+            workspaceOf(2, "docs", 3, window::SwitcherWorkspaceState::ThisWindow),
+        };
+        _switcher = std::make_unique<window::SwitcherController>(switcherServices(nullptr, workspaces));
+        _switcher->open(window::SwitcherOpening {
+            .window = vtworkspace::WorkspaceId { 1 },
+            .windowDaemon = session::SwitchTarget { .kind = vthost::proto::SwitchDaemonKind::Label,
+                                                    .daemon = "default",
+                                                    .workspace = {} },
+            .mode = session::SwitchMode::Switch,
+            .prompt = window::SwitcherPrompt::Browse,
+            .pick = std::nullopt,
+            .scope = window::SwitcherScope::OneDaemon,
+            .windowWorkspaces = workspaces,
+            .origin = window::SwitcherOrigin::Chip });
+        _controller.presentSwitcher(_switcher.get(), _controller.workspaceDropdownAnchor);
+        awaitSwitcherOpened();
+    }
+
+    /// Waits until the switcher popup has opened, and lets its list build its rows.
+    void awaitSwitcherOpened()
+    {
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                auto const* popup = root().findChild<QObject*>(QStringLiteral("switcher"));
+                return popup != nullptr && popup->property("opened").toBool();
+            },
+            3000));
+        _incubation.settle();
+        QCoreApplication::processEvents();
+    }
+
+    /// @return A workspace of boards 1-3, its status the one @p urgency draws.
+    [[nodiscard]] static window::SwitcherWorkspace boardWorkspace(
+        uint32_t position,
+        char const* name,
+        std::size_t tabs,
+        window::Urgency urgency,
+        std::string git = {},
+        window::SwitcherWorkspaceState state = window::SwitcherWorkspaceState::Hidden)
+    {
+        auto const glyph = [urgency] {
+            switch (urgency)
+            {
+                case window::Urgency::Idle: return window::TabBadgeKind::None;
+                case window::Urgency::UnseenOutput: return window::TabBadgeKind::Output;
+                case window::Urgency::Working: return window::TabBadgeKind::Working;
+                case window::Urgency::DoneUnseen: return window::TabBadgeKind::Done;
+                case window::Urgency::Failed: return window::TabBadgeKind::Error;
+                case window::Urgency::NeedsYou: return window::TabBadgeKind::Blocked;
+            }
+            return window::TabBadgeKind::None;
+        }();
+        auto status = window::SwitcherStatus {};
+        status.urgency = urgency;
+        status.glyph = glyph;
+        status.gitText = std::move(git);
+        return window::SwitcherWorkspace { .ref = switcherWorkspaceRef(name),
+                                           .position = position,
+                                           .name = name,
+                                           .tabs = tabs,
+                                           .state = state,
+                                           .status = std::move(status),
+                                           .id = position };
+    }
+
+    /// The moment the boards' times are measured against.
+    static constexpr auto SwitcherNow = std::chrono::sys_days { std::chrono::year { 2026 } / 11 / 12 };
+
+    /// @return The workspaces of another daemon of boards 1-3, by name: `home` (board 3) and `ci-box`.
+    [[nodiscard]] static std::vector<window::SwitcherWorkspace> boardDaemonWorkspaces(std::string_view daemon)
+    {
+        using window::Urgency;
+        if (daemon == "home")
+        {
+            auto failed = boardWorkspace(1, "api-docs", 2, Urgency::Failed, "main");
+            failed.status.reason = { .label = "exit 1", .separator = " · ", .command = "make deploy" };
+            failed.status.time.kind = window::TimeKind::Relative;
+            failed.status.since = SwitcherNow - std::chrono::minutes { 2 };
+            return { std::move(failed),
+                     boardWorkspace(2, "rapid-proto", 2, Urgency::Idle),
+                     boardWorkspace(3, "dotfiles", 1, Urgency::UnseenOutput, "master ↓1"),
+                     boardWorkspace(4, "music", 1, Urgency::Idle) };
+        }
+        if (daemon == "ci-box")
+            return { boardWorkspace(1, "ci-runner", 1, Urgency::Idle),
+                     boardWorkspace(2, "nightly", 1, Urgency::Idle) };
+        return {};
+    }
+
+    /// @return The window's own daemon's workspaces of boards 1-3, on `work`, `contour` shown here.
+    [[nodiscard]] static std::vector<window::SwitcherWorkspace> boardWindowWorkspaces()
+    {
+        using window::Urgency;
+        return {
+            boardWorkspace(
+                1, "contour", 3, Urgency::Working, "main ↑2", window::SwitcherWorkspaceState::ThisWindow),
+            boardWorkspace(2, "api-gateway", 2, Urgency::NeedsYou, "feat/auth"),
+            boardWorkspace(3, "docs", 1, Urgency::DoneUnseen, "master"),
+            boardWorkspace(4, "scratch", 1, Urgency::Idle)
+        };
+    }
+
+    /// @return The switcher's services over the boards' world: @p discovery finds the other daemons (none for
+    ///         null), each is listed at once, nothing is switched, and `All daemons…` shows the chord the
+    ///         scene binds to ShowSwitcher.
+    /// @param windowWorkspaces What a listing of the window's own daemon would say.
+    [[nodiscard]] window::SwitcherServices switcherServices(
+        std::shared_ptr<cli::IDaemonDiscovery> discovery,
+        std::vector<window::SwitcherWorkspace> windowWorkspaces)
+    {
+        auto const style = command::shortcutStyleFor(variantHost(_variant));
+        auto const index = command::shortcutIndex(_config, style);
+        auto const chord = index.find(command::commandId(actions::ShowSwitcher {}));
+        return window::SwitcherServices {
+            .discovery = std::move(discovery),
+            .savedHosts = [] { return std::vector<window::SwitcherDaemon> {}; },
+            .list =
+                [windowWorkspaces = std::move(windowWorkspaces)](vtworkspace::WorkspaceId,
+                                                                 session::SwitchTarget const& daemon,
+                                                                 window::SwitcherListed const& done) {
+                    auto listed = boardDaemonWorkspaces(daemon.daemon);
+                    if (listed.empty())
+                        done(windowWorkspaces);
+                    else
+                        done(std::move(listed));
+                },
+            .request = [](vtworkspace::WorkspaceId, session::SwitchTarget const&, session::SwitchMode) {},
+            .startDaemon = nullptr,
+            .now = [] { return std::chrono::system_clock::time_point { SwitcherNow }; },
+            .style = style,
+            .showSwitcherShortcut = [shortcut = chord != index.end() ? chord->second
+                                                                     : std::string {}] { return shortcut; },
+            .workspaceMenu =
+                [](vtworkspace::WorkspaceId, uint64_t workspace) {
+                    return command::WorkspaceMenuState { .position = static_cast<std::size_t>(workspace),
+                                                         .count = 4,
+                                                         .joinable = {} };
+                },
+        };
+    }
+
+    /// Opens the switcher over boards 1-7's world as ShowSwitcher (or NewDaemon) does, then does what
+    /// @p step asks: types, drills in, opens a row's menu or hovers a row.
+    void openSwitcher(ScriptAction step)
+    {
+        auto discovery = std::shared_ptr<cli::IDaemonDiscovery> {};
+        auto const found = std::vector<cli::DiscoveredDaemon> {
+            { .label = "work", .socket = "/run/contour/work", .workspaces = 4 },
+            { .label = "home", .socket = "/run/contour/home", .workspaces = 4 },
+            { .label = "ci-box", .socket = "/run/contour/ci-box", .workspaces = 2 },
+        };
+        if (step == ScriptAction::SwitcherDiscovering)
+        {
+            _heldDiscovery = std::make_shared<test::GatedDiscovery>(found);
+            discovery = _heldDiscovery;
+        }
+        else
+            discovery = std::make_shared<test::FixedDiscovery>(found);
+        _switcher = std::make_unique<window::SwitcherController>(
+            switcherServices(std::move(discovery), boardWindowWorkspaces()));
+        _switcher->open(window::SwitcherOpening {
+            .window = vtworkspace::WorkspaceId { 1 },
+            .windowDaemon = session::SwitchTarget { .kind = vthost::proto::SwitchDaemonKind::Label,
+                                                    .daemon = "work",
+                                                    .workspace = {} },
+            .mode = session::SwitchMode::Switch,
+            .prompt = step == ScriptAction::NewDaemonSwitcher ? window::SwitcherPrompt::NewDaemon
+                                                              : window::SwitcherPrompt::Browse,
+            .pick = std::nullopt,
+            .scope = window::SwitcherScope::Everything,
+            .windowWorkspaces = boardWindowWorkspaces(),
+            .origin = window::SwitcherOrigin::Centred });
+        if (step != ScriptAction::SwitcherDiscovering)
+            REQUIRE(QTest::qWaitFor(
+                [&] {
+                    return !_switcher->isDiscovering()
+                           && std::ranges::all_of(_switcher->daemons(),
+                                                  [](window::SwitcherDaemon const& each) {
+                                                      return each.listing == window::SwitcherListing::Listed;
+                                                  });
+                },
+                3000));
+        _controller.presentSwitcher(_switcher.get(), std::nullopt);
+        awaitSwitcherOpened();
+
+        auto const rowTitled = [&](std::string_view title, window::SwitcherRowKind kind) {
+            auto const& rows = _switcher->rows();
+            auto const at = std::ranges::find_if(
+                rows, [&](window::SwitcherRow const& row) { return row.title == title && row.kind == kind; });
+            REQUIRE(at != rows.end());
+            return static_cast<int>(std::distance(rows.begin(), at));
+        };
+        switch (step)
+        {
+            case ScriptAction::FilterSwitcher: _switcher->setFilter(QStringLiteral("api")); break;
+            case ScriptAction::SwitcherNoMatch: _switcher->setFilter(QStringLiteral("zzz")); break;
+            case ScriptAction::NewDaemonSwitcher: _switcher->checkLabel(QStringLiteral("research")); break;
+            case ScriptAction::DrillInSwitcher:
+                _switcher->activate(rowTitled("home", window::SwitcherRowKind::Daemon));
+                break;
+            case ScriptAction::SwitcherRowMenu: {
+                std::ignore = _switcher->handleKey(Qt::Key_Menu, Qt::NoModifier, 0);
+                auto const* menu = root().findChild<QObject*>(QStringLiteral("switcherRowMenu"));
+                REQUIRE(menu != nullptr);
+                REQUIRE(QTest::qWaitFor([&] { return menu->property("visible").toBool(); }, 3000));
+                break;
+            }
+            case ScriptAction::HoverSwitcherRow: {
+                auto* list = root().findChild<QQuickItem*>(QStringLiteral("switcherList"));
+                REQUIRE(list != nullptr);
+                auto* row = static_cast<QQuickItem*>(nullptr);
+                QMetaObject::invokeMethod(list,
+                                          "itemAtIndex",
+                                          Q_RETURN_ARG(QQuickItem*, row),
+                                          Q_ARG(int, rowTitled("docs", window::SwitcherRowKind::Workspace)));
+                REQUIRE(row != nullptr);
+                auto* entry = row->findChild<QQuickItem*>(QStringLiteral("switcherRow"));
+                REQUIRE(entry != nullptr);
+                // Moved within the row, as a hand moves: the first event over the list only says where the
+                // pointer is, and a later one that it moved.
+                auto const centre = entry->mapRectToScene(entry->boundingRect()).center().toPoint();
+                pointAt(centre - QPoint { 8, 0 });
+                QTest::qWait(50);
+                pointAt(centre);
+                auto const* fill = row->findChild<QQuickItem*>(QStringLiteral("switcherHover"));
+                REQUIRE(fill != nullptr);
+                REQUIRE(QTest::qWaitFor([&] { return fill->isVisible(); }, 2000));
+                break;
+            }
+            default: break;
+        }
+        _incubation.settle();
+        QCoreApplication::processEvents();
+    }
+
     void openMainMenu()
     {
         _controller.activateHeaderBarItem(static_cast<int>(window::HeaderBarItem::MainMenu), {});
@@ -1528,6 +1845,103 @@ class ChromeSnapshotScene
         return nullptr;
     }
 
+    /// A program-status record of @p state that changed state @p age ago, by the sidebar's clock.
+    [[nodiscard]] static vtbackend::ProgramStatusRecord sidebarRecord(vtbackend::ProgramState state,
+                                                                      std::string message,
+                                                                      std::chrono::seconds age)
+    {
+        auto record = vtbackend::ProgramStatusRecord {};
+        record.state = state;
+        record.app = "claude";
+        record.message = std::move(message);
+        record.since = MockMainController::SidebarEpoch - age;
+        record.generation = 1;
+        return record;
+    }
+
+    /// Lists what the sidebar shows of the window's workspaces for @p sidebar: `billing` with a blocked
+    /// agent, a working tab, a finished one nobody looked at, a failed command and a split tab, on a branch
+    /// two commits ahead; `docs`, idle; and `infra`, folded. Nothing for SnapshotSidebar::None.
+    /// @param sidebar What the script shows of the sidebar.
+    void listWorkspaces(SnapshotSidebar sidebar)
+    {
+        using namespace std::chrono_literals;
+        if (sidebar == SnapshotSidebar::None)
+            return;
+        auto blocked = sidebarRecord(vtbackend::ProgramState::Blocked, "Bash: psql $DEV_URL", 30s);
+        blocked.kind = vtbackend::BlockedKind::Permission;
+        auto claude = directoryPaneOf(10, "claude");
+        claude.cwd = "/src/billing";
+        claude.status = { blocked };
+        auto build = directoryPaneOf(11, "build");
+        build.status = { sidebarRecord(vtbackend::ProgramState::Working, {}, 252s) };
+        auto notes = directoryPaneOf(12, "review");
+        notes.status = { sidebarRecord(vtbackend::ProgramState::Done, "All tests pass", 120s) };
+        auto deploy = directoryPaneOf(13, "deploy");
+        deploy.finished = vthost::proto::FinishedCommand { .exitCode = 1,
+                                                           .durationMs = 18000,
+                                                           .commandLine = "make deploy" };
+        deploy.finishedSerial = 1;
+
+        auto billing = directoryWorkspaceOf(1, "billing", { claude, build, notes, deploy });
+        auto split = window::DirectoryTab {};
+        split.id = 14;
+        split.label = "server";
+        split.panes = { directoryPaneOf(14, "server"), directoryPaneOf(15, "logs") };
+        billing.tabs.push_back(std::move(split));
+        billing.git = window::DirectoryGit { .branch = "feat/billing", .ahead = 2 };
+
+        auto const shown = sidebar == SnapshotSidebar::NeedsYou || sidebar == SnapshotSidebar::Hidden
+                               ? uint64_t { 2 }
+                               : uint64_t { 1 };
+        auto& listed = _controller.sidebarSource().listed;
+        listed.workspaces = { std::move(billing),
+                              directoryWorkspaceOf(2,
+                                                   "docs",
+                                                   { directoryPaneOf(20, "notes"),
+                                                     directoryPaneOf(21, "preview"),
+                                                     directoryPaneOf(22, "publish") }),
+                              // Folded below, so every sidebar picture shows the collapsed disclosure too.
+                              directoryWorkspaceOf(3, "infra", { directoryPaneOf(30, "terraform") }) };
+        listed.selected = shown;
+        // The band names the shown workspace's tabs as the directory does, so the breadcrumb and the sidebar
+        // agree on the tab's name.
+        for (auto const& tab: listed.workspaces[static_cast<std::size_t>(shown - 1)].tabs)
+            _controller.shownWorkspaceTabTitles.push_back(QString::fromStdString(tab.label));
+        _controller.sidebarHost().displayed =
+            window::TabRef { .workspace = shown, .tab = shown == 1 ? 10u : 20u };
+        _controller.sidebarModel().refreshNow();
+        auto const& rows = _controller.sidebarModel().rows();
+        auto const infra = std::ranges::find_if(rows, [](auto const& row) { return row.key.workspace == 3; });
+        REQUIRE(infra != rows.end());
+        _controller.sidebarModel().collapse(static_cast<int>(std::distance(rows.begin(), infra)));
+        if (sidebar == SnapshotSidebar::Collapsed)
+        {
+            // The first row is billing; once it is folded, docs is the second.
+            _controller.sidebarModel().collapse(0);
+            _controller.sidebarModel().collapse(1);
+        }
+        // Hidden keeps the sidebar placement: the chip then leads the strip that took the tabs back.
+        _controller.setTabPlacement(sidebar == SnapshotSidebar::TopTabs ? config::TabPlacement::Top
+                                                                        : config::TabPlacement::Sidebar);
+    }
+
+    /// Shows the sidebar at the width its look asks for, once the window is loaded; Hidden and None leave it
+    /// off.
+    /// @param sidebar What the script shows of the sidebar.
+    void showSidebar(SnapshotSidebar sidebar)
+    {
+        if (sidebar == SnapshotSidebar::None || sidebar == SnapshotSidebar::Hidden)
+            return;
+        auto const* style =
+            _engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+        REQUIRE(style != nullptr);
+        auto const* look = style->property("sidebar").value<QObject*>();
+        REQUIRE(look != nullptr);
+        _controller.showSidebar(static_cast<int>(look->property("width").toReal()));
+        _incubation.settle();
+    }
+
     /// Loads Main.qml against the controller under the variant's chrome row.
     [[nodiscard]] std::unique_ptr<QObject> load()
     {
@@ -1547,8 +1961,10 @@ class ChromeSnapshotScene
         // The panes the active tab shows, as WindowController counts them: two or more make cards.
         _controller.setVisiblePaneCount(static_cast<int>(paneCount(scriptRow(_variant.script).panes)));
         _engine.rootContext()->setContextProperty(QStringLiteral("newDefaults"), &_newDefaults);
+        listWorkspaces(scriptRow(_variant.script).sidebar);
         auto root = loadMainWindow(_engine, _controller, _warnings, chrome);
         REQUIRE(qobject_cast<QQuickWindow*>(root.get()) != nullptr);
+        showSidebar(scriptRow(_variant.script).sidebar);
         _incubation.settle();
         return root;
     }
@@ -1581,6 +1997,12 @@ class ChromeSnapshotScene
     /// The Settings window over *_settings, on _engine; null unless the script's surface is that window.
     std::unique_ptr<window::SettingsWindowHost> _settingsWindow;
     IncubationDriver _incubation;
+    /// The discovery a SwitcherDiscovering script holds back; released as the scene goes, before _switcher
+    /// joins its worker.
+    std::shared_ptr<test::GatedDiscovery> _heldDiscovery;
+    /// The switcher a switcher script or the chip's dropdown (openWorkspaceDropdown()) opened, presented in
+    /// _root's scene; null otherwise. Before _root, which borrows it, so it outlives the QML tree.
+    std::unique_ptr<window::SwitcherController> _switcher;
     std::unique_ptr<QObject> _root; ///< The QML tree dies before everything it borrows.
     /// Last: openKitDialog()'s dialog, parented into _root's tree, dies first.
     std::unique_ptr<QObject> _overlay;

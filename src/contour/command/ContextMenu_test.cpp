@@ -536,3 +536,16 @@ TEST_CASE("ContextMenu.rolesPassThrough", "[contextmenu]")
     CHECK(entries[0].role == MenuItemRole::Quit);
     CHECK(entries[1].role == MenuItemRole::None);
 }
+
+TEST_CASE("ContextMenu.showSidebar.offeredOnlyWhenNoToggleIsOnScreen", "[contextmenu]")
+{
+    auto state = fullyEnabledState();
+    state.sidebarRecovery = SidebarRecovery::None;
+    CHECK(find(buildContextMenu(state), "Show Sidebar") == nullptr);
+
+    state.sidebarRecovery = SidebarRecovery::Offered;
+    auto const offered = buildContextMenu(state);
+    auto const* row = find(offered, "Show Sidebar");
+    REQUIRE(row != nullptr);
+    CHECK(std::holds_alternative<contour::actions::ToggleSidebar>(row->action));
+}

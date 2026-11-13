@@ -63,6 +63,48 @@ namespace
     /// The key the terminals' last light/dark preference is kept under.
     constexpr auto LastColorPreferenceKey = std::string_view { "last_color_preference" };
 
+    /// The key the workspace sidebar's last-used preferences are kept under.
+    constexpr auto SidebarKey = std::string_view { "sidebar" };
+
+    /// The sidebar preferences @p node holds.
+    /// @param node A `sidebar` node.
+    /// @return The preferences; none when the node is absent or not a map. A word that names no visibility
+    ///         reads as the default, and a width that is not a positive number as none.
+    [[nodiscard]] std::optional<SidebarPrefs> sidebarPrefsOf(YAML::Node const& node)
+    {
+        if (!node || !node.IsMap())
+            return std::nullopt;
+        auto prefs = SidebarPrefs {};
+        auto const scalar = [&node](std::string_view key) -> std::optional<std::string> {
+            if (auto const value = node[std::string { key }]; value && value.IsScalar())
+                return value.as<std::string>();
+            return std::nullopt;
+        };
+        if (auto const word = scalar("visibility"))
+            prefs.visibility = configEnumFromToken<SidebarVisibility>(*word).value_or(prefs.visibility);
+        auto const width = [&scalar](std::string_view key) -> std::optional<int> {
+            if (auto const word = scalar(key))
+                if (auto const value = YAML::Node { *word }.as<int>(0); value > 0)
+                    return value;
+            return std::nullopt;
+        };
+        prefs.widthPx = width("width_px");
+        prefs.widthCells = width("width_cells");
+        return prefs;
+    }
+
+    /// The node that stores @p prefs.
+    [[nodiscard]] YAML::Node sidebarPrefsNode(SidebarPrefs const& prefs)
+    {
+        auto node = YAML::Node { YAML::NodeType::Map };
+        node["visibility"] = std::string { configEnumToken(prefs.visibility) };
+        if (prefs.widthPx)
+            node["width_px"] = *prefs.widthPx;
+        if (prefs.widthCells)
+            node["width_cells"] = *prefs.widthCells;
+        return node;
+    }
+
     /// The Settings window state @p node holds.
     /// @param node A `settings_window` node.
     /// @return The state; none when the node is absent or not a map. A key that does not read as its type is
@@ -153,6 +195,7 @@ namespace
                 return std::unexpected { GuiStateError::Malformed };
             auto state = GuiState {};
             state.settingsWindow = settingsWindowOf(document[std::string { SettingsWindowKey }]);
+            state.sidebar = sidebarPrefsOf(document[std::string { SidebarKey }]);
             if (auto const target = document[std::string { LastConnectTargetKey }];
                 target && target.IsScalar())
                 state.lastConnectTarget = target.as<std::string>();
@@ -222,6 +265,10 @@ namespace
             previous[std::string { SettingsWindowKey }] = settingsWindowNode(*state.settingsWindow);
         else
             previous.remove(std::string { SettingsWindowKey });
+        if (state.sidebar)
+            previous[std::string { SidebarKey }] = sidebarPrefsNode(*state.sidebar);
+        else
+            previous.remove(std::string { SidebarKey });
         if (state.lastConnectTarget.empty())
             previous.remove(std::string { LastConnectTargetKey });
         else

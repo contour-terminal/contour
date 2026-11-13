@@ -386,6 +386,53 @@ class SessionFactory
         return RemoteRouting::Local;
     }
 
+    /// Attach mode: renames the DAEMON's workspace @p workspace; the daemon's label change reaches every
+    /// window listing it (WorkspaceMeta).
+    /// @param workspace The daemon's workspace id, as a directory lists it.
+    /// @param label The new label; empty clears it.
+    /// @return Routed if handed to the daemon; Refused if the daemon owns the labels and cannot take it (the
+    ///         capability not shared, no connection); Local for a local factory, whose caller labels the
+    ///         workspace itself.
+    [[nodiscard]] virtual RemoteRouting requestRemoteRenameWorkspace(uint64_t /*workspace*/,
+                                                                     std::string_view /*label*/)
+    {
+        return RemoteRouting::Local;
+    }
+
+    /// Attach mode: sets the title of the DAEMON's tab that holds @p session, whether or not this client
+    /// mirrors it (proto::EditTab, which names a tab by any session it holds); the daemon's change reaches
+    /// every window listing it.
+    /// @param session A daemon session id of the tab, as a directory lists its panes.
+    /// @param title The new title; empty returns the tab to its automatic title.
+    /// @return As requestRemoteRenameWorkspace().
+    [[nodiscard]] virtual RemoteRouting requestRemoteTabTitle(uint64_t /*session*/,
+                                                              std::string_view /*title*/)
+    {
+        return RemoteRouting::Local;
+    }
+
+    /// Attach mode: moves the DAEMON's workspace @p workspace to a place in its workspace order; the daemon
+    /// states the new order to every window (WorkspaceMeta::position).
+    /// @param workspace The daemon's workspace id, as a directory lists it.
+    /// @param position The 0-based place it moves to; the daemon clamps it.
+    /// @return As requestRemoteRenameWorkspace().
+    [[nodiscard]] virtual RemoteRouting requestRemoteMoveWorkspace(uint64_t /*workspace*/,
+                                                                   uint32_t /*position*/)
+    {
+        return RemoteRouting::Local;
+    }
+
+    /// Attach mode: closes the DAEMON's workspace @p workspace in one step: the daemon ends whatever it holds
+    /// at that moment, a tab another client added a moment ago included, and removes the workspace; whether
+    /// or not this client mirrors its sessions.
+    /// @param workspace The daemon's workspace id, as a directory lists it.
+    /// @return Routed if handed to the daemon; Refused if it cannot be told (the capability not shared, no
+    ///         connection); Local for a local factory.
+    [[nodiscard]] virtual RemoteRouting requestRemoteCloseWorkspace(uint64_t /*workspace*/)
+    {
+        return RemoteRouting::Local;
+    }
+
     /// Attach mode: reports that the user moved the divider of the split separating the panes backed
     /// by @p firstPty and @p secondPty, so the DAEMON's model records the new ratio.
     ///
@@ -426,6 +473,16 @@ class SessionFactory
     /// SessionEnd). A local factory does nothing — destroying the pty ends its process.
     /// @param pty The pty backing the session to end.
     virtual void requestRemoteClose(vtpty::Pty const* /*pty*/) {}
+
+    /// Attach mode: lets go of the remote session the pane backed by @p pty mirrors, as only the pane goes
+    /// and the session runs on (SessionEnd::Detach): a window's switch leaves it, or the window's layout no
+    /// longer names it, as it moved to a workspace the window does not show. The session may be shown again
+    /// over this very connection -- a switch back, or a move the window follows -- so it is let go now: not
+    /// when the pty is destroyed, which may be after it is shown again, and with nothing left behind that
+    /// keeps it from being shown. Called ONLY where only the view goes; requestRemoteClose() is the end. A
+    /// local factory does nothing -- a local pane's session ends with its pty.
+    /// @param pty The pty backing the pane detached.
+    virtual void releaseRemoteSession(vtpty::Pty const* /*pty*/) {}
 
     /// Decides where an operation on the engine of the session backed by @p pty runs, and sends it to the
     /// remote end when that is where it runs.

@@ -327,6 +327,9 @@ class NativeClient final
     /// Told of the role the daemon gives this connection for raising, at the start of the connection and on
     /// every change.
     using RaiseRoleHandler = std::function<void(proto::RaiseRole)>;
+    /// Told what the daemon states of a workspace besides its layout (Capability::WorkspaceMeta): in full
+    /// after the hello and for a workspace created since, then a delta for each change.
+    using WorkspaceMetaHandler = std::function<void(proto::WorkspaceMeta const&)>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
     using HandshakeHandler = std::function<void()>;
 
@@ -400,6 +403,8 @@ class NativeClient final
     /// @param onPaneSummary Told what changed about a pane of a workspace this connection does not select
     ///        (Capability::DaemonFollow).
     /// @param onRaiseRole Told the role this connection has for raising (Capability::DaemonFollow).
+    /// @param onWorkspaceMeta Told what the daemon states of each workspace besides its layout
+    ///        (Capability::WorkspaceMeta).
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -416,7 +421,8 @@ class NativeClient final
                  PanesReprojectedHandler onPanesReprojected = {},
                  SwitchRequestHandler onSwitchRequest = {},
                  PaneSummaryHandler onPaneSummary = {},
-                 RaiseRoleHandler onRaiseRole = {});
+                 RaiseRoleHandler onRaiseRole = {},
+                 WorkspaceMetaHandler onWorkspaceMeta = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -486,7 +492,7 @@ class NativeClient final
     /// @param session The session whose pane is closed.
     /// @return Sent, or Unsupported -- nothing written -- once the connection is ending or the daemon refuses
     ///         the request.
-    Delivery closePane(uint64_t session);
+    [[nodiscard]] Delivery closePane(uint64_t session);
 
     /// Has this connection select @p workspace: the daemon pushes its layout and its sessions' screens in
     /// full from then on, the other workspaces' panes as summaries only, and a reconnect resumes it.
@@ -495,14 +501,17 @@ class NativeClient final
     /// @return The serial it went out under, which the LayoutBatchEnd answering it names as its causeSerial
     ///         (stating the selection the daemon kept, should it have no such workspace); std::nullopt when
     ///         nothing was written, unless the daemon shares Capability::DaemonFollow.
-    std::optional<uint64_t> selectWorkspace(uint64_t workspace);
+    /// @param directoryFrom The session of the pane asking for a new workspace (@p workspace 0): the new
+    ///        workspace's first shell starts in its working directory. Ignored for any other workspace.
+    std::optional<uint64_t> selectWorkspace(uint64_t workspace,
+                                            std::optional<uint64_t> directoryFrom = std::nullopt);
 
     /// Tells the daemon whether this connection's window has the user's focus, from which it decides which
     /// window raises for a bell or a notification.
     /// @param focus The window's focus now.
     /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares
     ///         Capability::DaemonFollow.
-    Delivery reportFocus(proto::WindowFocus focus);
+    [[nodiscard]] Delivery reportFocus(proto::WindowFocus focus);
 
     /// @return What this connection does with a bell or notification, as the daemon last stated it; Quiet
     ///         until it does.
@@ -513,7 +522,7 @@ class NativeClient final
     /// layouts pushed before the daemon served it (@see PendingTabEdits).
     /// @param edit The change.
     /// @return Sent, or Unsupported — nothing written — unless the daemon shares Capability::TabEdits.
-    Delivery editTab(proto::EditTab edit);
+    [[nodiscard]] Delivery editTab(proto::EditTab edit);
 
     /// Asks the daemon to graft a whole tab beside a pane of another tab. The daemon moves the tab's sessions
     /// into the target tab -- none is spawned or closed -- and re-pushes a LayoutState to every attached
@@ -523,9 +532,9 @@ class NativeClient final
     /// @param targetSession The session of the pane to split.
     /// @param side Which side of that pane the tab goes on.
     /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::TabMerge.
-    Delivery mergeTabIntoSplit(std::span<uint64_t const> tabSessions,
-                               uint64_t targetSession,
-                               vtworkspace::SplitSide side);
+    [[nodiscard]] Delivery mergeTabIntoSplit(std::span<uint64_t const> tabSessions,
+                                             uint64_t targetSession,
+                                             vtworkspace::SplitSide side);
 
     /// Asks the daemon to move a pane or a whole tab: beside a pane, onto one (a swap), into a workspace's
     /// tab well or into a new workspace. Nothing is spawned or closed; the daemon answers with the layout
@@ -536,12 +545,32 @@ class NativeClient final
     ///         unless the daemon shares Capability::MoveNode.
     [[nodiscard]] std::optional<uint64_t> moveNode(proto::MoveNode const& move);
 
+    /// Asks the daemon to move a workspace in its workspace order. The daemon answers every client with the
+    /// new positions (proto::WorkspaceMeta::position).
+    /// @param workspace The daemon's workspace id.
+    /// @param position The 0-based place it moves to; the daemon clamps it.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::WorkspaceMeta.
+    [[nodiscard]] Delivery moveWorkspace(uint64_t workspace, uint32_t position);
+
+    /// Asks the daemon to close a workspace in one step: it ends whatever the workspace holds at that moment
+    /// and removes the workspace.
+    /// @param workspace The daemon's workspace id.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::WorkspaceMeta.
+    [[nodiscard]] Delivery closeWorkspace(uint64_t workspace);
+
+    /// Asks the daemon to set a workspace's label. The daemon answers every client with the label
+    /// (proto::WorkspaceMeta::label).
+    /// @param workspace The daemon's workspace id.
+    /// @param label The new label; empty clears it.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::WorkspaceMeta.
+    [[nodiscard]] Delivery setWorkspaceLabel(uint64_t workspace, std::string label);
+
     /// Asks the daemon to set the axis of the split above a pane. The daemon answers with the layout push
     /// alone; a stale session is ignored there.
     /// @param anchorSession The session of a leaf inside the split to change.
     /// @param state The axis to set.
     /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::MoveNode.
-    Delivery setSplitOrientation(uint64_t anchorSession, vtworkspace::SplitState state);
+    [[nodiscard]] Delivery setSplitOrientation(uint64_t anchorSession, vtworkspace::SplitState state);
 
     /// @return Whether the daemon resolves profile names (Capability::ProfileByName shared): it then owns
     ///         what the sessions run and how they emulate, and this client names profiles instead.
@@ -783,6 +812,7 @@ class NativeClient final
     SwitchRequestHandler _onSwitchRequest;
     PaneSummaryHandler _onPaneSummary;
     RaiseRoleHandler _onRaiseRole;
+    WorkspaceMetaHandler _onWorkspaceMeta;
     proto::RaiseRole _raiseRole = proto::RaiseRole::Quiet; ///< @see raiseRole()
     HandshakeHandler _onHandshake;                         ///< @see setHandshakeHandler()
     std::map<uint64_t, RemoteScreen> _screens;

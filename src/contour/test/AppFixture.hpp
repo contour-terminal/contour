@@ -27,7 +27,8 @@
 namespace contour::test
 {
 
-/// A workspace lister that answers when the test says: it keeps each listing asked for until answer().
+/// A workspace lister that answers when the test says: it keeps each listing asked for until answer(), and
+/// each workspace creation asked for in creations.
 class ScriptedWorkspaceLister final: public contour::remote::IWorkspaceLister
 {
   public:
@@ -38,9 +39,25 @@ class ScriptedWorkspaceLister final: public contour::remote::IWorkspaceLister
         contour::remote::WorkspacesListed done; ///< Told the answer.
     };
 
+    /// One workspace creation asked for.
+    struct Creation
+    {
+        contour::remote::ListTarget target;     ///< The daemon.
+        std::string label;                      ///< The new workspace's label.
+        contour::remote::WorkspaceCreated done; ///< Told the new workspace's control id.
+    };
+
     void list(contour::remote::ListTarget target, contour::remote::WorkspacesListed done) override
     {
         requests.push_back(Request { .target = std::move(target), .done = std::move(done) });
+    }
+
+    void create(contour::remote::ListTarget target,
+                std::string label,
+                contour::remote::WorkspaceCreated done) override
+    {
+        creations.push_back(
+            Creation { .target = std::move(target), .label = std::move(label), .done = std::move(done) });
     }
 
     /// Answers the oldest listing still waiting.
@@ -53,7 +70,8 @@ class ScriptedWorkspaceLister final: public contour::remote::IWorkspaceLister
         request.done(std::move(listing));
     }
 
-    std::vector<Request> requests; ///< The listings waiting for an answer, oldest first.
+    std::vector<Request> requests;   ///< The listings waiting for an answer, oldest first.
+    std::vector<Creation> creations; ///< The creations asked for, oldest first; none is answered.
 };
 
 /// Builds a ContourGuiApp whose parameters() are populated with defaults (so profileName() resolves
@@ -88,6 +106,8 @@ class TestApp
     /// @param shellHost The host the shell-integration offer decides on. A POSIX one by default, so the offer
     ///                behaves the same on every machine running the tests; pass HostPlatform::Windows to see
     ///                it refuse.
+    /// @param gitProbe What looks up the git state of the in-process workspaces; null for none, as the
+    ///                fixture's files are not this machine's disk.
     explicit TestApp(
         std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
         std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
@@ -99,7 +119,8 @@ class TestApp
         std::unique_ptr<contour::platform::TaskbarProgressSink> taskbarProgress = nullptr,
         contour::platform::AppearanceServices const& appearance = contour::platform::nullAppearanceServices(),
         std::unique_ptr<contour::platform::IShellRcEditor> shellRcEditor = nullptr,
-        contour::config::HostPlatform shellHost = contour::config::HostPlatform::Other):
+        contour::config::HostPlatform shellHost = contour::config::HostPlatform::Other,
+        std::unique_ptr<vthost::IGitStatusProbe> gitProbe = nullptr):
         _environment { std::move(environment) },
         _sessionFiles { fileSystem ? fileSystem : &_fileSystem },
         _app(
@@ -127,7 +148,8 @@ class TestApp
             fakeSwitchDirectory(),
             [this](int status) { _exitCodes.push_back(status); },
             bootstrapPromptFactory(),
-            scriptedStartupLister())
+            scriptedStartupLister(),
+            std::move(gitProbe))
     {
         parseTerminalVerb();
     }

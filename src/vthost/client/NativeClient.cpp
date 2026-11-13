@@ -411,7 +411,8 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
                            PanesReprojectedHandler onPanesReprojected,
                            SwitchRequestHandler onSwitchRequest,
                            PaneSummaryHandler onPaneSummary,
-                           RaiseRoleHandler onRaiseRole):
+                           RaiseRoleHandler onRaiseRole,
+                           WorkspaceMetaHandler onWorkspaceMeta):
     _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
@@ -430,6 +431,7 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _onSwitchRequest(std::move(onSwitchRequest)),
     _onPaneSummary(std::move(onPaneSummary)),
     _onRaiseRole(std::move(onRaiseRole)),
+    _onWorkspaceMeta(std::move(onWorkspaceMeta)),
     _liveness(liveness),
     _keyAuth(_handshake.keySource ? std::optional { KeyAuthenticator { _handshake.keySource } }
                                   : std::nullopt),
@@ -647,6 +649,31 @@ std::optional<uint64_t> NativeClient::moveNode(proto::MoveNode const& move)
     return serial != 0 ? std::optional { serial } : std::nullopt;
 }
 
+Delivery NativeClient::moveWorkspace(uint64_t workspace, uint32_t position)
+{
+    // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
+    auto const request = proto::MoveWorkspace { .workspace = workspace, .toPosition = position };
+    if (!shares(proto::Capability::WorkspaceMeta) || send(proto::DecodedPdu { request }) == 0)
+        return Delivery::Unsupported;
+    return Delivery::Sent;
+}
+
+Delivery NativeClient::closeWorkspace(uint64_t workspace)
+{
+    auto const request = proto::CloseWorkspace { .workspace = workspace };
+    if (!shares(proto::Capability::WorkspaceMeta) || send(proto::DecodedPdu { request }) == 0)
+        return Delivery::Unsupported;
+    return Delivery::Sent;
+}
+
+Delivery NativeClient::setWorkspaceLabel(uint64_t workspace, std::string label)
+{
+    auto request = proto::SetWorkspaceLabel { .workspace = workspace, .label = std::move(label) };
+    if (!shares(proto::Capability::WorkspaceMeta) || send(proto::DecodedPdu { std::move(request) }) == 0)
+        return Delivery::Unsupported;
+    return Delivery::Sent;
+}
+
 Delivery NativeClient::setSplitOrientation(uint64_t anchorSession, vtworkspace::SplitState state)
 {
     // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
@@ -687,14 +714,16 @@ Delivery NativeClient::closePane(uint64_t session)
                                                                                     : Delivery::Unsupported;
 }
 
-std::optional<uint64_t> NativeClient::selectWorkspace(uint64_t workspace)
+std::optional<uint64_t> NativeClient::selectWorkspace(uint64_t workspace,
+                                                      std::optional<uint64_t> directoryFrom)
 {
     // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
     if (!shares(proto::Capability::DaemonFollow))
         return std::nullopt;
     // Held only once the daemon states it with the layout batch that answers (handleNotice): a workspace it
     // does not have leaves the selection as it was, and a new one (0) is named by that batch alone.
-    auto const serial = send(proto::DecodedPdu { proto::SelectWorkspace { .workspace = workspace } });
+    auto const serial = send(proto::DecodedPdu {
+        proto::SelectWorkspace { .workspace = workspace, .directoryFromSession = directoryFrom } });
     return serial != 0 ? std::optional { serial } : std::nullopt;
 }
 
@@ -917,6 +946,12 @@ bool NativeClient::handleNotice(proto::DecodedFrame const& frame)
     {
         if (_onPaneSummary)
             _onPaneSummary(*summary);
+        return true;
+    }
+    if (auto const* meta = std::get_if<proto::WorkspaceMeta>(&pdu))
+    {
+        if (_onWorkspaceMeta)
+            _onWorkspaceMeta(*meta);
         return true;
     }
     if (auto const* role = std::get_if<proto::NotifyRole>(&pdu))

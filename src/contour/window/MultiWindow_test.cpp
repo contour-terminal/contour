@@ -119,11 +119,14 @@ TEST_CASE("a window says its notices only while accessibility_announcements allo
         return announcer;
     };
     auto const* backing = manager.model().createWorkspace();
-    auto controller =
-        contour::window::WindowController { manager,       contour::window::WindowId { 9000 },
-                                            backing->id(), contour::config::MenuPresentation::InScene,
-                                            std::nullopt,  core::platform::defaultSteadyClock(),
-                                            recording };
+    auto controller = contour::window::WindowController { manager,
+                                                          contour::window::WindowId { 9000 },
+                                                          backing->id(),
+                                                          contour::config::MenuPresentation::InScene,
+                                                          std::nullopt,
+                                                          core::platform::defaultSteadyClock(),
+                                                          core::platform::defaultSystemWallClock(),
+                                                          recording };
     REQUIRE(said != nullptr);
     using contour::window::Notice;
     using contour::window::NoticeKind;
@@ -1973,6 +1976,23 @@ TEST_CASE("parseNodeDrag reads what writeNodeDrag writes, and nothing else", "[c
     pane.host = { .kind = HostKind::Process, .id = QStringLiteral("token") };
     pane.sessions = { 5 };
     CHECK(contour::window::parseNodeDrag(contour::window::writeNodeDrag(pane)) == pane);
+    auto const workspace = NodeDrag { .payload = DropPayload::Workspace,
+                                      .host = { .kind = HostKind::Daemon, .id = QStringLiteral("42") },
+                                      .window = vtworkspace::WorkspaceId { 3 },
+                                      .tabIndex = 0,
+                                      .workspace = 12,
+                                      .sessions = {} };
+    CHECK(contour::window::parseNodeDrag(contour::window::writeNodeDrag(workspace)) == workspace);
+    for (
+        auto const* const json: {
+            // A workspace names its workspace, and names no session.
+            R"({"kind":"workspace","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":[]})",
+            R"({"kind":"workspace","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"workspaceId":1,"sessions":[4]})",
+            R"({"kind":"workspace","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"workspaceId":-1,"sessions":[]})",
+            // Nothing else carries one.
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"workspaceId":1,"sessions":[4]})",
+        })
+        CHECK_FALSE(contour::window::parseNodeDrag(QString::fromUtf8(json)).has_value());
 
     auto const valid = std::string {
         R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":[4]})"
@@ -2256,10 +2276,14 @@ TEST_CASE("a drop while the window's drag runs moves once the drag has returned,
         REQUIRE_FALSE(f.a->beginPaneDrag(f.right).isEmpty());
         CHECK(probe.forgotten == 1);
         CHECK(f.a->carriedPane() == f.right);
-        QCoreApplication::processEvents(); // the held drop is made when the stale drag ends
-        CHECK(f.b->count() == 2);
+        // The held drop is released as the stale drag ends, but the new drag's loop turns the event loop it
+        // is posted to: it waits that drag out too, so the layout stays whole under the new drag's delegate.
+        QCoreApplication::processEvents();
+        CHECK(f.b->count() == 1);
         f.a->finishNodeDrag(Qt::MoveAction);
         CHECK(probe.forgotten == 2);
+        QCoreApplication::processEvents();
+        CHECK(f.b->count() == 2);
     }
 
     SECTION("a window that closes with its drag running ends it")

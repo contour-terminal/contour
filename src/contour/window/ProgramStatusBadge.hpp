@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/window/StatusUrgency.hpp>
+
 #include <vtbackend/core/UntrustedText.hpp>
 #include <vtbackend/screen/ProgramStatusSet.hpp>
 #include <vtbackend/vt/ProgramStatus.hpp>
@@ -27,23 +29,6 @@
 
 namespace contour::window
 {
-
-/// What a tab's program-status badge shows (OSC 7501).
-enum class BadgeKind : uint8_t
-{
-    None = 0, ///< Nothing: no record, or none worth showing.
-    Working,  ///< A spinner, with the progress when the program gave one.
-    Blocked,  ///< `!`: the program waits for the user.
-    Done,     ///< `✓`: finished, with results the user has not seen.
-    Error,    ///< `✕`: failed.
-};
-
-/// Whether the user has seen what a status record reports.
-enum class StatusSeen : uint8_t
-{
-    Unseen = 0, ///< The record is newer than the last one the user saw.
-    Seen,       ///< The user has seen this record, or a later one.
-};
 
 /// The badge a tab shows: its kind, the progress of a Working one, and the tooltip text.
 struct ProgramStatusBadge
@@ -73,7 +58,8 @@ struct BadgeRow
     BadgeVisibility visibility;    ///< When.
 };
 
-/// The states that show, most urgent first: the first row a tab's records match wins.
+/// The states that show, most urgent first (see StatusUrgency.hpp, which checks the order): the first row
+/// a tab's records match wins. An unseen Done outranks Working; a seen one is skipped.
 inline constexpr auto BadgeRows = std::array {
     BadgeRow { .state = vtbackend::ProgramState::Blocked,
                .kind = BadgeKind::Blocked,
@@ -81,13 +67,25 @@ inline constexpr auto BadgeRows = std::array {
     BadgeRow { .state = vtbackend::ProgramState::Error,
                .kind = BadgeKind::Error,
                .visibility = BadgeVisibility::WhileUnseen },
-    BadgeRow { .state = vtbackend::ProgramState::Working,
-               .kind = BadgeKind::Working,
-               .visibility = BadgeVisibility::Always },
     BadgeRow { .state = vtbackend::ProgramState::Done,
                .kind = BadgeKind::Done,
                .visibility = BadgeVisibility::WhileUnseen },
+    BadgeRow { .state = vtbackend::ProgramState::Working,
+               .kind = BadgeKind::Working,
+               .visibility = BadgeVisibility::Always },
 };
+
+namespace detail
+{
+    [[nodiscard]] constexpr bool badgeRowsByUrgency() noexcept
+    {
+        return std::ranges::is_sorted(BadgeRows, std::ranges::greater {}, [](BadgeRow const& row) {
+            return urgencyOf(row.kind, StatusSeen::Unseen);
+        });
+    }
+} // namespace detail
+
+static_assert(detail::badgeRowsByUrgency(), "BadgeRows must list the rows most urgent first");
 
 /// Whether the user has seen @p record.
 /// @param record The record.

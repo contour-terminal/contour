@@ -11,8 +11,13 @@
 #include <contour/window/LinkPillPlacement.hpp>
 #include <contour/window/PalettePlacement.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/PickerAccessory.hpp>
+#include <contour/window/PopupAnchor.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/SecureLockPlacement.hpp>
+#include <contour/window/SidebarControls.hpp>
+#include <contour/window/SidebarSelection.hpp>
+#include <contour/window/SidebarToggle.hpp>
 #include <contour/window/SplitChrome.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabWellLayout.hpp>
@@ -208,6 +213,7 @@ namespace
             .restart = QString::fromUtf8(tokens.restartGlyph),
             .scrollThumb = QString::fromUtf8(tokens.scrollThumbGlyph),
             .drillIn = QString::fromUtf8(tokens.drillInGlyph),
+            .breadcrumb = QString::fromUtf8(tokens.breadcrumbGlyph),
             .palettePrompt = QString::fromUtf8(tokens.palettePromptGlyph),
             .findPrevious = QString::fromUtf8(tokens.findPreviousGlyph),
             .findNext = QString::fromUtf8(tokens.findNextGlyph),
@@ -237,6 +243,18 @@ namespace
         return QString::fromUtf8(name);
     }
 
+    /// The enumerator of @p count whose name, by @p nameOfValue, is @p name.
+    /// @return It, or nothing for a name no enumerator has.
+    template <typename E, typename NameOf>
+    [[nodiscard]] std::optional<E> enumeratorNamed(QString const& name, size_t count, NameOf nameOfValue)
+    {
+        auto const values = std::views::iota(size_t { 0 }, count)
+                            | std::views::transform([](size_t index) { return static_cast<E>(index); });
+        auto const named =
+            std::ranges::find_if(values, [&](E candidate) { return name == nameOf(nameOfValue(candidate)); });
+        return named != values.end() ? std::optional { *named } : std::nullopt;
+    }
+
     /// @param column The text of a header action's row to list.
     /// @return That text of every header action, indexed by config::PaneHeaderAction.
     [[nodiscard]] QStringList paneHeaderActionTexts(std::string_view PaneHeaderActionRow::* column)
@@ -262,6 +280,7 @@ ChromeInputs chromeInputsFor(config::ChromeStyle row, QFont const& font)
 {
     return ChromeInputs { .row = row,
                           .font = font,
+                          .fixedFont = {},
                           .accessibility = {},
                           .appearance = {},
                           .scheme = config::chromeSchemeColorsOf(vtbackend::ColorPalette {}),
@@ -285,7 +304,11 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _size { _groups.size, _units, this },
     _space { _groups.space, _units, this },
     _radii { _groups.radii, _units, this },
-    _type { _groups.type, _inputs.font, this },
+    // Code is set in the chrome font where the chrome is cells, which is the terminal's own fixed face.
+    _type { _groups.type,
+            _inputs.font,
+            _tokens.unit == config::LengthUnit::Cell ? _inputs.font : _inputs.fixedFont,
+            this },
     _motion { _groups.motion, _units, this },
     _elevation { _groups.elevation, _units, this },
     _material { _groups.material, this },
@@ -294,6 +317,7 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _layout { _groups.layout, this },
     _tint { _groups.tint, this },
     _settings { _groups.settings, _units, this },
+    _sidebar { _groups.sidebar, _groups.layout.sidebar, _units, this },
     _settingsTraits { _groups.layout.settings, this },
     _colors { _groups.colors, _inputs.scheme, _groups.contrast.separatorPercent, *this },
     _paneHeaderActionNames { paneHeaderActionTexts(&PaneHeaderActionRow::accessibleName) },
@@ -381,7 +405,7 @@ QVariantMap UiStyleProvider::badgeLook(int kind) const
     if (!inRange(kind, TabBadgeKindCount))
         return {};
     auto const& look = tabBadgeLook(static_cast<TabBadgeKind>(kind));
-    return { { QStringLiteral("glyph"), nameOf(look.glyph) },
+    return { { QStringLiteral("glyph"), nameOf(tabBadgeGlyph(look.kind, _groups.layout.sidebar)) },
              { QStringLiteral("mark"), nameOf(badgeMarkName(look.mark)) },
              { QStringLiteral("ink"), statusInk(static_cast<int>(look.ink)) },
              { QStringLiteral("name"), nameOf(look.accessibleName) } };
@@ -402,12 +426,19 @@ bool UiStyleProvider::isHostChipShown(QString const& hostLabel) const
     return hostChipPresence(hostLabel.toStdString()) == HostChipPresence::Shown;
 }
 
-QVariantMap UiStyleProvider::titleBand(
-    int frame, int mode, int strip, int position, QString const& hostLabel, int hostChipState) const
+QVariantMap UiStyleProvider::titleBand(int frame,
+                                       int mode,
+                                       int strip,
+                                       int position,
+                                       QString const& hostLabel,
+                                       int hostChipState,
+                                       int placement,
+                                       int sidebar) const
 {
     if (!inRange(frame, WindowFrameCount) || !inRange(mode, WindowModeCount)
         || !inRange(strip, TabStripGateCount) || !inRange(position, config::TabBarPositionCount)
-        || !inRange(hostChipState, HostChipStateCount))
+        || !inRange(hostChipState, HostChipStateCount) || !inRange(placement, config::TabPlacementCount)
+        || !inRange(sidebar, config::SidebarVisibilityCount))
         return {};
     auto const band =
         titleBandOf(TitleBandInputs { .frame = static_cast<WindowFrame>(frame),
@@ -415,7 +446,9 @@ QVariantMap UiStyleProvider::titleBand(
                                       .strip = static_cast<TabStripGate>(strip),
                                       .position = static_cast<config::TabBarPosition>(position),
                                       .notice = hostNoticeOf(hostChipPresence(hostLabel.toStdString()),
-                                                             static_cast<HostChipState>(hostChipState)) });
+                                                             static_cast<HostChipState>(hostChipState)),
+                                      .placement = static_cast<config::TabPlacement>(placement),
+                                      .sidebar = static_cast<config::SidebarVisibility>(sidebar) });
     return { { QStringLiteral("band"), nameOf(barPresenceName(band.band)) },
              { QStringLiteral("bandEdge"), nameOf(barEdgeName(band.bandEdge)) },
              { QStringLiteral("centre"), nameOf(barCentreName(band.centre)) },
@@ -493,6 +526,24 @@ QVariantMap UiStyleProvider::palettePlacement(qreal windowWidth, qreal windowHei
              { QStringLiteral("maxHeight"), placement.maxHeight } };
 }
 
+QVariantMap UiStyleProvider::popupBelow(
+    QRectF const& control, qreal width, qreal height, qreal windowWidth, qreal windowHeight) const
+{
+    auto const rounded = [](qreal value) {
+        return static_cast<int>(std::lround(value));
+    };
+    auto const at =
+        window::popupBelow(PopupRect { .x = rounded(control.x()),
+                                       .y = rounded(control.y()),
+                                       .width = rounded(control.width()),
+                                       .height = rounded(control.height()) },
+                           rounded(width),
+                           rounded(height),
+                           rounded(_space.s1()),
+                           PopupRect { .width = rounded(windowWidth), .height = rounded(windowHeight) });
+    return { { QStringLiteral("x"), at.x }, { QStringLiteral("y"), at.y } };
+}
+
 QFont UiStyleProvider::activeTabFont(QFont const& base) const
 {
     auto font = base;
@@ -508,6 +559,81 @@ qreal UiStyleProvider::snapToCells(qreal length) const
 {
     auto const quantum = _metrics.widthQuantum;
     return quantum * std::ceil(length / quantum);
+}
+
+qreal UiStyleProvider::snappedSidebarWidth(qreal pixels) const
+{
+    auto const metrics = sidebarMetrics();
+    return geometry::sidebarUnitsOf(static_cast<int>(std::lround(pixels)), metrics.tokens, metrics.scale)
+           * metrics.scale.unitPixels;
+}
+
+bool UiStyleProvider::sidebarTitleInHeaderBar(bool bandOnScreen) const
+{
+    return bandOnScreen
+           && config::sidebarLookTraits(_groups.layout.sidebar).title == config::SidebarTitle::InHeaderBar;
+}
+
+QVariantMap UiStyleProvider::sidebarControls() const
+{
+    auto controls = QVariantMap {};
+    for (auto const control:
+         std::views::iota(size_t { 0 }, SidebarControlCount)
+             | std::views::transform([](size_t i) { return static_cast<SidebarControl>(i); }))
+    {
+        auto const& face = sidebarControlFace(_groups.layout.sidebar, control);
+        controls.insert(nameOf(sidebarControlName(control)),
+                        QVariantMap { { QStringLiteral("iconName"), nameOf(face.iconName) },
+                                      { QStringLiteral("bundledIcon"), nameOf(face.bundledIcon) },
+                                      { QStringLiteral("glyph"), nameOf(face.glyph) },
+                                      // The action it runs, whose bound chord its tooltip names.
+                                      { QStringLiteral("command"), nameOf(sidebarControlCommand(control)) },
+                                      // Whether a pane or a tab dropped on it gets a workspace of its own.
+                                      { QStringLiteral("takesNewWorkspaceDrop"),
+                                        face.drop == SidebarControlDrop::NewWorkspace } });
+    }
+    return controls;
+}
+
+QVariantMap UiStyleProvider::pickerAccessory() const
+{
+    auto const& face = pickerAccessoryFace(_groups.layout.sidebar);
+    return QVariantMap { { QStringLiteral("iconName"), nameOf(face.iconName) },
+                         { QStringLiteral("bundledIcon"), nameOf(face.bundledIcon) },
+                         { QStringLiteral("glyph"), nameOf(face.glyph) } };
+}
+
+QVariantMap UiStyleProvider::sidebarToggle(int sidebarVisibility,
+                                           QString const& band,
+                                           QString const& bandEdge) const
+{
+    auto const presence = enumeratorNamed<BarPresence>(band, BarPresenceCount, barPresenceName);
+    auto const edge = enumeratorNamed<BarEdge>(bandEdge, BarEdgeCount, barEdgeName);
+    if (!inRange(sidebarVisibility, config::SidebarVisibilityCount) || !presence || !edge)
+        return {};
+    auto const toggle = sidebarToggleOf(
+        SidebarToggleInputs { .span = config::sidebarLookTraits(_groups.layout.sidebar).span,
+                              .visibility = static_cast<config::SidebarVisibility>(sidebarVisibility),
+                              .band = *presence,
+                              .bandEdge = *edge });
+    return { { QStringLiteral("host"), nameOf(sidebarToggleHostName(toggle.host)) },
+             { QStringLiteral("label"), nameOf(toggle.label) },
+             { QStringLiteral("shown"),
+               sidebarVisibility == static_cast<int>(config::SidebarVisibility::Shown) } };
+}
+
+QVariantMap UiStyleProvider::sidebarSelection(int selection, bool treeFocused, bool rowFocused) const
+{
+    auto const marked = inRange(selection, 3) ? static_cast<RowSelection>(selection) : RowSelection::None;
+    auto focus = SidebarFocus::Elsewhere;
+    if (rowFocused)
+        focus = SidebarFocus::OnRow;
+    else if (treeFocused)
+        focus = SidebarFocus::InTree;
+    auto const paint = sidebarSelectionPaint(_groups.layout.sidebar, marked, focus);
+    return { { QStringLiteral("fill"), nameOf(selectionFillName(paint.fill)) },
+             { QStringLiteral("ring"), paint.ring == FocusRing::Shown },
+             { QStringLiteral("pill"), paint.pill == AccentPill::Shown } };
 }
 
 qreal UiStyleProvider::wellGap() const noexcept

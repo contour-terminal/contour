@@ -25,6 +25,9 @@ namespace
     /// What a window says when the user declined a question a switch asked: the window stays as it was.
     constexpr auto SwitchDeclinedText = std::string_view { "Did not switch to {}: {}." };
 
+    /// What a window says when the workspace a switch was to go to could not be created: where, then why.
+    constexpr auto CreateFailedText = std::string_view { "Could not create a workspace on {}: {}." };
+
     /// Why a switch whose target did not show within its deadline failed.
     constexpr auto SwitchTimedOut = std::string_view { "it did not show the workspace in time" };
 
@@ -145,18 +148,20 @@ void WindowSwitcher::request(vtworkspace::WorkspaceId window,
         return;
     }
     request.config.emplace(*std::move(destination.config));
-    // The window's own daemon: its connection holds the directory of every workspace, so nothing is listed --
-    // but for a workspace named by its control id, which only the daemon's listing knows.
-    if (request.sameDaemon == SameDaemon::Yes && !namesControlId(request.target.workspace))
+    // The window's own daemon: its connection holds the directory of every workspace, control ids and all, so
+    // nothing is listed -- but for a workspace named by its control id on a daemon that states none.
+    if (request.sameDaemon == SameDaemon::Yes)
     {
-        auto const rows =
-            workspaceRowsOf(own->liveController() != nullptr ? own->liveController()->directory()
-                                                             : window::WorkspaceDirectory {},
-                            [&](uint64_t daemonWorkspace) {
-                                return shownHere(SameDaemon::Yes, request.address, *own, daemonWorkspace);
-                            });
-        resolve(std::move(request), rows);
-        return;
+        auto const directory = own->liveController() != nullptr ? own->liveController()->directory()
+                                                                : window::WorkspaceDirectory {};
+        if (resolvesFromDirectory(request.target.workspace, directory))
+        {
+            auto const rows = workspaceRowsOf(directory, [&](uint64_t daemonWorkspace) {
+                return shownHere(SameDaemon::Yes, request.address, *own, daemonWorkspace);
+            });
+            resolve(std::move(request), rows);
+            return;
+        }
     }
     auto list = ListTarget { .address = request.address, .transport = request.config->controller.transport };
     _lister->list(std::move(list),
@@ -234,6 +239,59 @@ void WindowSwitcher::listWorkspaces(vtworkspace::WorkspaceId window,
                           return switcher.shownHere(sameDaemon, address, *link, daemonWorkspace);
                       }));
                   });
+}
+
+void WindowSwitcher::createWorkspace(vtworkspace::WorkspaceId window,
+                                     session::SwitchTarget const& daemon,
+                                     std::string label,
+                                     session::SwitchMode mode,
+                                     session::SwitchCompletion done)
+{
+    auto* const own = linkOf(window);
+    if (own == nullptr)
+    {
+        failCreate(window, daemon, "this window has no daemon behind it", done);
+        return;
+    }
+    auto destination = destinationOf(*own, daemon, window);
+    if (!destination.config)
+    {
+        failCreate(window, daemon, destination.config.error(), done);
+        return;
+    }
+    auto target =
+        ListTarget { .address = destination.address, .transport = destination.config->controller.transport };
+    _lister->create(
+        std::move(target),
+        std::move(label),
+        [alive = std::weak_ptr { _alive },
+         window,
+         daemon = session::SwitchTarget { .kind = daemon.kind, .daemon = daemon.daemon, .workspace = {} },
+         mode,
+         done = std::move(done)](auto created) mutable {
+            auto const self = alive.lock();
+            if (!self)
+                return;
+            if (!created)
+            {
+                (*self)->failCreate(window, daemon, created.error(), done);
+                return;
+            }
+            // The new workspace, by the control id the daemon gave it: never mistaken for another.
+            daemon.workspace = *created;
+            (*self)->request(window, std::move(daemon), mode, session::NoLandingDeadline, std::move(done));
+        });
+}
+
+std::vector<WorkspaceRow> WindowSwitcher::windowWorkspaceRows(vtworkspace::WorkspaceId window)
+{
+    auto* const own = linkOf(window);
+    if (own == nullptr || own->liveController() == nullptr)
+        return {};
+    auto const address = own->address();
+    return workspaceRowsOf(own->liveController()->directory(), [&](uint64_t daemonWorkspace) {
+        return shownHere(SameDaemon::Yes, address, *own, daemonWorkspace);
+    });
 }
 
 void WindowSwitcher::resolveListed(Request request, std::vector<vtcontrol::WorkspaceInfo> const& workspaces)
@@ -442,6 +500,20 @@ void WindowSwitcher::succeed(Request const& request, vthost::proto::SwitchOutcom
 {
     _busy.erase(request.window.value);
     request.done(outcome);
+}
+
+void WindowSwitcher::failCreate(vtworkspace::WorkspaceId window,
+                                session::SwitchTarget const& daemon,
+                                std::string const& reason,
+                                session::SwitchCompletion const& done)
+{
+    // Asked for from a popup that has closed by now: the window says it, as a failed switch does.
+    auto const text = std::format(
+        CreateFailedText, session::daemonPhrase(daemon.kind, daemon.daemon, "this daemon"), reason);
+    errorLog()("switch: {}", text);
+    if (auto* const controller = _sessions.controllerDisplaying(window))
+        controller->notices().post(window::Notice { .kind = window::NoticeKind::SwitchFailed, .text = text });
+    done(std::unexpected(reason));
 }
 
 void WindowSwitcher::fail(Request const& request, std::string const& reason)

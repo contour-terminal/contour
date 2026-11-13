@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+//
+// The switcher's rows as palette levels (boards 1, 2, 3 and 5 of the redesign): each rule is a case over a
+// fixture of plain data, with no window and no Qt.
+
 #include <contour/window/SwitcherRows.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -14,17 +18,26 @@
 
 using contour::session::SwitchTarget;
 using contour::window::SwitcherDaemon;
-using contour::window::SwitcherExpansion;
+using contour::window::SwitcherDiscovery;
 using contour::window::SwitcherGroup;
 using contour::window::SwitcherHostLink;
 using contour::window::switcherInitialSelection;
 using contour::window::SwitcherInputs;
+using contour::window::SwitcherLevel;
 using contour::window::SwitcherListing;
+using contour::window::SwitcherOrigin;
+using contour::window::SwitcherPill;
 using contour::window::SwitcherRow;
 using contour::window::SwitcherRowKind;
+using contour::window::switcherRows;
 using contour::window::SwitcherScope;
+using contour::window::switcherSelection;
+using contour::window::SwitcherStatus;
+using contour::window::SwitcherView;
 using contour::window::SwitcherWorkspace;
 using contour::window::SwitcherWorkspaceState;
+using contour::window::TabBadgeKind;
+using contour::window::Urgency;
 using vthost::proto::SwitchDaemonKind;
 
 namespace
@@ -53,43 +66,58 @@ namespace
 
 [[nodiscard]] SwitcherWorkspace workspace(uint32_t position,
                                           std::string name,
-                                          std::size_t tabs,
-                                          SwitcherWorkspaceState state)
+                                          SwitcherWorkspaceState state = SwitcherWorkspaceState::Hidden,
+                                          SwitcherStatus status = {})
 {
-    return SwitcherWorkspace {
-        .ref = workspaceRef(name), .position = position, .name = std::move(name), .tabs = tabs, .state = state
+    return SwitcherWorkspace { .ref = workspaceRef(name),
+                               .position = position,
+                               .name = std::move(name),
+                               .tabs = 1,
+                               .state = state,
+                               .status = std::move(status) };
+}
+
+[[nodiscard]] SwitcherStatus failed()
+{
+    auto status = SwitcherStatus {};
+    status.urgency = Urgency::Failed;
+    status.glyph = TabBadgeKind::Error;
+    return status;
+}
+
+[[nodiscard]] SwitcherDaemon daemon(SwitchTarget address, std::vector<SwitcherWorkspace> workspaces)
+{
+    return SwitcherDaemon { .address = std::move(address),
+                            .workspaceCount = workspaces.size(),
+                            .tag = {},
+                            .listing = SwitcherListing::Listed,
+                            .failure = {},
+                            .workspaces = std::move(workspaces) };
+}
+
+/// Boards 1 and 2: `work` is the window's daemon, holding four workspaces, the window on `contour`; `home`
+/// is another local daemon.
+[[nodiscard]] std::vector<SwitcherDaemon> boards()
+{
+    return {
+        daemon(label("work"),
+               { workspace(1, "contour", SwitcherWorkspaceState::ThisWindow),
+                 workspace(2, "api-gateway"),
+                 workspace(3, "docs", SwitcherWorkspaceState::ShownElsewhere),
+                 workspace(4, "scratch") }),
+        daemon(label("home"),
+               { workspace(1, "api-docs", SwitcherWorkspaceState::Hidden, failed()),
+                 workspace(2, "rapid-proto"),
+                 workspace(3, "dotfiles") }),
     };
 }
 
-/// The mockup's panel B: `default` (this window's, expanded, two workspaces), `admin` (expanded, two) and
-/// the saved host `studio-admin`, not yet connected.
-[[nodiscard]] std::vector<SwitcherDaemon> mockup()
+[[nodiscard]] std::vector<SwitcherRowKind> kindsOf(std::vector<SwitcherRow> const& rows)
 {
-    return {
-        SwitcherDaemon { .address = label("default"),
-                         .workspaceCount = 2,
-                         .tag = {},
-                         .expansion = SwitcherExpansion::Expanded,
-                         .listing = SwitcherListing::Listed,
-                         .failure = {},
-                         .workspaces = { workspace(1, "work", 4, SwitcherWorkspaceState::ThisWindow),
-                                         workspace(3, "scratch", 1, SwitcherWorkspaceState::Hidden) } },
-        SwitcherDaemon { .address = label("admin"),
-                         .workspaceCount = 2,
-                         .tag = {},
-                         .expansion = SwitcherExpansion::Expanded,
-                         .listing = SwitcherListing::Listed,
-                         .failure = {},
-                         .workspaces = { workspace(1, "ops", 3, SwitcherWorkspaceState::Hidden),
-                                         workspace(2, "logs", 1, SwitcherWorkspaceState::ShownElsewhere) } },
-        SwitcherDaemon { .address = host("studio-admin"),
-                         .workspaceCount = std::nullopt,
-                         .tag = "TLS",
-                         .expansion = SwitcherExpansion::Collapsed,
-                         .listing = SwitcherListing::NotListed,
-                         .failure = {},
-                         .workspaces = {} },
-    };
+    auto kinds = std::vector<SwitcherRowKind> {};
+    for (auto const& row: rows)
+        kinds.push_back(row.kind);
+    return kinds;
 }
 
 [[nodiscard]] std::vector<std::string> titlesOf(std::vector<SwitcherRow> const& rows)
@@ -100,197 +128,330 @@ namespace
     return titles;
 }
 
+using enum SwitcherRowKind;
+
 } // namespace
 
-TEST_CASE("switcherRows groups the daemons and lists the expanded ones' workspaces", "[switcher]")
-{
-    auto const daemons = mockup();
-    auto const rows =
-        switcherRows(SwitcherInputs { .daemons = daemons, .windowDaemon = label("default") }, "");
-
-    CHECK(titlesOf(rows)
-          == std::vector<std::string> { "default",
-                                        "1 \"work\"",
-                                        "3 \"scratch\"",
-                                        "+ new workspace on default",
-                                        "admin",
-                                        "1 \"ops\"",
-                                        "2 \"logs\"",
-                                        "+ new workspace on admin",
-                                        "New daemon…",
-                                        "studio-admin" });
-    REQUIRE(rows.size() == 10);
-    CHECK(rows[0].group == SwitcherGroup::ThisComputer);
-    CHECK(rows[0].detail == "running · 2 workspaces · this window");
-    CHECK(rows[0].expansion == SwitcherExpansion::Expanded);
-    CHECK(rows[1].detail == "4 tabs · this window");
-    CHECK(rows[2].detail == "1 tab · hidden");
-    CHECK(rows[5].detail == "3 tabs · hidden");
-    CHECK(rows[6].detail == "1 tab · shown elsewhere");
-    CHECK(rows[4].detail == "running · 2 workspaces");
-    CHECK(rows[8].kind == SwitcherRowKind::NewDaemon);
-    CHECK(rows[9].group == SwitcherGroup::SavedHosts);
-    CHECK(rows[9].detail == "not yet connected");
-    CHECK(rows[9].tag == "TLS");
-    CHECK(rows[9].expansion == SwitcherExpansion::Collapsed);
-
-    // Where each row goes.
-    CHECK(rows[0].target == label("default"));
-    CHECK(rows[5].target == label("admin", workspaceRef("ops")));
-    CHECK(rows[7].target == label("admin", contour::session::NewWorkspace {}));
-    CHECK(rows[9].target == host("studio-admin"));
-}
-
-TEST_CASE("switcherRows says how a daemon's listing stands", "[switcher]")
-{
-    auto daemons = mockup();
-    daemons[2].expansion = SwitcherExpansion::Expanded;
-
-    SECTION("listing")
-    {
-        daemons[2].listing = SwitcherListing::Listing;
-        auto const rows =
-            switcherRows(SwitcherInputs { .daemons = daemons, .windowDaemon = label("default") }, "");
-        CHECK(rows[9].detail == "listing…");
-        // Nothing listed under it yet but the way to a new workspace.
-        REQUIRE(rows.size() == 11);
-        CHECK(rows[10].kind == SwitcherRowKind::NewWorkspace);
-    }
-    SECTION("failed")
-    {
-        daemons[2].listing = SwitcherListing::Failed;
-        daemons[2].failure = "connection refused";
-        auto const rows =
-            switcherRows(SwitcherInputs { .daemons = daemons, .windowDaemon = label("default") }, "");
-        CHECK(rows[9].detail == "could not list: connection refused");
-    }
-    SECTION("listed, and this window's daemon")
-    {
-        daemons[2].listing = SwitcherListing::Listed;
-        daemons[2].workspaces = { workspace(1, "build", 2, SwitcherWorkspaceState::ThisWindow) };
-        auto const rows =
-            switcherRows(SwitcherInputs { .daemons = daemons, .windowDaemon = host("studio-admin") }, "");
-        CHECK(rows[0].detail == "running · 2 workspaces");
-        CHECK(rows[9].detail == "connected · 1 workspace · this window");
-    }
-}
-
-TEST_CASE("switcherRows filters daemons and workspaces", "[switcher]")
-{
-    auto daemons = mockup();
-    daemons[1].expansion = SwitcherExpansion::Collapsed;
-    auto const rowsFor = [&](std::string_view filter) {
-        return titlesOf(
-            switcherRows(SwitcherInputs { .daemons = daemons, .windowDaemon = label("default") }, filter));
-    };
-
-    // A daemon's name keeps it, with what is expanded under it.
-    CHECK(rowsFor("DEFAULT")
-          == std::vector<std::string> {
-              "default", "1 \"work\"", "3 \"scratch\"", "+ new workspace on default" });
-    // A workspace's name finds it under a collapsed daemon too.
-    CHECK(rowsFor("logs") == std::vector<std::string> { "admin", "2 \"logs\"" });
-    CHECK(rowsFor("studio") == std::vector<std::string> { "studio-admin" });
-    CHECK(rowsFor("new dae") == std::vector<std::string> { "New daemon…" });
-    CHECK(rowsFor("nothing like it").empty());
-}
-
-TEST_CASE("switcherRows lists a pick's daemon alone", "[switcher]")
-{
-    auto const daemons = std::vector<SwitcherDaemon> { mockup()[1] };
-    auto const rows = switcherRows(SwitcherInputs { .daemons = daemons,
-                                                    .windowDaemon = label("default"),
-                                                    .scope = SwitcherScope::OneDaemon },
-                                   "");
-
-    CHECK(titlesOf(rows)
-          == std::vector<std::string> { "1 \"ops\"", "2 \"logs\"", "+ new workspace on admin" });
-    for (auto const& row: rows)
-        CHECK(row.group == SwitcherGroup::Pick);
-}
-
-TEST_CASE("switcherSelection keeps the row it was on", "[switcher]")
-{
-    auto const daemons = mockup();
-    auto const rows =
-        switcherRows(SwitcherInputs { .daemons = daemons, .windowDaemon = label("default") }, "");
-    CHECK(switcherSelection(rows, std::nullopt) == 0);
-    CHECK(switcherSelection(rows, label("admin")) == 4);
-    CHECK(switcherSelection(rows, label("gone")) == 0);
-}
-
-TEST_CASE("switcherInitialSelection starts on the first daemon that is not the window's own", "[switcher]")
-{
-    auto const daemons = mockup();
-    auto const everything = [&](SwitchTarget const& own) {
-        return switcherRows(SwitcherInputs { .daemons = daemons, .windowDaemon = own }, "");
-    };
-
-    SECTION("a window on the first daemon opens on the next one, not on New daemon")
-    {
-        auto const rows = everything(label("default"));
-        auto const at = switcherInitialSelection(rows, label("default"));
-        REQUIRE(at < rows.size());
-        CHECK(rows[at].kind == SwitcherRowKind::Daemon);
-        CHECK(rows[at].target.daemon != "default");
-    }
-
-    SECTION("a window on another daemon opens on the first one")
-    {
-        auto const rows = everything(label("admin"));
-        auto const at = switcherInitialSelection(rows, label("admin"));
-        REQUIRE(at < rows.size());
-        CHECK(rows[at].kind == SwitcherRowKind::Daemon);
-        CHECK(rows[at].target.daemon != "admin");
-    }
-
-    SECTION("the window's own daemon is the fallback when it is the only one")
-    {
-        auto const only = std::vector<SwitcherDaemon> { mockup()[0] };
-        auto const rows =
-            switcherRows(SwitcherInputs { .daemons = only, .windowDaemon = label("default") }, "");
-        auto const at = switcherInitialSelection(rows, label("default"));
-        REQUIRE(at < rows.size());
-        CHECK(rows[at].kind == SwitcherRowKind::Daemon);
-        CHECK(rows[at].target.daemon == "default");
-    }
-
-    SECTION("a saved host is never preselected while a local daemon can be")
-    {
-        auto const hostOnly = std::vector<SwitcherDaemon> { mockup()[0], mockup()[2] };
-        auto const rows =
-            switcherRows(SwitcherInputs { .daemons = hostOnly, .windowDaemon = label("default") }, "");
-        auto const at = switcherInitialSelection(rows, label("default"));
-        REQUIRE(at < rows.size());
-        // The only other daemon is a saved host: the window's own row stays selected.
-        CHECK(rows[at].target.kind == SwitchDaemonKind::Label);
-        CHECK(rows[at].target.daemon == "default");
-    }
-
-    SECTION("without daemon rows it is the first row")
-    {
-        CHECK(switcherInitialSelection({}, label("default")) == 0);
-    }
-}
-
-TEST_CASE("a saved host reached before says it is not connected, not that it was never connected",
+TEST_CASE("the top level lists the window's daemon's workspaces, the other daemons, then the actions",
           "[switcher]")
 {
-    auto daemons = mockup();
-    auto const detailOfStudio = [&] {
-        auto const rows =
-            switcherRows(SwitcherInputs { .daemons = daemons, .windowDaemon = label("default") }, "");
-        auto const studio = std::ranges::find(rows, "studio-admin", &SwitcherRow::title);
-        REQUIRE(studio != rows.end());
-        return studio->detail;
+    auto const daemons = boards();
+    auto const rows = switcherRows(SwitcherInputs { .daemons = daemons }, SwitcherView {});
+
+    CHECK(kindsOf(rows)
+          == std::vector { Workspace, Workspace, Workspace, Workspace, Daemon, NewWorkspace, NewDaemon });
+    CHECK(titlesOf(rows)
+          == std::vector<std::string> {
+              "contour", "api-gateway", "docs", "scratch", "home", "New Workspace", "New Daemon…" });
+    CHECK(rows[0].groupTitle == "Workspaces on work");
+    CHECK(rows[0].group == SwitcherGroup::WindowDaemon);
+    CHECK(rows[1].groupTitle.empty());
+    CHECK(rows[4].groupTitle == "Other daemons");
+    CHECK(rows[4].group == SwitcherGroup::OtherDaemons);
+    CHECK(rows[5].groupTitle == "Actions");
+    CHECK(rows[6].groupTitle.empty());
+
+    CHECK(rows[0].pill == SwitcherPill::Current);
+    CHECK(rows[0].pillText == "Current");
+    CHECK(rows[1].pill == SwitcherPill::None);
+    CHECK(rows[2].pill == SwitcherPill::OtherWindow);
+    CHECK(rows[2].pillText == "Other window");
+
+    CHECK(rows[1].target == label("work", daemons[0].workspaces[1].ref));
+    CHECK(rows[4].target == label("home", contour::session::AnyWorkspace {}));
+    CHECK(rows[5].target == label("work", contour::session::NewWorkspace {}));
+    CHECK(rows[4].daemon == 1);
+}
+
+TEST_CASE("a daemon row rolls up its listed workspaces' status", "[switcher]")
+{
+    auto const daemons = boards();
+    auto const rows = switcherRows(SwitcherInputs { .daemons = daemons }, SwitcherView {});
+    REQUIRE(rows.size() == 7);
+    CHECK(rows[4].status.glyph == TabBadgeKind::Error);
+    CHECK(rows[4].status.urgency == Urgency::Failed);
+    CHECK(contour::window::daemonStatusOf(daemons[0]) == SwitcherStatus {});
+}
+
+TEST_CASE("typing lists matching workspaces across every listed daemon, best first, with their daemon",
+          "[switcher]")
+{
+    auto const daemons = boards();
+    auto const rows = switcherRows(SwitcherInputs { .daemons = daemons }, SwitcherView { .filter = "api" });
+
+    CHECK(kindsOf(rows) == std::vector { Workspace, Workspace, Workspace, NewWorkspace });
+    CHECK(titlesOf(rows)
+          == std::vector<std::string> { "api-gateway", "api-docs", "rapid-proto", "New Workspace “api”" });
+    CHECK(rows[0].group == SwitcherGroup::Matches);
+    CHECK(rows[0].groupTitle == "Workspaces");
+    CHECK(rows[3].groupTitle == "Actions");
+    for (auto const& row: rows | std::views::take(3))
+        CHECK(row.pill == SwitcherPill::Daemon);
+    CHECK(rows[0].pillText == "work");
+    CHECK(rows[1].pillText == "home");
+    CHECK(rows[2].pillText == "home");
+    CHECK(rows[0].titleMatches == std::vector { 0, 1, 2 });
+    CHECK(rows[1].daemon == 1);
+    CHECK(rows[3].target == label("work", contour::session::NewWorkspace {}));
+}
+
+TEST_CASE("no match leaves the create action alone", "[switcher]")
+{
+    auto const daemons = boards();
+    auto const rows = switcherRows(SwitcherInputs { .daemons = daemons }, SwitcherView { .filter = "zzz" });
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].kind == NewWorkspace);
+    CHECK(rows[0].title == "New Workspace “zzz”");
+    CHECK(rows[0].groupTitle == "Actions");
+}
+
+TEST_CASE("a saved host is matched by name and never by its unlisted workspaces", "[switcher]")
+{
+    auto daemons = boards();
+    auto ci = daemon(host("ci-box"), { workspace(1, "ci-runner") });
+    ci.tag = "SSH";
+    daemons.push_back(std::move(ci));
+
+    auto const rows = switcherRows(SwitcherInputs { .daemons = daemons }, SwitcherView { .filter = "ci" });
+    CHECK(kindsOf(rows) == std::vector { Daemon, NewWorkspace });
+    CHECK(rows[0].title == "ci-box");
+    CHECK(rows[0].group == SwitcherGroup::OtherDaemons);
+    CHECK(rows[0].groupTitle == "Other daemons");
+    CHECK(rows[0].titleMatches == std::vector { 0, 1 });
+    CHECK(rows[0].pill == SwitcherPill::Transport);
+    CHECK(rows[0].pillText == "SSH");
+}
+
+TEST_CASE("while discovery runs, other daemons show one looking row", "[switcher]")
+{
+    auto daemons = boards();
+    daemons.pop_back();
+    auto const rows = switcherRows(
+        SwitcherInputs { .daemons = daemons, .discovery = SwitcherDiscovery::Running }, SwitcherView {});
+    CHECK(
+        kindsOf(rows)
+        == std::vector { Workspace, Workspace, Workspace, Workspace, Discovering, NewWorkspace, NewDaemon });
+    CHECK(rows[4].title == "Looking for other daemons…");
+    CHECK(rows[4].groupTitle == "Other daemons");
+
+    SECTION("settled, no other daemon leaves the group out")
+    {
+        auto const settled = switcherRows(SwitcherInputs { .daemons = daemons }, SwitcherView {});
+        CHECK(kindsOf(settled)
+              == std::vector { Workspace, Workspace, Workspace, Workspace, NewWorkspace, NewDaemon });
+    }
+}
+
+TEST_CASE("the daemon level lists that daemon's workspaces and its new workspace", "[switcher]")
+{
+    auto daemons = boards();
+    auto const view = SwitcherView { .level = SwitcherLevel::Daemon, .daemon = 1 };
+    auto const rows = switcherRows(SwitcherInputs { .daemons = daemons }, view);
+
+    CHECK(kindsOf(rows) == std::vector { Workspace, Workspace, Workspace, NewWorkspace });
+    CHECK(titlesOf(rows)
+          == std::vector<std::string> { "api-docs", "rapid-proto", "dotfiles", "New Workspace" });
+    CHECK(rows[0].group == SwitcherGroup::DaemonWorkspaces);
+    CHECK(rows[0].groupTitle == "Workspaces on home");
+    CHECK(rows[3].groupTitle == "Actions");
+    CHECK(rows[3].target == label("home", contour::session::NewWorkspace {}));
+    CHECK(rows[0].status.glyph == TabBadgeKind::Error);
+
+    SECTION("a filter keeps its matching workspaces, best first")
+    {
+        auto filtered = view;
+        filtered.filter = "dotf";
+        auto const matching = switcherRows(SwitcherInputs { .daemons = daemons }, filtered);
+        CHECK(titlesOf(matching) == std::vector<std::string> { "dotfiles", "New Workspace “dotf”" });
+        CHECK(matching[0].groupTitle == "Workspaces on home");
+        CHECK(matching[0].titleMatches == std::vector { 0, 1, 2, 3 });
+    }
+
+    SECTION("a host still being listed shows one connecting row")
+    {
+        daemons.push_back(SwitcherDaemon { .address = host("ci-box"),
+                                           .workspaceCount = std::nullopt,
+                                           .tag = "SSH",
+                                           .listing = SwitcherListing::Listing,
+                                           .failure = {},
+                                           .workspaces = {} });
+        auto const connecting = switcherRows(SwitcherInputs { .daemons = daemons },
+                                             SwitcherView { .level = SwitcherLevel::Daemon, .daemon = 2 });
+        CHECK(kindsOf(connecting) == std::vector { Connecting, NewWorkspace });
+        CHECK(connecting[0].title == "Connecting to ci-box…");
+        CHECK(connecting[0].groupTitle == "Workspaces on ci-box");
+    }
+}
+
+TEST_CASE("the chip scope lists the window's daemon, New Workspace and All daemons…", "[switcher]")
+{
+    auto const daemons = boards();
+    auto const rows =
+        switcherRows(SwitcherInputs { .daemons = daemons },
+                     SwitcherView { .origin = SwitcherOrigin::Chip, .scope = SwitcherScope::OneDaemon });
+
+    CHECK(kindsOf(rows)
+          == std::vector { Workspace, Workspace, Workspace, Workspace, NewWorkspace, AllDaemons });
+    CHECK(rows[0].groupTitle == "Workspaces on work");
+    CHECK(rows[4].groupTitle == "Actions");
+    CHECK(rows[5].title == "All daemons…");
+
+    SECTION("widened, it is the top level")
+    {
+        auto const widened = switcherRows(SwitcherInputs { .daemons = daemons },
+                                          SwitcherView { .origin = SwitcherOrigin::Chip });
+        CHECK(kindsOf(widened)
+              == kindsOf(switcherRows(SwitcherInputs { .daemons = daemons }, SwitcherView {})));
+    }
+
+    SECTION("a pick's one daemon, centred, offers no way out to every daemon")
+    {
+        auto const pick = switcherRows(SwitcherInputs { .daemons = daemons },
+                                       SwitcherView { .daemon = 1, .scope = SwitcherScope::OneDaemon });
+        CHECK(kindsOf(pick) == std::vector { Workspace, Workspace, Workspace, NewWorkspace });
+        CHECK(pick[0].groupTitle == "Workspaces on home");
+    }
+}
+
+TEST_CASE("the new daemon level offers one action for a label it can act on", "[switcher]")
+{
+    auto const daemons = boards();
+    auto const rowsFor = [&](std::string_view typed) {
+        return switcherRows(SwitcherInputs { .daemons = daemons },
+                            SwitcherView { .level = SwitcherLevel::NewDaemon, .filter = typed });
     };
 
-    REQUIRE(daemons.back().address.kind == SwitchDaemonKind::Host);
-    CHECK(detailOfStudio() == "not yet connected");
-    daemons.back().link = SwitcherHostLink::Disconnected;
-    CHECK(detailOfStudio() == "not connected");
-    daemons.back().link = SwitcherHostLink::Connected;
-    CHECK(detailOfStudio() == "connected");
+    CHECK(rowsFor("").empty());
+    CHECK(rowsFor("a b").empty());
+
+    auto const fresh = rowsFor("research");
+    REQUIRE(fresh.size() == 1);
+    CHECK(fresh[0].kind == LabelAction);
+    CHECK(fresh[0].title == "Start daemon “research” and switch this window to it");
+    CHECK(fresh[0].target == label("research", contour::session::AnyWorkspace {}));
+
+    auto const running = rowsFor("home");
+    REQUIRE(running.size() == 1);
+    CHECK(running[0].title == "Switch this window to daemon “home”");
+    CHECK(running[0].target == label("home", contour::session::AnyWorkspace {}));
+}
+
+TEST_CASE("switcherInitialSelection starts on the first workspace this window does not show", "[switcher]")
+{
+    auto const daemons = boards();
+    auto const rows = switcherRows(SwitcherInputs { .daemons = daemons }, SwitcherView {});
+    CHECK(switcherInitialSelection(rows) == 1);
+
+    SECTION("with no such workspace it is the first row")
+    {
+        auto const none =
+            switcherRows(SwitcherInputs { .daemons = daemons }, SwitcherView { .filter = "zzz" });
+        CHECK(switcherInitialSelection(none) == 0);
+        CHECK(switcherInitialSelection({}) == 0);
+    }
+}
+
+TEST_CASE("switcherSelection keeps the row it was on, by its kind and target", "[switcher]")
+{
+    auto const daemons = boards();
+    auto const rows = switcherRows(SwitcherInputs { .daemons = daemons }, SwitcherView {});
+    auto const identityOf = [&](std::size_t at) {
+        return contour::window::switcherRowIdentity(rows[at]);
+    };
+    CHECK(switcherSelection(rows, identityOf(4)) == 4);
+    CHECK(switcherSelection(rows,
+                            contour::window::SwitcherRowIdentity {
+                                .kind = Daemon, .target = label("gone", contour::session::AnyWorkspace {}) })
+          == 0);
+    CHECK(switcherSelection(rows, std::nullopt) == 0);
+
+    SECTION("rows without a target are told apart by their kind, the looking row among them")
+    {
+        auto const looking = switcherRows(
+            SwitcherInputs { .daemons = daemons, .discovery = SwitcherDiscovery::Running }, SwitcherView {});
+        REQUIRE(
+            kindsOf(looking)
+            == std::vector {
+                Workspace, Workspace, Workspace, Workspace, Daemon, Discovering, NewWorkspace, NewDaemon });
+        auto const newDaemon = contour::window::switcherRowIdentity(looking[7]);
+        CHECK(switcherSelection(looking, newDaemon) == 7);
+        CHECK(switcherSelection(looking, contour::window::switcherRowIdentity(looking[5])) == 5);
+        // Discovery answers: the looking row goes, and New Daemon… stays selected where it now is.
+        CHECK(switcherSelection(rows, newDaemon) == 6);
+    }
+}
+
+TEST_CASE("no daemon at all lists New Daemon… alone", "[switcher]")
+{
+    CHECK(kindsOf(switcherRows(SwitcherInputs {}, SwitcherView {})) == std::vector { NewDaemon });
+    auto const looking =
+        switcherRows(SwitcherInputs { .discovery = SwitcherDiscovery::Running }, SwitcherView {});
+    CHECK(kindsOf(looking) == std::vector { Discovering, NewDaemon });
+}
+
+TEST_CASE("a view of a daemon that is not there lists nothing of it", "[switcher]")
+{
+    auto const daemons = boards();
+    CHECK(switcherRows(SwitcherInputs { .daemons = daemons },
+                       SwitcherView { .level = SwitcherLevel::Daemon, .daemon = 9 })
+              .empty());
+    CHECK(switcherRows(SwitcherInputs { .daemons = daemons },
+                       SwitcherView { .daemon = 9, .scope = SwitcherScope::OneDaemon })
+              .empty());
+}
+
+TEST_CASE("the daemon level says why a daemon could not be listed, and keeps what a refresh lists",
+          "[switcher]")
+{
+    auto daemons = boards();
+    auto const view = SwitcherView { .level = SwitcherLevel::Daemon, .daemon = 1 };
+
+    SECTION("failed: one failure row, no stale workspaces")
+    {
+        daemons[1].listing = SwitcherListing::Failed;
+        daemons[1].failure = "connection refused";
+        auto const rows = switcherRows(SwitcherInputs { .daemons = daemons }, view);
+        CHECK(kindsOf(rows) == std::vector { Failure, NewWorkspace });
+        CHECK(rows[0].title == "Could not list home: connection refused");
+        CHECK(rows[0].groupTitle == "Workspaces on home");
+    }
+    SECTION("listed again: the known workspaces stay while the answer comes")
+    {
+        daemons[1].listing = SwitcherListing::Listing;
+        auto const rows = switcherRows(SwitcherInputs { .daemons = daemons }, view);
+        CHECK(kindsOf(rows) == std::vector { Workspace, Workspace, Workspace, NewWorkspace });
+    }
+    SECTION("listed for the first time: one connecting row")
+    {
+        daemons[1].listing = SwitcherListing::Listing;
+        daemons[1].workspaces.clear();
+        auto const rows = switcherRows(SwitcherInputs { .daemons = daemons }, view);
+        CHECK(kindsOf(rows) == std::vector { Connecting, NewWorkspace });
+    }
+}
+
+TEST_CASE("the looking row is left out while typing", "[switcher]")
+{
+    auto const daemons = boards();
+    auto const rows =
+        switcherRows(SwitcherInputs { .daemons = daemons, .discovery = SwitcherDiscovery::Running },
+                     SwitcherView { .filter = "api" });
+    CHECK(std::ranges::none_of(rows, [](SwitcherRow const& row) { return row.kind == Discovering; }));
+}
+
+TEST_CASE("a window on a saved host still finds that host's own workspaces by typing", "[switcher]")
+{
+    auto daemons = boards();
+    daemons[0].address = host("ci-box");
+    daemons[0].tag = "SSH";
+    auto const rows = switcherRows(SwitcherInputs { .daemons = daemons }, SwitcherView { .filter = "scr" });
+    REQUIRE_FALSE(rows.empty());
+    CHECK(rows[0].title == "scratch");
+    CHECK(rows[0].pillText == "ci-box");
+    CHECK(rows[0].target
+          == SwitchTarget { .kind = SwitchDaemonKind::Host,
+                            .daemon = "ci-box",
+                            .workspace = daemons[0].workspaces[3].ref });
 }
 
 TEST_CASE("switcherHostLinkOf tells a connected host from one reached before and one never reached",

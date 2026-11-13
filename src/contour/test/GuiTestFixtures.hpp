@@ -91,24 +91,32 @@ class ContourGuiApp;
 namespace contour::test
 {
 
+/// The Qt modifier flags a binding's chord is pressed with: Super is Meta -- the Command key, as Qt reports
+/// it with its Control/Meta swap off -- on a Mac.
+/// @param chord The chord, as a binding holds it.
+/// @return The flags.
+[[nodiscard]] inline Qt::KeyboardModifiers qtModifiersOfChord(vtbackend::Modifiers chord)
+{
+    auto flags = Qt::KeyboardModifiers {};
+    if (chord.contains(vtbackend::Modifier::Control))
+        flags |= Qt::ControlModifier;
+    if (chord.contains(vtbackend::Modifier::Shift))
+        flags |= Qt::ShiftModifier;
+    if (chord.contains(vtbackend::Modifier::Alt))
+        flags |= Qt::AltModifier;
+    if (chord.contains(vtbackend::Modifier::Super))
+        flags |= Qt::MetaModifier;
+    return flags;
+}
+
 /// The Qt modifier flags of the host's Primary chord, plus @p extra: Control and Shift on the desktop, and
-/// Meta -- the Command key, as Qt reports it with its Control/Meta swap off -- on a Mac. So a test that
-/// presses the chord that opens a tab or the palette presses the one the host binds.
+/// Meta on a Mac. So a test that presses the chord that opens a tab or the palette presses the one the host
+/// binds.
 /// @param extra Further flags the chord holds.
 /// @return The flags.
 [[nodiscard]] inline Qt::KeyboardModifiers hostPrimaryQt(Qt::KeyboardModifiers extra = {})
 {
-    auto flags = extra;
-    auto const primary = hostPrimary();
-    if (primary.contains(vtbackend::Modifier::Control))
-        flags |= Qt::ControlModifier;
-    if (primary.contains(vtbackend::Modifier::Shift))
-        flags |= Qt::ShiftModifier;
-    if (primary.contains(vtbackend::Modifier::Alt))
-        flags |= Qt::AltModifier;
-    if (primary.contains(vtbackend::Modifier::Super))
-        flags |= Qt::MetaModifier;
-    return flags;
+    return extra | qtModifiersOfChord(hostPrimary());
 }
 
 /// The notifier every session a test makes raises through, unless the test wants another.
@@ -179,6 +187,27 @@ class RecordingWindowSwitching final: public contour::remote::SwitchingService
         done(std::unexpected(std::string { "switching is not available" }));
     }
 
+    /// Records the creation as a request for a new workspace, labelled @p label.
+    void createWorkspace(vtworkspace::WorkspaceId window,
+                         contour::session::SwitchTarget const& daemon,
+                         std::string label,
+                         contour::session::SwitchMode mode,
+                         contour::session::SwitchCompletion done) override
+    {
+        createdLabels.push_back(std::move(label));
+        auto target = daemon;
+        target.workspace = contour::session::NewWorkspace {};
+        request(window, std::move(target), mode, contour::session::NoLandingDeadline, std::move(done));
+    }
+
+    /// No window here has a daemon behind it.
+    [[nodiscard]] std::vector<contour::remote::WorkspaceRow> windowWorkspaceRows(
+        vtworkspace::WorkspaceId /*window*/) override
+    {
+        return {};
+    }
+
+    std::vector<std::string> createdLabels; ///< The labels createWorkspace() was asked for, in order.
     std::vector<Request> requests;          ///< Every request, in order.
     std::optional<std::string> failWith {}; ///< When set, every request fails at once with this reason.
     /// When set (and failWith is not), every request is handed on to it: a test of a real switcher behind

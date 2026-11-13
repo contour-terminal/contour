@@ -23,6 +23,7 @@
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
+#include <contour/window/SidebarModel.hpp>
 #include <contour/window/TabBadge.hpp>
 
 #include <vtbackend/core/Search.hpp>
@@ -258,6 +259,12 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
                                                   { "accessibleName", QStringLiteral("New tab") } },
                .swatches = 0,
                .name = QStringLiteral("New tab"),
+               .role = QAccessible::Button },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/SidebarControlButton.qml"),
+               .initialProperties = QVariantMap { { "control", QStringLiteral("filter") },
+                                                  { "accessibleName", QStringLiteral("Filter workspaces") } },
+               .swatches = 0,
+               .name = QStringLiteral("Filter workspaces"),
                .role = QAccessible::Button },
         Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/DaemonDriftBadge.qml"),
                .initialProperties = { { QStringLiteral("model"), QVariant::fromValue<QObject*>(&drift) } },
@@ -739,5 +746,58 @@ TEST_CASE("accessibility: a segmented control's segments are radio buttons in a 
         CHECK(attached->property("name").toString() == names[index]);
         CHECK(attached->property("checked").toBool() == (index == 1));
     }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE(
+    "accessibility: a sidebar row is a tree item named by its title, its kind, fold and status described",
+    "[contour][gui][qml][a11y][sidebar]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::window::registerSidebarQmlTypes();
+    contour::test::QmlMessageCapture const warnings;
+    auto const row = [](int kind, int expansion) {
+        return QVariantMap {
+            { "index", 0 },
+            { "kind", kind },
+            { "depth", kind == 0 ? 0 : 1 },
+            { "title", QStringLiteral("billing") },
+            { "reason", QString {} },
+            { "fullReason", QString {} },
+            { "gitText", QString {} },
+            { "timeText", QString {} },
+            { "timeKind", 0 },
+            { "progress", -1 },
+            { "glyph", 0 },
+            { "expansion", expansion },
+            { "selected", false },
+            { "selection", 0 },
+            { "treeText", QString {} },
+            { "treeTextContinued", QString {} },
+            { "meterText", QString {} },
+            { "accessibleName", QStringLiteral("billing") },
+            { "accessibleDescription", QStringLiteral("Workspace, expanded, 1 pane needs you") },
+            { "program", QString {} },
+            { "folder", QString {} },
+            { "reasonLabel", QString {} },
+            { "reasonCommand", QString {} },
+            { "fullReasonLabel", QString {} },
+            { "fullReasonCommand", QString {} },
+            { "hoverDetail", QString {} },
+            { "progressFraction", 0.0 },
+            { "sidebar", QVariant::fromValue<QObject*>(nullptr) },
+            { "controller", QVariant::fromValue<QObject*>(nullptr) },
+        };
+    };
+    auto item = loadComponent(engine,
+                              QStringLiteral("qrc:/qt/qml/Contour/Ui/SidebarRow.qml"),
+                              row(0, static_cast<int>(contour::window::RowExpansion::Expanded)));
+    auto* attached = accessibleAttachedOf(item.get());
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::TreeItem);
+    CHECK(attached->property("name").toString() == QStringLiteral("billing"));
+    CHECK(attached->property("description").toString()
+          == QStringLiteral("Workspace, expanded, 1 pane needs you"));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

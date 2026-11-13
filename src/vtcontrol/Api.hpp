@@ -209,6 +209,24 @@ struct EnumTable<ProgramStatusReason>
     };
 };
 
+/// What a workspace's git HEAD names, as vtbackend::GitHeadKind does.
+enum class GitHeadKind : uint8_t
+{
+    Branch = 0, ///< A local branch.
+    Detached,   ///< A commit, named by its abbreviated object id.
+    OtherRef,   ///< Any other ref: a remote-tracking branch, a tag.
+};
+
+template <>
+struct EnumTable<GitHeadKind>
+{
+    static constexpr std::array Rows {
+        EnumName { GitHeadKind::Branch, "branch" },
+        EnumName { GitHeadKind::Detached, "detached" },
+        EnumName { GitHeadKind::OtherRef, "otherRef" },
+    };
+};
+
 // }}}
 
 // {{{ Vocabulary records
@@ -249,6 +267,22 @@ struct ProgramStatusInfo
     uint32_t generation = 0; ///< Raised whenever the record is new or its state or kind changes; saturates.
 };
 
+/// A command block.
+struct BlockInfo
+{
+    using ApiRecordTag = void;
+
+    std::string id {};                        ///< `block:<pane-uuid>/<serial>`.
+    std::string pane {};                      ///< The pane's id.
+    BlockState state = BlockState::Prompting; ///< How far it has come.
+    std::optional<std::string> command {};    ///< The command line, when known.
+    std::optional<int32_t> exitCode {};       ///< The exit status, once finished.
+    std::optional<std::string> cwd {};        ///< The working directory it ran in.
+    std::optional<std::string> promptAt {};   ///< RFC 3339 UTC time the prompt started.
+    std::optional<std::string> startedAt {};  ///< RFC 3339 UTC time the command started.
+    std::optional<uint32_t> durationMs {};    ///< How long it ran, in milliseconds.
+};
+
 /// A pane: one hosted shell.
 struct PaneInfo
 {
@@ -261,6 +295,9 @@ struct PaneInfo
     bool isActive = false; ///< Whether it is its tab's active pane.
     Size size {};          ///< Its size in cells.
     std::vector<ProgramStatusInfo> programStatus {}; ///< Its OSC 7501 program-status records.
+    /// Its newest finished command block, which says how the last command ended; absent while none has
+    /// finished, and without the grant program status needs.
+    std::optional<BlockInfo> lastFinished {};
 };
 
 /// A tab.
@@ -274,6 +311,17 @@ struct TabInfo
     uint32_t position = 0;          ///< 1-based position within the workspace.
     bool isActive = false;          ///< Whether it is its workspace's active tab.
     std::vector<PaneInfo> panes {}; ///< Its panes.
+};
+
+/// A workspace's git repository: where its active pane's directory is.
+struct WorkspaceGitInfo
+{
+    using ApiRecordTag = void;
+
+    std::string branch {};                  ///< The branch or ref name, or a detached HEAD's short object id.
+    GitHeadKind kind = GitHeadKind::Branch; ///< What `branch` names.
+    std::optional<uint32_t> ahead {};       ///< Commits the branch has that its upstream has not, when known.
+    std::optional<uint32_t> behind {};      ///< Commits its upstream has that the branch has not, when known.
 };
 
 /// A workspace.
@@ -291,22 +339,9 @@ struct WorkspaceInfo
     std::string visibility {};
     uint32_t clients = 0;         ///< How many windows select it now.
     std::vector<TabInfo> tabs {}; ///< Its tabs.
-};
-
-/// A command block.
-struct BlockInfo
-{
-    using ApiRecordTag = void;
-
-    std::string id {};                        ///< `block:<pane-uuid>/<serial>`.
-    std::string pane {};                      ///< The pane's id.
-    BlockState state = BlockState::Prompting; ///< How far it has come.
-    std::optional<std::string> command {};    ///< The command line, when known.
-    std::optional<int32_t> exitCode {};       ///< The exit status, once finished.
-    std::optional<std::string> cwd {};        ///< The working directory it ran in.
-    std::optional<std::string> promptAt {};   ///< RFC 3339 UTC time the prompt started.
-    std::optional<std::string> startedAt {};  ///< RFC 3339 UTC time the command started.
-    std::optional<uint32_t> durationMs {};    ///< How long it ran, in milliseconds.
+    /// Its git repository, as last looked up (on a directory change, a finished command and every 30 s,
+    /// window or not); absent outside one, or before its active pane's directory is known.
+    std::optional<WorkspaceGitInfo> git {};
 };
 
 // }}}
@@ -474,6 +509,105 @@ struct CloseTabRequest
     using ApiRecordTag = void;
 
     std::string tab {}; ///< The tab to close.
+};
+
+/// `workspace.create` request.
+struct CreateWorkspaceRequest
+{
+    using ApiRecordTag = void;
+
+    std::string
+        cwd {}; ///< Where the first pane starts, and what the default name comes from; empty for the default.
+    std::string label {}; ///< The workspace's label; empty names it after its folder.
+};
+
+/// `workspace.create` reply.
+struct CreateWorkspaceReply
+{
+    using ApiRecordTag = void;
+
+    std::string workspace {}; ///< The new workspace's id.
+    std::string tab {};       ///< Its first tab.
+    std::string pane {};      ///< Its first pane.
+};
+
+/// `workspace.rename` request.
+struct RenameWorkspaceRequest
+{
+    using ApiRecordTag = void;
+
+    std::string workspace {}; ///< The workspace to rename.
+    std::string label {};     ///< The new label; empty clears it.
+};
+
+/// `workspace.close` request.
+struct CloseWorkspaceRequest
+{
+    using ApiRecordTag = void;
+
+    std::string workspace {}; ///< The workspace to close, with all its tabs and panes.
+};
+
+/// `workspace.move` request.
+struct MoveWorkspaceRequest
+{
+    using ApiRecordTag = void;
+
+    std::string workspace {}; ///< The workspace to move.
+    uint32_t toPosition = 0; ///< Where it goes, counted from 1 as `position` is in `workspace.list`; clamped.
+                             ///< 0, which a missing key reads as, is refused.
+};
+
+/// `tab.move` request.
+struct MoveTabRequest
+{
+    using ApiRecordTag = void;
+
+    std::string tab {};         ///< The tab to move.
+    std::string toWorkspace {}; ///< The workspace it moves into; may be the tab's own, which reorders it.
+    uint32_t toPosition =
+        0; ///< Its place among that workspace's tabs, counted from 1; clamped. 0 (a missing key) is refused.
+};
+
+/// Where `pane.move` takes a pane.
+enum class PaneDestination : uint8_t
+{
+    Tab = 0,      ///< Into another tab, as a split beside its active pane.
+    Workspace,    ///< Into a workspace, as a tab of its own.
+    NewWorkspace, ///< Into a new workspace, as its only tab.
+};
+
+template <>
+struct EnumTable<PaneDestination>
+{
+    static constexpr std::array Rows {
+        EnumName { PaneDestination::Tab, "tab" },
+        EnumName { PaneDestination::Workspace, "workspace" },
+        EnumName { PaneDestination::NewWorkspace, "newWorkspace" },
+    };
+};
+
+/// `pane.move` request.
+struct MovePaneRequest
+{
+    using ApiRecordTag = void;
+
+    std::string pane {};                       ///< The pane to move.
+    PaneDestination to = PaneDestination::Tab; ///< Where it goes.
+    std::string toTab {};                      ///< `tab`: the tab it joins; empty for the caller's.
+    std::string toWorkspace {}; ///< `workspace`: the workspace it joins; empty for the caller's.
+    /// `workspace`: its place among that workspace's tabs, counted from 1 and clamped, as `tab.move` counts;
+    /// none (a missing key) is the end, and 0 is a bad request.
+    std::optional<uint32_t> toPosition {};
+};
+
+/// `pane.move` reply: where the pane is now.
+struct MovePaneReply
+{
+    using ApiRecordTag = void;
+
+    std::string workspace {}; ///< The workspace holding it.
+    std::string tab {};       ///< The tab holding it.
 };
 
 /// `workspace.switch` request: where one window should go.

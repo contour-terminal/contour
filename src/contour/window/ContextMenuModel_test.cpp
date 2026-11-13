@@ -172,3 +172,14 @@ TEST_CASE("ContextMenuModel.aHeaderRowHasATitleAndNoAction", "[contextmenumodel]
     CHECK_FALSE(header.contains("actionId"));
     CHECK(model[1].toMap()["actionId"].toInt() == 0);
 }
+
+TEST_CASE("ContextMenuModel.aCommandRowCarriesItsChord", "[contextmenumodel]")
+{
+    auto withChord = commandNode("Copy", 0);
+    withChord.shortcut = "⇧⌘C";
+    auto const nodes = std::vector<MenuNode> { withChord, commandNode("Paste", 1) };
+    auto const model = window::toContextMenuModel(nodes);
+    REQUIRE(model.size() == 2);
+    CHECK(model[0].toMap()["shortcut"].toString() == QStringLiteral("⇧⌘C"));
+    CHECK(model[1].toMap()["shortcut"].toString().isEmpty());
+}

@@ -4,6 +4,7 @@
 #include <contour/config/ConfigEnumInfo.hpp>
 #include <contour/config/NewDefaultsOffer.hpp>
 #include <contour/config/ShellKind.hpp>
+#include <contour/config/TabBarMode.hpp>
 
 #include <vtbackend/core/ColorPalette.hpp>
 
@@ -74,6 +75,20 @@ struct SettingsWindowState
     [[nodiscard]] bool operator==(SettingsWindowState const&) const = default;
 };
 
+/// What the user last chose of the workspace sidebar (`sidebar:`): the last-used preferences, written on
+/// every change, which win over the configured defaults.
+struct SidebarPrefs
+{
+    SidebarVisibility visibility = SidebarVisibility::Hidden; ///< Whether it was shown.
+    /// Its width in logical pixels on a native chrome row; none before the user sized it there.
+    std::optional<int> widthPx {};
+    /// Its width in cells on the Terminal row; none before the user sized it there. Kept apart from
+    /// @ref widthPx: a count of cells is no count of pixels, so one must not be read as the other.
+    std::optional<int> widthCells {};
+
+    [[nodiscard]] bool operator==(SidebarPrefs const&) const = default;
+};
+
 /// What the GUI remembers about the user's answers and its windows, as opposed to what they configured.
 ///
 /// Kept out of `settings.yml` on purpose: that file holds settings, which a reload re-applies, while
@@ -96,6 +111,10 @@ struct GuiState
     /// The light/dark preference the terminals last showed; none before any. What the GUI states to a daemon
     /// before it has read the OS's scheme, which it can only once Qt is up -- after its first connection.
     std::optional<vtbackend::ColorPreference> lastColorPreference {};
+
+    /// The workspace sidebar as the user last left it; none before they ever changed it, when the
+    /// configuration's defaults apply.
+    std::optional<SidebarPrefs> sidebar {};
 
     [[nodiscard]] bool operator==(GuiState const&) const = default;
 };
@@ -165,8 +184,9 @@ inline constexpr std::string_view GuiStateBackupSuffix = ".bak";
 ///
 /// The file reads `dismissed_new_defaults: [existing_config]`, `dismissed_shell_integration: [zsh]` and
 /// `settings_window: { x, y, width, height, screen, show: normal|maximized, page }` and
-/// `last_connect_target: starfive` and `last_color_preference: light|dark`. A token no offer or
-/// shell answers to is skipped, so a file written by a newer release still loads, and a save keeps those
+/// `last_connect_target: starfive`, `last_color_preference: light|dark` and
+/// `sidebar: { visibility: shown|hidden, width_px, width_cells }`. A token no offer
+/// or shell answers to is skipped, so a file written by a newer release still loads, and a save keeps those
 /// tokens and any other keys. A `settings_window` that is not a map is no state; an unknown `show` word is
 /// `normal`.
 /// Saving over a file that does not load first copies it to `gui-state.yml.bak` (GuiStateBackupSuffix),

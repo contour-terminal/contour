@@ -80,8 +80,23 @@ namespace
             }
             case std::to_underlying(MoveTargetKind::NewWorkspace):
                 return vtworkspace::MoveTarget { vtworkspace::NewWorkspaceTarget {} };
+            case std::to_underlying(MoveTargetKind::Tab):
+                if (leaf == nullptr)
+                    return refuse(NodeMoveError::UnknownSession);
+                return vtworkspace::MoveTarget { vtworkspace::TabTarget { .workspace = workspace->id(),
+                                                                          .tab = tab->id() } };
             default: return refuse(NodeMoveError::UnknownKind);
         }
+    }
+    /// @return The workspace holding what @p source names, or null when it names nothing.
+    [[nodiscard]] vtworkspace::Workspace const* workspaceOf(vtworkspace::SessionModel const& model,
+                                                            vtworkspace::MoveSource const& source)
+    {
+        if (auto const* const pane = std::get_if<vtworkspace::PaneSource>(&source))
+            return std::get<0>(model.findSessionLeaf(pane->session));
+        auto const& tab = std::get<vtworkspace::TabSource>(source);
+        auto const* const holder = model.workspace(tab.workspace);
+        return holder != nullptr && holder->tabAt(holder->indexOf(tab.tab)) != nullptr ? holder : nullptr;
     }
 } // namespace
 
@@ -93,26 +108,35 @@ std::expected<vtworkspace::MoveResult, NodeMoveFailure> applyMoveNode(vtworkspac
     auto const source = sourceOf(model, move);
     if (!source)
         return std::unexpected { source.error() };
-    auto target = targetOf(model, move);
+    auto const target = targetOf(model, move);
     if (!target)
         return std::unexpected { target.error() };
-    // sourceOf() found the session's pane, so it has a workspace.
-    auto const sourceWorkspace =
-        std::get<0>(model.findSessionLeaf(vtworkspace::SessionId { move.sourceSessions.front() }))->id();
+    return applyMove(model, *source, *target, workspaces);
+}
+
+std::expected<vtworkspace::MoveResult, NodeMoveFailure> applyMove(vtworkspace::SessionModel& model,
+                                                                  vtworkspace::MoveSource const& source,
+                                                                  vtworkspace::MoveTarget const& target,
+                                                                  MoveWorkspaceHooks const& workspaces)
+{
+    auto const* const holder = workspaceOf(model, source);
+    if (holder == nullptr)
+        return refuse(NodeMoveError::UnknownSession);
+    auto const sourceWorkspace = holder->id();
     // The model would refuse a new workspace for what fills its workspace, but only once the workspace was
     // made: refused before, nothing is made, and no client sees a workspace come and go.
-    if (std::holds_alternative<vtworkspace::NewWorkspaceTarget>(*target) && model.fillsItsWorkspace(*source))
+    if (std::holds_alternative<vtworkspace::NewWorkspaceTarget>(target) && model.fillsItsWorkspace(source))
         return std::unexpected { NodeMoveFailure { .error = NodeMoveError::Model,
                                                    .model = vtworkspace::MoveError::NoOp } };
     // A new workspace is made by the host's own path, which names it and records who asked, and is then the
     // well of a move; a refused move takes the still-empty workspace away again.
-    auto const made = std::holds_alternative<vtworkspace::NewWorkspaceTarget>(*target)
+    auto const made = std::holds_alternative<vtworkspace::NewWorkspaceTarget>(target)
                           ? std::optional { workspaces.create() }
                           : std::nullopt;
     auto const landing =
         made ? vtworkspace::MoveTarget { vtworkspace::TabWellTarget { .workspace = *made, .index = 0 } }
-             : *target;
-    auto moved = model.moveNode(*source, landing).transform_error([](vtworkspace::MoveError error) {
+             : target;
+    auto moved = model.moveNode(source, landing).transform_error([](vtworkspace::MoveError error) {
         return NodeMoveFailure { .error = NodeMoveError::Model, .model = error };
     });
     if (!moved)

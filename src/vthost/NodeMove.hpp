@@ -48,4 +48,18 @@ struct MoveWorkspaceHooks
 [[nodiscard]] std::expected<vtworkspace::MoveResult, NodeMoveFailure> applyMoveNode(
     vtworkspace::SessionModel& model, proto::MoveNode const& move, MoveWorkspaceHooks const& workspaces);
 
+/// Moves @p source to @p target in the host's model: what applyMoveNode() does once it has read the request,
+/// and what the control API's `pane.move` does with what it resolved. A NewWorkspace target lands in a
+/// workspace made by @p workspaces, and a workspace the move empties is removed by it.
+/// @param model The daemon's model.
+/// @param source What moves.
+/// @param target Where it goes.
+/// @param workspaces Makes the workspace of a NewWorkspace target, and removes a workspace the move empties.
+/// @return Where focus landed, or why nothing changed.
+[[nodiscard]] std::expected<vtworkspace::MoveResult, NodeMoveFailure> applyMove(
+    vtworkspace::SessionModel& model,
+    vtworkspace::MoveSource const& source,
+    vtworkspace::MoveTarget const& target,
+    MoveWorkspaceHooks const& workspaces);
+
 } // namespace vthost

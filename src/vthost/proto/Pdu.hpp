@@ -99,6 +99,10 @@ enum class PduType : uint8_t
     NotifyRole = 53,
     PaneSummary = 54,
     AuthChallenge = 55,
+    WorkspaceMeta = 56,
+    MoveWorkspace = 57,
+    SetWorkspaceLabel = 58,
+    CloseWorkspace = 59,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1582,21 +1586,21 @@ struct TabMergeRefused
 };
 
 /// Client→server (Capability::MoveNode): move a pane or a whole tab to an edge of a pane, onto a pane (swap),
-/// into a workspace's tab well or into a new workspace. Nothing is spawned or closed: every session keeps
-/// running. Both ends are named by session, like every other client→server layout verb, because tab and pane
-/// ids are minted per model and the two ends have their own. A move the daemon performs is answered by the
-/// layout pushes to every attached client alone.
+/// into another tab as a split, into a workspace's tab well or into a new workspace. Nothing is spawned or
+/// closed: every session keeps running. Both ends are named by session, like every other client→server layout
+/// verb, because tab and pane ids are minted per model and the two ends have their own. A move the daemon
+/// performs is answered by the layout pushes to every attached client alone.
 struct MoveNode
 {
     uint8_t sourceKind = 0; ///< A vtworkspace::MoveSourceKind as the wire spells it.
     /// A pane source: its session. A tab source: EVERY session of the tab as the client sees it, the first
     /// naming the tab; the daemon refuses a request whose sessions are not exactly the tab's now.
     std::vector<uint64_t> sourceSessions = {};
-    uint8_t targetKind = 0; ///< A vtworkspace::MoveTargetKind as the wire spells it.
-    uint64_t targetSession =
-        0;              ///< Edge/swap: the pane. Tab well: any session of the workspace. New workspace: 0.
-    uint8_t side = 0;   ///< Edge only: a vtworkspace::SplitSide as the wire spells it.
-    uint64_t index = 0; ///< Tab well only: the position among the workspace's tabs.
+    uint8_t targetKind = 0;     ///< A vtworkspace::MoveTargetKind as the wire spells it.
+    uint64_t targetSession = 0; ///< Edge/swap: the pane. Tab: any session of the tab. Tab well: any session
+                                ///< of the workspace. New: 0.
+    uint8_t side = 0;           ///< Edge only: a vtworkspace::SplitSide as the wire spells it.
+    uint64_t index = 0;         ///< Tab well only: the position among the workspace's tabs.
     bool operator==(MoveNode const&) const = default;
 };
 
@@ -1663,6 +1667,13 @@ struct SelectWorkspace
 {
     /// The daemon workspace to select; 0 asks the daemon to create one and select it.
     uint64_t workspace = 0;
+    /// The session the request comes from, which only a creation (@ref workspace 0) reads: the new
+    /// workspace's first shell starts in that session's working directory, as a tab made from that pane does.
+    /// Appended after @ref workspace, so a body without it is a sender from before the field and names none.
+    ///
+    /// Optional by omission, with no presence byte: it is written only when engaged, so a field appended
+    /// after it must make the encoder always write this one, or a decoder would read the later field as this.
+    std::optional<uint64_t> directoryFromSession = std::nullopt;
     bool operator==(SelectWorkspace const&) const = default;
 };
 
@@ -1737,6 +1748,76 @@ struct PaneSummary
     PaneBell bell = PaneBell::Silent;                       ///< Whether the pane rang the bell.
     std::vector<PaneNotification> notifications = {};       ///< What the pane notified, oldest first.
     bool operator==(PaneSummary const&) const = default;
+};
+
+/// What a workspace's git repository's HEAD names, as WorkspaceMeta carries it: vtbackend::GitHeadKind's
+/// values one up, with None for a workspace that is in no repository (anymore).
+enum class GitHeadKindWire : uint8_t
+{
+    None = 0,     ///< Not a repository: the workspace's git state is cleared.
+    Branch = 1,   ///< A local branch.
+    Detached = 2, ///< A commit, named by its abbreviated object id.
+    OtherRef = 3, ///< Any other ref: a remote-tracking branch, a tag.
+};
+
+/// The git state of a workspace (the repository its active pane's working directory is in). A growing record:
+/// it travels as a blob inside WorkspaceMeta.
+struct WireGitInfo
+{
+    std::string branch = {}; ///< The branch or ref, or the short object id; empty for None.
+    GitHeadKindWire kind = GitHeadKindWire::None;  ///< What @ref branch names; None clears the git state.
+    std::optional<uint32_t> ahead = std::nullopt;  ///< Commits ahead of its upstream, when it has one.
+    std::optional<uint32_t> behind = std::nullopt; ///< Commits behind its upstream, when it has one.
+    bool operator==(WireGitInfo const&) const = default;
+};
+
+/// Server→client (Capability::WorkspaceMeta): what the daemon states of a workspace besides its layout.
+///
+/// The daemon sends every field after the hello, and for a workspace created since, once its layout went out;
+/// after that a delta for each change. Absent optionals mean "unchanged": an empty @ref label clears the
+/// label, and a @ref git of kind GitHeadKindWire::None says the workspace is in no repository anymore, which
+/// an absent one does not. A workspace's removal is told by its layout disappearing, not here.
+struct WorkspaceMeta
+{
+    uint64_t workspace = 0;                          ///< The daemon's workspace id.
+    std::array<uint8_t, 16> controlId = {};          ///< Its control-API UUID; all zero when unbound.
+    std::optional<std::string> label = std::nullopt; ///< Its label, if it changed; empty clears it.
+    std::optional<WireGitInfo> git = std::nullopt;   ///< Its git state, if it changed.
+    /// Its 0-based place in the daemon's workspace order, if it changed. The daemon sends it with the full
+    /// meta and again, for every workspace that shifted, after a reorder, a creation or a removal: a client
+    /// lists its workspaces by it, not by the order layouts happen to arrive or by id.
+    std::optional<uint32_t> position = std::nullopt;
+    bool operator==(WorkspaceMeta const&) const = default;
+};
+
+/// Client→server (Capability::WorkspaceMeta): move a workspace to a place in the daemon's workspace order.
+/// The daemon clamps @p toPosition to the order's bounds and answers every client with the new positions
+/// (WorkspaceMeta::position); an unknown workspace changes nothing.
+struct MoveWorkspace
+{
+    uint64_t workspace = 0;  ///< The daemon's workspace id.
+    uint32_t toPosition = 0; ///< The 0-based place it moves to.
+    bool operator==(MoveWorkspace const&) const = default;
+};
+
+/// Client→server (Capability::WorkspaceMeta): close a workspace, in one step. The daemon ends, in one frame,
+/// every session the workspace holds at that moment (a tab another client added a moment ago included) and
+/// then removes the workspace, which no client lists afterwards. An unknown workspace changes nothing.
+struct CloseWorkspace
+{
+    uint64_t workspace = 0; ///< The daemon's workspace id.
+    bool operator==(CloseWorkspace const&) const = default;
+};
+
+/// Client→server (Capability::WorkspaceMeta): set a workspace's label, which is what the sidebar's rename
+/// does. The daemon applies it to the object registry, so every client is told through WorkspaceMeta, and
+/// every control-API subscriber through `workspace.labelChanged`. An empty label clears it; an unknown
+/// workspace changes nothing.
+struct SetWorkspaceLabel
+{
+    uint64_t workspace = 0; ///< The daemon's workspace id.
+    std::string label = {}; ///< The new label.
+    bool operator==(SetWorkspaceLabel const&) const = default;
 };
 
 /// @param summary A pane's summary.
@@ -1893,7 +1974,11 @@ using DecodedPdu = std::variant<Invalid,
                                 ReportFocus,
                                 NotifyRole,
                                 PaneSummary,
-                                AuthChallenge>;
+                                AuthChallenge,
+                                WorkspaceMeta,
+                                MoveWorkspace,
+                                SetWorkspaceLabel,
+                                CloseWorkspace>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

@@ -150,7 +150,7 @@ namespace detail
 template <typename T>
 core::async::Task<std::optional<T>> withAttachBudget(core::net::EventLoop* loop,
                                                      core::async::Task<T> work,
-                                                     AttachBudget budget,
+                                                     AttachBudget const& budget,
                                                      TransportReturnMark const* mark)
 {
     return withDeadline<T>(std::move(work), detail::attachDeadline(loop, budget, mark));

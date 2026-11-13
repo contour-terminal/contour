@@ -58,6 +58,7 @@
 #include <vthost/TabEdits.hpp>
 #include <vthost/TabMerge.hpp>
 #include <vthost/TimeWire.hpp>
+#include <vthost/WorkspaceGit.hpp>
 #include <vthost/control/ProgramStatusConvert.hpp>
 #include <vthost/handover/HandoverRestore.hpp>
 #include <vthost/proto/PduTrace.hpp>
@@ -344,6 +345,9 @@ NativeSession::NativeSession(core::net::EventLoop& loop,
     _layoutObserver.onWorkspaceChange = [this](vtworkspace::WorkspaceId workspace) {
         layoutChanged(workspace);
     };
+    _layoutObserver.onWorkspaceOrderChange = [this] {
+        syncWorkspacePositions();
+    };
     _layoutObserver.onTabChange = [this](vtworkspace::TabId tab) {
         layoutChanged(_host.model().workspaceOfTab(tab));
     };
@@ -603,6 +607,142 @@ bool NativeSession::summarizesPanes() const noexcept
     return _following == DaemonFollowing::Yes;
 }
 
+namespace
+{
+    /// @return @p git as WorkspaceMeta carries it.
+    [[nodiscard]] proto::WireGitInfo wireGitOf(GitInfo const& git)
+    {
+        auto const kind = [&] {
+            switch (git.kind)
+            {
+                case vtbackend::GitHeadKind::Branch: return proto::GitHeadKindWire::Branch;
+                case vtbackend::GitHeadKind::Detached: return proto::GitHeadKindWire::Detached;
+                case vtbackend::GitHeadKind::OtherRef: break;
+            }
+            return proto::GitHeadKindWire::OtherRef;
+        }();
+        return proto::WireGitInfo {
+            .branch = git.branch, .kind = kind, .ahead = git.ahead, .behind = git.behind
+        };
+    }
+} // namespace
+
+bool NativeSession::sharesWorkspaceMeta() const noexcept
+{
+    return _negotiated.has_value() && _negotiated->shared.contains(proto::Capability::WorkspaceMeta);
+}
+
+std::array<uint8_t, 16> NativeSession::controlIdOf(vtworkspace::WorkspaceId workspace) const
+{
+    return _host.objects().uuidOf(workspace).value_or(vtcontrol::Uuid {}).bytes;
+}
+
+void NativeSession::announceWorkspaceMeta(vtworkspace::Workspace const& workspace)
+{
+    if (!sharesWorkspaceMeta())
+        return;
+    // A workspace holding no tab is one the client lists nothing of, and prunes what it knew of it: it is
+    // announced again, in full, with the layout that brings its first tab.
+    if (workspace.tabCount() == 0)
+    {
+        _announcedMeta.erase(workspace.id().value);
+        return;
+    }
+    auto const position = static_cast<uint32_t>(positionOf(workspace.id()));
+    if (!_announcedMeta.try_emplace(workspace.id().value, position).second)
+        return;
+    auto const uuid = _host.objects().uuidOf(workspace.id()).value_or(vtcontrol::Uuid {});
+    auto const ref = vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace, .uuid = uuid };
+    // Every field, so the client's metadata of the workspace starts from what it is now. The git state goes
+    // to a following window only (@see sendWorkspaceGit); absent, it is in no repository, or none was looked
+    // up.
+    auto git = summarizesPanes() ? _host.gitInfoOf(workspace.id()).transform(wireGitOf) : std::nullopt;
+    send(0,
+         proto::DecodedPdu { proto::WorkspaceMeta { .workspace = workspace.id().value,
+                                                    .controlId = uuid.bytes,
+                                                    .label = std::string { _host.objects().labelOf(ref) },
+                                                    .git = std::move(git),
+                                                    .position = position } });
+}
+
+int NativeSession::positionOf(vtworkspace::WorkspaceId workspace) const
+{
+    auto const& model = _host.model();
+    auto const indices = std::views::iota(0, model.workspaceCount());
+    auto const found = std::ranges::find_if(indices, [&](int i) {
+        auto const* candidate = model.workspaceAt(i);
+        return candidate != nullptr && candidate->id() == workspace;
+    });
+    return found != indices.end() ? *found : 0;
+}
+
+void NativeSession::syncWorkspacePositions()
+{
+    if (_phase != ConnectionPhase::Viewing || _closed || !sharesWorkspaceMeta())
+        return;
+    auto const& model = _host.model();
+    for (auto const i: std::views::iota(0, model.workspaceCount()))
+    {
+        auto const* workspace = model.workspaceAt(i);
+        if (workspace == nullptr)
+            continue;
+        auto const told = _announcedMeta.find(workspace->id().value);
+        // One not announced yet is told its position with the rest of its meta.
+        if (told == _announcedMeta.end() || std::cmp_equal(told->second, i))
+            continue;
+        told->second = static_cast<uint32_t>(i);
+        send(0,
+             proto::DecodedPdu { proto::WorkspaceMeta { .workspace = workspace->id().value,
+                                                        .controlId = controlIdOf(workspace->id()),
+                                                        .position = static_cast<uint32_t>(i) } });
+    }
+}
+
+void NativeSession::forgetRemovedWorkspaceMeta()
+{
+    auto const& model = _host.model();
+    std::erase_if(_announcedMeta, [&model](auto const& announced) {
+        return model.workspace(vtworkspace::WorkspaceId { announced.first }) == nullptr;
+    });
+}
+
+void NativeSession::workspaceLabelChanged(vtcontrol::ObjectRef const& ref, std::string_view label)
+{
+    if (ref.kind != vtcontrol::ObjectKind::Workspace || _phase != ConnectionPhase::Viewing || _closed)
+        return;
+    auto const handle = _host.objects().find(ref);
+    if (!handle)
+        return;
+    auto const workspace = std::get<vtworkspace::WorkspaceId>(*handle).value;
+    // A workspace not announced yet is told its label in full with its layout.
+    if (!_announcedMeta.contains(workspace))
+        return;
+    send(0,
+         proto::DecodedPdu { proto::WorkspaceMeta { .workspace = workspace,
+                                                    .controlId = ref.uuid.bytes,
+                                                    .label = std::string { label },
+                                                    .git = std::nullopt } });
+}
+
+void NativeSession::workspaceGitChanged(WorkspaceGitChangedSignal const& signal)
+{
+    sendWorkspaceGit(signal.workspace.value, signal.git.transform(wireGitOf));
+}
+
+void NativeSession::sendWorkspaceGit(uint64_t workspace, std::optional<proto::WireGitInfo> const& git)
+{
+    if (_phase != ConnectionPhase::Viewing || _closed || !summarizesPanes() || !sharesWorkspaceMeta()
+        || !_announcedMeta.contains(workspace))
+        return;
+    send(0,
+         proto::DecodedPdu { proto::WorkspaceMeta {
+             .workspace = workspace,
+             .controlId = controlIdOf(vtworkspace::WorkspaceId { workspace }),
+             .label = std::nullopt,
+             // None, not absent: absent says nothing changed, None that the repository is gone.
+             .git = git.value_or(proto::WireGitInfo {}) } });
+}
+
 template <std::invocable<proto::PaneSummary&> Note>
 void NativeSession::queueSummary(SessionId session, Note&& note)
 {
@@ -817,6 +957,8 @@ void NativeSession::pushLayout()
             sendWorkspaceLayout(*workspace);
             pushed = true;
         }
+    forgetRemovedWorkspaceMeta();
+    syncWorkspacePositions();
     noteModelSessions();
     if (pushed && batchesLayouts())
     {
@@ -831,6 +973,7 @@ void NativeSession::sendWorkspaceLayout(vtworkspace::Workspace& workspace)
     if (workspace.id().value == _selectedWorkspace)
         requestArrivedSnapshots(workspace);
     sendLayout(serializeLayout(workspace));
+    announceWorkspaceMeta(workspace);
 }
 
 void NativeSession::sendLayout(proto::LayoutState layout)
@@ -849,6 +992,14 @@ void NativeSession::layoutChanged(vtworkspace::WorkspaceId workspace)
 {
     if (!batchesLayouts())
     {
+        // A whole push names only the workspaces the model holds: a removed one is told emptied first.
+        if (_phase == ConnectionPhase::Viewing && !_closed && workspace != vtworkspace::WorkspaceId {}
+            && _host.model().workspace(workspace) == nullptr)
+        {
+            auto emptied = proto::LayoutState {};
+            emptied.workspace = workspace.value;
+            sendLayout(std::move(emptied));
+        }
         pushLayout();
         return;
     }
@@ -896,6 +1047,8 @@ bool NativeSession::flushChangedLayouts()
         sendLayout(std::move(emptied));
         pushed = true;
     }
+    forgetRemovedWorkspaceMeta();
+    syncWorkspacePositions();
     noteModelSessions();
     return pushed;
 }
@@ -2280,17 +2433,19 @@ NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame con
             refuse(frame);
             return TabVerb::Served;
         }
-        // A workspace whose last session ended is gone, though the model may keep it: selected, it would read
-        // as one the connection never held a tab of, which it would keep showing empty.
+        // A workspace whose last session ended is gone from the model: a select of it names nothing.
         auto const asked = vtworkspace::WorkspaceId { select->workspace };
-        auto const known =
-            select->workspace != 0 && _host.model().workspace(asked) != nullptr && !_host.hasEnded(asked);
+        auto const known = select->workspace != 0 && _host.model().workspace(asked) != nullptr;
         if (known)
             selectWorkspace(asked);
         else if (select->workspace == 0)
         {
             // A workspace of its own, which the connection selects as it creates it.
-            if (auto const* created = _host.createWorkspace(spawnRequest({})))
+            // Started where the pane that asked is, as a tab made from it would be.
+            auto const from = select->directoryFromSession
+                                  ? std::optional { vtworkspace::SessionId { *select->directoryFromSession } }
+                                  : std::nullopt;
+            if (auto const* created = _host.createWorkspace(spawnRequest({}, from)))
                 selectWorkspace(created->id());
             else
                 errorLog()("{}: the workspace this client asked to select could not be created", _id);
@@ -2306,6 +2461,50 @@ NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame con
             openLayoutBatch();
             _layoutBatch = LayoutBatch::Pushed;
         }
+        return TabVerb::Served;
+    }
+    if (auto const* move = std::get_if<proto::MoveWorkspace>(&frame.pdu))
+    {
+        if (!_negotiated->shared.contains(proto::Capability::WorkspaceMeta))
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        // Applied to the model, which announces the move: every client is told the new positions.
+        if (_host.model().workspace(vtworkspace::WorkspaceId { move->workspace }) == nullptr)
+            errorLog()("{}: ignoring {}: there is no such workspace", _id, proto::describe(frame.pdu));
+        else
+            _host.model().moveWorkspace(
+                vtworkspace::WorkspaceId { move->workspace },
+                static_cast<int>(std::min<uint32_t>(move->toPosition, std::numeric_limits<int>::max())));
+        return TabVerb::Served;
+    }
+    if (auto const* close = std::get_if<proto::CloseWorkspace>(&frame.pdu))
+    {
+        if (!_negotiated->shared.contains(proto::Capability::WorkspaceMeta))
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        // Whatever the workspace holds now, in this one step: a tab another client added a moment ago too.
+        if (auto const closed = _host.closeWorkspace(vtworkspace::WorkspaceId { close->workspace }); !closed)
+            errorLog()("{}: not closing workspace {}: {}", _id, close->workspace, describe(closed.error()));
+        return TabVerb::Served;
+    }
+    if (auto const* set = std::get_if<proto::SetWorkspaceLabel>(&frame.pdu))
+    {
+        if (!_negotiated->shared.contains(proto::Capability::WorkspaceMeta))
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        // Set on the object registry, whose label observers tell every client and every control subscriber.
+        auto const uuid = _host.objects().uuidOf(vtworkspace::WorkspaceId { set->workspace });
+        if (!uuid)
+            errorLog()("{}: ignoring {}: there is no such workspace", _id, proto::describe(frame.pdu));
+        else
+            _host.objects().setLabel(
+                vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace, .uuid = *uuid }, set->label);
         return TabVerb::Served;
     }
     if (std::holds_alternative<proto::ReportFocus>(frame.pdu))
@@ -2767,6 +2966,11 @@ void NativeSession::attachClient(uint64_t serial,
     _clientTicket = _services.daemon.get().admitClient();
     _streamSubscription.emplace(_host, *this, &SessionHost::subscribeStream, &SessionHost::unsubscribeStream);
     _layoutSubscription.emplace(_host, _layoutObserver, &SessionHost::subscribe, &SessionHost::unsubscribe);
+    if (negotiated.shared.contains(proto::Capability::WorkspaceMeta))
+        _labelSubscription.emplace(
+            _host.objects().onLabelChanged([this](vtcontrol::ObjectRef const& ref, std::string_view label) {
+                workspaceLabelChanged(ref, label);
+            }));
 
     // Adopted BEFORE the spawn below: that session exists because THIS client attached, so it
     // inherits this client's profile like any tab the client goes on to open. A profile the host
@@ -2924,11 +3128,10 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
                                                                                 : WorkingDirectoryStated::Yes,
                                    .instance = _host.instance(),
                                    .lastSelected = _host.lastSelectedWorkspace() };
-    // A workspace whose last session ended is not listed: a Select naming it is then a launch's choice, as a
-    // SelectWorkspace of it is refused (serveWorkspaceVerb), and the connection never lands on it empty.
+    // A workspace whose last session ended is gone, unless it was the only one: that one is listed as a fresh
+    // daemon's empty one is, which a launch gives its first tab.
     for (auto const i: std::views::iota(0, model.workspaceCount()))
-        if (auto const* workspace = model.workspaceAt(i);
-            workspace != nullptr && !_host.hasEnded(workspace->id()))
+        if (auto const* workspace = model.workspaceAt(i); workspace != nullptr)
             context.workspaces.push_back(
                 WorkspaceSummary { .id = workspace->id().value, .tabCount = workspace->tabCount() });
     std::ranges::sort(context.workspaces, {}, &WorkspaceSummary::id);

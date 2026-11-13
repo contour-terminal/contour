@@ -66,6 +66,8 @@ namespace
                 row["checkable"] = node.check != command::RowCheck::None;
                 row["checked"] = node.check == command::RowCheck::Checked;
                 row["actionId"] = static_cast<int>(node.actionIndex);
+                // The chord, drawn in the row's trailing column, as the native menu draws it.
+                row["shortcut"] = QString::fromStdString(node.shortcut);
                 break;
         }
         return row;

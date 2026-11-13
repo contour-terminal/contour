@@ -23,12 +23,14 @@
 #include <optional>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <vtcontrol/ObjectRef.hpp>
 #include <vtcontrol/testing/FakeControlApi.hpp>
 #include <vtcontrol/testing/SequentialUuidSource.hpp>
 #include <vthost/SessionHost.hpp>
+#include <vthost/WorkspaceGit.hpp>
 #include <vthost/control/ControlService.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -39,8 +41,22 @@ namespace vthost::testing
 /// A host over MockPty sessions with no pump threads, and a control service over it.
 struct ControlHarness
 {
+    /// The service's reply cap when a test names none.
+    static constexpr auto DefaultMaxReplyBytes = std::size_t { 1 } * 1024 * 1024;
+
     /// @param maxReplyBytes The service's reply cap.
-    explicit ControlHarness(std::size_t maxReplyBytes = std::size_t { 1 } * 1024 * 1024):
+    explicit ControlHarness(std::size_t maxReplyBytes = DefaultMaxReplyBytes):
+        ControlHarness { std::nullopt, maxReplyBytes }
+    {
+    }
+
+    /// @param git Where the host looks its workspaces' git state up.
+    explicit ControlHarness(vthost::WorkspaceGitServices git): ControlHarness { git, DefaultMaxReplyBytes } {}
+
+    /// @param git Where the host looks its workspaces' git state up; none looks nothing up.
+    /// @param maxReplyBytes The service's reply cap.
+    ControlHarness(std::optional<vthost::WorkspaceGitServices> git, std::size_t maxReplyBytes):
+        workspaceGit { std::move(git) },
         service { host,
                   vthost::control::ControlServiceConfig { .version = "9.8.7",
                                                           .socketPath = "/run/test.sock",
@@ -57,6 +73,8 @@ struct ControlHarness
     core::platform::testing::InMemoryFileSystem files;
     /// The override every spawn was given, in spawn order.
     std::vector<vtpty::Process::ExecInfo> seen;
+    /// Where the host looks its workspaces' git state up; none looks nothing up.
+    std::optional<vthost::WorkspaceGitServices> workspaceGit {};
     vthost::SessionHost host {
         loop,
         [this](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const& spawn) {
@@ -67,6 +85,7 @@ struct ControlHarness
         core::defaultEnvironment(),
         vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
                                     .fileSystem = files,
+                                    .workspaceGit = workspaceGit,
                                     .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>() }
     };
     control::ControlService service;

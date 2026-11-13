@@ -87,8 +87,8 @@ ThemedWindow
     // Whether tabs that can show the lock are on screen: in their own strip, or in the centre of a band that
     // is. Icon-only tabs (a narrow well) have no room for it, so they hold nothing.
     readonly property bool tabsOnScreen: (appWindow.band.tabBar === "shown" && tabsBar.tabsHostLock)
-                                         || (appWindow.band.centre === "tabs" && appWindow.bandOnScreen
-                                             && titleBar.tabsHostLock)
+                                         || ((appWindow.band.centre === "tabs" || appWindow.band.centre === "chip+tabs")
+                                             && appWindow.bandOnScreen && titleBar.tabsHostLock)
 
     // Whether the title band is on screen with the active tab's title in its middle: where a single pane's sticky
     // header lives (window::StickyHeaderHost), handed down by PaneNode like visiblePanes, as a
@@ -120,13 +120,24 @@ ThemedWindow
     // is in full screen, the tab-bar gate, the configured edge and the host chip, whose interrupted
     // connection shows the band whatever the gate says. The ints are the enumerators' underlying values:
     // WindowFrame { ClientBand, NativeFrame }, WindowMode { Windowed, FullScreen }, TabStripGate { Hidden,
-    // Shown }, TabBarPosition { Top, Bottom } and HostChipState. Main.qml is the only caller.
+    // Shown }, TabBarPosition { Top, Bottom }, HostChipState, TabPlacement { Top, Sidebar } and
+    // SidebarVisibility { Hidden, Shown }. Main.qml is the only caller.
     readonly property var band: chromeStyle.titleBand(appWindow.bandFrame,
                                                       appWindow.bandMode,
                                                       appWindow.tabBarShouldShow ? 1 : 0,
                                                       appWindow.tabBarPosition,
                                                       (appWindow.win && appWindow.win.hostLabel) || "",
-                                                      (appWindow.win && appWindow.win.hostChipState) || 0)
+                                                      (appWindow.win && appWindow.win.hostChipState) || 0,
+                                                      (appWindow.win && appWindow.win.tabPlacement) || 0,
+                                                      (appWindow.win && appWindow.win.sidebarVisibility) || 0)
+
+    // The sidebar's toggle -- { host, label } -- from whether the sidebar is shown and where the band is
+    // (UiStyleProvider::sidebarToggle): the band's leading end, or the sidebar's title row where the sidebar
+    // takes that end, so it stays at one spot. Nothing for a window without a sidebar (a lightweight mock).
+    readonly property var sidebarToggle: appWindow.win && appWindow.win.sidebar
+        ? chromeStyle.sidebarToggle(appWindow.win.sidebarVisibility || 0, appWindow.band.band || "",
+                                    appWindow.band.bandEdge || "")
+        : ({})
 
     // Whether a full-screen band should be revealed: while the pointer is on the reveal edge -- which,
     // once revealed, grows to the band's resting rectangle, so a band still sliding in is not lost to a
@@ -238,7 +249,8 @@ ThemedWindow
         // in SessionChrome.qml for the full mechanism; it shipped that bug as a full-pane-wide bar.
         // left/right stay anchored: that pair is unconditional, so sizing the width is intended.
         // A full-screen band slides from above its resting place by its slideOffset.
-        anchors.left: parent.left
+        // Beside a sidebar that takes the window's full height (the source list), the band starts at its edge.
+        anchors.left: sidebarSlot.besideBand ? sidebarSlot.right : parent.left
         anchors.right: parent.right
         y: titleBar.restingTop + titleBar.slideOffset
         // At the bottom edge, or at the top -- where a full-screen band rests below the menu bar AppKit
@@ -303,8 +315,12 @@ ThemedWindow
         // draws the traffic lights in the strip it reveals below the menu bar, a window of its own that
         // takes the clicks over it -- so the band rests below that strip while it is revealed
         // (titleBandRevealTop), and no light is over it there.
-        nativeControlsInset: appWindow.bandMode === 1 ? 0
+        // A sidebar beside the band holds the traffic lights over its own top instead.
+        nativeControlsInset: appWindow.bandMode === 1 || sidebarSlot.besideBand ? 0
                              : ((appWindow.win && appWindow.win.nativeControlsInset) || 0)
+        // The header bar's part above a sidebar whose title row it draws (the ContourLinux row).
+        sidebarWidth: sidebarSlot.titleInHeaderBar ? sidebarSlot.width : 0
+        sidebarToggle: appWindow.sidebarToggle
         // The window's top corners, rounded only while the band is its top edge. The window itself is
         // transparent, so nothing is painted outside them. `|| 0` as above, for a controller without it.
         cornerRadius: appWindow.band.bandEdge === "bottom" ? 0
@@ -362,7 +378,7 @@ ThemedWindow
     Column {
         id: bannerStack
         objectName: "bannerStack" // so offscreen tests can findChild() it
-        anchors.left: parent.left
+        anchors.left: sidebarSlot.besideBand ? sidebarSlot.right : parent.left
         anchors.right: parent.right
         // Below the band's effective height: a full-screen band overlays the content and pushes nothing.
         y: appWindow.band.bandEdge === "top" ? titleBar.effectiveHeight : 0
@@ -414,6 +430,36 @@ ThemedWindow
         }
     }
 
+    // The workspace sidebar, at the window's left edge while it is shown (WindowController.sidebarWidth is 0
+    // while it is hidden, and the content then takes the whole width). Below the band and the banners, down to
+    // the content's bottom, unless the row's look stands it beside the band (chromeStyle.sidebar.besideBand,
+    // macOS): then it is the window's full height and the band and the banners start at its edge, the
+    // traffic lights over its top. `!== undefined` for a lightweight mock `win` without a sidebar.
+    Loader {
+        id: sidebarSlot
+        objectName: "sidebarSlot" // so offscreen tests can findChild() it
+        readonly property bool shown: !!appWindow.win && appWindow.win.sidebar !== undefined
+                                      && appWindow.win.sidebar !== null && (appWindow.win.sidebarWidth || 0) > 0
+        readonly property bool besideBand: sidebarSlot.shown && chromeStyle.sidebar.besideBand
+                                           && appWindow.band.bandEdge !== "bottom"
+        // Whether the header bar draws the sidebar's title row: the look's choice, while that bar is on screen.
+        readonly property bool titleInHeaderBar: chromeStyle.sidebarTitleInHeaderBar(appWindow.bandOnScreen)
+        active: sidebarSlot.shown
+        anchors.left: parent.left
+        anchors.top: sidebarSlot.besideBand ? parent.top : bannerStack.bottom
+        anchors.bottom: content.bottom
+        width: sidebarSlot.item ? sidebarSlot.item.shownWidth : 0
+        z: 2
+        sourceComponent: Sidebar {
+            controller: appWindow.win
+            window: appWindow
+            bandHeight: titleBar.implicitHeight
+            titleInHeaderBar: sidebarSlot.titleInHeaderBar
+            sidebarToggle: appWindow.sidebarToggle
+            controlsInset: appWindow.bandMode === 1 ? 0 : ((appWindow.win && appWindow.win.nativeControlsInset) || 0)
+        }
+    }
+
     // Content area: the active tab's pane tree is the SOLE renderer for every case — a single unsplit
     // terminal is just a single-leaf tree (one TerminalPane), and a split is a multi-leaf tree. There is no
     // separate single-pane display: this removes the vtui<->pane-tree session hand-off that caused a series
@@ -427,7 +473,7 @@ ThemedWindow
         // so content reclaims the full window either way.
         anchors.top: bannerStack.bottom
         anchors.bottom: appWindow.band.bandEdge === "bottom" ? titleBar.top : tabsBar.top
-        anchors.left: parent.left
+        anchors.left: sidebarSlot.right
         anchors.right: parent.right
 
         // The chrome's tooltips are KitToolTips, plain text by construction. This is for a stray attached one
@@ -531,7 +577,8 @@ ThemedWindow
     // Whether keyboard focus is anywhere in the chrome.
     readonly property bool chromeHasFocus: !!appWindow.win
                                            && ((appWindow.win.focusedTabIndex ?? -1) >= 0
-                                               || (appWindow.win.focusedToolbarIndex ?? -1) >= 0)
+                                               || (appWindow.win.focusedToolbarIndex ?? -1) >= 0
+                                               || !!appWindow.win.sidebarHasFocus)
 
     // Tells the controller what the chrome shows, so its cycle skips what is not there and gives focus back
     // to the terminal when the area it is in goes (the tab well closing under it).
@@ -540,8 +587,16 @@ ThemedWindow
             appWindow.win.setChromePresence(appWindow.tabWellShown, appWindow.toolbarItems.length)
     }
     onTabWellShownChanged: appWindow.reportChromePresence()
+    // Tells the controller where the sidebar's toggle stands: with none on screen, the pane's context menu
+    // offers the hidden sidebar back.
+    onSidebarToggleChanged: if (appWindow.win && appWindow.win.setSidebarToggleHost)
+        appWindow.win.setSidebarToggleHost(appWindow.sidebarToggle.host ?? "none")
     onToolbarItemsChanged: appWindow.reportChromePresence()
-    onWinChanged: appWindow.reportChromePresence()
+    onWinChanged: {
+        appWindow.reportChromePresence()
+        if (appWindow.win && appWindow.win.setSidebarToggleHost)
+            appWindow.win.setSidebarToggleHost(appWindow.sidebarToggle.host ?? "none")
+    }
 
     // Moves the real active focus to where the controller says the chrome focus is.
     function applyChromeFocus() {
@@ -549,7 +604,9 @@ ThemedWindow
             return
         const tab = appWindow.win.focusedTabIndex ?? -1
         const item = appWindow.win.focusedToolbarIndex ?? -1
-        if (tab >= 0 && appWindow.tabStrip)
+        if (appWindow.win.sidebarHasFocus && sidebarSlot.item)
+            sidebarSlot.item.focusTree()
+        else if (tab >= 0 && appWindow.tabStrip)
             appWindow.tabStrip.focusTab(tab)
         else if (item >= 0 && item < appWindow.toolbarItems.length)
             appWindow.toolbarItems[item].forceActiveFocus()
@@ -631,6 +688,24 @@ ThemedWindow
                 closeTabDialog.reject()
         }
     }
+
+    // Closing from the sidebar's menu always asks; closing a workspace whose panes run programs asks first, as
+    // closing such a tab does. One dialog for both, worded per kind by the window's table.
+    ConfirmClose {
+        id: closeDialog
+        controller: appWindow.win
+    }
+
+    Connections {
+        target: appWindow.win
+        ignoreUnknownSignals: true
+        function onCloseWorkspaceConfirmationRequested(workspace, workspaceLabel, program) {
+            closeDialog.ask(SidebarRows.CloseKind.Workspace, workspace, 0, 0, workspaceLabel, program)
+        }
+        function onSidebarCloseConfirmationRequested(kind, workspace, tab, pane, label, program) {
+            closeDialog.ask(kind, workspace, tab, pane, label, program)
+        }
+    }
     // }}}
 
     // The command palette (Ctrl+Shift+P). Opened by the OpenCommandPalette action, which routes
@@ -640,6 +715,15 @@ ThemedWindow
     CommandPalette {
         id: commandPalette
         objectName: "commandPalette" // so offscreen tests can findChild() it
+        controller: appWindow.win
+        window: appWindow
+    }
+
+    // The daemon and workspace switcher, in this window's scene: the application presents its one switcher
+    // in the window it is opened over (WindowController.presentSwitcher), which shows it here.
+    Switcher {
+        id: switcher
+        objectName: "switcher" // so offscreen tests can findChild() it
         controller: appWindow.win
         window: appWindow
     }
@@ -663,6 +747,16 @@ ThemedWindow
         objectName: "terminalContextMenu"
         entries: appWindow.win ? appWindow.win.contextMenuModel : []
         onPicked: (actionId) => { if (appWindow.win) appWindow.win.triggerContextMenuAction(actionId); }
+    }
+
+    // A sidebar row's menu: a right-click on a row, or the menu key on the focused one, has the controller
+    // publish the row's commands (WindowController.openSidebarContextMenu), which then asks for the menu at the
+    // place the row named -- the pointer, or under the row.
+    ActionContextMenu {
+        id: sidebarContextMenu
+        objectName: "sidebarContextMenu"
+        entries: appWindow.win ? appWindow.win.sidebarContextMenuModel : []
+        onPicked: (actionId) => { if (appWindow.win) appWindow.win.triggerSidebarContextMenuAction(actionId); }
     }
 
     // Opens the terminal's menu where the controller says (a block menu opened from the keyboard or the ⋯
@@ -733,6 +827,9 @@ ThemedWindow
         function onSaveLayoutRequested() { saveLayoutDialog.open(); }
         function onContextMenuRequested() { appWindow.popTerminalContextMenu(); }
         function onTitleBarContextMenuRequested() { titleBarContextMenu.popup(); }
+        function onSidebarContextMenuRequested(row, windowPosition) {
+            sidebarContextMenu.popup(windowPosition.x, windowPosition.y);
+        }
         // Attention on behalf of a session that may have no pane on screen -- a command finishing in a
         // background tab. Such a session has no SessionChrome, so the window carries the request.
         function onNotificationRequested(title, body) { appWindow.showTrayMessage(title, body); }

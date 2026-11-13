@@ -250,10 +250,24 @@ set(_header_files
     session/WindowSwitching.hpp
     window/ChromeFocus.hpp
     window/ChromeKeys.hpp
+    window/QtChromeKeys.hpp
     window/DragEndPolicy.hpp
     window/DragEndProbe.hpp
     window/DropZonePolicy.hpp
     window/DroppedText.hpp
+    window/SidebarDropPolicy.hpp
+    window/SidebarSelection.hpp
+    window/CloseDialogTable.hpp
+    window/PickerAccessory.hpp
+    window/SidebarControls.hpp
+    window/SidebarToggle.hpp
+    window/PopupAnchor.hpp
+    window/Utf16Offsets.hpp
+    window/SidebarTree.hpp
+    window/SwitcherStatus.hpp
+    window/SwitcherRows.hpp
+    window/SwitcherKeys.hpp
+    window/SwitcherText.hpp
     window/TabBarDropPolicy.hpp
     window/TabBarHitValue.hpp
     window/NodeDrag.hpp
@@ -278,6 +292,10 @@ set(_header_files
 # are only referenced reflectively at runtime.
 set(_core_source_files
     session/HyperlinkTooltip.cpp
+    window/SidebarTree.cpp
+    window/SwitcherStatus.cpp
+    window/SwitcherRows.cpp
+    window/SwitcherText.cpp
     window/TabLabel.cpp
 )
 # The executable entry point lives outside the object library so the test can supply its own main
@@ -318,7 +336,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsBackdrop.hpp
         window/ConnectPickerController.hpp
         window/SwitcherController.hpp
-        window/SwitcherRows.hpp
+        window/SwitcherPresenter.hpp
         window/SettingsWindowHost.hpp
         session/PreviewTranscript.hpp
         session/PastePreview.hpp
@@ -330,6 +348,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/TerminalSessionManager.hpp
         window/ChromeStyleHost.hpp
         window/NoticeModel.hpp
+        window/SidebarModel.hpp
         window/NoticeQueue.hpp
         window/ToastPlacement.hpp
         window/SaveLayoutCheck.hpp
@@ -340,6 +359,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/UiStyleProvider.hpp
         window/WindowActivation.hpp
         window/WindowControlStyleProvider.hpp
+        window/PopupParent.hpp
         window/WindowLivenessQt.hpp
         session/SessionInput.hpp
         session/SessionRole.hpp
@@ -360,6 +380,7 @@ if(CONTOUR_FRONTEND_GUI)
         display/PciIds.hpp
         display/SysfsGpuInventory.hpp
         geometry/CellRectangle.hpp
+        geometry/SidebarGeometry.hpp
         geometry/WindowGeometry.hpp
         askpass/AskpassBroker.hpp
         askpass/AskpassPromptRouter.hpp
@@ -399,11 +420,12 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsPreview.cpp
         window/ConnectPickerController.cpp
         window/SwitcherController.cpp
-        window/SwitcherRows.cpp
+        window/SwitcherPresenter.cpp
         window/SettingsWindowHost.cpp
         session/Permission.cpp
         session/PermissionPrompt.cpp
         window/NoticeModel.cpp
+        window/SidebarModel.cpp
         window/QuickTerminalController.cpp
         session/TerminalSession.cpp
         session/TerminalSessionKeyInput.cpp
@@ -421,6 +443,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/UiStyleProvider.cpp
         window/WindowControlStyleProvider.cpp
         window/DragEndProbe.cpp
+        window/GeometryDump.cpp
         window/NodeDrag.cpp
         window/TabBarHitValue.cpp
         window/WindowController.cpp
@@ -499,6 +522,15 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SessionChrome.qml
         qml/TitleBar.qml
         qml/HostChip.qml
+        qml/WorkspaceChip.qml
+        qml/Breadcrumb.qml
+        qml/Sidebar.qml
+        qml/SidebarControlButton.qml
+        qml/SidebarRow.qml
+        qml/SidebarHoverCard.qml
+        qml/SidebarNewWorkspaceDrop.qml
+        qml/SidebarFooter.qml
+        qml/ConfirmClose.qml
         qml/ToolbarButton.qml
         qml/FocusRing.qml
         qml/SymbolicIcon.qml
@@ -521,6 +553,10 @@ if(CONTOUR_FRONTEND_GUI)
         qml/ActionContextMenu.qml
         qml/MenuSwatchRow.qml
         qml/CommandPalette.qml
+        qml/PickerPopup.qml
+        qml/PickerGroupHeader.qml
+        qml/PickerRowSelection.qml
+        qml/MatchedLabel.qml
         qml/SaveLayoutDialog.qml
         qml/SettingsPage.qml
         qml/SettingsSidebar.qml
@@ -725,6 +761,18 @@ target_link_libraries(contour_block_tooltip PUBLIC vtbackend)
 target_include_directories(contour_block_tooltip PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 # }}}
 
+# {{{ contour_inprocess_directory: the workspace directory of a window whose sessions run in this process
+# Qt-free, and tested in contour_test, for the reason contour_block_tooltip is.
+add_library(contour_inprocess_directory STATIC
+    session/InProcessDirectory.cpp
+    session/InProcessDirectory.hpp
+    window/WorkspaceDirectory.hpp
+    window/WorkspaceDirectorySource.hpp
+)
+target_link_libraries(contour_inprocess_directory PUBLIC vthost vtworkspace)
+target_include_directories(contour_inprocess_directory PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+# }}}
+
 # {{{ contour_local_file: what following a hyperlink to a file on this machine does with it
 # Qt-free, and tested in contour_test, for the reason contour_block_tooltip is.
 add_library(contour_local_file STATIC
@@ -869,6 +917,7 @@ target_link_libraries(contour_core
     contour::tracy
     contour_block_tooltip
     contour_command
+    contour_inprocess_directory
     contour_askpass
     contour_command_output
     contour_cli
@@ -961,6 +1010,7 @@ if(CONTOUR_FRONTEND_GUI)
             remote/DaemonSwitchDirectory_test.cpp
             remote/SwitchGuard_test.cpp
             remote/SwitchPlan_test.cpp
+            remote/DirectorySource_test.cpp
             platform/AppearanceSources_test.cpp
             platform/WindowsAppearanceSources_test.cpp
             platform/WindowsSettings_test.cpp
@@ -983,8 +1033,10 @@ if(CONTOUR_FRONTEND_GUI)
             config/GpuSelector_test.cpp
             test/Accessibility_qml_test.cpp
             test/ConnectPickerQml_test.cpp
+            test/SwitcherController_test.cpp
             test/SwitcherQml_test.cpp
-            window/SwitcherRows_test.cpp
+            test/SidebarQml_test.cpp
+            test/SidebarFakes.hpp
             platform/SpeechSynthesizer_test.cpp
             display/ContentScale_test.cpp
             display/InGridVisualsRendering_test.cpp
@@ -1010,7 +1062,9 @@ if(CONTOUR_FRONTEND_GUI)
             session/Permission_test.cpp
             session/PermissionPrompt_test.cpp
             window/NoticeModel_test.cpp
+            window/SidebarModel_test.cpp
             test/MainWindowControllerMock.hpp
+            test/SwitcherHost.hpp
             test/MockMainController.hpp
             test/QmlMocks.hpp
             test/RecordingAnnouncer.hpp
@@ -1034,6 +1088,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/Win32Settings_test.cpp
             window/WindowPositionStore_test.cpp
             window/DragEndProbe_test.cpp
+            window/GeometryDump_test.cpp
             window/ContextMenuModel_test.cpp
             window/SettingsWindowRules_test.cpp
             platform/PopupShadow_test.cpp
@@ -1101,6 +1156,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/TabListModel_test.cpp
             window/CaptionController_test.cpp
             window/TitleBandController_test.cpp
+            window/SidebarController_test.cpp
             window/UiStyleProvider_test.cpp
             window/WindowSizing_test.cpp
         )
@@ -1238,12 +1294,13 @@ if(CONTOUR_FRONTEND_GUI)
         # it the run needs a real display and fails wherever there is none. It was passing only because
         # every invocation that mattered happened to export QT_QPA_PLATFORM by hand.
         #
-        # LeakSanitizer is off here for the same, already-documented reason as the e2e app runs below:
-        # constructing a QGuiApplication initializes freetype through Qt's font database, whose one-time
-        # global allocations are freed by teardown hooks that run AFTER LSan reports. Every block in that
-        # report is freetype/Qt-internal with ZERO first-party frames, and it fires after Catch2 has
-        # already reported the suite green -- so it turns a passing run into a failing test. ASan proper
-        # (use-after-free, overflow) stays fully enabled; the Qt-free unit suites keep leak checking.
+        # LeakSanitizer is off for these four runs, and only for them. The system libraries' leaks are left out
+        # of every report (cmake/lsan-suppressions.txt, docs/internals/sanitizers.md), but these suites still
+        # end with indirect leaks inside Qt Quick's own grab paths, with no direct leak behind them: the
+        # QQuickItemGrabResult that QQuickItem::grabToImage() creates (a reference cycle through its
+        # QSharedPointer and signal connections), and the software renderer's QRasterPaintEngine and QImage
+        # under QQuickWindow::grabWindow(), from the pixel checks in MainWindowQml_test, QmlPaneCards_test and
+        # QmlComponents_test. Every assertion passes; the report alone fails the run. ASan proper stays on.
         #
         # A QML disk cache of this build tree's own. Qt's default is one per user and application name,
         # so every contour_gui_test on the machine -- across worktrees and build types -- shares one
@@ -1366,7 +1423,7 @@ if(CONTOUR_FRONTEND_GUI)
             set_tests_properties(contour_notification_nonblocking
                 PROPERTIES
                     ENVIRONMENT
-                        "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0;${CONTOUR_QML_TEST_ENVIRONMENT}"
+                        "QT_QPA_PLATFORM=offscreen;${CONTOUR_QML_TEST_ENVIRONMENT}"
                     TIMEOUT 120
                     LABELS e2e)
             if(CONTOUR_SANITIZE STREQUAL "thread")
@@ -1449,21 +1506,17 @@ if(CONTOUR_FRONTEND_GUI)
                 COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/tls-key-login.sh $<TARGET_FILE:contour>)
             set_tests_properties(contour_e2e_tls_key_login PROPERTIES SKIP_RETURN_CODE 77)
 
-            # LeakSanitizer is disabled for the e2e app runs (LSAN_OPTIONS=detect_leaks=0). Booting the
-            # real binary probes the audio/GPU driver stack (QMediaDevices::audioOutputs() ->
-            # FFmpeg/VA-API, libcuda, libdbus), which leaves one-time global-init allocations freed by the
-            # drivers' own atexit hooks AFTER LSan runs. Every leaked block is driver-internal
-            # (libcuda/libdbus/stripped <unknown module> FFmpeg frames) with ZERO first-party frames, and
-            # the stripped frames cannot be targeted by a suppression file. This mirrors the identical,
-            # documented relaxation in scripts/run-display-tests.sh. ASan proper (use-after-free/overflow)
-            # stays fully enabled here; the unit-test suites keep full leak checking.
+            # LeakSanitizer checks the e2e app runs. Booting the real binary probes the audio, GPU and D-Bus
+            # stacks, whose one-time allocations are freed, if at all, by the libraries' own atexit hooks after
+            # LSan reports; those libraries are left out of the report by cmake/lsan-suppressions.txt, which an
+            # ASan build compiles into the binary (docs/internals/sanitizers.md). A leak of ours still fails.
             set_tests_properties(
                 contour_e2e_lifecycle contour_e2e_vt_stream
                 contour_e2e_custom_config contour_e2e_cli contour_e2e_daemon
                 contour_e2e_client_unreachable contour_e2e_hosting contour_e2e_stdio_relay contour_e2e_connect
                 contour_e2e_tls_key_login
                 PROPERTIES
-                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;LSAN_OPTIONS=detect_leaks=0"
+                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1"
                     TIMEOUT 120
                     RUN_SERIAL TRUE
                     LABELS e2e)
@@ -1489,6 +1542,41 @@ if(CONTOUR_FRONTEND_GUI)
             endif()
         endif()
 
+        # {{{ The sidebar's workflows on a real X server (label e2e-display)
+        # What the offscreen suites cannot run: the OS drag loop. Each case of sidebar-workflows.py starts its own
+        # Xvfb (`-displayfd`, so it never takes a display someone else has), the minimal window manager beside
+        # it, a private daemon and `contour client`, drives the window with xdotool's real pointer and keyboard
+        # events, and asserts through the control API. One test per case, the cases listed by the script
+        # itself so a new one is a function there and nothing here. Opt-in: they skip, saying so (exit 77),
+        # unless CONTOUR_E2E_DISPLAY=1 is set (CI's e2e-display step sets it), and on a machine without Xvfb or
+        # xdotool. LeakSanitizer is off for the reason given for the offscreen app runs above.
+        if(NOT WIN32 AND NOT APPLE)
+            find_package(Python3 COMPONENTS Interpreter QUIET)
+        endif()
+        if(NOT WIN32 AND NOT APPLE AND Python3_Interpreter_FOUND)
+            set(_display_workflows ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/sidebar-workflows.py)
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_display_workflows})
+            execute_process(COMMAND ${Python3_EXECUTABLE} -I ${_display_workflows} --list
+                            OUTPUT_VARIABLE _display_cases OUTPUT_STRIP_TRAILING_WHITESPACE
+                            RESULT_VARIABLE _display_list_status)
+            if(NOT _display_list_status EQUAL 0)
+                message(FATAL_ERROR "${_display_workflows} --list failed (${_display_list_status})")
+            endif()
+            string(REPLACE "\n" ";" _display_cases "${_display_cases}")
+            foreach(_case IN LISTS _display_cases)
+                add_test(NAME contour_e2e_display_${_case}
+                         COMMAND setsid -w ${Python3_EXECUTABLE} -I ${_display_workflows} $<TARGET_FILE:contour>
+                                 ${_case})
+                set_tests_properties(contour_e2e_display_${_case}
+                    PROPERTIES
+                        TIMEOUT 300
+                        RUN_SERIAL TRUE
+                        SKIP_RETURN_CODE 77
+                        LABELS e2e-display)
+            endforeach()
+        endif()
+        # }}}
+
         # A real in-place daemon upgrade: the daemon re-execs itself while a program runs in a pane, and the
         # program, its screen (alternate screen, mouse modes, a kitty image), a non-default profile setting
         # and the counter it prints all come through; a configuration the new release cannot load refuses it,
@@ -1508,7 +1596,7 @@ if(CONTOUR_FRONTEND_GUI)
                         $<TARGET_FILE:contour>)
             set_tests_properties(contour_e2e_daemon_live_upgrade
                 PROPERTIES
-                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;LSAN_OPTIONS=detect_leaks=0"
+                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1"
                     TIMEOUT 120
                     RUN_SERIAL TRUE
                     LABELS "e2e;daemon")
@@ -1585,6 +1673,7 @@ if(CONTOUR_TESTING)
         config/PtyReadBufferSize_test.cpp
         config/ScrollBarMode_test.cpp
         config/TabBarMode_test.cpp
+        geometry/SidebarGeometry_test.cpp
         config/UiStyle_test.cpp
         config/WindowControlStyle_test.cpp
         test/ChromeSnapshotPlan_test.cpp
@@ -1597,6 +1686,8 @@ if(CONTOUR_TESTING)
         command/MenuBarTable_test.cpp
         command/MenuTree_test.cpp
         command/Shortcut_test.cpp
+        command/SidebarMenus_test.cpp
+        command/SwitcherMenus_test.cpp
         command/TabMenus_test.cpp
         command/TitleBarContextMenu_test.cpp
         cli/AgentHookConfig_test.cpp
@@ -1639,6 +1730,7 @@ if(CONTOUR_TESTING)
         session/ScreenshotFile_test.cpp
         session/CommandOutputFiles_test.cpp
         session/CommandBlockTooltip_test.cpp
+        session/InProcessDirectory_test.cpp
         session/LocalFileAction_test.cpp
         session/EndReason_test.cpp
         platform/CaptionHitTest_test.cpp
@@ -1675,8 +1767,27 @@ if(CONTOUR_TESTING)
         window/SecureLockPlacement_test.cpp
         window/HostChipState_test.cpp
         window/TabAttention_test.cpp
+        window/SidebarMenuState_test.cpp
         window/WorkspaceDirectory_test.cpp
         window/TabBadge_test.cpp
+        window/StatusUrgency_test.cpp
+        window/AttentionJump_test.cpp
+        window/SidebarTree.cpp
+        window/SidebarTree_test.cpp
+        window/SwitcherStatus.cpp
+        window/SwitcherStatus_test.cpp
+        window/SwitcherRows.cpp
+        window/SwitcherRows_test.cpp
+        window/PickerAccessory_test.cpp
+        window/SwitcherKeys_test.cpp
+        window/SwitcherText.cpp
+        window/SwitcherText_test.cpp
+        window/SidebarDropPolicy_test.cpp
+        window/SidebarSelection_test.cpp
+        window/CloseDialogTable_test.cpp
+        window/SidebarToggle_test.cpp
+        window/PopupAnchor_test.cpp
+        window/Utf16Offsets_test.cpp
         window/ShellIntegrationOffer_test.cpp
         window/ShellInstallRows_test.cpp
         window/TaskbarAttentionTally_test.cpp
@@ -1706,6 +1817,7 @@ if(CONTOUR_TESTING)
         contour_askpass
         contour_block_tooltip
         contour_command
+        contour_inprocess_directory
         contour_command_output
         contour_cli
         contour_local_file

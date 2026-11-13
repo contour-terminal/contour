@@ -94,6 +94,15 @@ class WindowSwitcher final: public SwitchingService
                         session::SwitchTarget const& daemon,
                         DaemonWorkspacesListed done) override;
 
+    /// Reaches the daemon the way the switch would, has it create the workspace, then switches to it.
+    void createWorkspace(vtworkspace::WorkspaceId window,
+                         session::SwitchTarget const& daemon,
+                         std::string label,
+                         session::SwitchMode mode,
+                         session::SwitchCompletion done) override;
+
+    [[nodiscard]] std::vector<WorkspaceRow> windowWorkspaceRows(vtworkspace::WorkspaceId window) override;
+
   private:
     /// The daemon a target names, as seen from the window's own link.
     struct Destination
@@ -151,6 +160,13 @@ class WindowSwitcher final: public SwitchingService
     /// Ends @p request as declined by the user: said in its window without alarm, and to the caller. The
     /// window shows what it showed.
     void decline(Request const& request, std::string const& reason);
+
+    /// Says in @p window why the workspace a switch to @p daemon was to land on could not be created, and
+    /// tells @p done.
+    void failCreate(vtworkspace::WorkspaceId window,
+                    session::SwitchTarget const& daemon,
+                    std::string const& reason,
+                    session::SwitchCompletion const& done);
 
     session::TerminalSessionManager& _sessions;
     ISwitchHost& _host;

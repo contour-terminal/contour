@@ -3,6 +3,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -2285,7 +2286,9 @@ TEST_CASE("MoveNode round-trips for every target kind and carries bytes no enume
         .sourceKind = 1, .sourceSessions = { 4, 5, 6 }, .targetKind = 2, .targetSession = 9, .index = 300
     };
     auto const newWorkspace = MoveNode { .sourceKind = 1, .sourceSessions = { 4, 5 }, .targetKind = 3 };
-    for (auto const& move: { edge, swap, well, newWorkspace })
+    auto const tab =
+        MoveNode { .sourceKind = 0, .sourceSessions = { 4 }, .targetKind = 4, .targetSession = 9 };
+    for (auto const& move: { edge, swap, well, newWorkspace, tab })
         CHECK(roundTrip(DecodedPdu { move }) == DecodedPdu { move });
     auto const unknown = MoveNode { .sourceKind = 0xEE,
                                     .sourceSessions = {},
@@ -2369,6 +2372,19 @@ TEST_CASE("the workspace select, focus, role and switch PDUs round-trip", "[vtho
     {
         auto const select = SelectWorkspace { .workspace = workspace };
         CHECK(roundTrip(DecodedPdu { select }) == DecodedPdu { select });
+    }
+    // The appended field: present, it round-trips; absent, the body is what a sender from before it wrote.
+    for (auto const from: { uint64_t { 0 }, uint64_t { 7 } })
+    {
+        auto const select = SelectWorkspace { .workspace = 0, .directoryFromSession = from };
+        CHECK(roundTrip(DecodedPdu { select }) == DecodedPdu { select });
+    }
+    {
+        auto without = Writer {};
+        auto with = Writer {};
+        encodePdu(without, 1, DecodedPdu { SelectWorkspace { .workspace = 3 } });
+        encodePdu(with, 1, DecodedPdu { SelectWorkspace { .workspace = 3, .directoryFromSession = 1 } });
+        CHECK(without.size() < with.size());
     }
     for (auto const focus: { WindowFocus::Unfocused, WindowFocus::Focused })
     {
@@ -2473,6 +2489,149 @@ TEST_CASE("PaneSummary round-trips every combination of its optional fields",
                                                            .notifications = notifications };
                         CHECK(roundTrip(DecodedPdu { summary }) == DecodedPdu { summary });
                     }
+}
+
+TEST_CASE("WorkspaceMeta tag is 56", "[vthost][pdu][workspace-meta]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::WorkspaceMeta) == 56);
+}
+
+namespace
+{
+/// @return A control id whose bytes count up from @p first.
+[[nodiscard]] std::array<uint8_t, 16> controlIdFrom(uint8_t first)
+{
+    auto id = std::array<uint8_t, 16> {};
+    for (auto const index: std::views::iota(std::size_t { 0 }, id.size()))
+        id.at(index) = static_cast<uint8_t>(first + index);
+    return id;
+}
+} // namespace
+
+TEST_CASE("WorkspaceMeta round-trips with all fields", "[vthost][pdu][workspace-meta]")
+{
+    auto const meta = WorkspaceMeta {
+        .workspace = 3,
+        .controlId = controlIdFrom(0xA0),
+        .label = "ops",
+        .git = WireGitInfo { .branch = "main", .kind = GitHeadKindWire::Branch, .ahead = 2, .behind = 7 },
+    };
+    CHECK(roundTrip(DecodedPdu { meta }) == DecodedPdu { meta });
+}
+
+TEST_CASE("WorkspaceMeta round-trips with each optional absent", "[vthost][pdu][workspace-meta]")
+{
+    auto const labels = std::vector<std::optional<std::string>> { std::nullopt, "", "ops" };
+    auto const gits = std::vector<std::optional<WireGitInfo>> {
+        std::nullopt,
+        WireGitInfo {
+            .branch = "", .kind = GitHeadKindWire::None, .ahead = std::nullopt, .behind = std::nullopt },
+        WireGitInfo {
+            .branch = "abc1234", .kind = GitHeadKindWire::Detached, .ahead = std::nullopt, .behind = 0 },
+        WireGitInfo { .branch = "v1", .kind = GitHeadKindWire::OtherRef, .ahead = 5, .behind = std::nullopt },
+        WireGitInfo {
+            .branch = "main", .kind = GitHeadKindWire::Branch, .ahead = 0xFFFFFFFF, .behind = 0xFFFFFFFF },
+    };
+    for (auto const& label: labels)
+        for (auto const& git: gits)
+        {
+            auto const meta =
+                WorkspaceMeta { .workspace = 9, .controlId = controlIdFrom(1), .label = label, .git = git };
+            CHECK(roundTrip(DecodedPdu { meta }) == DecodedPdu { meta });
+        }
+}
+
+TEST_CASE(
+    "WorkspaceMeta refuses a truncated body, reads an unknown kind as another ref, ignores appended bytes",
+    "[vthost][pdu][workspace-meta]")
+{
+    auto const id = controlIdFrom(0x10);
+    auto git = Writer {};
+    git.u8(200); // a kind no enumerator names
+    git.string("feature");
+    git.u8(0b01);
+    git.varint(3);
+    auto body = Writer {};
+    body.varint(4);
+    body.bytes(std::as_bytes(std::span { id }));
+    body.u8(0b11);
+    body.string("ops");
+    body.blob(git.view());
+    SECTION("an unknown kind reads as another ref, its name kept")
+    {
+        auto const decoded = decodeAs<WorkspaceMeta>(frameOf(PduType::WorkspaceMeta, body.view()));
+        CHECK(decoded.workspace == 4);
+        CHECK(decoded.controlId == id);
+        CHECK(decoded.label == std::optional<std::string> { "ops" });
+        REQUIRE(decoded.git.has_value());
+        CHECK(decoded.git->kind == GitHeadKindWire::OtherRef);
+        CHECK(decoded.git->branch == "feature");
+        CHECK(decoded.git->ahead == std::optional<uint32_t> { 3 });
+        CHECK_FALSE(decoded.git->behind.has_value());
+    }
+    SECTION("bytes a later version appended are ignored")
+    {
+        body.varint(77);
+        auto const decoded = decodeAs<WorkspaceMeta>(frameOf(PduType::WorkspaceMeta, body.view()));
+        CHECK(decoded.workspace == 4);
+        CHECK(decoded.git->ahead == std::optional<uint32_t> { 3 });
+    }
+    SECTION("a field a later version appended to the git record stays inside it")
+    {
+        git.varint(42);
+        auto grown = Writer {};
+        grown.varint(4);
+        grown.bytes(std::as_bytes(std::span { id }));
+        grown.u8(0b10);
+        grown.blob(git.view());
+        grown.varint(5); // a field appended to the PDU after the record
+        auto const decoded = decodeAs<WorkspaceMeta>(frameOf(PduType::WorkspaceMeta, grown.view()));
+        REQUIRE(decoded.git.has_value());
+        CHECK(decoded.git->branch == "feature");
+        CHECK(decoded.git->ahead == std::optional<uint32_t> { 3 });
+    }
+    SECTION("a control id cut short is malformed")
+    {
+        auto truncated = Writer {};
+        truncated.varint(4);
+        truncated.bytes(std::as_bytes(std::span { id }.first(9)));
+        CHECK_FALSE(decodePdu(frameOf(PduType::WorkspaceMeta, truncated.view())).has_value());
+    }
+    SECTION("a git state announced and missing is malformed")
+    {
+        auto truncated = Writer {};
+        truncated.varint(4);
+        truncated.bytes(std::as_bytes(std::span { id }));
+        truncated.u8(0b10); // announces a git state that is not there
+        CHECK_FALSE(decodePdu(frameOf(PduType::WorkspaceMeta, truncated.view())).has_value());
+    }
+    SECTION("a git record cut short inside its blob is malformed")
+    {
+        auto cut = Writer {};
+        cut.u8(std::to_underlying(GitHeadKindWire::Branch));
+        cut.string("main");
+        cut.u8(0b01); // announces an ahead count that is not there
+        auto truncated = Writer {};
+        truncated.varint(4);
+        truncated.bytes(std::as_bytes(std::span { id }));
+        truncated.u8(0b10);
+        truncated.blob(cut.view());
+        CHECK_FALSE(decodePdu(frameOf(PduType::WorkspaceMeta, truncated.view())).has_value());
+    }
+    SECTION("a count beyond 32 bits is malformed")
+    {
+        auto record = Writer {};
+        record.u8(std::to_underlying(GitHeadKindWire::Branch));
+        record.string("main");
+        record.u8(0b10);
+        record.varint(uint64_t { 1 } << 32);
+        auto wide = Writer {};
+        wide.varint(4);
+        wide.bytes(std::as_bytes(std::span { id }));
+        wide.u8(0b10);
+        wide.blob(record.view());
+        CHECK_FALSE(decodePdu(frameOf(PduType::WorkspaceMeta, wide.view())).has_value());
+    }
 }
 
 TEST_CASE("a SwitchRequest from a daemon that states no deadline reads as stating none",

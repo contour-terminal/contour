@@ -81,6 +81,19 @@ Escape, Backspace, Delete and Tab, with no modifier or with Shift or Alt alone. 
 those keys is still yours. Plain typing is not sent to the shell until you press Escape to return to the
 terminal.
 
+## The workspace sidebar
+
+Each row of the [workspace sidebar](sidebar.md) is a list item whose name says what a sighted user reads
+off the tree: its title, its kind, whether it is expanded or collapsed, how many panes under it need you or
+work, and whether it is the current tab: `billing, workspace, expanded, 1 needs you`. Qt's accessibility has
+no expanded state of its own, so it is part of the name. A tab or pane that failed or finished is named
+`failed` or `done`. The footer's counts are one text, and the sidebar's list and filter field have their
+own names. **Ctrl+Shift+D** (**⇧⌘E** on macOS) moves keyboard focus into the tree, which then answers the
+arrow keys, Return, F2 and typing as the [sidebar guide](sidebar.md#keyboard) lists.
+
+When a pane in a workspace other than the one you are looking at starts needing you, Contour announces it,
+Polite, once. Reduce Motion is honoured: rows fold and unfold at once.
+
 ## Things that are only announced
 
 Some of what a terminal does has no representation in the accessibility tree at all — nothing's state
@@ -90,6 +103,7 @@ changed, so nothing is reported unless it is said explicitly. Contour announces:
 |-------|-----------|
 | The bell | Polite — it waits for your screen reader to finish its sentence |
 | A desktop notification (OSC 99, OSC 777 or OSC 9) | Polite |
+| A pane in another workspace starts needing you (see [the sidebar](#the-workspace-sidebar)) | Polite |
 | Read-only mode being switched on or off | Assertive — it interrupts, because it changes what typing does |
 
 Set `accessibility_announcements: false` in `contour.yml` to switch these off. They cost nothing while

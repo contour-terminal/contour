@@ -324,6 +324,17 @@ namespace
             ::close(*terminal);
         }
 
+        // Entered before the settle is said: until then the parent names the directory the child is about to
+        // enter (Process::workingDirectory()), and from then on the child's own, which is this one already.
+        if (!launch.workingDirectory.empty() && ::chdir(launch.workingDirectory.c_str()) != 0)
+        {
+            auto const failure = errno;
+            report(
+                launch,
+                std::format("Failed to chdir to \"{}\". {}\n", launch.workingDirectory, errorText(failure)));
+            ::_exit(failureStatus(launch.failureExit));
+        }
+
         // Its terminal's queues are flushed: what the parent writes from now on reaches the program. Said
         // with a byte, not only the close: a helper another thread of the parent forks holds the parent's
         // copy of this end on, and would keep the parent's end from reading end-of-file for as long as it
@@ -332,15 +343,6 @@ namespace
         {
             std::ignore = ::write(*settle, "s", 1);
             ::close(*settle);
-        }
-
-        if (!launch.workingDirectory.empty() && ::chdir(launch.workingDirectory.c_str()) != 0)
-        {
-            auto const failure = errno;
-            report(
-                launch,
-                std::format("Failed to chdir to \"{}\". {}\n", launch.workingDirectory, errorText(failure)));
-            ::_exit(failureStatus(launch.failureExit));
         }
 
         auto keepFd = STDERR_FILENO;

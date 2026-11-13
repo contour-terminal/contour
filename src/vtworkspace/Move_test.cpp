@@ -339,6 +339,68 @@ TEST_CASE("moveNode: multi-pane tab to a tab well and a new workspace", "[vtwork
     }
 }
 
+TEST_CASE("moveNode: a node joins a tab beside its active pane, on JoinTabSide", "[vtworkspace][model][move]")
+{
+    MoveFixture f;
+    SECTION("a pane of another tab")
+    {
+        // Tab c's active pane is 1004; the pane lands on its right, in a split of its own.
+        auto const result = f.model.moveNode(PaneSource { SessionId { 1000 } }, TabTarget { f.w2Id, f.cId });
+        REQUIRE(result.has_value());
+        CHECK(result->workspace == f.w2Id);
+        CHECK(result->tab == f.cId);
+        CHECK(MoveFixture::sessionsOf(*f.c) == std::vector<uint64_t> { 1003, 1004, 1000 });
+        CHECK(MoveFixture::sessionsOf(*f.a) == std::vector<uint64_t> { 1001 });
+        CHECK(f.events.countPrefix("paneClosed:") == 0);
+        CHECK(f.allSessionsPresent());
+        f.requireFocus(*result, SessionId { 1000 });
+    }
+    SECTION("a whole tab: its panes become splits of the target, and the emptied tab goes")
+    {
+        auto const result = f.model.moveNode(TabSource { f.w1Id, f.aId }, TabTarget { f.w1Id, f.bId });
+        REQUIRE(result.has_value());
+        CHECK(result->tab == f.bId);
+        CHECK(f.w1->tabCount() == 1);
+        CHECK(MoveFixture::sessionsOf(*f.b) == std::vector<uint64_t> { 1002, 1000, 1001 });
+        CHECK(f.allSessionsPresent());
+        f.requireFocus(*result, SessionId { 1001 });
+    }
+    SECTION("the only tab of a workspace leaves that workspace empty, for the host to close")
+    {
+        auto const result = f.model.moveNode(TabSource { f.w2Id, f.cId }, TabTarget { f.w1Id, f.bId });
+        REQUIRE(result.has_value());
+        CHECK(f.w2->empty());
+        CHECK(MoveFixture::sessionsOf(*f.b) == std::vector<uint64_t> { 1002, 1003, 1004 });
+        CHECK(f.allSessionsPresent());
+    }
+}
+
+TEST_CASE("moveNode: a join refuses its own tab and an unknown one", "[vtworkspace][model][move]")
+{
+    MoveFixture f;
+    SECTION("a pane into the tab it is in")
+    {
+        f.requireRefused(f.model.moveNode(PaneSource { SessionId { 1000 } }, TabTarget { f.w1Id, f.aId }),
+                         MoveError::SelfTarget);
+    }
+    SECTION("a tab into itself")
+    {
+        f.requireRefused(f.model.moveNode(TabSource { f.w1Id, f.aId }, TabTarget { f.w1Id, f.aId }),
+                         MoveError::SelfTarget);
+    }
+    SECTION("a tab that is not there")
+    {
+        f.requireRefused(
+            f.model.moveNode(PaneSource { SessionId { 1000 } }, TabTarget { f.w1Id, TabId { 999 } }),
+            MoveError::UnknownTarget);
+    }
+    SECTION("a tab named by another workspace than its own")
+    {
+        f.requireRefused(f.model.moveNode(PaneSource { SessionId { 1000 } }, TabTarget { f.w2Id, f.bId }),
+                         MoveError::UnknownTarget);
+    }
+}
+
 TEST_CASE("moveNode: one-pane tab is treated as a pane (swap)", "[vtworkspace][model][move]")
 {
     MoveFixture f;

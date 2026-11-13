@@ -82,6 +82,12 @@ class FakeLister final: public contour::remote::IWorkspaceLister
         asked.push_back(Asked { .target = std::move(target), .done = std::move(done) });
     }
 
+    /// The directory creates nothing.
+    void create(ListTarget /*target*/, std::string /*label*/, contour::remote::WorkspaceCreated done) override
+    {
+        done(std::unexpected(std::string { "not in this test" }));
+    }
+
     /// Answers the listing of @p daemon asked first and not answered yet.
     void answer(std::string const& daemon, contour::remote::WorkspaceListing listed)
     {

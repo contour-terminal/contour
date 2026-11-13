@@ -5,6 +5,7 @@
 #include <contour/window/ChromeTokenObjects.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
+#include <QtGui/QFontMetricsF>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QPalette>
 
@@ -26,6 +27,32 @@ namespace
         auto sized = font;
         sized.setPixelSize(static_cast<int>(std::lround(pixelSize)));
         return sized;
+    }
+
+    /// @p face at the size of @p model, whichever unit that size is in.
+    [[nodiscard]] QFont sizedLike(QFont face, QFont const& model)
+    {
+        if (model.pixelSize() > 0)
+            face.setPixelSize(model.pixelSize());
+        else if (model.pointSizeF() > 0)
+            face.setPointSizeF(model.pointSizeF());
+        return face;
+    }
+
+    /// @p face sized so its lower case stands as tall as @p model's: a run of it beside @p model's text (a
+    /// command on a row's second line) reads as one size, where the same nominal size would not.
+    [[nodiscard]] QFont xHeightLike(QFont face, QFont const& model)
+    {
+        face = sizedLike(face, model);
+        auto const faceX = QFontMetricsF(face).xHeight();
+        auto const modelX = QFontMetricsF(model).xHeight();
+        if (faceX <= 0 || modelX <= 0 || face.family() == model.family())
+            return face;
+        if (face.pixelSize() > 0)
+            face.setPixelSize(std::max(1, static_cast<int>(std::lround(face.pixelSize() * modelX / faceX))));
+        else if (face.pointSizeF() > 0)
+            face.setPointSizeF(face.pointSizeF() * modelX / faceX);
+        return face;
     }
 
     /// @p font at @p weight on the CSS 100-900 scale, which QFont::Weight shares.
@@ -61,7 +88,10 @@ ChromeRadiusTokens::ChromeRadiusTokens(config::RadiusTokens tokens, ChromeUnits 
 {
 }
 
-ChromeTypeTokens::ChromeTypeTokens(config::TypeTokens tokens, QFont const& font, QObject* parent):
+ChromeTypeTokens::ChromeTypeTokens(config::TypeTokens tokens,
+                                   QFont const& font,
+                                   QFont const& mono,
+                                   QObject* parent):
     QObject { parent },
     _caption { sizedFont(font, tokens.caption) },
     _footnote { sizedFont(font, tokens.footnote) },
@@ -76,7 +106,9 @@ ChromeTypeTokens::ChromeTypeTokens(config::TypeTokens tokens, QFont const& font,
     _bodyStrong { weightedFont(_body, QFont::Bold) },
     _bodyMedium { weightedFont(_body, QFont::Medium) },
     _footnoteStrong { weightedFont(_footnote, QFont::Bold) },
-    _footnoteSemibold { weightedFont(_footnote, QFont::DemiBold) }
+    _footnoteSemibold { weightedFont(_footnote, QFont::DemiBold) },
+    _monospace { sizedLike(mono, _body) },
+    _monospaceFootnote { xHeightLike(mono, _footnote) }
 {
 }
 
@@ -128,6 +160,14 @@ ChromeLayoutTokens::ChromeLayoutTokens(config::LayoutTokens tokens, QObject* par
 
 ChromeSettingsTokens::ChromeSettingsTokens(config::SettingsTokens tokens, ChromeUnits units, QObject* parent):
     QObject { parent }, _tokens { tokens }, _units { units }
+{
+}
+
+ChromeSidebarTokens::ChromeSidebarTokens(config::SidebarTokens tokens,
+                                         config::SidebarLook look,
+                                         ChromeUnits units,
+                                         QObject* parent):
+    QObject { parent }, _tokens { tokens }, _look { look }, _units { units }
 {
 }
 

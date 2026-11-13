@@ -17,6 +17,7 @@
 #include <contour/window/DaemonDriftChoice.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/WindowId.hpp>
+#include <contour/window/WorkspaceDirectorySource.hpp>
 
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
@@ -144,7 +145,7 @@ using LinkRole = std::variant<BootRole, OpeningRole, SwitchArrival>;
 /// the selected workspace ended -- is realized in the window in place. A further window on the daemon is a
 /// link of its own (IDaemonLinkHost::startWindowLink). GUI thread only, apart from what the controller does
 /// on its own reactor.
-class DaemonLink final: public session::WindowBinding
+class DaemonLink final: public session::WindowBinding, public window::IWorkspaceDirectorySource
 {
   public:
     /// Names a link among the application's.
@@ -229,6 +230,17 @@ class DaemonLink final: public session::WindowBinding
     /// @return How many tabs of the workspaces its window does not select wait for the user, as the
     ///         directory's program status has them.
     [[nodiscard]] unsigned tabsWaitingElsewhere() const override;
+    /// @return Itself: its windows list its daemon's workspaces.
+    [[nodiscard]] window::IWorkspaceDirectorySource* directorySource() noexcept override { return this; }
+    /// @return Every workspace of its daemon, as its connection holds them; none while it holds no
+    ///         connection.
+    [[nodiscard]] window::WorkspaceDirectory directory() const override;
+    /// Has its window show @p workspace of its daemon (selectWorkspace()); a refusal is logged, as the
+    /// window has no one to tell,
+    /// and a refusal by the daemon cancels the window's pending jump (WindowController::cancelPendingJump()).
+    /// @param workspace The daemon's workspace id.
+    /// @return Refused when the selection could not be sent.
+    window::SelectResult select(uint64_t workspace) override;
     /// @return Its daemon as every link to it names it: by the name a switch gives it, or, for one no switch
     ///         can name, by its transport.
     [[nodiscard]] std::optional<uint64_t> daemonKey() const override;
@@ -429,6 +441,10 @@ class DaemonLink final: public session::WindowBinding
     ///         a window switched to it something to show. One that holds none would empty the window, which
     ///         then closes as its last pane's end closes it.
     [[nodiscard]] bool holdsTab(uint64_t daemonWorkspace) const;
+
+    /// @return The daemon session of the pane the window shown here has active, which a new workspace takes
+    ///         its starting directory from; none when the window shows none, or the pane is not bound.
+    [[nodiscard]] std::optional<uint64_t> activePaneSession() const;
     /// Applies the daemon's layout of the workspace the window displays to the window.
     void applyShownLayout();
     /// A switch selectWorkspace() started failed before it was shown: the switch is told why. No-op without a

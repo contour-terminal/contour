@@ -29,7 +29,7 @@ bool isMethodName(std::string_view name)
 
 TEST_CASE("every catalog row is unique and its examples decode", "[vtcontrol][catalog]")
 {
-    STATIC_REQUIRE(std::tuple_size_v<decltype(vtcontrol::Methods)> == 20);
+    STATIC_REQUIRE(std::tuple_size_v<decltype(vtcontrol::Methods)> == 26);
 
     auto names = std::set<std::string_view> {};
     std::apply(
@@ -53,7 +53,7 @@ TEST_CASE("every catalog row is unique and its examples decode", "[vtcontrol][ca
                 ...);
         },
         vtcontrol::Methods);
-    CHECK(names.size() == 20);
+    CHECK(names.size() == 26);
 }
 
 TEST_CASE("daemon.upgrade needs write and is for sockets only", "[vtcontrol][catalog]")
@@ -76,6 +76,34 @@ TEST_CASE("workspace.switch needs write and is for sockets only", "[vtcontrol][c
     STATIC_REQUIRE(Row.permission == vtcontrol::Permission::Write);
     // Never an extension's: re-pointing a window is its user's, or a socket peer's, decision.
     STATIC_REQUIRE(Row.exposure == vtcontrol::Exposure::SocketOnly);
+}
+
+TEST_CASE("the workspace and tab mutations need write", "[vtcontrol][catalog]")
+{
+    constexpr auto Create =
+        std::get<vtcontrol::Method<vtcontrol::CreateWorkspaceRequest, vtcontrol::CreateWorkspaceReply>>(
+            vtcontrol::Methods);
+    constexpr auto Rename =
+        std::get<vtcontrol::Method<vtcontrol::RenameWorkspaceRequest, vtcontrol::EmptyReply>>(
+            vtcontrol::Methods);
+    constexpr auto MoveWorkspace =
+        std::get<vtcontrol::Method<vtcontrol::MoveWorkspaceRequest, vtcontrol::EmptyReply>>(
+            vtcontrol::Methods);
+    constexpr auto MoveTab =
+        std::get<vtcontrol::Method<vtcontrol::MoveTabRequest, vtcontrol::EmptyReply>>(vtcontrol::Methods);
+    STATIC_REQUIRE(Create.name == "workspace.create");
+    STATIC_REQUIRE(Rename.name == "workspace.rename");
+    STATIC_REQUIRE(MoveWorkspace.name == "workspace.move");
+    STATIC_REQUIRE(MoveTab.name == "tab.move");
+    STATIC_REQUIRE(Create.permission == vtcontrol::Permission::Write);
+    STATIC_REQUIRE(Rename.permission == vtcontrol::Permission::Write);
+    STATIC_REQUIRE(MoveWorkspace.permission == vtcontrol::Permission::Write);
+    STATIC_REQUIRE(MoveTab.permission == vtcontrol::Permission::Write);
+    constexpr auto MovePane =
+        std::get<vtcontrol::Method<vtcontrol::MovePaneRequest, vtcontrol::MovePaneReply>>(vtcontrol::Methods);
+    STATIC_REQUIRE(MovePane.name == "pane.move");
+    STATIC_REQUIRE(MovePane.permission == vtcontrol::Permission::Write);
+    STATIC_REQUIRE(MovePane.exposure == MoveTab.exposure);
 }
 
 TEST_CASE("permissions and exposures are spelled by their tables", "[vtcontrol][catalog]")

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <vtcontrol/Api.hpp>
+#include <vtcontrol/ObjectRef.hpp>
 
 namespace contour::cli
 {
@@ -20,6 +21,16 @@ namespace contour::cli
 /// @param replyJson The reply JSON.
 /// @return The workspaces, in the daemon's order, or why the reply does not read as a listing.
 [[nodiscard]] std::expected<std::vector<vtcontrol::WorkspaceInfo>, std::string> decodeWorkspaceList(
+    std::string_view replyJson);
+
+/// @param label The new workspace's label; empty names it after its folder.
+/// @return The `workspace.create` request JSON for it.
+[[nodiscard]] std::string encodeCreateWorkspace(std::string const& label);
+
+/// Reads what `workspace.create` answered.
+/// @param replyJson The reply JSON.
+/// @return The new workspace's control id, or why the reply names none.
+[[nodiscard]] std::expected<vtcontrol::ObjectRef, std::string> decodeCreatedWorkspace(
     std::string_view replyJson);
 
 /// Resolves what `contour client --workspace` names to the daemon's native id of it, in the forms every

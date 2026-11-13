@@ -27,6 +27,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -140,9 +141,36 @@ class FixtureLister final: public contour::remote::IWorkspaceLister
             Qt::QueuedConnection);
     }
 
+    /// Creates a workspace labelled @p label on the fixture's daemon, as `workspace.create` does.
+    void create(contour::remote::ListTarget target,
+                std::string label,
+                contour::remote::WorkspaceCreated done) override
+    {
+        created.push_back(label);
+        auto const found = _daemons.find(target.address.name);
+        auto made = std::expected<vtcontrol::ObjectRef, std::string> {};
+        if (found == _daemons.end())
+            made = std::unexpected(std::string { "cannot connect to the daemon" });
+        else
+            made = found->second->onDaemon([&daemon = *found->second, &label] {
+                auto* const workspace = daemon.host->createWorkspace();
+                auto const ref = vtcontrol::ObjectRef {
+                    .kind = vtcontrol::ObjectKind::Workspace,
+                    .uuid = daemon.host->objects().uuidOf(workspace->id()).value_or(vtcontrol::Uuid {})
+                };
+                daemon.host->objects().setLabel(ref, label);
+                return ref;
+            });
+        QMetaObject::invokeMethod(
+            &_receiver,
+            [done = std::move(done), made = std::move(made)]() mutable { done(std::move(made)); },
+            Qt::QueuedConnection);
+    }
+
     int listings = 0; ///< How often a daemon was listed.
     /// The daemons whose listing the user declines to trust, by label.
     std::set<std::string> declined;
+    std::vector<std::string> created; ///< The labels a workspace was created with, in order.
 
   private:
     [[nodiscard]] static std::vector<vtcontrol::WorkspaceInfo> describe(DaemonFixture& daemon)
@@ -781,6 +809,54 @@ TEST_CASE("WindowSwitcher: a switch within the daemon reuses the window's connec
           == SwitchOutcome::FocusedExisting);
 }
 
+TEST_CASE("WindowSwitcher: a same-daemon switch naming a control id resolves from the directory without a "
+          "listing",
+          "[switch][link]")
+{
+    auto rig = SwitchRig {};
+    auto const target = rig.a.onDaemon([&rig] {
+        return vtcontrol::toString(vtcontrol::ObjectRef {
+            .kind = vtcontrol::ObjectKind::Workspace,
+            .uuid = *rig.a.host->objects().uuidOf(vtworkspace::WorkspaceId { rig.aWorkspaces[1] }) });
+    });
+    // The directory carries the control ids once the daemon stated them.
+    auto* const controller = rig.launchLink().liveController();
+    REQUIRE(controller != nullptr);
+    REQUIRE(waitUntil([&] {
+        auto const directory = controller->directory();
+        return std::ranges::all_of(directory.workspaces, [](auto const& workspace) {
+            return workspace.controlId != std::array<uint8_t, 16> {};
+        });
+    }));
+
+    auto const outcome = rig.request(to(daemonA(), target));
+
+    REQUIRE(outcome == SwitchOutcome::Switched);
+    CHECK(rig.lister->listings == 0);
+    CHECK(rig.windowLink() == &rig.launchLink());
+    CHECK(rig.launchLink().workspaceOf(rig.shown()) == rig.aWorkspaces[1]);
+}
+
+TEST_CASE("WindowSwitcher: a same-daemon switch naming a control id the directory lacks asks the listing",
+          "[switch][link]")
+{
+    auto rig = SwitchRig {};
+    auto* const controller = rig.launchLink().liveController();
+    REQUIRE(controller != nullptr);
+    REQUIRE(waitUntil([&] { return controller->directory().workspaces.size() == rig.aWorkspaces.size(); }));
+    // An id no workspace the window knows of carries: the daemon's listing is the one to say.
+    auto absent = vtcontrol::Uuid {};
+    absent.bytes.fill(0xEE);
+
+    auto const outcome = rig.request(to(daemonA(),
+                                        vtcontrol::toString(vtcontrol::ObjectRef {
+                                            .kind = vtcontrol::ObjectKind::Workspace, .uuid = absent })));
+
+    CHECK(rig.lister->listings == 1);
+    CHECK(outcome != SwitchOutcome::Switched);
+    CHECK(rig.launchLink().workspaceOf(rig.shown()) == rig.aWorkspaces[0]);
+}
+
 TEST_CASE("WindowSwitcher: SwitchToWorkspace selects another workspace in the same window", "[switch][link]")
 {
     auto rig = SwitchRig {};
@@ -1234,6 +1310,48 @@ TEST_CASE("WindowSwitcher: a reconnect forgets the workspace a timed-out switch 
     CHECK(visibilityOn(rig.a, *shown) == WorkspaceVisibility::Shown);
 }
 
+TEST_CASE("WindowSwitcher: a labelled workspace is created on the daemon, then switched to",
+          "[switch][link][switcher]")
+{
+    auto rig = SwitchRig {};
+    auto const workspacesOnB = rig.b.onDaemon([&rig] { return rig.b.host->model().workspaceCount(); });
+    auto told = Told {};
+    rig.switcher->createWorkspace(rig.shown(), to(daemonB()), "q", SwitchMode::Switch, told.completion());
+    REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 2000));
+    INFO((*told.outcome ? std::string { "switched" } : told.outcome->error()));
+    CHECK(*told.outcome == SwitchOutcome::Switched);
+    CHECK(rig.lister->created == std::vector<std::string> { "q" });
+    CHECK(rig.b.onDaemon([&rig] { return rig.b.host->model().workspaceCount(); }) == workspacesOnB + 1);
+    REQUIRE(rig.windowLink() != nullptr);
+    CHECK(rig.windowLink()->address() == daemonB());
+    auto const made = rig.b.onDaemon(
+        [&rig, workspacesOnB] { return rig.b.host->model().workspaceAt(workspacesOnB)->id().value; });
+    CHECK(rig.windowLink()->workspaceOf(rig.shown()) == made);
+
+    SECTION("the window's own daemon lists its workspaces from the directory, and nothing is listed")
+    {
+        auto const listings = rig.lister->listings;
+        CHECK_FALSE(rig.switcher->windowWorkspaceRows(rig.shown()).empty());
+        CHECK(rig.lister->listings == listings);
+    }
+}
+
+TEST_CASE("WindowSwitcher: a workspace that cannot be created is said in the window, and nothing switches",
+          "[switch][link][switcher]")
+{
+    // Asked for from the switcher, which has closed by the time the daemon answers: the window says why.
+    auto rig = SwitchRig {};
+    auto const before = rig.windowSessions();
+    auto told = Told {};
+    // A daemon the fixture's lister knows nothing of: `workspace.create` cannot reach it.
+    auto const nowhere = DaemonAddress { .kind = SwitchDaemonKind::Label, .name = "nowhere" };
+    rig.switcher->createWorkspace(rig.shown(), to(nowhere), "q", SwitchMode::Switch, told.completion());
+    REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 2000));
+    CHECK_FALSE(told.outcome->has_value());
+    CHECK(rig.window->controller->notices().toastText().contains("Could not create a workspace on"));
+    CHECK(rig.windowSessions() == before);
+}
+
 TEST_CASE("WindowSwitcher: the switcher popup's pick re-enters the switch, and Esc changes nothing",
           "[switch][link][switcher]")
 {
@@ -1266,7 +1384,6 @@ TEST_CASE("WindowSwitcher: the switcher popup's pick re-enters the switch, and E
                 .address = pick.target,
                 .workspaceCount = pick.workspaces.size(),
                 .tag = {},
-                .expansion = contour::window::SwitcherExpansion::Expanded,
                 .listing = contour::window::SwitcherListing::Listed,
                 .failure = {},
                 .workspaces = contour::remote::switcherWorkspacesOf(pick.workspaces, pick.window),
@@ -1288,7 +1405,7 @@ TEST_CASE("WindowSwitcher: the switcher popup's pick re-enters the switch, and E
     SECTION("Return on B's second workspace")
     {
         popup.setCurrentIndex(1);
-        popup.activateCurrent();
+        popup.activate(1);
         REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 2000));
         CHECK(*told.outcome == SwitchOutcome::Switched);
         REQUIRE(rig.windowLink() != nullptr);

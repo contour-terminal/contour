@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/window/ProgramStatusBadge.hpp>
+#include <contour/window/StatusUrgency.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/WorkspaceDirectory.hpp>
 
@@ -26,8 +27,9 @@ struct AttentionTally
     bool operator==(AttentionTally const&) const = default;
 };
 
-/// Counts the tabs that wait for the user: those whose resolved badge is Blocked (a tab counts while it is
-/// in front too: a question waiting in the window the user just left is still waiting).
+/// Counts the tabs that wait for the user: those whose resolved badge is NeedsYou, a Blocked program or a
+/// bell (a tab counts while it is in front too: a question waiting in the window the user just left is still
+/// waiting).
 /// @param tabs Every tab of every window, as its window's id and the badge it shows.
 /// @return The count per window and in all.
 [[nodiscard]] inline AttentionTally tallyWaitingTabs(std::span<std::pair<uint64_t, TabBadgeKind> const> tabs)
@@ -38,7 +40,7 @@ struct AttentionTally
         auto entry = std::ranges::find(tally.perWindow, window, &std::pair<uint64_t, unsigned>::first);
         if (entry == tally.perWindow.end())
             entry = tally.perWindow.insert(tally.perWindow.end(), { window, 0u });
-        if (kind == TabBadgeKind::Blocked)
+        if (urgencyOf(kind) == Urgency::NeedsYou)
         {
             ++entry->second;
             ++tally.total;
@@ -104,7 +106,8 @@ struct WindowWaiting
             auto records = std::vector<vtbackend::ProgramStatusRecord> {};
             for (auto const& pane: tab.panes)
                 records.insert(records.end(), pane.status.begin(), pane.status.end());
-            if (badgeFor(records, AllRecordsSeen).kind == BadgeKind::Blocked)
+            // Program status cannot produce a Bell, so NeedsYou here is exactly Blocked, which ignores Seen.
+            if (urgencyOf(badgeFor(records, AllRecordsSeen).kind, StatusSeen::Seen) == Urgency::NeedsYou)
                 ++waiting;
         }
     }

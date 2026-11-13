@@ -637,6 +637,11 @@ fs::path Process::homeDirectory()
 
 string Process::workingDirectory() const
 {
+    // Between fork() and the chdir() the trampoline does before it settles, the child is still in this
+    // process's directory, which it is about to leave: the one it starts in is the answer.
+    if (!_d->cwd.empty() && spawnProgress() == SpawnProgress::InProgress)
+        return _d->cwd.string();
+
 #ifdef __linux__
     auto const childPid = _d->child();
     if (childPid == NoChild)

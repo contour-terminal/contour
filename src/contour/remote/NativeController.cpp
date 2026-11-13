@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <format>
+#include <limits>
 #include <ranges>
 #include <utility>
 
@@ -87,6 +88,7 @@ namespace
             vthost::proto::Capability::ClipboardTargets,
             vthost::proto::Capability::SoftFonts,
             vthost::proto::Capability::DaemonFollow,
+            vthost::proto::Capability::WorkspaceMeta,
         });
         if (switchRequests == NativeController::SwitchRequests::Answered)
             offered.idents.push_back(std::to_underlying(vthost::proto::Capability::WorkspaceSwitch));
@@ -384,7 +386,9 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             [this](vthost::proto::SwitchRequest const& request) { onSwitchRequest(request); } },
         NativeClient::PaneSummaryHandler {
             [this](vthost::proto::PaneSummary const& summary) { onPaneSummary(summary); } },
-        NativeClient::RaiseRoleHandler { [this](vthost::proto::RaiseRole role) { onRaiseRole(role); } });
+        NativeClient::RaiseRoleHandler { [this](vthost::proto::RaiseRole role) { onRaiseRole(role); } },
+        NativeClient::WorkspaceMetaHandler {
+            [this](vthost::proto::WorkspaceMeta const& meta) { onWorkspaceMeta(meta); } });
 }
 
 core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
@@ -661,6 +665,8 @@ void NativeController::adoptReconnect(std::lock_guard<std::mutex> const& /*held*
     // or a connection that may not have delivered it.
     _layouts.clear();
     _settledLayouts.clear();
+    // The new connection states every workspace's metadata again, in full.
+    _workspaceMeta.clear();
     // A move asked of the lost connection is answered on it or not at all.
     _moveRequests.clear();
     _landedMoves.clear();
@@ -1025,7 +1031,8 @@ std::expected<void, contour::session::ReconnectError> NativeController::reconnec
     return {};
 }
 
-std::expected<uint64_t, std::string> NativeController::select(uint64_t workspace)
+std::expected<uint64_t, std::string> NativeController::select(uint64_t workspace,
+                                                              std::optional<uint64_t> directoryFrom)
 {
     auto request = uint64_t { 0 };
     {
@@ -1038,11 +1045,11 @@ std::expected<uint64_t, std::string> NativeController::select(uint64_t workspace
     }
     // The selection is the one the daemon states with the batch that answers: a workspace it does not have
     // leaves it as it was.
-    _reactor.post([this, workspace, request] {
+    _reactor.post([this, workspace, request, directoryFrom] {
         if (_client == nullptr)
             return;
         // Answered by the batch naming it as its cause (onLayoutBatchEnd).
-        if (auto const serial = _client->selectWorkspace(workspace))
+        if (auto const serial = _client->selectWorkspace(workspace, directoryFrom))
             _selectRequests.insert_or_assign(*serial,
                                              SelectRequest { .request = request, .asked = workspace });
     });
@@ -1090,24 +1097,66 @@ namespace
         std::map<uint64_t, window::PaneStatus> const& _store;
     };
 
-    /// The labels of workspaces, none of which a daemon states yet.
-    class NoLabels final: public window::LabelLookup
+    /// A directory's view of what the daemon stated of each workspace.
+    class MetaLookup final: public window::WorkspaceMetaLookup
     {
       public:
-        [[nodiscard]] std::string labelOf(uint64_t /*workspace*/) const override { return {}; }
+        explicit MetaLookup(std::map<uint64_t, window::WorkspaceMetadata> const& store): _store(store) {}
+
+        [[nodiscard]] window::WorkspaceMetadata metaOf(uint64_t workspace) const override
+        {
+            auto const found = _store.find(workspace);
+            return found != _store.end() ? found->second : window::WorkspaceMetadata {};
+        }
+
+      private:
+        std::map<uint64_t, window::WorkspaceMetadata> const& _store;
     };
+
+    /// @return @p git as a directory holds it; none for a workspace in no repository.
+    [[nodiscard]] std::optional<window::DirectoryGit> directoryGitOf(vthost::proto::WireGitInfo const& git)
+    {
+        using vthost::proto::GitHeadKindWire;
+        auto const kind = [&]() -> std::optional<vtbackend::GitHeadKind> {
+            switch (git.kind)
+            {
+                case GitHeadKindWire::None: return std::nullopt;
+                case GitHeadKindWire::Branch: return vtbackend::GitHeadKind::Branch;
+                case GitHeadKindWire::Detached: return vtbackend::GitHeadKind::Detached;
+                case GitHeadKindWire::OtherRef: break;
+            }
+            return vtbackend::GitHeadKind::OtherRef;
+        }();
+        return kind.transform([&](vtbackend::GitHeadKind headKind) {
+            return window::DirectoryGit {
+                .branch = git.branch, .kind = headKind, .ahead = git.ahead, .behind = git.behind
+            };
+        });
+    }
 } // namespace
 
 window::WorkspaceDirectory NativeController::directory() const
 {
     auto const lock = std::lock_guard { _mutex };
-    // std::map keeps the keys ascending: the daemon's workspaces in the order it numbered them.
-    auto const layouts =
-        std::ranges::to<std::vector>(_settledLayouts | std::views::values
-                                     | std::views::transform([](auto const& layout) { return *layout; }));
+    // std::map keeps the keys ascending: the daemon's workspaces in the order it numbered them. The place the
+    // daemon states for each workspace (it moves them) goes first; the stable sort keeps id order for a
+    // daemon that states none, and for a workspace whose position has not arrived yet.
+    // A layout that holds no tab is not listed: an emptied layout is how the daemon says a workspace is gone,
+    // and the one tabless workspace it keeps (its only one, once its last session ended) has nothing to show.
+    auto layouts = std::ranges::to<std::vector>(
+        _settledLayouts | std::views::values
+        | std::views::filter([](auto const& layout) { return !layout->tabs.empty(); })
+        | std::views::transform([](auto const& layout) { return *layout; }));
+    auto const positionOf = [this](vthost::proto::LayoutState const& layout) {
+        auto const found = _workspaceMeta.find(layout.workspace);
+        return found != _workspaceMeta.end() && found->second.position ? *found->second.position
+                                                                       : std::numeric_limits<uint32_t>::max();
+    };
+    std::ranges::stable_sort(layouts,
+                             [&](auto const& a, auto const& b) { return positionOf(a) < positionOf(b); });
     return window::directoryFromLayouts(layouts,
                                         StoreLookup { _paneStatus },
-                                        NoLabels {},
+                                        MetaLookup { _workspaceMeta },
                                         _selected != 0 ? std::optional { _selected } : std::nullopt);
 }
 
@@ -1121,12 +1170,22 @@ void NativeController::onPaneSummary(vthost::proto::PaneSummary const& summary)
         status.title = *summary.title;
     if (summary.cwd)
         status.cwd = *summary.cwd;
+    // Each occurrence takes the next serial, so a window that acknowledged the old one still sees the new.
     if (summary.activity == vthost::proto::OutputActivity::Output)
+    {
         status.activity = vthost::proto::OutputActivity::Output;
+        status.activitySerial = ++_flagSerial;
+    }
     if (summary.bell == vthost::proto::PaneBell::Rang)
+    {
         status.bell = vthost::proto::PaneBell::Rang;
+        status.bellSerial = ++_flagSerial;
+    }
     if (summary.finished)
+    {
         status.finished = *summary.finished;
+        status.finishedSerial = ++_flagSerial;
+    }
     // What it raised is judged by the role as it stands now, in the order the daemon decided both: a focus
     // change on its way to the GUI thread cannot leave the raise to no window.
     if (vthost::proto::carriesRaise(summary) && _raiseRole == vthost::proto::RaiseRole::Raise)
@@ -1134,6 +1193,22 @@ void NativeController::onPaneSummary(vthost::proto::PaneSummary const& summary)
                                                        .finished = summary.finished,
                                                        .bell = summary.bell,
                                                        .notifications = summary.notifications });
+    scheduleStatusFlush();
+}
+
+void NativeController::onWorkspaceMeta(vthost::proto::WorkspaceMeta const& meta)
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto& stated = _workspaceMeta[meta.workspace];
+    // Field by field: an absent one is unchanged, an empty label clears it, and a git state of kind None says
+    // the workspace is in no repository anymore.
+    stated.controlId = meta.controlId;
+    if (meta.label)
+        stated.label = *meta.label;
+    if (meta.git)
+        stated.git = directoryGitOf(*meta.git);
+    if (meta.position)
+        stated.position = meta.position;
     scheduleStatusFlush();
 }
 
@@ -1196,6 +1271,12 @@ void NativeController::pruneStatus()
             window::forEachLeaf(
                 tab.root, [&named](vthost::proto::WirePane const& leaf) { named.insert(leaf.session); });
     std::erase_if(_paneStatus, [&named](auto const& entry) { return !named.contains(entry.first); });
+    // A workspace's metadata goes with its layout, which comes first: one whose layout is gone, or emptied as
+    // the daemon removes it, is gone.
+    std::erase_if(_workspaceMeta, [this](auto const& entry) {
+        auto const layout = _layouts.find(entry.first);
+        return layout == _layouts.end() || layout->second->tabs.empty();
+    });
 }
 
 namespace
@@ -1409,6 +1490,82 @@ contour::session::RemoteRouting NativeController::requestRemoteMove(contour::ses
         // Routed, so the manager waits for it: told now, it waits no longer, and the user learns why nothing
         // moved.
         emit moveRefused(MoveNotSent, 0, request);
+    });
+    return contour::session::RemoteRouting::Routed;
+}
+
+contour::session::RemoteRouting NativeController::requestRemoteRenameWorkspace(uint64_t workspace,
+                                                                               std::string_view label)
+{
+    auto const agreed = negotiated();
+    if (!agreed || !agreed->shared.contains(vthost::proto::Capability::WorkspaceMeta))
+        return contour::session::RemoteRouting::Refused;
+    // The client's send verbs must run on the reactor thread that owns it.
+    _reactor.post([this, workspace, label = std::string { label }]() mutable {
+        if (_client != nullptr)
+            std::ignore = _client->setWorkspaceLabel(workspace, std::move(label));
+    });
+    return contour::session::RemoteRouting::Routed;
+}
+
+contour::session::RemoteRouting NativeController::requestRemoteTabTitle(uint64_t session,
+                                                                        std::string_view title)
+{
+    if (!negotiated())
+        return contour::session::RemoteRouting::Refused;
+    auto edit = vthost::proto::EditTab {
+        .session = session,
+        .kind = title.empty() ? vthost::proto::TabEditKind::ClearTitle : vthost::proto::TabEditKind::SetTitle,
+        .title = std::string { title },
+        .color = 0,
+    };
+    _reactor.post([this, edit = std::move(edit)] {
+        if (_client != nullptr)
+            std::ignore = _client->editTab(edit);
+    });
+    return contour::session::RemoteRouting::Routed;
+}
+
+contour::session::RemoteRouting NativeController::requestRemoteMoveWorkspace(uint64_t workspace,
+                                                                             uint32_t position)
+{
+    auto const agreed = negotiated();
+    if (!agreed || !agreed->shared.contains(vthost::proto::Capability::WorkspaceMeta))
+        return contour::session::RemoteRouting::Refused;
+    _reactor.post([this, workspace, position] {
+        if (_client != nullptr)
+            std::ignore = _client->moveWorkspace(workspace, position);
+    });
+    return contour::session::RemoteRouting::Routed;
+}
+
+contour::session::RemoteRouting NativeController::requestRemoteCloseWorkspace(uint64_t workspace)
+{
+    auto const agreed = negotiated();
+    if (!isConnected() || !agreed || !agreed->shared.contains(vthost::proto::Capability::WorkspaceMeta))
+        return contour::session::RemoteRouting::Refused;
+    {
+        // Tombstoned before the close goes out, as requestRemoteClose() does: the daemon ends the sessions
+        // later, and their in-flight deltas must not re-adopt a pane the user just ended.
+        auto const lock = std::lock_guard { _mutex };
+        if (auto const layout = _layouts.find(workspace); layout != _layouts.end())
+        {
+            auto const tombstone = [&](auto const& self, vthost::proto::WirePane const& pane) -> void {
+                if (pane.isSplit())
+                {
+                    for (auto const& child: pane.children)
+                        self(self, child);
+                    return;
+                }
+                _closedSessions.insert(pane.session);
+            };
+            for (auto const& tab: layout->second->tabs)
+                tombstone(tombstone, tab.root);
+        }
+    }
+    _reactor.post([this, workspace] {
+        if (_client != nullptr)
+            std::ignore = _client->closeWorkspace(workspace);
     });
     return contour::session::RemoteRouting::Routed;
 }
@@ -1958,26 +2115,12 @@ void NativeController::forgetBinding(uint64_t session, uint64_t serial)
     auto const lock = std::lock_guard { _mutex };
     --_livePtys;
     auto const binding = _bindings.find(session);
-    // A detached binding's pty: the session id, if bound at all, is a new session's now.
+    // A detached binding's pty, or one released as its pane was detached: the session id, if bound at all, is
+    // another pane's.
     if (binding == _bindings.end() || binding->second.serial != serial)
         return;
-    _bindings.erase(binding);
+    dropBinding(binding);
     _inputEchoes.erase(session); // a session id is never reused within a run
-    // The pane is gone: its grid must not keep contributing to a composed client area, and the
-    // sent-size bookkeeping for it is meaningless (a session id is never reused).
-    {
-        auto const geometryLock = std::lock_guard { _geometryMutex };
-        _paneSizes.erase(session);
-        _paneSerials.erase(session);
-        _lastReportedPaneSizes.erase(session);
-        // The anchor is the third thing this pane owned: it selects WHICH tab the client area is
-        // composed from, and a session id is never reused, so once the pane is gone the anchor can
-        // only ever miss. Left set, a flush already queued when this ran would compose the fallback
-        // tab while still believing it had anchored — reporting a client area for a window the user
-        // never touched, which the daemon answers by re-projecting every pane of every workspace.
-        if (_geometryAnchor == session)
-            _geometryAnchor.reset();
-    }
     // Tombstone while the connection lives, so a remote session that outlives its local pane cannot
     // resurrect it through a later delta. Whether that session should also be ENDED on the daemon is
     // NOT knowable here — a pty is destroyed by a pane close, a window close, an app quit and a lost
@@ -1986,6 +2129,36 @@ void NativeController::forgetBinding(uint64_t session, uint64_t serial)
     // window destroy the user's shells.
     if (_stopPhase == StopPhase::Running)
         _closedSessions.insert(session);
+}
+
+void NativeController::releaseRemoteSession(vtpty::Pty const* pty)
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto const binding =
+        std::ranges::find_if(_bindings, [pty](auto const& entry) { return entry.second.pty == pty; });
+    // The pty stays counted live until it is destroyed, when unbind() finds no binding of its serial to
+    // forget.
+    if (binding != _bindings.end())
+        dropBinding(binding);
+}
+
+void NativeController::dropBinding(std::unordered_map<uint64_t, Binding>::iterator binding)
+{
+    auto const session = binding->first;
+    _bindings.erase(binding);
+    // The pane is gone: its grid must not keep contributing to a composed client area, and the
+    // sent-size bookkeeping for it is meaningless (a pane's binding is never bound again).
+    auto const geometryLock = std::lock_guard { _geometryMutex };
+    _paneSizes.erase(session);
+    _paneSerials.erase(session);
+    _lastReportedPaneSizes.erase(session);
+    // The anchor is the third thing this pane owned: it selects WHICH tab the client area is
+    // composed from, and once the pane is gone the anchor can only ever miss. Left set, a flush already
+    // queued when this ran would compose the fallback tab while still believing it had anchored —
+    // reporting a client area for a window the user never touched, which the daemon answers by
+    // re-projecting every pane of every workspace.
+    if (_geometryAnchor == session)
+        _geometryAnchor.reset();
 }
 
 void NativeController::closeAllBindings()

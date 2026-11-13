@@ -22,6 +22,13 @@ enum class MenuChildPlacement : std::uint8_t
     Spliced, ///< Directly in the parent menu.
 };
 
+/// Whether the pane's menu is the way back to a hidden workspace sidebar.
+enum class SidebarRecovery : std::uint8_t
+{
+    None = 0, ///< The sidebar is shown, or its toggle is on screen: the menu need not offer it.
+    Offered,  ///< The sidebar is hidden and no toggle is on screen (no band): the menu offers "Show Sidebar".
+};
+
 /// The world, as the terminal pane's context menu needs to see it.
 ///
 /// A plain snapshot, taken once under the terminal lock at the moment of the right-click. It is the
@@ -76,6 +83,10 @@ struct ContextMenuState
     MenuChildPlacement blockMenuPlacement = MenuChildPlacement::Spliced;
     /// Whether the last finished block's command line is known, which is what "Copy Last Command" copies.
     CommandLinePresence lastCommandLine = CommandLinePresence::Absent;
+
+    /// Whether the menu offers the hidden sidebar back. Left for the window to fill in: where the sidebar's
+    /// toggle stands is the window's chrome, not the session's.
+    SidebarRecovery sidebarRecovery = SidebarRecovery::None;
 
     std::string activeProfile;             ///< The profile this session runs under.
     std::vector<std::string> profileNames; ///< Every configured profile, in a stable order.

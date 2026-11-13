@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <vtcontrol/Api.hpp>
+#include <vtcontrol/ObjectRef.hpp>
 #include <vthost/Transport.hpp>
 
 namespace contour::remote
@@ -48,7 +49,12 @@ using WorkspaceListing = std::expected<std::vector<vtcontrol::WorkspaceInfo>, Li
 /// Told once, on the GUI thread, what a daemon's `workspace.list` answered, or why it did not.
 using WorkspacesListed = std::function<void(WorkspaceListing)>;
 
-/// Lists a daemon's workspaces without blocking the GUI thread: a daemon over ssh may take seconds.
+/// Told once, on the GUI thread, the control id of the workspace a daemon's `workspace.create` made, or why
+/// it made none.
+using WorkspaceCreated = std::function<void(std::expected<vtcontrol::ObjectRef, std::string>)>;
+
+/// Lists a daemon's workspaces, and creates one, without blocking the GUI thread: a daemon over ssh may take
+/// seconds.
 class IWorkspaceLister
 {
   public:
@@ -66,13 +72,20 @@ class IWorkspaceLister
     /// @param target The daemon.
     /// @param done Told the workspaces, or why there are none.
     virtual void list(ListTarget target, WorkspacesListed done) = 0;
+
+    /// Creates a workspace labelled @p label on @p target (`workspace.create`); @p done is told later, on the
+    /// GUI thread, unless the lister is gone.
+    /// @param target The daemon.
+    /// @param label The new workspace's label; empty names it after its folder.
+    /// @param done Told the new workspace's control id, or why there is none.
+    virtual void create(ListTarget target, std::string label, WorkspaceCreated done) = 0;
 };
 
-/// The production lister: `workspace.list` over the control API, one call per listing, on a thread of its
-/// own; the answer is posted to the GUI thread.
-/// @param timeout How long the handshake and the `workspace.list` call of one listing may take together,
-///        from the moment its transport hands out the connection; the dial, which may wait for the user to
-///        trust the daemon, is not counted (vthost::client::runControlCall()).
+/// The production lister: `workspace.list` and `workspace.create` over the control API, one call each, on a
+/// thread of its own; the answer is posted to the GUI thread.
+/// @param timeout How long the handshake and the call of one listing or creation may take together, from the
+///        moment its transport hands out the connection; the dial, which may wait for the user to trust the
+///        daemon, is not counted (vthost::client::runControlCall()).
 /// @return The lister.
 [[nodiscard]] std::unique_ptr<IWorkspaceLister> makeControlWorkspaceLister(std::chrono::milliseconds timeout);
 
