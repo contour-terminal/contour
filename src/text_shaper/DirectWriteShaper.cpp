@@ -8,9 +8,11 @@
 #include <libunicode/convert.h>
 
 #include <algorithm>
+#include <format>
 #include <iostream> // DEBUGGING ONLY
 #include <limits>
 #include <ranges>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -145,15 +147,25 @@ struct DirectWriteShaper::Private
 
     Private(DPI initialDPI, FontLocator& fontLocator): locator { &fontLocator }, dpi { initialDPI }
     {
-        auto hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
-                                      __uuidof(IDWriteFactory7),
-                                      reinterpret_cast<IUnknown**>(factory.GetAddressOf()));
+        // Without a factory and an analyzer nothing can be shaped: every member function dereferences them.
+        if (auto const hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
+                                                __uuidof(IDWriteFactory7),
+                                                reinterpret_cast<IUnknown**>(factory.GetAddressOf()));
+            FAILED(hr))
+            throw std::runtime_error(std::format(
+                "directwrite: DWriteCreateFactory failed (HRESULT 0x{:08X}).", static_cast<ULONG>(hr)));
         ComPtr<IDWriteTextAnalyzer> analyzer;
-        hr = factory->CreateTextAnalyzer(&analyzer);
-        analyzer.As(&textAnalyzer);
+        if (auto const hr = factory->CreateTextAnalyzer(&analyzer); FAILED(hr))
+            throw std::runtime_error(std::format("directwrite: CreateTextAnalyzer failed (HRESULT 0x{:08X}).",
+                                                 static_cast<ULONG>(hr)));
+        if (auto const hr = analyzer.As(&textAnalyzer); FAILED(hr))
+            throw std::runtime_error(
+                std::format("directwrite: the text analyzer is no IDWriteTextAnalyzer1 (HRESULT 0x{:08X}).",
+                            static_cast<ULONG>(hr)));
 
+        // The buffer's size is in characters, not bytes.
         wchar_t locale[LOCALE_NAME_MAX_LENGTH];
-        GetUserDefaultLocaleName(locale, sizeof(locale));
+        GetUserDefaultLocaleName(locale, LOCALE_NAME_MAX_LENGTH);
         userLocale = locale;
     }
 
@@ -581,7 +593,7 @@ void DirectWriteShaper::shapeWithFont(FontKey font,
 }
 
 std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
-                                                            RenderMode mode,
+                                                            RenderMode /*mode*/,
                                                             float /*outlineThickness*/)
 {
     DxFontInfo const& fontInfo = _d->fonts.at(glyph.font);
@@ -787,7 +799,7 @@ void DirectWriteShaper::setFontFallbackLimit(int limit)
     _d->fallbackLimit = limit;
 }
 
-optional<GlyphPosition> DirectWriteShaper::shape(FontKey font, char32_t codepoint)
+optional<GlyphPosition> DirectWriteShaper::shape(FontKey /*font*/, char32_t /*codepoint*/)
 {
     return nullopt; // TODO
 }

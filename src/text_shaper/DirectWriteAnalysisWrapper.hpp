@@ -29,7 +29,7 @@ class DWriteAnalysisWrapper:
 #pragma region IDWriteTextAnalysisSource
     HRESULT GetTextAtPosition(UINT32 textPosition,
                               _Outptr_result_buffer_(*textLength) WCHAR const** textString,
-                              _Out_ UINT32* textLength) override
+                              _Out_ UINT32* textLength) noexcept override
     {
         *textString = nullptr;
         *textLength = 0;
@@ -45,7 +45,7 @@ class DWriteAnalysisWrapper:
 
     HRESULT GetTextBeforePosition(UINT32 textPosition,
                                   _Outptr_result_buffer_(*textLength) WCHAR const** textString,
-                                  _Out_ UINT32* textLength) override
+                                  _Out_ UINT32* textLength) noexcept override
     {
         *textString = nullptr;
         *textLength = 0;
@@ -59,7 +59,7 @@ class DWriteAnalysisWrapper:
         return S_OK;
     }
 
-    DWRITE_READING_DIRECTION GetParagraphReadingDirection() override
+    DWRITE_READING_DIRECTION GetParagraphReadingDirection() noexcept override
     {
         // TODO: is this always correct?
         return DWRITE_READING_DIRECTION::DWRITE_READING_DIRECTION_LEFT_TO_RIGHT;
@@ -67,7 +67,7 @@ class DWriteAnalysisWrapper:
 
     HRESULT GetLocaleName(UINT32 textPosition,
                           _Out_ UINT32* textLength,
-                          _Outptr_result_z_ WCHAR const** localeName) override
+                          _Outptr_result_z_ WCHAR const** localeName) noexcept override
     {
         *localeName = _userLocale.c_str();
         *textLength = _text.size() - textPosition;
@@ -75,9 +75,10 @@ class DWriteAnalysisWrapper:
         return S_OK;
     }
 
-    HRESULT GetNumberSubstitution(UINT32 textPosition,
-                                  _Out_ UINT32* textLength,
-                                  _COM_Outptr_ IDWriteNumberSubstitution** numberSubstitution) override
+    HRESULT GetNumberSubstitution(
+        UINT32 textPosition,
+        _Out_ UINT32* textLength,
+        _COM_Outptr_ IDWriteNumberSubstitution** numberSubstitution) noexcept override
     {
 
         *numberSubstitution = nullptr;
@@ -88,32 +89,32 @@ class DWriteAnalysisWrapper:
 #pragma endregion
 
 #pragma region IDWriteTextAnalysisSink
-    HRESULT SetScriptAnalysis(UINT32 textPosition,
-                              UINT32 textLength,
-                              _In_ DWRITE_SCRIPT_ANALYSIS const* scriptAnalysis) override
+    HRESULT SetScriptAnalysis(UINT32 /*textPosition*/,
+                              UINT32 /*textLength*/,
+                              _In_ DWRITE_SCRIPT_ANALYSIS const* scriptAnalysis) noexcept override
     {
         script = *scriptAnalysis;
         return S_OK;
     }
 
-    HRESULT SetLineBreakpoints(UINT32 textPosition,
-                               UINT32 textLength,
-                               _In_reads_(textLength) DWRITE_LINE_BREAKPOINT const* lineBreakpoints) override
+    HRESULT SetLineBreakpoints(UINT32 /*textPosition*/,
+                               UINT32 /*textLength*/,
+                               DWRITE_LINE_BREAKPOINT const* /*lineBreakpoints*/) noexcept override
     {
         return S_OK;
     }
 
-    HRESULT SetBidiLevel(UINT32 textPosition,
-                         UINT32 textLength,
+    HRESULT SetBidiLevel(UINT32 /*textPosition*/,
+                         UINT32 /*textLength*/,
                          UINT8 /*explicitLevel*/,
-                         UINT8 resolvedLevel) override
+                         UINT8 /*resolvedLevel*/) noexcept override
     {
         return S_OK;
     }
 
-    HRESULT SetNumberSubstitution(UINT32 textPosition,
-                                  UINT32 textLength,
-                                  _In_ IDWriteNumberSubstitution* numberSubstitution) override
+    HRESULT SetNumberSubstitution(UINT32 /*textPosition*/,
+                                  UINT32 /*textLength*/,
+                                  _In_ IDWriteNumberSubstitution* /*numberSubstitution*/) noexcept override
     {
         return S_OK;
     }
