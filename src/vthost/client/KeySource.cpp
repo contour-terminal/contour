@@ -111,8 +111,9 @@ namespace
         {
             auto session = std::unique_ptr<IAskpassSession> {};
             if (_broker)
-                if (auto opened = _broker->open(_askpassTarget))
-                    session = *std::move(opened);
+                if (auto const serving = co_await _broker->whenServing(); serving)
+                    if (auto opened = _broker->open(_askpassTarget))
+                        session = *std::move(opened);
             auto const argv = std::vector<std::string> { "ssh-keygen",
                                                          "-Y",
                                                          "sign",

@@ -18,6 +18,17 @@ XDG_CONFIG_HOME="$OUT/config"
 XDG_STATE_HOME="$OUT/state"
 export XDG_CONFIG_HOME XDG_STATE_HOME
 
+# No thread of the client runs a Qt event loop before the QApplication exists: the attach starts before the
+# GUI has made it, and the askpass broker's thread, started then, crashed the client on Linux now and again.
+# Qt says so on every such run, so the warning catches it where the crash only sometimes would. $1 is a log.
+expectNoEventLoopBeforeApp() {
+    if grep -q "Cannot be used without QCoreApplication" "$1"; then
+        echo "error: a Qt event loop ran before the QApplication existed:" >&2
+        cat "$1" >&2
+        exit 1
+    fi
+}
+
 # `timeout` bounds a regression into a client that waits forever, which would otherwise hold the
 # RUN_SERIAL slot until ctest's own TIMEOUT.
 timeout 30 "$CONTOUR" client --connect-tcp 127.0.0.1:1 >"$OUT/out.log" 2>&1
@@ -39,6 +50,8 @@ if grep -qiE "QApplication|destroyed while|still in use|QObject::|ASSERT" "$OUT/
     cat "$OUT/out.log" >&2
     exit 1
 fi
+
+expectNoEventLoopBeforeApp "$OUT/out.log"
 
 # `--host` names the daemon and the way to it, so an option naming another of these is refused, not ignored.
 # $1 is the option, $2 its value.
@@ -63,6 +76,7 @@ if grep -q "pass either --host or --workspace" "$OUT/host-workspace.log" \
     cat "$OUT/host-workspace.log" >&2
     exit 1
 fi
+expectNoEventLoopBeforeApp "$OUT/host-workspace.log"
 
 # An ssh host nothing answers for fails the same way, its reason naming the host once, from ssh's own words.
 if command -v ssh >/dev/null 2>&1; then
@@ -79,5 +93,6 @@ if command -v ssh >/dev/null 2>&1; then
         cat "$OUT/host.log" >&2
         exit 1
     fi
+    expectNoEventLoopBeforeApp "$OUT/host.log"
 fi
 exit 0

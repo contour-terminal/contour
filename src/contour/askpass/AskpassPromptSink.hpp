@@ -9,6 +9,7 @@
 
 #include <QtCore/QString>
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 
@@ -18,6 +19,19 @@ namespace contour::askpass
 /// Names one prompt for as long as it is open: the broker hands the sink the id with the prompt, and names
 /// the prompt again when its helper goes away.
 using AskpassPromptId = std::uint64_t;
+
+/// Hands out prompt ids, unique across everyone who shares it: the broker's sessions and the prompts the
+/// application asks itself (a daemon's fingerprint), since the router holds every prompt by its id. Shared
+/// rather than owned by the broker, so that asking for an id makes no broker. Any thread.
+class AskpassPromptIds
+{
+  public:
+    /// @return An id nobody sharing this source has had.
+    [[nodiscard]] AskpassPromptId next() noexcept { return ++_last; }
+
+  private:
+    std::atomic<AskpassPromptId> _last { 0 };
+};
 
 /// Shows a prompt and tells what the user made of it. Called on the thread the broker was made on (the GUI
 /// thread), always.

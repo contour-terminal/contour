@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <core/async/SyncRun.hpp>
 #include <core/async/Task.hpp>
 #include <core/async/WhenAll.hpp>
 #include <core/net/EventLoop.hpp>
@@ -10,6 +11,7 @@
 #include <chrono>
 #include <memory>
 #include <optional>
+#include <string>
 
 #include <vthost/AttachBudget.hpp>
 #include <vthost/PromptPause.hpp>
@@ -47,6 +49,21 @@ class FakeBroker final: public vthost::IAskpassBroker
 
   private:
     std::atomic<std::chrono::milliseconds::rep> const* _openFor;
+};
+
+/// A broker that cannot serve yet, as the askpass broker before the GUI's application object exists.
+class NotServingBroker final: public vthost::IAskpassBroker
+{
+  public:
+    [[nodiscard]] core::async::Task<std::expected<void, std::string>> whenServing() override
+    {
+        co_return std::unexpected { std::string { "not yet" } };
+    }
+    [[nodiscard]] std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> open(
+        vthost::SshTarget const& /*target*/) override
+    {
+        return std::unexpected { std::string { "not yet" } };
+    }
 };
 
 core::async::Task<int> afterwards(core::net::EventLoop* loop, std::chrono::milliseconds wait)
@@ -159,4 +176,13 @@ TEST_CASE("an attempt is extended only by the prompts asked since it began", "[v
     auto session = broker.open(vthost::SshTarget {});
     REQUIRE(session);
     CHECK(attempt.paused() == 300ms);
+}
+
+TEST_CASE("a pausing broker waits as the broker it wraps does", "[vthost][askpass]")
+{
+    auto broker = vthost::PausingAskpassBroker { std::make_shared<NotServingBroker>(),
+                                                 std::make_shared<vthost::PromptPause>() };
+    auto const serving = core::async::syncRun(broker.whenServing());
+    REQUIRE_FALSE(serving.has_value());
+    CHECK(serving.error() == "not yet");
 }

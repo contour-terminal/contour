@@ -89,6 +89,12 @@ class PausingAskpassBroker final: public IAskpassBroker
     {
     }
 
+    /// @copydoc IAskpassBroker::whenServing
+    [[nodiscard]] core::async::Task<std::expected<void, std::string>> whenServing() override
+    {
+        return _inner->whenServing();
+    }
+
     /// @copydoc IAskpassBroker::open
     [[nodiscard]] std::expected<std::unique_ptr<IAskpassSession>, std::string> open(
         SshTarget const& target) override

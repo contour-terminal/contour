@@ -964,6 +964,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/AppearanceSources_test.cpp
             platform/WindowsAppearanceSources_test.cpp
             platform/WindowsSettings_test.cpp
+            platform/ApplicationReadiness_test.cpp
             platform/AudioNote_test.cpp
             platform/ControlsStyleProbe_test.cpp
             platform/FontFamilySource_test.cpp

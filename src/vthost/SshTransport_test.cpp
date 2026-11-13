@@ -182,6 +182,16 @@ class FakeAskpassBroker final: public vthost::IAskpassBroker
     std::shared_ptr<FakeAskpassState> state = std::make_shared<FakeAskpassState>();
     int opened = 0;
     bool isOpenFailing = false;
+    bool isServingRefused = false; ///< whenServing() says the broker cannot serve, as before the GUI is up.
+    int servingAwaited = 0;
+
+    [[nodiscard]] core::async::Task<std::expected<void, std::string>> whenServing() override
+    {
+        ++servingAwaited;
+        if (isServingRefused)
+            co_return std::unexpected { std::string { "the application did not start" } };
+        co_return std::expected<void, std::string> {};
+    }
 
     [[nodiscard]] std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> open(
         SshTarget const& /*target*/) override
@@ -762,6 +772,27 @@ TEST_CASE("a broker that cannot open a session falls back to batch mode and conn
     REQUIRE(fixture.spawner->spawned.size() == 2);
     CHECK(fixture.spawner->spawned[1] == vthost::sshArguments(fixture.target, SshPromptMode::Batch));
     CHECK(fixture.spawner->spawnedEnvironments[1].set.empty());
+}
+
+TEST_CASE("a broker that cannot serve yet is awaited, and then falls back to batch mode",
+          "[vthost][ssh][askpass]")
+{
+    // The askpass broker waits for the GUI's application object in whenServing(); one that will not come
+    // leaves ssh without prompts, and open() is not tried.
+    auto fixture = SshFixture {};
+    fixture.broker = std::make_shared<FakeAskpassBroker>();
+    fixture.broker->isServingRefused = true;
+    fixture.prepareVersionProbe("OpenSSH_9.6p1, OpenSSL 3.0.13\n");
+    auto [remote, state] = fixture.prepare();
+    fixture.loop.blockOn(writeText(remote.get(), std::string { vthost::StdioPreambleReady }));
+
+    auto factory = fixture.factory();
+    auto const connection = fixture.loop.blockOn(factory.connect(fixture.loop));
+    REQUIRE(connection.has_value());
+    CHECK(fixture.broker->servingAwaited == 1);
+    CHECK(fixture.broker->opened == 0);
+    REQUIRE(fixture.spawner->spawned.size() == 2);
+    CHECK(fixture.spawner->spawned[1] == vthost::sshArguments(fixture.target, SshPromptMode::Batch));
 }
 
 namespace

@@ -67,6 +67,7 @@
 #include <core/platform/FileSystem.hpp>
 #include <core/platform/SystemPower.hpp>
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QPointer>
 #include <QtCore/QTimer>
 #include <QtGui/QPalette>
@@ -1398,6 +1399,17 @@ class ContourGuiApp:
         std::make_shared<askpass::AskpassPromptRouter>([this] { showBootstrapPrompt(); },
                                                        [this] { refreshWindowAttention(); },
                                                        [this] { refreshAttachAttention(); });
+    /// Whether the QApplication exists yet, for the askpass broker's thread, which waits for it: with
+    /// `--host`, `contour client` makes the broker, and gets to its first session, before terminalGuiAction()
+    /// makes that object. Ready from the start where one exists already (the GUI tests make their own).
+    std::shared_ptr<platform::ApplicationReadiness> _applicationReadiness =
+        std::make_shared<platform::ApplicationReadiness>(
+            QCoreApplication::instance() != nullptr ? platform::ApplicationReadiness::State::Ready
+                                                    : platform::ApplicationReadiness::State::Pending);
+    /// The ids of every prompt: the broker's sessions' and a daemon fingerprint's alike. Apart from the
+    /// broker, so that a fingerprint prompt (`contour client --connect-tcp`) makes no broker.
+    std::shared_ptr<askpass::AskpassPromptIds> _askpassPromptIds =
+        std::make_shared<askpass::AskpassPromptIds>();
     /// Answers the ssh prompts of every ssh host this app opens; made by askpassBroker() on first use.
     std::shared_ptr<askpass::AskpassBroker> _askpassBroker;
     /// The stand-in window for ssh's prompts, while no terminal window shows them, and the host it shows. The

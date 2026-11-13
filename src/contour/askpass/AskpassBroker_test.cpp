@@ -1,11 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/askpass/AskpassBroker.hpp>
 #include <contour/askpass/AskpassClient.hpp>
+#include <contour/platform/ApplicationReadiness.hpp>
 #include <contour/remote/RemoteController.hpp>
 #include <contour/window/PromptHost.hpp>
 
 #include <core/Random.hpp>
+#include <core/async/StopToken.hpp>
+#include <core/async/Task.hpp>
+#include <core/async/WhenAny.hpp>
 #include <core/log/LogSink.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/InterruptibleSleep.hpp>
+#include <core/net/IoBackend.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/testing/Environment.hpp>
 
@@ -27,6 +34,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <vthost/SshTransport.hpp>
@@ -152,6 +160,79 @@ void pumpUntil(Until const& until)
     return vthost::SshTarget { .user = "me", .host = "host", .port = std::nullopt };
 }
 
+/// What a broker made where the application object exists waits for: nothing.
+[[nodiscard]] std::shared_ptr<contour::platform::ApplicationReadiness> readyApplication()
+{
+    return std::make_shared<contour::platform::ApplicationReadiness>(
+        contour::platform::ApplicationReadiness::State::Ready);
+}
+
+/// Runs a broker's whenServing() on an event loop of its own thread, as an ssh attempt does, so that this
+/// thread can settle what it waits for.
+class ServingWait
+{
+  public:
+    explicit ServingWait(AskpassBroker& broker):
+        _thread { [this, &broker] {
+            auto const backend = core::net::makeDefaultBackend();
+            auto loop = core::net::EventLoop { *backend };
+            loop.blockOn(run(&loop, &broker, &_result, _stop.get_token()));
+        } }
+    {
+    }
+    ~ServingWait()
+    {
+        if (_thread.joinable())
+            _thread.join();
+    }
+    ServingWait(ServingWait const&) = delete;
+    ServingWait& operator=(ServingWait const&) = delete;
+    ServingWait(ServingWait&&) = delete;
+    ServingWait& operator=(ServingWait&&) = delete;
+
+    /// Stops the waiting coroutine, as a link's stop() does.
+    void stop() { _stop.request_stop(); }
+
+    /// @return What whenServing() said; nothing if it was stopped first.
+    [[nodiscard]] std::optional<std::expected<void, std::string>> result()
+    {
+        _thread.join();
+        return _result;
+    }
+
+  private:
+    static core::async::Task<void> serve(AskpassBroker* broker,
+                                         std::optional<std::expected<void, std::string>>* result)
+    {
+        *result = co_await broker->whenServing();
+    }
+
+    static core::async::Task<void> untilStopped(core::net::EventLoop* loop, core::async::StopToken token)
+    {
+        std::ignore = co_await core::net::interruptibleSleepUntil(
+            loop, token, loop->clock().now() + std::chrono::hours { 1 });
+    }
+
+    static core::async::Task<void> run(core::net::EventLoop* loop,
+                                       AskpassBroker* broker,
+                                       std::optional<std::expected<void, std::string>>* result,
+                                       core::async::StopToken token)
+    {
+        std::ignore = co_await core::async::whenAny(serve(broker, result), untilStopped(loop, token));
+    }
+
+    std::optional<std::expected<void, std::string>> _result;
+    core::async::StopSource _stop;
+    std::thread _thread;
+};
+
+/// Spins until @p readiness has @p count parked waiters: the wait is under way, deterministically.
+void awaitWaiters(contour::platform::ApplicationReadiness const& readiness, std::size_t count)
+{
+    while (readiness.waiting() != count)
+        std::this_thread::yield();
+}
+
 /// Sends @p request as a raw client would.
 [[nodiscard]] std::unique_ptr<QLocalSocket> connectRaw(
     std::map<std::string, std::string, std::less<>> const& v)
@@ -174,7 +255,7 @@ TEST_CASE("the askpass broker's session names ssh's askpass environment", "[askp
 {
     auto random = vthost::testing::CountingRandom {};
     auto sink = FakeSink {};
-    auto broker = AskpassBroker { sink, "/opt/contour/contour", random };
+    auto broker = AskpassBroker { sink, readyApplication(), "/opt/contour/contour", random };
     auto session = broker.open(targetOf());
     REQUIRE(session.has_value());
     auto const variables = variablesOf(**session);
@@ -202,6 +283,7 @@ TEST_CASE("the askpass broker draws its nonce and endpoint name from the injecte
     auto sink = FakeSink {};
     auto random = vthost::testing::CountingRandom {};
     auto broker = AskpassBroker { sink,
+                                  readyApplication(),
                                   "/opt/contour/contour",
                                   random,
                                   core::platform::defaultSteadyClock(),
@@ -217,6 +299,94 @@ TEST_CASE("the askpass broker draws its nonce and endpoint name from the injecte
     CHECK(variables.at("CONTOUR_ASKPASS_ENDPOINT").contains("contour-askpass-2122232425262728"));
 }
 
+TEST_CASE("the askpass broker starts no thread before the application object exists", "[askpass][broker]")
+{
+    // `contour client --host` makes the broker, and gets to its first session, before the GUI has made its
+    // QApplication: Qt runs no event loop on a thread before then.
+    using contour::platform::ApplicationReadiness;
+    auto random = vthost::testing::CountingRandom {};
+    auto sink = FakeSink {};
+    auto const application = std::make_shared<ApplicationReadiness>(ApplicationReadiness::State::Pending);
+    auto broker = AskpassBroker { sink, application, "/opt/contour/contour", random };
+    CHECK_FALSE(broker.isServing());
+
+    // open() never waits: it fails while the object is not there, and starts nothing.
+    auto const early = broker.open(targetOf());
+    REQUIRE_FALSE(early.has_value());
+    CHECK(early.error() == "cannot serve ssh's prompts: the application has not started yet");
+    CHECK_FALSE(broker.isServing());
+
+    // whenServing() parks its coroutine, not its loop, until the object is made; then the thread starts.
+    auto waiting = ServingWait { broker };
+    awaitWaiters(*application, 1);
+    CHECK_FALSE(broker.isServing());
+    application->markReady();
+    auto const served = waiting.result();
+    REQUIRE(served.has_value());
+    CHECK(served->has_value());
+    CHECK(broker.isServing());
+    auto session = broker.open(targetOf());
+    REQUIRE(session.has_value());
+    CHECK_FALSE(variablesOf(**session).at("CONTOUR_ASKPASS_ENDPOINT").empty());
+}
+
+TEST_CASE("the askpass broker serves nothing when the application object will not come", "[askpass][broker]")
+{
+    using contour::platform::ApplicationReadiness;
+    auto random = vthost::testing::CountingRandom {};
+    auto sink = FakeSink {};
+    auto const application = std::make_shared<ApplicationReadiness>(ApplicationReadiness::State::Pending);
+    auto broker = AskpassBroker { sink, application, "/opt/contour/contour", random };
+    auto waiting = ServingWait { broker };
+    awaitWaiters(*application, 1);
+    // A launch that gives up before it made the QApplication lets the waiter go.
+    application->abandon();
+    auto const served = waiting.result();
+    REQUIRE(served.has_value());
+    REQUIRE_FALSE(served->has_value());
+    CHECK(served->error() == "cannot serve ssh's prompts: the application did not start");
+    CHECK_FALSE(broker.isServing());
+    CHECK(broker.open(targetOf()).error() == "cannot serve ssh's prompts: the application did not start");
+}
+
+TEST_CASE("a stop ends the askpass broker's wait for the application object", "[askpass][broker]")
+{
+    // A link stopped, or an attach given up, while its ssh attempt waits for the GUI: the wait ends with it.
+    using contour::platform::ApplicationReadiness;
+    auto random = vthost::testing::CountingRandom {};
+    auto sink = FakeSink {};
+    auto const application = std::make_shared<ApplicationReadiness>(ApplicationReadiness::State::Pending);
+    auto broker = AskpassBroker { sink, application, "/opt/contour/contour", random };
+    auto waiting = ServingWait { broker };
+    awaitWaiters(*application, 1);
+    waiting.stop();
+    CHECK_FALSE(waiting.result().has_value());
+    CHECK(application->waiting() == 0);
+    CHECK_FALSE(broker.isServing());
+}
+
+TEST_CASE("the askpass broker's prompt ids come from the source it shares", "[askpass][broker]")
+{
+    // A fingerprint prompt takes its id from the same source, without a broker: the ids never collide.
+    auto random = vthost::testing::CountingRandom {};
+    auto sink = FakeSink {};
+    sink.answer = [](FakeSink::Ask const&) {
+        return answeredReply("hunter2");
+    };
+    auto const router = std::make_shared<AskpassPromptRouter>();
+    router->attach(AnyWindow, sink);
+    auto const ids = std::make_shared<AskpassPromptIds>();
+    CHECK(ids->next() == 1);
+    auto broker = AskpassBroker { router, ids, readyApplication(), "/opt/contour/contour", random };
+    auto session = broker.open(targetOf());
+    REQUIRE(session.has_value());
+    auto const run = runHelper(variablesOf(**session), "me@host's password: ");
+    CHECK(run.exitCode == 0);
+    REQUIRE(sink.asks.size() == 1);
+    CHECK(sink.asks.front().promptId == 2);
+    CHECK(ids->next() == 3);
+}
+
 TEST_CASE("a secret prompt is answered through the sink and printed", "[askpass][broker]")
 {
     auto random = vthost::testing::CountingRandom {};
@@ -225,7 +395,7 @@ TEST_CASE("a secret prompt is answered through the sink and printed", "[askpass]
     sink.answer = [](FakeSink::Ask const&) {
         return answeredReply("hunter2");
     };
-    auto broker = AskpassBroker { sink, "/opt/contour/contour", random };
+    auto broker = AskpassBroker { sink, readyApplication(), "/opt/contour/contour", random };
     auto session = broker.open(targetOf());
     REQUIRE(session.has_value());
 
@@ -251,7 +421,7 @@ TEST_CASE("the kind ssh's environment names reaches the sink", "[askpass][broker
     sink.answer = [](FakeSink::Ask const&) {
         return answeredReply("yes");
     };
-    auto broker = AskpassBroker { sink, "/opt/contour/contour", random };
+    auto broker = AskpassBroker { sink, readyApplication(), "/opt/contour/contour", random };
     auto session = broker.open(targetOf());
     REQUIRE(session.has_value());
     auto variables = variablesOf(**session);
@@ -268,7 +438,7 @@ TEST_CASE("a cancelled prompt exits 1 and marks the session cancelled", "[askpas
     sink.answer = [](FakeSink::Ask const&) {
         return AskpassReply { .outcome = AskpassOutcome::Cancelled, .answer = Secret { "leaked?" } };
     };
-    auto broker = AskpassBroker { sink, "/opt/contour/contour", random };
+    auto broker = AskpassBroker { sink, readyApplication(), "/opt/contour/contour", random };
     auto session = broker.open(targetOf());
     REQUIRE(session.has_value());
     auto helper = std::vector<std::future<HelperRun>> {};
@@ -289,7 +459,7 @@ TEST_CASE(
     sink.answer = [](FakeSink::Ask const&) {
         return AskpassReply { AskpassOutcome::Cancelled, {} };
     };
-    auto broker = AskpassBroker { sink, "/opt/contour/contour", random };
+    auto broker = AskpassBroker { sink, readyApplication(), "/opt/contour/contour", random };
     auto session = broker.open(targetOf());
     REQUIRE(session.has_value());
     auto woken = std::atomic<int> { 0 };
@@ -326,7 +496,7 @@ TEST_CASE("cancelling a notice, a security key's touch, ends the attempt", "[ask
 {
     auto random = vthost::testing::CountingRandom {};
     auto sink = FakeSink {};
-    auto broker = AskpassBroker { sink, "/opt/contour/contour", random };
+    auto broker = AskpassBroker { sink, readyApplication(), "/opt/contour/contour", random };
     auto session = broker.open(targetOf());
     REQUIRE(session.has_value());
     auto woken = std::atomic<int> { 0 };
@@ -356,8 +526,11 @@ TEST_CASE("a window's Cancel on a notice ends the attempt, end to end", "[askpas
     // woken, and the helper exits 1 once the transport has dropped the session.
     auto router = std::make_shared<AskpassPromptRouter>();
     auto host = contour::window::PromptHost { router, 1 };
-    auto const broker =
-        std::make_shared<AskpassBroker>(router, QStringLiteral("/opt/contour/contour"), random);
+    auto const broker = std::make_shared<AskpassBroker>(router,
+                                                        std::make_shared<AskpassPromptIds>(),
+                                                        readyApplication(),
+                                                        QStringLiteral("/opt/contour/contour"),
+                                                        random);
     auto session = RoutedAskpassBroker { broker, 1 }.open(targetOf());
     REQUIRE(session.has_value());
     auto woken = std::atomic<int> { 0 };
@@ -382,7 +555,7 @@ TEST_CASE("a request with the wrong nonce is refused without a prompt", "[askpas
 {
     auto random = vthost::testing::CountingRandom {};
     auto sink = FakeSink {};
-    auto broker = AskpassBroker { sink, "/opt/contour/contour", random };
+    auto broker = AskpassBroker { sink, readyApplication(), "/opt/contour/contour", random };
     auto session = broker.open(targetOf());
     REQUIRE(session.has_value());
     auto variables = variablesOf(**session);
@@ -398,7 +571,7 @@ TEST_CASE("a helper that goes away mid-prompt has the prompt withdrawn", "[askpa
 {
     auto random = vthost::testing::CountingRandom {};
     auto sink = FakeSink {};
-    auto broker = AskpassBroker { sink, "/opt/contour/contour", random };
+    auto broker = AskpassBroker { sink, readyApplication(), "/opt/contour/contour", random };
     auto session = broker.open(targetOf());
     REQUIRE(session.has_value());
     auto const variables = variablesOf(**session);
@@ -424,7 +597,7 @@ TEST_CASE("the time a prompt is open is counted, and the server closes with its 
     auto random = vthost::testing::CountingRandom {};
     auto clock = core::platform::ManualClock {};
     auto sink = FakeSink {};
-    auto broker = AskpassBroker { sink, "/opt/contour/contour", random, clock };
+    auto broker = AskpassBroker { sink, readyApplication(), "/opt/contour/contour", random, clock };
     auto session = broker.open(targetOf());
     REQUIRE(session.has_value());
     auto const variables = variablesOf(**session);
@@ -510,7 +683,7 @@ TEST_CASE("an attach polled from the event loop completes once its prompt is ans
     // What the launch of `contour client --host` does: it looks at the attach from the event loop, which is
     // what serves the broker's server and the window that shows the prompt. Nothing waits on the GUI thread.
     auto sink = FakeSink {};
-    auto broker = AskpassBroker { sink, "/opt/contour/contour", random };
+    auto broker = AskpassBroker { sink, readyApplication(), "/opt/contour/contour", random };
     auto controller = PromptingController { broker };
     auto const budget = vthost::AttachBudget { 10s };
 
@@ -535,7 +708,7 @@ TEST_CASE("a request that is oversized or malformed is refused without a prompt"
 {
     auto random = vthost::testing::CountingRandom {};
     auto sink = FakeSink {};
-    auto broker = AskpassBroker { sink, "/opt/contour/contour", random };
+    auto broker = AskpassBroker { sink, readyApplication(), "/opt/contour/contour", random };
     auto session = broker.open(targetOf());
     REQUIRE(session.has_value());
     auto const variables = variablesOf(**session);
@@ -567,7 +740,7 @@ TEST_CASE("a session serves one request after another, as ssh asks a password an
     sink.answer = [](FakeSink::Ask const& ask) {
         return answeredReply(ask.prompt.toStdString());
     };
-    auto broker = AskpassBroker { sink, "/opt/contour/contour", random };
+    auto broker = AskpassBroker { sink, readyApplication(), "/opt/contour/contour", random };
     auto session = broker.open(targetOf());
     REQUIRE(session.has_value());
     auto const variables = variablesOf(**session);
@@ -583,6 +756,7 @@ TEST_CASE("connections that do not send their request are bounded in number and 
     auto sink = FakeSink {};
     auto broker = AskpassBroker {
         sink,
+        readyApplication(),
         "/opt/contour/contour",
         random,
         core::platform::defaultSteadyClock(),
@@ -612,7 +786,7 @@ TEST_CASE("a session opened and destroyed off the GUI thread needs no GUI event 
 {
     auto random = vthost::testing::CountingRandom {};
     auto sink = FakeSink {};
-    auto broker = AskpassBroker { sink, "/opt/contour/contour", random };
+    auto broker = AskpassBroker { sink, readyApplication(), "/opt/contour/contour", random };
     // This thread serves no events while the other one opens and drops its session.
     auto opened = false;
     auto endpoint = std::string {};
@@ -640,6 +814,7 @@ TEST_CASE("a listen failure off the GUI thread is open()'s error", "[askpass][br
     auto sink = FakeSink {};
     auto broker =
         AskpassBroker { sink,
+                        readyApplication(),
                         "/opt/contour/contour",
                         random,
                         core::platform::defaultSteadyClock(),
@@ -663,7 +838,7 @@ TEST_CASE("a helper that connects before the GUI serves events waits for its ans
     sink.answer = [](FakeSink::Ask const&) {
         return answeredReply("hunter2");
     };
-    auto broker = AskpassBroker { sink, "/opt/contour/contour", random };
+    auto broker = AskpassBroker { sink, readyApplication(), "/opt/contour/contour", random };
     auto session = broker.open(targetOf());
     REQUIRE(session.has_value());
 
@@ -720,7 +895,7 @@ TEST_CASE("a stop while the GUI thread serves no events does not hang on the bro
 {
     auto random = vthost::testing::CountingRandom {};
     auto sink = FakeSink {};
-    auto broker = AskpassBroker { sink, "/opt/contour/contour", random };
+    auto broker = AskpassBroker { sink, readyApplication(), "/opt/contour/contour", random };
     auto controller = OpeningController { broker };
     controller.startConnecting();
     // Never pumped here: a quitting or not yet running GUI thread.
@@ -747,8 +922,11 @@ TEST_CASE("each window's attach prompts in its own window", "[askpass][broker][r
     };
     router->attach(1, left);
     router->attach(2, right);
-    auto const broker =
-        std::make_shared<AskpassBroker>(router, QStringLiteral("/opt/contour/contour"), random);
+    auto const broker = std::make_shared<AskpassBroker>(router,
+                                                        std::make_shared<AskpassPromptIds>(),
+                                                        readyApplication(),
+                                                        QStringLiteral("/opt/contour/contour"),
+                                                        random);
     // Two windows attach to the same host.
     auto leftSession = RoutedAskpassBroker { broker, 1 }.open(targetOf());
     auto rightSession = RoutedAskpassBroker { broker, 2 }.open(targetOf());
@@ -768,8 +946,11 @@ TEST_CASE("an attach with no window waits for the first window to appear", "[ask
 {
     auto random = vthost::testing::CountingRandom {};
     auto router = std::make_shared<AskpassPromptRouter>();
-    auto const broker =
-        std::make_shared<AskpassBroker>(router, QStringLiteral("/opt/contour/contour"), random);
+    auto const broker = std::make_shared<AskpassBroker>(router,
+                                                        std::make_shared<AskpassPromptIds>(),
+                                                        readyApplication(),
+                                                        QStringLiteral("/opt/contour/contour"),
+                                                        random);
     auto session = broker->open(targetOf());
     REQUIRE(session.has_value());
     auto helper = startHelper(variablesOf(**session));
@@ -793,8 +974,11 @@ TEST_CASE("a broker a transport kept alive past the windows neither crashes nor 
     auto router = std::make_shared<AskpassPromptRouter>();
     auto sink = std::make_unique<FakeSink>();
     router->attach(1, *sink);
-    auto const broker =
-        std::make_shared<AskpassBroker>(router, QStringLiteral("/opt/contour/contour"), random);
+    auto const broker = std::make_shared<AskpassBroker>(router,
+                                                        std::make_shared<AskpassPromptIds>(),
+                                                        readyApplication(),
+                                                        QStringLiteral("/opt/contour/contour"),
+                                                        random);
     auto session = broker->open(targetOf());
     REQUIRE(session.has_value());
     auto const variables = variablesOf(**session);

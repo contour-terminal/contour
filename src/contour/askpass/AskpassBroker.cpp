@@ -2,6 +2,8 @@
 #include <contour/Logging.hpp>
 #include <contour/askpass/AskpassBroker.hpp>
 
+#include <core/Assert.hpp>
+#include <core/log/LogStore.hpp>
 #include <core/net/Tls.hpp>
 
 #include <QtCore/QByteArray>
@@ -25,6 +27,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 
 #ifdef Q_OS_WIN
@@ -70,9 +73,9 @@ namespace
     {
         std::shared_ptr<AskpassPromptRouter> router; ///< Finds the window that shows a prompt.
         AskpassRouteId route;                        ///< The window that started the attach.
-        QObject* guiContext;    ///< Lives on the thread the sink is asked on; outlives every session.
-        QObject* workerContext; ///< Lives on the broker's thread; outlives every session.
-        std::atomic<AskpassPromptId>& lastPromptId;
+        QObject* guiContext;         ///< Lives on the thread the sink is asked on; outlives every session.
+        QObject* workerContext;      ///< Lives on the broker's thread; outlives every session.
+        AskpassPromptIds& promptIds; ///< Hands out each prompt's id; outlives every session.
         core::platform::IClock const& clock;
     };
 
@@ -288,7 +291,7 @@ namespace
                 return;
             }
             auto const kind = classifyAskpassPrompt(request.prompt, request.sshAskpassPrompt);
-            auto const promptId = ++_hub.lastPromptId;
+            auto const promptId = _hub.promptIds.next();
             connection.prompt = promptId;
             askpassLog()("askpass: asking a {} prompt", nameOf(kind));
             if (_asking++ == 0)
@@ -492,30 +495,41 @@ namespace
 } // namespace
 
 AskpassBroker::AskpassBroker(std::shared_ptr<AskpassPromptRouter> router,
+                             std::shared_ptr<AskpassPromptIds> promptIds,
+                             std::shared_ptr<platform::ApplicationReadiness> application,
                              QString executablePath,
                              core::IRandom& random,
                              core::platform::IClock const& clock,
                              AskpassBrokerConfig config):
     _router { std::move(router) },
+    _promptIds { std::move(promptIds) },
+    _application { std::move(application) },
     _executablePath { std::move(executablePath) },
     _clock { clock },
     _config { std::move(config) },
     _random { random },
     _worker { std::make_unique<QObject>() }
 {
+    Require(_promptIds != nullptr);
+    Require(_application != nullptr);
+    // Not started here: startServing() starts it, once the application object exists.
     _thread.setObjectName(QStringLiteral("askpass-broker"));
     _worker->moveToThread(&_thread);
-    _thread.start();
-    _state = _thread.isRunning() ? State::Serving : State::NotStarted;
 }
 
 AskpassBroker::AskpassBroker(IAskpassPromptSink& sink,
+                             std::shared_ptr<platform::ApplicationReadiness> application,
                              QString executablePath,
                              core::IRandom& random,
                              core::platform::IClock const& clock,
                              AskpassBrokerConfig config):
-    AskpassBroker(
-        std::make_shared<AskpassPromptRouter>(), std::move(executablePath), random, clock, std::move(config))
+    AskpassBroker(std::make_shared<AskpassPromptRouter>(),
+                  std::make_shared<AskpassPromptIds>(),
+                  std::move(application),
+                  std::move(executablePath),
+                  random,
+                  clock,
+                  std::move(config))
 {
     _router->attach(AnyWindow, sink);
 }
@@ -523,6 +537,7 @@ AskpassBroker::AskpassBroker(IAskpassPromptSink& sink,
 void AskpassBroker::shutdown()
 {
     _state = State::ShutDown;
+    _state.notify_all();
     _router->shutdown();
 }
 
@@ -531,6 +546,63 @@ AskpassBroker::~AskpassBroker()
     // Every session is gone by now (they are destroyed before the broker), so nothing is left on the thread.
     _thread.quit();
     _thread.wait();
+}
+
+std::expected<void, std::string> AskpassBroker::startServing()
+{
+    auto observed = _state.load();
+    if (observed == State::NotStarted)
+    {
+        // Qt runs no event loop on a thread of its own before the application object exists.
+        switch (_application->state())
+        {
+            case platform::ApplicationReadiness::State::Ready: break;
+            case platform::ApplicationReadiness::State::Pending:
+                return std::unexpected { std::string {
+                    "cannot serve ssh's prompts: the application has not started yet" } };
+            case platform::ApplicationReadiness::State::Abandoned:
+                return std::unexpected { std::string {
+                    "cannot serve ssh's prompts: the application did not start" } };
+        }
+        if (_state.compare_exchange_strong(observed, State::Starting))
+        {
+            _thread.start();
+            auto const outcome = _thread.isRunning() ? State::Serving : State::Failed;
+            // Not over a shutdown() that came meanwhile.
+            auto starting = State::Starting;
+            if (_state.compare_exchange_strong(starting, outcome) && outcome == State::Failed)
+                errorLog()("askpass: the prompt server's thread failed to start; ssh runs without "
+                           "prompts");
+            _state.notify_all();
+            observed = _state.load();
+        }
+    }
+    // Another caller is starting it: QThread::start() returns as soon as the thread exists.
+    while (observed == State::Starting)
+    {
+        _state.wait(State::Starting);
+        observed = _state.load();
+    }
+    switch (observed)
+    {
+        case State::Serving: return {};
+        case State::Failed:
+            return std::unexpected { std::string {
+                "cannot serve ssh's prompts: the prompt server's thread failed to start" } };
+        case State::ShutDown:
+            return std::unexpected { std::string { "the application no longer answers ssh's prompts" } };
+        case State::NotStarted:
+        case State::Starting: break;
+    }
+    return std::unexpected { std::string { "cannot serve ssh's prompts: the prompt server did not start" } };
+}
+
+core::async::Task<std::expected<void, std::string>> AskpassBroker::whenServing()
+{
+    // Parks the awaiting coroutine, never its loop, until the GUI has made the application object; a stop of
+    // that coroutine (its link stopped, its attach given up) ends the wait.
+    std::ignore = co_await _application->whenSettled();
+    co_return startServing();
 }
 
 std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> AskpassBroker::open(
@@ -542,15 +614,8 @@ std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> AskpassBrok
 std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> AskpassBroker::open(
     vthost::SshTarget const& target, AskpassRouteId route)
 {
-    switch (_state.load())
-    {
-        case State::Serving: break;
-        case State::ShutDown:
-            return std::unexpected { std::string { "the application no longer answers ssh's prompts" } };
-        case State::NotStarted:
-            return std::unexpected { std::string {
-                "cannot serve ssh's prompts: the broker's thread did not start" } };
-    }
+    if (auto const serving = startServing(); !serving)
+        return std::unexpected { serving.error() };
     auto state = std::make_shared<SessionState>();
     auto nonce = randomHex(_random, 32).toStdString();
     auto const name = QString::fromLatin1("contour-askpass-") + QString::fromLatin1(randomHex(_random, 8));
@@ -562,7 +627,7 @@ std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> AskpassBrok
         _worker.get(),
         [&] {
             auto server =
-                std::make_unique<Endpoint>(Hub { _router, route, this, _worker.get(), _lastPromptId, _clock },
+                std::make_unique<Endpoint>(Hub { _router, route, this, _worker.get(), *_promptIds, _clock },
                                            state,
                                            nonce,
                                            targetText,
