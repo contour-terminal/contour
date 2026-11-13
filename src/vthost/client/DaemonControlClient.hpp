@@ -174,6 +174,6 @@ inline constexpr auto DefaultUpgradeTimeout = std::chrono::milliseconds { 30'000
 /// @return The port; TransportErrorKind::DaemonAbsent -- a missing socket or a refused connection -- reads
 ///         as ControlErrorCode::NotRunning.
 [[nodiscard]] std::unique_ptr<DaemonControlPort> makeDaemonControl(
-    std::shared_ptr<ITransportFactory> transport, AttachBudget timeout = DefaultControlTimeout);
+    std::shared_ptr<ITransportFactory> transport, AttachBudget const& timeout = DefaultControlTimeout);
 
 } // namespace vthost::client
