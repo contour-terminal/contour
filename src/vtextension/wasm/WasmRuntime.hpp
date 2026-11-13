@@ -230,10 +230,10 @@ class IWasmModule
     /// reach nobody. May run on another prepared thread than the one that loaded the module.
     ///
     /// A WASI reactor (a module that imports WASI and exports `_initialize`, as every Rust guest built
-    /// with Rust 1.100 or newer does) is initialized here: the backend runs its `_initialize` exactly
-    /// once, before instantiate() returns, and the caller must not call it again (wasi-libc's traps
-    /// on a second call). It runs before any IWasmInstance exists to interrupt, so under no deadline (a
-    /// pre-existing gap a follow-up will close), and a host function it calls fails.
+    /// with Rust 1.100 or newer does) is not initialized here: the backend never runs its `_initialize`,
+    /// which here would run before any IWasmInstance exists to interrupt it, under no deadline, and with
+    /// host functions failing. The instance exports it under its own name, and the caller calls it,
+    /// exactly once (wasi-libc's traps on a second call), before any other export.
     /// @param context What the instance's host function calls reach; must outlive the instance.
     /// @return The instance, which keeps the module alive; `OutOfMemory` if a memory's initial size
     ///         exceeds the runtime's memory cap, `InvalidComponent` if the runtime cannot instantiate the

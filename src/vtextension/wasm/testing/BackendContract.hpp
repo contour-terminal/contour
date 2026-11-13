@@ -592,22 +592,34 @@ void callsExport()
     CHECK(context.calls().empty());
 }
 
-/// A WASI reactor's `_initialize` has run exactly once when instantiate() returns.
+/// A WASI reactor's `_initialize` has not run when instantiate() returns: it is the caller's to call, by
+/// that name, and it then runs exactly once -- however the name's length is encoded.
 template <typename T>
-void instantiateInitializesReactor()
+void instantiateLeavesReactorToCaller()
 {
     auto const backend = T::make();
     auto const runtime = createRuntime(*backend);
     auto const guard = enterThread(*backend);
-    auto const module = load(*runtime, vtextension::testing::WasiReactorModule);
-    auto context = RecordingHostContext {};
-    auto const instance = instantiate(*module, context);
+    auto const check = [&](std::string_view description, auto const& bytes) {
+        INFO(description);
+        auto const module = load(*runtime, bytes);
+        // The module shows it by its own name, whatever name the backend runs it by.
+        CHECK(exportOf(*module, "_initialize").kind == ExternKind::Function);
+        auto context = RecordingHostContext {};
+        auto const instance = instantiate(*module, context);
 
-    auto count = std::array<uint32_t, 1> {};
-    REQUIRE(instance->call(functionOf(*instance, "initializations"), count).has_value());
-    CHECK(count[0] == 1);
-    auto argv = std::array<uint32_t, 2> { 0, 0 };
-    CHECK(instance->call(functionOf(*instance, "load"), argv).has_value());
+        auto count = std::array<uint32_t, 1> {};
+        REQUIRE(instance->call(functionOf(*instance, "initializations"), count).has_value());
+        CHECK(count[0] == 0);
+        auto none = std::array<uint32_t, 0> {};
+        REQUIRE(instance->call(functionOf(*instance, "_initialize"), none).has_value());
+        REQUIRE(instance->call(functionOf(*instance, "initializations"), count).has_value());
+        CHECK(count[0] == 1);
+        auto argv = std::array<uint32_t, 2> { 0, 0 };
+        CHECK(instance->call(functionOf(*instance, "load"), argv).has_value());
+    };
+    check("a one-byte name length", vtextension::testing::WasiReactorModule);
+    check("a five-byte name length", vtextension::testing::WasiReactorPaddedNameModule);
 }
 
 /// A memory view lies inside the memory, or there is none.
@@ -972,7 +984,7 @@ void wasiStdioGoesNowhere()
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                     \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)                 \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                          \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instantiateInitializesReactor)        \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instantiateLeavesReactorToCaller)     \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryViewIsBoundsChecked)            \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)        \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArgumentsInOrder) \

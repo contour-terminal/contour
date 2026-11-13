@@ -36,10 +36,9 @@ using ConfigMap = std::vector<std::pair<std::string, std::string>>;
 /// One running extension: an instance of a CompiledExtension, sandboxed, speaking the statusline
 /// world through typed calls.
 ///
-/// - **Deadlines.** Every call is guarded by the engine's watchdog: `load` by `loadDeadline`, `update`
-///   and `render` by `callDeadline`. A call that runs past it is stopped and fails with
-///   `DeadlineExceeded`. A WASI reactor's `_initialize` is the exception: the backend runs it while
-///   instantiating, under no deadline, a pre-existing gap a follow-up will close.
+/// - **Deadlines.** Every call is guarded by the engine's watchdog: a WASI reactor's `_initialize` and
+///   `load` each by `loadDeadline`, `update` and `render` by `callDeadline`. A call that runs past it is
+///   stopped and fails with `DeadlineExceeded`.
 /// - **Memory.** Linear memory is capped at the engine's `memoryBytes`, the interpreter stack at the
 ///   engine's `stackBytes`: both are the engine's runtime's limits, fixed when it was created, and an
 ///   instance's own limits must name the same. A call into the guest that fails because its memory
@@ -80,8 +79,8 @@ class Instance final: private wasm::IHostContext
     /// @param limits The limits this instance is held to. Its `memoryBytes` and `stackBytes` must be the
     ///        engine's (@p engine's limits()), whose runtime enforces them; the rest are the instance's.
     /// @return The instance; `OutOfMemory` if the module needs more memory than @p limits allow,
-    ///         `InvalidComponent` if the runtime cannot instantiate it (a WASI reactor whose
-    ///         `_initialize` traps included: the backend runs it while instantiating).
+    ///         `InvalidComponent` if the runtime cannot instantiate it, or the error a WASI reactor's
+    ///         `_initialize` failed with.
     [[nodiscard]] static std::expected<std::unique_ptr<Instance>, ExtensionError> create(
         Engine& engine,
         CompiledExtension const& compiled,

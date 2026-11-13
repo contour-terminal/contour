@@ -17,10 +17,9 @@ set -ex
 # later steps of a GitHub job find cargo; a caller in one shell session extends PATH itself.
 
 WASM_TARGET="wasm32-wasip1"
-# A named release, not "stable": the guests are built by whatever this installs, so "stable" changes what
-# every build produces on the day Rust releases. 1.100.0 did exactly that -- the guests it builds trap in
-# the WebAssembly runtime. Raise this on purpose, with the extension tests green.
-RUST_TOOLCHAIN="1.99.1"
+# A named release, not "stable": the guests are built by whatever this installs, so with "stable" a Rust
+# release day would change what every build produces. Raise this on purpose, with the extension tests green.
+RUST_TOOLCHAIN="1.100.0"
 CARGO_BIN="${CARGO_HOME:-$HOME/.cargo}/bin"
 
 if ! command -v rustup >/dev/null 2>&1 && [ -x "$CARGO_BIN/rustup" ]; then

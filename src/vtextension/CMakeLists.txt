@@ -61,6 +61,7 @@ set(vtextension_HEADERS
     Utf8.hpp
     wasm/DefaultBackend.hpp
     wasm/WasiAllowList.hpp
+    wasm/WasmBinary.hpp
     wasm/WasmRuntime.hpp
 )
 
@@ -107,6 +108,7 @@ if(VTEXTENSION_TESTING)
         StatusLineAdapter_test.cpp
         Surface_test.cpp
         Wit_test.cpp
+        wasm/WasmBinary_test.cpp
         testing/FakeGuestMemory.hpp
         testing/FakeWasmBackend.hpp
         testing/Harness.hpp
