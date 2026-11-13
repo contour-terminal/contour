@@ -504,8 +504,10 @@ TEST_CASE("LinkDetector.destroyedWithAJobInFlight", "[links]")
 
 namespace
 {
+#ifndef _WIN32
 /// The smallest default stack a secondary thread gets (macOS): what LinkDetector documents matching must fit.
 constexpr auto SmallestThreadStack = std::size_t { 512 } * 1024;
+#endif
 
 /// Runs @p job on a new thread with a stack of SmallestThreadStack, and waits for it. On Windows, which
 /// offers no portable way to ask for less, on std::thread's default of 1 MiB.
