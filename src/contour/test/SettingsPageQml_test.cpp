@@ -500,7 +500,7 @@ struct AnnouncementProbe
 
 } // namespace
 
-TEST_CASE("Settings lists the six sections, the profiles and hosts beneath theirs, then Edit contour.yml…",
+TEST_CASE("Settings lists the seven sections, the profiles and hosts beneath theirs, then Edit contour.yml…",
           "[contour][gui][qml][settings]")
 {
     auto const row = GENERATE(config::ChromeStyle::MacOS, config::ChromeStyle::Terminal);
@@ -522,7 +522,7 @@ TEST_CASE("Settings lists the six sections, the profiles and hosts beneath their
     auto names = QStringList {};
     for (auto const* sidebarRow: rows)
         names << sidebarRow->objectName();
-    CHECK(fx.controller->sections().size() == qsizetype { 6 });
+    CHECK(fx.controller->sections().size() == qsizetype { 7 });
     INFO("sidebar: " << names.join(", ").toStdString());
     // Each section, then what it lists beneath it.
     auto expected = QStringList {};
@@ -540,7 +540,7 @@ TEST_CASE("Settings lists the six sections, the profiles and hosts beneath their
     expected << "editConfigRow";
     CHECK(names == expected);
     CHECK(names.front() == "sidebarRow:general");
-    CHECK(names.at(4) == "sidebarRow:profiles");
+    CHECK(names.at(5) == "sidebarRow:profiles");
     CHECK(names.at(names.size() - 2) == "sidebarRow:hosts");
     CHECK(names.back() == "editConfigRow");
 
@@ -828,7 +828,7 @@ TEST_CASE("the keyboard alone reaches every section and every control", "[contou
     auto* sidebar = fx.byName("settingsSidebarList");
     REQUIRE(sidebar != nullptr);
     TestWindow::focus(*sidebar);
-    for ([[maybe_unused]] auto const press: std::views::iota(0, 4))
+    for ([[maybe_unused]] auto const press: std::views::iota(0, 5))
         window.press(Qt::Key_Down);
     fx.settle();
     CHECK(fx.page->property("currentPage").toString() == "section:shell-integration");

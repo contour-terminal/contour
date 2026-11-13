@@ -319,12 +319,31 @@ profiles:
         show_title_bar: true
 )" };
 
+/// A string row whose text is a word or a value of a fixed form, and one it accepts that is not its default.
+struct GrammarValue
+{
+    std::string_view key;   ///< The row's key.
+    std::string_view value; ///< A value its check accepts, spelled as the row shows it back.
+};
+
+/// The string rows that appending to would break: the tab_style keys that take a keyword or a colour.
+constexpr auto GrammarValues = std::array {
+    GrammarValue { .key = "tab_style.active_fill", .value = "#3B82F6" },
+    GrammarValue { .key = "tab_style.inactive_fill", .value = "subtle" },
+    GrammarValue { .key = "tab_style.bar_fill", .value = "#202428" },
+    GrammarValue { .key = "tab_style.indicator_color", .value = "#11CC88" },
+};
+
 /// A value for global-field row @p row that differs from the one it shows now, in the type the row's
 /// editor would send.
 [[nodiscard]] QVariant differentValue(QVariantMap const& row)
 {
     auto const type = row.value("type").toString();
     auto const current = row.value("value");
+    auto const key = row.value("key").toString().toStdString();
+    if (auto const grammar = std::ranges::find(GrammarValues, key, &GrammarValue::key);
+        grammar != GrammarValues.end())
+        return { QString::fromUtf8(grammar->value.data(), static_cast<qsizetype>(grammar->value.size())) };
     if (type == "bool")
         return { !current.toBool() };
     // Down rather than up where it can go: a row's range is not on it, and a default at its maximum -- the
