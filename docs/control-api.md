@@ -39,7 +39,7 @@ pane.
 | `contour send [--pane P] [--enter] [--wait] TEXT...\|-` | Types text into a pane. `--enter` appends a carriage return, `-` reads standard input, `--wait` waits for the command the text starts and exits with that command's own status. |
 | `contour pane capture [--pane P] [--scrollback N \| --all]` | Prints a pane's text. |
 | `contour close [--pane P \| --tab T]` | Closes a pane, or a tab with all its panes. |
-| `contour label OBJECT LABEL` | Labels a workspace, tab or pane (`contour label pane:018f logs`); an empty label clears it. |
+| `contour label OBJECT LABEL` | Labels a workspace, tab or pane (`contour label pane:018f logs`); an empty label clears it. A workspace's or a tab's label is the name its windows show for it, in the sidebar, the tab strip and the switcher, over its title; cleared, it shows its title again. |
 | `contour workspace new [--cwd DIR] [--name NAME]` | Opens a workspace with one tab and prints its id. The shell starts in `--cwd`, and the workspace is named after that folder (its repository's, inside one) unless `--name` labels it. |
 | `contour workspace rename WORKSPACE LABEL` | Renames a workspace, which `object.setLabel` does too; an empty label clears it. Every window listing it shows the new name. |
 | `contour workspace close WORKSPACE` | Closes a workspace with all its tabs and panes, and ends their shells. Whatever it holds at that moment goes, in one step, and the workspace is removed. The daemon's last workspace cannot be closed. |

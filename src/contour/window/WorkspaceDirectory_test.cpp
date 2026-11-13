@@ -127,6 +127,29 @@ TEST_CASE("status and summaries come from the lookup, keyed by daemon session id
     CHECK(tabs[1].label == "named");
 }
 
+TEST_CASE("a tab's control label names it over its title and its first pane's", "[contour][directory]")
+{
+    auto const layouts = std::vector { layoutOf(
+        1,
+        { proto::WireTab { .tabId = 1, .title = "named", .label = "build", .root = leaf(5) },
+          proto::WireTab { .tabId = 2, .label = "logs", .root = leaf(6) },
+          proto::WireTab { .tabId = 3, .title = "named", .root = leaf(7) } }) };
+    auto status = TableStatus {};
+    for (auto const session: { uint64_t { 5 }, uint64_t { 6 }, uint64_t { 7 } })
+    {
+        auto pane = PaneStatus {};
+        pane.title = "vim";
+        status.table[session] = std::move(pane);
+    }
+    auto const directory = directoryFromLayouts(layouts, status, TableMeta {}, std::nullopt);
+    auto const& tabs = directory.workspaces.at(0).tabs;
+    REQUIRE(tabs.size() == 3);
+    CHECK(tabs[0].label == "build");
+    CHECK(tabs[0].title == "named");
+    CHECK(tabs[1].label == "logs");
+    CHECK(tabs[2].label == "named");
+}
+
 TEST_CASE("the selection is carried", "[contour][directory]")
 {
     auto const layouts = std::vector { layoutOf(4, {}) };

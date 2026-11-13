@@ -11,11 +11,13 @@
 #include <format>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <variant>
 #include <vector>
 
 #include <vtcontrol/Target.hpp>
+#include <vtworkspace/TabName.hpp>
 
 namespace contour::remote
 {
@@ -139,9 +141,11 @@ std::vector<WorkspaceRow> workspaceRowsOf(std::span<vtcontrol::WorkspaceInfo con
             .ref = vtcontrol::parseObjectRef(info.id).value_or(vtcontrol::ObjectRef {}),
             .label = info.label,
             .position = info.position,
-            .name = workspaceDisplayName(info.label,
-                                         active != info.tabs.end() ? std::string_view { active->title } : "",
-                                         info.position),
+            .name = workspaceDisplayName(
+                info.label,
+                active != info.tabs.end() ? vtworkspace::tabNameOf({ .label = active->label }, active->title)
+                                          : "",
+                info.position),
             .visibility = visibility != Visibilities.end() ? *visibility : WorkspaceVisibility::Hidden,
             .tabs = info.tabs.size(),
             .shownByWindowHere = shownHere(id),
