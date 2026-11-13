@@ -2105,7 +2105,8 @@ class WindowController:
     /// @return Whether the area handled it.
     [[nodiscard]] window::ChromeKeyOutcome runChromeCommand(window::ChromeCommand command,
                                                             QString const& text = {});
-    /// The actions the active session's key bindings give a key press while the chrome has focus.
+    /// The actions the active session's key bindings give a key press while the chrome has focus: its
+    /// configured bindings first, then the built-in fallback rows, as the terminal itself matches a press.
     /// @return The bound actions; nullptr when nothing is bound or there is no active session.
     [[nodiscard]] actions::ActionList const* boundActionsFor(int qtKey,
                                                              Qt::KeyboardModifiers modifiers,

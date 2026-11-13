@@ -735,6 +735,27 @@ TEST_CASE("an application chord is the application's while the sidebar has focus
     CHECK(controller.activeTabIndex() == 1);
 }
 
+TEST_CASE("a built-in fallback chord is the application's while the sidebar has focus",
+          "[windowcontroller][chromefocus][sidebar]")
+{
+    // Ctrl+PageDown is SwitchToTabRight on every host, and a fallback too: with the configured row gone, a
+    // configuration that predates it still has it -- in the sidebar as in the terminal.
+    auto const f = ChromeFixture { [](contour::config::InputMappings& mappings) {
+        std::erase_if(mappings.keyMappings, [](auto const& mapping) {
+            return std::ranges::any_of(mapping.binding, [](auto const& action) {
+                return std::holds_alternative<contour::actions::SwitchToTabRight>(action);
+            });
+        });
+    } };
+    auto& controller = f.controller();
+    controller.activateTab(0);
+    controller.focusSidebar();
+    REQUIRE(controller.activeTabIndex() == 0);
+
+    CHECK(f.chromeKey(Qt::Key_PageDown, Qt::ControlModifier));
+    CHECK(controller.activeTabIndex() == 1);
+}
+
 TEST_CASE("F2 and typed characters are not the tab well's", "[windowcontroller][chromefocus][sidebar]")
 {
     auto const f = ChromeFixture {};

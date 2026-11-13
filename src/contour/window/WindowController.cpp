@@ -1840,11 +1840,14 @@ actions::ActionList const* WindowController::boundActionsFor(int qtKey,
 
     // No mode flags: the chrome has focus, so no terminal mode (search, vi, alternate screen) applies.
     constexpr auto NoModes = uint8_t { 0 };
-    auto const& mappings = session->config().inputMappings.value();
+    auto const& config = session->config();
+    auto const& mappings = config.inputMappings.value();
     // The chord as the terminal decides it, so that AltGr is no chord here where it is none there.
     auto chord = input::chordOfKeyPress(
         session->keyboardPlatform(), qtKey, static_cast<uint32_t>(modifiers.toInt()), text.toStdU32String());
 
+    // As the terminal routes a press (input::routeKey()): the user's bindings first, then the built-in
+    // fallback rows -- which hold chords a configuration need not spell, such as ⌘1…⌘9 on macOS.
     // A key a binding can name, as the terminal keys it: a named key, Shift+Tab's Backtab, or a character.
     auto const named =
         qtKey == Qt::Key_Backtab ? std::optional { vtbackend::Key::Tab } : input::namedKeyOf(qtKey);
@@ -1852,17 +1855,25 @@ actions::ActionList const* WindowController::boundActionsFor(int qtKey,
     {
         if (qtKey == Qt::Key_Backtab)
             chord.enable(vtbackend::Modifier::Shift);
-        return config::apply(mappings.keyMappings, *named, chord, NoModes);
+        if (auto const* bound = config::apply(mappings.keyMappings, *named, chord, NoModes))
+            return bound;
+        return config::applyBuiltinFallback(config, *named, chord, NoModes);
     }
     if (qtKey < PrintableAsciiBegin || qtKey >= PrintableAsciiEnd)
         return nullptr;
     // As TerminalSession matches a character: letters folded, and under Shift the unshifted key as well.
     auto const folded = config::foldedBindingCodepoint(static_cast<char32_t>(qtKey));
-    auto const* bound = config::apply(mappings.charMappings, folded, chord, NoModes);
-    if (bound == nullptr && chord.test(vtbackend::Modifier::Shift))
-        if (auto const base = input::unshiftedCodepoint(folded); base != folded)
-            bound = config::apply(mappings.charMappings, base, chord, NoModes);
-    return bound;
+    auto const lookUp = [&](auto const& find) {
+        auto const* found = find(folded);
+        if (found == nullptr && chord.test(vtbackend::Modifier::Shift))
+            if (auto const base = input::unshiftedCodepoint(folded); base != folded)
+                found = find(base);
+        return found;
+    };
+    if (auto const* bound =
+            lookUp([&](char32_t ch) { return config::apply(mappings.charMappings, ch, chord, NoModes); }))
+        return bound;
+    return lookUp([&](char32_t ch) { return config::applyBuiltinFallback(config, ch, chord, NoModes); });
 }
 
 bool WindowController::chromeKey(int qtKey, int qtModifiers, QString const& text)
