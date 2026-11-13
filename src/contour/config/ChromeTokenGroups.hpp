@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string_view>
 #include <variant>
@@ -1034,6 +1035,45 @@ namespace detail
     auto const hsl = detail::hslOf(color);
     return vtbackend::hslToRgb(
         hsl.hue, hsl.saturation, std::clamp(hsl.lightness + (points / 100.0), 0.0, 1.0));
+}
+
+/// Black or white, whichever reads better on @p ground: the ink of last resort.
+/// @param ground What the ink is drawn on.
+/// @return Black or white.
+[[nodiscard]] inline vtbackend::RGBColor monoInkOn(vtbackend::RGBColor ground) noexcept
+{
+    auto constexpr Black = vtbackend::RGBColor(0, 0, 0);
+    auto constexpr White = vtbackend::RGBColor(255, 255, 255);
+    return vtbackend::contrastRatio(ground, Black) >= vtbackend::contrastRatio(ground, White) ? Black : White;
+}
+
+/// @p ink where it reads on @p ground at @p floor; else @p ink shaded away from the ground -- darker on a
+/// light ground, lighter on a dark one, hue and saturation kept -- by the fewest lightness points that reach
+/// @p floor; else monoInkOn(). A status hue stays itself where a shade of it reads, as macOS keeps a
+/// destructive label red on a grey button rather than turning it black.
+/// @param ink    The colour the text or mark would be drawn in.
+/// @param ground The opaque colour it is drawn on.
+/// @param floor  The contrast it must reach: MinimumTextContrast for words, MinimumMarkContrast for marks.
+/// @return The ink; at least @p floor against @p ground where any ink of that hue, or black or white, is.
+[[nodiscard]] inline vtbackend::RGBColor legibleShadeOn(vtbackend::RGBColor ink,
+                                                        vtbackend::RGBColor ground,
+                                                        double floor) noexcept
+{
+    if (vtbackend::contrastRatio(ink, ground) >= floor)
+        return ink;
+    auto const mono = monoInkOn(ground);
+    // Toward black on a ground black reads on best, toward white otherwise: away from the ground.
+    auto const direction = mono == vtbackend::RGBColor(0, 0, 0) ? -1 : 1;
+    auto const shadeBy = [&](int points) {
+        return shiftLightness(ink, direction * points);
+    };
+    // Bisected: along one direction a shade's luminance only moves one way, so once one reads every further
+    // one does -- an ink that starts on the far side of the ground first passes through it, at contrasts
+    // below the one it started at, which already fell short.
+    auto const points = std::views::iota(1, 101);
+    auto const first = std::ranges::partition_point(
+        points, [&](int shift) { return vtbackend::contrastRatio(shadeBy(shift), ground) < floor; });
+    return first != points.end() ? shadeBy(*first) : mono;
 }
 
 /// Duration every transition collapses to under @c MotionPreference::Reduced.

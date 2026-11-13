@@ -1614,9 +1614,10 @@ TEST_CASE("UiStyleProvider: statusTextOn inks words for the ground they sit on",
     // The tone of the ground picks the hue, and it is the text hue, not the mark's.
     auto const black = QColor(Qt::black);
     CHECK(style.statusTextOn(warning, black) == QColor::fromRgb(hues.dark));
-    // Every answer reads at the text ratio on its ground, every status role over, falling back to black or
-    // white where the hue cannot.
-    auto fellBack = 0;
+    // Every answer reads at the text ratio on its ground, every status role over: a hue that falls short is
+    // shaded away from its ground rather than given up for black or white (config::legibleShadeOn(), whose
+    // table covers the fallback that remains).
+    auto shaded = 0;
     for (auto const& ground:
          { QColor(Qt::black), QColor(Qt::white), QColor(0xD9, 0xDC, 0xE3), QColor(0x80, 0x80, 0x80) })
         for (auto const role: std::views::iota(0, static_cast<int>(contour::config::StatusColorRoleCount)))
@@ -1626,9 +1627,15 @@ TEST_CASE("UiStyleProvider: statusTextOn inks words for the ground they sit on",
             CHECK(vtbackend::contrastRatio(contour::platform::toRGBColor(ink),
                                            contour::platform::toRGBColor(ground))
                   >= contour::config::MinimumTextContrast);
-            fellBack += ink == style.onColor(ground) ? 1 : 0;
+            auto const& roleHues =
+                contour::config::StatusColors[static_cast<size_t>(role)].hues(StatusInkUse::Text);
+            auto const asIs = std::array { QColor::fromRgb(roleHues.light),
+                                           QColor::fromRgb(roleHues.dark),
+                                           style.accentColor(),
+                                           style.onColor(ground) };
+            shaded += std::ranges::find(asIs, ink) == asIs.end() ? 1 : 0;
         }
-    CHECK(fellBack > 0);
+    CHECK(shaded > 0);
     CHECK(style.statusTextOn(-1, black) == QColor(Qt::transparent));
 }
 
@@ -2854,7 +2861,7 @@ TEST_CASE("UiStyleProvider: the sticky header's glyph reads in the pane header a
     using contour::window::StickyHeaderGlyphRows;
     using contour::window::UiStyleProvider;
     auto const empty = QStringLiteral("empty");
-    auto fellBack = 0;
+    auto shaded = 0;
     for (auto const name: vtbackend::defaultColorPaletteNames())
     {
         INFO("scheme: " << name);
@@ -2887,14 +2894,22 @@ TEST_CASE("UiStyleProvider: the sticky header's glyph reads in the pane header a
                         {
                             auto const ink = provider.statusMarkOn(static_cast<int>(row.role), ground);
                             CHECK(contrastOf(ink, ground) >= contour::config::MinimumMarkContrast);
-                            fellBack += ink == provider.onColor(ground) ? 1 : 0;
+                            auto const& hues =
+                                contour::config::StatusColors[static_cast<size_t>(row.role)].hues(
+                                    contour::config::StatusInkUse::Mark);
+                            auto const asIs = std::array { QColor::fromRgb(hues.light),
+                                                           QColor::fromRgb(hues.dark),
+                                                           provider.accentColor(),
+                                                           provider.onColor(ground) };
+                            shaded += std::ranges::find(asIs, ink) == asIs.end() ? 1 : 0;
                         }
                     }
                 });
         }
     }
-    // Not vacuous: some hues fall short somewhere and take the black or white fallback.
-    CHECK(fellBack > 0);
+    // Not vacuous: some hues fall short somewhere, and are shaded until they read rather than given up for
+    // black or white (config::legibleShadeOn()).
+    CHECK(shaded > 0);
 }
 
 TEST_CASE("UiStyleProvider publishes the Settings window's tokens per row", "[contour][uistyle]")
