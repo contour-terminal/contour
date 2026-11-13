@@ -118,6 +118,8 @@
     #include <sys/ioctl.h>
 
     #include <unistd.h>
+
+    #include <vthost/keeper/KeeperProcess.hpp>
 #endif
 
 #ifdef _WIN32
@@ -1749,7 +1751,7 @@ int ContourApp::keeperAction(DaemonVerbOptions const& options)
                                                                        : std::filesystem::path {});
     return runKeeperVerb(KeeperVerbInputs { .daemonImage = std::move(running.executable),
                                             .launch = launch,
-                                            .environment = processEnvironmentEntries(),
+                                            .environment = vthost::keeper::processEnvironmentEntries(),
                                             .policy = hostConfig->daemon.value().keeper.restartPolicy,
                                             .restartImages = std::move(restartImages) },
                          cerr);

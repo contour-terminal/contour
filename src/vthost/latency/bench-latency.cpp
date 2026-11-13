@@ -6,12 +6,17 @@
 #include <core/Environment.hpp>
 #include <core/cli/App.hpp>
 #include <core/cli/CLI.hpp>
+#include <core/platform/Clock.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <iostream>
+#include <iterator>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -23,6 +28,13 @@
 #include <vthost/latency/E2eBench.hpp>
 #include <vthost/latency/EchoChild.hpp>
 #include <vthost/latency/HeadlessBench.hpp>
+
+#ifndef _WIN32
+    #include <vthost/keeper/KeeperProcess.hpp>
+    #include <vthost/keeper/PosixPorts.hpp>
+    #include <vthost/keeper/UniqueFd.hpp>
+    #include <vthost/keeperlink/KeeperAttachment.hpp>
+#endif
 
 namespace CLI = core::cli;
 using namespace std::string_literals;
@@ -60,6 +72,12 @@ class BenchLatency final: public core::cli::App
         auto const keysOption =
             CLI::Option { .name = "keys", .v = CLI::Value { 50u }, .helpText = "Measured keys per launch." };
 
+        // CLI-boundary booleans: HeadlessOptions receives it as DaemonKeeping, serve() switches on it.
+        auto const keeperOption =
+            CLI::Option { .name = "keeper",
+                          .v = CLI::Value { false },
+                          .helpText = "Runs the daemon behind a PTY keeper, which parents it and every "
+                                      "shell, as `contour daemon` does." };
         auto const mixedOption = CLI::Option {
             .name = "mixed",
             .v = CLI::Value { false },
@@ -86,6 +104,11 @@ class BenchLatency final: public core::cli::App
                           .placeholder = "WORKLOAD" },
             secondsOption,
             mixedOption,
+            keeperOption,
+            CLI::Option { .name = "behind-keeper",
+                          .v = CLI::Value { false },
+                          .helpText = "Serves as the daemon a `keeper` started, on the channel it inherited "
+                                      "(internal)." },
         };
         auto const headlessOptions = CLI::OptionList {
             runsOption,
@@ -103,6 +126,7 @@ class BenchLatency final: public core::cli::App
                           .v = CLI::Value { false },
                           .helpText = "Opens a tab every second while a pane floods `ascii` for `seconds`; "
                                       "reports each tab's time to its prompt and the flood's MiB/s." },
+            keeperOption,
             recordOption,
         };
         // The three flags are CLI-boundary booleans; runE2eBench() receives them as enums.
@@ -180,6 +204,33 @@ class BenchLatency final: public core::cli::App
         return vthost::latency::runFloodChild(workload, seconds);
     }
 
+    /// @return What `serve`'s options make of the echo child its sessions run: `mixed`, and the flood.
+    [[nodiscard]] std::vector<std::string> childArguments() const
+    {
+        auto arguments = std::vector<std::string> {};
+        if (parameters().boolean("bench-latency.serve.mixed"))
+            arguments.emplace_back("mixed");
+        if (auto const workload = parameters().str("bench-latency.serve.flood"); !workload.empty())
+            arguments.insert(arguments.end(),
+                             { "flood",
+                               workload,
+                               "seconds",
+                               std::to_string(parameters().uint("bench-latency.serve.seconds")) });
+        return arguments;
+    }
+
+    /// @param role The option that says which part the started process plays.
+    /// @return This process's `serve` arguments, the keeper's own option replaced by @p role: what the daemon
+    ///         behind a keeper is started with.
+    [[nodiscard]] std::vector<std::string> serveArgumentsFor(std::string_view role) const
+    {
+        auto arguments =
+            std::vector<std::string> { "serve", "socket", parameters().str("bench-latency.serve.socket") };
+        std::ranges::move(childArguments(), std::back_inserter(arguments));
+        arguments.emplace_back(role);
+        return arguments;
+    }
+
     int serve()
     {
         auto const self = vtpty::currentExecutablePath();
@@ -188,23 +239,67 @@ class BenchLatency final: public core::cli::App
             std::cerr << "bench-latency: cannot find its own executable\n";
             return EXIT_FAILURE;
         }
+        if (parameters().boolean("bench-latency.serve.keeper"))
+        {
+#ifdef _WIN32
+            std::cerr << "bench-latency: `keeper` needs the PTY keeper, which this platform does not have\n";
+            return EXIT_FAILURE;
+#else
+            return keep(*self);
+#endif
+        }
         auto config = vthost::DaemonConfig {};
         config.instance = vthost::drawDaemonInstance();
         config.socketPath = parameters().str("bench-latency.serve.socket");
         auto arguments = std::vector<std::string> { "echo-child" };
-        if (parameters().boolean("bench-latency.serve.mixed"))
-            arguments.push_back("mixed");
-        if (auto const workload = parameters().str("bench-latency.serve.flood"); !workload.empty())
-            arguments.insert(arguments.end(),
-                             { "flood",
-                               workload,
-                               "seconds",
-                               std::to_string(parameters().uint("bench-latency.serve.seconds")) });
+        std::ranges::move(childArguments(), std::back_inserter(arguments));
         config.shell = vthost::latency::benchExecInfo(*self, std::move(arguments));
         config.executablePath = *self;
         config.lifecycle = vthost::DaemonLifecycle::Persistent;
+#ifndef _WIN32
+        if (parameters().boolean("bench-latency.serve.behind-keeper"))
+        {
+            auto const clock = core::platform::SteadyClock {};
+            auto attachment = vthost::keeperlink::attachToKeeper(
+                vthost::keeper::UniqueFd { vthost::keeper::DaemonChannelDescriptor },
+                clock,
+                vthost::keeperlink::AttachBound);
+            if (!attachment)
+            {
+                std::cerr << std::format("bench-latency: cannot reach the keeper: {}\n",
+                                         vthost::keeperlink::describe(attachment.error()));
+                return EXIT_FAILURE;
+            }
+            return vthost::runDaemon(config, std::nullopt, *std::move(attachment));
+        }
+#endif
         return vthost::runDaemon(config);
     }
+
+#ifndef _WIN32
+    /// Keeps the daemon: this process becomes the PTY keeper, which starts the daemon (this executable's
+    /// `serve … behind-keeper`) and forks every shell on its behalf. Blocks until the keeper ends.
+    /// @param self This executable, which the daemon runs as.
+    /// @return The keeper's exit status.
+    int keep(std::filesystem::path const& self)
+    {
+        auto const kept = vthost::keeper::runKeeperProcess(vthost::keeper::KeeperProcessConfig {
+            .daemonImage = self,
+            .daemonArguments = serveArgumentsFor("behind-keeper"),
+            .environment = vthost::keeper::processEnvironmentEntries(),
+            .socketPath = parameters().str("bench-latency.serve.socket"),
+            .launchOptions = {},
+            .policy = {},
+            .images = nullptr,
+        });
+        if (!kept)
+        {
+            std::cerr << std::format("bench-latency: {}\n", vthost::keeper::describe(kept.error()));
+            return EXIT_FAILURE;
+        }
+        return *kept;
+    }
+#endif
 
     int headless()
     {
@@ -220,6 +315,9 @@ class BenchLatency final: public core::cli::App
                 .tabs = parameters().boolean("bench-latency.headless.tabs")
                             ? vthost::latency::TabLoad::EverySecond
                             : vthost::latency::TabLoad::None,
+                .keeping = parameters().boolean("bench-latency.headless.keeper")
+                               ? vthost::latency::DaemonKeeping::Keeper
+                               : vthost::latency::DaemonKeeping::Plain,
                 .executable = std::nullopt,
                 .record = recordPath(parameters().str("bench-latency.headless.record")),
             },

@@ -66,6 +66,9 @@ the pacing back on.
 bench-latency headless                       # 10 runs of 50 keys per mode
 bench-latency headless runs 20 keys 100 record latency-headless.tsv
 bench-latency headless workload ascii seconds 3   # throughput instead of keystrokes
+bench-latency headless mixed seconds 60          # keys in one pane while another floods `ascii`
+bench-latency headless runs 20 keys 100 keeper   # the daemon behind a PTY keeper, as `contour daemon` runs it
+bench-latency headless tabs seconds 30           # a tab a second while a pane floods: each tab's time to its prompt
 
 # With the real GUI: `contour terminal` against `contour client`. Needs a display.
 bench-latency e2e contour PATH-TO-contour gate
@@ -160,3 +163,62 @@ change: 829 M instructions against 846 M, with `streamSnapshots` at 37 % and `bu
 and no new hot spot.
 
 The keystroke gate was rerun with the fix; that run is the `257505a7` row of the results table above.
+
+### The keeper
+
+`contour daemon` runs the daemon behind a PTY keeper (see [the internals page](vthost.md#the-keeper)); the
+keeper forks every shell, so creating a session costs one round trip over its channel, and the daemon
+still reads and writes each PTY itself.
+
+Measured on 2026-11-12, Fedora 44, Linux 7.2.13, AMD Ryzen 9 9950X3D (32 threads), clang-release. *Master* is
+`9bcacb58` carrying the same bench code and the PTY resize fix (`vtpty: resize a PTY under the lock its close
+takes`), so that both trees differ only by the branch; *keeper* is the branch with `keeper`. Runs are paired
+in ABBA order (master, keeper, keeper, master, …) so that run order cancels out, each block under the build
+lock. The machine was not idle: other sessions' tests and builds, and later a game, kept the 1-minute load
+between 0.3 and 13 (mostly 2–7; per-run figures are logged with the raw results). *Noise* is master's
+(p90 − p10) / median; *worse/better* counts the pairs, and *p* is a two-sided sign test over them.
+
+| Measure (pairs) | Master | Keeper | Δ | Master noise | Worse / better | p |
+| --- | --- | --- | --- | --- | --- | --- |
+| `runs 10 keys 100`, keystroke p50 (20) | 112.5 µs | 121.6 µs | +8.1% | 18.6% | 16 / 4 | 0.012 |
+| `runs 10 keys 100`, keystroke p99 (20) | 215.5 µs | 224.9 µs | +4.4% | 161% | 13 / 7 | 0.26 |
+| `runs 10 keys 100`, startup p50 (20) | 4.61 ms | 4.95 ms | +0.34 ms | 21.5% | 16 / 4 | 0.012 |
+| in-process control: keystroke p50 (20) | 67.1 µs | 69.8 µs | +4.2% | 23.0% | 13 / 7 | 0.26 |
+| in-process control: startup p50 (20) | 4.23 ms | 4.51 ms | +6.6% | 19.8% | 14 / 6 | 0.12 |
+| `mixed seconds 60 runs 1`, keystroke p50 (20) | 94.5 µs | 93.0 µs | −1.6% | 65.8% | 9 / 11 | 0.82 |
+| `mixed seconds 60 runs 1`, flood MiB/s (20) | 339.1 | 336.4 | −0.8% | 4.2% | 14 / 5 | 0.064 |
+| `workload ascii seconds 60`, MiB/s (20) | 343.6 | 341.6 | −0.6% | 7.0% | 14 / 6 | 0.12 |
+| in-process control: ascii MiB/s (20) | 360.5 | 353.9 | −1.8% | 8.0% | 15 / 5 | 0.041 |
+
+**The idle keystroke median is consistently worse on the branch**: +9 µs, in 16 of 20 pairs (p = 0.012). It is
+not the keeper's doing. The same branch binary run plain and with `keeper`, 20 ABBA pairs, shows no keystroke
+difference (p50 +4.7%, 11 / 9, p = 0.82; p99 −1.3%, 9 / 11), and callgrind of the plain daemon under 200 typed
+keys counts the same work on both trees (loop thread 26.00 M against 26.02 M instructions, pump thread 2.21 M
+against 2.16 M). What separates the trees is the rest of the branch: the in-process leg, which runs no daemon
+and no keeper, moved +4.2% in the same pairs. Session creation does carry the keeper: startup is +0.34 ms
+against master, and +0.41 ms (+8.8%) behind the keeper against the same binary run plain, inside the +10 ms
+budget.
+
+**Loop-thread terminal lock.** `Terminal::_stateMutex` is a `TracyLockable`; Tracy builds of both trees
+(`CONTOUR_TRACY=ON`) ran `bench-latency headless tabs seconds 10` — a tab opened every second while the
+first pane floods `ascii` — five ABBA pairs, the daemon's trace reduced to every hold of the lock on its loop
+(main) thread. Median of the five runs' p99: master 0.51 µs, keeper 0.47 µs (worse in 0 of 5 pairs; one
+tie); median hold 0.04 µs on both; the longest single hold 1.7 ms on both. The session's pump thread holds it
+far longer (p99 ≈ 110 µs on both). In steady state the keeper takes the terminal lock nowhere; a daemon
+recovered after a crash takes it once per restored session to seed its history (`HistorySeed`). A
+Tracy-built keeper runs Tracy's threads, which the keeper refuses (it must be single-threaded); for these
+runs only, a local, uncommitted change let it start anyway.
+
+**Session creation under a flood.** `bench-latency headless tabs seconds 30 runs 1` opens a tab every second
+while the first pane floods `ascii`, and times each from its request to its prompt; 10 ABBA pairs of release
+builds. Behind the keeper the median tab takes 7.21 ms against master's 6.86 ms (+0.35 ms, slower in 9 of 10
+pairs, p = 0.021) and the slowest 23.5 ms against 20.3 ms (10 / 0); the flood meanwhile runs 2.5% slower
+(331.5 against 340.1 MiB/s, 10 / 0, p = 0.002). Against the same branch binary run plain (10 pairs), the
+keeper costs a consistent +0.24 ms (+3.4%, 10 / 0) per tab — its spawn round trip — and nothing on the
+flood (+0.2%, 7 / 3, p = 0.34): the flood's 2.5% is the branch's, not the keeper's, like the in-process
+control's 1.8% above.
+
+Callgrind of the daemon alone serving a 40 s `ascii` flood (about 68 MiB at the 1.7 MiB/s it manages under
+callgrind) found the loop thread at 11.90 G instructions on master and 11.83 G behind the keeper, the
+session's pump thread at 2.95 G and 2.98 G; the only symbols the keeper adds on those threads are
+`KeeperChild`'s forwarding to its PTY and the heartbeat, under 0.01% of either.

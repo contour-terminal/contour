@@ -5,12 +5,15 @@
     #include <sys/prctl.h>
 #endif
 
+#include <vtpty/UnixUtils.hpp>
+
 #include <core/log/LogStore.hpp>
 
 #include <charconv>
 #include <csignal>
 #include <fstream>
 #include <memory>
+#include <ranges>
 #include <string>
 #include <utility>
 
@@ -47,6 +50,13 @@ namespace
         return "ended";
     }
 } // namespace
+
+std::vector<std::string> processEnvironmentEntries()
+{
+    return std::ranges::to<std::vector>(
+        vtpty::util::environmentEntries()
+        | std::views::transform([](std::string_view entry) { return std::string { entry }; }));
+}
 
 std::optional<std::size_t> runningThreadCount()
 {

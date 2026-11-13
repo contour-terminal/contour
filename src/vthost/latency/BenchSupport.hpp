@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <iosfwd>
@@ -80,6 +81,9 @@ class BenchProcess
 
     /// @return Whether the process still runs.
     [[nodiscard]] bool isRunning() const;
+
+    /// @return The process's id; nullopt once it was reaped.
+    [[nodiscard]] std::optional<std::int64_t> processId() const;
 
     /// Waits for the process to end.
     /// @param timeout How long to wait before giving up.

@@ -29,10 +29,6 @@ namespace contour::cli
 /// keeper::DaemonChannelDescriptor).
 [[nodiscard]] std::vector<std::string> keeperServeArguments();
 
-/// @return This process's environment, each variable as `NAME=value`: what the keeper hands the daemon and
-///         every shell it starts.
-[[nodiscard]] std::vector<std::string> processEnvironmentEntries();
-
 /// What `contour daemon` keeps a daemon with.
 struct KeeperVerbInputs
 {

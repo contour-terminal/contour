@@ -45,6 +45,10 @@ struct KeeperProcessConfig
     std::unique_ptr<RestartImages> images = nullptr;
 };
 
+/// @return This process's environment, each variable as `NAME=value`: what a keeper hands its daemon and
+///         every shell it starts.
+[[nodiscard]] std::vector<std::string> processEnvironmentEntries();
+
 /// @return How many threads this process runs, where the platform says (Linux: `/proc/self/status`);
 ///         nullopt where it cannot be told.
 [[nodiscard]] std::optional<std::size_t> runningThreadCount();

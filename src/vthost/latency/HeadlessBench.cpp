@@ -649,20 +649,43 @@ namespace
         return true;
     }
 
-    /// @param daemon The daemon a run left a session behind in, or that answered no status after it.
-    /// @return Why the daemon is not empty: still hosting a session, or gone.
-    [[nodiscard]] std::string describeLeftover(BenchProcess& daemon)
+    /// @param started The process the bench started: the daemon, or the keeper that keeps it.
+    /// @param keeping Which of the two @p started is.
+    /// @return Why the daemon is not empty: still hosting a session, or the process the bench started gone.
+    [[nodiscard]] std::string describeLeftover(BenchProcess& started, DaemonKeeping keeping)
     {
-        auto const ended = daemon.waitFor(0ms);
+        auto const ended = started.waitFor(0ms);
         if (!ended)
             return "bench-latency: the daemon still hosts a session after the run\n";
+        auto const* const name = keeping == DaemonKeeping::Keeper ? "the daemon's keeper" : "the daemon";
         if (auto const* const signal = std::get_if<vtpty::Process::SignalExit>(&*ended))
-            return std::format("bench-latency: the daemon died during the run, of signal {}\n",
-                               signal->signum);
-        return std::format("bench-latency: the daemon ended during the run, with status {}\n",
+            return std::format("bench-latency: {} died during the run, of signal {}\n", name, signal->signum);
+        return std::format("bench-latency: {} ended during the run, with status {}\n",
+                           name,
                            std::get<vtpty::Process::NormalExit>(*ended).exitCode);
     }
 } // namespace
+
+std::vector<std::string> daemonServeArguments(HeadlessOptions const& options,
+                                              std::filesystem::path const& socketPath)
+{
+    // The daemon's sessions run the same child the in-process leg does.
+    auto arguments = std::vector<std::string> { "serve", "socket", socketPath.string() };
+    if (!options.workload.empty())
+        arguments.insert(
+            arguments.end(),
+            { "flood", options.workload, "seconds", std::to_string(options.floodDuration.count()) });
+    if (options.keystrokeLoad == KeystrokeLoad::FloodedPane || options.tabs == TabLoad::EverySecond)
+        arguments.insert(arguments.end(),
+                         { "mixed",
+                           "flood",
+                           std::string(MixedFloodWorkload),
+                           "seconds",
+                           std::to_string(options.floodDuration.count()) });
+    if (options.keeping == DaemonKeeping::Keeper)
+        arguments.emplace_back("keeper");
+    return arguments;
+}
 
 int runHeadlessBench(HeadlessOptions const& options, std::ostream& out, std::ostream& err)
 {
@@ -707,6 +730,14 @@ int runHeadlessBench(HeadlessOptions const& options, std::ostream& out, std::ost
         return EXIT_FAILURE;
     }
 
+#ifdef _WIN32
+    if (options.keeping == DaemonKeeping::Keeper)
+    {
+        err << "bench-latency: `keeper` needs the PTY keeper, which this platform does not have\n";
+        return EXIT_FAILURE;
+    }
+#endif
+
     auto self = options.executable;
     if (!self)
         if (auto const found = vtpty::currentExecutablePath())
@@ -724,20 +755,7 @@ int runHeadlessBench(HeadlessOptions const& options, std::ostream& out, std::ost
     }
     auto const socketPath = scratch->path() / "daemon";
 
-    // The daemon's sessions run the same child the in-process leg does.
-    auto serveArguments = std::vector<std::string> { "serve", "socket", socketPath.string() };
-    if (!options.workload.empty())
-        serveArguments.insert(
-            serveArguments.end(),
-            { "flood", options.workload, "seconds", std::to_string(options.floodDuration.count()) });
-    if (daemonOnly)
-        serveArguments.insert(serveArguments.end(),
-                              { "mixed",
-                                "flood",
-                                std::string(MixedFloodWorkload),
-                                "seconds",
-                                std::to_string(options.floodDuration.count()) });
-    auto daemon = BenchProcess::start(*self, std::move(serveArguments));
+    auto daemon = BenchProcess::start(*self, daemonServeArguments(options, socketPath));
     if (!daemon)
     {
         err << std::format("bench-latency: {}\n", daemon.error());
@@ -765,7 +783,7 @@ int runHeadlessBench(HeadlessOptions const& options, std::ostream& out, std::ost
                 failed |= !take(runDaemonLeg(socketPath, options), "daemon", viaDaemon, err);
                 if (!awaitEmptyDaemon(socketPath))
                 {
-                    err << describeLeftover(**daemon);
+                    err << describeLeftover(**daemon, options.keeping);
                     failed = true;
                 }
             }

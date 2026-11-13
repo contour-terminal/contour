@@ -6,23 +6,11 @@
 #include <cstdlib>
 #include <format>
 #include <ostream>
-#include <ranges>
 #include <utility>
 
 #ifndef _WIN32
-    #include <unistd.h>
-
     #include <vthost/keeper/KeeperProcess.hpp>
     #include <vthost/keeper/PosixPorts.hpp>
-
-    // POSIX requires no header to declare `environ`; src/vtpty/Process_unix.cpp explains the per-platform
-    // story.
-    #ifdef __APPLE__
-        #include <crt_externs.h>
-        #define environ (*_NSGetEnviron())
-    #elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-extern "C" char** environ;
-    #endif
 #endif
 
 namespace contour::cli
@@ -34,17 +22,6 @@ std::vector<std::string> keeperServeArguments()
     return { "daemon",
              "keeper-serve",
              std::format("--keeper-channel={}", vthost::keeper::DaemonChannelDescriptor) };
-}
-
-std::vector<std::string> processEnvironmentEntries()
-{
-    auto entries = std::vector<std::string> {};
-    auto const set = [](char* const* entry) {
-        return *entry != nullptr;
-    };
-    for (auto const* const* entry: std::views::iota(environ) | std::views::take_while(set))
-        entries.emplace_back(*entry);
-    return entries;
 }
 
 int runKeeperVerb(KeeperVerbInputs inputs, std::ostream& errors)

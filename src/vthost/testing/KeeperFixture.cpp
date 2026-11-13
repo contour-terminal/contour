@@ -71,17 +71,6 @@ namespace
         return *std::move(path);
     }
 
-    [[nodiscard]] std::vector<std::string> processEnvironment()
-    {
-        auto environment = std::vector<std::string> {};
-        auto const set = [](char* const* entry) {
-            return *entry != nullptr;
-        };
-        for (auto const* const* entry: std::views::iota(environ) | std::views::take_while(set))
-            environment.emplace_back(*entry);
-        return environment;
-    }
-
     /// @return A connected or listening AF_UNIX stream socket on @p path; none where it could not be made.
     [[nodiscard]] keeper::UniqueFd unixSocket(std::string const& path,
                                               int (*act)(int, sockaddr const*, socklen_t))
@@ -327,7 +316,7 @@ namespace
             .daemonArguments = { std::string { ServeMode } },
             .environment =
                 [] {
-                    auto environment = processEnvironment();
+                    auto environment = keeper::processEnvironmentEntries();
                     environment.push_back(std::format("{}=1", KeeperOnlyVariable));
                     return environment;
                 }(),

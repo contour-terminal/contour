@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace vthost::latency
 {
@@ -32,6 +33,13 @@ enum class TabLoad : uint8_t
                  ///< the run reports each tab's time from its request to its prompt.
 };
 
+/// Who parents the daemon a headless run measures, and its shells.
+enum class DaemonKeeping : uint8_t
+{
+    Plain = 0, ///< The daemon runs on its own, the parent of every shell.
+    Keeper,    ///< A PTY keeper parents the daemon and every shell, as `contour daemon` does.
+};
+
 /// The Workloads row the flooded pane of a KeystrokeLoad::FloodedPane run writes.
 inline constexpr std::string_view MixedFloodWorkload = "ascii";
 
@@ -47,10 +55,17 @@ struct HeadlessOptions
     KeystrokeLoad keystrokeLoad = KeystrokeLoad::Idle;
     std::chrono::seconds floodDuration { 3 }; ///< How long a flood lasts.
     TabLoad tabs = TabLoad::None;             ///< Whether tabs are opened during a flood; excludes the rest.
+    DaemonKeeping keeping = DaemonKeeping::Plain; ///< Whether the daemon runs behind a PTY keeper.
     /// The executable whose `echo-child` and `serve` verbs the legs run; the running one if absent.
     std::optional<std::filesystem::path> executable;
     std::optional<std::filesystem::path> record; ///< Where to write the TSV record.
 };
+
+/// @param options How the benchmark runs.
+/// @param socketPath The socket the daemon serves on.
+/// @return The arguments of the `serve` verb the benchmark starts its daemon with.
+[[nodiscard]] std::vector<std::string> daemonServeArguments(HeadlessOptions const& options,
+                                                            std::filesystem::path const& socketPath);
 
 /// Runs the benchmark and prints its table.
 /// @param options How it runs.
