@@ -3,13 +3,17 @@
 
 #include <core/Utf8Path.hpp>
 #include <core/net/EventLoop.hpp>
+#include <core/net/IListener.hpp>
 #include <core/net/IoBackend.hpp>
 #include <core/net/Sockets.hpp>
+#include <core/net/WithTimeout.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -31,6 +35,7 @@
 #include <vthost/DaemonSpawn.hpp>
 #include <vthost/DaemonStarter.hpp>
 #include <vthost/NativeSession.hpp>
+#include <vthost/PlatformStreams.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/StdioAttach.hpp>
@@ -119,6 +124,15 @@ core::async::Task<void> serveNative(core::net::EventLoop* loop,
     co_await session.run();
 }
 
+/// Tells @p listening that the loop serves. Spawned after the acceptor's serve(), it runs once that flow has
+/// suspended in its first accept: the ready queue is first-in first-out, and whenAny() starts its children
+/// inline.
+core::async::Task<void> announceServing(std::promise<std::optional<std::string>>* listening)
+{
+    listening->set_value(std::nullopt);
+    co_return;
+}
+
 /// Lets the loop run until @p stop is requested.
 core::async::Task<void> idleUntil(core::net::EventLoop* loop, std::stop_token stop)
 {
@@ -131,6 +145,12 @@ class ServedDaemon
 {
   public:
     /// Binds the native socket beside @p controlSocket and returns once it accepts.
+    ///
+    /// "Accepts" is an accept PARKED on the listener, not just a bound one: a client could otherwise connect
+    /// into the backlog, and half-close, before the loop has taken its first turn. On Windows, an AF_UNIX
+    /// half-close made before the AcceptEx is posted can be lost to the accepted socket, so the session would
+    /// wait for a hello that never comes, and the client for the session to end (@see the case "a client's
+    /// half-close made before the daemon accepts reaches it").
     explicit ServedDaemon(fs::path const& controlSocket)
     {
         auto listening = std::promise<std::optional<std::string>> {};
@@ -165,7 +185,7 @@ class ServedDaemon
                                                  return serveNative(&loop, &host, id, std::move(connection));
                                              } };
             loop.spawn(acceptor.serve());
-            listening.set_value(std::nullopt);
+            loop.spawn(announceServing(&listening));
             loop.blockOn(idleUntil(&loop, std::move(stop)));
             acceptor.close();
         } };
@@ -208,6 +228,40 @@ class ServedDaemon
             pending.erase(pending.begin(), pending.begin() + static_cast<std::ptrdiff_t>(frame->consumed));
         }
     }
+}
+
+/// What the accepted end of a connection read first.
+enum class FirstRead : std::uint8_t
+{
+    Nothing = 0, ///< Nothing within the deadline: the read is still parked.
+    EndOfStream, ///< The peer's half-close.
+    Bytes,       ///< Data.
+    Failed,      ///< The accept or the read failed.
+};
+
+/// Accepts one connection on @p listener, and reads it once, for at most @p deadline.
+core::async::Task<void> acceptAndReadOnce(core::net::EventLoop* loop,
+                                          core::net::IListener* listener,
+                                          std::chrono::milliseconds deadline,
+                                          FirstRead* result)
+{
+    *result = FirstRead::Failed;
+    auto accepted = co_await listener->accept();
+    if (!accepted)
+        co_return;
+    auto* const socket = accepted->get();
+    auto const read = [](core::net::ISocket* socket, FirstRead* result) -> core::async::Task<void> {
+        auto buffer = std::array<std::byte, 16> {};
+        auto const count = co_await socket->read(buffer);
+        if (!count)
+            *result = FirstRead::Failed;
+        else if (*count == 0)
+            *result = FirstRead::EndOfStream;
+        else
+            *result = FirstRead::Bytes;
+    };
+    *result = FirstRead::Nothing;
+    std::ignore = co_await core::net::withTimeout(loop, read(socket, result), deadline);
 }
 
 } // namespace
@@ -319,4 +373,29 @@ TEST_CASE("stdio attach starts the daemon through the starter when none serves",
             std::string_view { "contour-stdio 1 error: daemon did not start within 5 seconds.\n" };
         CHECK(readText(*client.b, expected.size() + 1) == expected);
     }
+}
+
+// What the stdio relay rests on: the daemon learns that the client is gone from the client's half-close, and
+// ends the connection, which ends the relay. Here the half-close is made while the connection still waits in
+// the listener's backlog, before any accept is posted -- the order a scheduler can produce whenever a client
+// is quicker than the daemon's first loop turn. A daemon that never sees that half-close would leave the
+// client waiting for ever. [!mayfail] while it is not known to hold on Windows' AF_UNIX: it reports there,
+// rather than failing the suite. @see ServedDaemon, which no longer lets its own cases reach this order.
+TEST_CASE("a client's half-close made before the daemon accepts reaches it",
+          "[vthost][stdio][afunix][!mayfail]")
+{
+    auto const directory = SocketDirectory {};
+    auto const path = vthost::nativeSocketPath(directory.controlSocket());
+    auto const backend = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *backend };
+    auto listener = core::net::listenUnix(loop, core::pathToUtf8(path));
+    REQUIRE(listener.has_value());
+
+    auto const client = vthost::connectUnixStream(path);
+    REQUIRE(client.has_value());
+    (*client)->closeWrite(); // into the backlog: nothing has accepted it yet
+
+    auto firstRead = FirstRead::Failed;
+    loop.blockOn(acceptAndReadOnce(&loop, listener->get(), std::chrono::seconds { 5 }, &firstRead));
+    CHECK(firstRead == FirstRead::EndOfStream);
 }
