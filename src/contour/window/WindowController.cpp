@@ -1012,16 +1012,11 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
         case Roles::IsActiveRole: return row == activeTabIndex();
         case Roles::PaneCountRole: return tab != nullptr ? tab->paneCount() : 1;
         case Roles::ZoomedRole: return tab != nullptr && tab->isZoomed();
-        // resolvedProgress() rather than progress(): this runs on the GUI thread, and _progress is
-        // written on the parser thread under the terminal's state mutex. Both roles read it through
-        // ONE lock each -- that mutex is the one the parser holds across a whole writeToScreen(), so
-        // asking twice for a two-byte answer would block the strip's repaint behind a busy writer
-        // twice over. Same "ask once" reasoning as ColorRole above.
         case Roles::ProgressStateRole:
         case Roles::ProgressPercentageRole: {
             if (session == nullptr)
                 return 0;
-            auto const progress = session->terminal().resolvedProgress();
+            auto const progress = _manager.tabProgress(session->modelSessionId());
             return static_cast<Roles>(role) == Roles::ProgressStateRole
                        ? static_cast<int>(std::to_underlying(progress.state))
                        : static_cast<int>(progress.percentage);

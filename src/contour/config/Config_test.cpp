@@ -88,6 +88,7 @@ early_exit_threshold: 11
 live_config: true
 reflow_on_resize: false
 notification_close_timeout: 2500
+progress_show_delay: 1000
 profiles:
     main:
         shell: /bin/sh
@@ -98,6 +99,8 @@ profiles:
     CHECK(config.live.value() == true);
     CHECK(config.reflowOnResize.value() == false);
     CHECK(config.notificationCloseTimeout.value() == std::chrono::milliseconds { 2500 });
+    CHECK(config.progressShowDelay.value() == std::chrono::milliseconds { 1000 });
+    CHECK(contour::config::defaultConfigString().contains("progress_show_delay: 500\n"));
 }
 
 TEST_CASE("Config: renderer.gpu loads, and a bad value falls back to auto", "[config][gpu]")

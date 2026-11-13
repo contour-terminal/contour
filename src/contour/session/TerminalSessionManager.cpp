@@ -148,6 +148,13 @@ TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app,
             });
     _taskbarProgressTimer.setSingleShot(true);
     connect(&_taskbarProgressTimer, &QTimer::timeout, this, &TerminalSessionManager::refreshTaskbarProgress);
+    _progressRevealTimer.setSingleShot(true);
+    _progressRevealTimer.setTimerType(Qt::PreciseTimer);
+    connect(&_progressRevealTimer, &QTimer::timeout, this, [this] {
+        scheduleProgressReveal();
+        refreshTabProgress();
+        scheduleTaskbarProgress();
+    });
     // Long enough to take in every notification of one save, short enough to read as immediate.
     constexpr auto ConfigReloadCoalescing = std::chrono::milliseconds { 100 };
     _configReloadTimer.setSingleShot(true);
@@ -2380,6 +2387,8 @@ std::expected<void, std::string> TerminalSessionManager::reloadAllSessions()
                         controller->updateSizeHintsFor(
                             *display, window::WindowController::HintApplyMode::RespectWindowState);
         }
+    scheduleProgressReveal();
+    refreshTabProgress();
     scheduleTaskbarProgress();
     return {};
 }
@@ -3025,7 +3034,10 @@ void TerminalSessionManager::activePaneChanged(vtworkspace::TabId tab, vtworkspa
         _keyboardPaneMove == tab ? window::PaneActivation::Keyboard : window::PaneActivation::Pointer;
     if (auto* c = controllerDisplaying(_model->workspaceOfTab(tab)))
     {
-        c->notifyTabRowChanged(tab, { window::WindowController::Roles::TitleRole });
+        c->notifyTabRowChanged(tab,
+                               { window::WindowController::Roles::TitleRole,
+                                 window::WindowController::Roles::ProgressStateRole,
+                                 window::WindowController::Roles::ProgressPercentageRole });
         c->notifyActivePaneChanged();
         c->emitActiveSessionChanged();
         // Move terminal focus to the newly active pane's leaf (symmetric out/in via setFocusedSession).
@@ -3222,14 +3234,48 @@ void TerminalSessionManager::refreshTabProgressForSession(vtworkspace::SessionId
         c->notifyTabRowChanged(tab->id(),
                                { window::WindowController::Roles::ProgressStateRole,
                                  window::WindowController::Roles::ProgressPercentageRole });
+}
 
-    // The window-level aggregate the OS taskbar would show. Fed here, on the GUI thread, because
-    // this is the one place a progress change is already known to have landed; the router decides
-    // what several sessions reduce to and when a report goes stale, and a platform backend attaches
-    // to its answer. Kept current even with no backend present, so adding one is a sink, not a
-    // rewiring. @see platform::TaskbarProgressRouter.
-    if (auto* s = sessionForId(session))
-        recordProgress(session, s->terminal().resolvedProgress(), _app.terminalClocks().steady.now());
+void TerminalSessionManager::recordProgress(vtworkspace::SessionId session,
+                                            vtbackend::Progress progress,
+                                            std::chrono::steady_clock::time_point now)
+{
+    if (sessionForId(session) == nullptr)
+        return;
+    _taskbarProgress.onProgress(session.value, progress, now);
+    scheduleProgressReveal();
+    refreshTabProgressForSession(session);
+    scheduleTaskbarProgress();
+}
+
+vtbackend::Progress TerminalSessionManager::tabProgress(vtworkspace::SessionId session) const
+{
+    return _taskbarProgress.progressFor(
+        session.value, _app.terminalClocks().steady.now(), _app.config().progressShowDelay.value());
+}
+
+void TerminalSessionManager::scheduleProgressReveal()
+{
+    auto const now = _app.terminalClocks().steady.now();
+    if (auto const reveal = _taskbarProgress.nextReveal(now, _app.config().progressShowDelay.value()))
+    {
+        auto const wait = std::chrono::ceil<std::chrono::milliseconds>(*reveal - now);
+        // Keep earlier wakeups: another tab may already be due to repaint.
+        if (!_progressRevealTimer.isActive() || wait < _progressRevealTimer.remainingTimeAsDuration())
+            _progressRevealTimer.start(wait);
+    }
+}
+
+void TerminalSessionManager::refreshTabProgress()
+{
+    for (auto* const controller: _controllersByWindow | std::views::values)
+        if (auto const* workspace = _model->workspace(controller->displayedWorkspace()))
+            for (auto const row: std::views::iota(0, workspace->tabCount()))
+                if (auto const* tab = workspace->tabAt(row))
+                    controller->notifyTabRowChanged(
+                        tab->id(),
+                        { window::WindowController::Roles::ProgressStateRole,
+                          window::WindowController::Roles::ProgressPercentageRole });
 }
 
 void TerminalSessionManager::refreshTabBadgeForSession(vtworkspace::SessionId session)
@@ -3452,7 +3498,8 @@ vthost::client::ConnectionState TerminalSessionManager::hostConnection(
 platform::TaskbarProgress TerminalSessionManager::taskbarProgress(
     std::chrono::steady_clock::time_point now) const
 {
-    return _taskbarProgress.resolve(now, _app.config().progressTimeout.value());
+    return _taskbarProgress.resolve(
+        now, _app.config().progressTimeout.value(), _app.config().progressShowDelay.value());
 }
 
 platform::TaskbarProgress TerminalSessionManager::taskbarProgress(
@@ -3468,7 +3515,8 @@ platform::TaskbarProgress TerminalSessionManager::taskbarProgress(
             return std::ranges::find(owned, _model->workspaceOfTab(found->second)) != owned.end();
         },
         now,
-        _app.config().progressTimeout.value());
+        _app.config().progressTimeout.value(),
+        _app.config().progressShowDelay.value());
 }
 
 void TerminalSessionManager::bindTaskbarWindow(window::WindowId window, QWindow& nativeWindow)

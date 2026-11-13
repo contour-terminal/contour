@@ -40,6 +40,7 @@ struct PixelReporting {};
 struct AccessibilityAnnouncements {};
 struct AccessibilityCaretReporting {};
 struct HyperlinkHoverTooltip {};
+struct ProgressShowDelay {};
 struct ProgressTimeout {};
 struct NotificationCloseTimeout {};
 struct TabBarPosition {};

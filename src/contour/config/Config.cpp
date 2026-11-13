@@ -1896,6 +1896,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("accessibility_announcements", c.accessibilityAnnouncements);
         loadFromEntry("accessibility_caret_reporting", c.accessibilityCaretReporting);
         loadFromEntry("hyperlink_hover_tooltip", c.hyperlinkHoverTooltip);
+        loadFromEntry("progress_show_delay", c.progressShowDelay);
         loadFromEntry("progress_timeout", c.progressTimeout);
         loadFromEntry("notification_close_timeout", c.notificationCloseTimeout);
         loadFromEntry("tab_bar_position", c.tabBarPosition);

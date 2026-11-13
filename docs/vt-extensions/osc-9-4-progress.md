@@ -79,6 +79,17 @@ printf '\033]9;4;0\033\\'
   implementing the same protocol may also display it. macOS overlays a bar on the application Dock
   icon, with red for errors, orange for paused work and a moving segment while busy.
 
+## Show delay
+
+The tab strip and desktop indicators wait 500 milliseconds before showing running or busy progress.
+If the application clears progress in that time, no bar appears. Percentage updates keep the
+original deadline. Paused and error states appear immediately. The status line shows progress as
+soon as it is reported.
+
+Change **Progress show delay** under **Settings → Appearance → Tab bar**, or set
+[`progress_show_delay`](../configuration/index.md#progress_show_delay) in milliseconds in
+`contour.yml`. Use `0` for immediate display.
+
 ## Withdrawing a stale indicator
 
 The terminal cannot tell a genuinely long operation from an application that died holding one, so by

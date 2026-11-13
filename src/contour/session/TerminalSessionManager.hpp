@@ -1345,11 +1345,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param session The session whose hosting tab should refresh its label.
     void refreshTabForSession(vtworkspace::SessionId session);
 
-    /// Refreshes only the progress roles of the tab hosting @p session, so the strip repaints its
-    /// progress indicator without re-expanding the tab label. No-op if no tab hosts @p session.
-    /// MUST be called on the GUI thread (it emits dataChanged on the owning controller).
-    /// @param session The session whose hosting tab should refresh its progress indicator.
-    void refreshTabProgressForSession(vtworkspace::SessionId session);
+    /// Returns OSC 9;4 progress currently visible on the tab strip for @p session. GUI thread.
+    [[nodiscard]] vtbackend::Progress tabProgress(vtworkspace::SessionId session) const;
 
     /// The program-status path (OSC 7501): recomputes @p session's own pane status
     /// (TerminalSession::setPaneProgramStatus) and repaints the badge of the tab hosting it, which pools the
@@ -1445,18 +1442,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param nativeWindow The Qt window backing it.
     void bindTaskbarWindow(window::WindowId window, QWindow& nativeWindow);
 
-    /// Records @p progress for @p session, for the taskbar aggregate above.
+    /// Records @p progress for @p session and refreshes its tab and desktop indicators. GUI thread.
     ///
     /// @param session The reporting session.
     /// @param progress What it reported.
-    /// @param now When it reported it; defaulted, and stated outright by a test.
+    /// @param now When it reported it.
     void recordProgress(vtworkspace::SessionId session,
                         vtbackend::Progress progress,
-                        std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now())
-    {
-        _taskbarProgress.onProgress(session.value, progress, now);
-        scheduleTaskbarProgress();
-    }
+                        std::chrono::steady_clock::time_point now);
 
     /// Sets an explicit @p title on the tab hosting @p session, through the authoritative SessionModel
     /// (which repaints the owning window's tab strip). Used by the tmux mirror to reflect a
@@ -2374,6 +2367,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// own -- both are supplied per call -- so nothing here can drift from the configured value.
     platform::TaskbarProgressRouter _taskbarProgress {};
     QTimer _taskbarProgressTimer;
+    QTimer _progressRevealTimer;
+
+    /// Arms a wakeup for the next progress reveal, including on systems without a taskbar sink.
+    void scheduleProgressReveal();
+    /// Refreshes the progress roles of all displayed tabs.
+    void refreshTabProgress();
+    /// Refreshes the progress roles of the tab hosting @p session.
+    void refreshTabProgressForSession(vtworkspace::SessionId session);
 
     /// Publishes current window aggregates and schedules the next expiry, using the injected clock.
     void refreshTaskbarProgress();

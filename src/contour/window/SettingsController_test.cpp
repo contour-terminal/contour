@@ -1264,6 +1264,18 @@ TEST_CASE("SettingsController: remember window position persists and resets", "[
     CHECK_FALSE(fx.cfg.rememberWindowPosition.value());
 }
 
+TEST_CASE("SettingsController: progress show delay applies and resets", "[settings][progress]")
+{
+    using namespace std::chrono_literals;
+    auto fx = Fixture("progress_show_delay: 1000\n");
+    CHECK(fx.cfg.progressShowDelay.value() == 1000ms);
+    CHECK_FALSE(fx.controller->setGlobalField("progress_show_delay", -1).has_value());
+    fx.commitGlobal("progress_show_delay", 0);
+    CHECK(fx.cfg.progressShowDelay.value() == 0ms);
+    fx.resetGlobal("progress_show_delay");
+    CHECK(fx.cfg.progressShowDelay.value() == 1000ms);
+}
+
 TEST_CASE("SettingsController: global overrides write settings.yml, apply, and reset", "[settings]")
 {
     auto fx = Fixture("default_profile: main\n"

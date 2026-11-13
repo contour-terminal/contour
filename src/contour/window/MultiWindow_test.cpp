@@ -233,7 +233,70 @@ TEST_CASE("unsupported taskbar adapters do not schedule updates", "[contour][mul
                            now);
     QCoreApplication::processEvents();
     CHECK(recording->windows.empty());
-    CHECK(manager.taskbarProgress(window.windowId, now).state == vtbackend::ProgressState::Normal);
+    CHECK(manager.taskbarProgress(window.windowId, now).state == vtbackend::ProgressState::Inactive);
+    CHECK(manager.taskbarProgress(window.windowId, now + std::chrono::milliseconds { 500 }).state
+          == vtbackend::ProgressState::Normal);
+}
+
+TEST_CASE("OSC progress reveals on the tab and taskbar only after the show delay",
+          "[contour][multiwindow][taskbar]")
+{
+    using namespace std::chrono_literals;
+    using Roles = contour::window::WindowController::Roles;
+    using vtbackend::ProgressState;
+    auto sink = std::make_unique<RecordingTaskbar>();
+    auto* recording = sink.get();
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>(),
+                nullptr,
+                nullptr,
+                nullptr,
+                TestApp::testHostIdentity(),
+                nullptr,
+                {},
+                std::move(sink));
+    app.app().config().progressShowDelay.value() = 20ms;
+    ScopedController window { app.manager() };
+    window->createNewTab();
+    auto& terminal = window->activeSession()->terminal();
+    auto const row = window->index(0, 0);
+    auto const tabState = [&] {
+        return static_cast<ProgressState>(
+            window->data(row, static_cast<int>(Roles::ProgressStateRole)).toInt());
+    };
+    auto const desktop = [&] {
+        return recording->windows.at(window.windowId.value);
+    };
+
+    terminal.writeToScreen("\033]9;4;3\033\\");
+    QCoreApplication::processEvents();
+    CHECK(tabState() == ProgressState::Inactive);
+    terminal.writeToScreen("\033]9;4;0\033\\");
+    QCoreApplication::processEvents();
+    app.steadyClock().advance(20ms);
+    CHECK(tabState() == ProgressState::Inactive);
+    REQUIRE(QTest::qWaitFor([&] { return recording->windows.contains(window.windowId.value); }, 1000));
+    CHECK(desktop().state == ProgressState::Inactive);
+
+    terminal.writeToScreen("\033]9;4;1;10\033\\");
+    QCoreApplication::processEvents();
+    app.steadyClock().advance(10ms);
+    terminal.writeToScreen("\033]9;4;1;40\033\\");
+    QCoreApplication::processEvents();
+    CHECK(tabState() == ProgressState::Inactive);
+    CHECK(desktop().state == ProgressState::Inactive);
+    auto rowChanged = QSignalSpy(window.controller, &contour::window::WindowController::dataChanged);
+    app.steadyClock().advance(10ms);
+    REQUIRE(QTest::qWaitFor([&] { return !rowChanged.empty() && desktop().state == ProgressState::Normal; },
+                            1000));
+    CHECK(tabState() == ProgressState::Normal);
+    CHECK(desktop().percentage == 40);
+
+    terminal.writeToScreen("\033]9;4;0\033\\\033]9;4;1;10\033\\");
+    QCoreApplication::processEvents();
+    CHECK(tabState() == ProgressState::Inactive);
+    terminal.writeToScreen("\033]9;4;2\033\\");
+    QCoreApplication::processEvents();
+    CHECK(tabState() == ProgressState::Error);
 }
 
 TEST_CASE("taskbar progress follows background panes across window moves and closure",
@@ -311,6 +374,7 @@ TEST_CASE("application taskbar progress combines windows without resetting repor
     auto* failed = windowA->activeSession();
     auto* running = windowB->activeSession();
     auto const now = app.steadyClock().now();
+    app.app().config().progressShowDelay.value() = std::chrono::milliseconds { 0 };
     app.app().config().progressTimeout.value() = std::chrono::milliseconds { 10 };
     manager.recordProgress(
         failed->modelSessionId(), { .state = vtbackend::ProgressState::Error, .percentage = 60 }, now);
