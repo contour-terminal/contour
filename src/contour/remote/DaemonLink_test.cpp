@@ -1883,6 +1883,42 @@ TEST_CASE("DaemonLink: a window switched back before the panes it left ended sho
     drainGuiEvents();
 }
 
+TEST_CASE("DaemonLink: a window switched to another workspace and back shows the tab it left active",
+          "[attach][link][switch]")
+{
+    auto daemon = DaemonFixture {};
+    auto const ids = seedWorkspaces(daemon, 2);
+    auto const pane = onlyPaneOf(daemon, ids[0]);
+    auto rig = LinkRig { daemon.endpoint(), {}, {}, selecting(ids[0]) };
+    auto& manager = rig.app.manager();
+    auto const boot = contour::test::ScopedController { manager };
+    REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
+    REQUIRE(waitUntil([&] { return rig.link->workspaceOf(boot.id) == ids[0]; }));
+    REQUIRE(waitUntil([&] { return !sessionsOf(manager, boot.id).empty(); }));
+
+    // A second and a third tab, made on the daemon; the window leaves the second one active.
+    daemon.onDaemon([&] {
+        std::ignore = daemon.host->createTab({}, pane);
+        std::ignore = daemon.host->createTab({}, pane);
+        return 0;
+    });
+    auto const displayed = [&] {
+        return manager.controllerOf(boot.windowId)->displayedWorkspace();
+    };
+    REQUIRE(waitUntil([&] { return manager.model().workspace(displayed())->tabCount() == 3; }));
+    manager.activateTab(boot.id, 1);
+    auto const activeRow = [&] {
+        auto const* const workspace = manager.model().workspace(displayed());
+        return workspace->indexOf(workspace->activeTab()->id());
+    };
+    REQUIRE(activeRow() == 1);
+    drainGuiEvents();
+
+    switchAwayAndBack(rig, boot, ids);
+    REQUIRE(waitUntil([&] { return manager.model().workspace(displayed())->tabCount() == 3; }));
+    CHECK(activeRow() == 1);
+}
+
 TEST_CASE("DaemonLink: a client started after one switched away and back shows and drives the pane",
           "[attach][link][switch]")
 {

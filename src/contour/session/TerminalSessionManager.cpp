@@ -3085,6 +3085,12 @@ void TerminalSessionManager::reportTabPresentation(vtworkspace::TabId tabId)
     auto* const binding = mutableBindingOf(windowId);
     if (binding == nullptr)
         return;
+    // A workspace its window no longer shows is one it is letting go of: the panes a switch detaches are
+    // activated and closed one by one, and what that leaves active is no choice of the user's. Reported, it
+    // would overwrite the tab and pane the user left active, which the daemon keeps for the way back.
+    if (auto const* const owner = controllerOwning(windowId);
+        owner != nullptr && owner->displayedWorkspace() != windowId)
+        return;
     auto& factory = binding->sessions();
     if (factory.hosting() != SessionHosting::Remote)
         return;
