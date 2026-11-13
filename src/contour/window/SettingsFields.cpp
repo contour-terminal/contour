@@ -1614,6 +1614,26 @@ namespace
                                              "back to the one contour.yml names, use Reset." });
     }
 
+    /// Refuses a tab fill the loader cannot parse (config::parseTabFill).
+    /// @param value The fill the user typed.
+    /// @return Nothing when it parses, or the message the page shows.
+    [[nodiscard]] std::expected<void, std::string> checkTabFill(QVariant const& value)
+    {
+        if (config::parseTabFill(value.toString().trimmed().toStdString()))
+            return {};
+        return std::unexpected(std::string { "Enter auto, accent, subtle, or a colour as #RRGGBB." });
+    }
+
+    /// Refuses an indicator colour the loader cannot parse (config::parseIndicatorColor).
+    /// @param value The colour the user typed.
+    /// @return Nothing when it parses, or the message the page shows.
+    [[nodiscard]] std::expected<void, std::string> checkIndicatorColor(QVariant const& value)
+    {
+        if (config::parseIndicatorColor(value.toString().trimmed().toStdString()))
+            return {};
+        return std::unexpected(std::string { "Enter accent, or a colour as #RRGGBB." });
+    }
+
 } // namespace
 
 namespace
@@ -1644,8 +1664,20 @@ namespace
         GlobalFieldGroupRow { .key = "window_control_style", .group = SettingsGroup::AppearanceChrome },
         GlobalFieldGroupRow { .key = "ui_font_family", .group = SettingsGroup::AppearanceChrome },
         GlobalFieldGroupRow { .key = "ui_font_size", .group = SettingsGroup::AppearanceChrome },
-        GlobalFieldGroupRow { .key = "tab_bar_position", .group = SettingsGroup::AppearanceTabBar },
-        GlobalFieldGroupRow { .key = "tab_bar_visibility", .group = SettingsGroup::AppearanceTabBar },
+        GlobalFieldGroupRow { .key = "tab_bar_position", .group = SettingsGroup::TabBarPlacement },
+        GlobalFieldGroupRow { .key = "tab_bar_visibility", .group = SettingsGroup::TabBarPlacement },
+        GlobalFieldGroupRow { .key = "tab_style.active_fill", .group = SettingsGroup::TabBarTabs },
+        GlobalFieldGroupRow { .key = "tab_style.inactive_fill", .group = SettingsGroup::TabBarTabs },
+        GlobalFieldGroupRow { .key = "tab_style.tab_color_mode", .group = SettingsGroup::TabBarTabs },
+        GlobalFieldGroupRow { .key = "tab_style.active_indicator", .group = SettingsGroup::TabBarTabs },
+        GlobalFieldGroupRow { .key = "tab_style.indicator_color", .group = SettingsGroup::TabBarTabs },
+        GlobalFieldGroupRow { .key = "tab_style.close_button", .group = SettingsGroup::TabBarButtons },
+        GlobalFieldGroupRow { .key = "tab_style.new_tab_button", .group = SettingsGroup::TabBarButtons },
+        GlobalFieldGroupRow { .key = "tab_style.tab_width", .group = SettingsGroup::TabBarButtons },
+        GlobalFieldGroupRow { .key = "tab_style.min_tab_width", .group = SettingsGroup::TabBarButtons },
+        GlobalFieldGroupRow { .key = "tab_style.max_tab_width", .group = SettingsGroup::TabBarButtons },
+        // The rest of the section: shape, spacing, material and the bar's fill.
+        GlobalFieldGroupRow { .key = "tab_style.", .group = SettingsGroup::TabBarShape },
         GlobalFieldGroupRow { .key = "gutter.", .group = SettingsGroup::ShellGutter },
         GlobalFieldGroupRow { .key = "command_blocks.", .group = SettingsGroup::ShellCommandBlocks },
         GlobalFieldGroupRow { .key = "folding.", .group = SettingsGroup::ShellFolding },
@@ -1759,6 +1791,102 @@ std::vector<GlobalFieldDescriptor> const& globalFieldDescriptors()
                 "Tab bar visibility",
                 "When the tab strip is shown: always, never, or only once a window has more than one tab.",
                 [](config::Config const& c) { return c.tabBarVisibility.value(); }),
+            // The tab_style section, applied live like the density: the chrome style provider is rebuilt on
+            // reload. The fills and the opacity are words or values, so they are checked strings rather
+            // than combo boxes.
+            globalEnumFieldFromTable<config::TabLook>(
+                "tab_style.shape",
+                "Tab shape",
+                "How each tab is drawn: the interface style's own, a floating pill, a flat square, an "
+                "underline only, or an outline. No effect in the terminal interface style.",
+                [](config::Config const& c) { return c.tabStyle.value().shape; }),
+            globalEnumFieldFromTable<config::TabBarMaterial>(
+                "tab_style.material",
+                "Tab bar material",
+                "What the tab bar is made of: opaque, frosted, or see-through glass. Windows draws these "
+                "as Mica and Acrylic, macOS as a blur (Liquid Glass on macOS 26), KDE Plasma over KWin's "
+                "blur.",
+                [](config::Config const& c) { return c.tabStyle.value().material; }),
+            globalEnumFieldFromTable<config::TabIndicator>(
+                "tab_style.active_indicator",
+                "Active tab indicator",
+                "A line on the active tab: none, along its bottom, or along its top.",
+                [](config::Config const& c) { return c.tabStyle.value().activeIndicator; }),
+            globalStringField(
+                "tab_style.bar_fill",
+                "Tab bar fill",
+                "The bar's own fill: auto, accent, subtle, or a colour as #RRGGBB. Labels and buttons on "
+                "the bar are inked for it.",
+                [](config::Config const& c) { return config::tabFillText(c.tabStyle.value().barFill); },
+                checkTabFill),
+            globalStringField(
+                "tab_style.indicator_color",
+                "Indicator colour",
+                "The indicator line's colour: accent for the system accent colour, or a colour as #RRGGBB.",
+                [](config::Config const& c) {
+                    return config::tabFillText(c.tabStyle.value().indicatorColor);
+                },
+                checkIndicatorColor),
+            globalEnumFieldFromTable<config::TabColorMode>(
+                "tab_style.tab_color_mode",
+                "Tab colour shown as",
+                "How a tab shows a colour of its own, from its profile or picked for it: as its fill, as a "
+                "tint over the styled tab, or only as its indicator line.",
+                [](config::Config const& c) { return c.tabStyle.value().tabColorMode; }),
+            globalEnumFieldFromTable<config::TabCloseButton>(
+                "tab_style.close_button",
+                "Close button",
+                "When a tab shows its close button: the interface style's own, on hover, on the active tab "
+                "and on hover, always, or never (close with a middle click, the tab's menu or the keyboard).",
+                [](config::Config const& c) { return c.tabStyle.value().closeButton; }),
+            globalEnumFieldFromTable<config::NewTabButton>(
+                "tab_style.new_tab_button",
+                "New tab button",
+                "Whether the \"+\" button is shown. Without it, open tabs from the keyboard, the menus or "
+                "the "
+                "command palette.",
+                [](config::Config const& c) { return c.tabStyle.value().newTabButton; }),
+            globalStringField(
+                "tab_style.active_fill",
+                "Active tab fill",
+                "auto keeps the interface style's own; accent, subtle, or a colour as #RRGGBB replace it. "
+                "A colour given to a tab itself wins.",
+                [](config::Config const& c) { return config::tabFillText(c.tabStyle.value().activeFill); },
+                checkTabFill),
+            globalStringField(
+                "tab_style.inactive_fill",
+                "Inactive tab fill",
+                "The fill of every tab but the active one: auto, accent, subtle, or a colour as #RRGGBB.",
+                [](config::Config const& c) { return config::tabFillText(c.tabStyle.value().inactiveFill); },
+                checkTabFill),
+            globalIntField(
+                "tab_style.spacing",
+                "Tab spacing",
+                "The gap between two tabs, in pixels. With a gap, no line is drawn between tabs. The "
+                "pills of macOS and Linux keep their own gap.",
+                [](config::Config const& c) { return c.tabStyle.value().spacing; },
+                0,
+                config::MaxTabSpacing),
+            globalEnumFieldFromTable<config::TabWidth>(
+                "tab_style.tab_width",
+                "Tab width",
+                "Every tab as wide as the others, shrinking together as tabs are added, or each as wide as "
+                "its title. The pills of macOS and Linux are always equal.",
+                [](config::Config const& c) { return c.tabStyle.value().tabWidth; }),
+            globalIntField(
+                "tab_style.min_tab_width",
+                "Minimum tab width",
+                "The narrowest a tab gets, in pixels. 0 keeps the interface style's own.",
+                [](config::Config const& c) { return c.tabStyle.value().minTabWidth; },
+                0,
+                config::MaxTabWidthSetting),
+            globalIntField(
+                "tab_style.max_tab_width",
+                "Maximum tab width",
+                "The widest a tab gets, in pixels. 0 keeps the interface style's own.",
+                [](config::Config const& c) { return c.tabStyle.value().maxTabWidth; },
+                0,
+                config::MaxTabWidthSetting),
             // Reads its options and its accepted set from contour/UiStyle.h, like the tab bar rows
             // above. The restart note is part of the help text rather than a separate affordance
             // because the limitation is Qt's: the Quick Controls style is chosen once, before the
