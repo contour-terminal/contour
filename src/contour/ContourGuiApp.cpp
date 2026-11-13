@@ -1049,8 +1049,8 @@ void ContourGuiApp::applyOpenGlGpuSelection()
 #endif
 }
 
-std::optional<std::expected<void, std::string>> ContourGuiApp::pollNativeAttach(remote::DaemonLink& link,
-                                                                                vthost::AttachBudget budget)
+std::optional<std::expected<void, std::string>> ContourGuiApp::pollNativeAttach(
+    remote::DaemonLink& link, vthost::AttachBudget const& budget)
 {
     auto attached = link.pollAttached(budget);
     if (!attached)

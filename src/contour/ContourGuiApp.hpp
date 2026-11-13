@@ -1303,7 +1303,7 @@ class ContourGuiApp:
     /// @param budget How long the attach may take since it started; never less than MinimumConnectAwait.
     /// @return Nothing while it goes on; else nothing once attached, or why not, the controller given up.
     [[nodiscard]] std::optional<std::expected<void, std::string>> pollNativeAttach(
-        remote::DaemonLink& link, vthost::AttachBudget budget);
+        remote::DaemonLink& link, vthost::AttachBudget const& budget);
 
     /// Opens the first window and does what follows it: the hosting notice, the hotkey problem, the adoption
     /// of the daemon's other sessions, the latency probe.

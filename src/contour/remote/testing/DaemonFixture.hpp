@@ -929,7 +929,7 @@ inline void drainGuiEvents()
 /// @param budget How long the attach may take.
 /// @return Nothing once attached; why not otherwise.
 [[nodiscard]] inline std::expected<void, std::string> pollUntilAttached(contour::remote::DaemonLink& link,
-                                                                        vthost::AttachBudget budget)
+                                                                        vthost::AttachBudget const& budget)
 {
     while (true)
     {
