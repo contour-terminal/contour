@@ -33,11 +33,31 @@ get_target_property(_qmake_executable Qt${DEPLOY_QT_VERSION}::qmake IMPORTED_LOC
 get_filename_component(_qt_bin_dir "${_qmake_executable}" DIRECTORY)
 
 if(WIN32)
-    find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${_qt_bin_dir}")
+    if(CMAKE_CROSSCOMPILING)
+        # Cross-compiling from Linux, qmake's directory is the host Qt's (QT_HOST_PATH): windeployqt is the
+        # target Qt's own Windows executable, beside its qtpaths.exe. find_file, not find_program: wine needs
+        # no execute permission, and a Qt on a Windows drive mounted into Linux often has none.
+        find_file(WINDEPLOYQT_EXECUTABLE windeployqt.exe HINTS "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_BINS}"
+                  NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+    else()
+        find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${_qt_bin_dir}")
+    endif()
     if(NOT WINDEPLOYQT_EXECUTABLE)
         message(FATAL_ERROR "windeployqt not found")
     endif()
     mark_as_advanced(WINDEPLOYQT_EXECUTABLE)
+
+    if(CMAKE_CROSSCOMPILING)
+        # windeployqt.exe runs under the emulator (wine) that runs the tests, and so writes into the build
+        # tree through wine's Z: drive.
+        if(NOT CMAKE_CROSSCOMPILING_EMULATOR)
+            message(FATAL_ERROR "Deploying Qt in a cross build runs windeployqt.exe, which needs "
+                                "CMAKE_CROSSCOMPILING_EMULATOR (wine)")
+        endif()
+        set(_windeployqt_command ${CMAKE_CROSSCOMPILING_EMULATOR} "${WINDEPLOYQT_EXECUTABLE}")
+    else()
+        set(_windeployqt_command "${CMAKE_COMMAND}" -E env "PATH=${_qt_bin_dir}" "${WINDEPLOYQT_EXECUTABLE}")
+    endif()
 endif()
 
 if(APPLE)
@@ -56,8 +76,7 @@ function(windeployqt target)
     # are SVG, read through its image plugin (imageformats/qsvg.dll).
     get_target_property(target_source_dir ${target} SOURCE_DIR)
     add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E
-            env PATH="${_qt_bin_dir}" "${WINDEPLOYQT_EXECUTABLE}"
+        COMMAND ${_windeployqt_command}
                 --no-compiler-runtime
                 --no-translations
                 --qmldir "${target_source_dir}"

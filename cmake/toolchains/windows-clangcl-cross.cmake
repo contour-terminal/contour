@@ -7,6 +7,9 @@
 # same name, else /opt/msvc. The MSVC toolset and SDK versions are the newest found there unless
 # MSVC_WINE_TOOLSET_VERSION / MSVC_WINE_SDK_VERSION name one.
 #
+# The GUI builds against an official Qt for Windows (MSVC 2022 x64) in QT_WINDOWS_ROOT, with the host's Qt
+# tools (QT_HOST_PATH); see below.
+#
 # Test binaries run under wine: CMAKE_CROSSCOMPILING_EMULATOR is set, so ctest runs them as it would
 # on Windows.
 #
@@ -78,9 +81,39 @@ foreach(_kind IN ITEMS EXE SHARED MODULE)
     set(CMAKE_${_kind}_LINKER_FLAGS_INIT "${_libpaths}")
 endforeach()
 
+# Qt for Windows, for the GUI: an official Qt MSVC 2022 x64 install, as the Qt installer lays it out
+# (<version>/msvc2022_64). Where it lives is QT_WINDOWS_ROOT -- a cache variable, else the environment variable
+# of the same name, else /opt/qt-windows/6.11.1/msvc2022_64. Its tools (moc, rcc, qmlcachegen, ...) are
+# Windows executables, so Qt takes them from a Qt of the same minor release on the host instead: QT_HOST_PATH
+# (default /usr), with its CMake packages in QT_HOST_PATH_CMAKE_DIR (default <QT_HOST_PATH>/lib64/cmake where
+# that exists, as on Fedora, else <QT_HOST_PATH>/lib/cmake). A missing QT_WINDOWS_ROOT is not an error here:
+# a build without the GUI (CONTOUR_FRONTEND_GUI=OFF) does not need it.
+if(NOT DEFINED QT_WINDOWS_ROOT)
+    if(DEFINED ENV{QT_WINDOWS_ROOT})
+        set(QT_WINDOWS_ROOT "$ENV{QT_WINDOWS_ROOT}")
+    else()
+        set(QT_WINDOWS_ROOT "/opt/qt-windows/6.11.1/msvc2022_64")
+    endif()
+endif()
+set(QT_WINDOWS_ROOT "${QT_WINDOWS_ROOT}" CACHE PATH "Qt for Windows (MSVC 2022 x64) to build the GUI against")
+if(IS_DIRECTORY "${QT_WINDOWS_ROOT}/lib/cmake/Qt6")
+    list(APPEND CMAKE_PREFIX_PATH "${QT_WINDOWS_ROOT}")
+    list(APPEND CMAKE_FIND_ROOT_PATH "${QT_WINDOWS_ROOT}")
+    set(QT_HOST_PATH "/usr" CACHE PATH "The host's Qt, whose tools a cross build runs")
+    if(IS_DIRECTORY "${QT_HOST_PATH}/lib64/cmake/Qt6")
+        set(QT_HOST_PATH_CMAKE_DIR "${QT_HOST_PATH}/lib64/cmake" CACHE PATH "The host Qt's CMake packages")
+    else()
+        set(QT_HOST_PATH_CMAKE_DIR "${QT_HOST_PATH}/lib/cmake" CACHE PATH "The host Qt's CMake packages")
+    endif()
+endif()
+
 # Windows binaries run under wine, with Microsoft's own C++ runtime rather than wine's reimplementation of
 # it (the debug one exists only as Microsoft's), and the DLLs of every CMAKE_PREFIX_PATH entry on the DLL
 # search path. WINEPREFIX and WINEDEBUG come from the environment as usual.
+#
+# The emulator is a script written into the build directory, <build>/wine-run.sh, rather than an
+# `env WINEPATH=... wine` list: WINEPATH is ;-separated, and a ; inside a CMake list does not survive being
+# expanded into a custom command (windeployqt's, see DeployQt.cmake). It also runs a binary by hand.
 find_program(MSVC_WINE_WINE NAMES wine wine64)
 if(MSVC_WINE_WINE)
     set(_redistRoot "${MSVC_WINE_ROOT}/vc/Redist/MSVC/${MSVC_WINE_TOOLSET_VERSION}")
@@ -90,11 +123,17 @@ if(MSVC_WINE_WINE)
         list(APPEND _winePath "${_prefix}/bin")
     endforeach()
     list(REMOVE_DUPLICATES _winePath)
-    list(JOIN _winePath "\\;" _winePath)
-    set(CMAKE_CROSSCOMPILING_EMULATOR
-        env "WINEPATH=${_winePath}"
-            "WINEDLLOVERRIDES=msvcp140,msvcp140_1,msvcp140_2,vcruntime140,vcruntime140_1=n,b"
-            "${MSVC_WINE_WINE}")
+    list(JOIN _winePath ";" _winePath)
+    file(WRITE "${CMAKE_BINARY_DIR}/wine-run.sh"
+         "#!/bin/sh\n"
+         "# Written by cmake/toolchains/windows-clangcl-cross.cmake: runs a Windows executable of this build "
+         "under wine.\n"
+         "export WINEPATH='${_winePath}'\n"
+         "export WINEDLLOVERRIDES='msvcp140,msvcp140_1,msvcp140_2,vcruntime140,vcruntime140_1=n,b'\n"
+         "exec '${MSVC_WINE_WINE}' \"$@\"\n")
+    file(CHMOD "${CMAKE_BINARY_DIR}/wine-run.sh" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ
+                                                             GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+    set(CMAKE_CROSSCOMPILING_EMULATOR "${CMAKE_BINARY_DIR}/wine-run.sh")
 endif()
 
 # Dependencies come from CMAKE_PREFIX_PATH / CMAKE_FIND_ROOT_PATH, never from the Linux host.

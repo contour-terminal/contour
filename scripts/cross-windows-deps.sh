@@ -55,6 +55,11 @@ for import in "$prefix"/lib/lib*.dll.a; do
     cp "$import" "$prefix/lib/${name#lib}.lib"
 done
 
+# harfbuzz's config spells its DLL with the target's library prefix, which is empty on MSVC; MinGW's is
+# libharfbuzz-0.dll. Where the DLL is matters to whatever stages a target's runtime DLLs beside it.
+sed -i 's|/bin/${CMAKE_SHARED_LIBRARY_PREFIX}${library_name}|/bin/lib${library_name}|' \
+    "$prefix/lib/cmake/harfbuzz/harfbuzz-config.cmake"
+
 # libssh2 installs no CMake package for MinGW; vtpty asks for vcpkg's Libssh2::libssh2.
 mkdir -p "$prefix/lib/cmake/Libssh2"
 cat >"$prefix/lib/cmake/Libssh2/Libssh2Config.cmake" <<'EOF'

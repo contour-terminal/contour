@@ -25,7 +25,7 @@
                 "CMAKE_FIND_ROOT_PATH": "${sourceDir}/out/windows-cross-deps",
                 "OPENSSL_ROOT_DIR": "${sourceDir}/out/windows-cross-deps",
                 "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
-                "CONTOUR_FRONTEND_GUI": "OFF",
+                "CONTOUR_FRONTEND_GUI": "ON",
                 "CONTOUR_EXTENSIONS": "OFF",
                 "CONTOUR_INSTALL_TOOLS": "OFF",
                 "LIBTERMINAL_BUILD_BENCH_HEADLESS": "OFF",
