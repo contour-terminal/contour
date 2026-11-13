@@ -52,6 +52,19 @@
             }
         },
         {
+            "name": "msvc-ci",
+            "inherits": [
+                "windows-common",
+                "release"
+            ],
+            "displayName": "MSVC Release (CI)",
+            "description": "msvc-release without the production flags: what a pull request builds and tests",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "cl",
+                "CMAKE_CXX_COMPILER": "cl"
+            }
+        },
+        {
             "name": "clangcl-debug",
             "inherits": [
                 "windows-common",
@@ -100,6 +113,12 @@
             "configuration": "Release"
         },
         {
+            "name": "msvc-ci",
+            "displayName": "x64 (MSVC) Release (CI)",
+            "configurePreset": "msvc-ci",
+            "configuration": "Release"
+        },
+        {
             "name": "clangcl-debug",
             "displayName": "x64 (ClangCL) Debug",
             "configurePreset": "clangcl-debug",
@@ -128,6 +147,18 @@
         {
             "name": "msvc-release",
             "configurePreset": "msvc-release",
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": true,
+                "timeout": 600
+            }
+        },
+        {
+            "name": "msvc-ci",
+            "configurePreset": "msvc-ci",
             "output": {
                 "outputOnFailure": true
             },

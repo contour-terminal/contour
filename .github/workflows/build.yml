@@ -62,16 +62,27 @@ env:
   CCACHE_BASEDIR: ${{ github.workspace }}
   CCACHE_NOHASHDIR: "1"
   CCACHE_SLOPPINESS: include_file_mtime,include_file_ctime
+  # The Pace release the Windows job caches its compiles with (pace-cc and pace-kv, one archive). One
+  # version for both: a launcher and a daemon of different wire versions refuse every exchange. It is part
+  # of the store's cache key, so a bump starts from an empty store.
+  PACE_VERSION: "0.7.0"
+  # The SHA-256 of that release's pace-<version>-Windows-AMD64.zip, checked before it is unpacked. Bumped
+  # together with PACE_VERSION: a digest that does not match makes the Windows job build without Pace.
+  PACE_WINDOWS_ZIP_SHA256: "3c76e2771ff9aed970a57fbacdb2dbd15f05f0606599d9b899944212255277d5"
   # The one place where a step or script learns that it builds a release; jobs use the same condition
   # in their `if:` (docs/internals/releasing.md).
   CONTOUR_BUILD_CHANNEL: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'prerelease' }}
 
 # What runs where. A pull request runs the platform builds and tests (Windows, macOSArm, one Linux
-# leg) plus the guard builds, the lint jobs and clang-tidy on the changed lines. Everything else --
+# leg) plus the guard builds, the lint jobs and clang-tidy on the changed lines. Windows and macOSArm
+# build the plain configuration (`msvc-ci`, `macos-ci`); the production build that ships, with its
+# tests, signing and packages, is `windows_package` and `macos_package`. Everything else -- those two,
 # the other compiler legs, packaging, valgrind, conformance, bench, notcurses -- runs on master
 # pushes, in the merge queue and on release tags, through `if: github.event_name != 'pull_request'`.
-# That includes FreeBSD, which nothing exempts a release tag from. The full-tree clang-tidy runs
-# nightly and on release tags, in a workflow of its own (clang-tidy.yml). The
+# That includes FreeBSD, which nothing exempts a release tag from. No job but the two documented in
+# scripts/check-workflows.py (PRODUCTION_ON_PULL_REQUESTS) builds the production configuration on a
+# pull request. The full-tree clang-tidy runs nightly and on release tags, in a workflow of its own
+# (clang-tidy.yml). The
 # static build (`github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')`) runs on
 # master and release tags and never in the merge queue. The release-only jobs use
 # `startsWith(github.ref, 'refs/tags/v')`. The daemon packages: the Debian one
@@ -583,11 +594,12 @@ jobs:
     - name: "build"
       run: cmake --build build
 
-  # One generation per compiler-cache key. The ccache action saves a new entry per master run and
-  # deletes none; two generations of the largest keys overflow the cache quota, and GitHub then evicts
-  # whatever was read least recently -- some other job's cache. Once the jobs that save one are done,
-  # every ccache key keeps its newest entry and loses the rest. scripts/check-workflows.py fails if a
-  # job that saves a cache is missing from `needs`. See docs/internals/build-times.md.
+  # One generation per compiler-cache key. The ccache action and the Windows job's Pace store save a new
+  # entry per master run and delete none; two generations of the largest keys overflow the cache quota,
+  # and GitHub then evicts whatever was read least recently -- some other job's cache. Once the jobs that
+  # save one are done, every compiler-cache key keeps its newest entry and loses the rest.
+  # scripts/check-workflows.py fails if a job that saves one is missing from `needs`. See
+  # docs/internals/build-times.md.
   prune_compiler_caches:
     name: "Prune superseded compiler caches"
     # Whatever the jobs concluded with: a failed job saved its cache too, and pruning is idempotent.
@@ -608,7 +620,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: "delete every ccache key's older generations"
+      - name: "delete every compiler-cache key's older generations"
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/prune-cache-generations.py --repo "${GITHUB_REPOSITORY}" --ref refs/heads/master
@@ -1004,13 +1016,19 @@ jobs:
             rm -rf _deps build
   # }}}
   # {{{ macOS
+  # Two jobs, so that neither switches its configuration by event. `macOSArm` (a required check) runs on
+  # every event and builds the plain configuration, `macos-ci`: the package's compiler, Qt and vcpkg
+  # libraries without link-time optimization, signing or notarization. Its master runs save the compiler
+  # cache its pull-request runs restore. `macos_package` builds what ships, `macos-package`, tests it,
+  # signs, notarizes and packages it -- on master pushes, in the merge queue and on release tags only.
+  # docs/internals/build-times.md ("Why pull requests build the plain configuration").
+  #
+  # Both pinned to macos-15, not macos-latest, so the toolchain and SDK behind a release are reproducible
+  # and a GitHub image rotation cannot silently change what ships. The minimum macOS of the .dmg no longer
+  # depends on this: the libraries Contour links are built from source by vcpkg against
+  # CMAKE_OSX_DEPLOYMENT_TARGET (13.3), not taken from the runner's Homebrew bottles.
+  # CONTOUR_MACOS_MIN_SUPPORTED, which the package preset sets, enforces that.
   macOSArm:
-    # Pinned, not macos-latest, so the toolchain and SDK behind a release are reproducible
-    # and a GitHub image rotation cannot silently change what ships.
-    #
-    # The minimum macOS of the .dmg no longer depends on this: the libraries Contour links
-    # are built from source by vcpkg against CMAKE_OSX_DEPLOYMENT_TARGET (13.3), not taken
-    # from the runner's Homebrew bottles. CONTOUR_MACOS_MIN_SUPPORTED enforces that.
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -1025,18 +1043,68 @@ jobs:
           path: out/.tools
           key: lint-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/check-workflows.py', 'scripts/check-spelling.py') }}
       - name: set variables
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      # A key of its own for the plain configuration: the production build's entries
+      # (`ccache-macosArm-r1`) held link-time-optimization objects a plain build cannot use.
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ccache-macosArm-ci
+          max-size: 1500M
+          save: ${{ github.ref == 'refs/heads/master' }}
+          evict-old-files: job
+      - name: "Build environment"
+        # Qt, the dependencies, vcpkg, tmux, fish and Rust; the action's own comments say why each.
+        timeout-minutes: 45
+        uses: ./.github/actions/macos-build-env
+      - name: "Generate build files"
+        run: |
+          # Attempted twice. Configuring is where the vcpkg manifest install runs, and that builds
+          # its dependencies from source, so this step's success depends on hosts nobody here
+          # controls being up: it has failed repeatedly on 502/503/504 from
+          # gitlab.freedesktop.org (cairo, fontconfig) and once on a 404 from ftpmirror.gnu.org.
+          # vcpkg already retries an individual download three times; what it cannot retry is the
+          # whole install once a port has given up. None of it is a verdict on the commit under
+          # test, and this job is a required check, so a single bad minute upstream otherwise
+          # blocks every pull request. Only a repeated failure fails the job.
+          configure() { cmake --preset macos-ci; }
+          configure || {
+            echo "::warning::configure failed (typically an upstream source download); retrying once"
+            sleep 30
+            configure
+          }
+      - name: "Build"
+        run: cmake --build --preset macos-ci
+      - name: "Tests"
+        # The suite had 30 minutes and the three checks after it none of their own; one bound for all.
+        timeout-minutes: 45
+        uses: ./.github/actions/macos-tests
+        with:
+          preset: macos-ci
+  macos_package:
+    name: "macOS (package)"
+    if: github.event_name != 'pull_request'
+    concurrency:
+      group: ${{ github.ref }}-macos_package
+      cancel-in-progress: false
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      # @see the same step of macOSArm.
+      - name: "Lint tools"
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: out/.tools
+          key: lint-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/check-workflows.py', 'scripts/check-spelling.py') }}
+      - name: set variables
         id: set_vars
         run: |
           ./scripts/ci-set-vars.sh
           # Signing is gated on whether the secrets are actually reachable, not on the
-          # branch name. GitHub withholds secrets from fork pull requests, which is the
-          # real precondition; a branch-name test only approximates it, and approximated
-          # it badly in both directions -- fork PRs still asked codesign for a Developer ID
-          # that was in no keychain (breaking every PR run of this job), while a release
-          # branch's signing path went completely unexercised until it was already on
-          # master. Signing has to be proven before the merge, not after it.
-          # (An ordinary pull request no longer packages or signs at all; the merge queue and
-          # release tags, which carry the secrets, prove it before it ships.)
+          # branch name: a run without them (a fork's merge-queue entry, a repository
+          # without the secrets) still builds, tests and packages, ad-hoc signed.
           if [[ -n "$HAS_SIGNING_SECRETS" ]]; then
             echo "CODE_SIGN_CERTIFICATE_ID=Developer ID Application: Christian Parpart (6T525MU9UR)" >> "$GITHUB_OUTPUT"
             echo "NOTARIZE=ON" >> "$GITHUB_OUTPUT"
@@ -1056,18 +1124,10 @@ jobs:
           else
             echo "STAPLE_APP=OFF" >> "$GITHUB_OUTPUT"
           fi
-          # Whether this run produces the .dmg at all (see PACKAGE_IMAGE below).
-          echo "PACKAGE_IMAGE=$PACKAGE_IMAGE" >> "$GITHUB_OUTPUT"
         env:
           REPOSITORY: ${{ github.event.repository.name }}
-          # Empty on fork pull requests, where GitHub withholds secrets. Only the
-          # emptiness is observable here -- the value never reaches the log.
-          #
-          # Not even read on an ordinary pull request: nothing is signed there, so the secret is
-          # never exposed to the job and the PR path is the same with or without secrets.
-          HAS_SIGNING_SECRETS: ${{ github.event_name != 'pull_request' && secrets.BUILD_CERTIFICATE_BASE64 || '' }}
-          # A pull request builds and tests; it does not package, so it neither signs nor notarizes.
-          PACKAGE_IMAGE: ${{ github.event_name != 'pull_request' }}
+          # Only the emptiness is observable here -- the value never reaches the log.
+          HAS_SIGNING_SECRETS: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
       - name: Install the Apple signing certificate
         if: steps.set_vars.outputs.NOTARIZE == 'ON'
         env:
@@ -1115,127 +1175,11 @@ jobs:
                 --key-id "$APPLE_API_KEY_ID" \
                 --issuer "$APPLE_API_ISSUER_ID"
           rm -f "$KEY_PATH"
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: ccache-macosArm-r1
-          max-size: 2100M
-          save: ${{ github.ref == 'refs/heads/master' }}
-          evict-old-files: job
-      - name: Install Qt
-        # The official Qt binaries, as on Linux and Windows -- not Homebrew's. Homebrew
-        # splits Qt across ~40 per-module prefixes and macdeployqt only follows one of
-        # them, so a brew-Qt bundle ships missing frameworks and unresolvable @rpath
-        # references. That is the defect this job used to hand to users as a .dmg.
-        #
-        # Version pinned and the install attempted twice, both for the reasons documented at the
-        # clang-tidy job's copy of this step. Pinned here too so every platform is measured against
-        # one Qt, even though the corrupt archive is Linux AARCH64 only.
-        id: install_qt
-        continue-on-error: true
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: 6.11.1
-          modules: qtmultimedia qt5compat qtshadertools qtspeech
-          cache: true
-      - name: Install Qt -- retry past a bad mirror
-        if: steps.install_qt.outcome == 'failure'
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: 6.11.1
-          modules: qtmultimedia qt5compat qtshadertools qtspeech
-          cache: true
-      - name: "Install dependencies"
-        # Sometimes, brew thinks it needs to install from source rather than binary,
-        # so cap the runtime rather than burn CI credits on a source build.
-        #
-        # The libraries Contour links are NOT taken from Homebrew here -- see the vcpkg
-        # steps below for why. install-deps.sh also brings the autotools that some vcpkg
-        # ports need on the build host.
-        timeout-minutes: 15
-        run: |
-          set -ex
-          #brew update
-
-          # Trying to work around some Github CI issues causing `brew install` to fail
-          brew uninstall aws-sam-cli azure-cli
-
-          ./scripts/install-deps.sh
-      - name: "Cache vcpkg"
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/vcpkg/archives
-          key: vcpkg-macos-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/vcpkg-triplets/arm64-osx-contour.cmake') }}
-          restore-keys: vcpkg-macos-
-      - name: "vcpkg: clone and bootstrap"
-        # The libraries Contour links (openssl, libssh2, yaml-cpp, freetype, harfbuzz,
-        # cairo) are built from source against CMAKE_OSX_DEPLOYMENT_TARGET rather than
-        # taken from Homebrew. Homebrew ships one prebuilt bottle per macOS release and
-        # installs the one matching the runner, which made the .dmg's minimum macOS equal
-        # to the runner image's -- an invisible compatibility cliff that moved whenever
-        # GitHub rotated the image. vcpkg puts that floor under our control; the triplet at
-        # cmake/vcpkg-triplets/arm64-osx-contour.cmake is where it is set.
-        run: |
-          set -ex
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/vcpkg"
-          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
-          echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
-      - name: "install tmux (oracle for the tmux-interop tests)"
-        # A CI-only tool, so it is here rather than in install-deps.sh, which lists what Contour
-        # needs to BUILD. Without it the tmux oracles self-skip, and switching this job to
-        # ctest (below) would otherwise have reached them only to watch them do nothing -- macOS
-        # is where the BSD socket and Apple-libc++ differences in that code path would show up.
-        #
-        # Built from source at the same pinned 3.7b as the Linux matrix, rather than taken from the
-        # formula. Both platforms then measure against the exact protocol version the control-mode
-        # server claims to speak (docs/internals/vthost.md), and neither can start or stop running
-        # the imsg oracle because a formula moved.
-        run: |
-          set -ex
-          # tmux's configure hard-errors without libevent; ncurses comes with the SDK on macOS.
-          # PKG_CONFIG_PATH is stated rather than assumed: the formula is not keg-only today, so its
-          # .pc file is normally on the default search path anyway -- but naming the prefix keeps
-          # this working if that ever changes, and costs nothing while it has not.
-          brew install libevent
-          export PKG_CONFIG_PATH="$(brew --prefix libevent)/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-          curl -sSL -o "$RUNNER_TEMP/tmux.tar.gz" \
-            https://github.com/tmux/tmux/releases/download/3.7b/tmux-3.7b.tar.gz
-          tar xzf "$RUNNER_TEMP/tmux.tar.gz" -C "$RUNNER_TEMP"
-          # The release tarball ships a generated configure, so no autotools are needed here.
-          # --disable-utf8proc is required, not merely a choice: 3.7b's configure hard-errors
-          # ("must give --enable-utf8proc or --disable-utf8proc") rather than defaulting, and this
-          # oracle only has to speak the control-mode protocol -- how tmux measures east-Asian
-          # width does not enter into it. Stated on both platforms so they build the same binary.
-          cd "$RUNNER_TEMP/tmux-3.7b" \
-            && ./configure --disable-utf8proc \
-            && make -j"$(sysctl -n hw.ncpu)" \
-            && sudo make install
-          tmux -V
-      - name: "install fish, the one shell the shell-integration tests drive that macOS lacks"
-        # contour_test runs each bundled integration script in its own shell on a real PTY, and SKIPs a
-        # shell that is not installed. macOS brings bash (/bin/bash, 3.2.57), zsh and tcsh, and the runner
-        # image PowerShell (actions/runner-images' macos-15-arm64-Readme.md); fish it does not.
-        #
-        # Pinned, as tmux is: Homebrew installs whatever its formula moved to, and the fish version
-        # decides which marks the script sends itself. fish's own release package, checked against its
-        # SHA-256, installs a universal binary into /usr/local/bin.
-        run: |
-          set -ex
-          curl -sSL -o "$RUNNER_TEMP/fish.pkg" \
-            https://github.com/fish-shell/fish-shell/releases/download/4.2.1/fish-4.2.1.pkg
-          echo "07630a79598eb52ec42d54f458c99c9e2ebd39e525342ce3b354d338ef716965  $RUNNER_TEMP/fish.pkg" \
-            | shasum -a 256 -c -
-          sudo installer -pkg "$RUNNER_TEMP/fish.pkg" -target /
-          fish --version
-          bash --version
-          zsh --version
-          tcsh --version
-          pwsh --version
-      # CONTOUR_EXTENSIONS_BUNDLED is on by default, and its configuration fails without cargo and the
-      # wasm32-wasip1 target: the bundled status-line extensions, and the test guests, are Rust.
-      - name: "install Rust (wasm32-wasip1)"
-        run: ./scripts/install-rust-wasm.sh
+      # No compiler cache: these are link-time-optimization objects no pull request can use, and the
+      # entry would take a quarter of the repository's 10 GB cache quota (docs/internals/build-times.md).
+      - name: "Build environment"
+        timeout-minutes: 45
+        uses: ./.github/actions/macos-build-env
       - name: "Generate build files"
         run: |
           # The `macos-package` preset IS the definition of a shippable macOS build --
@@ -1252,16 +1196,13 @@ jobs:
           # shipping a .dmg that cannot launch. Configuring also triggers the vcpkg
           # manifest install, which builds those dylibs against that same target.
           #
-          # Attempted twice. Configuring is where the vcpkg manifest install runs, and that builds
-          # its dependencies from source, so this step's success depends on hosts nobody here
-          # controls being up: it has failed repeatedly on 502/503/504 from
-          # gitlab.freedesktop.org (cairo, fontconfig) and once on a 404 from ftpmirror.gnu.org.
-          # vcpkg already retries an individual download three times; what it cannot retry is the
-          # whole install once a port has given up. None of it is a verdict on the commit under
-          # test, and this job is a required check, so a single bad minute upstream otherwise
-          # blocks every pull request. Only a repeated failure fails the job.
+          # USE_COMPILER_CACHE=OFF: this job has no cache, and a ccache found on the runner would be an empty
+          # one on every run.
+          #
+          # Attempted twice, for the upstream download failures documented at macOSArm's copy.
           configure() {
             cmake --preset macos-package \
+                  -DUSE_COMPILER_CACHE=OFF \
                   -DCODE_SIGN_CERTIFICATE_ID="${{ steps.set_vars.outputs.CODE_SIGN_CERTIFICATE_ID }}" \
                   -DCONTOUR_MACOS_NOTARIZE="${{ steps.set_vars.outputs.NOTARIZE }}" \
                   -DCONTOUR_MACOS_STAPLE_APP="${{ steps.set_vars.outputs.STAPLE_APP }}"
@@ -1273,75 +1214,13 @@ jobs:
           }
       - name: "Build"
         run: cmake --build --preset macos-package
-      - name: "tests"
-        # ctest, not a hand-written list of binaries: the previous four-line list predated
-        # src/coro, src/net, src/vthost and src/vtworkspace, so those suites were built here and
-        # never run — macOS is exactly where the Apple-libc++ and BSD-socket differences bite.
-        # Registering a new test target must not require editing this file.
-        #
-        # 15 rather than 10: with tmux installed the four oracles now actually run instead of
-        # skipping, and each drives a real tmux server over a pty. 30 rather than 15: the GUI suite
-        # runs once per Quick Controls style (Fusion, Fluent, ContourLinux, ContourTui), each 4-7 minutes
-        # on this runner, and the fourth was cut off at 15 with every earlier test passing.
-        #
-        # A hang fails one test, not the step: the preset gives every test 10 minutes, the GUI suite's
-        # four runs their own 20 (each takes 8-10 here), vthost_test its own 5, and ctest shows a
-        # timed-out test's output. The trace names each Catch2 case on stderr as it starts, so that
-        # output ends with the case that hung.
-        timeout-minutes: 30
-        env:
-          CONTOUR_TEST_TRACE: "1"
-        run: ctest --preset macos-package -j "$(sysctl -n hw.ncpu)"
-      - name: "verify the tmux oracles actually ran"
-        # @see the identical assertion on the Linux matrix for why a green suite is not enough:
-        # a Catch2 SKIP exits 0, so "no tmux, nothing ran" is indistinguishable from success.
-        # Nothing is excluded, for parity with Linux: this job pins the same tmux 3.7b, so the imsg
-        # oracle runs here too rather than being carved out by name. Pinning is what makes that safe
-        # -- the version is stated in the workflow, not inherited from whatever a formula moved to.
-        run: |
-          set -o pipefail
-          binary=out/macos-package/src/vthost/vthost_test
-          output=$("$binary" '[oracle]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
-          printf '%s\n' "$output"
-          if printf '%s' "$output" | grep -q 'skipped'; then
-            echo "::error::$binary reported SKIPPED; the tmux interop tests are not being exercised on macOS"
-            exit 1
-          fi
-      - name: "verify the shell-integration tests actually ran"
-        # @see the identical assertion on the Linux matrix: a Catch2 SKIP exits 0. macOS is where Apple's
-        # bash 3.2 and tcsh, with BSD awk and sed, run the scripts, and PowerShell runs on macOS.
-        run: |
-          set -o pipefail
-          binary=out/macos-package/src/contour/contour_test
-          # ShellIntegrationShells.profileLine runs the line the one-click install writes, which asks the
-          # contour binary for the script: outside ctest, it learns that binary here, and SKIPs without it.
-          # That binary links Qt, and a runner has no display for it, as the AppImage smoke test knows.
-          export QT_QPA_PLATFORM=offscreen
-          export CONTOUR_BINARY="$PWD/out/macos-package/src/contour/contour.app/Contents/MacOS/contour"
-          [ -x "$CONTOUR_BINARY" ] || { echo "::error::$CONTOUR_BINARY not found; profileLine would skip"; exit 1; }
-          output=$("$binary" '[shells]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
-          printf '%s\n' "$output"
-          if printf '%s' "$output" | grep -q 'skipped'; then
-            echo "::error::$binary [shells] reported SKIPPED; a shell the integration scripts target is not being exercised on macOS"
-            exit 1
-          fi
-      - name: "verify the macOS menu bar's key seam on the cocoa platform"
-        # The ctest above runs contour_gui_test offscreen, where every [display] case SKIPs: the menu bar
-        # needs Qt Widgets on the cocoa plugin, so the chords the terminal leaves to the menu (Cmd-Q, Cmd-,,
-        # Cmd-M, Cmd-H) and what AppKit does with them reach no assertion there. The runner has a
-        # logged-in Aqua session, so this runs them on the real platform. Gating, and checked for SKIPs
-        # like the steps above: a Catch2 SKIP exits 0.
-        run: |
-          set -o pipefail
-          binary=out/macos-package/src/contour/contour_gui_test
-          output=$(CONTOUR_TEST_DISPLAY=1 "$binary" '[shortcutoverride],[menubar]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
-          printf '%s\n' "$output"
-          if printf '%s' "$output" | grep -q 'skipped'; then
-            echo "::error::$binary [shortcutoverride],[menubar] reported SKIPPED; the menu bar's key seam is not being exercised on macOS"
-            exit 1
-          fi
+      - name: "Tests"
+        # The same suite as macOSArm, on the binaries that ship: CI tests what it packages.
+        timeout-minutes: 45
+        uses: ./.github/actions/macos-tests
+        with:
+          preset: macos-package
       - name: "Create Package(s)"
-        if: steps.set_vars.outputs.PACKAGE_IMAGE == 'true'
         # cpack deploys, prunes unloadable plugins, verifies the bundle is self-contained,
         # signs it inside-out, notarizes and staples both the app and the image. Each of
         # those steps is fatal on failure now, so a broken bundle stops here instead of
@@ -1376,7 +1255,6 @@ jobs:
           mv -vf "out/macos-package/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "${BASENAME}.dmg"
           echo "DMG=${BASENAME}.dmg" >> "$GITHUB_ENV"
       - name: "verify the DMG is something a user can actually open"
-        if: steps.set_vars.outputs.PACKAGE_IMAGE == 'true'
         # The assertion that was missing all along: a green package step used to mean only
         # that hdiutil succeeded.
         #
@@ -1443,7 +1321,6 @@ jobs:
           staple_check "$DMG"
           spctl --assess --verbose=4 --type install "$DMG"
       - name: upload to artifact store (DMG)
-        if: steps.set_vars.outputs.PACKAGE_IMAGE == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm.dmg"
@@ -1451,13 +1328,207 @@ jobs:
           retention-days: 7
   # }}}
   # {{{ Windows
+  # Two jobs, so that neither switches its configuration by event. `windows` (a required check) runs on
+  # every event and builds the plain configuration, `msvc-ci`: `msvc-release` without link-time
+  # optimization and hardening, whose link alone took 49 of a 53-minute build. Its compile cache is
+  # pace-cc, whose store its master runs save and its pull-request runs restore. `windows_package` builds
+  # what ships, `msvc-release`, tests it, signs and packages it -- on master pushes, in the merge queue and
+  # on release tags only. docs/internals/build-times.md ("Why pull requests build the plain configuration").
   windows:
     name: "Windows"
     runs-on: windows-latest
-    # About twice what a green master run takes (70 minutes), rather than GitHub's 360-minute default. SignPath
-    # waits for the owner's approval twice (the payload, then the installers), up to an hour each, on top of the
-    # build and the checks: 300 minutes.
-    timeout-minutes: ${{ vars.WINDOWS_SIGNER == 'signpath' && 300 || 150 }}
+    # A cold store -- the first master run, every PACE_VERSION bump, an evicted entry -- compiles all of
+    # the tree: 127.7 minutes on the first run. That plus room, rather than GitHub's 360-minute default.
+    timeout-minutes: 200
+    permissions:
+      contents: read
+      # vcpkg's binary cache is a NuGet feed on GitHub Packages.
+      packages: write
+    env:
+      CMAKE_PRESET: "msvc-ci"
+      VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # The pinned lint tools (actionlint, typos) that `check_workflows` and `check_spelling` download from
+      # GitHub release assets on first use, kept between runs: a release-asset outage (HTTP 504 for hours,
+      # once) used to fail every job that runs the lint ctest, since CHECK_WORKFLOWS_REQUIRE_TOOL turns the
+      # skipped download into a failure. The key is the files that pin the versions, so a hit needs no
+      # download and a bump fetches once. scripts/lib/toolcache.py also retries a download that does miss.
+      - name: "Lint tools"
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: out/.tools
+          key: lint-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/check-workflows.py', 'scripts/check-spelling.py') }}
+      # The compile cache: pace-cc (https://github.com/LASTRADA-Software/pace) in front of cl, served by a
+      # pace-kv on this runner whose store is one file, kept between runs like any other cache entry. It
+      # hit 99 % where ccache hit 0.5 to 2 % at full size (docs/internals/build-times.md). Restored by every
+      # run, saved by master pushes alone, under a key per run that the prune job keeps one generation of.
+      # A Pace step that fails does not fail the job: without the cache the build is slower, not wrong.
+      # Each has five minutes, since continue-on-error does not end a step that hangs.
+      - name: "pace: restore the store"
+        timeout-minutes: 5
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}\pace-store
+          key: pace-store-windows-msvc-ci-${{ env.PACE_VERSION }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: pace-store-windows-msvc-ci-${{ env.PACE_VERSION }}-
+      - name: "pace: install, and start pace-kv on the store"
+        timeout-minutes: 5
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $download = Join-Path $env:RUNNER_TEMP 'pace-download'
+          $install = Join-Path $env:RUNNER_TEMP 'pace'
+          $store = Join-Path $env:RUNNER_TEMP 'pace-store'
+          gh release download "v$env:PACE_VERSION" --repo LASTRADA-Software/pace --pattern "pace-$env:PACE_VERSION-Windows-AMD64.zip" --dir $download
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $zip = Join-Path $download "pace-$env:PACE_VERSION-Windows-AMD64.zip"
+          $digest = (Get-FileHash -Algorithm SHA256 $zip).Hash
+          if ($digest -ne $env:PACE_WINDOWS_ZIP_SHA256) {
+            Write-Output "::warning::$zip has SHA-256 $digest, not the pinned $env:PACE_WINDOWS_ZIP_SHA256; building without Pace"
+            exit 0
+          }
+          Expand-Archive $zip -DestinationPath $install
+          $bin = (Get-ChildItem $install -Recurse -Filter pace-cc.exe | Select-Object -First 1).DirectoryName
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          New-Item -ItemType Directory -Force $store | Out-Null
+          Get-ChildItem $store | Select-Object Name, Length
+          # cmd owns the redirection, as real file handles the daemon inherits: redirected through
+          # Start-Process they are pipes PowerShell reads, which break when this step's shell exits and take
+          # pace-kv with them. One plain build stores 335 MB, and Pace evicts only at the disk cap, so 1 GB holds
+          # the tree with room while two generations stay small beside the 10 GB Actions quota. The memory tier
+          # is capped too: it defaulted to about 4 GB of a runner whose compiles peak at 4.6 GiB, and the
+          # store is on disk anyway.
+          $line = "`"$bin\pace-kv.exe`" --storage=$store\contour-windows.cow --storage-shards=1 --storage-max-disk=1g --max-memory=1g > $env:RUNNER_TEMP\pace-kv.out 2> $env:RUNNER_TEMP\pace-kv.err"
+          Start-Process -FilePath cmd.exe -ArgumentList '/c', $line -WindowStyle Hidden
+          foreach ($attempt in 1..30) {
+            if ((Test-NetConnection 127.0.0.1 -Port 6674 -WarningAction SilentlyContinue).TcpTestSucceeded) { "pace-kv answers after $attempt attempt(s)"; break }
+            Start-Sleep -Seconds 2
+          }
+          & "$bin\pace-cc.exe" --version
+      - name: setup environment
+        shell: powershell
+        id: set_vars
+        run: .\scripts\ci-set-vars.ps1
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "Build environment"
+        # Embedded dependencies, Qt, vcpkg, CMake, the MSVC environment and Rust; the action's own comments
+        # say why each.
+        uses: ./.github/actions/windows-build-env
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      # cmake/CompileCache.cmake takes pace-cc only when its own two-second probe of the daemon succeeds, and
+      # otherwise falls back to the uncached ccache of the runner image. So configure only once a compile has
+      # been served (a cold pace-kv can take longer than two seconds to answer its first), and configure
+      # again, in a fresh tree, while it still says it is not using pace-cc. Neither fails the job: a cache
+      # problem must not fail a required check, it only makes the build slower.
+      - name: "pace: probe until a compile is served"
+        timeout-minutes: 5
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          if (-not (Get-Command pace-cc -ErrorAction SilentlyContinue)) {
+            Write-Output "::warning::pace-cc is not installed; the build runs without its cache"
+            exit 0
+          }
+          $probe = Join-Path $env:RUNNER_TEMP 'pace-probe'
+          New-Item -ItemType Directory -Force $probe | Out-Null
+          Set-Location $probe
+          "int ready() { return 0; }" | Out-File -Encoding ascii ready.cpp
+          $env:PACE_SOURCE_DIR = $probe
+          $env:PACE_BINARY_DIR = $probe
+          $env:PACE_VERBOSE = "1"
+          $env:PACE_NO_STATS = "1"
+          $env:PACE_TIMEOUT = "10s"
+          $served = $false
+          foreach ($attempt in 1..12) {
+            $text = (& pace-cc cl /nologo /c ready.cpp /Foready.obj 2>&1 | Out-String)
+            "attempt ${attempt}: exit $LASTEXITCODE"; $text
+            if ($text -match 'pace-cc: (HIT|MISS) key=') { $served = $true; break }
+            Start-Sleep -Seconds 5
+          }
+          if (-not $served) {
+            Write-Output "::warning::pace-cc served no compile; the build may run without its cache"
+            Get-Content (Join-Path $env:RUNNER_TEMP 'pace-kv.err') -Tail 15 -ErrorAction SilentlyContinue
+          }
+          exit 0
+      - name: "Generate build files"
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'configure.log'
+          foreach ($attempt in 1..3) {
+            cmake --preset $env:CMAKE_PRESET 2>&1 | Tee-Object -FilePath $log
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            # Without pace-cc there is nothing to configure again for.
+            if (-not (Get-Command pace-cc -ErrorAction SilentlyContinue)) { break }
+            if (-not (Select-String -Path $log -Pattern 'Not using pace-cc' -Quiet)) { break }
+            if ($attempt -lt 3) {
+              Write-Output "configure attempt $attempt did not select pace-cc; configuring again in a fresh tree"
+              Remove-Item -Recurse -Force "out/build/$env:CMAKE_PRESET"
+              Start-Sleep -Seconds 5
+            } else {
+              Write-Output "::warning::configure did not select pace-cc in $attempt attempts; building without its cache"
+            }
+          }
+          Select-String -Path $log -Pattern '\[cache\]' | ForEach-Object { $_.Line }
+        env:
+          VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
+      - name: "Build"
+        shell: pwsh
+        run: |
+          cmake --build --preset $env:CMAKE_PRESET
+      # pace-kv is stopped before its store is saved. It has no clean stop on Windows but a console
+      # Ctrl-C, which a detached process does not receive (docs/operations/known-limitations.md of Pace),
+      # so it is given time to write out what its default `--storage-durability=batched` still holds and
+      # then killed; the trial lost nothing that way. The step says whether pace-kv was still running: a
+      # daemon that refused its store (a damaged file) exits at once, and saving that same file again would
+      # hand it to every later run.
+      - name: "pace: statistics, then stop pace-kv"
+        id: pace_stop
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $stats = pace-cc --show-stats | Out-String
+          Write-Output $stats
+          $compiles = if ($stats -match 'compiles\s*:\s*(\d+)') { $Matches[1] } else { '?' }
+          $hits = if ($stats -match 'hits\s*:\s*(\d+)\s*\(([^)]*)\)') { "$($Matches[1]) ($($Matches[2]))" } else { '?' }
+          "pace-cc: $hits hits of $compiles compiles" >> $env:GITHUB_STEP_SUMMARY
+          Start-Sleep -Seconds 20
+          $daemon = Get-Process pace-kv -ErrorAction SilentlyContinue
+          "alive=$(if ($daemon) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
+          $daemon | Stop-Process -Force
+          Start-Sleep -Seconds 2
+          Get-ChildItem (Join-Path $env:RUNNER_TEMP 'pace-store') -ErrorAction SilentlyContinue | Select-Object Name, Length
+          Get-Content (Join-Path $env:RUNNER_TEMP 'pace-kv.err') -Tail 15 -ErrorAction SilentlyContinue
+          # A low hit rate is reported, never a failure.
+          exit 0
+      - name: "pace: save the store"
+        if: ${{ !cancelled() && steps.pace_stop.outputs.alive == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+        timeout-minutes: 5
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}\pace-store
+          key: pace-store-windows-msvc-ci-${{ env.PACE_VERSION }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: "Tests"
+        # The suite had 30 minutes and each of the three checks after it 10; one bound for all.
+        timeout-minutes: 60
+        uses: ./.github/actions/windows-tests
+        with:
+          preset: msvc-ci
+  windows_package:
+    name: "Windows (package)"
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    # No compiler cache, so the whole tree compiles and then links with link-time optimization (49 minutes
+    # with every object cached), before the tests, the packages and their checks. SignPath waits for the
+    # owner's approval twice (the payload, then the installers), up to an hour each, on top of that, so it
+    # gets GitHub's limit.
+    timeout-minutes: ${{ vars.WINDOWS_SIGNER == 'signpath' && 360 || 300 }}
     permissions:
       contents: read
       packages: write
@@ -1473,37 +1544,22 @@ jobs:
     # job has its environment. How it works, and how to turn it on: docs/internals/release-signing.md.
     environment: ${{ ((vars.WINDOWS_SIGNER != '' && vars.WINDOWS_SIGNER != 'none') && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.WINDOWS_SIGNING_BUILDS == 'releases-and-master'))) && 'release-signing' || '' }}
     # One signing job at a time: a one-time code is single use, and two jobs logging in within its 30 seconds
-    # collide. Jobs that do not sign get a group of their own and wait for nobody.
+    # collide. A job that does not sign queues behind its own previous run on the same ref, as every job no
+    # pull request runs does.
     concurrency:
-      group: ${{ ((vars.WINDOWS_SIGNER != '' && vars.WINDOWS_SIGNER != 'none') && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.WINDOWS_SIGNING_BUILDS == 'releases-and-master'))) && 'release-signing' || format('windows-{0}-{1}', github.run_id, github.run_attempt) }}
+      group: ${{ ((vars.WINDOWS_SIGNER != '' && vars.WINDOWS_SIGNER != 'none') && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.WINDOWS_SIGNING_BUILDS == 'releases-and-master'))) && 'release-signing' || format('{0}-windows_package', github.ref) }}
       cancel-in-progress: false
     env:
       CMAKE_PRESET: "msvc-release"
       VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      # The pinned lint tools (actionlint, typos) that `check_workflows` and `check_spelling` download from
-      # GitHub release assets on first use, kept between runs: a release-asset outage (HTTP 504 for hours,
-      # once) used to fail every job that runs the lint ctest, since CHECK_WORKFLOWS_REQUIRE_TOOL turns the
-      # skipped download into a failure. The key is the files that pin the versions, so a hit needs no
-      # download and a bump fetches once. scripts/lib/toolcache.py also retries a download that does miss.
+      # @see the same step of the windows job.
       - name: "Lint tools"
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: out/.tools
           key: lint-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/check-workflows.py', 'scripts/check-spelling.py') }}
-      # ccache, not sccache: cmake/CompileCache.cmake picks the ccache on PATH, and with it forces
-      # /Z7 (debug info inside the .obj) in place of /Zi, which no launcher can cache, wherever a build has debug info. The action
-      # installs ccache 4.9 and sets compiler_check=content on Windows, where the compiler's mtime
-      # follows the image's install time. The statistics step at the end names the binary CMake used
-      # and the cache directory it read, so a mismatch with the restored one shows in the log.
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2.20
-        with:
-          key: ccache-windows-msvc-release
-          max-size: 3800M
-          save: ${{ github.ref == 'refs/heads/master' }}
-          evict-old-files: job
       - name: setup environment
         shell: powershell
         id: set_vars
@@ -1511,7 +1567,6 @@ jobs:
         env:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: "Name the packages"
-        if: github.event_name != 'pull_request'
         shell: pwsh
         # The packages CPack leaves in the build directory, as paths relative to the workspace: every later step
         # that names one reads these.
@@ -1521,223 +1576,31 @@ jobs:
           "CONTOUR_MSI=$directory/contour-$version-win64.msi" >> $env:GITHUB_ENV
           "CONTOUR_USER_MSI=$directory/contour-$version-win64-user.msi" >> $env:GITHUB_ENV
           "CONTOUR_ZIP=$directory/contour-$version-win64.zip" >> $env:GITHUB_ENV
-      - name: "Fetch embedded dependencies"
-        shell: powershell
-        run: |
-          ./scripts/install-deps.ps1 --skip-vcpkg
-          type ./_deps/sources/CMakeLists.txt
-      - name: Install Qt
-        # Attempted twice, for the bad-mirror failure documented at the clang-tidy job's copy of
-        # this step; only a repeated failure fails the job.
-        id: install_qt
-        continue-on-error: true
-        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+      # No compiler cache: these are link-time-optimization objects no pull request can use, and the entry
+      # would take a third of the repository's 10 GB cache quota (docs/internals/build-times.md).
+      - name: "Build environment"
+        uses: ./.github/actions/windows-build-env
         with:
-          # 6.10, not the 6.11 the other platforms pin: Qt restructured its Windows package
-          # repository at 6.11 into per-architecture subdirectories
-          # (qt6_6111/qt6_6111_msvc2022_64/Updates.xml) where every release up to 6.10 kept a flat
-          # one (qt6_6103/Updates.xml). aqtinstall still requests the flat path, so a 6.11 install
-          # here dies with "Failed to locate XML data for Qt version '6.11.1'". 3.3.0 is its latest
-          # release, so there is nothing newer to move to; Linux and macOS are unaffected because
-          # their repositories stayed flat.
-          #
-          # 6.10 carries all four modules below, so this costs no feature -- only the configure-time
-          # notice that the detected Qt is older than the version Contour is tested against. Raise
-          # this to "6.11.*" once aqtinstall learns the new layout.
-          version: "6.10.*"
-          #version: "5.15.*"
-          modules: qtmultimedia qt5compat qtshadertools qtspeech
-      - name: Install Qt -- retry past a bad mirror
-        if: steps.install_qt.outcome == 'failure'
-        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
-        with:
-          version: "6.10.*"
-          modules: qtmultimedia qt5compat qtshadertools qtspeech
-      - name: "Setup NuGet for vcpkg caching"
-        shell: bash
-        run: |
-          dotnet nuget add source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
-            --name GitHub \
-            --username "${{ github.repository_owner }}" \
-            --password "${{ secrets.GITHUB_TOKEN }}" \
-            --store-password-in-clear-text
-      - name: "Cache vcpkg"
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        id: vcpkg-cache
-        with:
-          path: ${{ runner.workspace }}/vcpkg
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-
-      - name: "Upgrade NuGet"
-        run: |
-          choco upgrade nuget.commandline -y
-      - name: "vcpkg: Clone and bootstrap"
-        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git ${{ runner.workspace }}\vcpkg
-          ${{ runner.workspace }}\vcpkg\bootstrap-vcpkg.bat
-          ${{ runner.workspace }}\vcpkg\vcpkg.exe fetch nuget
-        env:
-          VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
-      - name: "vcpkg: Install dependencies"
-        shell: pwsh
-        run: |
-          ${{ runner.workspace }}\vcpkg\vcpkg.exe install --triplet x64-windows
-        env:
-          VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
-          VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
-      # CMake 3.30 is the first to honour CPACK_WIX_VERSION: older ones run WiX 3's candle and light whatever
-      # WiX the next step installs.
-      - name: "Install cmake"
-        uses: lukka/get-cmake@f5b8fbb4d77cec1acc5a5f9f0df4beffaf5d98d9 # v4.3.4
-      - name: "Check cmake version"
-        run: cmake --version
-      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
-      - name: "install Rust (wasm32-wasip1)"
-        # @see the same step on Linux: the bundled extensions and the test guests are Rust.
-        shell: bash
-        run: ./scripts/install-rust-wasm.sh
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: "Generate build files"
         shell: pwsh
+        # Without a launcher: the runner image's ccache would otherwise be picked up as a cache that is
+        # empty on every run.
         run: |
-          cmake --preset ${{ env.CMAKE_PRESET }}
+          cmake --preset $env:CMAKE_PRESET -DUSE_COMPILER_CACHE=OFF
         env:
           VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
       - name: "Build"
         shell: pwsh
         run: |
-          cmake --build --preset ${{ env.CMAKE_PRESET }}
-      - name: "Show ccache statistics"
-        if: ${{ !cancelled() }}
-        shell: pwsh
-        run: |
-          (Get-Command ccache).Source
-          ccache --version
-          ccache --show-config | Select-String -Pattern 'cache_dir|max_size|compiler_check|sloppiness|base_dir'
-          ccache -s
-      - name: "Test"
-        # A hang fails one test, not the step: the preset gives every test 10 minutes, the GUI suite's
-        # four runs their own 20 (each takes 8-10 here), vthost_test its own 5, and ctest shows a
-        # timed-out test's output. The trace names each Catch2 case on stderr as it starts, so that
-        # output ends with the case that hung.
-        shell: pwsh
-        timeout-minutes: 30
-        env:
-          CONTOUR_TEST_TRACE: "1"
-        run: |
-          ctest --preset ${{ env.CMAKE_PRESET }} --build-config Release -j $env:NUMBER_OF_PROCESSORS
-      - name: "verify the AF_UNIX tests actually ran"
-        # Windows is the ONLY validation the daemon's Windows transport gets -- nobody develops it
-        # on a Windows box. The AF_UNIX cases self-skip where the platform has no AF_UNIX, and a
-        # Catch2 SKIP exits 0, so a green suite cannot distinguish "the transport works" from "it
-        # was never exercised". `windows-latest` is far past the 10 1803 that introduced AF_UNIX,
-        # so a skip here is a regression, not a platform fact. Same assertion the Linux matrix
-        # makes about the tmux oracles. The transport itself is core-cpp's now (vendor/core-cpp), whose
-        # own CI runs its AF_UNIX cases on Windows; vthost_test is what exercises it from here.
-        #
-        # On WIN32 the top-level CMakeLists redirects CMAKE_RUNTIME_OUTPUT_DIRECTORY to
-        # <binaryDir>/bin, so the executables do NOT sit beside their source directory the way they
-        # do on Linux. The preset's generator is Ninja (single-config), so there is no
-        # per-configuration subdirectory under it either.
-        #
-        # Bounded, and streamed with CONTOUR_TEST_TRACE's case names: a case that hangs here would
-        # otherwise hold the job until its own time limit and print nothing, its output still captured.
-        # The skip check reads Catch2's summary, not the trace's case names.
-        shell: bash
-        timeout-minutes: 10
-        env:
-          CONTOUR_TEST_TRACE: "1"
-        run: |
-          set -o pipefail
-          for binary in \
-              "out/build/${CMAKE_PRESET}/bin/vthost_test.exe"; do
-            # A missing binary must not read as "nothing skipped": that is the very failure mode
-            # this step exists to catch, one directory layout further out.
-            [ -x "$binary" ] || { echo "::error::$binary not found; the assertion below would pass vacuously"; exit 1; }
-            echo "--- $binary [afunix]"
-            log=$(mktemp)
-            "$binary" '[afunix]' 2>&1 | tee "$log" || exit 1
-            if grep -v '^\[trace\]' "$log" | grep -q 'skipped'; then
-              echo "::error::$binary [afunix] reported SKIPPED; the daemon's AF_UNIX transport is not being exercised on Windows"
-              exit 1
-            fi
-          done
-      - name: "verify the PowerShell integration tests actually ran"
-        # @see "verify the AF_UNIX tests actually ran": a Catch2 SKIP exits 0, and contour_test SKIPs
-        # the PowerShell integration's cases where no pwsh is on PATH. windows-latest carries
-        # PowerShell 7 (per actions/runner-images' Windows2025-VS2026-Readme.md), so a skip here is a
-        # regression -- and Windows is where the script's OSC 133 has to pass through ConPTY. Each case
-        # runs under Windows PowerShell 5.1 too, which every Windows ships, PSReadLine 2.0 and all. Only
-        # [pwsh]: contour_test does not run the POSIX shells on Windows at all.
-        #
-        # ShellIntegrationShells.profileLine runs the very line the one-click install appends to a profile,
-        # which asks contour.exe for the script through a pipe: Release builds the GUI-subsystem
-        # contour.exe a user installs, so this is where that pipe is proved. Run outside ctest, it learns
-        # the binary from CONTOUR_BINARY here, and SKIPs -- failing this step -- without it.
-        shell: pwsh
-        timeout-minutes: 10
-        run: |
-          $binary = "out/build/$env:CMAKE_PRESET/bin/contour_test.exe"
-          $contour = "out/build/$env:CMAKE_PRESET/bin/contour.exe"
-          # A missing binary must not read as "nothing skipped".
-          foreach ($required in $binary, $contour) {
-            if (-not (Test-Path $required)) {
-              Write-Output "::error::$required not found; the assertion below would pass vacuously"
-              exit 1
-            }
-          }
-          $env:CONTOUR_BINARY = (Resolve-Path $contour).Path
-          Write-Output "--- $binary [pwsh]"
-          $output = & $binary '[pwsh]' 2>&1 | Out-String
-          $status = $LASTEXITCODE
-          Write-Output $output
-          # Before the exit status: Catch2 exits non-zero when every case skipped, which is exactly what
-          # a missing pwsh looks like.
-          if ($output -match 'skipped') {
-            Write-Output "::error::$binary [pwsh] reported SKIPPED; the PowerShell integration is not being exercised on Windows"
-            exit 1
-          }
-          if ($status -ne 0) { exit 1 }
-      - name: "verify the Win32 chrome and Restart Manager tests actually ran"
-        # @see "verify the PowerShell integration tests actually ran": the [win32] cases SKIP off the native
-        # Windows platform, and a SKIP exits 0, so a run that never reached the native plugin would read as a
-        # pass. windows-latest has a desktop, so a skip here is a regression. The [win11-22h2] cases are left
-        # out: they SKIP on a Windows older than 22H2 (a pinned runner image), which is no regression.
-        shell: pwsh
-        timeout-minutes: 10
-        env:
-          QT_QPA_PLATFORM: windows
-          QT_QUICK_BACKEND: software
-          CONTOUR_TEST_DISPLAY: "1"
-        run: |
-          # The chrome's own cases, and the Restart Manager one (contour_restart_manager_test closes a running
-          # Contour the way Windows Installer does and expects it back): both SKIP without a desktop.
-          $rows = @(
-            @{ Binary = 'contour_gui_test.exe'; Filter = '[win32]~[win11-22h2]'; What = 'the Win32 chrome' }
-            @{ Binary = 'contour_restart_manager_test.exe'; Filter = '[win32]'; What = 'closing and reopening Contour as Windows Installer does' }
-          )
-          foreach ($row in $rows) {
-            $binary = "out/build/$env:CMAKE_PRESET/bin/$($row.Binary)"
-            # A missing binary must not read as "nothing skipped".
-            if (-not (Test-Path $binary)) {
-              Write-Output "::error::$binary not found; the assertion below would pass vacuously"
-              exit 1
-            }
-            Write-Output "--- $binary $($row.Filter)"
-            $output = & $binary $row.Filter 2>&1 | Out-String
-            $status = $LASTEXITCODE
-            Write-Output $output
-            if ($output -match 'skipped') {
-              Write-Output "::error::$binary $($row.Filter) reported SKIPPED; $($row.What) is not being exercised on Windows"
-              exit 1
-            }
-            if ($status -ne 0) { exit 1 }
-          }
-      # Pull requests build and test; packaging (WiX, zip, their checks and uploads) runs on master, the merge
-      # queue and release tags.
+          cmake --build --preset $env:CMAKE_PRESET
+      - name: "Tests"
+        # The same suite as the windows job, on the binaries that ship: CI tests what it packages.
+        timeout-minutes: 60
+        uses: ./.github/actions/windows-tests
+        with:
+          preset: msvc-release
       - name: "Install Wix Toolset"
-        if: github.event_name != 'pull_request'
         run: |
           # Use this to list all available versions
           # dotnet tool search --global wix --detail
@@ -1754,7 +1617,6 @@ jobs:
       # Without a configured signer the plan says `none`, nothing is signed, and the dry run proves the machinery
       # with a throwaway certificate. The plan, not this file, decides who signs: the steps follow its output.
       - name: "Signing: plan"
-        if: github.event_name != 'pull_request'
         id: signing
         shell: pwsh
         # The kind of build is the one input the script cannot see.
@@ -1764,11 +1626,10 @@ jobs:
           BUILDS: ${{ vars.WINDOWS_SIGNING_BUILDS }}
           BUILD_KIND: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/master' && 'master') || 'other' }}
       - name: "Signing: stage the payload"
-        if: github.event_name != 'pull_request'
         shell: pwsh
         run: ./scripts/sign-windows.ps1 stage -BuildDirectory out/build/$env:CMAKE_PRESET -Destination out/signing/stage
       - name: "Signing: sign the payload"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport != 'signpath'
+        if: steps.signing.outputs.transport != 'signpath'
         shell: pwsh
         run: ./scripts/sign-windows.ps1 sign -Kind Payload -Root out/signing/stage -Signer $env:SIGNER -Manifest out/signing/payload.tsv
         env: &signing_env
@@ -1780,11 +1641,11 @@ jobs:
           ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
           ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
       - name: "Signing: send the payload to SignPath"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        if: steps.signing.outputs.transport == 'signpath'
         shell: pwsh
         run: ./scripts/sign-windows.ps1 export -Kind Payload -Root out/signing/stage -Signer signpath -Destination out/signing/signpath-payload -Manifest out/signing/payload.tsv
       - name: "Signing: upload the payload for SignPath"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        if: steps.signing.outputs.transport == 'signpath'
         id: signpath_payload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -1793,7 +1654,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
       - name: "Signing: have SignPath sign the payload"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        if: steps.signing.outputs.transport == 'signpath'
         uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -1807,11 +1668,10 @@ jobs:
           wait-for-completion-timeout-in-seconds: 3600
           output-artifact-directory: out/signing/signpath-payload-signed
       - name: "Signing: take the signed payload back"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        if: steps.signing.outputs.transport == 'signpath'
         shell: pwsh
         run: ./scripts/sign-windows.ps1 import -Root out/signing/stage -From out/signing/signpath-payload-signed -Manifest out/signing/payload.tsv -Signer signpath
       - name: "Create Package(s)"
-        if: github.event_name != 'pull_request'
         shell: powershell
         # The per-machine MSI and the zip, then the per-user MSI. CPack names them in lowercase already
         # (contour-<version>-win64.msi, .zip and -win64-user.msi) and leaves them in the build directory. The
@@ -1831,16 +1691,16 @@ jobs:
             }
           }
       - name: "Signing: sign the installers"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport != 'signpath'
+        if: steps.signing.outputs.transport != 'signpath'
         shell: pwsh
         run: ./scripts/sign-windows.ps1 sign -Kind Packages -Root out/build/$env:CMAKE_PRESET -Files $env:CONTOUR_MSI,$env:CONTOUR_USER_MSI -Signer $env:SIGNER
         env: *signing_env
       - name: "Signing: send the installers to SignPath"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        if: steps.signing.outputs.transport == 'signpath'
         shell: pwsh
         run: ./scripts/sign-windows.ps1 export -Kind Packages -Root out/build/$env:CMAKE_PRESET -Files $env:CONTOUR_MSI,$env:CONTOUR_USER_MSI -Signer signpath -Destination out/signing/signpath-packages -Manifest out/signing/packages.tsv
       - name: "Signing: upload the installers for SignPath"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        if: steps.signing.outputs.transport == 'signpath'
         id: signpath_packages
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -1849,7 +1709,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
       - name: "Signing: have SignPath sign the installers"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        if: steps.signing.outputs.transport == 'signpath'
         uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -1863,21 +1723,19 @@ jobs:
           wait-for-completion-timeout-in-seconds: 3600
           output-artifact-directory: out/signing/signpath-packages-signed
       - name: "Signing: take the signed installers back"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        if: steps.signing.outputs.transport == 'signpath'
         shell: pwsh
         run: ./scripts/sign-windows.ps1 import -Root out/build/$env:CMAKE_PRESET -From out/signing/signpath-packages-signed -Manifest out/signing/packages.tsv -Signer signpath
       - name: "Signing: dry run"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.dry-run == 'true'
+        if: steps.signing.outputs.dry-run == 'true'
         shell: pwsh
         run: ./scripts/sign-windows.ps1 dry-run -Root out/signing/stage -Packages $env:CONTOUR_MSI,$env:CONTOUR_USER_MSI
       - name: "Signing: verify what ships"
-        if: github.event_name != 'pull_request'
         shell: pwsh
         run: ./scripts/sign-windows.ps1 verify -Signer $env:SIGNER -Manifest out/signing/payload.tsv -Zip $env:CONTOUR_ZIP -Msi $env:CONTOUR_MSI,$env:CONTOUR_USER_MSI
         env:
           SIGNER: ${{ steps.signing.outputs.signer }}
       - name: "Check the package contents"
-        if: github.event_name != 'pull_request'
         # What each package must and must not hold, asserted as the macOS job does for its image: a mistake
         # either way has no other visible symptom. The rows, and why each exists, are in
         # scripts/check-windows-package.ps1.
@@ -1886,7 +1744,6 @@ jobs:
           pwsh scripts/check-windows-package.ps1 -Zip $env:CONTOUR_ZIP -MachineMsi $env:CONTOUR_MSI -UserMsi $env:CONTOUR_USER_MSI
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: "Uploading MSI to artifact store"
-        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
@@ -1894,7 +1751,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading the per-user MSI to artifact store"
-        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64-user.msi"
@@ -1902,7 +1758,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading ZIP to artifact store"
-        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
@@ -1910,7 +1765,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: "Check that the MSI upgrades in place"
-        if: github.event_name != 'pull_request'
         timeout-minutes: 30
         # Installs the package over an earlier build of the same release, and over the latest release, as an
         # installed Contour is upgraded in the field, and checks what the upgrade leaves: the folder, the PATH,
@@ -1994,7 +1848,7 @@ jobs:
             exit 1
           }
       - name: "Uploading the upgrade check's logs"
-        if: failure() && github.event_name != 'pull_request'
+        if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "msi-upgrade-check-logs"
@@ -2843,7 +2697,7 @@ jobs:
         if: runner.os == 'macOS'
         run: env CONTOUR_INSTALL_BREW_QT=ON QTVER=6 ./scripts/install-deps.sh
       # }}}
-      # {{{ Windows: the dependency steps of the windows job
+      # {{{ Windows: the dependency steps of the Windows jobs (.github/actions/windows-build-env)
       - name: "Fetch embedded dependencies"
         if: runner.os == 'Windows'
         shell: powershell
@@ -3265,7 +3119,10 @@ jobs:
       - check_links
       - check_release
       - check_notcurses_test_matrix
+      # The package jobs make the release's macOS and Windows files; the plain jobs are waited for as
+      # well, so that a release does not ship while the plain suite is red.
       - macOSArm
+      - macos_package
       - package_for_AppImage
       - package_for_Ubuntu
       - check_ubuntu2404_matrix_test_matrix
@@ -3275,6 +3132,7 @@ jobs:
       - test_daemon_package_swap
       - package_for_Fedora
       - windows
+      - windows_package
     permissions:
       # We need write permissions on contents to create GitHub releases.
       contents: write

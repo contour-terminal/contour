@@ -1,12 +1,15 @@
 #! /usr/bin/env python3
 """Deletes the superseded generations of the compiler caches a branch has saved.
 
-`hendrikmuhs/ccache-action` saves a new entry per run, named `ccache-<key>-<timestamp>`, and never
-deletes one. Two generations of every key do not fit GitHub's cache quota, and a pull request that
-restores the older one keeps it "recently used", so GitHub evicts some other key instead -- which is
-how a job ends up with no cache at all. This keeps the newest entry of each key and deletes the rest.
+Every compiler cache CI keeps saves a new entry per run and never deletes one:
+`hendrikmuhs/ccache-action` names it `ccache-<key>-<timestamp>`, the Windows job's Pace store
+`pace-store-<job>-<pace version>-<run id>-<run attempt>` (the families are the rows of
+scripts/lib/compiler_caches.py). Two generations of every key do not fit GitHub's cache quota, and a
+pull request that restores the older one keeps it "recently used", so GitHub evicts some other key
+instead -- which is how a job ends up with no cache at all. This keeps the newest entry of each key
+and deletes the rest.
 
-Run by `.github/workflows/cache-prune.yml` after each `Build` of master; see
+Run by the `prune_compiler_caches` job of `.github/workflows/build.yml` after each `Build` of master; see
 docs/internals/build-times.md ("The compiler cache").
 """
 
@@ -15,15 +18,14 @@ from __future__ import annotations
 import argparse
 import enum
 import json
-import re
 import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 
-# A compiler-cache entry: the action's `ccache-` prefix, the job's key, and the timestamp the action
-# appends. Anything else in the cache store (vcpkg, Qt, FreeBSD, ...) does not match and is never touched.
-_GENERATION = re.compile(r"^(?P<name>ccache-.+)-\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
+# A compiler-cache entry is a generation of one key of one family; anything else in the cache store
+# (vcpkg, Qt, FreeBSD, ...) belongs to no family and is never touched.
+from lib.compiler_caches import generation_name
 
 
 @dataclass(frozen=True)
@@ -42,10 +44,9 @@ def generations_to_delete(entries: list[CacheEntry], ref: str) -> list[int]:
     newest: dict[str, CacheEntry] = {}
     superseded: list[int] = []
     for entry in entries:
-        match = _GENERATION.match(entry.key)
-        if entry.ref != ref or match is None:
+        name = generation_name(entry.key)
+        if entry.ref != ref or name is None:
             continue
-        name = match["name"]
         kept = newest.get(name)
         if kept is None:
             newest[name] = entry
@@ -118,8 +119,16 @@ _X86 = "ccache-ccache-ubuntu-24.04-Clang 22-23-Release-6"
 _ARM = "ccache-ccache-ubuntu-24.04-arm-Clang 22-23-Release-6"
 
 
+_PACE = "pace-store-windows-msvc-ci-0.7.0"
+_PACE_NEXT = "pace-store-windows-msvc-ci-0.8.0"
+
+
 def _generation(entry_id: int, name: str, stamp: str, ref: str = _MASTER) -> CacheEntry:
     return CacheEntry(entry_id, f"{name}-{stamp}", ref, stamp)
+
+
+def _pace_store(entry_id: int, name: str, run_id: int, stamp: str, ref: str = _MASTER, attempt: int = 1) -> CacheEntry:
+    return CacheEntry(entry_id, f"{name}-{run_id}-{attempt}", ref, stamp)
 
 
 def self_test() -> int:
@@ -153,6 +162,39 @@ def self_test() -> int:
             [],
         ),
         ("tie", [_generation(4, _WINDOWS, _T1), _generation(9, _WINDOWS, _T1)], [4]),
+        (
+            "two Pace store generations",
+            [_pace_store(1, _PACE, 43010602755, _T1), _pace_store(2, _PACE, 43087533177, _T2)],
+            [1],
+        ),
+        (
+            "a re-run's Pace store supersedes the first attempt's",
+            [_pace_store(5, _PACE, 43087533177, _T1), _pace_store(6, _PACE, 43087533177, _T2, attempt=2)],
+            [5],
+        ),
+        (
+            "Pace stores of other versions stay apart",
+            [_pace_store(1, _PACE, 43010602755, _T1), _pace_store(2, _PACE_NEXT, 43087533177, _T2)],
+            [],
+        ),
+        (
+            "a Pace store and a ccache key stay apart",
+            [_pace_store(1, _PACE, 43010602755, _T1), _generation(2, _WINDOWS, _T2)],
+            [],
+        ),
+        (
+            "a Pace store key without a run, untouched",
+            [CacheEntry(1, _PACE, _MASTER, _T1), CacheEntry(2, _PACE, _MASTER, _T2)],
+            [],
+        ),
+        (
+            "Pace stores of other refs untouched",
+            [
+                _pace_store(1, _PACE, 43010602755, _T1, ref="refs/pull/2292/merge"),
+                _pace_store(2, _PACE, 43087533177, _T2),
+            ],
+            [],
+        ),
     )
     failures: list[str] = []
     for name, entries, expected in cases:

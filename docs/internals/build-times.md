@@ -111,22 +111,37 @@ So the gap is cache misses on slow vCPUs, and the cache is the lever. Why it mis
 
 Rules, in `.github/workflows/build.yml`:
 
-- **`master` pushes save, everything else only restores** (`save: ${{ github.ref == 'refs/heads/master' }}`).
-  `hendrikmuhs/ccache-action` restores by key prefix, so a pull request takes the newest entry
-  `master` saved under the same key. Merge-queue and release-tag runs restore too and save nothing: a
-  cache saved under a tag's scope would serve only that tag and push master's out of the quota.
-- **`evict-old-files: job`** drops every cached object the saving job did not touch, so an entry is
-  one working set -- the current tree -- and does not accumulate dead objects up to `max-size`.
-- **Keys are stable**: one per job, the action appends the timestamp.
+- **`master` pushes save, everything else only restores** (`save: ${{ github.ref == 'refs/heads/master' }}`,
+  and for the Windows job's Pace store an `actions/cache/save` step with the same condition).
+  Both restore by key prefix, so a pull request takes the newest entry `master` saved under the same
+  key. Merge-queue and release-tag runs restore too and save nothing: a cache saved under a tag's
+  scope would serve only that tag and push master's out of the quota.
+- **A job saves only what pull requests can use.** The cache-saving jobs build the same
+  configuration on every event, so the entry a `master` run saves is the one the next pull request
+  restores; no job switches its configuration by event. The production builds (`windows_package`,
+  `macos_package`) have no cache at all: their objects carry link-time-optimization code that no
+  pull request compiles, and an entry of them was 3 GB. They configure with `-DUSE_COMPILER_CACHE=OFF`,
+  so the ccache of the runner image is not picked up as a cache that is empty on every run.
+- **`evict-old-files: job`** drops every cached object the saving ccache job did not touch, so an
+  entry is one working set -- the current tree -- and does not accumulate dead objects up to
+  `max-size`. The Pace store has no such pass: `pace-kv` evicts only when the store reaches
+  `--storage-max-disk`, so the cap is what bounds it, set at about three times one plain build.
+- **Keys are stable**: one per job. The ccache action appends a timestamp to it; the Pace store's key
+  is spelled out in the workflow as `pace-store-windows-msvc-ci-<PACE_VERSION>-<run id>-<run attempt>`,
+  and restored by the prefix up to the version.
+- **The Pace store is saved only if `pace-kv` was still running** when the job stopped it. A daemon
+  that refused its store (a damaged file) has exited by then, and saving the same file again would
+  hand it to every later run.
 - **Hit-defeating inputs are neutralised workflow-wide**: `CCACHE_BASEDIR` (the checkout),
   `CCACHE_NOHASHDIR`, and `CCACHE_SLOPPINESS=include_file_mtime,include_file_ctime`. There is no
   `pch_defines` because there is no PCH.
 - **The tidy-diff job has no cache.** It builds generated headers only and compiles nothing.
-- **One generation per key.** The action saves a new entry per run and deletes none, so on `master`
-  the job `prune_compiler_caches` waits for every job that saves one and then
-  `scripts/prune-cache-generations.py` deletes each ccache key's entries but the newest. Nothing
-  else in the cache store is touched. `scripts/check-workflows.py` fails when a job that saves a
-  cache is missing from the prune job's `needs`.
+- **One generation per key.** The ccache action and the Pace store step save a new entry per run and
+  delete none, so on `master` the job `prune_compiler_caches` waits for every job that saves one and
+  then `scripts/prune-cache-generations.py` deletes each key's entries but the newest. The two kinds
+  of entry are the rows of one table, `scripts/lib/compiler_caches.py`, which both that script and
+  `scripts/check-workflows.py` read; nothing else in the cache store is touched. The latter fails when
+  a job that saves a compiler cache is missing from the prune job's `needs`.
 - **A `master` run has a concurrency group per commit**, so it starts at once and is never
   cancelled. With one group for the branch each run queued behind the last and a third push
   cancelled the one still pending, which left a merge's caches hours late or missing.
@@ -140,8 +155,8 @@ Rules, in `.github/workflows/build.yml`:
   commit alone, consecutive pushes ran all of these side by side: on 2026-11-12 the jobs of a
   second `master` build and of pull requests waited 40 to 90 minutes for a runner.
 - **A key no pull request restores has no cache** while the quota is tight. The Linux matrix's GCC
-  legs and its arm Clang leg, the 26.04 leg of the daemon package, the Ubuntu packaging job and the
-  full-tree clang-tidy all run on `master` alone.
+  legs and its arm Clang leg, the 26.04 leg of the daemon package, the Ubuntu packaging job, the
+  Windows and macOS package jobs run on `master` alone, and the full-tree clang-tidy nightly.
 
 ### Why the cache missed in November 2026
 
@@ -171,6 +186,32 @@ On 2026-11-11 a pull request took about two hours again. `ccache -s` from pull-r
 - Link-time optimization itself (the production build on Windows, macOS, AppImage and the daemon
   package) cost roughly 20 of 103 build minutes on Windows and 10 of 97 on macOS.
 
+### Why pull requests build the plain configuration
+
+Until 2026-11-12 the `Windows` and `macOSArm` jobs built the production configuration
+(`CONTOUR_PRODUCTION_BUILD=ON`: link-time optimization and hardening, presets `msvc-release` and
+`macos-package`) on every event, and a pull request's Windows or macOS job took one to two hours.
+Measured that day on Windows with a cache that worked (99.0 % hits, 1486 of 1501 compiles): the build
+step took 53 minutes, of which compiling was 4.0 and linking 48.8. Every test executable is optimized
+again at link time: `contour_test.exe` 1110 s, `contour_gui_test.exe` 382 s, `vtbackend_test.exe`
+376 s, `bench-latency.exe` 317 s. No compiler cache can help with that, and the repository was at
+GitHub's limit of 20 concurrent jobs with five of them typically held by two-hour Windows jobs.
+
+So a pull request builds the plain configuration, `msvc-ci` and `macos-ci`: the same presets without
+`production` (and on macOS without signing and notarization), in `Release`. The jobs `Windows` and
+`macOSArm` build it on every event and stay the required checks. The production build, with the full
+test suite run against the binaries that ship, `check_production_build`, signing and packaging, is
+`windows_package` and `macos_package`, which run on `master` pushes, in the merge queue and on release
+tags. The accepted cost: a defect that only link-time optimization or the hardening flags expose is
+found on `master` after the merge, not in the pull request. The release still waits for the package
+jobs, and for the plain ones too.
+
+`scripts/check-workflows.py` keeps it that way: a job that builds the production configuration --
+a `--preset` or value naming a preset that inherits `production`, `CONTOUR_PRODUCTION_BUILD=ON`, or
+`scripts/build-appimage.sh`, which sets it -- must not run on pull requests. Its table
+`PRODUCTION_ON_PULL_REQUESTS` names the two exceptions, each with its reason: the `contour-daemon`
+package, the only GUI-less build, and the AppImage; both are short Linux jobs.
+
 ### Sizes
 
 Measured with ccache 4.9.1 (the version the Ubuntu 24.04 runner installs), compression on, a clean
@@ -191,21 +232,27 @@ that is the size of the first build under a cap that no longer bit, on 2026-11-1
 
 | Job | Key | Entry | `max-size` |
 |---|---|---:|---:|
-| Windows (MSVC) | `ccache-windows-msvc-release` | 2.9 GB or more | 3800 MB |
-| macOS (arm) | `ccache-macosArm-r1` | 1.6 GB | 2100 MB |
+| Windows (MSVC), `pace-cc` | `pace-store-windows-msvc-ci-<Pace version>-<run>` | 335 MB | 1 GB (`--storage-max-disk`) |
+| macOS (arm) | `ccache-macosArm-ci` | 0.2 GB | 1500 MB |
 | Linux matrix, Clang on x86 | `ccache-ubuntu-24.04-Clang 22-...` | 0.7 GB | 900 MB |
 | Packaging for AppImage | `ccache-appimage` | 0.76 GB | 1200 MB |
 | `build_no_extensions` | `ccache-ubuntu2404-no-extensions` | 0.55 GB | 700 MB |
 | `package_daemon_for_Ubuntu`, 24.04 | `ccache-ubuntu24.04-headless` | 0.33 GB | 500 MB |
+| `windows_package`, `macos_package` | none | | |
 | Linux matrix: GCC (x86, arm), Clang on arm | none | | |
 | `package_daemon_for_Ubuntu`, 26.04 | none | | |
 | Packaging, Ubuntu 26.04 | none | | |
 | Full-tree clang-tidy (`clang-tidy.yml`) | none | | |
 
-One generation of each is about 6.8 GB, beside roughly 1.7 GB of Qt, vcpkg, FreeBSD, apt and
-lint-tool caches: 8.5 GB of the 10 GB quota. Windows was 2.9 GB of that while CI built `RelWithDebInfo`, because MSVC's `/Z7`
-puts the debug information into every object file; a `Release` build has none, and the figure is to be measured again. The jobs without a cache run on `master` alone, so
-they cost no pull request anything; they get their caches back when the entries shrink.
+With the production builds' entries the Windows and macOS rows were 2.9 and 1.6 GB, of about 6.8 GB
+for one generation of each key, beside roughly 1.7 GB of Qt, vcpkg, FreeBSD, apt and lint-tool
+caches: 8.5 GB of the 10 GB quota. The production builds have no entry any more; the plain
+configuration's objects carry no link-time-optimization code, and a `Release` build has no debug
+information, so both rows shrink. The Pace store held 335 MB after one full plain build, where the
+production build's store in the trial was 3.2 GB, and the macOS entry held 0.2 GB where the
+production build's held 1.6 GB. The jobs without a
+cache run on `master` alone, so they cost no pull request anything; they get their caches back when
+the entries shrink.
 
 That headroom is not enough for a second generation, and there is one for a while on every
 `master` build: from the moment a job saves its new entry until the prune job has run. In that
@@ -219,23 +266,49 @@ restored Clang-matrix entry would hit almost nothing.
 
 ### Windows
 
-The MSVC build is cacheable. `cmake/CompileCache.cmake` selects the `ccache` on `PATH` (the log reads
-`[cache] Enabling ccache (C:/Strawberry/c/bin/ccache.exe)`) and, whenever a launcher is in use under
-MSVC, sets `CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded` with `CMAKE_POLICY_DEFAULT_CMP0141=NEW` --
-`/Z7` instead of `/Zi` -- and rewrites a legacy `/Zi` in the flag variables; the project requires
-CMake 3.25, which has both. What was missing was a persisted cache directory, so the job now runs
-`hendrikmuhs/ccache-action` like the Linux jobs, and its final step prints the binary CMake used,
-its configuration and `ccache -s`; "Uncacheable calls" there would mean `/Zi` survived.
-The dead `sccache` steps and `SCCACHE_*` environment are gone.
+The plain Windows job caches its compiles with `pace-cc`, the launcher of
+[Pace](https://github.com/LASTRADA-Software/pace), served by a `pace-kv` on the runner whose store
+is one file. In a trial on the production build, ccache hit 0.5 to 2 % with a cache at its full size
+where `pace-cc` hit 99 %: restoring the 3.2 GB store took 39 s, installing and starting Pace 13 s, and
+the 4 minutes of compiles hit 99 %.
+
+The job installs the Pace release named by `PACE_VERSION` at the top of `build.yml` (launcher and
+daemon come from the one archive, and must be one version: a wire-version mismatch refuses every
+exchange) and checks the archive against the SHA-256 pinned beside it (`PACE_WINDOWS_ZIP_SHA256`;
+a mismatch builds without Pace), restores the store, and starts `pace-kv` on it, with its memory tier
+capped at 1 GB, through `cmd.exe`, which owns its output
+redirection: started by PowerShell with redirected output it died when the step's shell exited. It
+then waits until a compile is served, because `cmake/CompileCache.cmake` takes `pace-cc` only when its
+own two-second probe of the daemon succeeds and otherwise falls back to the uncached ccache of the
+runner image; configure says which (`[cache] Enabling pace-cc` or `[cache] Not using pace-cc ...`), and
+the job configures again in a fresh tree, up to three times, while it says the latter. None of the Pace
+steps fails the job: without the cache the build is slower, not wrong. After the build it prints
+`pace-cc --show-stats`, writes the hits and compiles into the job summary, and stops `pace-kv` before
+the store is saved. `pace-kv` has no clean stop on Windows but a console Ctrl-C, which a detached
+process does not receive, so it is given 20 seconds to write out what its default
+`--storage-durability=batched` holds and then killed; the trial lost nothing that way. Every Pace
+step has five minutes, since `continue-on-error` does not end a step that hangs.
+
+A cold store costs about two hours: the first plain run compiled all 1502 translation units (a
+median of 14.6 s each) in a build step of 110 minutes, and the job took 127.7. That recurs on the
+first `master` run after a `PACE_VERSION` bump and after GitHub evicts the entry, so the job may run
+200 minutes.
+
+Whenever a launcher is in use under MSVC, `cmake/CompileCache.cmake` sets
+`CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded` with `CMAKE_POLICY_DEFAULT_CMP0141=NEW` -- `/Z7`
+instead of `/Zi`, which no launcher can cache -- and rewrites a legacy `/Zi` in the flag variables; a
+`Release` build has no debug information to begin with.
 
 ## What a pull request runs
 
-A pull request runs the platform builds and tests -- `Windows`, `macOSArm` (build and tests, no
-signing, no packaging) and one Linux leg (Clang 22 on x86, built with `-Werror`) -- plus the guard
-builds, the lint jobs and clang-tidy on the changed lines. Master pushes and the merge queue run
-the rest: the other three compiler legs, packaging, valgrind, conformance, bench-headless,
-notcurses and FreeBSD. The full-tree clang-tidy runs nightly (below). A release
-tag runs everything a master push runs, and the full-tree clang-tidy as well; the static build runs on master pushes and release
+A pull request runs the platform builds and tests -- `Windows`, `macOSArm` (the plain
+configuration, `msvc-ci` and `macos-ci`: build and tests, no signing, no packaging) and one Linux leg
+(Clang 22 on x86, built with `-Werror`) -- plus the guard builds, the lint jobs and clang-tidy on the
+changed lines. Master pushes and the merge queue run the rest: the production builds of Windows and
+macOS with their tests, signing and packages (`Windows (package)`, `macOS (package)`), the other three
+compiler legs, packaging, valgrind, conformance, bench-headless, notcurses and FreeBSD. The full-tree
+clang-tidy runs nightly (below). A release tag runs everything a master push runs, and the full-tree
+clang-tidy as well; the static build runs on master pushes and release
 tags, never in the merge queue.
 
 The daemon packages are the two exceptions in kind. `package_daemon_for_Ubuntu` (the Qt-free
