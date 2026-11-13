@@ -2791,7 +2791,9 @@ void NativeSession::preAuthExpired()
 {
     if (_closed)
         return;
-    errorLog()("{}: no hello was accepted within {}s of the accept; closing", _id, PreAuthTimeout.count());
+    errorLog()("{}: no hello was accepted within {} of the accept; closing",
+               _id,
+               std::chrono::duration_cast<std::chrono::seconds>(_services.handshake.helloTimeout));
     _closed = true;
     // The queue closes _connection too, which resumes the parked read and ends the flow that owns this.
     _writer.close();
@@ -3356,7 +3358,10 @@ ConnectionHandler makeNativeHandler(core::net::EventLoop& loop,
     // so the captures never outlive an activation frame.
     return [&loop, &host, services = std::move(services)](ConnectionId id,
                                                           std::unique_ptr<core::net::ISocket> connection) {
-        return serveNativeClient(&loop, &host, std::move(id), std::move(connection), services);
+        auto connectionServices = services;
+        connectionServices.handshake.authDeadline = loop.clock().now() + services.handshake.helloTimeout;
+        return serveNativeClient(
+            &loop, &host, std::move(id), std::move(connection), std::move(connectionServices));
     };
 }
 
@@ -3367,6 +3372,7 @@ namespace
     {
         core::net::ISocket* socket;
         ConnectionId const* id;
+        std::chrono::milliseconds timeout; ///< The budget it missed, for the log.
     };
 
     /// One TLS client's lifetime: the handshake settled first, so that its channel binding is known before
@@ -3381,17 +3387,18 @@ namespace
     {
         // From the accept: the TLS handshake and then the hello share this one budget, so a peer that
         // stalls in either is closed. Closing the socket ends whatever is parked on it.
-        auto const deadline = loop->clock().now() + PreAuthTimeout;
+        auto const deadline = loop->clock().now() + services.handshake.helloTimeout;
         services.handshake.authDeadline = deadline;
-        auto expiry = HandshakeExpiry { .socket = socket.get(), .id = &id };
+        auto expiry =
+            HandshakeExpiry { .socket = socket.get(), .id = &id, .timeout = services.handshake.helloTimeout };
         auto handshakeTimer = core::net::DeadlineTimer {
             *loop,
             deadline,
             [](void* state) {
                 auto const& stalled = *static_cast<HandshakeExpiry*>(state);
-                errorLog()("{}: the TLS handshake was not finished within {}s of the accept; closing",
+                errorLog()("{}: the TLS handshake was not finished within {} of the accept; closing",
                            *stalled.id,
-                           PreAuthTimeout.count());
+                           std::chrono::duration_cast<std::chrono::seconds>(stalled.timeout));
                 stalled.socket->close();
             },
             &expiry

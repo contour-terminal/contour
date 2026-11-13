@@ -93,8 +93,8 @@ struct KeyAuthPolicy
     std::reference_wrapper<core::IRandom> random; ///< Where each challenge's nonce comes from.
 };
 
-// PreAuthTimeout, how long a connection on a network listener has to authenticate, lives in KeyAuth.hpp,
-// where a client that waits on it can name it too.
+// PreAuthTimeout, how long a connection has by default to authenticate, lives in KeyAuth.hpp, where a client
+// that waits on it can name it too.
 
 /// What the daemon side of the handshake admits: the token, versions and capabilities it requires
 /// and offers.
@@ -108,9 +108,14 @@ struct HandshakePolicy
     /// whose permissions are the gate, and for any endpoint without keys. Per connection, so set only by the
     /// handler that has the connection's TLS session in hand.
     std::optional<KeyAuthPolicy> keyAuth = std::nullopt;
+    /// How long a connection has, from its accept, to have a hello accepted: the TLS handler's budget for
+    /// the handshake and the hello together, the local handler's for the hello alone. A local peer is no
+    /// stranger, but one that says nothing would hold its connection -- and the relay of a stdio attach in
+    /// front of it -- for ever. The handlers turn it into @ref authDeadline as they accept.
+    std::chrono::milliseconds helloTimeout = PreAuthTimeout;
     /// The instant, on the event loop's clock, by which a hello must have been accepted; the connection is
-    /// closed at it otherwise. Empty for a unix socket, whose permissions are the gate. Per connection, as
-    /// it runs from the accept: set by the handler that knows when that was.
+    /// closed at it otherwise. Empty for a session constructed without a handler. Per connection, as it runs
+    /// from the accept: set by the handler that knows when that was, from @ref helloTimeout.
     std::optional<core::platform::SteadyTimePoint> authDeadline = std::nullopt;
     /// The protocol versions this endpoint speaks; the highest one shared with the client is agreed.
     proto::VersionRange versions = proto::SupportedVersions;
@@ -1440,8 +1445,9 @@ struct TlsKeyAuth
 };
 
 /// Composes a native connection handler that FIRST encrypts each accepted socket (server-side TLS), then
-/// serves the native protocol over it. Each connection has PreAuthTimeout, from its accept, to finish the TLS
-/// handshake and have its hello accepted; one that has not is closed.
+/// serves the native protocol over it. Each connection has HandshakePolicy::helloTimeout (PreAuthTimeout by
+/// default), from its accept, to finish the TLS handshake and have its hello accepted; one that has not is
+/// closed.
 /// @param loop The event loop every connection runs on; its clock times the deadline.
 /// @param host The session host every connection serves (not owned; outlives the handler).
 /// @param tls The server-side TLS context.
@@ -1456,8 +1462,9 @@ struct TlsKeyAuth
     NativeSessionServices services,
     TlsKeyAuth keyAuth);
 
-/// The daemon's connection-handler factory for native-protocol clients.
-/// @param loop The event loop every connection runs on.
+/// The daemon's connection-handler factory for native-protocol clients. Each connection has
+/// HandshakePolicy::helloTimeout, from its accept, to have its hello accepted; one that has not is closed.
+/// @param loop The event loop every connection runs on; its clock times the deadline.
 /// @param host The session host every connection serves (not owned; outlives the handler).
 /// @param services What each connection is constructed with.
 /// @return The handler.

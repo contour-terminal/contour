@@ -9189,18 +9189,77 @@ TEST_CASE("a connection whose hello was accepted outlives the pre-authentication
     CHECK_FALSE(d.ended);
 }
 
-TEST_CASE("a unix-socket session has no pre-authentication deadline", "[vthost][native][auth][deadline]")
+namespace
 {
-    auto clock = core::platform::ManualClock { core::platform::SteadyTimePoint {} + 10s };
-    auto h = NativeHarness { HarnessOptions { .clock = &clock } };
-    auto ended = false;
-    h.loop.spawn(runUntilEnded(h.session.get(), &ended));
-    turnIdle(h.loop);
-    clock.advance(10min);
-    turnIdle(h.loop);
-    CHECK_FALSE(ended);
-    h.pair.second->close();
-    CHECK(turnUntil(h.loop, [&] { return ended; }));
+/// A local (non-TLS) connection served through makeNativeHandler on a ManualClock, its hello due
+/// @ref HelloTimeout after the accept.
+struct LocalDeadlineHarness
+{
+    static constexpr auto HelloTimeout = 5s;
+
+    core::platform::ManualClock clock { core::platform::SteadyTimePoint {} + 10s };
+    NativeHarness h { HarnessOptions { .clock = &clock } };
+    core::net::testing::SocketPair pair = makeConnection(h.loop, std::nullopt);
+    bool served = false;
+    bool clientSawEnd = false;
+    std::vector<proto::DecodedFrame> received;
+
+    LocalDeadlineHarness()
+    {
+        auto services = vthost::NativeSessionServices {};
+        services.handshake.helloTimeout = HelloTimeout;
+        auto const handler = vthost::makeNativeHandler(h.loop, h.host, std::move(services));
+        h.loop.spawn([](core::async::Task<void> serve, bool* done) -> Task<void> {
+            co_await std::move(serve);
+            *done = true;
+        }(handler(vthost::ConnectionId { .endpoint = "native", .index = 7 }, std::move(pair.first)),
+                                                                   &served));
+        h.loop.spawn(readAll(pair.second.get(), &received, &clientSawEnd));
+    }
+
+    /// Lets the connection end (its client closes) before anything it reaches is destroyed.
+    ~LocalDeadlineHarness()
+    {
+        pair.second->close();
+        std::ignore = turnUntil(h.loop, [this] { return served; });
+    }
+
+    LocalDeadlineHarness(LocalDeadlineHarness const&) = delete;
+    LocalDeadlineHarness& operator=(LocalDeadlineHarness const&) = delete;
+    LocalDeadlineHarness(LocalDeadlineHarness&&) = delete;
+    LocalDeadlineHarness& operator=(LocalDeadlineHarness&&) = delete;
+};
+} // namespace
+
+TEST_CASE("a local connection that sends no hello is closed at its hello deadline",
+          "[vthost][native][auth][deadline]")
+{
+    auto capture = core::log::ScopedCapture {};
+    auto d = LocalDeadlineHarness {};
+    turnIdle(d.h.loop);
+    d.clock.advance(LocalDeadlineHarness::HelloTimeout - 1s);
+    turnIdle(d.h.loop);
+    CHECK_FALSE(d.served); // a second early: still waiting
+    CHECK_FALSE(d.clientSawEnd);
+
+    d.clock.advance(2s);
+    CHECK(turnUntil(d.h.loop, [&] { return d.served && d.clientSawEnd; }));
+    CHECK(capture.contains("no hello was accepted within 5s"));
+}
+
+TEST_CASE("a local connection whose hello was accepted outlives its hello deadline",
+          "[vthost][native][auth][deadline]")
+{
+    auto d = LocalDeadlineHarness {};
+    auto const hello = encodeRequest({ proto::DecodedPdu { controlHello(std::nullopt) } });
+    d.h.loop.spawn(feedBytes(d.pair.second.get(), &hello));
+    CHECK(turnUntil(d.h.loop, [&] { return !d.received.empty(); }));
+    REQUIRE_FALSE(d.received.empty());
+    CHECK(admits(d.received.front()));
+
+    d.clock.advance(10min);
+    turnIdle(d.h.loop);
+    CHECK_FALSE(d.served);
 }
 
 TEST_CASE("a TLS listener with neither a key nor a token is refused", "[vthost][native][auth]")
