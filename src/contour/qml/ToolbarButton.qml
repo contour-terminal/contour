@@ -15,6 +15,9 @@ import QtQuick
 Item {
     id: root
 
+    /// The colour roles the button is inked with: the chrome's, or the tab bar's where it sits on the bar.
+    property var colors: chromeStyle.colors
+
     /// The glyph the button draws.
     property string glyph
     /// What assistive technology announces the button as.
@@ -24,11 +27,11 @@ Item {
     /// The font the glyph is drawn in.
     property font glyphFont: chromeStyle.newTabFont
     /// The colour the glyph is drawn in: the band's tab text unless the host has a surface of its own.
-    property color glyphColor: chromeStyle.colors.tabText
+    property color glyphColor: root.colors.tabText
     /// The edge of the button's square.
     property real extent: chromeStyle.size.toolbarButton
     /// The fill under a hovered or focused button: the band's unless the host sits on a surface of its own.
-    property color hoverFill: chromeStyle.colors.tabHoverFill
+    property color hoverFill: root.colors.tabHoverFill
 
     /// The tooltip's label: the accessible name unless the host says more; empty shows no tooltip.
     property string toolTipText: root.accessibleName
@@ -87,7 +90,7 @@ Item {
         objectName: "toolbarButtonBackground"   // findChild() handle for the GUI test
         anchors.fill: parent
         radius: chromeStyle.radii.control
-        color: primary.pressed || secondary.pressed ? chromeStyle.colors.controlPressedFill
+        color: primary.pressed || secondary.pressed ? root.colors.controlPressedFill
              : hover.hovered || root.activeFocus ? root.hoverFill
              : "transparent"
     }

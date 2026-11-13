@@ -1257,10 +1257,12 @@ TEST_CASE("UiStyleProvider: badgeLook, hostChipLook, titleBand and tabWellLayout
           == QStringLiteral("hidden"));
     CHECK(contourLinux.titleBand(0, 0, 0, 0, {}, static_cast<int>(contour::window::HostChipStateCount))
               .isEmpty());
-    // Fluent's joined band always shows, holding its one tab (R-j).
+    // Fluent's joined band always shows, for its caption buttons: the tabs while the gate shows them, else
+    // the title.
     auto const fluent = UiStyleProvider(chromeInputsFor(ChromeStyle::Fluent, font));
     CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0).value("band").toString() == QStringLiteral("shown"));
-    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0).value("centre").toString() == QStringLiteral("tabs"));
+    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0).value("centre").toString() == QStringLiteral("title"));
+    CHECK(fluent.titleBand(0, 0, 1, 0, {}, 0).value("centre").toString() == QStringLiteral("tabs"));
 
     auto const crowded = mac.tabWellLayout(300, 12);
     CHECK(crowded.value("scrolls").toBool());
@@ -1924,6 +1926,190 @@ TEST_CASE("UiStyleProvider: colorOn picks the label by the pane's own background
     CHECK(gap
           == contour::platform::toQColor(contour::config::shadeLightness(vtbackend::RGBColor(0x1C1E24), -4)));
     CHECK(tokenOf(shaded, "colors", "paneGapFill").value<QColor>() == gap);
+}
+
+TEST_CASE("UiStyleProvider: tabStyle is the row's own until tab_style names something", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::TabFillKind;
+    using contour::config::TabIndicator;
+    using contour::window::UiStyleProvider;
+    using vtbackend::operator""_rgb;
+
+    // Untouched: the row's line between two tabs, the row's fills and no indicator.
+    auto const fluent =
+        UiStyleProvider(contour::window::chromeInputsFor(ChromeStyle::Fluent, QGuiApplication::font()));
+    auto const mac =
+        UiStyleProvider(contour::window::chromeInputsFor(ChromeStyle::MacOS, QGuiApplication::font()));
+    // The classic rule unless the inputs name native2026's: the chrome's separator strength everywhere.
+    CHECK(tokenOf(fluent, "tabStyle", "separatorAlpha").toReal() == Catch::Approx(0.10));
+    CHECK_FALSE(tokenOf(fluent, "tabStyle", "separatesRestingTabsOnly").toBool());
+    CHECK(tokenOf(mac, "tabStyle", "separatorAlpha").toReal() == Catch::Approx(0.10));
+    // Under native2026 the Windows row draws its stronger line, and only between tabs at rest.
+    auto nativeInputs = contour::window::chromeInputsFor(ChromeStyle::Fluent, QGuiApplication::font());
+    nativeInputs.tabSeparators = contour::config::TabSeparators::BetweenResting;
+    auto const native2026 = UiStyleProvider(nativeInputs);
+    CHECK(tokenOf(native2026, "tabStyle", "separatorAlpha").toReal() == Catch::Approx(0.20));
+    CHECK(tokenOf(native2026, "tabStyle", "separatesRestingTabsOnly").toBool());
+    CHECK_FALSE(tokenOf(fluent, "tabStyle", "hasActiveFill").toBool());
+    CHECK_FALSE(tokenOf(fluent, "tabStyle", "hasInactiveFill").toBool());
+    CHECK(tokenOf(fluent, "tabStyle", "activeFill").value<QColor>().alpha() == 0);
+    CHECK(tokenOf(fluent, "tabStyle", "indicator").toInt() == tokenOf(fluent, "tabStyle", "none").toInt());
+
+    // Every kind of fill, and where its colour comes from.
+    auto inputs = contour::window::chromeInputsFor(ChromeStyle::Fluent, QGuiApplication::font());
+    inputs.appearance.accent = 0x007AFF_rgb;
+    inputs.tabStyle = { .spacing = 4,
+                        .activeFill = { .kind = TabFillKind::Accent },
+                        .inactiveFill = { .kind = TabFillKind::Subtle },
+                        .activeIndicator = TabIndicator::TopLine };
+    auto const styled = UiStyleProvider(inputs);
+    // A gap between the tabs replaces the line.
+    CHECK(tokenOf(styled, "tabStyle", "spacing").toReal() == 4.0);
+    CHECK(tokenOf(styled, "tabStyle", "separatorAlpha").toReal() == 0.0);
+    CHECK(tokenOf(styled, "tabStyle", "hasActiveFill").toBool());
+    CHECK(tokenOf(styled, "tabStyle", "hasInactiveFill").toBool());
+    CHECK(tokenOf(styled, "tabStyle", "activeFill").value<QColor>() == QColor(0x007AFF));
+    CHECK(tokenOf(styled, "tabStyle", "inactiveFill").value<QColor>()
+          == tokenOf(styled, "colors", "tabHoverFill").value<QColor>());
+    CHECK(tokenOf(styled, "tabStyle", "indicator").toInt() == tokenOf(styled, "tabStyle", "topLine").toInt());
+
+    inputs.tabStyle.activeFill = { .kind = TabFillKind::Custom, .color = 0x112233_rgb };
+    inputs.tabStyle.activeIndicator = TabIndicator::Underline;
+    auto const custom = UiStyleProvider(inputs);
+    CHECK(tokenOf(custom, "tabStyle", "activeFill").value<QColor>() == QColor(0x112233));
+    CHECK(tokenOf(custom, "tabStyle", "indicator").toInt()
+          == tokenOf(custom, "tabStyle", "underline").toInt());
+
+    // The row's own tab has no trait of a look, and the tabs touch.
+    for (auto const* trait: { "roundsCorners",
+                              "squaresCorners",
+                              "floats",
+                              "marksActive",
+                              "washesActive",
+                              "outlinesActive",
+                              "underlinesActive" })
+    {
+        INFO(trait);
+        CHECK_FALSE(tokenOf(fluent, "tabStyle", trait).toBool());
+    }
+    CHECK(tokenOf(fluent, "tabStyle", "spacing").toReal() == 0.0);
+
+    // A look publishes its traits, not its name.
+    inputs.tabStyle.shape = contour::config::TabLook::Outlined;
+    auto const outlined = UiStyleProvider(inputs);
+    CHECK(tokenOf(outlined, "tabStyle", "roundsCorners").toBool());
+    CHECK(tokenOf(outlined, "tabStyle", "floats").toBool());
+    CHECK(tokenOf(outlined, "tabStyle", "marksActive").toBool());
+    CHECK(tokenOf(outlined, "tabStyle", "outlinesActive").toBool());
+    CHECK_FALSE(tokenOf(outlined, "tabStyle", "washesActive").toBool());
+    CHECK_FALSE(tokenOf(outlined, "tabStyle", "squaresCorners").toBool());
+
+    // The Terminal row's tabs are cells: it takes neither the look nor the gap.
+    auto terminalInputs = contour::window::chromeInputsFor(ChromeStyle::Terminal, QGuiApplication::font());
+    terminalInputs.tabStyle = { .shape = contour::config::TabLook::Pill, .spacing = 8 };
+    auto const terminal = UiStyleProvider(terminalInputs);
+    CHECK_FALSE(tokenOf(terminal, "tabStyle", "marksActive").toBool());
+    CHECK(tokenOf(terminal, "tabStyle", "spacing").toReal() == 0.0);
+
+    // A bar left to the row has no ground of its own: what is drawn on it is inked as the rest of the chrome.
+    CHECK_FALSE(fluent.barGround().has_value());
+    CHECK_FALSE(tokenOf(fluent, "tabStyle", "hasBarGround").toBool());
+    CHECK(tokenOf(fluent, "bandColors", "tabText").value<QColor>()
+          == tokenOf(fluent, "colors", "tabText").value<QColor>());
+    CHECK_FALSE(tokenOf(fluent, "tabStyle", "rulesBar").toBool());
+
+    // A bar of the user's colour is the ground its labels are inked for, whatever the palette says: light
+    // ink on a dark bar and dark ink on a light one, each legible on it, on either chrome.
+    for (auto const window: { QColor(LightChrome), QColor(DarkChrome) })
+        for (auto const bar: { 0x101418_rgb, 0xF2F2EE_rgb })
+            withWindowColor(window, [&] {
+                INFO("chrome: " << window.name().toStdString());
+                auto barInputs =
+                    contour::window::chromeInputsFor(ChromeStyle::Fluent, QGuiApplication::font());
+                barInputs.tabStyle.barFill = { .kind = TabFillKind::Custom, .color = bar };
+                auto const provider = UiStyleProvider(barInputs);
+                auto const ground = contour::platform::toQColor(bar);
+                REQUIRE(provider.barGround().has_value());
+                CHECK(*provider.barGround() == ground);
+                CHECK(tokenOf(provider, "tabStyle", "barGround").value<QColor>() == ground);
+                for (auto const* role: { "tabText", "tabTextActive", "windowButtonGlyph", "chipText" })
+                {
+                    INFO(role);
+                    auto const ink = over(tokenOf(provider, "bandColors", role).value<QColor>(), ground);
+                    CHECK(contrastOf(ink, ground) >= 4.5);
+                }
+                // The bar paints the colour where it paints at all, and tints its material where it shows
+                // one.
+                auto const painted =
+                    provider.bandFillColor(static_cast<int>(contour::config::BandFill::Tint));
+                CHECK(painted == ground);
+                auto const tinted =
+                    provider.bandFillColor(static_cast<int>(contour::config::BandFill::Clear));
+                CHECK(tinted.rgb() == ground.rgb());
+                CHECK(tinted.alphaF()
+                      == Catch::Approx(contour::config::BarFillOverMaterialPercent / 100.0).margin(0.01));
+                // The rest of the chrome is untouched.
+                CHECK(tokenOf(provider, "colors", "tabText").value<QColor>()
+                      == tokenOf(fluent, "colors", "tabText").value<QColor>());
+            });
+
+    // A wash keeps the row's tone: no ground of its own, a step off the row's fill.
+    auto washInputs = contour::window::chromeInputsFor(ChromeStyle::Fluent, QGuiApplication::font());
+    washInputs.tabStyle.barFill = { .kind = TabFillKind::Subtle };
+    auto const washed = UiStyleProvider(washInputs);
+    CHECK_FALSE(washed.barGround().has_value());
+    auto const tintFill = static_cast<int>(contour::config::BandFill::Tint);
+    CHECK(washed.bandFillColor(tintFill) != fluent.bandFillColor(tintFill));
+    CHECK(washed.bandFillColor(tintFill).alpha() == 255);
+    CHECK(washed.bandFillColor(static_cast<int>(contour::config::BandFill::Clear))
+          == tokenOf(washed, "colors", "tabHoverFill").value<QColor>());
+
+    // The looks with square tabs rule the bar's foot.
+    auto flatInputs = contour::window::chromeInputsFor(ChromeStyle::Fluent, QGuiApplication::font());
+    flatInputs.tabStyle.shape = contour::config::TabLook::Flat;
+    CHECK(tokenOf(UiStyleProvider(flatInputs), "tabStyle", "rulesBar").toBool());
+
+    // The indicator line is the accent until the section names a colour.
+    CHECK(tokenOf(custom, "tabStyle", "indicatorColor").value<QColor>() == QColor(0x007AFF));
+    inputs.tabStyle.indicatorColor = { .kind = TabFillKind::Custom, .color = 0x11CC88_rgb };
+    CHECK(tokenOf(UiStyleProvider(inputs), "tabStyle", "indicatorColor").value<QColor>() == QColor(0x11CC88));
+
+    // A tab's own colour is its fill unless the section says otherwise.
+    CHECK(tokenOf(fluent, "tabStyle", "tabColorMode").toInt()
+          == tokenOf(fluent, "tabStyle", "colorFill").toInt());
+    inputs.tabStyle.tabColorMode = contour::config::TabColorMode::Indicator;
+    auto const lined = UiStyleProvider(inputs);
+    CHECK(tokenOf(lined, "tabStyle", "tabColorMode").toInt()
+          == tokenOf(lined, "tabStyle", "colorIndicator").toInt());
+    CHECK(tokenOf(lined, "tabStyle", "colorTint").toInt() != tokenOf(lined, "tabStyle", "colorFill").toInt());
+
+    // The section is part of what a provider is built from, so a reload that changes it rebuilds the chrome.
+    CHECK(inputs != contour::window::chromeInputsFor(ChromeStyle::Fluent, QGuiApplication::font()));
+}
+
+TEST_CASE("UiStyleProvider: tab_style's width limits replace the row's, and equalTabWidth shares within them",
+          "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::TabWidth;
+    using contour::window::UiStyleProvider;
+
+    auto const plain =
+        UiStyleProvider(contour::window::chromeInputsFor(ChromeStyle::Fluent, QGuiApplication::font()));
+    auto inputs = contour::window::chromeInputsFor(ChromeStyle::Fluent, QGuiApplication::font());
+    inputs.tabStyle = { .tabWidth = TabWidth::Equal, .minTabWidth = 90, .maxTabWidth = 200 };
+    auto const styled = UiStyleProvider(inputs);
+
+    CHECK(styled.minTabWidth() == 90);
+    CHECK(styled.maxTabWidth() == 200);
+    CHECK_FALSE(tokenOf(plain, "tabStyle", "equalWidths").toBool());
+    CHECK(tokenOf(styled, "tabStyle", "equalWidths").toBool());
+
+    // A roomy bar stops at the maximum; a crowded one at the minimum; in between, the share less the gaps.
+    CHECK(styled.equalTabWidth(2000, 3, 4) == Catch::Approx(200));
+    CHECK(styled.equalTabWidth(200, 10, 4) == Catch::Approx(90));
+    CHECK(styled.equalTabWidth(458, 3, 4) == Catch::Approx(150));
 }
 
 TEST_CASE("UiStyleProvider: the pane text reads at 4.5:1 on every row, appearance and bundled scheme",

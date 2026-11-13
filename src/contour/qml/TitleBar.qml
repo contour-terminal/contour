@@ -186,6 +186,27 @@ Item {
         topRightRadius: root.cornerRadius
     }
 
+    // The ink of a window button's glyph at rest: the bar's own where tab_style.bar_fill gives the bar a
+    // colour, else the OS window text the controls have always used.
+    readonly property color barInk: chromeStyle.tabStyle.hasBarGround ? chromeStyle.bandColors.tabTextActive
+                                                                      : systemPalette.windowText
+
+    /// Whether the bar's foot is its top edge: a bar below the content (tab_bar_position: Bottom) meets it
+    /// there. Main.qml sets it on the bar it places at the bottom.
+    property bool footOnTop: false
+
+    // A hairline along the bar's foot, under a look in which no tab joins the content (tab_style.shape:
+    // flat, underline), so something still says where the bar ends and the content begins.
+    Rectangle {
+        objectName: "barFootRule"   // findChild() handle for the GUI test
+        visible: chromeStyle.tabStyle.rulesBar && !root.isConcealed
+        anchors.left: parent.left
+        anchors.right: parent.right
+        y: root.footOnTop ? 0 : parent.height - height
+        height: chromeStyle.borderWidth
+        color: Qt.alpha(chromeStyle.bandColors.tabText, chromeStyle.contrast.separatorAlpha)
+    }
+
     // The window controls, one group per side: each of the two Loaders below is on while its side's
     // list has a button; one that is off is held at zero width, so a corner with no buttons costs the
     // bar nothing.
@@ -194,6 +215,8 @@ Item {
 
         WindowControls {
             side: "leading"
+            colors: chromeStyle.bandColors
+            ink: root.barInk
             window: root.window
             controller: root.controller
         }
@@ -203,6 +226,8 @@ Item {
 
         WindowControls {
             side: "trailing"
+            colors: chromeStyle.bandColors
+            ink: root.barInk
             window: root.window
             controller: root.controller
         }
@@ -227,8 +252,8 @@ Item {
             icon.name: headerButton.modelData.iconName
             icon.source: headerButton.modelData.bundledIcon
             // The window buttons' ink, so the items and the buttons beside them read as one set.
-            icon.color: root.window && root.window.active ? chromeStyle.colors.windowButtonGlyph
-                                                          : chromeStyle.colors.captionGlyphInactive
+            icon.color: root.window && root.window.active ? chromeStyle.bandColors.windowButtonGlyph
+                                                          : chromeStyle.bandColors.captionGlyphInactive
             icon.width: chromeStyle.size.headerIcon
             icon.height: chromeStyle.size.headerIcon
             contentItem: SymbolicIcon {
@@ -244,8 +269,8 @@ Item {
             }
             background: Rectangle {
                 radius: chromeStyle.radii.control
-                color: headerButton.down ? chromeStyle.colors.controlPressedFill
-                     : headerButton.hovered ? chromeStyle.colors.tabHoverFill
+                color: headerButton.down ? chromeStyle.bandColors.controlPressedFill
+                     : headerButton.hovered ? chromeStyle.bandColors.tabHoverFill
                      : "transparent"
             }
 
@@ -276,7 +301,9 @@ Item {
     function headerItemsAt(slot) {
         if (!root.isHeader)
             return [];
-        return chromeStyle.headerBarItems.filter(row => root.header.slots[row.item] === slot);
+        // The new-tab item goes with tab_style.new_tab_button, as the strip's and the band's "+" do.
+        return chromeStyle.headerBarItems.filter(row => root.header.slots[row.item] === slot
+                                                 && (row.menu !== "newTab" || chromeStyle.tabStyle.showsNewTabButton));
     }
 
     // What the bar's parts before and after the tabs take, from their preferred widths, which do not
@@ -346,7 +373,7 @@ Item {
             Layout.preferredHeight: chromeStyle.size.controlsSeparator
             Layout.leftMargin: leadingSeparator.shown ? chromeStyle.space.s3 : 0
             Layout.rightMargin: leadingSeparator.shown ? chromeStyle.space.s3 : 0
-            color: chromeStyle.colors.headerSeparator
+            color: chromeStyle.bandColors.headerSeparator
         }
 
         // The header bar's leading items (the new-tab button).
@@ -374,6 +401,7 @@ Item {
             Layout.leftMargin: shown ? root.gap : 0
             Layout.rightMargin: shown ? root.gap : 0
             sourceComponent: HostChip {
+                colors: chromeStyle.bandColors
                 // `?? ""` keeps a lightweight mock controller (offscreen tests) without the property local.
                 hostLabel: root.controller ? (root.controller.hostLabel ?? "") : ""
                 connection: root.controller ? (root.controller.hostChipState ?? 0) : 0
@@ -495,7 +523,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: chromeStyle.radii.toolbarChip
-                    color: chromeStyle.colors.chipFill
+                    color: chromeStyle.bandColors.chipFill
                 }
 
                 Row {
@@ -507,7 +535,7 @@ Item {
                         id: chipLock
                         indicator: titleRows.activeIndicator
                         anchors.verticalCenter: parent.verticalCenter
-                        color: chromeStyle.colors.chipText
+                        color: chromeStyle.bandColors.chipText
                         Accessible.ignored: true
                     }
 
@@ -518,7 +546,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         text: chromeStyle.secureInputText(titleRows.activeIndicator)
                         font: chromeStyle.type.footnote
-                        color: chromeStyle.colors.chipText
+                        color: chromeStyle.bandColors.chipText
                         Accessible.ignored: true
                     }
                 }
@@ -544,10 +572,12 @@ Item {
             id: newTabSlot
             // The header bar draws its own new-tab item instead.
             active: root.isBand && root.isPill && !root.isHeader && root.centre !== "empty"
+                    && chromeStyle.tabStyle.showsNewTabButton
             Layout.alignment: Qt.AlignVCenter
             Layout.preferredWidth: active ? implicitWidth : 0
             Layout.rightMargin: active ? chromeStyle.space.s4 : 0
             sourceComponent: ToolbarButton {
+                colors: chromeStyle.bandColors
                 id: newTabButton
                 objectName: "newTabButton"
                 glyph: chromeStyle.newTabGlyph
@@ -589,7 +619,7 @@ Item {
             Layout.preferredHeight: chromeStyle.size.controlsSeparator
             Layout.leftMargin: trailingSeparator.shown ? chromeStyle.space.s3 : 0
             Layout.rightMargin: trailingSeparator.shown ? chromeStyle.space.s3 : 0
-            color: chromeStyle.colors.headerSeparator
+            color: chromeStyle.bandColors.headerSeparator
         }
 
         // Trailing slot: where Windows and Breeze put theirs, after the drag region.
@@ -640,7 +670,7 @@ Item {
             Accessible.role: Accessible.StaticText
             Accessible.name: root.stickyShown ? root.stickyName : text
             font: chromeStyle.type.bodyMedium
-            color: chromeStyle.colors.tabText
+            color: chromeStyle.bandColors.tabText
             elide: Text.ElideMiddle
         }
 

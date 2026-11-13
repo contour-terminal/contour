@@ -8,6 +8,7 @@
 /// pixels and the QML never learns which style is active.
 
 #include <contour/config/ChromeTokenGroups.hpp>
+#include <contour/config/TabStyle.hpp>
 #include <contour/session/EndReason.hpp>
 #include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
@@ -725,6 +726,8 @@ class ChromeMaterialTokens: public QObject
     Q_PROPERTY(int none READ none CONSTANT)
     Q_PROPERTY(int glass READ glass CONSTANT)
     Q_PROPERTY(int mica READ mica CONSTANT)
+    Q_PROPERTY(int acrylic READ acrylic CONSTANT)
+    Q_PROPERTY(int frost READ frost CONSTANT)
     Q_PROPERTY(int solid READ solid CONSTANT)
 
   public:
@@ -741,6 +744,11 @@ class ChromeMaterialTokens: public QObject
     [[nodiscard]] static constexpr int none() noexcept { return static_cast<int>(config::Material::None); }
     [[nodiscard]] static constexpr int glass() noexcept { return static_cast<int>(config::Material::Glass); }
     [[nodiscard]] static constexpr int mica() noexcept { return static_cast<int>(config::Material::Mica); }
+    [[nodiscard]] static constexpr int acrylic() noexcept
+    {
+        return static_cast<int>(config::Material::Acrylic);
+    }
+    [[nodiscard]] static constexpr int frost() noexcept { return static_cast<int>(config::Material::Frost); }
     [[nodiscard]] static constexpr int solid() noexcept { return static_cast<int>(config::Material::Solid); }
 
   private:
@@ -1171,6 +1179,15 @@ class ChromeLayoutTokens: public QObject
     config::LayoutTokens _tokens {};
 };
 
+/// What a set of colour roles is inked for.
+enum class ChromeGround : uint8_t
+{
+    Palette = 0, //!< The application palette's window colour: the chrome as the OS or the theme paints it.
+    /// The tab bar's own fill where `tab_style.bar_fill` gives it a colour (UiStyleProvider::barGround),
+    /// else the palette's: what is drawn on the bar stays legible on a bar of another tone.
+    Bar,
+};
+
 /// The chrome colour roles, `chromeStyle.colors`.
 ///
 /// Resolved on every read rather than cached: a palette source reads the application palette as it
@@ -1265,10 +1282,13 @@ class ChromeColorTokens: public QObject
     ///                         (@c contrast.separatorPercent).
     /// @param provider         The provider a @c Status source asks, whose palette changes this re-announces.
     ///                         Borrowed; it is also this object's Qt parent.
+    /// @param ground           What the roles are inked for: the palette's window, or the tab bar's fill
+    ///                         (`chromeStyle.bandColors`).
     ChromeColorTokens(Sources sources,
                       config::ChromeSchemeColors scheme,
                       int separatorPercent,
-                      UiStyleProvider& provider);
+                      UiStyleProvider& provider,
+                      ChromeGround ground = ChromeGround::Palette);
 
     /// @param role The role to resolve.
     /// @return The role's colour as the application palette paints it now.
@@ -1439,6 +1459,207 @@ class ChromeColorTokens: public QObject
     Sources _sources {};
     config::ChromeSchemeColors _scheme {};
     int _separatorPercent = 0;
+    ChromeGround _ground = ChromeGround::Palette; ///< What the roles are inked for.
+    UiStyleProvider const& _provider;
+};
+
+/// How the tabs are drawn once the user's `tab_style:` is laid over the row, `chromeStyle.tabStyle`.
+///
+/// The fills are resolved on every read, as the colour roles are: the accent and the wash follow the
+/// application palette, so @ref changed is re-emitted on the provider's paletteRevisionChanged.
+class ChromeTabStyleTokens: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(qreal separatorAlpha READ separatorAlpha CONSTANT)
+    Q_PROPERTY(qreal spacing READ spacing CONSTANT)
+    // Bools for QML (the QML-facing carve-out): read-only predicates over the look's traits, which stay
+    // the source of truth as config::TabLookTraits; the tab reads what to draw and never which look it is.
+    Q_PROPERTY(bool roundsCorners READ roundsCorners CONSTANT)
+    Q_PROPERTY(bool squaresCorners READ squaresCorners CONSTANT)
+    Q_PROPERTY(bool floats READ floats CONSTANT)
+    Q_PROPERTY(bool marksActive READ marksActive CONSTANT)
+    Q_PROPERTY(bool washesActive READ washesActive CONSTANT)
+    Q_PROPERTY(bool outlinesActive READ outlinesActive CONSTANT)
+    Q_PROPERTY(bool underlinesActive READ underlinesActive CONSTANT)
+    Q_PROPERTY(bool rulesBar READ rulesBar CONSTANT)
+    Q_PROPERTY(bool separatesRestingTabsOnly READ separatesRestingTabsOnly CONSTANT)
+    Q_PROPERTY(int closeVisibility READ closeVisibility CONSTANT)
+    Q_PROPERTY(int closeAlways READ closeAlways CONSTANT)
+    Q_PROPERTY(int closeActiveOrHovered READ closeActiveOrHovered CONSTANT)
+    Q_PROPERTY(int closeHovered READ closeHovered CONSTANT)
+    Q_PROPERTY(int closeNever READ closeNever CONSTANT)
+    Q_PROPERTY(bool showsNewTabButton READ showsNewTabButton CONSTANT)
+    Q_PROPERTY(bool equalWidths READ equalWidths CONSTANT)
+    Q_PROPERTY(bool hasBarGround READ hasBarGround NOTIFY changed)
+    Q_PROPERTY(QColor barGround READ barGround NOTIFY changed)
+    Q_PROPERTY(int indicator READ indicator CONSTANT)
+    Q_PROPERTY(int none READ none CONSTANT)
+    Q_PROPERTY(int underline READ underline CONSTANT)
+    Q_PROPERTY(int topLine READ topLine CONSTANT)
+    Q_PROPERTY(int tabColorMode READ tabColorMode CONSTANT)
+    Q_PROPERTY(int colorFill READ colorFill CONSTANT)
+    Q_PROPERTY(int colorTint READ colorTint CONSTANT)
+    Q_PROPERTY(int colorIndicator READ colorIndicator CONSTANT)
+    // Bools for QML (the QML-facing carve-out): read-only predicates over the fills' kinds, which stay the
+    // source of truth as config::TabFillKind; the one place a kind is compared, so the tab never names one.
+    Q_PROPERTY(bool hasActiveFill READ hasActiveFill CONSTANT)
+    Q_PROPERTY(bool hasInactiveFill READ hasInactiveFill CONSTANT)
+    Q_PROPERTY(QColor activeFill READ activeFill NOTIFY changed)
+    Q_PROPERTY(QColor inactiveFill READ inactiveFill NOTIFY changed)
+    Q_PROPERTY(QColor indicatorColor READ indicatorColor NOTIFY changed)
+
+  public:
+    /// @param tokens   The tab look, resolved by config::resolveTabStyle.
+    /// @param colors   The row's colour roles, which a @c Subtle fill reads. Borrowed; the provider owns
+    /// both.
+    /// @param provider The provider whose accent an @c Accent fill takes and whose palette changes this
+    ///                 re-announces. Borrowed; it is also this object's Qt parent.
+    ChromeTabStyleTokens(config::TabStyleTokens tokens,
+                         ChromeColorTokens const& colors,
+                         UiStyleProvider& provider);
+
+    /// @return The opacity of the line between two tabs, 0 to 1; 0 draws none.
+    [[nodiscard]] qreal separatorAlpha() const noexcept { return _tokens.separatorPercent / 100.0; }
+
+    /// @return The gap between two tabs, in logical pixels.
+    [[nodiscard]] qreal spacing() const noexcept { return _tokens.spacing; }
+
+    /// @return Whether the tab's four corners all take the row's radius.
+    [[nodiscard]] bool roundsCorners() const noexcept
+    {
+        return _tokens.look.corners == config::TabCorners::Round;
+    }
+    /// @return Whether the tab's corners are square.
+    [[nodiscard]] bool squaresCorners() const noexcept
+    {
+        return _tokens.look.corners == config::TabCorners::Square;
+    }
+    /// @return Whether the tab is lifted off the strip's floor.
+    [[nodiscard]] bool floats() const noexcept { return _tokens.look.seat == config::TabSeat::Floating; }
+    /// @return Whether the look, rather than the row, decides what sets the active tab apart.
+    [[nodiscard]] bool marksActive() const noexcept
+    {
+        return _tokens.look.active != config::TabActiveMark::Row;
+    }
+    /// @return Whether the active tab is filled with the row's active-tab fill over the bar.
+    [[nodiscard]] bool washesActive() const noexcept
+    {
+        return _tokens.look.active == config::TabActiveMark::Wash;
+    }
+    /// @return Whether the active tab is an outline with no fill.
+    [[nodiscard]] bool outlinesActive() const noexcept
+    {
+        return _tokens.look.active == config::TabActiveMark::Outline;
+    }
+    /// @return Whether the active tab is the indicator line under it, with no fill.
+    [[nodiscard]] bool underlinesActive() const noexcept
+    {
+        return _tokens.look.active == config::TabActiveMark::Underline;
+    }
+    /// @return Whether a hairline is drawn along the bar's foot, where it meets the content.
+    [[nodiscard]] bool rulesBar() const noexcept { return _tokens.look.edge == config::TabBarEdge::Ruled; }
+    /// @return When a tab's close button shows, a config::TabCloseVisibility as its underlying value.
+    [[nodiscard]] int closeVisibility() const noexcept { return static_cast<int>(_tokens.closeVisibility); }
+    /// @return The QML names of config::TabCloseVisibility's enumerators.
+    [[nodiscard]] static constexpr int closeAlways() noexcept
+    {
+        return static_cast<int>(config::TabCloseVisibility::Always);
+    }
+    [[nodiscard]] static constexpr int closeActiveOrHovered() noexcept
+    {
+        return static_cast<int>(config::TabCloseVisibility::ActiveOrHovered);
+    }
+    [[nodiscard]] static constexpr int closeHovered() noexcept
+    {
+        return static_cast<int>(config::TabCloseVisibility::Hovered);
+    }
+    [[nodiscard]] static constexpr int closeNever() noexcept
+    {
+        return static_cast<int>(config::TabCloseVisibility::Never);
+    }
+    /// @return Whether every tab is as wide as the others (config::TabWidthLayout::Equal).
+    [[nodiscard]] bool equalWidths() const noexcept { return _tokens.widths == config::TabWidthLayout::Equal; }
+    /// @return The resolved tab look, for the provider's own extents (its minimum and maximum tab widths).
+    [[nodiscard]] config::TabStyleTokens const& tokens() const noexcept { return _tokens; }
+    /// @return Whether the window shows a new-tab button (config::NewTabButton::Shown).
+    [[nodiscard]] bool showsNewTabButton() const noexcept
+    {
+        return _tokens.newTabButton == config::NewTabButton::Shown;
+    }
+
+    /// @return Whether the line between two tabs is drawn only where two tabs at rest meet, never beside the
+    ///         active one (config::TabSeparators::BetweenResting).
+    [[nodiscard]] bool separatesRestingTabsOnly() const noexcept
+    {
+        return _tokens.separators == config::TabSeparators::BetweenResting;
+    }
+
+    /// @return Whether `tab_style.bar_fill` gives the bar a colour of its own, which is then the ground
+    ///         whatever is drawn on the bar sits on.
+    [[nodiscard]] bool hasBarGround() const;
+    /// @return That colour; transparent where the bar keeps the row's ground (hasBarGround()).
+    [[nodiscard]] QColor barGround() const;
+
+    /// @return The accent line on the active tab, a config::TabIndicator as its underlying value.
+    [[nodiscard]] int indicator() const noexcept { return static_cast<int>(_tokens.indicator); }
+    /// @return The QML names of config::TabIndicator's enumerators.
+    [[nodiscard]] static constexpr int none() noexcept
+    {
+        return static_cast<int>(config::TabIndicator::None);
+    }
+    [[nodiscard]] static constexpr int underline() noexcept
+    {
+        return static_cast<int>(config::TabIndicator::Underline);
+    }
+    [[nodiscard]] static constexpr int topLine() noexcept
+    {
+        return static_cast<int>(config::TabIndicator::TopLine);
+    }
+
+    /// @return How a tab shows a colour of its own, a config::TabColorMode as its underlying value.
+    [[nodiscard]] int tabColorMode() const noexcept { return static_cast<int>(_tokens.tabColorMode); }
+    /// @return The QML names of config::TabColorMode's enumerators.
+    [[nodiscard]] static constexpr int colorFill() noexcept
+    {
+        return static_cast<int>(config::TabColorMode::Fill);
+    }
+    [[nodiscard]] static constexpr int colorTint() noexcept
+    {
+        return static_cast<int>(config::TabColorMode::Tint);
+    }
+    [[nodiscard]] static constexpr int colorIndicator() noexcept
+    {
+        return static_cast<int>(config::TabColorMode::Indicator);
+    }
+
+    /// @return Whether the active tab's fill is the user's rather than the row's.
+    [[nodiscard]] bool hasActiveFill() const noexcept
+    {
+        return _tokens.activeFill.kind != config::TabFillKind::Auto;
+    }
+    /// @return Whether an inactive tab's fill is the user's rather than the row's.
+    [[nodiscard]] bool hasInactiveFill() const noexcept
+    {
+        return _tokens.inactiveFill.kind != config::TabFillKind::Auto;
+    }
+    /// @return The active tab's fill; transparent where the row's own applies (hasActiveFill()).
+    [[nodiscard]] QColor activeFill() const { return resolve(_tokens.activeFill); }
+    /// @return An inactive tab's fill; transparent where the row's own applies (hasInactiveFill()).
+    [[nodiscard]] QColor inactiveFill() const { return resolve(_tokens.inactiveFill); }
+    /// @return The indicator line's colour: the accent, or the user's.
+    [[nodiscard]] QColor indicatorColor() const { return resolve(_tokens.indicatorColor); }
+
+  signals:
+    /// Either fill may have changed colour.
+    void changed();
+
+  private:
+    /// @param fill A fill of the section.
+    /// @return Its colour as the application palette paints it now; transparent for @c Auto.
+    [[nodiscard]] QColor resolve(config::TabFill const& fill) const;
+
+    config::TabStyleTokens _tokens {};
+    ChromeColorTokens const& _colors;
     UiStyleProvider const& _provider;
 };
 

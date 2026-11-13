@@ -43,6 +43,9 @@ struct TitleBandSurface
     config::BandBackdrop backdrop = config::BandBackdrop::Client; ///< What the OS draws behind the band.
     config::BandFill fill = config::BandFill::Palette;            ///< What the band paints.
     config::TitleBarGrowth growth = config::TitleBarGrowth::None; ///< What the title bar is grown with.
+    /// Which variant of the OS's material a tabbed window asks for, where the backdrop is the native one.
+    config::BackdropKind kind = config::BackdropKind::Tabbed;
+    config::TabSurface tabs = config::TabSurface::Painted; ///< What draws the tabs' own surfaces.
 
     [[nodiscard]] bool operator==(TitleBandSurface const&) const = default;
 };
@@ -58,20 +61,34 @@ struct TitleBandSurfaceRow
 /// The surface rows, first match wins; a row and material no row names keeps today's band.
 ///
 /// The spike (spike-decisions.md, rulings S2 and S4) measured AppKit drawing a within-window material in
-/// the band and an empty compact toolbar making its title bar 40 pt: so macOS's glass is the native
-/// material under a tinted band, and either material grows the title bar by the toolbar.
+/// the band and an empty compact toolbar making its title bar 40 pt; under AppKit's own title-bar material,
+/// though, its NSTitlebarView takes the band's clicks (ruling S6, finding F13), so the shipped macOS band is
+/// Solid and no row selects NativeMaterial on macOS.
 ///
-/// The Glass row is data no shipped row selects (ruling S6): under the native material AppKit's
-/// NSTitlebarView takes the band's clicks, so the MacOS row resolves its band to Solid. It stays as the
-/// measured reason (F13) and as the full-screen step's fixture. The glass follow-up -- our own within-window
-/// NSVisualEffectView behind the Qt content, which keeps the clicks in Qt's view -- is a NEW BandBackdrop
-/// enumerator, not NativeMaterial: selecting NativeMaterial again re-opens F13.
+/// The frosted and glass bands (`tab_style.material`) follow Apple's Liquid Glass guidance -- the material is
+/// for the controls and navigation layer, and the system, not the app, draws their backgrounds:
+///   - Frosted is the Blurred backdrop -- the title bar's own material, in a view of ours behind the Qt
+///     content, which leaves the clicks in Qt's view -- with nothing painted over it.
+///   - Glass paints the band in the terminal's own background, so the bar reads as the content it sits on,
+///     and has the system draw each tab as a Liquid Glass shape of its own (TabSurface::Glass), in one
+///     shared container so the shapes sample alike: glass on the navigation elements, never a slab of
+///     it across the window, and never glass on glass. Before macOS 26 there is no Liquid Glass; the
+///     material reports it unsupported, and the window paints the solid band and its tabs.
+/// Both grow the title bar by the toolbar as the Solid band does. KDE Plasma's bands are the Blurred
+/// backdrop over KWin's blur, under a translucent tint, with no title bar to grow.
 inline constexpr auto TitleBandSurfaceRows = std::array {
     TitleBandSurfaceRow { .style = config::ChromeStyle::MacOS,
-                          .material = config::Material::Glass,
-                          .surface = { .backdrop = config::BandBackdrop::NativeMaterial,
-                                       .fill = config::BandFill::Tint,
+                          .material = config::Material::Frost,
+                          .surface = { .backdrop = config::BandBackdrop::Blurred,
+                                       .fill = config::BandFill::Clear,
                                        .growth = config::TitleBarGrowth::CompactToolbar } },
+    TitleBandSurfaceRow { .style = config::ChromeStyle::MacOS,
+                          .material = config::Material::Glass,
+                          .surface = { .backdrop = config::BandBackdrop::Client,
+                                       .fill = config::BandFill::Background,
+                                       .growth = config::TitleBarGrowth::CompactToolbar,
+                                       .kind = config::BackdropKind::TabbedGlass,
+                                       .tabs = config::TabSurface::Glass } },
     // The shipped macOS band (ruling S6), and what Reduce Transparency resolves Glass to: the client's own
     // paint over the compact toolbar.
     TitleBandSurfaceRow { .style = config::ChromeStyle::MacOS,
@@ -87,6 +104,25 @@ inline constexpr auto TitleBandSurfaceRows = std::array {
                           .surface = { .backdrop = config::BandBackdrop::NativeMaterial,
                                        .fill = config::BandFill::Clear,
                                        .growth = config::TitleBarGrowth::None } },
+    // Acrylic where the user asked for it (tab_style.material): the same cleared band, over DWM's blurred
+    // backdrop instead of Mica Alt.
+    TitleBandSurfaceRow { .style = config::ChromeStyle::Fluent,
+                          .material = config::Material::Acrylic,
+                          .surface = { .backdrop = config::BandBackdrop::NativeMaterial,
+                                       .fill = config::BandFill::Clear,
+                                       .growth = config::TitleBarGrowth::None,
+                                       .kind = config::BackdropKind::TabbedGlass } },
+    TitleBandSurfaceRow { .style = config::ChromeStyle::ContourLinux,
+                          .material = config::Material::Frost,
+                          .surface = { .backdrop = config::BandBackdrop::Blurred,
+                                       .fill = config::BandFill::FrostTint,
+                                       .growth = config::TitleBarGrowth::None } },
+    TitleBandSurfaceRow { .style = config::ChromeStyle::ContourLinux,
+                          .material = config::Material::Glass,
+                          .surface = { .backdrop = config::BandBackdrop::Blurred,
+                                       .fill = config::BandFill::GlassTint,
+                                       .growth = config::TitleBarGrowth::None,
+                                       .kind = config::BackdropKind::TabbedGlass } },
     TitleBandSurfaceRow { .style = config::ChromeStyle::Fluent,
                           .material = config::Material::Solid,
                           .surface = { .backdrop = config::BandBackdrop::Client,
@@ -130,11 +166,15 @@ inline constexpr auto BareBandSurface = TitleBandSurface {
                        : row->surface;
     if (inputs.mode == WindowMode::FullScreen)
     {
-        if (surface.backdrop == config::BandBackdrop::NativeMaterial)
+        if (surface.backdrop == config::BandBackdrop::NativeMaterial
+            || surface.backdrop == config::BandBackdrop::Blurred)
             surface.backdrop = config::BandBackdrop::Client;
-        if (surface.fill == config::BandFill::Clear)
+        if (surface.fill == config::BandFill::Clear || surface.fill == config::BandFill::FrostTint
+            || surface.fill == config::BandFill::GlassTint)
             surface.fill = config::BandFill::Tint;
         surface.growth = config::TitleBarGrowth::None;
+        // No material behind terminal text, and none on the tabs over it either.
+        surface.tabs = config::TabSurface::Painted;
     }
     return surface;
 }

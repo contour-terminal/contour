@@ -58,6 +58,10 @@ Row {
     readonly property real joinedButtonY: root.height - chromeStyle.size.stripButton - chromeStyle.space.s1
     // The well's widths for the tabs there are: { tabWidth, wellWidth, label, scrolls }.
     readonly property var wellLayout: chromeStyle.tabWellLayout(root.availableWidth, list.count)
+    // The one width of every tab where tab_style.tab_width is equal on a strip that is not a well, or 0
+    // where each tab is as wide as its title (and on a strip on its own, whose width no bar assigns).
+    readonly property real equalTabWidth: !root.pill && chromeStyle.tabStyle.equalWidths && root.availableWidth > 0
+        ? chromeStyle.equalTabWidth(root.availableWidth, list.count, chromeStyle.tabStyle.spacing) : 0
 
     /// Whether the tabs would have room for the lock: not while the well shows icons alone (TabItem.lockShown).
     /// @param available What the tabs may take, as availableWidth.
@@ -157,6 +161,53 @@ Row {
         // Over the strip from its entry (which reports at once) to its exit or drop.
         if (dropArea.nodePayload !== "")
             Qt.callLater(root.reportSpans)
+        root.scheduleGlassShapes()
+    }
+
+    // --- Tabs the operating system draws as glass (WindowController.tabsAreGlass, Liquid Glass on macOS 26) ---
+    // The strip paints only their labels, and tells the controller where each tab's surface stands, in window
+    // coordinates, whenever it moves: the system draws the glass there, behind this scene. A tab scrolled out of
+    // the strip's clip is cut to what shows, and one wholly out of it is left out. `?? false` and the typeof
+    // check keep a controller without glass tabs (a lightweight mock) out of it.
+    readonly property bool glassTabs: !!root.controller && (root.controller.tabsAreGlass ?? false)
+    onGlassTabsChanged: root.scheduleGlassShapes()
+    onXChanged: root.scheduleGlassShapes()
+    onWidthChanged: root.scheduleGlassShapes()
+
+    function scheduleGlassShapes() {
+        if (root.glassTabs)
+            Qt.callLater(root.publishGlassShapes)
+    }
+
+    function publishGlassShapes() {
+        if (!root.controller || typeof root.controller.setTabGlassShapes !== "function")
+            return
+        const shapes = []
+        if (root.glassTabs) {
+            const clipLeft = listClip.mapToItem(null, 0, 0).x
+            const clipRight = clipLeft + listClip.width
+            for (let i = 0; i < list.count; ++i) {
+                const tab = list.itemAtIndex(i)
+                if (!tab || !tab.visible)
+                    continue
+                const surface = tab.glassSurface
+                const at = surface.mapToItem(null, 0, 0)
+                const left = Math.max(at.x, clipLeft)
+                const right = Math.min(at.x + surface.width, clipRight)
+                if (right <= left || surface.height <= 0)
+                    continue
+                shapes.push({ x: left, y: at.y, width: right - left, height: surface.height,
+                              radius: surface.radius, tint: tab.glassTint })
+            }
+        }
+        root.controller.setTabGlassShapes(shapes)
+    }
+
+    Connections {
+        target: list
+        function onContentXChanged() { root.scheduleGlassShapes() }
+        function onCountChanged() { root.scheduleGlassShapes() }
+        function onWidthChanged() { root.scheduleGlassShapes() }
     }
 
     // Where the insertion slot for gap @p index stands, in the drop area's coordinates: centred on the
@@ -197,7 +248,7 @@ Row {
             width: parent.width
             height: chromeStyle.size.tabWell
             radius: chromeStyle.radii.tabWell
-            color: chromeStyle.colors.tabWellFill
+            color: chromeStyle.bandColors.tabWellFill
         }
 
         // What the tabs are clipped to: the well, or the strip. A pill's focus ring reaches past the pill, into
@@ -225,7 +276,8 @@ Row {
                 // same the well's widths are laid out with); the Flat strip sets tabs flush.
                 leftMargin: root.pill ? chromeStyle.wellPadding : 0
                 rightMargin: root.pill ? chromeStyle.wellPadding : 0
-                spacing: root.pill ? chromeStyle.wellGap : 0
+                // Between tabs that are not pills, the gap tab_style.spacing names (0: they touch).
+                spacing: root.pill ? chromeStyle.wellGap : chromeStyle.tabStyle.spacing
                 // Shrink to content width (the Row's implicitWidth then reflects the tabs + button); the
                 // parent layout caps the Row, and listClip keeps overflow tidy.
                 orientation: ListView.Horizontal
@@ -265,7 +317,8 @@ Row {
                     // A pill is the well's width, a Flat or joined tab as wide as its title; each is as tall as
                     // the list, which is placed where the tabs stand.
                     height: list.height
-                    width: root.pill ? root.wellLayout.tabWidth : implicitWidth
+                    width: root.pill ? root.wellLayout.tabWidth
+                         : root.equalTabWidth > 0 ? root.equalTabWidth : implicitWidth
                     labelMode: root.pill ? root.wellLayout.label : "full"
                     controller: root.controller
                     window: root.window
@@ -292,6 +345,8 @@ Row {
                     }
                     onXChanged: root.scheduleSpans()
                     onWidthChanged: root.scheduleSpans()
+                    onHeightChanged: root.scheduleGlassShapes()
+                    onGlassTintChanged: root.scheduleGlassShapes()
                     onEngagedChanged: root.engagedTabs += engaged ? 1 : -1
                     Component.onDestruction: if (engaged) root.engagedTabs -= 1
                 }
@@ -412,7 +467,7 @@ Row {
                 elide: Text.ElideRight
                 text: dropArea.title !== "" ? dropArea.title : qsTr("New tab")
                 font: chromeStyle.activeTabFont(chromeStyle.type.tab)
-                color: chromeStyle.colors.tabText
+                color: chromeStyle.bandColors.tabText
             }
         }
     }
@@ -421,11 +476,26 @@ Row {
     // ToolbarButton). A Loader, so the shape without it has no second "newTabButton" for a test to find.
     Loader {
         id: newTabLoader
-        active: !root.pill
+        active: !root.pill && chromeStyle.tabStyle.showsNewTabButton
         y: root.joined ? root.joinedButtonY : 0
         height: root.joined ? chromeStyle.size.stripButton : root.height
         sourceComponent: ToolButton {
             id: newTabButton
+            // On a bar of the user's colour (tab_style.bar_fill) the glyph takes the bar's ink: the palette's
+            // button text, and the icon colour the Windows style draws its label in, were chosen for the
+            // OS window colour. Bindings with `when`, so without a bar colour the style's own stay.
+            Binding {
+                target: newTabButton.palette
+                property: "buttonText"
+                value: chromeStyle.bandColors.tabTextActive
+                when: chromeStyle.tabStyle.hasBarGround
+            }
+            Binding {
+                target: newTabButton
+                property: "icon.color"
+                value: chromeStyle.bandColors.tabTextActive
+                when: chromeStyle.tabStyle.hasBarGround
+            }
             objectName: "newTabButton"
             height: newTabLoader.height
             text: chromeStyle.newTabGlyph
@@ -458,10 +528,26 @@ Row {
     Loader {
         id: newTabMenuLoader
         active: !root.pill && chromeStyle.layout.profileMenu === chromeStyle.layout.caret
+                && chromeStyle.tabStyle.showsNewTabButton
         y: root.joined ? root.joinedButtonY : 0
         height: root.joined ? chromeStyle.size.stripButton : root.height
         sourceComponent: ToolButton {
             id: newTabMenuButton
+            // On a bar of the user's colour (tab_style.bar_fill) the glyph takes the bar's ink: the palette's
+            // button text, and the icon colour the Windows style draws its label in, were chosen for the
+            // OS window colour. Bindings with `when`, so without a bar colour the style's own stay.
+            Binding {
+                target: newTabMenuButton.palette
+                property: "buttonText"
+                value: chromeStyle.bandColors.tabTextActive
+                when: chromeStyle.tabStyle.hasBarGround
+            }
+            Binding {
+                target: newTabMenuButton
+                property: "icon.color"
+                value: chromeStyle.bandColors.tabTextActive
+                when: chromeStyle.tabStyle.hasBarGround
+            }
             objectName: "newTabMenuButton"
             height: newTabMenuLoader.height
             text: chromeStyle.menuGlyph

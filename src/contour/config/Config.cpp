@@ -147,6 +147,7 @@ namespace
             .tabBarVisibility = TabBarVisibility::Always,
             .theme = GuiTheme::System,
             .chromeDensity = ChromeDensity::Comfortable,
+            .tabSeparators = TabSeparators::Classic,
             .hyperlinkHoverTooltip = true,
             .scrollBarMode = ScrollBarModePreference::Always,
             .preeditStyle = vtbackend::PreeditStyle::Highlighted,
@@ -174,6 +175,7 @@ namespace
             .tabBarVisibility = TabBarVisibility::Always,
             .theme = GuiTheme::Terminal,
             .chromeDensity = ChromeDensity::Comfortable,
+            .tabSeparators = TabSeparators::BetweenResting,
             .hyperlinkHoverTooltip = false,
             .scrollBarMode = ScrollBarModePreference::System,
             .preeditStyle = vtbackend::PreeditStyle::Inline,
@@ -1896,6 +1898,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("notification_close_timeout", c.notificationCloseTimeout);
         loadFromEntry("tab_bar_position", c.tabBarPosition);
         loadFromEntry("tab_bar_visibility", c.tabBarVisibility);
+        loadFromEntry("tab_style", c.tabStyle);
         loadFromEntry("text_scaling_method", c.textScalingMethod);
         loadFromEntry("grapheme_clustering", c.graphemeClustering);
         loadFromEntry("gui_config_locked", c.guiConfigLocked);
@@ -3276,6 +3279,108 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     auto hideOnFocusLoss = where.focusLoss == QuickTerminalFocusLoss::Hide;
     loadFromEntry(child, "hide_on_focus_loss", hideOnFocusLoss);
     where.focusLoss = hideOnFocusLoss ? QuickTerminalFocusLoss::Hide : QuickTerminalFocusLoss::Stay;
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, TabStyleConfig& where)
+{
+    // Only the children present are written: an override of one key must leave its siblings as they were.
+    auto const child = node[entry];
+    if (!child)
+        return;
+
+    // Validated rather than trusted: a word no row names and a percentage out of range are typos, and each
+    // keeps what was there.
+    auto const textOf = [&](char const* key) -> std::optional<std::string> {
+        auto const leaf = child[key];
+        if (!leaf)
+            return std::nullopt;
+        if (leaf.IsScalar())
+            return leaf.as<std::string>();
+        errorLog()("Ignoring {}: it takes a single value.", keyPathTo(child, key));
+        return std::nullopt;
+    };
+
+    loadGuarded(child, "shape", where.shape);
+    loadGuarded(child, "material", where.material);
+
+    // The keys that take a number of pixels: read aside and checked, since one out of range is a typo, and
+    // taken as written a gap would push the tabs off the bar.
+    struct PixelRow
+    {
+        char const* key;
+        int TabStyleConfig::* member;
+        int max;
+        std::string_view what;
+    };
+    constexpr auto PixelRows = std::to_array<PixelRow>({
+        { .key = "spacing", .member = &TabStyleConfig::spacing, .max = MaxTabSpacing, .what = "a gap" },
+        { .key = "min_tab_width",
+          .member = &TabStyleConfig::minTabWidth,
+          .max = MaxTabWidthSetting,
+          .what = "a tab width" },
+        { .key = "max_tab_width",
+          .member = &TabStyleConfig::maxTabWidth,
+          .max = MaxTabWidthSetting,
+          .what = "a tab width" },
+    });
+    for (auto const& row: PixelRows)
+    {
+        auto value = where.*row.member;
+        loadGuarded(child, row.key, value);
+        if (value >= 0 && value <= row.max)
+            where.*row.member = value;
+        else
+            errorLog()("Ignoring {}: {} is not {} from 0 to {} pixels; keeping {}.",
+                       keyPathTo(child, row.key),
+                       value,
+                       row.what,
+                       row.max,
+                       where.*row.member);
+    }
+
+    // The keys that take a colour or a word for one: each with its own parser, and what that parser takes.
+    struct ColorRow
+    {
+        char const* key;
+        TabFill TabStyleConfig::* member;
+        std::optional<TabFill> (*parse)(std::string_view);
+        std::string_view accepts;
+    };
+    constexpr auto FillWords = std::string_view { "`auto`, `accent`, `subtle` or a colour as '#RRGGBB'" };
+    constexpr auto ColorRows = std::to_array<ColorRow>({
+        { .key = "active_fill",
+          .member = &TabStyleConfig::activeFill,
+          .parse = parseTabFill,
+          .accepts = FillWords },
+        { .key = "inactive_fill",
+          .member = &TabStyleConfig::inactiveFill,
+          .parse = parseTabFill,
+          .accepts = FillWords },
+        { .key = "bar_fill",
+          .member = &TabStyleConfig::barFill,
+          .parse = parseTabFill,
+          .accepts = FillWords },
+        { .key = "indicator_color",
+          .member = &TabStyleConfig::indicatorColor,
+          .parse = parseIndicatorColor,
+          .accepts = "`accent` or a colour as '#RRGGBB'" },
+    });
+    for (auto const& row: ColorRows)
+    {
+        auto const text = textOf(row.key);
+        if (!text)
+            continue;
+        if (auto const color = row.parse(*text))
+            where.*row.member = *color;
+        else
+            errorLog()("Ignoring {}: '{}' is not {}.", keyPathTo(child, row.key), *text, row.accepts);
+    }
+
+    loadGuarded(child, "active_indicator", where.activeIndicator);
+    loadGuarded(child, "tab_color_mode", where.tabColorMode);
+    loadGuarded(child, "close_button", where.closeButton);
+    loadGuarded(child, "new_tab_button", where.newTabButton);
+    loadGuarded(child, "tab_width", where.tabWidth);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where)

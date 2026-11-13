@@ -46,10 +46,37 @@ namespace
 
 TEST_CASE("surface.macRows", "[titlebandsurface]")
 {
-    CHECK(surfaceOf(ChromeStyle::MacOS, Material::Glass, WindowFrame::ClientBand, WindowMode::Windowed)
-          == TitleBandSurface { .backdrop = BandBackdrop::NativeMaterial,
-                                .fill = BandFill::Tint,
+    using contour::config::BackdropKind;
+    using contour::config::TabSurface;
+
+    // Frosted is the title bar's own material in a view of ours behind the content -- never AppKit's
+    // title-bar material, whose NSTitlebarView takes the band's clicks (F13) -- with nothing painted over it,
+    // as Apple asks of bars.
+    CHECK(surfaceOf(ChromeStyle::MacOS, Material::Frost, WindowFrame::ClientBand, WindowMode::Windowed)
+          == TitleBandSurface { .backdrop = BandBackdrop::Blurred,
+                                .fill = BandFill::Clear,
                                 .growth = TitleBarGrowth::CompactToolbar });
+    // Glass is on the tabs, not across the band: the band is the terminal's own background, and the system
+    // draws each tab as Liquid Glass.
+    CHECK(surfaceOf(ChromeStyle::MacOS, Material::Glass, WindowFrame::ClientBand, WindowMode::Windowed)
+          == TitleBandSurface { .backdrop = BandBackdrop::Client,
+                                .fill = BandFill::Background,
+                                .growth = TitleBarGrowth::CompactToolbar,
+                                .kind = BackdropKind::TabbedGlass,
+                                .tabs = TabSurface::Glass });
+    // In full screen neither: no material behind terminal text, and the tabs painted again.
+    auto const fullGlass =
+        surfaceOf(ChromeStyle::MacOS, Material::Glass, WindowFrame::ClientBand, WindowMode::FullScreen);
+    CHECK(fullGlass.tabs == TabSurface::Painted);
+    CHECK(fullGlass.growth == TitleBarGrowth::None);
+    // No macOS row selects the native material any more, and only the glass band has glass tabs.
+    for (auto const& row: TitleBandSurfaceRows)
+    {
+        if (row.style == ChromeStyle::MacOS)
+            CHECK(row.surface.backdrop != BandBackdrop::NativeMaterial);
+        CHECK((row.surface.tabs == TabSurface::Glass)
+              == (row.style == ChromeStyle::MacOS && row.material == Material::Glass));
+    }
     CHECK(surfaceOf(ChromeStyle::MacOS, Material::Solid, WindowFrame::ClientBand, WindowMode::Windowed)
           == TitleBandSurface { .backdrop = BandBackdrop::Client,
                                 .fill = BandFill::Tint,
@@ -74,11 +101,40 @@ TEST_CASE("surface.fluentRows", "[titlebandsurface]")
           == TitleBandSurface {});
 }
 
+TEST_CASE("surface.fluentAcrylicIsMicasBandOverAnotherBackdrop", "[titlebandsurface]")
+{
+    using contour::config::BackdropKind;
+
+    // Acrylic (tab_style.material) clears the band over the native backdrop as Mica does, and differs only
+    // in which backdrop the window asks the compositor for.
+    auto const acrylic =
+        surfaceOf(ChromeStyle::Fluent, Material::Acrylic, WindowFrame::ClientBand, WindowMode::Windowed);
+    auto const mica =
+        surfaceOf(ChromeStyle::Fluent, Material::Mica, WindowFrame::ClientBand, WindowMode::Windowed);
+    CHECK(acrylic.backdrop == BandBackdrop::NativeMaterial);
+    CHECK(acrylic.fill == BandFill::Clear);
+    CHECK(acrylic.growth == mica.growth);
+    CHECK(acrylic.kind == BackdropKind::TabbedGlass);
+    CHECK(mica.kind == BackdropKind::Tabbed);
+
+    // No material behind terminal text in full screen, whichever was asked for.
+    auto const fullScreen =
+        surfaceOf(ChromeStyle::Fluent, Material::Acrylic, WindowFrame::ClientBand, WindowMode::FullScreen);
+    CHECK(fullScreen.backdrop == BandBackdrop::Client);
+    CHECK(fullScreen.fill == BandFill::Tint);
+
+    // A row with no compositor material has no Acrylic row, so it keeps today's band.
+    CHECK(surfaceOf(ChromeStyle::MacOS, Material::Acrylic, WindowFrame::ClientBand, WindowMode::Windowed)
+          == TitleBandSurface {});
+}
+
 TEST_CASE("surface.otherRowsKeepToday", "[titlebandsurface]")
 {
     for (auto const style: std::views::iota(size_t { 0 }, contour::config::detail::ChromeStyleCount))
     {
+        // The rows with a band material of their own are tested above; the Terminal row has none.
         if (static_cast<ChromeStyle>(style) == ChromeStyle::MacOS
+            || static_cast<ChromeStyle>(style) == ChromeStyle::ContourLinux
             || static_cast<ChromeStyle>(style) == ChromeStyle::Fluent)
             continue;
         for (auto const material: std::views::iota(size_t { 0 }, contour::config::MaterialCount))
@@ -95,6 +151,41 @@ TEST_CASE("surface.otherRowsKeepToday", "[titlebandsurface]")
     }
 }
 
+TEST_CASE("surface.linuxRowsBlurBehindATranslucentBand", "[titlebandsurface]")
+{
+    using contour::config::BackdropKind;
+
+    // KDE Plasma's frosted and glass bands: KWin's blur under the two tints, with no title bar to grow.
+    CHECK(surfaceOf(ChromeStyle::ContourLinux, Material::Frost, WindowFrame::ClientBand, WindowMode::Windowed)
+          == TitleBandSurface { .backdrop = BandBackdrop::Blurred,
+                                .fill = BandFill::FrostTint,
+                                .growth = TitleBarGrowth::None });
+    CHECK(surfaceOf(ChromeStyle::ContourLinux, Material::Glass, WindowFrame::ClientBand, WindowMode::Windowed)
+          == TitleBandSurface { .backdrop = BandBackdrop::Blurred,
+                                .fill = BandFill::GlassTint,
+                                .growth = TitleBarGrowth::None,
+                                .kind = BackdropKind::TabbedGlass });
+    // The solid band stays today's: no row, the palette's own paint.
+    CHECK(surfaceOf(ChromeStyle::ContourLinux, Material::Solid, WindowFrame::ClientBand, WindowMode::Windowed)
+          == TitleBandSurface {});
+
+    // No blur behind terminal text in full screen: the client's own tint, opaque.
+    for (auto const material: { Material::Frost, Material::Glass })
+    {
+        auto const full =
+            surfaceOf(ChromeStyle::ContourLinux, material, WindowFrame::ClientBand, WindowMode::FullScreen);
+        CHECK(full.backdrop == BandBackdrop::Client);
+        CHECK(full.fill == BandFill::Tint);
+    }
+
+    // The tints are the only translucent fills, and glass is the more see-through of the two.
+    using contour::config::bandFillOpacityPercent;
+    CHECK(bandFillOpacityPercent(BandFill::GlassTint) < bandFillOpacityPercent(BandFill::FrostTint));
+    CHECK(bandFillOpacityPercent(BandFill::FrostTint) < 100);
+    for (auto const fill: { BandFill::Palette, BandFill::Clear, BandFill::Tint, BandFill::Background })
+        CHECK(bandFillOpacityPercent(fill) == 100);
+}
+
 TEST_CASE("surface.nativeFrameHasNoBand", "[titlebandsurface]")
 {
     CHECK(surfaceOf(ChromeStyle::MacOS, Material::Glass, WindowFrame::NativeFrame, WindowMode::Windowed)
@@ -104,9 +195,9 @@ TEST_CASE("surface.nativeFrameHasNoBand", "[titlebandsurface]")
 TEST_CASE("surface.fullScreenIsSolid", "[titlebandsurface]")
 {
     auto const windowed =
-        surfaceOf(ChromeStyle::MacOS, Material::Glass, WindowFrame::ClientBand, WindowMode::Windowed);
+        surfaceOf(ChromeStyle::MacOS, Material::Frost, WindowFrame::ClientBand, WindowMode::Windowed);
     auto const full =
-        surfaceOf(ChromeStyle::MacOS, Material::Glass, WindowFrame::ClientBand, WindowMode::FullScreen);
+        surfaceOf(ChromeStyle::MacOS, Material::Frost, WindowFrame::ClientBand, WindowMode::FullScreen);
     CHECK(full.backdrop == BandBackdrop::Client);
     CHECK(full.fill == BandFill::Tint);
     CHECK(windowed.growth == TitleBarGrowth::CompactToolbar);

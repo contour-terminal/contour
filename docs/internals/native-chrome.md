@@ -135,6 +135,41 @@ Config keys you will touch: `ui_style`, `chrome_density` (`comfortable | minimal
 (`terminal` follows the background), `show_title_bar`, `defaults_edition`, `scrollbar.mode` and the
 window-control style (`src/contour/config/WindowControlStyle.hpp`).
 
+`tab_style` is the one place a user's configuration reaches into a row's look rather than choosing
+between rows. It is laid over the row by `config::resolveTabStyle` (`src/contour/config/TabStyle.hpp`)
+and published as `chromeStyle.tabStyle`, so `TabItem.qml` reads the result and never the section: a
+key left at `auto` is the row's own value.
+
+- `shape` is a *look*, not a layout: the row still owns the strip (`layout.tabShape`, the band rules,
+  the heights), and a look only changes how each tab is drawn inside it. A look is one row of
+  `TabLookTraitRows` (corners, seat, what marks the active tab); the tab reads those traits and never
+  the look's name, so a new look is a new row. The Terminal row counts in cells and takes no look.
+- `spacing` is the gap between tabs of a strip that is not a well of pills, whose gap is the well's.
+  With a gap, the line between two tabs is not drawn.
+- `material` is the one key that changes the row rather than the tabs: `config::bandMaterialFor` lays
+  it over `material.titleBand` inside `resolveChromeTokens`, before the accessibility steps, so Reduced
+  transparency and an OS without the material still end in Solid. Its values (`solid`, `frosted`,
+  `glass`) name what the user sees, not a platform's material: `BandMaterialGrants` says which
+  `Material` each row grants a wish with, and a row with no grant keeps its own. Windows grants Mica
+  and Acrylic (a `TitleBandSurfaceRows` row that asks DWM for `BackdropKind::TabbedGlass`). macOS
+  and KDE Plasma grant `Frost` and `Glass`: `BandBackdrop::Blurred`, under the band alone, painted
+  over with a translucent tint (`BandFill::FrostTint`, `GlassTint`). On macOS the blur is a view of
+  ours behind the Qt content view (`CocoaTitleBandMaterial.mm`), Liquid Glass on macOS 26 -- never
+  AppKit's title-bar material, which takes the band's clicks (F13). On Linux it is
+  `KWinTitleBandMaterial`, a material that needs a compositor rather than an OS title bar
+  (`BandMaterialHost::Compositor`); it reports itself unsupported where nothing blurs (a Wayland
+  compositor without `org_kde_kwin_blur`, an X11 window manager other than KWin), and the window
+  then paints the solid band. Its blur shares the window's one blur object with `background.blur`
+  (`BlurBehind.cpp` keeps both wishes per window).
+- `tab_color_mode` decides whether a tab's own colour is its fill (the default, which then wins over
+  `active_fill` and `inactive_fill`), a tint over the styled fill, or only its indicator line.
+
+The row's default for the line between two joined tabs is `contrast.tabSeparatorPercent`, apart from
+`separatorPercent` because over the band that line is all that separates two tabs. Where it is drawn
+is a defaults-edition choice (`EditionDefaults::tabSeparators`): `Classic` keeps the old line after
+every tab at rest at `separatorPercent`; `Native2026` draws it only where two tabs at rest meet, at
+`tabSeparatorPercent`.
+
 `DefaultsEdition { Classic = 0, Native2026 }` exists because a configuration that sets only
 `profiles.main.font` would otherwise inherit every new default. A fresh install is `Native2026` by
 virtue of the generated file carrying `defaults_edition: native2026`. A file that sets nothing is
@@ -223,8 +258,10 @@ Platform notes that are easy to get wrong:
 
 - **macOS.** The window keeps the full-size content view. As shipped the title band is the client's own
   tint over a compact toolbar (`Solid`): with AppKit's transparent title bar the `NSTitlebarView` took
-  the band's clicks. Glass remains a possible follow-up as a within-window `NSVisualEffectView` behind
-  the Qt content. `nativeControlsInset()` stays the horizontal inset for the traffic lights; the band's
+  the band's clicks. `tab_style.material: frosted` puts the title bar's material in an
+  `NSVisualEffectView` of ours behind the Qt content, and `glass` draws each tab as Liquid Glass
+  (macOS 26) in one `NSGlassEffectContainerView` behind it; neither is ever AppKit's own title-bar
+  material. `nativeControlsInset()` stays the horizontal inset for the traffic lights; the band's
   height comes from the safe area. Alpha-capable surfaces can clear `hasShadow`, so it is re-asserted
   after the frame is applied. On macOS `QWindow::setBaseSize` hard-resizes the `NSWindow`, and the
   OpenGL RHI backend maps a window that never composites; both are avoided in the code and must stay so.
@@ -244,7 +281,9 @@ Platform notes that are easy to get wrong:
   `button-layout`, KWin's `ButtonsOnLeft`/`ButtonsOnRight`, else close on the right). Window shadows are
   drawn client-side per windowing system (`X11WindowShadow`, `WaylandWindowShadow`) using Breeze's own
   parameters so a Contour window and a Breeze one cast the same shadow. Selected rows use the legible
-  highlight rule from the principles above.
+  highlight rule from the principles above. `tab_style.material: frosted | glass` is not a KDE variant
+  of the design but a capability: the same band over KWin's blur where the compositor offers it
+  (`KWinTitleBandMaterial`), the solid band everywhere else.
 
 ## The Settings window and its one save model
 

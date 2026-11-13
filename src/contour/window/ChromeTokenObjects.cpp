@@ -139,11 +139,13 @@ ChromeSettingsTraits::ChromeSettingsTraits(config::SettingsLayout layout, QObjec
 ChromeColorTokens::ChromeColorTokens(Sources sources,
                                      config::ChromeSchemeColors scheme,
                                      int separatorPercent,
-                                     UiStyleProvider& provider):
+                                     UiStyleProvider& provider,
+                                     ChromeGround ground):
     QObject { &provider },
     _sources { sources },
     _scheme { scheme },
     _separatorPercent { separatorPercent },
+    _ground { ground },
     _provider { provider }
 {
     connect(&provider, &UiStyleProvider::paletteRevisionChanged, this, &ChromeColorTokens::changed);
@@ -169,6 +171,20 @@ QColor ChromeColorTokens::color(config::ChromeColorRole role) const
 
 QColor ChromeColorTokens::resolve(config::ChromeColorSource const& source) const
 {
+    // On a bar of the user's colour the kit's inks take that colour's tone, and the two palette sources
+    // that name the window become the bar and the ink that reads on it: the palette's own window text was
+    // chosen for the palette's window, not for this ground.
+    if (auto const bar = _ground == ChromeGround::Bar ? _provider.barGround() : std::nullopt)
+    {
+        switch (source.kind)
+        {
+            case config::ColorSourceKind::PaletteWindow:
+                return platform::atOpacity(*bar, source.alphaPercent);
+            case config::ColorSourceKind::PaletteWindowText:
+                return platform::atOpacity(_provider.onColor(*bar), source.alphaPercent);
+            default: return resolve(source, platform::colorSchemeOfBackground(platform::toRGBColor(*bar)));
+        }
+    }
     auto const window = platform::toRGBColor(QGuiApplication::palette().color(QPalette::Window));
     return resolve(source, platform::colorSchemeOfBackground(window));
 }
@@ -230,6 +246,36 @@ QColor ChromeColorTokens::resolve(config::ChromeColorSource const& source, Qt::C
                     stepOf(std::span<config::SurfacePair const>(config::SurfaceColors), source.level))
                 return faded(platform::toQColor(vtbackend::RGBColor(dark ? pair->dark : pair->light)));
             return { Qt::transparent };
+    }
+    return { Qt::transparent };
+}
+
+ChromeTabStyleTokens::ChromeTabStyleTokens(config::TabStyleTokens tokens,
+                                           ChromeColorTokens const& colors,
+                                           UiStyleProvider& provider):
+    QObject { &provider }, _tokens { tokens }, _colors { colors }, _provider { provider }
+{
+    connect(&provider, &UiStyleProvider::paletteRevisionChanged, this, &ChromeTabStyleTokens::changed);
+}
+
+bool ChromeTabStyleTokens::hasBarGround() const
+{
+    return _provider.barGround().has_value();
+}
+
+QColor ChromeTabStyleTokens::barGround() const
+{
+    return _provider.barGround().value_or(QColor { Qt::transparent });
+}
+
+QColor ChromeTabStyleTokens::resolve(config::TabFill const& fill) const
+{
+    switch (fill.kind)
+    {
+        case config::TabFillKind::Auto: break;
+        case config::TabFillKind::Accent: return _provider.accentColor();
+        case config::TabFillKind::Subtle: return _colors.color(config::ChromeColorRole::TabHoverFill);
+        case config::TabFillKind::Custom: return platform::toQColor(fill.color);
     }
     return { Qt::transparent };
 }

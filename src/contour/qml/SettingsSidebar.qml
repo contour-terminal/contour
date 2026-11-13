@@ -34,8 +34,8 @@ Rectangle {
     /// window has a frame. The sidebar's half of a split header row then moves and maximises the window too.
     property var windowController: null
     /// The glyph of each SettingsIcon, in enumerator order (Gear, Paintbrush, Keyboard, Terminal, Person,
-    /// Document, Network).
-    readonly property var iconGlyphs: ["⚙", "✎", "⌨", "❯", "☺", "☰", "⇄"]
+    /// Document, Network, Tabs).
+    readonly property var iconGlyphs: ["⚙", "✎", "⌨", "❯", "☺", "☰", "⇄", "▭"]
 
     /// A row was asked to open page @p page.
     signal openRequested(string page)

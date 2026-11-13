@@ -2662,6 +2662,499 @@ TEST_CASE("joined tabs sit on the band's floor (offscreen)", "[contour][gui][qml
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("tab_style restyles the joined tabs (offscreen)", "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    using contour::config::TabFillKind;
+    using contour::config::TabIndicator;
+
+    auto setup = rowSetup(ChromeStyle::Fluent);
+    setup.tabStyle = { .spacing = 6,
+                       .activeFill = { .kind = TabFillKind::Custom, .color = vtbackend::RGBColor(0xF0F0F0) },
+                       .inactiveFill = { .kind = TabFillKind::Custom,
+                                         .color = vtbackend::RGBColor(0x101010) },
+                       .activeIndicator = TabIndicator::TopLine };
+
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+    showWindow(*root);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 3);
+    auto const colorOf = [&](QQuickItem const& tab, char const* name) {
+        return part(tab, QString::fromLatin1(name)).property("color").value<QColor>().rgba();
+    };
+
+    // The user's fills replace the content's colour and the bare band, and each label is inked for the
+    // fill it sits on: a light fill takes black, a dark one white.
+    CHECK(colorOf(*tabs[0], "tabBackground") == QColor(0xF0F0F0).rgba());
+    CHECK(colorOf(*tabs[1], "tabBackground") == QColor(0x101010).rgba());
+    CHECK(contrastOf(QColor::fromRgba(colorOf(*tabs[0], "tabLabel")), QColor(0xF0F0F0)) >= 4.5);
+    CHECK(contrastOf(QColor::fromRgba(colorOf(*tabs[1], "tabLabel")), QColor(0x101010)) >= 4.5);
+
+    // The gap sets the tabs apart, so no line is drawn, even after an inactive tab that is not the last.
+    CHECK(tabs[1]->x() == tabs[0]->x() + tabs[0]->width() + 6.0);
+    CHECK_FALSE(part(*tabs[1], QStringLiteral("tabJoinedRule")).isVisible());
+
+    // The indicator is on the active tab alone, along its top edge, inside its rounded corners.
+    auto const& indicator = part(*tabs[0], QStringLiteral("tabActiveIndicator"));
+    CHECK(indicator.isVisible());
+    CHECK(indicator.y() == 0.0);
+    CHECK(indicator.x() == styleGroup(engine, "radii").property("tab").toReal());
+    CHECK(indicator.width() == tabs[0]->width() - 2 * indicator.x());
+    CHECK_FALSE(part(*tabs[1], QStringLiteral("tabActiveIndicator")).isVisible());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("tab_color_mode decides how a coloured joined tab shows its colour (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    using contour::config::TabColorMode;
+    using contour::config::TabFillKind;
+    using contour::test::snapshot::TabDecor;
+
+    // Row 0 is coloured (DecorTabColor) and row 1 is not; the coloured row is active or not.
+    auto const mode = GENERATE(TabColorMode::Fill, TabColorMode::Tint, TabColorMode::Indicator);
+    auto const activeTab = GENERATE(0, 1);
+    CAPTURE(static_cast<int>(mode), activeTab);
+
+    auto const styleFill = vtbackend::RGBColor(0x203040);
+    auto setup = rowSetup(ChromeStyle::Fluent);
+    setup.tabStyle = { .activeFill = { .kind = TabFillKind::Custom, .color = styleFill },
+                       .inactiveFill = { .kind = TabFillKind::Custom, .color = styleFill },
+                       .tabColorMode = mode };
+
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene {
+        .tabCount = 2, .decor = TabDecor::EveryBadge, .activeTab = activeTab } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+    showWindow(*root);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 2);
+    auto const tabColor = contour::platform::toQColor(contour::test::DecorTabColor);
+    auto const styled = contour::platform::toQColor(styleFill);
+    auto const fill = part(*tabs[0], QStringLiteral("tabBackground")).property("color").value<QColor>();
+    auto const& tint = part(*tabs[0], QStringLiteral("tabColorTint"));
+    auto const& line = part(*tabs[0], QStringLiteral("tabActiveIndicator"));
+
+    // As a fill the colour replaces the styled fill; in the other two modes the tab is filled as styled.
+    CHECK((fill.rgb() == styled.rgb()) == (mode != TabColorMode::Fill));
+    // The tint is a layer of the colour over that fill, at the row's tab tint.
+    CHECK(tint.isVisible() == (mode == TabColorMode::Tint));
+    if (mode == TabColorMode::Tint)
+    {
+        auto const wash = tint.property("color").value<QColor>();
+        CHECK(wash.rgb() == tabColor.rgb());
+        CHECK(wash.alphaF()
+              == Catch::Approx(styleGroup(engine, "tint").property("tab").toReal()).margin(0.01));
+    }
+    // As the indicator the colour is a line the tab carries active or not; no indicator is configured, so
+    // the other modes draw none.
+    CHECK(line.isVisible() == (mode == TabColorMode::Indicator));
+    if (mode == TabColorMode::Indicator)
+    {
+        CHECK(line.property("color").value<QColor>().rgb() == tabColor.rgb());
+        CHECK(line.y() == tabs[0]->height() - line.height());
+    }
+
+    // The uncoloured tab beside it is the styled one in every mode.
+    CHECK(part(*tabs[1], QStringLiteral("tabBackground")).property("color").value<QColor>().rgb()
+          == styled.rgb());
+    CHECK_FALSE(part(*tabs[1], QStringLiteral("tabColorTint")).isVisible());
+    CHECK_FALSE(part(*tabs[1], QStringLiteral("tabActiveIndicator")).isVisible());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the indicator on a filled coloured tab is indicator_color, not the tab's colour (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    using contour::config::TabIndicator;
+    using contour::test::snapshot::TabDecor;
+
+    auto setup = rowSetup(ChromeStyle::Fluent);
+    setup.tabStyle = { .activeIndicator = TabIndicator::TopLine,
+                       .indicatorColor = { .kind = contour::config::TabFillKind::Custom,
+                                           .color = vtbackend::RGBColor(0x11CC88) } };
+
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 2, .decor = TabDecor::EveryBadge } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+    showWindow(*root);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 2);
+    auto const& line = part(*tabs[0], QStringLiteral("tabActiveIndicator"));
+    REQUIRE(line.isVisible());
+    CHECK(line.property("color").value<QColor>().rgb() == QColor(0x11CC88).rgb());
+    CHECK(line.y() == 0.0);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the line between joined tabs follows the defaults edition (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    using contour::config::TabSeparators;
+
+    // Four tabs, each in turn the active one. Classic (existing configurations): the line after every tab at
+    // rest but the strip's last, as it always was. Native2026: only where two tabs at rest meet, since the
+    // active tab is set apart by its fill on either side.
+    constexpr auto TabCount = 4;
+    auto const separators = GENERATE(TabSeparators::Classic, TabSeparators::BetweenResting);
+    auto const activeTab = GENERATE(0, 1, 2, 3);
+    CAPTURE(static_cast<int>(separators), activeTab);
+
+    auto setup = rowSetup(ChromeStyle::Fluent);
+    setup.tabSeparators = separators;
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = TabCount, .activeTab = activeTab } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+    showWindow(*root);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == TabCount);
+    for (auto const index: std::views::iota(0, TabCount))
+    {
+        CAPTURE(index);
+        auto const beforeActive = index + 1 == activeTab;
+        auto const expected = index != activeTab && index != TabCount - 1
+                              && !(beforeActive && separators == TabSeparators::BetweenResting);
+        CHECK(part(*tabs[static_cast<size_t>(index)], QStringLiteral("tabJoinedRule")).isVisible()
+              == expected);
+    }
+
+    // Classic draws it at the chrome's separator strength, native2026 at the Windows row's stronger one.
+    auto const& rule =
+        part(*tabs[activeTab == 1 ? size_t { 2 } : size_t { 1 }], QStringLiteral("tabJoinedRule"));
+    if (rule.isVisible())
+        CHECK(rule.property("color").value<QColor>().alphaF()
+              == Catch::Approx(separators == TabSeparators::Classic ? 0.10 : 0.20).margin(0.01));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("tab_style.shape redraws the tabs on the row's own strip (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    using contour::config::TabActiveMark;
+    using contour::config::TabCorners;
+    using contour::config::TabLook;
+    using contour::config::TabSeat;
+
+    auto const look = GENERATE(TabLook::Pill, TabLook::Flat, TabLook::Underline, TabLook::Outlined);
+    CAPTURE(static_cast<int>(look));
+    auto const& traits = contour::config::tabLookTraits(look);
+
+    auto setup = rowSetup(ChromeStyle::Fluent);
+    setup.tabStyle = { .shape = look };
+
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+    showWindow(*root);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 3);
+    auto const& colors = styleGroup(engine, "colors");
+    auto const& active = part(*tabs[0], QStringLiteral("tabBackground"));
+    auto const& resting = part(*tabs[1], QStringLiteral("tabBackground"));
+
+    // The strip is still the row's: the tabs keep its height and stand on its floor.
+    CHECK(tabs[0]->height() == styleGroup(engine, "size").property("tab").toReal());
+
+    // Corners: the row's radius on all four, or none at all.
+    auto const radius = styleGroup(engine, "radii").property("tab").toReal();
+    auto const expectedRadius = traits.corners == TabCorners::Square ? 0.0 : radius;
+    CHECK(active.property("radius").toReal() == expectedRadius);
+    CHECK(active.property("bottomLeftRadius").toReal() == expectedRadius);
+    CHECK(active.property("bottomRightRadius").toReal() == expectedRadius);
+
+    // Seat: a floating tab leaves the bar showing under it.
+    auto const lift = styleGroup(engine, "space").property("s2").toReal();
+    CHECK(active.height() == tabs[0]->height() - (traits.seat == TabSeat::Floating ? lift : 0.0));
+
+    // The active tab: the row's active-tab fill over the bar, or no fill where an outline or a line marks
+    // it. Never the content's colour, which is the joined tab's.
+    auto const fill = active.property("color").value<QColor>();
+    if (traits.active == TabActiveMark::Wash)
+        CHECK(fill.rgba() == colors.property("tabActiveFill").value<QColor>().rgba());
+    else
+        CHECK(fill.alpha() == 0);
+    auto const border = active.property("border").value<QObject*>();
+    REQUIRE(border != nullptr);
+    CHECK((border->property("width").toReal() > 0.0) == (traits.active == TabActiveMark::Outline));
+    // A look that marks the active tab with the line shows it with no active_indicator configured.
+    auto const& line = part(*tabs[0], QStringLiteral("tabActiveIndicator"));
+    CHECK(line.isVisible() == (traits.active == TabActiveMark::Underline));
+    if (line.isVisible())
+        CHECK(line.y() == tabs[0]->height() - line.height());
+
+    // A tab at rest shows the bar, with no outline and no line.
+    CHECK(resting.property("color").value<QColor>().alpha() == 0);
+    CHECK(resting.property("border").value<QObject*>()->property("width").toReal() == 0.0);
+    CHECK_FALSE(part(*tabs[1], QStringLiteral("tabActiveIndicator")).isVisible());
+
+    // The labels are the bar's: the active one and the rest, a level dimmer in a background window.
+    auto const* window = qobject_cast<QQuickWindow*>(root.get());
+    auto const labelOf = [&](QQuickItem const& tab) {
+        return part(tab, QStringLiteral("tabLabel")).property("color").value<QColor>().rgba();
+    };
+    auto const role = [&colors](char const* name) {
+        return colors.property(name).value<QColor>().rgba();
+    };
+    CHECK(labelOf(*tabs[0]) == role(window->isActive() ? "tabTextActive" : "tabText"));
+    CHECK(labelOf(*tabs[1]) == role(window->isActive() ? "tabText" : "tabTextDimmed"));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("tab_style.bar_fill paints the bar and inks what is on it (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    using contour::config::TabFillKind;
+    using contour::config::TabLook;
+
+    // A dark bar and a light one, whichever the palette is: each time the resting tab's label and the
+    // window buttons must read on the bar, not on the OS window colour.
+    auto const barColor = GENERATE(0x101418u, 0xF2F2EEu);
+    // A bar that paints: Reduced transparency takes the Windows row's material away.
+    auto setup = rowSetup(ChromeStyle::Fluent);
+    setup.accessibility.transparency = contour::config::TransparencyPreference::Reduced;
+    setup.tabStyle = { .shape = TabLook::Flat,
+                       .barFill = { .kind = TabFillKind::Custom, .color = vtbackend::RGBColor(barColor) } };
+
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+    showWindow(*root);
+
+    auto const bar = QColor(QRgb { barColor });
+    CAPTURE(bar.name().toStdString());
+    CHECK(bandBackgroundOf(*root).rgb() == bar.rgb());
+    CHECK(bandBackgroundOf(*root).alpha() == 255);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 3);
+    auto const restingLabel = part(*tabs[1], QStringLiteral("tabLabel")).property("color").value<QColor>();
+    CHECK(contrastOf(over(restingLabel, bar), bar) >= 4.5);
+
+    // A look whose tabs are square rules the bar's foot, in the bar's own ink.
+    auto const& titleBar = named(*root, QStringLiteral("titleBar"));
+    auto const& rule = part(titleBar, QStringLiteral("barFootRule"));
+    CHECK(rule.isVisible());
+    CHECK(rule.y() == titleBar.height() - rule.height());
+    CHECK(rule.property("color").value<QColor>().rgb()
+          == styleGroup(engine, "bandColors").property("tabText").value<QColor>().rgb());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("glass tabs paint only their labels and publish where the glass goes (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    // What WindowController::tabsAreGlass says on macOS 26 under tab_style.material: glass, where the system
+    // draws each tab as Liquid Glass behind the scene.
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3, .activeTab = 1 } };
+    controller.setTabsAreGlass(true);
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    showWindow(*root);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 3);
+    // No fill, outline or tint of the tab's own: the system draws its background.
+    for (auto* tab: tabs)
+    {
+        auto const& surface = part(*tab, QStringLiteral("tabBackground"));
+        CHECK(surface.property("color").value<QColor>().alpha() == 0);
+        CHECK_FALSE(part(*tab, QStringLiteral("tabColorTint")).isVisible());
+    }
+
+    // One shape per tab, where its surface stands in the window, with the tab's own radius.
+    REQUIRE(QTest::qWaitFor([&] { return controller.tabGlassShapes().size() == 3; }, 1000));
+    auto const& shapes = controller.tabGlassShapes();
+    for (auto const index: std::views::iota(0, 3))
+    {
+        CAPTURE(index);
+        auto const& surface = part(*tabs[static_cast<size_t>(index)], QStringLiteral("tabBackground"));
+        auto const at = surface.mapToScene(QPointF(0, 0));
+        auto const shape = shapes[index].toMap();
+        CHECK(shape.value(QStringLiteral("x")).toReal() == Catch::Approx(at.x()));
+        CHECK(shape.value(QStringLiteral("y")).toReal() == Catch::Approx(at.y()));
+        CHECK(shape.value(QStringLiteral("width")).toReal() == Catch::Approx(surface.width()));
+        CHECK(shape.value(QStringLiteral("height")).toReal() == Catch::Approx(surface.height()));
+        CHECK(shape.value(QStringLiteral("radius")).toReal()
+              == Catch::Approx(surface.property("radius").toReal()));
+        // Colour on the one prominent tab alone: the active one is tinted, the rest are not.
+        auto const tint = shape.value(QStringLiteral("tint")).value<QColor>();
+        CHECK((tint.alpha() > 0) == (index == 1));
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("tab_style.close_button decides which tabs show the close button (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    using contour::config::TabCloseButton;
+
+    // Three tabs, the first active; no pointer over any of them, so only what shows at rest is seen.
+    struct Expected
+    {
+        TabCloseButton setting;
+        bool active;  // the active tab shows it
+        bool resting; // a tab at rest shows it
+    };
+    auto const row = GENERATE(Expected { TabCloseButton::Auto, true, false },
+                              Expected { TabCloseButton::Hover, false, false },
+                              Expected { TabCloseButton::Active, true, false },
+                              Expected { TabCloseButton::Always, true, true },
+                              Expected { TabCloseButton::Never, false, false });
+    CAPTURE(static_cast<int>(row.setting));
+
+    auto setup = rowSetup(ChromeStyle::Fluent);
+    setup.tabStyle = { .closeButton = row.setting };
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+    showWindow(*root);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 3);
+    CHECK(part(*tabs[0], QStringLiteral("tabCloseButton")).isVisible() == row.active);
+    CHECK(part(*tabs[1], QStringLiteral("tabCloseButton")).isVisible() == row.resting);
+
+    // Under never no room is kept for it: the tab is narrower than with the button allowed.
+    if (row.setting == TabCloseButton::Never)
+    {
+        auto allowedSetup = rowSetup(ChromeStyle::Fluent);
+        QQmlEngine allowedEngine;
+        MockMainController allowedController { MainWindowScene { .tabCount = 3 } };
+        contour::test::QmlMessageCapture allowedWarnings;
+        auto allowed = loadMainWindow(allowedEngine, allowedController, allowedWarnings, allowedSetup);
+        showWindow(*allowed);
+        auto const allowedTabs = tabDelegates(*allowed);
+        REQUIRE(allowedTabs.size() == 3);
+        CHECK(tabs[1]->property("naturalWidth").toReal() < allowedTabs[1]->property("naturalWidth").toReal());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("tab_style.new_tab_button: hidden removes the + on every row (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    // The strip's "+" and caret (Windows), the band's toolbar "+" (macOS), the header bar's item (Linux).
+    auto const style = GENERATE(ChromeStyle::Fluent, ChromeStyle::MacOS, ChromeStyle::ContourLinux);
+    CAPTURE(static_cast<int>(style));
+
+    auto setup = rowSetup(style);
+    setup.tabStyle = { .newTabButton = contour::config::NewTabButton::Hidden };
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 2 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+    showWindow(*root);
+
+    auto const* const window = qobject_cast<QQuickWindow*>(root.get());
+    REQUIRE(window != nullptr);
+    auto const* const plus = visualChild(*window->contentItem(), QStringLiteral("newTabButton"));
+    CHECK((plus == nullptr || !plus->isVisible()));
+    auto const* const caret = visualChild(*window->contentItem(), QStringLiteral("newTabMenuButton"));
+    CHECK((caret == nullptr || !caret->isVisible()));
+    auto const* const headerItem = visualChild(*window->contentItem(), QStringLiteral("headerNewTab"));
+    CHECK((headerItem == nullptr || !headerItem->isVisible()));
+    // The tabs themselves are still there.
+    CHECK(tabDelegates(*root).size() == 2);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("tab_style.tab_width: equal shares the bar between the tabs, fit keeps their titles' (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    auto const widthsOf = [](contour::config::TabStyleConfig const& tabStyle) {
+        auto setup = rowSetup(ChromeStyle::Fluent);
+        setup.tabStyle = tabStyle;
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene { .tabCount = 3 } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, setup);
+        showWindow(*root);
+        auto widths = std::vector<qreal> {};
+        for (auto const* tab: tabDelegates(*root))
+            widths.push_back(tab->width());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+        return widths;
+    };
+    using contour::config::TabWidth;
+
+    auto const fit = widthsOf({ .tabWidth = TabWidth::Fit });
+    auto const equal = widthsOf({ .tabWidth = TabWidth::Equal });
+    REQUIRE(fit.size() == 3);
+    REQUIRE(equal.size() == 3);
+    // Every tab as wide as the others, and wider than its title needs on a bar with room to spare.
+    CHECK(equal[0] == equal[1]);
+    CHECK(equal[1] == equal[2]);
+    CHECK(equal[0] > fit[0]);
+
+    // The limits bound both: an equal share stops at the maximum, a fitted title starts at the minimum.
+    auto const capped = widthsOf({ .tabWidth = TabWidth::Equal, .maxTabWidth = 140 });
+    REQUIRE(capped.size() == 3);
+    CHECK(capped[0] == 140);
+    auto const floored = widthsOf({ .tabWidth = TabWidth::Fit, .minTabWidth = 400 });
+    REQUIRE(floored.size() == 3);
+    CHECK(floored[0] >= 400);
+}
+
+TEST_CASE("the bar's foot is ruled only under a look that asks for it (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 2 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+    showWindow(*root);
+
+    CHECK_FALSE(part(named(*root, QStringLiteral("titleBar")), QStringLiteral("barFootRule")).isVisible());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the joined tabs carry no indicator and the row's line by default (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+    showWindow(*root);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 3);
+    CHECK_FALSE(part(*tabs[0], QStringLiteral("tabActiveIndicator")).isVisible());
+
+    // The line after an inactive tab is the tab text's ink, at the chrome's separator strength: the classic
+    // rule, which a configuration that names no newer edition keeps.
+    auto const& rule = part(*tabs[1], QStringLiteral("tabJoinedRule"));
+    REQUIRE(rule.isVisible());
+    auto const ink = styleGroup(engine, "colors").property("tabText").value<QColor>();
+    CHECK(rule.property("color").value<QColor>().alphaF() == Catch::Approx(0.10).margin(0.01));
+    CHECK(rule.property("color").value<QColor>().rgb() == ink.rgb());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("the active joined tab is the content's colour (offscreen)",
           "[contour][gui][qml][mainwindow][joinedtabs]")
 {
@@ -2727,8 +3220,9 @@ TEST_CASE("the joined strip keeps its profile dropdown (offscreen)",
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("one tab still shows the joined bar and its caption buttons (offscreen)",
-          "[contour][gui][qml][mainwindow][joinedtabs]")
+TEST_CASE(
+    "one tab under multiple keeps the joined bar for its caption buttons, showing the title (offscreen)",
+    "[contour][gui][qml][mainwindow][joinedtabs]")
 {
     QQmlEngine engine;
     MockMainController controller { MainWindowScene { .tabCount = 1,
@@ -2739,9 +3233,18 @@ TEST_CASE("one tab still shows the joined bar and its caption buttons (offscreen
     auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
     showWindow(*root);
 
+    // The gate hides the tabs, so the band holds the title in their place.
     CHECK(named(*root, QStringLiteral("titleBar")).isVisible());
-    CHECK(tabDelegates(*root).size() == 1);
+    CHECK(named(*root, QStringLiteral("bandTitleRow")).isVisible());
+    auto const* const list = root->findChild<QQuickItem*>(QStringLiteral("tabList"));
+    CHECK((list == nullptr || !list->isVisible()));
     CHECK(showsCloseButton(*root));
+
+    // The gate opening (a second tab, or `always`) brings the tabs back in place of the title.
+    controller.setTabBarShouldShow(true);
+    QCoreApplication::processEvents();
+    CHECK_FALSE(named(*root, QStringLiteral("bandTitleRow")).isVisible());
+    CHECK(tabDelegates(*root).size() == 1);
 
     // Under Minimal it is Pill's bare band: no tabs, but still the caption buttons.
     QQmlEngine minimalEngine;
@@ -4149,25 +4652,45 @@ TEST_CASE("one tab of one pane at a password prompt shows the lock as a band chi
     }
 }
 
-TEST_CASE(
-    "one tab of one pane at a password prompt on the joined Fluent row shows the lock on its tab (offscreen)",
-    "[contour][gui][qml][mainwindow][secureinput]")
+TEST_CASE("one tab of one pane at a password prompt on the joined Fluent row shows the lock on its tab, or "
+          "on the band "
+          "(offscreen)",
+          "[contour][gui][qml][mainwindow][secureinput]")
 {
-    QQmlEngine engine;
-    MockMainController controller { MainWindowScene { .tabCount = 1,
-                                                      .tabBarVisibility = TabBarVisibility::Multiple,
-                                                      .secure =
-                                                          contour::test::snapshot::SecureDecor::Locked } };
-    contour::test::QmlMessageCapture warnings;
-    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
-    showWindow(*root);
+    {
+        // The strip shown: the joined band holds the one tab, and the tab the lock.
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene {
+            .tabCount = 1,
+            .tabBarVisibility = TabBarVisibility::Always,
+            .secure = contour::test::snapshot::SecureDecor::Locked } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+        showWindow(*root);
 
-    // The band always holds the tabs on a joined row, one tab being still a tab.
-    auto const tabs = tabDelegates(*root);
-    REQUIRE(tabs.size() == 1);
-    CHECK(part(*tabs[0], QStringLiteral("tabLock")).isVisible());
-    CHECK_FALSE(root->property("secureLockInPane").toBool());
-    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+        auto const tabs = tabDelegates(*root);
+        REQUIRE(tabs.size() == 1);
+        CHECK(part(*tabs[0], QStringLiteral("tabLock")).isVisible());
+        CHECK_FALSE(root->property("secureLockInPane").toBool());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+    {
+        // One tab under `multiple`: the band stays for its caption buttons and shows the title, as macOS's
+        // does, so it is the band's chip that carries the lock.
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene {
+            .tabCount = 1,
+            .tabBarVisibility = TabBarVisibility::Multiple,
+            .secure = contour::test::snapshot::SecureDecor::Locked } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+        showWindow(*root);
+
+        CHECK(root->findChild<QQuickItem*>(QStringLiteral("bandTitleRow"))->isVisible());
+        CHECK(root->findChild<QQuickItem*>(QStringLiteral("secureInputChip"))->isVisible());
+        CHECK_FALSE(root->property("secureLockInPane").toBool());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
 }
 
 TEST_CASE(
@@ -4175,7 +4698,7 @@ TEST_CASE(
     "[contour][gui][qml][mainwindow][secureinput][securelock]")
 {
     // ContourLinux and Terminal hide the band with the strip: no header, well or band holds the lock. (Fluent
-    // is not here: its joined tabs are the title bar, so its band holds the tab, and the tab the lock.)
+    // is not here: its band stays for the caption buttons, and the band holds the lock.)
     for (auto const row: { ChromeStyle::ContourLinux, ChromeStyle::Terminal })
     {
         INFO("row: " << contour::config::chromeStyleName(row));

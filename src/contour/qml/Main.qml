@@ -317,6 +317,12 @@ ThemedWindow
         id: tabsBar
         objectName: "tabsBar" // so offscreen layout tests can findChild() this item
         role: "tabs"
+        // Below the content, so the bar meets it along its top edge.
+        footOnTop: true
+        // The OS window colour, as a bar holding only the tabs has always been, with tab_style.bar_fill
+        // laid over it as over the band's (bandFillColor of the palette fill, 0). Reads paletteRevision
+        // first, since the fill reads the palette.
+        fill: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.bandFillColor(0)
         anchors.left: parent.left
         anchors.right: parent.right
         y: parent.height - tabsBar.height
