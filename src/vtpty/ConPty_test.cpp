@@ -19,7 +19,9 @@
 #include <core/testing/EnvHelper.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
-#include <gsl/util>
+// The umbrella header: gsl::finally is in <gsl/gsl_util> in the GSL 3.1.0 the tree pins, and in <gsl/util>
+// in 4.x.
+#include <gsl/gsl>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -8,10 +8,11 @@
     #include <windows.h>
     #include <ws2tcpip.h>
 
-    // Link with ws2_32.lib, Mswsock.lib, and Advapi32.lib
-    #pragma comment(lib, "Ws2_32.lib")
-    #pragma comment(lib, "Mswsock.lib")
-    #pragma comment(lib, "AdvApi32.lib")
+    // Link with ws2_32.lib, mswsock.lib and advapi32.lib: spelled in lower case, as the SDK names them, for a
+    // case-sensitive file system (a cross build on Linux).
+    #pragma comment(lib, "ws2_32.lib")
+    #pragma comment(lib, "mswsock.lib")
+    #pragma comment(lib, "advapi32.lib")
 #endif
 // clang-format on
 
