@@ -69,10 +69,12 @@ void reopen_console_handle(DWORD std, int fd, FILE* stream)
     HANDLE handle = GetStdHandle(std);
     if (!is_a_console(handle))
         return;
+    // A stream that cannot be reopened stays as it was: the console it would have named is not reachable.
+    auto* reopened = static_cast<FILE*>(nullptr);
     if (fd == 0)
-        freopen("CONIN$", "rt", stream);
+        (void) freopen_s(&reopened, "CONIN$", "rt", stream);
     else
-        freopen("CONOUT$", "wt", stream);
+        (void) freopen_s(&reopened, "CONOUT$", "wt", stream);
 
     setvbuf(stream, NULL, _IONBF, 0);
 
@@ -88,7 +90,7 @@ void reopen_console_handle(DWORD std, int fd, FILE* stream)
     // dup2 will duplicate the underlying handle. Don't close unbound_fd,
     // since that will close the original handle.
     if (unbound_fd != -1)
-        dup2(unbound_fd, fd);
+        (void) _dup2(unbound_fd, fd);
 }
 
 template <typename... Ts>
