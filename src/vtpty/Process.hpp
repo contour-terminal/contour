@@ -217,8 +217,9 @@ class [[nodiscard]] Process: public Pty
     /// before then is lost, and a capture of the session taken then cannot promise to carry it. Settles for
     /// good once observed settled.
     /// @return InProgress from the trampoline's spawn until it signalled settling (one byte), right after
-    ///         the flush (or as it exits); Settled before start(), for an adopted child, and on Windows,
-    ///         where the console is the child's from CreateProcess() on.
+    ///         the flush and the change into the working directory (or as it exits); Settled before start(),
+    ///         for an adopted child, and on Windows, where the console is the child's from CreateProcess()
+    ///         on.
     [[nodiscard]] SpawnProgress spawnProgress() const;
 
     /// @return The child's exit status once it has exited; nullopt while it runs, or when there is none.
@@ -228,6 +229,9 @@ class [[nodiscard]] Process: public Pty
     /// @return Its exit status, or nullopt when start() never spawned a child to wait for.
     [[nodiscard]] std::optional<ExitStatus> wait();
 
+    /// @return The directory the child is in: the one it was started in while its spawn is in progress (it
+    ///         has not entered it yet, and is still in this process's), else as the system tells it;
+    ///         "." where there is no child, or the system cannot tell.
     [[nodiscard]] std::string workingDirectory() const;
 
     /// The name of the program leading the terminal's foreground process group: the shell at its prompt,

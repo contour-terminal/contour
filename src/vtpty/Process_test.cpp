@@ -447,6 +447,34 @@ TEST_CASE("Process.spawnSettlesOnceTheChildHasItsTerminal", "[process][placement
     (void) hangUp(process);
 }
 
+TEST_CASE("Process.workingDirectoryIsTheOneTheChildStartsIn", "[process][placement]")
+{
+    // Parked between fork() and exec(), the child is still in this process's directory: a look-up then must
+    // not name that one, which it is about to leave -- the daemon would look the wrong repository up.
+    auto const directory = core::testing::ScopedTempDir { "contour-process" };
+    auto const start = std::filesystem::canonical(directory.path());
+    REQUIRE(start != std::filesystem::canonical(std::filesystem::current_path()));
+    auto exec = execInfo("/bin/sh", { "-c", "printf ready; exec sleep 30" });
+    exec.workingDirectory = start;
+    auto placement = std::make_shared<RecordingPlacement>();
+    auto process =
+        vtpty::Process { exec, vtpty::createPty(PageSize, std::nullopt), /*escapeSandbox=*/false, placement };
+    auto const dropOnExit = DropOnExit { *placement };
+    REQUIRE(process.start().has_value());
+    REQUIRE(placement->pids().size() == 1);
+    REQUIRE(process.spawnProgress() == vtpty::Process::SpawnProgress::InProgress);
+    CHECK(std::filesystem::path { process.workingDirectory() } == start);
+
+    placement->release(placement->pids().front());
+    REQUIRE(printed(process, "ready"));
+    #if defined(__linux__) || defined(__APPLE__)
+    // Once settled, the answer is the child's own directory, which only these platforms can look up.
+    CHECK(std::filesystem::path { process.workingDirectory() } == start);
+    #endif
+
+    (void) hangUp(process);
+}
+
 TEST_CASE("Process.terminateWhileParked", "[process][placement]")
 {
     // A tab closed before its shell was released: the parked child dies, wait() returns, and the
