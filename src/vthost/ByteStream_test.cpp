@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <future>
 #include <ranges>
@@ -15,6 +17,7 @@
 
 using vthost::IByteStream;
 using vthost::PumpEnd;
+using vthost::RelayConfig;
 using vthost::RelayEnd;
 using vthost::testing::makeMemoryStreamPair;
 
@@ -39,6 +42,24 @@ void writeText(IByteStream& stream, std::string_view text)
             return received;
         received.insert(received.end(), buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(*count));
     }
+}
+
+/// Reads exactly @p count bytes as text, or fewer when the stream ends first.
+[[nodiscard]] std::string readText(IByteStream& stream, std::size_t count)
+{
+    auto text = std::string {};
+    auto buffer = std::array<std::byte, 1024> {};
+    while (text.size() < count)
+    {
+        auto const read =
+            stream.readSome(std::span { buffer }.first(std::min(buffer.size(), count - text.size())));
+        REQUIRE(read.has_value());
+        if (*read == 0)
+            break;
+        for (auto const byte: std::span { buffer }.first(*read))
+            text.push_back(static_cast<char>(byte));
+    }
+    return text;
 }
 
 [[nodiscard]] std::string readTextToEnd(IByteStream& stream)
@@ -116,4 +137,79 @@ TEST_CASE("runStdioRelay half-closes the daemon when the client ends", "[vthost]
     daemon.b->closeWrite();
     CHECK(relay.get() == RelayEnd::DaemonEnded);
     CHECK(readTextToEnd(*client.b).empty());
+}
+
+TEST_CASE("runStdioRelay gives up on a daemon that answers the client with nothing",
+          "[vthost][stdio][threading]")
+{
+    auto const client = makeMemoryStreamPair();
+    auto const daemon = makeMemoryStreamPair();
+    auto relay = std::async(std::launch::async, [&]() {
+        return vthost::runStdioRelay(
+            client.a, daemon.a, RelayConfig { .daemonReplyDeadline = std::chrono::milliseconds { 50 } });
+    });
+
+    writeText(*client.b, "hello");
+    CHECK(readText(*daemon.b, 5) == "hello");
+    CHECK(relay.get() == RelayEnd::DaemonSilent);
+    CHECK(readTextToEnd(*client.b).empty()); // the client is told the relay is over
+
+    client.b->closeWrite(); // lets the client→daemon thread finish
+    daemon.b->closeWrite(); // lets the daemon→client thread finish
+}
+
+TEST_CASE("runStdioRelay counts the daemon's deadline from the client's half-close too",
+          "[vthost][stdio][threading]")
+{
+    auto const client = makeMemoryStreamPair();
+    auto const daemon = makeMemoryStreamPair();
+    auto relay = std::async(std::launch::async, [&]() {
+        return vthost::runStdioRelay(
+            client.a, daemon.a, RelayConfig { .daemonReplyDeadline = std::chrono::milliseconds { 50 } });
+    });
+
+    client.b->closeWrite(); // owed: the daemon's end of the connection
+    CHECK(readTextToEnd(*daemon.b).empty());
+    CHECK(relay.get() == RelayEnd::DaemonSilent);
+
+    daemon.b->closeWrite(); // lets the daemon→client thread finish
+}
+
+TEST_CASE("runStdioRelay sets no deadline while the client has not spoken", "[vthost][stdio][threading]")
+{
+    auto const client = makeMemoryStreamPair();
+    auto const daemon = makeMemoryStreamPair();
+    auto relay = std::async(std::launch::async, [&]() {
+        return vthost::runStdioRelay(
+            client.a, daemon.a, RelayConfig { .daemonReplyDeadline = std::chrono::milliseconds { 10 } });
+    });
+
+    // Ten deadlines' worth of a silent client and a silent daemon: nobody owes anybody anything yet.
+    CHECK(relay.wait_for(std::chrono::milliseconds { 100 }) == std::future_status::timeout);
+
+    daemon.b->closeWrite();
+    CHECK(relay.get() == RelayEnd::DaemonEnded);
+    client.b->closeWrite(); // lets the client→daemon thread finish
+}
+
+TEST_CASE("runStdioRelay sets no deadline once the daemon has answered", "[vthost][stdio][threading]")
+{
+    auto const client = makeMemoryStreamPair();
+    auto const daemon = makeMemoryStreamPair();
+    auto relay = std::async(std::launch::async, [&]() {
+        return vthost::runStdioRelay(
+            client.a, daemon.a, RelayConfig { .daemonReplyDeadline = std::chrono::milliseconds { 10 } });
+    });
+
+    // The daemon speaks first, so that no deadline can be armed and expire before its answer is read.
+    writeText(*daemon.b, "hi");
+    CHECK(readText(*client.b, 2) == "hi");
+    writeText(*client.b, "hello");
+    CHECK(readText(*daemon.b, 5) == "hello");
+    // An idle session afterwards is no silent daemon: ten deadlines pass without ending the relay.
+    CHECK(relay.wait_for(std::chrono::milliseconds { 100 }) == std::future_status::timeout);
+
+    daemon.b->closeWrite();
+    CHECK(relay.get() == RelayEnd::DaemonEnded);
+    client.b->closeWrite(); // lets the client→daemon thread finish
 }

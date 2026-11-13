@@ -3,6 +3,7 @@
 
 #include <core/log/LogStore.hpp>
 
+#include <chrono>
 #include <cstdlib>
 #include <span>
 #include <string_view>
@@ -31,7 +32,7 @@ namespace
     }
 } // namespace
 
-int runStdioAttach(std::shared_ptr<IByteStream> client, DaemonConnector const& connect)
+int runStdioAttach(std::shared_ptr<IByteStream> client, DaemonConnector const& connect, RelayConfig relay)
 {
     auto daemon = connect();
     if (!daemon)
@@ -42,8 +43,16 @@ int runStdioAttach(std::shared_ptr<IByteStream> client, DaemonConnector const& c
     }
     if (!writeLine(*client, StdioPreambleReady))
         return EXIT_FAILURE;
-    return runStdioRelay(std::move(client), *std::move(daemon)) == RelayEnd::DaemonEnded ? EXIT_SUCCESS
-                                                                                         : EXIT_FAILURE;
+    switch (runStdioRelay(std::move(client), *std::move(daemon), relay))
+    {
+        case RelayEnd::DaemonEnded: return EXIT_SUCCESS;
+        case RelayEnd::Failed: return EXIT_FAILURE;
+        case RelayEnd::DaemonSilent:
+            errorLog()("contour daemon --stdio: daemon sent nothing within {}; giving up.",
+                       std::chrono::duration_cast<std::chrono::duration<double>>(relay.daemonReplyDeadline));
+            return EXIT_FAILURE;
+    }
+    return EXIT_FAILURE;
 }
 
 DaemonConnector makeLocalDaemonConnector(std::filesystem::path socketPath,

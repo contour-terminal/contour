@@ -28,9 +28,12 @@ using DaemonConnector = std::function<std::expected<std::shared_ptr<IByteStream>
 /// negotiate.
 /// @param client This process's stdio (makeProcessStdioStream()).
 /// @param connect Reaches the daemon.
+/// @param relay The relay's configuration: how long the daemon has to answer the client.
 /// @return EXIT_SUCCESS after the daemon side ended; EXIT_FAILURE after writing an error preamble, or
-///         when the relay failed.
-[[nodiscard]] int runStdioAttach(std::shared_ptr<IByteStream> client, DaemonConnector const& connect);
+///         when the relay failed, or the daemon sent nothing in time (logged as such).
+[[nodiscard]] int runStdioAttach(std::shared_ptr<IByteStream> client,
+                                 DaemonConnector const& connect,
+                                 RelayConfig relay = {});
 
 /// The production connector: when no daemon serves @p socketPath, @p starter starts one; then a
 /// blocking connect to its native socket (`nativeSocketPath(socketPath)`).
