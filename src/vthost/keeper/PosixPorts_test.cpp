@@ -185,13 +185,26 @@ std::size_t openDescriptorCount()
 }
 
 #ifdef __linux__
-/// @return The descriptors @p pid has open.
+/// @return The descriptors @p pid has open, less a standard output or error the program reopened on
+///         /dev/null for itself.
+///
+/// A program may not start with a standard descriptor closed: Rust's runtime, for one, opens /dev/null on
+/// any of 0, 1 and 2 it finds closed, before main() runs -- and Ubuntu's sleep(1) is Rust's (uutils) since
+/// 25.10. Such a descriptor is the program's own doing, not one the keeper passed on: whatever the keeper
+/// leaks keeps its number, which a stray of the test's, opened after the standard three, never has.
 std::set<int> descriptorsOf(int pid)
 {
+    auto const devNull = std::filesystem::path { "/dev/null" };
     auto numbers = std::set<int> {};
     auto error = std::error_code {};
     for (auto const& entry: std::filesystem::directory_iterator { std::format("/proc/{}/fd", pid), error })
-        numbers.insert(std::stoi(entry.path().filename().string()));
+    {
+        auto const number = std::stoi(entry.path().filename().string());
+        auto const isStandardOutput = number == STDOUT_FILENO || number == STDERR_FILENO;
+        if (isStandardOutput && std::filesystem::read_symlink(entry.path(), error) == devNull)
+            continue;
+        numbers.insert(number);
+    }
     return numbers;
 }
 
