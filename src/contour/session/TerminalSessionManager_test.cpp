@@ -4887,9 +4887,9 @@ TEST_CASE("TerminalSessionManager: New Window opens on the daemon only from a wi
     // A window on a daemon: a window of a connection of its own, which the daemon gives a workspace no window
     // shows -- not a clone of what this one displays.
     CHECK(manager.requestRemoteWindow(*pane, nullptr) == RemoteRouting::Routed);
-    REQUIRE(daemon.openedNew.size() == 1);
-    CHECK(daemon.openedNew.front() == onDaemon.id);
-    CHECK(daemon.openedLike.empty());
+    REQUIRE(daemon.opened.size() == 1);
+    CHECK(daemon.opened.front().window == onDaemon.id);
+    CHECK(daemon.opened.front().shows == contour::session::SiblingShows::DaemonsChoice);
 
     // A binding with no daemon, and a window none serves, leave it to the caller.
     auto links = TwoLinks {};
@@ -4898,7 +4898,7 @@ TEST_CASE("TerminalSessionManager: New Window opens on the daemon only from a wi
     auto* const localPane = manager.createSession(local.id);
     REQUIRE(localPane != nullptr);
     CHECK(manager.requestRemoteWindow(*localPane, nullptr) == RemoteRouting::Local);
-    CHECK(daemon.openedNew.size() == 1);
+    CHECK(daemon.opened.size() == 1);
     contour::test::closeAllTabs(*local);
     contour::test::closeAllTabs(*onDaemon);
 }

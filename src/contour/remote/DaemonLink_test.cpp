@@ -52,6 +52,7 @@
 
 using namespace std::chrono_literals;
 using namespace contour::remote::testing;
+using contour::session::SiblingShows;
 
 namespace
 {
@@ -439,7 +440,8 @@ TEST_CASE("DaemonLink: New Window shows the first hidden workspace, else a new o
     REQUIRE(waitUntil([&] { return !sessionsOf(rig.app.manager(), boot.id).empty(); }));
 
     // The launch's window shows the first; a New Window shows the second, which no window showed.
-    REQUIRE(rig.link->openNewWindow(boot.id, nullptr).has_value());
+    REQUIRE(
+        rig.link->openSiblingWindow(boot.id, SiblingShows::DaemonsChoice, std::nullopt, nullptr).has_value());
     REQUIRE(waitUntil([&] { return rig.host.opened.size() == 1; }));
     REQUIRE(waitUntil([&] { return visibilityOn(daemon, ids[1]) == WorkspaceVisibility::Shown; }));
     CHECK(daemon.onDaemon([&] { return showing(daemon, ids[0]); }) == 1);
@@ -447,7 +449,8 @@ TEST_CASE("DaemonLink: New Window shows the first hidden workspace, else a new o
     CHECK(daemon.onDaemon([&] { return daemon.host->model().workspaceCount(); }) == 2);
 
     // Every workspace is shown now: the next New Window gets a workspace of its own.
-    REQUIRE(rig.link->openNewWindow(boot.id, nullptr).has_value());
+    REQUIRE(
+        rig.link->openSiblingWindow(boot.id, SiblingShows::DaemonsChoice, std::nullopt, nullptr).has_value());
     REQUIRE(waitUntil([&] { return rig.host.opened.size() == 2; }));
     REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.host->model().workspaceCount() == 3; }));
     auto const shownBy = daemon.onDaemon([&] {
@@ -458,6 +461,26 @@ TEST_CASE("DaemonLink: New Window shows the first hidden workspace, else a new o
               }));
     });
     CHECK(shownBy == std::vector<std::size_t> { 1, 1, 1 });
+}
+
+TEST_CASE(
+    "DaemonLink: the daemon's choice needs no workspace of the asking window, a same-workspace one does",
+    "[attach][link]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 1);
+    auto rig = LinkRig { daemon.endpoint(), "home", {}, launch() };
+    auto const boot = contour::test::ScopedController { rig.app.manager() };
+    REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
+    REQUIRE(waitUntil([&] { return !sessionsOf(rig.app.manager(), boot.id).empty(); }));
+
+    // A window this link does not show: the launch rule asks nothing of it, a copy of it has nothing to copy.
+    auto const stranger = vtworkspace::WorkspaceId { boot.id.value + 1000 };
+    CHECK(rig.link->openSiblingWindow(stranger, SiblingShows::DaemonsChoice, std::nullopt, nullptr)
+              .has_value());
+    CHECK_FALSE(rig.link->openSiblingWindow(stranger, SiblingShows::SameWorkspace, std::nullopt, nullptr)
+                    .has_value());
+    CHECK(waitUntil([&] { return rig.host.opened.size() == 1; }));
 }
 
 // Review (PR 3, item 7): a window closed while it switched to a new workspace failed the switch, but the
@@ -639,8 +662,10 @@ TEST_CASE("DaemonLink: links of one daemon keep one launch role while they recon
     REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
     REQUIRE(waitUntil([&] { return rig.link->workspaceOf(boot.id).has_value(); }));
     // Two New Windows, each a link of its own to the daemon.
-    REQUIRE(rig.link->openWindowLike(boot.id, std::nullopt, nullptr).has_value());
-    REQUIRE(rig.link->openWindowLike(boot.id, std::nullopt, nullptr).has_value());
+    REQUIRE(
+        rig.link->openSiblingWindow(boot.id, SiblingShows::SameWorkspace, std::nullopt, nullptr).has_value());
+    REQUIRE(
+        rig.link->openSiblingWindow(boot.id, SiblingShows::SameWorkspace, std::nullopt, nullptr).has_value());
     REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.live.size() == 3; }));
     auto const holders = [&] {
         return std::ranges::count_if(rig.host.links(),
@@ -1393,7 +1418,8 @@ struct TwoWindowsOneWorkspace
         REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
         REQUIRE(waitUntil([&] { return rig.link->workspaceOf(boot.id).has_value(); }));
         REQUIRE(waitUntil([&] { return !sessionsOf(manager(), boot.id).empty(); }));
-        REQUIRE(rig.link->openWindowLike(boot.id, std::nullopt, nullptr).has_value());
+        REQUIRE(rig.link->openSiblingWindow(boot.id, SiblingShows::SameWorkspace, std::nullopt, nullptr)
+                    .has_value());
         REQUIRE(waitUntil(
             [&] { return rig.host.opened.size() == 1 && !sessionsOf(manager(), secondWindow()).empty(); }));
         REQUIRE(rig.host.windowLinks.size() == 1);
@@ -2740,7 +2766,8 @@ TEST_CASE("DaemonLink: a New Window that never loads tells the window it was ask
 
     rig.host.windowLoad = FakeLinkHost::WindowLoad::Fails;
     auto const endingsBefore = rig.host.endings;
-    REQUIRE(rig.link->openWindowLike(boot.id, std::nullopt, nullptr).has_value());
+    REQUIRE(
+        rig.link->openSiblingWindow(boot.id, SiblingShows::SameWorkspace, std::nullopt, nullptr).has_value());
 
     REQUIRE(waitUntil([&] { return rig.host.windowsAsked == 1; }, 3000));
     REQUIRE(waitUntil(

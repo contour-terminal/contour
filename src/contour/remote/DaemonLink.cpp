@@ -875,16 +875,33 @@ std::optional<uint64_t> DaemonLink::daemonKey() const
     return std::hash<vthost::ITransportFactory const*> {}(_siblingTemplate.controller.transport.get());
 }
 
-std::expected<void, std::string> DaemonLink::openWindowLike(vtworkspace::WorkspaceId window,
-                                                            std::optional<vtworkspace::TabId> activeTab,
-                                                            QScreen* screen)
+std::expected<void, std::string> DaemonLink::openSiblingWindow(vtworkspace::WorkspaceId window,
+                                                               session::SiblingShows shows,
+                                                               std::optional<vtworkspace::TabId> activeTab,
+                                                               QScreen* screen)
 {
     requireGuiThread();
-    if (!isLive() || !_shown || _shown->local != window)
+    if (!isLive())
         return std::unexpected(std::string { "this window shows no workspace of its daemon" });
     auto config = _siblingTemplate;
-    config.controller.intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Select,
-                                                             .workspace = _shown->daemonWorkspace };
+    switch (shows)
+    {
+        case session::SiblingShows::SameWorkspace:
+            if (!_shown || _shown->local != window)
+                return std::unexpected(std::string { "this window shows no workspace of its daemon" });
+            config.controller.intent =
+                vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Select,
+                                              .workspace = _shown->daemonWorkspace };
+            break;
+        case session::SiblingShows::DaemonsChoice:
+            // The daemon decides, as for a launch: a workspace no window shows, else a new one. It needs
+            // nothing the asking window shows, and no tab to activate.
+            config.controller.intent =
+                vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Default,
+                                              .workspace = 0 };
+            activeTab = std::nullopt;
+            break;
+    }
     config.controller.resumeFallback = NativeController::ResumeFallback::Nothing;
     auto const* const asking = _sessions.controllerDisplaying(window);
     config.opening = WindowOpening {
@@ -893,25 +910,6 @@ std::expected<void, std::string> DaemonLink::openWindowLike(vtworkspace::Workspa
         .screen = screen,
         .askedBy = asking != nullptr ? std::optional { asking->windowId() } : std::nullopt,
     };
-    _host.startWindowLink(std::move(config));
-    return {};
-}
-
-std::expected<void, std::string> DaemonLink::openNewWindow(vtworkspace::WorkspaceId window, QScreen* screen)
-{
-    requireGuiThread();
-    if (!isLive() || !_shown || _shown->local != window)
-        return std::unexpected(std::string { "this window shows no workspace of its daemon" });
-    auto config = _siblingTemplate;
-    // The daemon decides, as for a launch: a workspace no window shows, else a new one.
-    config.controller.intent =
-        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Default, .workspace = 0 };
-    config.controller.resumeFallback = NativeController::ResumeFallback::Nothing;
-    auto const* const asking = _sessions.controllerDisplaying(window);
-    config.opening =
-        WindowOpening { .activeTab = std::nullopt,
-                        .screen = screen,
-                        .askedBy = asking != nullptr ? std::optional { asking->windowId() } : std::nullopt };
     _host.startWindowLink(std::move(config));
     return {};
 }

@@ -960,15 +960,11 @@ RemoteRouting TerminalSessionManager::requestRemoteWindow(TerminalSession const&
     auto* const binding = window != nullptr ? mutableBindingOf(window->id()) : nullptr;
     if (binding == nullptr || !binding->daemonTarget())
         return RemoteRouting::Local;
-    // Not a window like this one: a new window shows a workspace no window shows
-    // (WindowBinding::openNewWindow).
-    auto const opened = binding->openNewWindow(window->id(), screen);
-    if (opened)
-        return RemoteRouting::Routed;
-    managerLog()("New Window: {}", opened.error());
-    if (auto* const controller = controllerDisplaying(window->id()))
-        controller->notices().post(window::windowLinkFailedNotice(opened.error()));
-    return RemoteRouting::Refused;
+    // Not a window like this one: a new window shows a workspace no window shows.
+    return routeOpened(
+        binding->openSiblingWindow(window->id(), SiblingShows::DaemonsChoice, std::nullopt, screen),
+        window->id(),
+        "New Window");
 }
 
 RemoteRouting TerminalSessionManager::openDaemonWindowLike(WindowBinding& binding,
@@ -977,7 +973,14 @@ RemoteRouting TerminalSessionManager::openDaemonWindowLike(WindowBinding& bindin
                                                            QScreen* screen,
                                                            std::string_view what) const
 {
-    auto const opened = binding.openWindowLike(asking, activeTab, screen);
+    return routeOpened(
+        binding.openSiblingWindow(asking, SiblingShows::SameWorkspace, activeTab, screen), asking, what);
+}
+
+RemoteRouting TerminalSessionManager::routeOpened(std::expected<void, std::string> const& opened,
+                                                  vtworkspace::WorkspaceId asking,
+                                                  std::string_view what) const
+{
     if (opened)
         return RemoteRouting::Routed;
     managerLog()("{}: {}", what, opened.error());
