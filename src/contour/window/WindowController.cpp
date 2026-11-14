@@ -32,7 +32,7 @@
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/LocationChip.hpp>
-#include <contour/window/LocationChipSteps.hpp>
+#include <contour/window/LocationChipQt.hpp>
 #include <contour/window/PaneState.hpp>
 #include <contour/window/PromptHost.hpp>
 #include <contour/window/QtChromeKeys.hpp>

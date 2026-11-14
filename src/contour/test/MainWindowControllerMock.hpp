@@ -15,7 +15,7 @@
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/LocationChip.hpp>
 #include <contour/window/LocationChipModel.hpp>
-#include <contour/window/LocationChipSteps.hpp>
+#include <contour/window/LocationChipQt.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/NoticeModel.hpp>
 #include <contour/window/PromptHost.hpp>

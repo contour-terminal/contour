@@ -160,12 +160,15 @@ bar), `window/TabWellLayout.hpp` and `window/TitleBandGeometry.hpp`. Keep the ke
 - **Location chip** (`WorkspaceChip.qml`, `window/LocationChip.hpp`, `window/HostChipState.hpp`): the one band
   chip that names the daemon and the workspace, `daemon › workspace ▾`, with the daemon's state (Connected,
   Reconnecting, Disconnected) as a dot, a glyph on the Terminal row, and words while there is room. A remote
-  daemon that is connected shows a dot, a local one none. Which band shows it (`locationChipPlace`) and how it
-  shortens are pure decisions in `LocationChip.hpp`: the state text goes first, then the daemon name is
+  daemon that is connected shows a dot, a local one none. `LocationChipModel` (`window/LocationChipModel.hpp`)
+  is the chip's whole surface for QML, built from the window's domain state (`LocationChipInputs`); the window
+  and the test doubles only supply inputs. Which band shows the chip (`chip.place`, from the window's band,
+  `DaemonHostingPolicies` and the sidebar) and how it shortens are pure decisions in `LocationChip.hpp`: the state text goes first, then the daemon name is
   elided, then the daemon shrinks to its dot, and last the workspace is elided to
   `LocationChipWorkspaceFloor` (6) cells of whole grapheme clusters and `…` (`LocationChipFit`). The chip
-  gives way before the tabs do: its room is what is left after the labelled tab-well minimum
-  (`labelledTabWellMinimum()`), so with many tabs it sits at its last step. `bandMinimumWidth()`
+  gives way before the tabs do: `allocateBand()` (`window/BandAllocation.hpp`) shares the band's room, and
+  the chip's room is what is left after the labelled tab-well minimum (`BandYieldOrder`), so with many tabs it
+  sits at its last step. `bandMinimumWidth()`
   (`window/TitleBandGeometry.hpp`) keeps the window from being narrower than that last step plus the band's
   other parts and one icon-only tab (`iconOnlyTabWellMinimum()`). Only a window with a daemon
   (`DaemonHosting::Daemon`) shows the daemon part; a tmux window (`OtherHost`) keeps its workspace-only

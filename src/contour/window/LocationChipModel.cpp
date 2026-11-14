@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/window/LocationChipModel.hpp>
-#include <contour/window/LocationChipSteps.hpp>
+#include <contour/window/LocationChipQt.hpp>
 #include <contour/window/QtString.hpp>
 
 #include <QtCore/QVariantMap>
