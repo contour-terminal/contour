@@ -330,17 +330,24 @@ Item {
     // (offscreen tests) without the chip local.
     readonly property string chipPlace: root.controller && root.controller.chip ? root.controller.chip.place : "none"
 
-    // The room the location chip has: the bar less every other part, the drag reserve and what the tab well
-    // needs to keep every tab labelled, so the chip gives way before any tab goes icon-only. With many tabs
-    // that leaves the chip nothing and it sits at its last step. Built from parts that do not read the chip,
-    // so the chip's fit does not loop through it. (The window's minimum width keeps only one icon-only pill:
-    // `bandWidths.tabWell`.)
-    readonly property real chipRoom: {
+    // How the band's room is shared between the location chip and the tab well (UiStyleProvider.allocateBand):
+    // the bar less every other part, the drag reserve and the strip's fixed parts is what the two share, and the
+    // chip yields first, so no tab goes icon-only before the chip is at its last step. With many tabs that
+    // leaves the chip nothing and it sits there. Built from parts that do not read the chip's fit, so the fit
+    // does not loop through it. (The window's minimum width keeps only one icon-only pill: `bandWidths.tabWell`.)
+    readonly property var bandAllocation: {
         const strip = tabStripLoader.item
-        const well = strip ? chromeStyle.tabWellLabelledMinimum(strip.tabCount) + strip.fixedWidth : 0
-        return Math.max(0, root.width - root.leadingPartsWithoutChip - 2 * root.gap - root.trailingPartsWidth
-                           - chromeStyle.space.dragReserve - tabStripLoader.Layout.leftMargin - well)
+        const chip = workspaceChipSlot.item
+        if (!chip)
+            return ({ fit: 0 })
+        const room = Math.max(0, root.width - root.leadingPartsWithoutChip - 2 * root.gap - root.trailingPartsWidth
+                                 - chromeStyle.space.dragReserve - tabStripLoader.Layout.leftMargin
+                                 - (strip ? strip.fixedWidth : 0))
+        return chromeStyle.allocateBand(chip.fitWidths, strip ? strip.tabCount : 0, room)
     }
+
+    /// The room the location chip had in that allocation: what the tab well keeps for its labels is left out.
+    readonly property real chipRoom: root.bandAllocation.chipRoom ?? 0
 
     // What the band is made of, told to the controller, which sums it into the window's minimum width: the
     // fixed parts, the chip at its last fit step and one tab-well minimum. The keys are window::BandWidthParts'.
@@ -361,9 +368,16 @@ Item {
     // Where the band sits against the sidebar, a window::BandPlacement: beside it, the window is the sidebar's
     // width wider than the band.
     readonly property int bandPlacement: root.besideSidebar ? 1 : 0
+    // What was last told, so an equal answer is not sent (and converted) again.
+    property string reportedBand: ""
     function reportBandWidths() {
-        if (root.isBand && root.controller && root.controller.setBandWidths)
-            root.controller.setBandWidths(root.bandWidths, root.bandPlacement)
+        if (!root.isBand || !root.controller || !root.controller.setBandWidths)
+            return
+        const report = JSON.stringify(root.bandWidths) + "|" + root.bandPlacement
+        if (report === root.reportedBand)
+            return
+        root.reportedBand = report
+        root.controller.setBandWidths(root.bandWidths, root.bandPlacement)
     }
     onBandWidthsChanged: root.reportBandWidths()
     onBandPlacementChanged: root.reportBandWidths()
@@ -558,7 +572,7 @@ Item {
                 sidebar: root.controller.sidebar
                 controller: root.controller
                 // The step the room allows, from the chip's measured steps: its own width never feeds it.
-                fit: root.controller.chip.fitFor(Object.assign({ available: root.chipRoom }, workspaceChip.fitWidths))
+                fit: root.bandAllocation.fit
                 focusRingShown: activeFocus && root.toolbarHasFocus
                 isOpen: !!root.controller && !!root.controller.isWorkspaceDropdownOpen
                 onClicked: if (root.controller && root.controller.showWorkspaceDropdown)

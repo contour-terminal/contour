@@ -843,12 +843,17 @@ class UiStyleProvider: public QObject
     /// tabs.
     [[nodiscard]] Q_INVOKABLE qreal tabWellMinimum(int tabCount) const;
 
-    /// The least width the tab well keeps while the band gives its room to the location chip: the chip yields
-    /// before any tab goes icon-only.
+    /// Shares the band's room between the location chip and the tab well (window::allocateBand): the chip
+    /// yields first, so no tab goes icon-only before the chip is at its last step.
+    /// @param widths   What each chip fit step needs by its key (window::LocationChipSteps), in pixels.
     /// @param tabCount How many tabs the well lists.
-    /// @return The width of a well holding every tab with its label (window::labelledTabWellMinimum); 0
-    ///         without tabs.
-    [[nodiscard]] Q_INVOKABLE qreal tabWellLabelledMinimum(int tabCount) const;
+    /// @param room     The width the band has for the chip and the well together.
+    /// @return `{ fit, chipRoom, chipWidth, tabWidth, wellWidth, label, scrolls }`: the chip's
+    ///         window::LocationChipFit as its underlying value, the room it had and its width, then the
+    ///         well's layout as tabWellLayout() gives it.
+    [[nodiscard]] Q_INVOKABLE QVariantMap allocateBand(QVariantMap const& widths,
+                                                       int tabCount,
+                                                       qreal room) const;
 
     /// Where the command palette goes in a window of the given size (window::placePalette), from the
     /// row's palette tokens in logical pixels, @c space.s7 as the margin, snapped to whole rows of cells on
