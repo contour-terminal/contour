@@ -7117,6 +7117,38 @@ TEST_CASE("TerminalSessionManager: the default daemon raises no band notice whil
     manager.releaseBinding(onDefault);
 }
 
+TEST_CASE(
+    "TerminalSessionManager: a named local daemon pins the band while reconnecting, the default one does not",
+    "[manager][chip]")
+{
+    // The spec leaves the band's notices as they were: only the plain-launch daemon is quiet about its
+    // connection in the band (its chip says it); one the user named is pinned like a remote host.
+    using namespace contour::window;
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto onDefault =
+        contour::test::DaemonNamedBinding { factory,
+                                            chipLabelTarget(std::string(vthost::DefaultSocketLabel)) };
+    auto onWork = contour::test::DaemonNamedBinding { factory, chipLabelTarget("work"), "work" };
+    contour::test::ScopedController const defaultWindow { manager };
+    contour::test::ScopedController const workWindow { manager };
+    manager.bindWindow(defaultWindow.id, onDefault);
+    manager.bindWindow(workWindow.id, onWork);
+    auto const noticeOf = [&](auto const& window, HostChipState state) {
+        return hostNoticeOf(hostChipPresence(manager.chromeLabelOf(window.id)), state);
+    };
+    for (auto const state:
+         { HostChipState::Reconnecting, HostChipState::Disconnected, HostChipState::NeedsAttention })
+    {
+        CHECK(noticeOf(defaultWindow, state) == HostNotice::None);
+        CHECK(noticeOf(workWindow, state) == HostNotice::Interrupted);
+    }
+    CHECK(noticeOf(workWindow, HostChipState::Connected) == HostNotice::None);
+    manager.releaseBinding(onDefault);
+    manager.releaseBinding(onWork);
+}
+
 TEST_CASE("TerminalSessionManager: hostingOf tells in-process, daemon and attached windows apart",
           "[manager][chip]")
 {
