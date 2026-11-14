@@ -364,6 +364,50 @@ TEST_CASE("attach controller mirrors a remote session over a real socket", "[att
     pane.terminal.reset(); // unbind (the controller outlives its ptys' registrations)
 }
 
+TEST_CASE("NativeController: a daemon-originated scope leaves the layout-realizing state alone",
+          "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    using contour::session::DaemonOriginatedScope;
+    REQUIRE_FALSE(controller.isRealizingLayout());
+    REQUIRE_FALSE(controller.canCreateSession());
+
+    SECTION("it makes no pane creatable, and ends as it began")
+    {
+        {
+            auto const scope = DaemonOriginatedScope { controller };
+            CHECK(controller.isDaemonOriginated());
+            CHECK_FALSE(controller.isRealizingLayout());
+            CHECK_FALSE(controller.canCreateSession());
+        }
+        CHECK_FALSE(controller.isDaemonOriginated());
+        CHECK_FALSE(controller.isRealizingLayout());
+    }
+    SECTION("a layout being realized is still being realized once it ends")
+    {
+        controller.setRealizingLayout(true);
+        {
+            auto const scope = DaemonOriginatedScope { controller };
+            CHECK(controller.isRealizingLayout());
+        }
+        CHECK(controller.isRealizingLayout());
+        CHECK(controller.canCreateSession());
+        controller.setRealizingLayout(false);
+    }
+    SECTION("nested scopes restore the one around them")
+    {
+        auto const outer = DaemonOriginatedScope { controller };
+        {
+            auto const inner = DaemonOriginatedScope { controller };
+            CHECK(controller.isDaemonOriginated());
+        }
+        CHECK(controller.isDaemonOriginated());
+    }
+}
+
 TEST_CASE("DaemonFixture: two fixtures serve two controllers at once", "[attach][controller][fixture]")
 {
     auto first = DaemonFixture { {}, {}, 7 };

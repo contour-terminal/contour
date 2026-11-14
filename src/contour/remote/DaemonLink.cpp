@@ -157,36 +157,18 @@ namespace
         return failure.empty() ? std::string { "the connection to the daemon was lost" } : std::move(failure);
     }
 
-    /// Holds @p controller in the state of a layout being realized for its lifetime: what the window does to
-    /// its panes meanwhile is the daemon's doing, or the window's own housekeeping, and none of it is
-    /// reported back as the user's (NativeController::reportTabPresentation drops it as it drops a layout's).
-    class DaemonOriginated
-    {
-      public:
-        explicit DaemonOriginated(NativeController& controller): _controller { controller }
-        {
-            _controller.setRealizingLayout(true);
-        }
-
-        DaemonOriginated(DaemonOriginated const&) = delete;
-        DaemonOriginated& operator=(DaemonOriginated const&) = delete;
-        DaemonOriginated(DaemonOriginated&&) = delete;
-        DaemonOriginated& operator=(DaemonOriginated&&) = delete;
-
-        ~DaemonOriginated() { _controller.setRealizingLayout(false); }
-
-      private:
-        NativeController& _controller;
-    };
-
     /// Detaches every pane of @p sessions still alive: its session runs on in its daemon. Each is activated
     /// and closed, as closeActivePane() closes the tab's active pane. None of that is the user's doing, so
     /// none of it is reported to the daemon, which keeps the tab and pane the user left active.
+    /// @param manager The manager of the panes' window.
+    /// @param owner The factory that owns the panes -- the one that heard of them, and would report their
+    ///        closing -- which is not the new link's when the window comes from another daemon.
+    /// @param sessions The panes' sessions.
     void detachPanes(session::TerminalSessionManager& manager,
-                     NativeController& controller,
+                     session::SessionFactory& owner,
                      std::span<QPointer<session::TerminalSession> const> sessions)
     {
-        auto const daemonOriginated = DaemonOriginated { controller };
+        auto const daemonOriginated = session::DaemonOriginatedScope { owner };
         for (auto const& session: sessions)
         {
             if (!session)
@@ -825,8 +807,11 @@ std::expected<void, std::string> DaemonLink::adoptWindow(vtworkspace::WorkspaceI
     auto previous = std::vector<QPointer<session::TerminalSession>> {};
     for (auto* const session: _sessions.sessionsOfWindow(window))
         previous.emplace_back(session);
+    // Those panes belong to what the window was bound to until now, which is not this link's controller when
+    // it comes from another daemon.
+    auto& owner = _sessions.factoryFor(window);
     bindDaemonWorkspace(*workspace, window);
-    detachPanes(_sessions, *_controller, previous);
+    detachPanes(_sessions, owner, previous);
     return {};
 }
 

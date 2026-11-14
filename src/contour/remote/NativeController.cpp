@@ -1329,6 +1329,25 @@ void NativeController::setRealizingLayout(bool realizing)
     _realizingLayout = realizing;
 }
 
+void NativeController::beginDaemonOriginated()
+{
+    auto const lock = std::lock_guard { _mutex };
+    ++_daemonOriginated;
+}
+
+void NativeController::endDaemonOriginated()
+{
+    auto const lock = std::lock_guard { _mutex };
+    if (_daemonOriginated > 0)
+        --_daemonOriginated;
+}
+
+bool NativeController::isDaemonOriginated() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _daemonOriginated > 0;
+}
+
 bool NativeController::isRealizingLayout() const
 {
     auto const lock = std::lock_guard { _mutex };
@@ -1598,7 +1617,7 @@ void NativeController::reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty c
 {
     // A ratio the reconciler itself applied came FROM the daemon; sending it back would make every
     // layout push author a write on the peer that pushed it.
-    if (isRealizingLayout())
+    if (isRealizingLayout() || isDaemonOriginated())
         return;
     auto const first = sessionForPty(firstPty);
     auto const second = sessionForPty(secondPty);
@@ -1614,7 +1633,7 @@ void NativeController::reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty c
 void NativeController::reportTabPresentation(contour::session::LocalTabPresentation const& presentation)
 {
     // What the reconciler applies came FROM the daemon, as for a ratio (@see reportSplitRatio).
-    if (isRealizingLayout())
+    if (isRealizingLayout() || isDaemonOriginated())
         return;
     auto const active = sessionForPty(presentation.activePty);
     if (!active)

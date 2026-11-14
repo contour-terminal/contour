@@ -1055,6 +1055,60 @@ TEST_CASE("DaemonLink: what its controller signals after stop() is ignored", "[a
     manager.releaseBinding(link);
 }
 
+namespace
+{
+/// A factory another daemon's window was bound to: it counts what it is told of its panes being detached.
+class DetachRecordingFactory final: public contour::session::SessionFactory
+{
+  public:
+    [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(std::optional<std::string> /*cwd*/,
+                                                        std::optional<vtbackend::PageSize> pageSize,
+                                                        std::optional<vtpty::Process::ExecInfo> /*command*/,
+                                                        std::optional<std::string> /*profile*/) override
+    {
+        return std::make_unique<vtpty::MockPty>(pageSize.value_or(vtbackend::PageSize {
+            vtbackend::LineCount(25), vtbackend::ColumnCount(80) }));
+    }
+    void beginDaemonOriginated() override { ++begun; }
+    void endDaemonOriginated() override { ++ended; }
+
+    int begun = 0; ///< How often beginDaemonOriginated() was called.
+    int ended = 0; ///< How often endDaemonOriginated() was called.
+};
+} // namespace
+
+TEST_CASE("DaemonLink: adopting a window of another daemon marks that daemon's panes, not the adopter's, "
+          "as detached by the window",
+          "[attach][link][switch]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 1);
+    auto rig = LinkRig { daemon.endpoint() };
+    auto& manager = rig.app.manager();
+    auto const window = contour::test::ScopedController { manager };
+    window->createNewTab();
+    auto old = DetachRecordingFactory {};
+    auto oldBinding = contour::test::DaemonNamedBinding { old,
+                                                          contour::session::SwitchTarget {
+                                                              .kind = vthost::proto::SwitchDaemonKind::Label,
+                                                              .daemon = "elsewhere",
+                                                              .workspace = {} } };
+    manager.bindWindow(window.id, oldBinding);
+    REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
+    REQUIRE(waitUntil([&] { return rig.link->canAdoptWindow(window.id).has_value(); }));
+
+    REQUIRE(rig.link->adoptWindow(window.id).has_value());
+
+    // The old panes belong to the old binding's factory: it was held, once, and let go.
+    CHECK(old.begun == 1);
+    CHECK(old.ended == 1);
+    // And the adopter's own state is as it was.
+    REQUIRE(rig.link->liveController() != nullptr);
+    CHECK_FALSE(rig.link->liveController()->isDaemonOriginated());
+    CHECK_FALSE(rig.link->liveController()->isRealizingLayout());
+    manager.releaseBinding(oldBinding);
+}
+
 TEST_CASE("DaemonLink: a link destroyed unstopped releases its windows", "[attach][link]")
 {
     auto daemon = DaemonFixture {};

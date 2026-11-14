@@ -1586,6 +1586,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         manager was constructed with makes.
     [[nodiscard]] WindowBinding const* bindingOf(vtworkspace::WorkspaceId window) const noexcept;
 
+    /// @param window A window of this manager.
+    /// @return The factory that makes its sessions and is asked about them: its binding's (@see bindWindow),
+    ///         else the one this manager was constructed with. A window no binding claims -- the quick
+    ///         terminal among them -- is local, and that is the only rule.
+    [[nodiscard]] SessionFactory& factoryFor(vtworkspace::WorkspaceId window) const noexcept;
+
     /// The one record of which windows a binding serves: what bindWindow() bound to it, and neither a close
     /// nor a later bindWindow() took away since.
     /// @param binding A binding.
@@ -2031,12 +2037,6 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Tells the focused session that the user is looking at it, when it is on screen and focus did
     /// not move to say so: its window was activated again, or restored. @see TerminalSession::paneSeen
     void focusedSessionSeen();
-
-    /// @param window A window of this manager.
-    /// @return The factory that makes its sessions and is asked about them: its binding's (@see bindWindow),
-    ///         else the one this manager was constructed with. A window no binding claims -- the quick
-    ///         terminal among them -- is local, and that is the only rule.
-    [[nodiscard]] SessionFactory& factoryFor(vtworkspace::WorkspaceId window) const noexcept;
 
     /// @param window A window of this manager.
     /// @return What @p window is bound to, as it was bound (@see bindingOf); null for a local window.
