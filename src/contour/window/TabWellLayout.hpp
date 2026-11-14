@@ -77,6 +77,28 @@ struct TabWellLayout
     return layout;
 }
 
+/// @param tabCount The number of tabs.
+/// @param metrics  The widths to lay out with.
+/// @return The least width at which layoutTabWell() still shows every pill with its label: the padding at
+///         both ends, @p tabCount pills of the minimum width and the gaps between them; 0 without tabs. What
+///         the location chip leaves the tab well, so the chip gives way before any pill goes icon-only.
+[[nodiscard]] constexpr double labelledTabWellMinimum(int tabCount, TabWellMetrics const& metrics) noexcept
+{
+    if (tabCount <= 0)
+        return 0;
+    auto const n = static_cast<double>(tabCount);
+    return (2 * metrics.padding) + (n * metrics.minTab) + ((n - 1) * metrics.gap);
+}
+
+/// @param tabCount The number of tabs.
+/// @param metrics  The widths to lay out with.
+/// @return The least width the tab well can be given at all: one icon-only pill, the well scrolling to the
+///         active tab beyond it; 0 without tabs. What the window's minimum width keeps for the well.
+[[nodiscard]] constexpr double iconOnlyTabWellMinimum(int tabCount, TabWellMetrics const& metrics) noexcept
+{
+    return tabCount <= 0 ? 0 : (2 * metrics.padding) + metrics.iconOnlyTab;
+}
+
 /// The name QML reads a label mode by.
 /// @param mode The mode.
 /// @return "full" or "iconOnly".

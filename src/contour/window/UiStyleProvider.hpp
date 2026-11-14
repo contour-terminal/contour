@@ -740,7 +740,7 @@ class UiStyleProvider: public QObject
     ///         status ink and the accessible name; empty for a kind outside the table.
     [[nodiscard]] Q_INVOKABLE QVariantMap badgeLook(int kind) const;
 
-    /// How the host chip looks in @p state.
+    /// How the location chip's connection looks in @p state.
     /// @param state A window::HostChipState as its underlying value.
     /// @return `{ dot, status, accessibleState }`: the dot's ink and the two texts; empty for a state
     ///         outside the table.
@@ -837,10 +837,18 @@ class UiStyleProvider: public QObject
     ///         the well scrolls (a QML-facing bool, the documented carve-out).
     [[nodiscard]] Q_INVOKABLE QVariantMap tabWellLayout(qreal available, int tabCount) const;
 
-    /// The least width the tab well keeps while the band gives its room to the location chip.
+    /// The least width the tab well can be given at all, which the window's minimum width keeps.
     /// @param tabCount How many tabs the well lists.
-    /// @return The width of a well holding one icon-only pill; 0 without tabs.
+    /// @return The width of a well holding one icon-only pill (window::iconOnlyTabWellMinimum); 0 without
+    /// tabs.
     [[nodiscard]] Q_INVOKABLE qreal tabWellMinimum(int tabCount) const;
+
+    /// The least width the tab well keeps while the band gives its room to the location chip: the chip yields
+    /// before any tab goes icon-only.
+    /// @param tabCount How many tabs the well lists.
+    /// @return The width of a well holding every tab with its label (window::labelledTabWellMinimum); 0
+    ///         without tabs.
+    [[nodiscard]] Q_INVOKABLE qreal tabWellLabelledMinimum(int tabCount) const;
 
     /// Where the command palette goes in a window of the given size (window::placePalette), from the
     /// row's palette tokens in logical pixels, @c space.s7 as the margin, snapped to whole rows of cells on

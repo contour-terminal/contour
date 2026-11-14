@@ -2,9 +2,9 @@
 #pragma once
 
 /// @file
-/// What the host chip of a remote window says: the supervised connection's six states fold onto the chip's
-/// three, each with its dot colour and text. Pure, so the chip, its accessibility name and the tests read
-/// the same rows.
+/// What the location chip says of its daemon's connection: the supervised connection's six states fold onto
+/// the chip's four, each with its dot colour and text. Pure, so the chip, its accessibility name and the
+/// tests read the same rows.
 
 #include <contour/config/UiStyle.hpp>
 
@@ -19,7 +19,7 @@
 namespace contour::window
 {
 
-/// The three states the host chip shows.
+/// The states the location chip shows of its daemon's connection.
 enum class HostChipState : uint8_t
 {
     Connected = 0, ///< The daemon is reachable.
@@ -80,14 +80,14 @@ static_assert(detail::hostChipRowsInOrder(), "HostChipRows must list the connect
     return HostChipRows[static_cast<size_t>(connection)].state;
 }
 
-/// Whether a window shows a host chip.
+/// Whether a window is on a remote host, whose connection the band must be able to report.
 enum class HostChipPresence : uint8_t
 {
     Hidden = 0, ///< A local window.
     Shown,      ///< A window onto a remote host.
 };
 
-/// Decides whether the chip shows.
+/// Decides whether the window names a remote host.
 /// @param hostLabel The window's host label; empty for a local window.
 /// @return Shown when there is a host to name.
 [[nodiscard]] constexpr HostChipPresence hostChipPresence(std::string_view hostLabel) noexcept
@@ -99,7 +99,7 @@ enum class HostChipPresence : uint8_t
 enum class HostNotice : uint8_t
 {
     None = 0,    ///< A local window, or a remote one whose connection is up.
-    Interrupted, ///< A remote window reconnecting or disconnected: its host chip must be on screen.
+    Interrupted, ///< A remote window reconnecting or disconnected: the band must be on screen to say so.
 };
 
 /// Number of @c HostNotice enumerators, derived from the last one.

@@ -7,6 +7,7 @@
 #include <array>
 #include <optional>
 #include <ranges>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -52,37 +53,69 @@ TEST_CASE("locationChip.steps", "[LocationChip]")
 
 TEST_CASE("locationChip.fit", "[LocationChip]")
 {
-    constexpr auto widths = LocationChipWidths { 300, 220, 160, 110 };
-    CHECK(locationChipFit(widths, 400) == LocationChipFit::Full);
-    CHECK(locationChipFit(widths, 300) == LocationChipFit::Full);
-    CHECK(locationChipFit(widths, 250) == LocationChipFit::NoStateText);
-    CHECK(locationChipFit(widths, 200) == LocationChipFit::DaemonElided);
-    CHECK(locationChipFit(widths, 120) == LocationChipFit::DotOnly);
-    CHECK(locationChipFit(widths, 90) == LocationChipFit::WorkspaceElided);
-    CHECK(locationChipFit(widths, 10) == LocationChipFit::WorkspaceElided);
+    constexpr auto Widths = LocationChipWidths { 300, 220, 160, 110 };
+    CHECK(locationChipFit(Widths, 400) == LocationChipFit::Full);
+    CHECK(locationChipFit(Widths, 300) == LocationChipFit::Full);
+    CHECK(locationChipFit(Widths, 250) == LocationChipFit::NoStateText);
+    CHECK(locationChipFit(Widths, 200) == LocationChipFit::DaemonElided);
+    CHECK(locationChipFit(Widths, 120) == LocationChipFit::DotOnly);
+    CHECK(locationChipFit(Widths, 90) == LocationChipFit::WorkspaceElided);
+    CHECK(locationChipFit(Widths, 10) == LocationChipFit::WorkspaceElided);
 }
 
 TEST_CASE("locationChip.accessibleName", "[LocationChip]")
 {
-    auto summary = contour::window::SidebarSummary { .currentWorkspace = "billing" };
-    CHECK(locationChipAccessibleName("starfive", summary) == "Workspace billing on starfive");
-    CHECK(locationChipAccessibleName("", summary) == workspaceChipAccessibleName(summary));
-    CHECK(locationChipAccessibleName("", summary) == "Workspace billing");
-    summary.otherWorkspaces = contour::window::Urgency::NeedsYou;
-    CHECK(locationChipAccessibleName("starfive", summary)
-          == "Workspace billing on starfive, another workspace needs you");
-    CHECK(locationChipAccessibleName("", summary) == workspaceChipAccessibleName(summary));
+    // The name is what the chip shows; status goes in the description (ui-ux rule 8.2).
+    CHECK(locationChipAccessibleName("starfive", "billing") == "Workspace billing on starfive");
+    CHECK(locationChipAccessibleName("", "billing") == "Workspace billing");
+    CHECK(locationChipDaemonAccessibleName("local") == "Daemon local");
 }
 
 TEST_CASE("locationChip.accessibleDescription", "[LocationChip]")
 {
-    CHECK(locationChipAccessibleDescription(HostChipState::Connected, "collapsed") == "collapsed");
-    CHECK(locationChipAccessibleDescription(HostChipState::Reconnecting, "collapsed")
+    constexpr auto Idle = Urgency::Idle;
+    constexpr auto Collapsed = ChipDisclosure::Collapsed;
+    CHECK(locationChipAccessibleDescription(HostChipState::Connected, Idle, Collapsed) == "collapsed");
+    CHECK(locationChipAccessibleDescription(HostChipState::Connected, Idle, ChipDisclosure::Expanded)
+          == "expanded");
+    CHECK(locationChipAccessibleDescription(HostChipState::Reconnecting, Idle, Collapsed)
           == "Reconnecting, collapsed");
-    CHECK(locationChipAccessibleDescription(HostChipState::NeedsAttention, "collapsed")
+    CHECK(locationChipAccessibleDescription(HostChipState::NeedsAttention, Idle, Collapsed)
           == "Reconnecting, needs your attention, collapsed");
-    CHECK(locationChipAccessibleDescription(HostChipState::Disconnected, "collapsed")
+    CHECK(locationChipAccessibleDescription(HostChipState::Disconnected, Idle, Collapsed)
           == "Disconnected, collapsed");
+    // What another workspace asks is said while the marker shows, between the state and the disclosure.
+    CHECK(locationChipAccessibleDescription(HostChipState::Connected, Urgency::NeedsYou, Collapsed)
+          == "Another workspace needs you, collapsed");
+    CHECK(locationChipAccessibleDescription(HostChipState::Reconnecting, Urgency::Failed, Collapsed)
+          == "Reconnecting, another workspace has failed, collapsed");
+    CHECK(locationChipAccessibleDescription(HostChipState::Connected, Urgency::DoneUnseen, Collapsed)
+          == "Another workspace is done, collapsed");
+    // What does not mark the chip is not said either.
+    CHECK(locationChipAccessibleDescription(HostChipState::Connected, Urgency::Working, Collapsed)
+          == "collapsed");
+    CHECK(locationChipAccessibleDescription(HostChipState::Connected, Urgency::UnseenOutput, Collapsed)
+          == "collapsed");
+}
+
+TEST_CASE("locationChip.translation", "[LocationChip]")
+{
+    // Every sentence goes through the translator, whole, with its arguments filled in afterwards.
+    auto const shouted = [](std::string_view sentence) {
+        auto text = std::string(sentence);
+        std::ranges::transform(text, text.begin(), [](char c) { return c == 'a' ? 'A' : c; });
+        return text;
+    };
+    CHECK(locationChipAccessibleName("starfive", "billing", shouted) == "WorkspAce billing on starfive");
+    CHECK(locationChipToolTip(HostChipState::Reconnecting, LocationChipFit::DotOnly, "starfive", shouted)
+          == "Reconnecting to starfive · Switch workspAce or dAemon");
+    CHECK(locationChipAccessibleDescription(
+              HostChipState::Connected, Urgency::NeedsYou, ChipDisclosure::Collapsed, shouted)
+          == "Another workspAce needs you, collApsed");
+    CHECK(locationChipStatusText(HostChipState::Disconnected, LocationChipFit::Full, shouted)
+          == "Disconnected");
+    // A marker-like text in an argument is left alone.
+    CHECK(locationChipAccessibleName("a%2b", "w%2", SourceText {}) == "Workspace w%2 on a%2b");
 }
 
 TEST_CASE("locationChip.stateGlyph", "[LocationChip]")
@@ -111,30 +144,51 @@ TEST_CASE("locationChip.toolTip", "[LocationChip]")
 
 TEST_CASE("locationChip.place", "[LocationChip]")
 {
-    constexpr auto bands = std::array {
-        BarPresence::Hidden, BarPresence::Shown, BarPresence::RevealOnEdge, BarPresence::Pinned
+    using P = LocationChipPlace;
+    struct Row
+    {
+        BarPresence band;
+        BarCentre centre;
+        DaemonHosting hosting;
+        SidebarShown sidebar;
+        LocationChipPlace expected;
     };
-    constexpr auto centres = std::array {
-        BarCentre::Empty, BarCentre::Tabs, BarCentre::Title, BarCentre::Breadcrumb, BarCentre::ChipAndTabs
+    constexpr auto Daemon = DaemonHosting::Daemon;
+    constexpr auto None = DaemonHosting::InProcess;
+    constexpr auto OtherHost = DaemonHosting::OtherHost;
+    constexpr auto Off = SidebarShown::No;
+    constexpr auto On = SidebarShown::Yes;
+    constexpr auto Shown = BarPresence::Shown;
+    constexpr auto Hidden = BarPresence::Hidden;
+    auto const rows = std::array {
+        // A daemon's chip follows the band's centre.
+        Row { Shown, BarCentre::ChipAndTabs, Daemon, Off, P::Band },
+        Row { Shown, BarCentre::Tabs, Daemon, Off, P::Band },
+        Row { Shown, BarCentre::Title, Daemon, Off, P::Band },
+        Row { Shown, BarCentre::Empty, Daemon, Off, P::Band },
+        Row { BarPresence::Pinned, BarCentre::Tabs, Daemon, Off, P::Band },
+        Row { BarPresence::RevealOnEdge, BarCentre::Title, Daemon, Off, P::Band },
+        Row { Shown, BarCentre::Breadcrumb, Daemon, On, P::Sidebar },
+        Row { Shown, BarCentre::Breadcrumb, Daemon, Off, P::Sidebar },
+        // With no band the sidebar names the daemon, or nothing does.
+        Row { Hidden, BarCentre::Tabs, Daemon, On, P::Sidebar },
+        Row { Hidden, BarCentre::Tabs, Daemon, Off, P::None },
+        // Without a daemon (in-process, or attached to a tmux host) only the workspace-chip centre shows.
+        Row { Shown, BarCentre::ChipAndTabs, None, Off, P::Band },
+        Row { Shown, BarCentre::Tabs, None, Off, P::None },
+        Row { Shown, BarCentre::Title, None, Off, P::None },
+        Row { Shown, BarCentre::Empty, None, Off, P::None },
+        Row { Shown, BarCentre::Breadcrumb, None, On, P::None },
+        Row { Hidden, BarCentre::Tabs, None, On, P::None },
+        Row { Hidden, BarCentre::ChipAndTabs, None, Off, P::None },
+        Row { Shown, BarCentre::ChipAndTabs, OtherHost, Off, P::Band },
+        Row { Shown, BarCentre::Tabs, OtherHost, Off, P::None },
+        Row { Shown, BarCentre::Title, OtherHost, Off, P::None },
+        Row { Shown, BarCentre::Breadcrumb, OtherHost, On, P::None },
+        Row { Hidden, BarCentre::Tabs, OtherHost, On, P::None },
     };
-    for (auto const sidebar: { SidebarShown::No, SidebarShown::Yes })
-        for (auto const band: bands)
-            for (auto const centre: centres)
-            {
-                auto const daemon = locationChipPlace(band, centre, DaemonHosting::Daemon, sidebar);
-                auto const inProcess = locationChipPlace(band, centre, DaemonHosting::InProcess, sidebar);
-                auto expectedDaemon = LocationChipPlace::Band;
-                if (band == BarPresence::Hidden)
-                    expectedDaemon =
-                        sidebar == SidebarShown::Yes ? LocationChipPlace::Sidebar : LocationChipPlace::None;
-                else if (centre == BarCentre::Breadcrumb)
-                    expectedDaemon = LocationChipPlace::Sidebar;
-                auto const expectedInProcess = band != BarPresence::Hidden && centre == BarCentre::ChipAndTabs
-                                                   ? LocationChipPlace::Band
-                                                   : LocationChipPlace::None;
-                CHECK(daemon == expectedDaemon);
-                CHECK(inProcess == expectedInProcess);
-            }
+    for (auto const& row: rows)
+        CHECK(locationChipPlace(row.band, row.centre, row.hosting, row.sidebar) == row.expected);
 }
 
 TEST_CASE("locationChip.placeNamed", "[LocationChip]")
@@ -148,27 +202,19 @@ TEST_CASE("locationChip.placeNamed", "[LocationChip]")
     CHECK(locationChipPlaceNamed("shown", "chip+tabs", DaemonHosting::InProcess, SidebarShown::No) == "band");
     CHECK(locationChipPlaceNamed("hidden", "tabs", DaemonHosting::Daemon, SidebarShown::Yes) == "sidebar");
     CHECK(locationChipPlaceNamed("hidden", "tabs", DaemonHosting::InProcess, SidebarShown::Yes) == "none");
+    CHECK(locationChipPlaceNamed("hidden", "tabs", DaemonHosting::OtherHost, SidebarShown::Yes) == "none");
+    CHECK(locationChipPlaceNamed("shown", "chip+tabs", DaemonHosting::OtherHost, SidebarShown::No) == "band");
     CHECK(locationChipPlaceNamed("nonsense", "tabs", DaemonHosting::Daemon, SidebarShown::No) == "none");
     CHECK(locationChipPlaceNamed("shown", "nonsense", DaemonHosting::Daemon, SidebarShown::No) == "none");
 }
 
-TEST_CASE("locationChip.enumsFromInts", "[LocationChip]")
+TEST_CASE("locationChip.fitFromInt", "[LocationChip]")
 {
-    CHECK(daemonHostingFromInt(0) == DaemonHosting::InProcess);
-    CHECK(daemonHostingFromInt(1) == DaemonHosting::Daemon);
-    CHECK(daemonHostingFromInt(static_cast<int>(DaemonHostingCount)) == std::nullopt);
-    CHECK(daemonHostingFromInt(-1) == std::nullopt);
-    CHECK(sidebarShownFromInt(0) == SidebarShown::No);
-    CHECK(sidebarShownFromInt(1) == SidebarShown::Yes);
-    CHECK(sidebarShownFromInt(static_cast<int>(SidebarShownCount)) == std::nullopt);
-    CHECK(sidebarShownFromInt(-1) == std::nullopt);
-
-    // A value that is none of them places the chip nowhere, however the rest asks.
-    CHECK(locationChipPlaceFromInts("shown", "tabs", 1, 0) == "band");
-    CHECK(locationChipPlaceFromInts("shown", "tabs", 0, 0) == "none");
-    CHECK(locationChipPlaceFromInts("shown", "tabs", 2, 0) == "none");
-    CHECK(locationChipPlaceFromInts("shown", "chip+tabs", -1, 0) == "none");
-    CHECK(locationChipPlaceFromInts("shown", "tabs", 1, 7) == "none");
+    CHECK(locationChipFitFromInt(0) == LocationChipFit::Full);
+    CHECK(locationChipFitFromInt(4) == LocationChipFit::WorkspaceElided);
+    CHECK(locationChipFitFromInt(static_cast<int>(LocationChipFitCount)) == std::nullopt);
+    CHECK(locationChipFitFromInt(-1) == std::nullopt);
+    STATIC_REQUIRE(LocationChipFits.size() == LocationChipFitCount);
 }
 
 TEST_CASE("locationChip.placeName", "[LocationChip]")
@@ -190,6 +236,19 @@ TEST_CASE("locationChip.daemonText", "[LocationChip]")
     CHECK(locationChipDaemonText(Long, LocationChipFit::WorkspaceElided).empty());
     // Characters, not bytes: eleven two-byte characters elide to ten characters.
     CHECK(locationChipDaemonText("ééééééééééé", LocationChipFit::DaemonElided) == "ééééé…éééé");
+    // Cells, not characters: ten CJK characters take twenty cells, and a wide character is never halved, so
+    // the head and the tail each keep as many whole characters as their cells hold (four cells each, with the
+    // ellipsis's one making the ten).
+    CHECK(locationChipDaemonText("日本語日本語日本語日", LocationChipFit::DaemonElided) == "日本…語日");
+    // A grapheme cluster is never split: combining marks stay with their base, a ZWJ sequence stays whole.
+    auto const combining =
+        std::string("e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301");
+    CHECK(locationChipDaemonText(combining, LocationChipFit::DaemonElided)
+          == "e\u0301e\u0301e\u0301e\u0301e\u0301…e\u0301e\u0301e\u0301e\u0301");
+    auto const family = std::string("\U0001F468\u200D\U0001F469\u200D\U0001F467");
+    auto const elided = locationChipDaemonText(family + family + family + family + family + family,
+                                               LocationChipFit::DaemonElided);
+    CHECK(elided == family + family + "…" + family + family);
 }
 
 TEST_CASE("locationChip.statusText", "[LocationChip]")
@@ -216,4 +275,14 @@ TEST_CASE("locationChip.workspaceText", "[LocationChip]")
     CHECK(locationChipWorkspaceText("billin", LocationChipFit::WorkspaceElided) == "billin");
     CHECK(locationChipWorkspaceText("api", LocationChipFit::WorkspaceElided) == "api");
     CHECK(locationChipWorkspaceText("ééééééé", LocationChipFit::WorkspaceElided) == "éééééé…");
+    // The floor is six cells: six CJK characters take twelve, so the least kept is three of them.
+    CHECK(locationChipWorkspaceText("日本語日本語", LocationChipFit::WorkspaceElided) == "日本語…");
+    CHECK(locationChipWorkspaceText("日本語", LocationChipFit::WorkspaceElided) == "日本語");
+    // Combining marks and a ZWJ sequence are never split, whatever the floor lands on.
+    auto const combining = std::string("e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301");
+    CHECK(locationChipWorkspaceText(combining, LocationChipFit::WorkspaceElided)
+          == "e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301…");
+    auto const family = std::string("\U0001F468\u200D\U0001F469\u200D\U0001F467");
+    CHECK(locationChipWorkspaceText(family + family + family + family, LocationChipFit::WorkspaceElided)
+          == family + family + family + "…");
 }

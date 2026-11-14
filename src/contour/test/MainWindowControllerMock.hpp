@@ -137,7 +137,6 @@ class MainWindowControllerMock: public QAbstractListModel
     /// chip.
     Q_PROPERTY(QObject* switcher READ switcher NOTIFY switcherChanged)
     Q_PROPERTY(bool isWorkspaceDropdownOpen READ isWorkspaceDropdownOpen NOTIFY switcherChanged)
-    Q_PROPERTY(QString workspaceChipDescription READ workspaceChipDescription NOTIFY switcherChanged)
     // Mirrors WindowController's host chip state (a window::HostChipState); a test sets it to drive the chip.
     Q_PROPERTY(int hostChipState READ hostChipState WRITE setHostChipState NOTIFY hostChipStateChanged)
     // Mirrors WindowController's location chip, which names the daemon and the workspace in one control. A
@@ -147,6 +146,7 @@ class MainWindowControllerMock: public QAbstractListModel
     Q_PROPERTY(QString chipStateGlyph READ chipStateGlyph NOTIFY chipChanged)
     Q_PROPERTY(QStringList chipStateGlyphs READ chipStateGlyphs CONSTANT)
     Q_PROPERTY(QString chipAccessibleName READ chipAccessibleName NOTIFY chipChanged)
+    Q_PROPERTY(QString chipDaemonAccessibleName READ chipDaemonAccessibleName NOTIFY chipChanged)
     Q_PROPERTY(QString chipAccessibleDescription READ chipAccessibleDescription NOTIFY chipChanged)
     Q_PROPERTY(int chipHosting READ chipHosting NOTIFY chipChanged)
     Q_PROPERTY(QVariantList chipFitSteps READ chipFitSteps CONSTANT)
@@ -209,6 +209,10 @@ class MainWindowControllerMock: public QAbstractListModel
                 &MainWindowControllerMock::chipChanged);
         connect(
             this, &MainWindowControllerMock::switcherChanged, this, &MainWindowControllerMock::chipChanged);
+        connect(this,
+                &MainWindowControllerMock::sidebarWidthChanged,
+                this,
+                &MainWindowControllerMock::chipChanged);
     }
 
     /// Mirrors WindowController::hostLabel(): the attached host, set by a test before Main.qml loads.
@@ -217,29 +221,47 @@ class MainWindowControllerMock: public QAbstractListModel
     /// Mirrors WindowController::hostChipState().
     [[nodiscard]] int hostChipState() const noexcept { return _hostChipState; }
 
-    /// A daemon window's daemon, as the chip names it; empty falls back to the attached host, and then to
-    /// an in-process window, which names no daemon.
+    /// A daemon window's daemon, as the chip names it; empty falls back to the attached host. Says nothing of
+    /// what serves the window: that is `daemonHosting`.
     QString daemonName {};
+    /// What serves the window, as TerminalSessionManager::hostingOf() answers it: set by a test beside the
+    /// name (setDaemon(), rebindHost() or setHosting()), never worked out from it.
+    window::DaemonHosting daemonHosting = window::DaemonHosting::InProcess;
     /// Whether the daemon runs on this machine; a window attached to a host is remote whatever this says.
     window::DaemonLocality daemonLocality = window::DaemonLocality::Local;
+
+    /// The one rule the mocks derive hosting by: a name or a host makes a daemon's window, neither an
+    /// in-process one. A window that is bound to a host that is no daemon is set by setHosting().
+    /// @param host   The host label.
+    /// @param daemon The daemon name.
+    /// @return Daemon where either is non-empty, else InProcess.
+    [[nodiscard]] static window::DaemonHosting hostingNamed(QString const& host, QString const& daemon)
+    {
+        return host.isEmpty() && daemon.isEmpty() ? window::DaemonHosting::InProcess
+                                                  : window::DaemonHosting::Daemon;
+    }
 
     /// @param name   The daemon the chip names from now on; empty for an in-process window.
     /// @param locality Where it runs.
     void setDaemon(QString name, window::DaemonLocality locality = window::DaemonLocality::Local)
     {
+        daemonHosting = hostingNamed({}, name);
         daemonName = std::move(name);
         daemonLocality = locality;
         emit chipChanged();
     }
 
+    /// Serves the window as @p hosting says, whatever the name: a window attached to a host that is no daemon
+    /// (a tmux attach) has a host label and no daemon.
+    /// @param hosting What serves the window from now on.
+    void setHosting(window::DaemonHosting hosting)
+    {
+        daemonHosting = hosting;
+        emit chipChanged();
+    }
+
     /// Mirrors WindowController::chipDaemonName().
     [[nodiscard]] QString chipDaemonName() const { return daemonName.isEmpty() ? attachedHost : daemonName; }
-
-    /// @return Whether the mock is a daemon window.
-    [[nodiscard]] window::DaemonHosting hosting() const
-    {
-        return chipDaemonName().isEmpty() ? window::DaemonHosting::InProcess : window::DaemonHosting::Daemon;
-    }
 
     /// Mirrors WindowController::chipDaemonDot().
     [[nodiscard]] int chipDaemonDot() const
@@ -260,52 +282,59 @@ class MainWindowControllerMock: public QAbstractListModel
     /// Mirrors WindowController::chipAccessibleName().
     [[nodiscard]] QString chipAccessibleName() const
     {
+        return QString::fromStdString(window::locationChipAccessibleName(
+            chipDaemonName().toStdString(), _sidebar.summary().currentWorkspace));
+    }
+
+    /// Mirrors WindowController::chipDaemonAccessibleName().
+    [[nodiscard]] QString chipDaemonAccessibleName() const
+    {
         return QString::fromStdString(
-            window::locationChipAccessibleName(chipDaemonName().toStdString(), _sidebar.summary()));
+            window::locationChipDaemonAccessibleName(chipDaemonName().toStdString()));
     }
 
     /// Mirrors WindowController::chipAccessibleDescription().
     [[nodiscard]] QString chipAccessibleDescription() const
     {
-        return QString::fromStdString(
-            window::locationChipAccessibleDescription(chipState(), workspaceChipDescription().toStdString()));
+        return QString::fromStdString(window::locationChipAccessibleDescription(
+            chipState(),
+            _sidebar.summary().otherWorkspaces,
+            isWorkspaceDropdownOpen() ? window::ChipDisclosure::Expanded
+                                      : window::ChipDisclosure::Collapsed));
     }
 
     /// Mirrors WindowController::chipToolTip().
     Q_INVOKABLE [[nodiscard]] QString chipToolTip(int fit) const
     {
-        return QString::fromStdString(
-            window::locationChipToolTip(chipState(), chipFitOf(fit), chipDaemonName().toStdString()));
+        return QString::fromStdString(window::locationChipToolTip(
+            chipState(), window::locationChipFitOf(fit), chipDaemonName().toStdString()));
     }
 
     /// Mirrors WindowController::chipDaemonText().
     Q_INVOKABLE [[nodiscard]] QString chipDaemonText(int fit) const
     {
         return QString::fromStdString(
-            window::locationChipDaemonText(chipDaemonName().toStdString(), chipFitOf(fit)));
+            window::locationChipDaemonText(chipDaemonName().toStdString(), window::locationChipFitOf(fit)));
     }
 
     /// Mirrors WindowController::chipStatusText().
     Q_INVOKABLE [[nodiscard]] QString chipStatusText(int fit) const
     {
-        return QString::fromStdString(window::locationChipStatusText(chipState(), chipFitOf(fit)));
+        return QString::fromStdString(
+            window::locationChipStatusText(chipState(), window::locationChipFitOf(fit)));
     }
 
     /// Mirrors WindowController::chipWorkspaceText().
     Q_INVOKABLE [[nodiscard]] QString chipWorkspaceText(QString const& workspace, int fit) const
     {
         return QString::fromStdString(
-            window::locationChipWorkspaceText(workspace.toStdString(), chipFitOf(fit)));
+            window::locationChipWorkspaceText(workspace.toStdString(), window::locationChipFitOf(fit)));
     }
 
     /// Mirrors WindowController::chipFit().
     Q_INVOKABLE [[nodiscard]] int chipFit(QVariantMap const& widths) const
     {
-        auto const widthOf = [&](std::string_view key) {
-            return widths.value(QString::fromUtf8(key.data(), static_cast<qsizetype>(key.size()))).toDouble();
-        };
-        return static_cast<int>(
-            window::locationChipFitFrom(widthOf, widths.value(QStringLiteral("available")).toDouble()));
+        return window::locationChipFitOfWidths(widths);
     }
 
     /// Mirrors WindowController::chipFitSteps().
@@ -320,8 +349,7 @@ class MainWindowControllerMock: public QAbstractListModel
     /// Mirrors WindowController::setBandWidths(): keeps the minimum the parts sum to and where the band sits.
     Q_INVOKABLE void setBandWidths(QVariantMap const& parts, int placement)
     {
-        _bandMinimumWidth = window::bandMinimumWidthFrom(
-            [&](std::string_view key) { return parts.value(QString::fromUtf8(key)).toDouble(); });
+        _bandMinimumWidth = window::bandMinimumWidthOfParts(parts);
         _bandPlacement = window::bandPlacementFromInt(placement).value_or(window::BandPlacement::FullWidth);
     }
 
@@ -336,16 +364,14 @@ class MainWindowControllerMock: public QAbstractListModel
     [[nodiscard]] double bandMinimumWidth() const noexcept { return _bandMinimumWidth; }
 
     /// Mirrors WindowController::chipHosting().
-    [[nodiscard]] int chipHosting() const { return static_cast<int>(std::to_underlying(hosting())); }
+    [[nodiscard]] int chipHosting() const { return static_cast<int>(std::to_underlying(daemonHosting)); }
 
     /// Mirrors WindowController::locationChipPlace().
-    Q_INVOKABLE [[nodiscard]] QString locationChipPlace(QString const& band,
-                                                        QString const& centre,
-                                                        int hostingValue,
-                                                        int sidebarShown) const
+    Q_INVOKABLE [[nodiscard]] QString locationChipPlace(QString const& band, QString const& centre) const
     {
-        return QString::fromUtf8(window::locationChipPlaceFromInts(
-            band.toStdString(), centre.toStdString(), hostingValue, sidebarShown));
+        auto const sidebar = sidebarWidth() > 0 ? window::SidebarShown::Yes : window::SidebarShown::No;
+        return QString::fromUtf8(
+            window::locationChipPlaceNamed(band.toStdString(), centre.toStdString(), daemonHosting, sidebar));
     }
 
     /// What the connection reports, as WindowController::notifyHostConnectionChanged() would tell it.
@@ -490,6 +516,7 @@ class MainWindowControllerMock: public QAbstractListModel
     /// @param host The host hostLabel() reports from now on.
     void rebindHost(QString host)
     {
+        daemonHosting = hostingNamed(host, daemonName);
         attachedHost = std::move(host);
         emit hostLabelChanged();
     }
@@ -800,10 +827,6 @@ class MainWindowControllerMock: public QAbstractListModel
     }
     [[nodiscard]] QObject* switcher() const { return _switcher.data(); }
     [[nodiscard]] bool isWorkspaceDropdownOpen() const { return _switcher && _switcherAnchor.has_value(); }
-    [[nodiscard]] QString workspaceChipDescription() const
-    {
-        return isWorkspaceDropdownOpen() ? QStringLiteral("expanded") : QStringLiteral("collapsed");
-    }
     /// Mirrors WindowController::openSidebarFilter().
     Q_INVOKABLE void openSidebarFilter() { emit sidebarFilterRequested(); }
     /// Mirrors WindowController::beginSidebarDrag(): the payload a workspace, tab or pane row carries, as the
@@ -924,12 +947,6 @@ class MainWindowControllerMock: public QAbstractListModel
     [[nodiscard]] window::HostChipState chipState() const
     {
         return static_cast<window::HostChipState>(_hostChipState);
-    }
-    /// @param fit A window::LocationChipFit's underlying value; out of range clamps.
-    [[nodiscard]] static window::LocationChipFit chipFitOf(int fit)
-    {
-        return static_cast<window::LocationChipFit>(
-            std::clamp(fit, 0, static_cast<int>(window::LocationChipFitCount) - 1));
     }
 
     int _visiblePaneCount = 1;     ///< @see visiblePaneCount; one pane, unsplit.

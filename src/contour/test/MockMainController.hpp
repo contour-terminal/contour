@@ -224,6 +224,8 @@ class MockMainController: public MainWindowControllerMock
     {
         attachedHost = _scene.hostLabel;
         daemonName = _scene.daemonName;
+        // A scene that names a host or a daemon is a daemon's window; one that names neither is in-process.
+        daemonHosting = hostingNamed(_scene.hostLabel, _scene.daemonName);
         daemonLocality = _scene.daemonLocality;
         shortcutStyle = _scene.shortcutStyle;
         setHostChipState(static_cast<int>(_scene.hostChipState));

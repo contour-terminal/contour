@@ -266,6 +266,7 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     // Everything the location chip shows follows one of these.
     connect(this, &WindowController::hostLabelChanged, this, &WindowController::chipChanged);
     connect(this, &WindowController::hostChipStateChanged, this, &WindowController::chipChanged);
+    connect(this, &WindowController::sidebarWidthChanged, this, &WindowController::chipChanged);
     connect(this, &WindowController::switcherChanged, this, &WindowController::chipChanged);
     connect(this, &WindowController::countChanged, this, &WindowController::clampChromeFocus);
     // The drag is the manager's, as QDrag::exec is process-wide; this window only says whose pane it carries.
@@ -627,16 +628,6 @@ int WindowController::hostChipState() const noexcept
     return static_cast<int>(std::to_underlying(hostChipStateOf(_manager.hostConnection(_displayed))));
 }
 
-namespace
-{
-    /// @param fit A LocationChipFit's underlying value from QML; out of range clamps.
-    LocationChipFit chipFitOf(int fit) noexcept
-    {
-        return static_cast<LocationChipFit>(
-            std::min(static_cast<size_t>(std::max(fit, 0)), LocationChipFitCount - 1));
-    }
-} // namespace
-
 QString WindowController::chipDaemonName() const
 {
     return QString::fromStdString(_manager.daemonNameOf(_displayed));
@@ -661,47 +652,51 @@ QString WindowController::chipStateGlyph() const
 
 QString WindowController::chipAccessibleName() const
 {
+    return QString::fromStdString(locationChipAccessibleName(
+        _manager.daemonNameOf(_displayed), _sidebar->summary().currentWorkspace, QtTranslated {}));
+}
+
+QString WindowController::chipDaemonAccessibleName() const
+{
     return QString::fromStdString(
-        locationChipAccessibleName(_manager.daemonNameOf(_displayed), _sidebar->summary()));
+        locationChipDaemonAccessibleName(_manager.daemonNameOf(_displayed), QtTranslated {}));
 }
 
 QString WindowController::chipAccessibleDescription() const
 {
     auto const state = hostChipStateOf(_manager.hostConnection(_displayed));
-    return QString::fromStdString(
-        locationChipAccessibleDescription(state, workspaceChipDescription().toStdString()));
+    auto const disclosure = isWorkspaceDropdownOpen() ? ChipDisclosure::Expanded : ChipDisclosure::Collapsed;
+    return QString::fromStdString(locationChipAccessibleDescription(
+        state, _sidebar->summary().otherWorkspaces, disclosure, QtTranslated {}));
 }
 
 QString WindowController::chipToolTip(int fit) const
 {
     auto const state = hostChipStateOf(_manager.hostConnection(_displayed));
-    return QString::fromStdString(
-        locationChipToolTip(state, chipFitOf(fit), _manager.daemonNameOf(_displayed)));
+    return QString::fromStdString(locationChipToolTip(
+        state, locationChipFitOf(fit), _manager.daemonNameOf(_displayed), QtTranslated {}));
 }
 
 QString WindowController::chipDaemonText(int fit) const
 {
-    return QString::fromStdString(locationChipDaemonText(_manager.daemonNameOf(_displayed), chipFitOf(fit)));
+    return QString::fromStdString(
+        locationChipDaemonText(_manager.daemonNameOf(_displayed), locationChipFitOf(fit)));
 }
 
 QString WindowController::chipStatusText(int fit) const
 {
     auto const state = hostChipStateOf(_manager.hostConnection(_displayed));
-    return QString::fromStdString(locationChipStatusText(state, chipFitOf(fit)));
+    return QString::fromStdString(locationChipStatusText(state, locationChipFitOf(fit), QtTranslated {}));
 }
 
 QString WindowController::chipWorkspaceText(QString const& workspace, int fit) const
 {
-    return QString::fromStdString(locationChipWorkspaceText(workspace.toStdString(), chipFitOf(fit)));
+    return QString::fromStdString(locationChipWorkspaceText(workspace.toStdString(), locationChipFitOf(fit)));
 }
 
 int WindowController::chipFit(QVariantMap const& widths) const
 {
-    auto const widthOf = [&](std::string_view key) {
-        return widths.value(QString::fromUtf8(key.data(), static_cast<qsizetype>(key.size()))).toDouble();
-    };
-    return static_cast<int>(std::to_underlying(
-        locationChipFitFrom(widthOf, widths.value(QStringLiteral("available")).toDouble())));
+    return locationChipFitOfWidths(widths);
 }
 
 QVariantList WindowController::chipFitSteps()
@@ -716,17 +711,14 @@ int WindowController::chipLeastFit()
 
 int WindowController::chipHosting() const
 {
-    return static_cast<int>(std::to_underlying(
-        _manager.isInProcessWindow(_displayed) ? DaemonHosting::InProcess : DaemonHosting::Daemon));
+    return static_cast<int>(std::to_underlying(_manager.hostingOf(_displayed)));
 }
 
-QString WindowController::locationChipPlace(QString const& band,
-                                            QString const& centre,
-                                            int hosting,
-                                            int sidebarShown) const
+QString WindowController::locationChipPlace(QString const& band, QString const& centre) const
 {
-    return QString::fromUtf8(
-        locationChipPlaceFromInts(band.toStdString(), centre.toStdString(), hosting, sidebarShown));
+    auto const sidebar = sidebarWidth() > 0 ? SidebarShown::Yes : SidebarShown::No;
+    return QString::fromUtf8(locationChipPlaceNamed(
+        band.toStdString(), centre.toStdString(), _manager.hostingOf(_displayed), sidebar));
 }
 
 QString WindowController::applicationVersion() const
@@ -884,11 +876,6 @@ void WindowController::runWorkspaceMenuAction(uint64_t workspace, actions::Actio
     runSidebarAction(
         SidebarRowKey { .kind = SidebarRowKind::Workspace, .workspace = workspace, .tab = 0, .pane = {} },
         action);
-}
-
-QString WindowController::workspaceChipDescription() const
-{
-    return isWorkspaceDropdownOpen() ? tr("expanded") : tr("collapsed");
 }
 
 void WindowController::runMenuBarAction(actions::Action const& action) const
@@ -3288,8 +3275,7 @@ void WindowController::setChromeHeight(int height)
 
 void WindowController::setBandWidths(QVariantMap const& parts, int placement)
 {
-    auto const minimum = bandMinimumWidthFrom(
-        [&](std::string_view key) { return parts.value(QString::fromUtf8(key)).toDouble(); });
+    auto const minimum = bandMinimumWidthOfParts(parts);
     auto const bandPlacement = bandPlacementFromInt(placement).value_or(BandPlacement::FullWidth);
     if (_bandMinimumWidth == minimum && _bandPlacement == bandPlacement)
         return;

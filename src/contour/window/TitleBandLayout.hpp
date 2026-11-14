@@ -3,7 +3,7 @@
 
 /// @file
 /// Where the title band and the tabs go: one table matched on the chrome row (its tab shape and density),
-/// the window frame and mode, the tab-bar gate, the host chip's notice and the tab-bar position, followed by
+/// the window frame and mode, the tab-bar gate, the connection's notice and the tab-bar position, followed by
 /// one full-screen step. Pure and Qt-free, so the band, its snapshot rows and
 /// the tests read the same rows.
 
@@ -96,12 +96,12 @@ inline constexpr size_t BarCentreCount = static_cast<size_t>(BarCentre::ChipAndT
 /// Everything the band decision reads.
 struct TitleBandInputs
 {
-    config::TabShape shape = config::TabShape::Flat;                    ///< The row's tab shape.
-    WindowFrame frame = WindowFrame::ClientBand;                        ///< Who draws the title area.
-    WindowMode mode = WindowMode::Windowed;                             ///< Windowed or full screen.
-    TabStripGate strip = TabStripGate::Shown;                           ///< The tab-bar gate's answer.
-    config::TabBarPosition position = config::TabBarPosition::Top;      ///< The configured tab-bar edge.
-    HostNotice notice = HostNotice::None;                               ///< Whether the host chip must show.
+    config::TabShape shape = config::TabShape::Flat;               ///< The row's tab shape.
+    WindowFrame frame = WindowFrame::ClientBand;                   ///< Who draws the title area.
+    WindowMode mode = WindowMode::Windowed;                        ///< Windowed or full screen.
+    TabStripGate strip = TabStripGate::Shown;                      ///< The tab-bar gate's answer.
+    config::TabBarPosition position = config::TabBarPosition::Top; ///< The configured tab-bar edge.
+    HostNotice notice = HostNotice::None; ///< Whether the band must show for an interrupted connection.
     config::ChromeDensity density = config::ChromeDensity::Comfortable; ///< The configured chrome density.
     /// Where the tabs live. Appended after the columns above, which the tests spell positionally.
     config::TabPlacement placement = config::TabPlacement::Top;
@@ -155,7 +155,7 @@ struct TitleBandRule
     std::optional<WindowFrame> frame;                 ///< The frame, or any.
     std::optional<WindowMode> mode;                   ///< Windowed or full screen, or any.
     std::optional<TabStripGate> strip;                ///< The tab-bar gate, or any.
-    std::optional<HostNotice> notice;                 ///< The host chip's notice, or any.
+    std::optional<HostNotice> notice;                 ///< The connection's notice, or any.
     std::optional<config::ChromeDensity> density;     ///< The chrome density, or any.
     std::optional<config::TabBarPosition> position;   ///< The configured tab-bar edge, or any.
     std::optional<config::TabPlacement> placement;    ///< Where the tabs live, or any.
@@ -208,7 +208,7 @@ inline constexpr auto TitleBandRules = std::array {
         .answer = { BarPresence::Shown, BarEdge::Bottom, BarCentre::ChipAndTabs, BarPresence::Hidden } },
     // Minimal's bare band in full screen: there are no traffic lights to carry, so an empty band would only
     // slide a strip of nothing over the top rows -- it stays hidden. A remote window whose connection is
-    // interrupted falls through: its band stays pinned, the host chip saying why the screen stopped.
+    // interrupted falls through: its band stays pinned, the location chip saying why the screen stopped.
     TitleBandRule { .shape = config::TabShape::Pill,
                     .frame = WindowFrame::ClientBand,
                     .mode = WindowMode::FullScreen,
@@ -336,8 +336,8 @@ inline constexpr auto TitleBandRules = std::array {
                     .sidebar = std::nullopt,
                     .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
     // Flat on a client band, and every shape under a native frame: the band is the strip. A remote window
-    // whose connection is not up shows it whatever the gate says: it is the host chip's home (R-d), and the
-    // strip appearing is itself what tells the user the window is remote.
+    // whose connection is not up shows it whatever the gate says: it is where the location chip shows the
+    // state (R-d), and the strip appearing is itself what tells the user the window is remote.
     TitleBandRule { .shape = std::nullopt,
                     .frame = std::nullopt,
                     .mode = std::nullopt,

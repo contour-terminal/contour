@@ -319,12 +319,14 @@ TEST_CASE("switcherDaemonName names the default daemon local and keeps a host's 
 TEST_CASE("the chip opens every daemon, and a window without a daemon its own workspaces alone", "[switcher]")
 {
     using contour::window::ChipSwitcherScope;
+    using contour::window::DaemonHosting;
     using contour::window::switcherScopeFor;
-    using contour::window::SwitcherWindowKind;
     STATIC_CHECK(ChipSwitcherScope == SwitcherScope::Everything);
-    CHECK(switcherScopeFor(ChipSwitcherScope, SwitcherWindowKind::Daemon) == SwitcherScope::Everything);
-    CHECK(switcherScopeFor(ChipSwitcherScope, SwitcherWindowKind::InProcess) == SwitcherScope::WindowOnly);
-    CHECK(switcherScopeFor(SwitcherScope::OneDaemon, SwitcherWindowKind::Daemon) == SwitcherScope::OneDaemon);
+    CHECK(switcherScopeFor(ChipSwitcherScope, DaemonHosting::Daemon) == SwitcherScope::Everything);
+    CHECK(switcherScopeFor(ChipSwitcherScope, DaemonHosting::InProcess) == SwitcherScope::WindowOnly);
+    CHECK(switcherScopeFor(SwitcherScope::OneDaemon, DaemonHosting::Daemon) == SwitcherScope::OneDaemon);
+    // A tmux-attached window is no in-process one: it keeps the scope that was asked.
+    CHECK(switcherScopeFor(ChipSwitcherScope, DaemonHosting::OtherHost) == SwitcherScope::Everything);
 }
 
 TEST_CASE("a pick's one daemon, centred, lists its workspaces and no way out to every daemon", "[switcher]")

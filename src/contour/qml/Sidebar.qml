@@ -55,6 +55,9 @@ Rectangle {
     /// The dividing column's width: one cell on the cell tree, a hairline elsewhere.
     readonly property real dividerWidth: chromeStyle.sidebar.dividerGlyph !== "" ? chromeStyle.cellWidth
                                                                                 : chromeStyle.borderWidth
+    /// The daemon control heading the title row, while it shows there; null otherwise. A toolbar item: the
+    /// chrome's keyboard walk visits it (Main.qml).
+    readonly property Item daemonChip: daemonChipSlot.item
     /// The tree (a ListView), for the tests.
     readonly property alias tree: tree
 
@@ -228,7 +231,7 @@ Rectangle {
                 fit: root.controller.chipFit(Object.assign({ available: Math.max(0, titleButtons.x - daemonChipSlot.x
                                                                                   - titleRow.gap) },
                                                            daemonChip.fitWidths))
-                focusRingShown: activeFocus
+                focusRingShown: activeFocus && (root.controller.focusedToolbarIndex ?? -1) >= 0
                 isOpen: !!root.controller && !!root.controller.isWorkspaceDropdownOpen
                 onClicked: if (root.controller && root.controller.showWorkspaceDropdown)
                     root.controller.showWorkspaceDropdown(daemonChip.dropdownAnchor())

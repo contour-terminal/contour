@@ -1309,7 +1309,7 @@ TEST_CASE("Main.qml remote chrome: a window attached to a host names it in its c
     {
         QQmlEngine engine;
         MockMainController controller;
-        controller.attachedHost = QStringLiteral("home");
+        controller.rebindHost(QStringLiteral("home"));
         contour::test::QmlMessageCapture warnings;
         auto root = loadMainWindow(engine, controller, warnings);
         // The chip fits its room, and a window that has none yet fits nothing but the workspace.
@@ -1351,8 +1351,8 @@ TEST_CASE("Main.qml remote chrome: a window attached to a host names it in its c
             auto const expectedDescription =
                 state == contour::window::HostChipState::Connected
                     ? QStringLiteral("collapsed")
-                    : QString::fromStdString(
-                          contour::window::locationChipAccessibleDescription(state, "collapsed"));
+                    : QString::fromStdString(contour::window::locationChipAccessibleDescription(
+                          state, contour::window::Urgency::Idle, contour::window::ChipDisclosure::Collapsed));
             CHECK(evaluateIn(*chip, QStringLiteral("Accessible.name")).toString()
                   == QStringLiteral("Workspace %1 on home").arg(workspace->property("text").toString()));
             CHECK(evaluateIn(*chip, QStringLiteral("Accessible.description")).toString()
@@ -1407,7 +1407,7 @@ TEST_CASE("Main.qml remote chrome: the location chip opens the switcher on every
     CAPTURE(static_cast<int>(style));
     QQmlEngine engine;
     MockMainController controller;
-    controller.attachedHost = QStringLiteral("home");
+    controller.rebindHost(QStringLiteral("home"));
     contour::test::QmlMessageCapture warnings;
     auto root = loadMainWindow(engine, controller, warnings, rowSetup(style));
     showWindow(*root);
@@ -4271,7 +4271,7 @@ TEST_CASE("Main.qml: the location chip's workspace name is bold, and the band's 
     {
         QQmlEngine engine;
         MockMainController controller;
-        controller.attachedHost = QStringLiteral("home");
+        controller.rebindHost(QStringLiteral("home"));
         contour::test::QmlMessageCapture warnings;
         auto root = loadMainWindow(engine, controller, warnings);
         auto* chip = root->findChild<QQuickItem*>(QStringLiteral("workspaceChip"));

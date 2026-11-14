@@ -117,7 +117,7 @@ ThemedWindow
 
     // Where the title band and the tabs go -- { band, bandEdge, centre, tabBar }, each by name -- from the
     // row's tab shape (UiStyleProvider::titleBand): who draws the frame (show_title_bar), whether the window
-    // is in full screen, the tab-bar gate, the configured edge and the host chip, whose interrupted
+    // is in full screen, the tab-bar gate, the configured edge and the connection, whose interrupted
     // connection shows the band whatever the gate says. The ints are the enumerators' underlying values:
     // WindowFrame { ClientBand, NativeFrame }, WindowMode { Windowed, FullScreen }, TabStripGate { Hidden,
     // Shown }, TabBarPosition { Top, Bottom }, HostChipState, TabPlacement { Top, Sidebar } and
@@ -457,8 +457,7 @@ ThemedWindow
             bandHeight: titleBar.implicitHeight
             titleInHeaderBar: sidebarSlot.titleInHeaderBar
             chipPlace: appWindow.win && appWindow.win.locationChipPlace
-                       ? appWindow.win.locationChipPlace(appWindow.band.band || "", appWindow.band.centre || "",
-                                                         appWindow.win.chipHosting, sidebarSlot.shown ? 1 : 0)
+                       ? appWindow.chipPlaceOf(appWindow.win)
                        : "none"
             sidebarToggle: appWindow.sidebarToggle
             controlsInset: appWindow.bandMode === 1 ? 0 : ((appWindow.win && appWindow.win.nativeControlsInset) || 0)
@@ -573,9 +572,19 @@ ThemedWindow
     // at the content's corner for want of a band. Their order is the controller's focusedToolbarIndex.
     readonly property var toolbarItems: {
         const items = titleBar.toolbarItems.slice()
+        const sidebarChip = sidebarSlot.item ? sidebarSlot.item.daemonChip : null
+        if (sidebarChip !== null && sidebarChip.visible)
+            items.unshift(sidebarChip)
         if (driftChip.visible && !driftChip.inBand)
             items.push(driftChip)
         return items
+    }
+    // Where the location chip shows for `controller`: its call, which knows what serves the window and
+    // whether its sidebar shows. A call QML cannot track, so the binding reads `chipHosting`, which changes
+    // with either (chipChanged).
+    function chipPlaceOf(controller) {
+        controller.chipHosting
+        return controller.locationChipPlace(appWindow.band.band || "", appWindow.band.centre || "")
     }
     // Whether keyboard focus is in the toolbar, which an item that also holds active focus rings by.
     readonly property bool toolbarHasFocus: !!appWindow.win && (appWindow.win.focusedToolbarIndex ?? -1) >= 0

@@ -793,17 +793,8 @@ TEST_CASE("SidebarTree.meter_text_fills_eighths_of_cells", "[sidebar]")
     CHECK(meterText(250) == meterText(100));
 }
 
-TEST_CASE("SidebarTree.the_chip_names_what_the_other_workspaces_ask", "[sidebar]")
+TEST_CASE("SidebarTree.urgency_has_no_words_when_idle", "[sidebar]")
 {
-    auto summary = SidebarSummary { .currentWorkspace = "docs", .otherWorkspaces = Urgency::Failed };
-    CHECK(workspaceChipAccessibleName(summary) == "Workspace docs, another workspace failed");
-    summary.otherWorkspaces = Urgency::DoneUnseen;
-    CHECK(workspaceChipAccessibleName(summary) == "Workspace docs, another workspace done");
-    summary.otherWorkspaces = Urgency::NeedsYou;
-    CHECK(workspaceChipAccessibleName(summary) == "Workspace docs, another workspace needs you");
-    // What does not mark the chip is not said either.
-    summary.otherWorkspaces = Urgency::Working;
-    CHECK(workspaceChipAccessibleName(summary) == "Workspace docs");
     CHECK(urgencyText(Urgency::Idle).empty());
 }
 

@@ -143,7 +143,8 @@ Item {
     Accessible.role: Accessible.ButtonMenu
     Accessible.focusable: root.focusRingShown
     Accessible.focused: root.focusRingShown
-    Accessible.name: root.controller.chipAccessibleName
+    // What it shows: the workspace and its daemon, or the daemon alone where it heads the sidebar.
+    Accessible.name: root.daemonOnly ? root.controller.chipDaemonAccessibleName : root.controller.chipAccessibleName
     Accessible.description: root.controller.chipAccessibleDescription
     Accessible.onPressAction: root.clicked()
 

@@ -1620,6 +1620,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         daemonTargetOf() and hostLabelOf()); empty for a window whose sessions run in-process.
     [[nodiscard]] std::string daemonNameOf(vtworkspace::WorkspaceId window) const;
 
+    /// @param window A window of this manager.
+    /// @return What serves @p window's sessions: no binding is InProcess, a binding with a daemon (a
+    ///         daemonTargetOf() value) is a Daemon, any other binding (a tmux attach) is OtherHost. The one
+    ///         rule the location chip and the switcher share.
+    [[nodiscard]] window::DaemonHosting hostingOf(vtworkspace::WorkspaceId window) const;
+
     /// What the switcher opens with over @p window: every daemon for a daemon window, its own workspaces
     /// alone for an in-process one (window::switcherScopeFor), whatever @p scope asks.
     /// @param window The window the popup opens over.

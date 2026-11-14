@@ -33,7 +33,7 @@ inline constexpr size_t PaneStateCount = static_cast<size_t>(PaneState::Ended) +
 /// @param end        How the pane's session ended; None while it runs.
 /// @param connection The state of the daemon connection the session is mirrored over (Connected for a
 ///                   local one).
-/// @return Reconnecting while the connection is being (re)established, folded as the window's host chip
+/// @return Reconnecting while the connection is being (re)established, folded as the window's location chip
 ///         folds it (hostChipStateOf), so the pane's pill and the chip never disagree -- for a live pane, and
 ///         for one whose session was lost with the connection (its footer's Reconnect is running); else Ended
 ///         once the session ended; else Live.

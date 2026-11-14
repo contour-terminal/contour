@@ -947,6 +947,13 @@ std::string TerminalSessionManager::daemonNameOf(vtworkspace::WorkspaceId window
     return target ? window::locationDaemonName(*target, hostLabelOf(window)) : std::string {};
 }
 
+window::DaemonHosting TerminalSessionManager::hostingOf(vtworkspace::WorkspaceId window) const
+{
+    if (isInProcessWindow(window))
+        return window::DaemonHosting::InProcess;
+    return daemonTargetOf(window) ? window::DaemonHosting::Daemon : window::DaemonHosting::OtherHost;
+}
+
 window::SwitcherOpening TerminalSessionManager::switcherOpeningFor(
     vtworkspace::WorkspaceId window,
     window::SwitcherPrompt prompt,
@@ -954,14 +961,12 @@ window::SwitcherOpening TerminalSessionManager::switcherOpeningFor(
     window::SwitcherOrigin origin,
     std::vector<window::SwitcherWorkspace> windowWorkspaces) const
 {
-    auto const kind = isInProcessWindow(window) ? window::SwitcherWindowKind::InProcess
-                                                : window::SwitcherWindowKind::Daemon;
     return window::SwitcherOpening { .window = window,
                                      .windowDaemon = daemonTargetOf(window).value_or(SwitchTarget {}),
                                      .mode = SwitchMode::Switch,
                                      .prompt = prompt,
                                      .pick = std::nullopt,
-                                     .scope = window::switcherScopeFor(scope, kind),
+                                     .scope = window::switcherScopeFor(scope, hostingOf(window)),
                                      .windowWorkspaces = std::move(windowWorkspaces),
                                      .origin = origin };
 }

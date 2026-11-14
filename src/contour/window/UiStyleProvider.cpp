@@ -508,8 +508,12 @@ TabWellMetrics UiStyleProvider::tabWellMetrics() const
 qreal UiStyleProvider::tabWellMinimum(int tabCount) const
 {
     // One icon-only pill: the well can always scroll to the active tab beyond it.
-    auto const metrics = tabWellMetrics();
-    return tabCount <= 0 ? 0 : (2 * metrics.padding) + metrics.iconOnlyTab;
+    return iconOnlyTabWellMinimum(tabCount, tabWellMetrics());
+}
+
+qreal UiStyleProvider::tabWellLabelledMinimum(int tabCount) const
+{
+    return labelledTabWellMinimum(tabCount, tabWellMetrics());
 }
 
 QVariantMap UiStyleProvider::palettePlacement(qreal windowWidth, qreal windowHeight) const

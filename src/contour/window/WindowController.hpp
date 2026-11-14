@@ -177,7 +177,6 @@ class WindowController:
     Q_PROPERTY(bool isWorkspaceDropdownOpen READ isWorkspaceDropdownOpen NOTIFY switcherChanged)
     /// The workspace chip's accessible description: "expanded" while its dropdown is open, else "collapsed"
     /// (Qt has no expanded state for a button).
-    Q_PROPERTY(QString workspaceChipDescription READ workspaceChipDescription NOTIFY switcherChanged)
     Q_PROPERTY(QVariantList sidebarContextMenuModel READ sidebarContextMenuModel NOTIFY
                    sidebarContextMenuModelChanged)
     Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
@@ -274,12 +273,17 @@ class WindowController:
     /// The glyph of every connection state: the title band reserves the widest, so the chip's least width
     /// does not depend on the state.
     Q_PROPERTY(QStringList chipStateGlyphs READ chipStateGlyphs CONSTANT)
-    /// What a screen reader says of the chip.
+    /// What a screen reader says of the chip: what it shows (`Workspace billing on starfive`).
     Q_PROPERTY(QString chipAccessibleName READ chipAccessibleName NOTIFY chipChanged)
-    /// What a screen reader adds: the connection's state and whether the switcher is open.
+    /// What a screen reader says of the control that names the daemon alone, the sidebar's head
+    /// (`Daemon local`).
+    Q_PROPERTY(QString chipDaemonAccessibleName READ chipDaemonAccessibleName NOTIFY chipChanged)
+    /// What a screen reader adds: the connection's state, what another workspace asks and whether the
+    /// switcher is open.
     Q_PROPERTY(QString chipAccessibleDescription READ chipAccessibleDescription NOTIFY chipChanged)
-    /// A window::DaemonHosting's underlying value: whether the window's sessions live in a daemon. The input
-    /// locationChipPlace() needs from the window, so a binding that passes it re-evaluates when it changes.
+    /// A window::DaemonHosting's underlying value: what serves the window's sessions. locationChipPlace()
+    /// reads it, and the sidebar's width, from the window itself; a QML binding that calls it reads this
+    /// property too, so it re-evaluates when either changes (chipChanged).
     Q_PROPERTY(int chipHosting READ chipHosting NOTIFY chipChanged)
     /// The fit steps in elision order, each { fit, key }: a window::LocationChipFit's underlying value and
     /// the name chipFit() takes its width by (window::LocationChipSteps). QML measures and keys by this list.
@@ -773,8 +777,6 @@ class WindowController:
     /// @return This window's notices, as the `notices` property hands them to QML.
     [[nodiscard]] NoticeModel* noticesForQml() noexcept { return &_notices; }
 
-    /// Where this window's toast goes now (placeToast()), from the band QML shows and the active pane's
-    /// cursor row: asked as a toast shows.
     /// @param fit A window::LocationChipFit's underlying value.
     /// @return The daemon segment's text at that fit; empty for an in-process window.
     Q_INVOKABLE [[nodiscard]] QString chipDaemonText(int fit) const;
@@ -794,6 +796,8 @@ class WindowController:
     /// @return A window::LocationChipFit's underlying value: the first step that fits.
     Q_INVOKABLE [[nodiscard]] int chipFit(QVariantMap const& widths) const;
 
+    /// Where this window's toast goes now (placeToast()), from the band QML shows and the active pane's
+    /// cursor row: asked as a toast shows.
     /// @param band The band's presence, by the name UiStyleProvider::titleBand() gives it ("shown", ...).
     /// @param edge Its edge, by name ("top" or "bottom").
     /// @param bandHeight The band's height, in logical pixels.
@@ -823,7 +827,7 @@ class WindowController:
     void refreshSwitching() const;
 
     /// Opens the daemon and workspace switcher over this window: what the ShowSwitcher action does, for
-    /// the host chip's click.
+    /// the location chip's click.
     Q_INVOKABLE void showSwitcher() const;
 
     /// Opens the switcher below the workspace chip: every daemon's workspaces for a daemon window, the
@@ -853,7 +857,6 @@ class WindowController:
     [[nodiscard]] SwitcherController* presentedSwitcher() const noexcept;
     [[nodiscard]] QObject* switcherForQml() const noexcept;
     [[nodiscard]] bool isWorkspaceDropdownOpen() const noexcept;
-    [[nodiscard]] QString workspaceChipDescription() const;
 
     /// @param workspace A workspace of this window's directory, by its id.
     /// @return What its sidebar row's menu is built from: the switcher's row menu shows the same rows.
@@ -1634,6 +1637,9 @@ class WindowController:
     /// @return What a screen reader says of the location chip.
     [[nodiscard]] QString chipAccessibleName() const;
 
+    /// @return What a screen reader says of the daemon-only control that heads the sidebar.
+    [[nodiscard]] QString chipDaemonAccessibleName() const;
+
     /// @return What a screen reader adds to the chip's name.
     [[nodiscard]] QString chipAccessibleDescription() const;
 
@@ -1653,15 +1659,10 @@ class WindowController:
     /// @param band The band's presence, by the name UiStyleProvider::titleBand() gives it ("hidden",
     ///             "shown", "reveal" or "pinned").
     /// @param centre The band centre's name (barCentreName()).
-    /// @param hosting The window's chipHosting: passed in, so the caller's binding depends on it.
-    /// @param sidebarShown A window::SidebarShown's underlying value: whether the sidebar is on screen.
-    /// @return Where the chip shows for this window: "none", "band" or "sidebar"; "none" for a name no
-    ///         presence or centre has. Names in and a name out is the QML carve-out, like
-    ///         UiStyleProvider::titleBand().
-    Q_INVOKABLE [[nodiscard]] QString locationChipPlace(QString const& band,
-                                                        QString const& centre,
-                                                        int hosting,
-                                                        int sidebarShown) const;
+    /// @return Where the chip shows for this window, which knows what serves it and whether its sidebar is on
+    ///         screen: "none", "band" or "sidebar"; "none" for a name no presence or centre has. Names in and
+    ///         a name out is the QML carve-out, like UiStyleProvider::titleBand().
+    Q_INVOKABLE [[nodiscard]] QString locationChipPlace(QString const& band, QString const& centre) const;
 
     /// The manager's host connection changed what the chip shows. @see hostChipState
     void notifyHostConnectionChanged() { emit hostChipStateChanged(); }

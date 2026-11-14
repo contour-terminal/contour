@@ -87,38 +87,38 @@ TEST_CASE("geometry.bandMinimumWidth", "[titlebandgeometry]")
         double expected;
     };
     // The chip's last step is the same wide whatever the daemon is called: the daemon is gone by then.
-    constexpr auto chipAtLastStep = 120.0;
-    constexpr auto rows = std::array {
+    constexpr auto ChipAtLastStep = 120.0;
+    constexpr auto Rows = std::array {
         // Traffic lights lead; the new-tab button trails.
         Row { .name = "macOS: traffic lights lead, the new-tab button trails",
               .widths = { .leading = 78,
                           .trailing = 44,
                           .chipMargins = 16,
-                          .chip = chipAtLastStep,
+                          .chip = ChipAtLastStep,
                           .dragReserve = 24,
                           .tabStripMargin = 4,
                           .tabWell = 48 },
-              .expected = 78 + 44 + 16 + chipAtLastStep + 24 + 4 + 48 },
+              .expected = 78 + 44 + 16 + ChipAtLastStep + 24 + 4 + 48 },
         // Caption buttons trail.
         Row { .name = "Fluent: caption buttons trail",
               .widths = { .leading = 12,
                           .trailing = 190,
                           .chipMargins = 16,
-                          .chip = chipAtLastStep,
+                          .chip = ChipAtLastStep,
                           .dragReserve = 24,
                           .tabStripMargin = 4,
                           .tabWell = 48 },
-              .expected = 12 + 190 + 16 + chipAtLastStep + 24 + 4 + 48 },
+              .expected = 12 + 190 + 16 + ChipAtLastStep + 24 + 4 + 48 },
         // The header bar: window buttons at the end, the menu and the toggle at the start.
         Row { .name = "ContourLinux: the header bar",
               .widths = { .leading = 96,
                           .trailing = 150,
                           .chipMargins = 16,
-                          .chip = chipAtLastStep,
+                          .chip = ChipAtLastStep,
                           .dragReserve = 24,
                           .tabStripMargin = 4,
                           .tabWell = 48 },
-              .expected = 96 + 150 + 16 + chipAtLastStep + 24 + 4 + 48 },
+              .expected = 96 + 150 + 16 + ChipAtLastStep + 24 + 4 + 48 },
         // Whole cells.
         Row { .name = "Terminal: whole cells",
               .widths = { .leading = 16,
@@ -136,11 +136,11 @@ TEST_CASE("geometry.bandMinimumWidth", "[titlebandgeometry]")
               .widths = { .leading = 96,
                           .trailing = 150 + 90,
                           .chipMargins = 16,
-                          .chip = chipAtLastStep,
+                          .chip = ChipAtLastStep,
                           .dragReserve = 24,
                           .tabStripMargin = 4,
                           .tabWell = 48 },
-              .expected = 96 + 150 + 90 + 16 + chipAtLastStep + 24 + 4 + 48 },
+              .expected = 96 + 150 + 90 + 16 + ChipAtLastStep + 24 + 4 + 48 },
         // No chip (a window without a daemon, or the sidebar shown), no tabs in the band.
         Row { .name = "ContourLinux: no chip, no tabs in the band",
               .widths = { .leading = 96,
@@ -156,7 +156,7 @@ TEST_CASE("geometry.bandMinimumWidth", "[titlebandgeometry]")
               .widths = { .leading = -5, .trailing = 40, .dragReserve = 10 },
               .expected = 50 },
     };
-    for (auto const& row: rows)
+    for (auto const& row: Rows)
     {
         INFO(row.name);
         CHECK(bandMinimumWidth(row.widths) == row.expected);
@@ -183,7 +183,7 @@ TEST_CASE("geometry.minimumWidthWith", "[titlebandgeometry]")
         BandPlacement placement;
         int expected;
     };
-    constexpr auto rows = std::array {
+    constexpr auto Rows = std::array {
         Row { .name = "the hint stands where it is the wider",
               .hintMinimum = 400,
               .bandMinimum = 300,
@@ -233,7 +233,7 @@ TEST_CASE("geometry.minimumWidthWith", "[titlebandgeometry]")
               .placement = BandPlacement::BesideSidebar,
               .expected = 200 },
     };
-    for (auto const& row: rows)
+    for (auto const& row: Rows)
     {
         INFO(row.name);
         CHECK(minimumWidthWith(row.hintMinimum, row.bandMinimum, row.sidebarWidth, row.placement)

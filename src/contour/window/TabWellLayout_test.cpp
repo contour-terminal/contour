@@ -79,6 +79,26 @@ TEST_CASE("tabWell.overflow", "[tabwell]")
     CHECK(layoutTabWell(900 - DragReserve, 30, Metrics).overflow == TabWellOverflow::Scrolls);
 }
 
+TEST_CASE("tabWell.minimums", "[tabwell]")
+{
+    // Literal rows: 2·2 padding + n·120 + (n-1)·2 labelled; 2·2 padding + one 34 pill icon-only.
+    CHECK(labelledTabWellMinimum(0, Metrics) == 0);
+    CHECK(labelledTabWellMinimum(1, Metrics) == 124);
+    CHECK(labelledTabWellMinimum(3, Metrics) == 368);
+    CHECK(labelledTabWellMinimum(10, Metrics) == 1222);
+    CHECK(iconOnlyTabWellMinimum(0, Metrics) == 0);
+    CHECK(iconOnlyTabWellMinimum(1, Metrics) == 38);
+    CHECK(iconOnlyTabWellMinimum(30, Metrics) == 38);
+    // The labelled minimum is the narrowest well that still shows every label.
+    for (auto const n: std::views::iota(1, 21))
+    {
+        INFO("n " << n);
+        CHECK(layoutTabWell(labelledTabWellMinimum(n, Metrics), n, Metrics).label == TabLabelMode::Full);
+        CHECK(layoutTabWell(labelledTabWellMinimum(n, Metrics) - 1, n, Metrics).label
+              == TabLabelMode::IconOnly);
+    }
+}
+
 TEST_CASE("tabWell.names", "[tabwell]")
 {
     CHECK(tabLabelModeName(TabLabelMode::Full) == "full");

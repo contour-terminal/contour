@@ -8,23 +8,38 @@
 
 #include <contour/session/WindowSwitching.hpp>
 #include <contour/window/DaemonDriftChoice.hpp>
+#include <contour/window/DaemonHosting.hpp>
 #include <contour/window/EnumFromInt.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/SidebarTree.hpp>
 #include <contour/window/TitleBandLayout.hpp>
+
+#include <libunicode/convert.h>
+#include <libunicode/utf8_grapheme_segmenter.h>
+#include <libunicode/width.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <vthost/SocketPath.hpp>
+
+// This header is Qt-free, yet its sentences are what `lupdate` collects for the "LocationChip" context: the
+// marker is spelled as Qt spells it (same parameters, same expansion, so a translation unit that has Qt's own
+// sees an identical redefinition) and does nothing here.
+#ifndef QT_TRANSLATE_NOOP
+    #define QT_TRANSLATE_NOOP(scope, x) x
+#endif
 
 namespace contour::window
 {
@@ -71,8 +86,23 @@ enum class LocationChipFit : uint8_t
     WorkspaceElided, ///< Not even that fits: the workspace name is elided.
 };
 
-/// Number of @c LocationChipFit enumerators, derived from the last one.
-inline constexpr size_t LocationChipFitCount = static_cast<size_t>(LocationChipFit::WorkspaceElided) + 1;
+/// Every @c LocationChipFit, the table its count and its conversion from QML's int come from.
+inline constexpr auto LocationChipFits = std::array { LocationChipFit::Full,
+                                                      LocationChipFit::NoStateText,
+                                                      LocationChipFit::DaemonElided,
+                                                      LocationChipFit::DotOnly,
+                                                      LocationChipFit::WorkspaceElided };
+static_assert(enumValuesAreDense(LocationChipFits));
+
+/// Number of @c LocationChipFit enumerators.
+inline constexpr size_t LocationChipFitCount = LocationChipFits.size();
+
+/// @param value A window::LocationChipFit's underlying value, as QML hands it over.
+/// @return The enumerator, or nothing for a value that is none of them.
+[[nodiscard]] constexpr std::optional<LocationChipFit> locationChipFitFromInt(int value) noexcept
+{
+    return enumFromInt(LocationChipFits, value);
+}
 
 /// The width each fit step needs, in the units of the available room.
 struct LocationChipWidths
@@ -83,8 +113,9 @@ struct LocationChipWidths
     double dotOnly = 0;      ///< For @c LocationChipFit::DotOnly.
 };
 
-/// The least workspace characters (cells) the chip keeps before the `…`. The caller reserves that width, so
-/// the chip never goes narrower.
+/// The least workspace cells the chip keeps before the `…`: it keeps whole grapheme clusters until they cover
+/// that many, so six CJK characters (twelve cells) give three. The caller reserves that width, so the chip
+/// never goes narrower.
 inline constexpr std::size_t LocationChipWorkspaceFloor = 6;
 
 /// One of the fit steps that is chosen by a width: which fit it is, the key its width goes by, and which
@@ -136,40 +167,72 @@ template <typename WidthOf>
     return locationChipFit(widths, available);
 }
 
-/// The longest daemon name, in characters, the chip shows while it elides the name.
+/// The longest daemon name, in cells, the chip shows while it elides the name.
 inline constexpr std::size_t LocationChipDaemonElidedMax = 10;
 
 namespace detail
 {
-    /// @param text UTF-8 text.
-    /// @return The byte offset of the @p count'th character; the size when the text has fewer.
-    [[nodiscard]] constexpr size_t utf8OffsetOf(std::string_view text, size_t count) noexcept
+    /// One grapheme cluster of a text: its UTF-8 and the terminal cells it takes.
+    struct Cluster
     {
-        auto seen = size_t { 0 };
-        for (auto const i: std::views::iota(size_t { 0 }, text.size()))
-        {
-            if ((static_cast<unsigned char>(text[i]) & 0xC0U) == 0x80U)
-                continue; // A continuation byte belongs to the character before it.
-            if (seen == count)
-                return i;
-            ++seen;
-        }
-        return text.size();
-    }
+        std::string text;  ///< The cluster, UTF-8.
+        std::size_t cells; ///< Its width in cells (unicode::grapheme_cluster_width).
+    };
 
     /// @param text UTF-8 text.
-    /// @return How many characters (code points) the text has.
-    [[nodiscard]] constexpr size_t utf8Length(std::string_view text) noexcept
+    /// @return The text's grapheme clusters in order, so an emoji ZWJ sequence or a base with its combining
+    ///         marks is one piece that is never split.
+    [[nodiscard]] inline std::vector<Cluster> clustersOf(std::string_view text)
     {
-        return static_cast<size_t>(std::ranges::count_if(
-            text, [](char c) { return (static_cast<unsigned char>(c) & 0xC0U) != 0x80U; }));
+        auto clusters = std::vector<Cluster> {};
+        for (std::u32string const& cluster: unicode::utf8_grapheme_segmenter(text))
+            clusters.push_back(Cluster { .text = unicode::convert_to<char>(std::u32string_view { cluster }),
+                                         .cells = unicode::grapheme_cluster_width(cluster) });
+        return clusters;
+    }
+
+    /// @param clusters A text's clusters.
+    /// @return The cells they take together.
+    [[nodiscard]] inline std::size_t cellsOf(std::span<Cluster const> clusters) noexcept
+    {
+        return std::ranges::fold_left(
+            clusters | std::views::transform(&Cluster::cells), std::size_t { 0 }, std::plus<> {});
+    }
+
+    /// @param clusters A text's clusters.
+    /// @return The clusters' text joined.
+    [[nodiscard]] inline std::string joined(std::span<Cluster const> clusters)
+    {
+        auto text = std::string {};
+        for (auto const& cluster: clusters)
+            text += cluster.text;
+        return text;
+    }
+
+    /// @param clusters A text's clusters, from the end the piece is taken from.
+    /// @param budget   The most cells the piece may take.
+    /// @return How many clusters from the front of @p clusters fit in @p budget cells.
+    [[nodiscard]] inline std::size_t countWithin(std::span<Cluster const> clusters,
+                                                 std::size_t budget) noexcept
+    {
+        auto used = std::size_t { 0 };
+        auto count = std::size_t { 0 };
+        for (auto const& cluster: clusters)
+        {
+            if (used + cluster.cells > budget)
+                break;
+            used += cluster.cells;
+            ++count;
+        }
+        return count;
     }
 } // namespace detail
 
 /// @param daemon The daemon's name; empty for an in-process window.
 /// @param fit    How much of the chip fits.
 /// @return The daemon segment's text: the whole name down to NoStateText, the name middle-elided to at most
-///         LocationChipDaemonElidedMax characters at DaemonElided, nothing from DotOnly on.
+///         LocationChipDaemonElidedMax cells at DaemonElided (whole grapheme clusters, the ellipsis counted),
+///         nothing from DotOnly on.
 [[nodiscard]] inline std::string locationChipDaemonText(std::string_view daemon, LocationChipFit fit)
 {
     switch (fit)
@@ -177,14 +240,17 @@ namespace detail
         case LocationChipFit::Full:
         case LocationChipFit::NoStateText: return std::string(daemon);
         case LocationChipFit::DaemonElided: {
-            auto const length = detail::utf8Length(daemon);
-            if (length <= LocationChipDaemonElidedMax)
+            auto const clusters = detail::clustersOf(daemon);
+            if (detail::cellsOf(clusters) <= LocationChipDaemonElidedMax)
                 return std::string(daemon);
-            auto const keep = LocationChipDaemonElidedMax - 1; // The ellipsis takes one.
-            auto const head = (keep + 1) / 2;
-            auto const tail = keep - head;
-            return std::string(daemon.substr(0, detail::utf8OffsetOf(daemon, head))) + "…"
-                   + std::string(daemon.substr(detail::utf8OffsetOf(daemon, length - tail)));
+            auto const keep = LocationChipDaemonElidedMax - 1; // The ellipsis takes one cell.
+            auto const head = detail::countWithin(clusters, (keep + 1) / 2);
+            auto const headCells = detail::cellsOf(std::span(clusters).first(head));
+            // The tail is what fits from the back, in the cells the head left of the budget.
+            auto const reversed = std::vector<detail::Cluster>(clusters.rbegin(), clusters.rend());
+            auto const tail = detail::countWithin(reversed, keep - headCells);
+            return detail::joined(std::span(clusters).first(head)) + "…"
+                   + detail::joined(std::span(clusters).last(tail));
         }
         case LocationChipFit::DotOnly:
         case LocationChipFit::WorkspaceElided: return {};
@@ -192,59 +258,112 @@ namespace detail
     return {};
 }
 
-/// @param state What the connection looks like.
-/// @param fit   How much of the chip fits.
+/// Turns a source sentence into what the user reads: Qt's translation in the application, the sentence itself
+/// where nothing translates it (the tests).
+struct SourceText
+{
+    /// @param sentence A source-language sentence, with `%1`, `%2` for its arguments.
+    /// @return The sentence, as it is.
+    [[nodiscard]] std::string operator()(std::string_view sentence) const { return std::string(sentence); }
+};
+
+namespace detail
+{
+    /// @param sentence A (translated) sentence with `%1`, `%2`, ... for its arguments.
+    /// @param arguments What each marker stands for, in order.
+    /// @return The sentence with every marker replaced, in one pass, so an argument that looks like a marker
+    ///         is left as it is.
+    [[nodiscard]] inline std::string filled(std::string_view sentence,
+                                            std::span<std::string_view const> arguments)
+    {
+        auto text = std::string {};
+        for (auto at = size_t { 0 }; at < sentence.size(); ++at)
+        {
+            auto const digit = at + 1 < sentence.size() ? sentence[at + 1] - '0' : -1;
+            if (sentence[at] == '%' && digit >= 1 && static_cast<size_t>(digit) <= arguments.size())
+            {
+                text += arguments[static_cast<size_t>(digit) - 1];
+                ++at;
+            }
+            else
+                text += sentence[at];
+        }
+        return text;
+    }
+} // namespace detail
+
+/// @param state     What the connection looks like.
+/// @param fit       How much of the chip fits.
+/// @param translate Gives a source sentence's translation.
 /// @return The state's words ("Reconnecting…") while the whole chip fits, else nothing; the tooltip then
 ///         carries them (locationChipToolTip()).
-[[nodiscard]] inline std::string locationChipStatusText(HostChipState state, LocationChipFit fit)
+template <typename Translate = SourceText>
+[[nodiscard]] std::string locationChipStatusText(HostChipState state,
+                                                 LocationChipFit fit,
+                                                 Translate const& translate = Translate {})
 {
-    return fit == LocationChipFit::Full ? std::string(hostChipLook(state).status) : std::string {};
+    auto const status = hostChipLook(state).status;
+    return fit == LocationChipFit::Full && !status.empty() ? std::string(translate(status)) : std::string {};
 }
 
 /// @param workspace The workspace's name.
 /// @param fit       How much of the chip fits.
-/// @return The workspace's text: whole until the chip has to elide it, then its first
-///         LocationChipWorkspaceFloor characters and an ellipsis (never fewer).
+/// @return The workspace's text: whole until the chip has to elide it, then whole grapheme clusters of it, at
+///         least LocationChipWorkspaceFloor cells' worth (never fewer), and an ellipsis. A name the floor
+///         already covers stays whole.
 [[nodiscard]] inline std::string locationChipWorkspaceText(std::string_view workspace, LocationChipFit fit)
 {
-    if (fit != LocationChipFit::WorkspaceElided
-        || detail::utf8Length(workspace) <= LocationChipWorkspaceFloor)
+    if (fit != LocationChipFit::WorkspaceElided)
         return std::string(workspace);
-    return std::string(workspace.substr(0, detail::utf8OffsetOf(workspace, LocationChipWorkspaceFloor)))
-           + "…";
+    auto const clusters = detail::clustersOf(workspace);
+    auto kept = std::size_t { 0 };
+    auto cells = std::size_t { 0 };
+    for (auto const& cluster: clusters)
+    {
+        if (cells >= LocationChipWorkspaceFloor)
+            break;
+        cells += cluster.cells;
+        ++kept;
+    }
+    if (kept >= clusters.size())
+        return std::string(workspace);
+    return detail::joined(std::span(clusters).first(kept)) + "…";
 }
 
-/// What a screen reader says of the chip: the workspace, the daemon it is on and, while the workspace marker
-/// shows, what the other workspaces ask (`Workspace billing on starfive, another workspace needs you`).
-/// @param daemon  The daemon's name; empty for an in-process window, which names no daemon.
-/// @param summary The summary the chip shows.
-/// @return The name.
-[[nodiscard]] inline std::string locationChipAccessibleName(std::string_view daemon,
-                                                            SidebarSummary const& summary)
+/// Whether the switcher the chip opens is on screen.
+enum class ChipDisclosure : uint8_t
 {
-    auto name = "Workspace " + summary.currentWorkspace;
-    if (!daemon.empty())
-        name += " on " + std::string(daemon);
-    if (chipMarkerOf(summary.otherWorkspaces) == ChipMarker::Shown)
-        name += ", another workspace " + std::string(urgencyText(summary.otherWorkspaces));
-    return name;
-}
+    Collapsed = 0, ///< The switcher is closed.
+    Expanded,      ///< The switcher is open.
+};
 
 /// What the chip says of one connection state beyond its dot.
 struct LocationChipStateRow
 {
     HostChipState state;            ///< The state this row describes.
-    std::string_view tooltipBefore; ///< The tooltip's words before the daemon's name; empty for Connected.
-    std::string_view tooltipAfter;  ///< The tooltip's words after the daemon's name.
+    std::string_view tooltipFormat; ///< The tooltip's sentence (`%1` the daemon, `%2` the action); empty for
+                                    ///< Connected, whose tooltip is the action alone.
+    std::string_view description;   ///< What a screen reader adds to the name; empty for Connected.
     std::string_view glyph;         ///< The terminal-style stand-in for the dot.
 };
 
 /// The rows, indexed by @c HostChipState.
 inline constexpr std::array<LocationChipStateRow, HostChipStateCount> LocationChipStateRows {
-    LocationChipStateRow { HostChipState::Connected, "", "", "●" },
-    LocationChipStateRow { HostChipState::Reconnecting, "Reconnecting to ", "", "◑" },
-    LocationChipStateRow { HostChipState::Disconnected, "Disconnected from ", "", "✕" },
-    LocationChipStateRow { HostChipState::NeedsAttention, "Reconnecting to ", " needs your attention", "!" },
+    LocationChipStateRow {
+        .state = HostChipState::Connected, .tooltipFormat = "", .description = "", .glyph = "●" },
+    LocationChipStateRow { .state = HostChipState::Reconnecting,
+                           .tooltipFormat = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting to %1 · %2"),
+                           .description = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting"),
+                           .glyph = "◑" },
+    LocationChipStateRow { .state = HostChipState::Disconnected,
+                           .tooltipFormat = QT_TRANSLATE_NOOP("LocationChip", "Disconnected from %1 · %2"),
+                           .description = QT_TRANSLATE_NOOP("LocationChip", "Disconnected"),
+                           .glyph = "✕" },
+    LocationChipStateRow {
+        .state = HostChipState::NeedsAttention,
+        .tooltipFormat = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting to %1 needs your attention · %2"),
+        .description = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting, needs your attention"),
+        .glyph = "!" },
 };
 
 namespace detail
@@ -261,6 +380,86 @@ namespace detail
 static_assert(detail::locationChipStateRowsInOrder(),
               "LocationChipStateRows must list the states in enumerator order");
 
+/// What a screen reader adds when another workspace has news the marker shows, indexed by @c Urgency; empty
+/// where the marker does not show.
+inline constexpr std::array<std::string_view, 6> LocationChipOtherWorkspaceRows {
+    "",                                                                // Idle
+    "",                                                                // UnseenOutput
+    "",                                                                // Working
+    QT_TRANSLATE_NOOP("LocationChip", "Another workspace is done"),    // DoneUnseen
+    QT_TRANSLATE_NOOP("LocationChip", "Another workspace has failed"), // Failed
+    QT_TRANSLATE_NOOP("LocationChip", "Another workspace needs you"),  // NeedsYou
+};
+
+static_assert(static_cast<size_t>(Urgency::NeedsYou) + 1 == LocationChipOtherWorkspaceRows.size(),
+              "LocationChipOtherWorkspaceRows must have a row per Urgency");
+
+/// The words of one disclosure state, indexed by @c ChipDisclosure.
+inline constexpr std::array<std::string_view, 2> LocationChipDisclosureRows {
+    QT_TRANSLATE_NOOP("LocationChip", "collapsed"), QT_TRANSLATE_NOOP("LocationChip", "expanded")
+};
+static_assert(static_cast<size_t>(ChipDisclosure::Expanded) + 1 == LocationChipDisclosureRows.size());
+
+/// What the chip tells a screen reader it is: what it shows, by the ui-ux rule that the name is what an item
+/// shows and its status goes in the description.
+/// @param daemon    The daemon's name; empty for an in-process window, which names no daemon.
+/// @param workspace The workspace the window shows.
+/// @param translate Gives a source sentence's translation.
+/// @return `Workspace billing on starfive`, or `Workspace billing` for an in-process window.
+template <typename Translate = SourceText>
+[[nodiscard]] std::string locationChipAccessibleName(std::string_view daemon,
+                                                     std::string_view workspace,
+                                                     Translate const& translate = Translate {})
+{
+    if (daemon.empty())
+        return detail::filled(translate(QT_TRANSLATE_NOOP("LocationChip", "Workspace %1")),
+                              std::array<std::string_view, 1> { workspace });
+    return detail::filled(translate(QT_TRANSLATE_NOOP("LocationChip", "Workspace %1 on %2")),
+                          std::array<std::string_view, 2> { workspace, daemon });
+}
+
+/// @param daemon    The daemon's name.
+/// @param translate Gives a source sentence's translation.
+/// @return What a screen reader says of the control that names the daemon alone (the sidebar's head): `Daemon
+///         local`, what it shows.
+template <typename Translate = SourceText>
+[[nodiscard]] std::string locationChipDaemonAccessibleName(std::string_view daemon,
+                                                           Translate const& translate = Translate {})
+{
+    return detail::filled(translate(QT_TRANSLATE_NOOP("LocationChip", "Daemon %1")),
+                          std::array<std::string_view, 1> { daemon });
+}
+
+/// @param state       What the connection looks like.
+/// @param others      The most urgent roll-up of the workspaces the window does not show.
+/// @param disclosure  Whether the switcher is open.
+/// @param translate   Gives a source sentence's translation.
+/// @return The chip's accessible description, its parts joined by commas: the connection's state when it is
+///         not Connected, what another workspace asks while the marker shows, then the disclosure.
+template <typename Translate = SourceText>
+[[nodiscard]] std::string locationChipAccessibleDescription(HostChipState state,
+                                                            Urgency others,
+                                                            ChipDisclosure disclosure,
+                                                            Translate const& translate = Translate {})
+{
+    auto parts = std::vector<std::string> {};
+    if (auto const& word = LocationChipStateRows[static_cast<size_t>(state)].description; !word.empty())
+        parts.emplace_back(translate(word));
+    if (chipMarkerOf(others) == ChipMarker::Shown)
+    {
+        auto clause = std::string(translate(LocationChipOtherWorkspaceRows[static_cast<size_t>(others)]));
+        // Mid-list the clause is no sentence of its own: "Reconnecting, another workspace has failed".
+        if (!parts.empty() && !clause.empty())
+            clause.front() = static_cast<char>(std::tolower(static_cast<unsigned char>(clause.front())));
+        parts.emplace_back(std::move(clause));
+    }
+    parts.emplace_back(translate(LocationChipDisclosureRows[static_cast<size_t>(disclosure)]));
+    auto text = std::string {};
+    for (auto const& part: parts)
+        text += (text.empty() ? "" : ", ") + part;
+    return text;
+}
+
 /// @param state What the connection looks like.
 /// @return The glyph that stands for the state where a dot cannot be drawn.
 [[nodiscard]] constexpr std::string_view daemonStateGlyph(HostChipState state) noexcept
@@ -268,56 +467,25 @@ static_assert(detail::locationChipStateRowsInOrder(),
     return LocationChipStateRows[static_cast<size_t>(state)].glyph;
 }
 
-/// @param state    What the connection looks like.
-/// @param expanded The disclosure word ("collapsed" or "expanded").
-/// @return The chip's accessible description: the state's word, capitalised, when it is not Connected, then
-///         the disclosure.
-[[nodiscard]] inline std::string locationChipAccessibleDescription(HostChipState state,
-                                                                   std::string_view expanded)
+/// @param state     What the connection looks like.
+/// @param fit       How much of the chip fits; the state text is in the tooltip once it is elided.
+/// @param daemon    The daemon's name; empty for an in-process window.
+/// @param translate Gives a source sentence's translation.
+/// @return The chip's tooltip: the action, preceded by the state while the chip does not show it itself.
+template <typename Translate = SourceText>
+[[nodiscard]] std::string locationChipToolTip(HostChipState state,
+                                              LocationChipFit fit,
+                                              std::string_view daemon,
+                                              Translate const& translate = Translate {})
 {
-    if (state == HostChipState::Connected)
-        return std::string(expanded);
-    auto word = std::string(hostChipLook(state).accessibleState);
-    if (!word.empty())
-        word.front() = static_cast<char>(std::toupper(static_cast<unsigned char>(word.front())));
-    return word + ", " + std::string(expanded);
-}
-
-/// @param state  What the connection looks like.
-/// @param fit    How much of the chip fits; the state text is in the tooltip once it is elided.
-/// @param daemon The daemon's name; empty for an in-process window.
-/// @return The chip's tooltip.
-[[nodiscard]] inline std::string locationChipToolTip(HostChipState state,
-                                                     LocationChipFit fit,
-                                                     std::string_view daemon)
-{
-    auto const action = std::string(daemon.empty() ? "Switch workspace" : "Switch workspace or daemon");
+    auto action = std::string(
+        translate(daemon.empty() ? QT_TRANSLATE_NOOP("LocationChip", "Switch workspace")
+                                 : QT_TRANSLATE_NOOP("LocationChip", "Switch workspace or daemon")));
     auto const& row = LocationChipStateRows[static_cast<size_t>(state)];
     if (fit == LocationChipFit::Full || state == HostChipState::Connected || daemon.empty())
         return action;
-    return std::string(row.tooltipBefore) + std::string(daemon) + std::string(row.tooltipAfter) + " · "
-           + action;
-}
-
-/// Whether the window's sessions live in a daemon or in this very process.
-enum class DaemonHosting : uint8_t
-{
-    InProcess = 0, ///< No daemon: the window hosts its own sessions.
-    Daemon,        ///< The sessions live in a daemon.
-};
-
-/// Every @c DaemonHosting, the table its count and its conversion from QML's int come from.
-inline constexpr auto DaemonHostings = std::array { DaemonHosting::InProcess, DaemonHosting::Daemon };
-static_assert(enumValuesAreDense(DaemonHostings));
-
-/// Number of @c DaemonHosting enumerators.
-inline constexpr size_t DaemonHostingCount = DaemonHostings.size();
-
-/// @param value A window::DaemonHosting's underlying value, as QML hands it over.
-/// @return The enumerator, or nothing for a value that is none of them.
-[[nodiscard]] constexpr std::optional<DaemonHosting> daemonHostingFromInt(int value) noexcept
-{
-    return enumFromInt(DaemonHostings, value);
+    return detail::filled(std::string(translate(row.tooltipFormat)),
+                          std::array<std::string_view, 2> { daemon, action });
 }
 
 /// Where the location chip shows.
@@ -335,27 +503,14 @@ enum class SidebarShown : uint8_t
     Yes,    ///< The sidebar shows.
 };
 
-/// Every @c SidebarShown, the table its count and its conversion from QML's int come from.
-inline constexpr auto SidebarShowns = std::array { SidebarShown::No, SidebarShown::Yes };
-static_assert(enumValuesAreDense(SidebarShowns));
-
-/// Number of @c SidebarShown enumerators.
-inline constexpr size_t SidebarShownCount = SidebarShowns.size();
-
-/// @param value A window::SidebarShown's underlying value, as QML hands it over.
-/// @return The enumerator, or nothing for a value that is none of them.
-[[nodiscard]] constexpr std::optional<SidebarShown> sidebarShownFromInt(int value) noexcept
-{
-    return enumFromInt(SidebarShowns, value);
-}
-
 /// @param band    Whether the title band shows.
 /// @param centre  What the band's middle holds.
 /// @param hosting Whether the sessions live in a daemon.
 /// @param sidebar Whether the workspace sidebar shows.
-/// @return Where the chip shows: a daemon's chip follows the band's centre, an in-process window shows the
-///         chip only in the band's workspace-chip centre. With no band, a daemon window's chip heads the
-///         sidebar when that shows, so the daemon is named somewhere.
+/// @return Where the chip shows: a daemon's chip follows the band's centre, a window with no daemon
+///         (in-process or attached to a tmux host) shows the chip only in the band's workspace-chip centre.
+///         With no band, a daemon window's chip heads the sidebar when that shows, so the daemon is named
+///         somewhere.
 [[nodiscard]] constexpr LocationChipPlace locationChipPlace(BarPresence band,
                                                             BarCentre centre,
                                                             DaemonHosting hosting,
@@ -413,23 +568,6 @@ inline constexpr size_t SidebarShownCount = SidebarShowns.size();
     if (presence == Presences.end() || !bar)
         return locationChipPlaceName(LocationChipPlace::None);
     return locationChipPlaceName(locationChipPlace(presence->second, *bar, hosting, sidebar));
-}
-
-/// @param band    The band's presence by name.
-/// @param centre  The band centre's name.
-/// @param hosting A DaemonHosting's underlying value, as QML hands it over.
-/// @param sidebar A SidebarShown's underlying value, as QML hands it over.
-/// @return locationChipPlaceNamed(), and "none" when @p hosting or @p sidebar is no enumerator.
-[[nodiscard]] inline std::string_view locationChipPlaceFromInts(std::string_view band,
-                                                                std::string_view centre,
-                                                                int hosting,
-                                                                int sidebar) noexcept
-{
-    auto const daemonHosting = daemonHostingFromInt(hosting);
-    auto const sidebarShown = sidebarShownFromInt(sidebar);
-    if (!daemonHosting || !sidebarShown)
-        return locationChipPlaceName(LocationChipPlace::None);
-    return locationChipPlaceNamed(band, centre, *daemonHosting, *sidebarShown);
 }
 
 } // namespace contour::window

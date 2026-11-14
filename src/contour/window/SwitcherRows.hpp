@@ -10,6 +10,7 @@
 /// and naming rule is a row of a table test; the controller only renders it.
 
 #include <contour/session/WindowSwitching.hpp>
+#include <contour/window/DaemonHosting.hpp>
 #include <contour/window/SwitcherStatus.hpp>
 
 #include <algorithm>
@@ -125,24 +126,17 @@ enum class SwitcherScope : uint8_t
                     ///< other daemon is looked for or offered.
 };
 
-/// What a window is served by, which decides what its switcher can list.
-enum class SwitcherWindowKind : uint8_t
-{
-    Daemon = 0, ///< The window is on a daemon.
-    InProcess,  ///< The window has no daemon: only its own workspaces exist for it.
-};
-
 /// What the workspace chip opens: every daemon, the full switcher below the chip.
 inline constexpr auto ChipSwitcherScope = SwitcherScope::Everything;
 
 /// @param requested The scope the action asked for.
-/// @param window What serves the window the popup opens over.
-/// @return The scope the popup opens with: a window without a daemon lists its own workspaces alone, whatever
-///         was asked.
+/// @param hosting What serves the window the popup opens over.
+/// @return The scope the popup opens with: an in-process window lists its own workspaces alone, whatever was
+///         asked. A window attached to a host that is no daemon keeps what was asked, as it always has.
 [[nodiscard]] constexpr SwitcherScope switcherScopeFor(SwitcherScope requested,
-                                                       SwitcherWindowKind window) noexcept
+                                                       DaemonHosting hosting) noexcept
 {
-    return window == SwitcherWindowKind::InProcess ? SwitcherScope::WindowOnly : requested;
+    return hosting == DaemonHosting::InProcess ? SwitcherScope::WindowOnly : requested;
 }
 
 /// @param scope A top level's scope.

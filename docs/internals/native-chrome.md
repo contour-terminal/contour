@@ -163,10 +163,14 @@ bar), `window/TabWellLayout.hpp` and `window/TitleBandGeometry.hpp`. Keep the ke
   daemon that is connected shows a dot, a local one none. Which band shows it (`locationChipPlace`) and how it
   shortens are pure decisions in `LocationChip.hpp`: the state text goes first, then the daemon name is
   elided, then the daemon shrinks to its dot, and last the workspace is elided to
-  `LocationChipWorkspaceFloor` (6) characters and `…` (`LocationChipFit`). `bandMinimumWidth()` (`window/TitleBandGeometry.hpp`)
-  keeps the window from being narrower than that last step plus the band's other parts and one tab-well
-  minimum. With the sidebar shown the band has no chip; `WorkspaceChip.qml` in its `daemonOnly` mode heads the
-  sidebar instead. A click, Space or Return opens the switcher below it (`SwitcherOrigin::Chip`); the tooltip
+  `LocationChipWorkspaceFloor` (6) cells of whole grapheme clusters and `…` (`LocationChipFit`). The chip
+  gives way before the tabs do: its room is what is left after the labelled tab-well minimum
+  (`labelledTabWellMinimum()`), so with many tabs it sits at its last step. `bandMinimumWidth()`
+  (`window/TitleBandGeometry.hpp`) keeps the window from being narrower than that last step plus the band's
+  other parts and one icon-only tab (`iconOnlyTabWellMinimum()`). Only a window with a daemon
+  (`DaemonHosting::Daemon`) shows the daemon part; a tmux window (`OtherHost`) keeps its workspace-only
+  chrome. With the sidebar shown the band has no chip; `WorkspaceChip.qml` in its `daemonOnly` mode heads
+  the sidebar instead. A click, Space or Return opens the switcher below it (`SwitcherOrigin::Chip`); the tooltip
   is "Switch workspace or daemon" with the `ShowSwitcher` chord (⇧⌘R, Ctrl+Shift+R), and Escape closes the popup.
   The daemon drift chip lives in the band's trailing area, never over the cells.
 - **Notices**: `window/NoticeModel.hpp` queues `Toast` (a transient pill) and `Banner` (a band below the

@@ -7026,14 +7026,22 @@ TEST_CASE("TerminalSessionManager: the chip's placement is decided by names", "[
     contour::test::ScopedController const daemon { manager };
     manager.bindWindow(daemon.id, onWork);
 
-    CHECK(daemon->locationChipPlace("shown", "tabs", daemon->chipHosting(), 0) == "band");
-    CHECK(daemon->locationChipPlace("reveal", "title", daemon->chipHosting(), 0) == "band");
-    CHECK(daemon->locationChipPlace("pinned", "breadcrumb", daemon->chipHosting(), 0) == "sidebar");
-    CHECK(daemon->locationChipPlace("hidden", "tabs", daemon->chipHosting(), 0) == "none");
-    CHECK(daemon->locationChipPlace("shown", "nonsense", daemon->chipHosting(), 0) == "none");
-    CHECK(daemon->locationChipPlace("hidden", "tabs", daemon->chipHosting(), 1) == "sidebar");
-    CHECK(inProcess->locationChipPlace("shown", "tabs", inProcess->chipHosting(), 0) == "none");
-    CHECK(inProcess->locationChipPlace("shown", "chip+tabs", inProcess->chipHosting(), 0) == "band");
+    // The window knows what serves it and whether its sidebar shows: QML asks with the band alone.
+    REQUIRE(daemon->sidebarWidth() == 0);
+    CHECK(daemon->locationChipPlace("shown", "tabs") == "band");
+    CHECK(daemon->locationChipPlace("reveal", "title") == "band");
+    CHECK(daemon->locationChipPlace("pinned", "breadcrumb") == "sidebar");
+    CHECK(daemon->locationChipPlace("hidden", "tabs") == "none");
+    CHECK(daemon->locationChipPlace("shown", "nonsense") == "none");
+    CHECK(inProcess->locationChipPlace("shown", "tabs") == "none");
+    CHECK(inProcess->locationChipPlace("shown", "chip+tabs") == "band");
+
+    // With the sidebar on screen and no band, the daemon heads the sidebar; an in-process window names none.
+    daemon->toggleSidebar();
+    inProcess->toggleSidebar();
+    REQUIRE(daemon->sidebarWidth() > 0);
+    CHECK(daemon->locationChipPlace("hidden", "tabs") == "sidebar");
+    CHECK(inProcess->locationChipPlace("hidden", "tabs") == "none");
 
     manager.releaseBinding(onWork);
 }
@@ -7054,7 +7062,7 @@ TEST_CASE("TerminalSessionManager: the chip's fit, texts and glyph come from the
 
     // The steps QML iterates are the table's rows, in elision order; each one's room admits that step and no
     // earlier one. A new row in LocationChipSteps is therefore one edit.
-    auto const steps = daemon->chipFitSteps();
+    auto const steps = contour::window::WindowController::chipFitSteps();
     REQUIRE(steps.size() == static_cast<qsizetype>(contour::window::LocationChipSteps.size()));
     CHECK(steps.size() + 1 == static_cast<qsizetype>(contour::window::LocationChipFitCount));
     for (auto const index: std::views::iota(size_t { 0 }, contour::window::LocationChipSteps.size()))
@@ -7082,8 +7090,9 @@ TEST_CASE("TerminalSessionManager: the chip's fit, texts and glyph come from the
     CHECK(daemon->chipDaemonText(static_cast<int>(LocationChipFit::Full)) == "work-build-server");
     CHECK(daemon->chipDaemonText(static_cast<int>(LocationChipFit::DaemonElided)) == "work-…rver");
     CHECK(daemon->chipDaemonText(static_cast<int>(LocationChipFit::DotOnly)).isEmpty());
-    CHECK(daemon->chipDaemonText(99)
-          == daemon->chipDaemonText(static_cast<int>(LocationChipFit::WorkspaceElided)));
+    // A value that is no fit is the default, the whole chip: checked, never clamped to the nearest step.
+    CHECK(daemon->chipDaemonText(99) == "work-build-server");
+    CHECK(daemon->chipDaemonText(-1) == "work-build-server");
     CHECK(inProcess->chipDaemonText(0).isEmpty());
     CHECK(daemon->chipStatusText(static_cast<int>(LocationChipFit::NoStateText)).isEmpty());
     CHECK(daemon->chipWorkspaceText(QStringLiteral("billing-and-invoices"),
@@ -7109,6 +7118,48 @@ TEST_CASE("TerminalSessionManager: the default daemon raises no band notice whil
     CHECK(hostNoticeOf(hostChipPresence(manager.chromeLabelOf(window.id)), HostChipState::Reconnecting)
           == HostNotice::None);
     manager.releaseBinding(onDefault);
+}
+
+TEST_CASE("TerminalSessionManager: hostingOf tells in-process, daemon and attached windows apart",
+          "[manager][chip]")
+{
+    using namespace contour::window;
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto onWork = contour::test::DaemonNamedBinding { factory, chipLabelTarget("work"), "work" };
+    // A tmux attach: bound, with a host label, and no daemon.
+    auto tmux = contour::session::FactoryBinding { factory, "tmuxhost" };
+    contour::test::ScopedController const inProcess { manager };
+    contour::test::ScopedController const daemon { manager };
+    contour::test::ScopedController const attached { manager };
+    manager.bindWindow(daemon.id, onWork);
+    manager.bindWindow(attached.id, tmux);
+
+    CHECK(manager.hostingOf(inProcess.id) == DaemonHosting::InProcess);
+    CHECK(manager.hostingOf(daemon.id) == DaemonHosting::Daemon);
+    CHECK(manager.hostingOf(attached.id) == DaemonHosting::OtherHost);
+
+    // A tmux window names no daemon, so its chrome is what it was before the chip: no location chip in a
+    // band that has no workspace chip, and no daemon control at the sidebar's head.
+    CHECK(attached->chipDaemonName().isEmpty());
+    CHECK(attached->chipHosting() == static_cast<int>(DaemonHosting::OtherHost));
+    CHECK(attached->locationChipPlace(QStringLiteral("shown"), QStringLiteral("tabs")) == "none");
+    CHECK(attached->locationChipPlace(QStringLiteral("shown"), QStringLiteral("title")) == "none");
+    CHECK(attached->locationChipPlace(QStringLiteral("shown"), QStringLiteral("breadcrumb")) == "none");
+    CHECK(attached->locationChipPlace(QStringLiteral("hidden"), QStringLiteral("tabs")) == "none");
+    CHECK(attached->locationChipPlace(QStringLiteral("shown"), QStringLiteral("chip+tabs")) == "band");
+    CHECK(daemon->locationChipPlace(QStringLiteral("shown"), QStringLiteral("tabs")) == "band");
+    CHECK(inProcess->locationChipPlace(QStringLiteral("shown"), QStringLiteral("tabs")) == "none");
+    // The switcher keeps what it did for it: the scope asked for.
+    CHECK(manager
+              .switcherOpeningFor(
+                  attached.id, SwitcherPrompt::Browse, ChipSwitcherScope, SwitcherOrigin::Chip, {})
+              .scope
+          == SwitcherScope::Everything);
+
+    manager.releaseBinding(onWork);
+    manager.releaseBinding(tmux);
 }
 
 TEST_CASE("TerminalSessionManager: the chip opens every daemon, an in-process window its own",

@@ -40,7 +40,6 @@ class MockSwitcherHost: public QObject, public window::SwitcherHost
     Q_OBJECT
     Q_PROPERTY(QObject* switcher READ switcher NOTIFY switcherChanged)
     Q_PROPERTY(bool isWorkspaceDropdownOpen READ isWorkspaceDropdownOpen NOTIFY switcherChanged)
-    Q_PROPERTY(QString workspaceChipDescription READ workspaceChipDescription NOTIFY switcherChanged)
     // The location chip of an in-process window: the workspace alone, no daemon segment, no dot.
     Q_PROPERTY(QString chipDaemonName READ chipDaemonName CONSTANT)
     Q_PROPERTY(int chipDaemonDot READ chipDaemonDot CONSTANT)
@@ -48,7 +47,7 @@ class MockSwitcherHost: public QObject, public window::SwitcherHost
     Q_PROPERTY(int hostChipState READ hostChipState CONSTANT)
     Q_PROPERTY(QVariantList chipFitSteps READ chipFitSteps CONSTANT)
     Q_PROPERTY(QString chipAccessibleName READ chipAccessibleName CONSTANT)
-    Q_PROPERTY(QString chipAccessibleDescription READ workspaceChipDescription NOTIFY switcherChanged)
+    Q_PROPERTY(QString chipAccessibleDescription READ chipAccessibleDescription NOTIFY switcherChanged)
 
   public:
     [[nodiscard]] static QString chipDaemonName() { return {}; }
@@ -109,7 +108,7 @@ class MockSwitcherHost: public QObject, public window::SwitcherHost
 
     [[nodiscard]] QObject* switcher() const { return _switcher.data(); }
     [[nodiscard]] bool isWorkspaceDropdownOpen() const { return _switcher && _anchor.has_value(); }
-    [[nodiscard]] QString workspaceChipDescription() const
+    [[nodiscard]] QString chipAccessibleDescription() const
     {
         return isWorkspaceDropdownOpen() ? QStringLiteral("expanded") : QStringLiteral("collapsed");
     }
@@ -168,7 +167,7 @@ Window {
         id: chip
         x: 40; y: 8
         sidebar: ({ currentWorkspaceTitle: "contour", workspaceChipMarked: false,
-                    workspaceChipAccessibleName: "contour", workspaceChipGlyph: 0 })
+                    workspaceChipGlyph: 0 })
         controller: hostWindow.switcherHost
         isOpen: hostWindow.switcherHost.isWorkspaceDropdownOpen
         onClicked: hostWindow.switcherHost.showWorkspaceDropdown(chip.dropdownAnchor())
