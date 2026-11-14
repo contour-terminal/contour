@@ -11,11 +11,13 @@
 #include <format>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <variant>
 #include <vector>
 
 #include <vtcontrol/Target.hpp>
+#include <vtworkspace/TabName.hpp>
 
 namespace contour::remote
 {
@@ -139,9 +141,11 @@ std::vector<WorkspaceRow> workspaceRowsOf(std::span<vtcontrol::WorkspaceInfo con
             .ref = vtcontrol::parseObjectRef(info.id).value_or(vtcontrol::ObjectRef {}),
             .label = info.label,
             .position = info.position,
-            .name = workspaceDisplayName(info.label,
-                                         active != info.tabs.end() ? std::string_view { active->title } : "",
-                                         info.position),
+            .name = workspaceDisplayName(
+                info.label,
+                active != info.tabs.end() ? vtworkspace::tabNameOf({ .label = active->label }, active->title)
+                                          : "",
+                info.position),
             .visibility = visibility != Visibilities.end() ? *visibility : WorkspaceVisibility::Hidden,
             .tabs = info.tabs.size(),
             .shownByWindowHere = shownHere(id),
@@ -155,12 +159,9 @@ std::vector<WorkspaceRow> workspaceRowsOf(window::WorkspaceDirectory const& dire
                                           ShownHere const& shownHere)
 {
     auto rows = std::vector<WorkspaceRow> {};
-    for (auto const [index, workspace]: core::views::enumerate(directory.workspaces))
+    for (auto const& [position, listed]: window::switchableWorkspacesOf(directory))
     {
-        // As a listing's: one holding no tab has nothing for a window to show.
-        if (workspace.tabs.empty())
-            continue;
-        auto const position = static_cast<uint32_t>(index + 1);
+        auto const& workspace = *listed;
         auto shown = shownHere(workspace.id);
         rows.push_back(WorkspaceRow {
             .id = workspace.id,
@@ -178,6 +179,14 @@ std::vector<WorkspaceRow> workspaceRowsOf(window::WorkspaceDirectory const& dire
         });
     }
     return rows;
+}
+
+std::vector<WorkspaceRow> inProcessWorkspaceRowsOf(window::WorkspaceDirectory const& directory,
+                                                   vtworkspace::WorkspaceId window)
+{
+    return workspaceRowsOf(directory, [window](uint64_t id) {
+        return id == window.value ? std::optional { window } : std::nullopt;
+    });
 }
 
 bool namesControlId(session::WorkspaceTarget const& workspace)

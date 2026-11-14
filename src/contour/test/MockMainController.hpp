@@ -295,6 +295,13 @@ class MockMainController: public MainWindowControllerMock
         _focusedToolbar = -1;
         emit chromeFocusChanged();
     }
+    /// Mirrors WindowController::activateSidebarRow(): the row is activated, and the keyboard goes to the
+    /// terminal when it showed something.
+    Q_INVOKABLE void activateSidebarRow(int row)
+    {
+        if (sidebarModel().activateRow(row) == window::sidebarrows::RowActivation::Shown)
+            leaveChrome();
+    }
     /// Records what the window reports it shows: how Main.qml tells the controller what there is to visit.
     /// Where Main.qml placed the sidebar's toggle; the mock has no pane menu to offer it in.
     Q_INVOKABLE void setSidebarToggleHost(QString const& host) { reportedSidebarToggleHost = host; }

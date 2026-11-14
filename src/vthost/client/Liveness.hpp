@@ -12,13 +12,10 @@
 #include <cstdint>
 #include <optional>
 
+#include <vthost/proto/ReconnectCeiling.hpp>
+
 namespace vthost::client
 {
-
-/// How long a daemon may take to answer a ClientHello before the attempt is given up on: long enough for a
-/// daemon busy restoring its sessions, short enough that a connection gone half-open mid-handshake is
-/// retried instead of waited on for good.
-inline constexpr auto DefaultHandshakeDeadline = std::chrono::milliseconds { 10000 };
 
 /// The thresholds of the liveness decision.
 struct LivenessPolicy
@@ -29,7 +26,7 @@ struct LivenessPolicy
     std::chrono::milliseconds deadAfter { 15000 };
     /// How long it may take to answer the ClientHello. Applies to every daemon, whether or not it shares
     /// Capability::Heartbeat: an old daemon answers the hello too.
-    std::chrono::milliseconds handshakeDeadline { DefaultHandshakeDeadline };
+    std::chrono::milliseconds handshakeDeadline { proto::HandshakeDeadline };
     /// A tick this much later than due means the process was frozen. Which freezes that reveals depends on
     /// the steady clock: on macOS it counts the time the system slept (libc++ reads CLOCK_MONOTONIC_RAW), so
     /// a sleep shows up as a late tick; on Linux and the BSDs it stops while the system is suspended, so a

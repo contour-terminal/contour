@@ -429,27 +429,51 @@ TEST_CASE("SystemdScopePlacement.the worker blocks process-directed signals", "[
     auto placement = rig.placement();
     REQUIRE(released(place(placement, fakeChild(4242))));
 
-    auto const readLine = [](std::filesystem::path const& file, std::string_view prefix) {
-        auto in = std::ifstream { file };
+    auto const readComm = [](std::filesystem::path const& task) {
+        auto in = std::ifstream { task / "comm" };
+        auto line = std::string {};
+        std::getline(in, line);
+        return line;
+    };
+    // The signals a live task blocks, from one read of its status; nothing for a task that is no longer
+    // live. pthread_join() returns early in a thread's exit, so an earlier test's worker, joined already,
+    // can still be listed: once the kernel has released its signal state, its status reads
+    // "State: X (dead)" with an all-zero SigBlk, and a task gone entirely reads nothing at all.
+    auto const liveBlockedSignals =
+        [](std::filesystem::path const& task) -> std::optional<unsigned long long> {
+        auto in = std::ifstream { task / "status" };
+        auto state = std::string {};
+        auto blocked = std::string {};
         auto line = std::string {};
         while (std::getline(in, line))
-            if (line.starts_with(prefix))
-                return line.substr(prefix.size());
-        return std::string {};
+        {
+            if (line.starts_with("State:"))
+                state = line.substr(6);
+            else if (line.starts_with("SigBlk:"))
+                blocked = line.substr(7);
+        }
+        state.erase(0, std::min(state.size(), state.find_first_not_of(" \t")));
+        if (state.empty() || blocked.empty() || state.starts_with('X') || state.starts_with('Z'))
+            return std::nullopt;
+        return std::stoull(blocked, nullptr, 16);
     };
-    // This worker, by name: other threads -- the sanitizers' among them -- block signals of their own.
-    auto const tasks = std::filesystem::directory_iterator { "/proc/self/task" };
-    auto const worker = std::ranges::find_if(tasks, [&](auto const& entry) {
-        return readLine(entry.path() / "comm", "") == vtpty::WorkerThreadName;
-    });
-    REQUIRE(worker != std::filesystem::directory_iterator {});
 
-    auto const mask = std::stoull(readLine(worker->path() / "status", "SigBlk:"), nullptr, 16);
-    auto const isBlocked = [mask](int signal) {
-        return ((mask >> (signal - 1)) & 1U) != 0;
-    };
-    CHECK(isBlocked(SIGTERM));
-    CHECK(isBlocked(SIGINT));
+    // The live workers, by name: other threads -- the sanitizers' among them -- block signals of their own.
+    auto masks = std::vector<unsigned long long> {};
+    for (auto const& entry: std::filesystem::directory_iterator { "/proc/self/task" })
+        if (readComm(entry.path()) == vtpty::WorkerThreadName)
+            if (auto const mask = liveBlockedSignals(entry.path()))
+                masks.push_back(*mask);
+    REQUIRE_FALSE(masks.empty());
+
+    for (auto const mask: masks)
+    {
+        auto const isBlocked = [mask](int signal) {
+            return ((mask >> (signal - 1)) & 1U) != 0;
+        };
+        CHECK(isBlocked(SIGTERM));
+        CHECK(isBlocked(SIGINT));
+    }
 }
 #endif
 

@@ -226,6 +226,7 @@ add_library(vthost STATIC
     proto/Pdu.hpp
     proto/PduTrace.cpp
     proto/PduTrace.hpp
+    proto/ReconnectCeiling.hpp
     proto/ReleasedVersions.hpp
     proto/Unsupported.cpp
     proto/Unsupported.hpp

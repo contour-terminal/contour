@@ -111,9 +111,21 @@ namespace
         {
             auto session = std::unique_ptr<IAskpassSession> {};
             if (_broker)
-                if (auto const serving = co_await _broker->whenServing(); serving)
-                    if (auto opened = _broker->open(_askpassTarget))
-                        session = *std::move(opened);
+            {
+                auto const serving = co_await _broker->whenServing();
+                auto opened = serving ? _broker->open(_askpassTarget)
+                                      : std::expected<std::unique_ptr<IAskpassSession>, std::string> {
+                                            std::unexpected { serving.error() }
+                                        };
+                if (opened)
+                    session = *std::move(opened);
+                else
+                    // As the ssh transport does: the passphrase cannot be asked, and ssh-keygen runs without.
+                    clientLog()("warning: key auth: {} is signed without prompts, as the prompt helper could "
+                                "not be set up: {}",
+                                core::pathToUtf8(_identityFile),
+                                opened.error());
+            }
             auto const argv = std::vector<std::string> { "ssh-keygen",
                                                          "-Y",
                                                          "sign",

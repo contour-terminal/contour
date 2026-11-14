@@ -101,6 +101,7 @@
 
 #include <text_shaper/BundledFonts.hpp>
 #include <text_shaper/FontLocator.hpp>
+#include <text_shaper/LastResortFontLocator.hpp>
 #include <text_shaper/NerdFontSymbolRanges.hpp>
 #include <text_shaper/NerdFontSymbolsLocator.hpp>
 
@@ -166,6 +167,7 @@
 #include <QtQuick/QSGRendererInterface>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QFileDialog>
+#include <QtWidgets/QMessageBox>
 
 #include <algorithm>
 #include <array>
@@ -485,7 +487,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::function<void(int)> exitEventLoop,
                              window::BootstrapPromptFactory bootstrapPromptFactory,
                              std::unique_ptr<remote::IWorkspaceLister> startupLister,
-                             std::unique_ptr<vthost::IGitStatusProbe> workspaceGitProbe):
+                             std::unique_ptr<vthost::IGitStatusProbe> workspaceGitProbe,
+                             platform::ApplicationReadiness::State applicationAtStart):
     ContourApp { env },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
     _exitEventLoop { exitEventLoop ? std::move(exitEventLoop)
@@ -524,6 +527,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     // In the config directory, as ssh keeps known_hosts: never under the state directory, which falls back
     // to a shared temporary directory that another local user could have planted a pin in.
     _knownDaemons(_fileSystem, vthost::knownDaemonsPath(config::configHome()), core::systemRandom()),
+    _applicationReadiness { std::make_shared<platform::ApplicationReadiness>(applicationAtStart) },
     _startupLister(std::move(startupLister)),
     _taskbarProgressSink(taskbarProgress ? std::move(taskbarProgress) : platform::makeTaskbarProgressSink()),
     _titleBandMaterial(appearanceServices.titleBand()),
@@ -3080,12 +3084,22 @@ text::FontLocator& ContourGuiApp::fontLocator(vtrasterizer::FontLocatorEngine en
             if (auto const directories = bundledFontDirectories(executable->parent_path());
                 !directories.paths.empty())
                 symbolsFont = directories.paths.front() / text::NerdFontSymbolsFileName;
-        _nativeFontLocator = std::make_unique<text::NerdFontSymbolsLocator>(platformLocator, symbolsFont);
+        _lastResortFontLocator = std::make_unique<text::LastResortFontLocator>(platformLocator);
+        _nativeFontLocator =
+            std::make_unique<text::NerdFontSymbolsLocator>(*_lastResortFontLocator, symbolsFont);
         startupLog()("Nerd Fonts symbols font {}: {}.",
                      _nativeFontLocator->hasSymbolsFont() ? "bundled" : "not found",
                      core::pathToUtf8(symbolsFont));
     });
     return *_nativeFontLocator;
+}
+
+void ContourGuiApp::reportUnusableFont(std::string const& reason) const
+{
+    errorLog()("{}", reason);
+    std::cerr << std::format("contour: {}\n", reason);
+    // Windows' GUI build has no console to show stderr in: the dialog is what the user sees.
+    QMessageBox::critical(nullptr, QStringLiteral("Contour"), QString::fromStdString(reason));
 }
 
 int ContourGuiApp::fontConfigAction()
@@ -3247,8 +3261,13 @@ int ContourGuiApp::terminalGuiAction()
         return likelyWayland && !wmClass.isEmpty() ? wmClass : QStringLiteral(CONTOUR_APP_ID);
     }());
     QApplication const app(qtArgsCount, (char**) qtArgsPtr.data());
-    // The attach above may wait to serve ssh's prompts: Qt can run that thread's event loop now.
+    // The attach above may wait to serve ssh's prompts: Qt can run that thread's event loop now, and the
+    // askpass broker starts it here, on this thread.
     _applicationReadiness->markReady();
+    // Declared after `app`, so that it runs before `app` is destroyed, on every return from here on: the
+    // links outlive the QApplication (releaseHosting() runs after it is gone), and a reconnect then must not
+    // start a Qt thread without it.
+    auto const applicationClosed = core::Finally { [this] { _applicationReadiness->close(); } };
     // The platform Qt runs on is known now; a test injected its own probe at construction.
     if (!_dragEndProbe)
         _dragEndProbe = window::makeDragEndProbe(QGuiApplication::platformName());
@@ -3292,6 +3311,19 @@ int ContourGuiApp::terminalGuiAction()
     setupQCoreApplication();
 
     registerBundledFonts();
+
+    // Refused here, before any window: a system on which not even a last-resort font can be found has
+    // nothing to draw a terminal with, and the renderer would otherwise fail inside the first window.
+    {
+        auto const& fonts = _config.profile(_config.defaultProfileName.value())->fonts.value();
+        auto const primary = text::locatePrimaryFont(fontLocator(fonts.fontLocator), fonts.regular);
+        if (!primary)
+        {
+            reportUnusableFont(text::describe(primary.error(), fonts.regular));
+            return EXIT_FAILURE;
+        }
+        startupLog()("Primary font: {}", *primary);
+    }
 
     if (startupLog.isEnabled())
     {
@@ -4580,13 +4612,27 @@ std::vector<window::SwitcherWorkspace> ContourGuiApp::windowWorkspacesOf(window:
 
 std::expected<void, std::string> ContourGuiApp::showSwitchPick(remote::SwitchPickRequest const& pick)
 {
-    auto const daemon = _sessionManager.daemonTargetOf(pick.window);
-    if (!daemon)
-        return std::unexpected(std::string { "the window went away" });
     auto* const controller = _sessionManager.controllerDisplaying(pick.window);
     if (controller == nullptr)
         return std::unexpected(std::string { "the window went away" });
     controller->sidebar().refreshNow(); // its rows as of now, not as of its last rebuild
+    auto const daemon = _sessionManager.daemonTargetOf(pick.window);
+    if (!daemon)
+    {
+        if (!_sessionManager.isInProcessWindow(pick.window))
+            return std::unexpected(std::string { "the window went away" });
+        // No daemon to scope the pick to: the window's own workspaces are the popup's, as for the chip.
+        return openSwitcher(
+            window::SwitcherOpening { .window = pick.window,
+                                      .windowDaemon = session::SwitchTarget {},
+                                      .mode = pick.mode,
+                                      .prompt = window::SwitcherPrompt::Browse,
+                                      .pick = std::nullopt,
+                                      .scope = window::SwitcherScope::WindowOnly,
+                                      .windowWorkspaces = windowWorkspacesOf(*controller, pick.window),
+                                      .origin = window::SwitcherOrigin::Centred },
+            *controller);
+    }
     return openSwitcher(
         window::SwitcherOpening {
             .window = pick.window,

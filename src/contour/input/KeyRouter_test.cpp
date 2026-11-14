@@ -200,3 +200,19 @@ TEST_CASE("an unbound app-modifier named key is sent", "[input][router]")
     CHECK(std::get<SendKey>(route.otherwise).key == Key::UpArrow);
     CHECK(std::get<SendKey>(route.otherwise).modifiers.chord == Modifiers { Modifier::Super });
 }
+
+TEST_CASE("on a Mac Control+Command with a vertical arrow routes to CycleWorkspace", "[input][router]")
+{
+    auto const config = configWith("    []", contour::config::KeyboardPlatformKind::Mac);
+    auto const chord = Modifiers { Modifier::Control, Modifier::Super };
+
+    auto const down = contour::input::routeKey(
+        Key::DownArrow, chord, AppModifier::Held, contextOf(config, SuperEncoding::Unrepresentable));
+    auto const up = contour::input::routeKey(
+        Key::UpArrow, chord, AppModifier::Held, contextOf(config, SuperEncoding::Unrepresentable));
+    INFO("down user=" << firstActionOf(down.user.actions)
+                      << " fallback=" << firstActionOf(down.fallback.actions));
+    INFO("up user=" << firstActionOf(up.user.actions) << " fallback=" << firstActionOf(up.fallback.actions));
+    CHECK(firstActionOf(down.fallback.actions) == "CycleWorkspace, direction: next");
+    CHECK(firstActionOf(up.fallback.actions) == "CycleWorkspace, direction: previous");
+}

@@ -70,6 +70,25 @@ TEST_CASE("Tab: title precedence is runtime > MultiplePanes > active-leaf", "[vt
     }
 }
 
+TEST_CASE("Tab: a control label names the tab over its title", "[vtworkspace][tab][title]")
+{
+    Ids ids;
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+    auto const resolver = makeResolver();
+    (void) tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    tab.setRuntimeTitle("my tab");
+
+    tab.setLabel("build");
+    CHECK(tab.label() == "build");
+    CHECK(tab.title(resolver) == "build");
+
+    // Cleared, the tab is named as before it had one.
+    tab.setLabel("");
+    CHECK(tab.title(resolver) == "my tab");
+    tab.setRuntimeTitle(std::nullopt);
+    CHECK(tab.title(resolver) == std::string { Tab::MultiplePanesLabel });
+}
+
 TEST_CASE("Tab: splitting makes the new pane active", "[vtworkspace][tab][split]")
 {
     Ids ids;

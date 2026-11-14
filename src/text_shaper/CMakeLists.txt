@@ -6,6 +6,7 @@ set(text_shaper_SRC
     FontLocatorProvider.cpp FontLocatorProvider.hpp
     MockFontLocator.cpp MockFontLocator.hpp
     NerdFontSymbolRanges.hpp
+    LastResortFontLocator.cpp LastResortFontLocator.hpp
     NerdFontSymbolsLocator.cpp NerdFontSymbolsLocator.hpp
     OpenShaper.cpp OpenShaper.hpp
     Shaper.cpp Shaper.hpp
@@ -91,7 +92,7 @@ message(STATUS "[text_shaper] Libraries: ${TEXT_SHAPER_LIBS}")
 
 if(CONTOUR_TESTING)
     enable_testing()
-    add_executable(text_shaper_test test_main.cpp ClusterSpans_test.cpp Font_test.cpp FontHash_test.cpp FontLocatorProvider_test.cpp NerdFontSymbolsLocator_test.cpp OpenShaper_test.cpp Scale_test.cpp)
+    add_executable(text_shaper_test test_main.cpp ClusterSpans_test.cpp Font_test.cpp FontHash_test.cpp FontLocatorProvider_test.cpp LastResortFontLocator_test.cpp NerdFontSymbolsLocator_test.cpp OpenShaper_test.cpp Scale_test.cpp)
     if(APPLE)
         target_sources(text_shaper_test PRIVATE CoreTextLocator_test.cpp)
     endif()

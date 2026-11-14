@@ -111,6 +111,32 @@ Task<void> feedBytes(core::net::ISocket* client, std::vector<std::byte> const* b
 /// the count.
 constexpr auto CollectBudget = std::chrono::milliseconds { 60'000 };
 
+/// How long a test client waits for what it counts on, and from when.
+///
+/// A case that waits for something that must NOT come -- a PDU a session should never send -- spends its
+/// budget in full, so it wants a short one. Counted from the start, a short budget is also all the time
+/// the frames that DO come have, and a loaded machine fails the case on their count instead. Counted from
+/// the @ref from'th frame, the budget times only the absence the case is about.
+struct CollectBound
+{
+    std::chrono::milliseconds budget = CollectBudget; ///< How long to wait.
+    std::size_t from = 0; ///< How many frames must have arrived before the budget starts; 0: at once.
+};
+
+/// Sleeps out @p bound: its budget, once @p out holds CollectBound::from frames. Waiting for those
+/// frames is bounded too, by CollectBudget, so a session that sends fewer still ends the collection.
+Task<void> spendBound(core::net::EventLoop* loop,
+                      std::vector<proto::DecodedFrame> const* out,
+                      CollectBound bound)
+{
+    if (bound.from != 0)
+        std::ignore = co_await core::net::testing::waitUntil(
+            loop,
+            [out, from = bound.from] { return out->size() >= from; },
+            static_cast<int>(CollectBudget.count()));
+    co_await loop->delay(bound.budget);
+}
+
 /// How a test client reads: as fast as the transport delivers, unless it is told to pause.
 ///
 /// A client that pauses before every read keeps a frame larger than a bounded transport in flight
@@ -164,28 +190,28 @@ Task<void> decodeUntil(core::net::ISocket* client,
 /// @param loop What the budget is timed on.
 /// @param done Consulted after each decoded frame; the collector stops when it returns true.
 /// @param pacing How fast the client reads.
-/// @param budget How long to wait for @p done before giving up on it, with what arrived so far.
+/// @param bound How long to wait for @p done before giving up on it, with what arrived so far.
 Task<void> collectUntil(core::net::EventLoop* loop,
                         core::net::ISocket* client,
                         CollectDone done,
                         std::vector<proto::DecodedFrame>* out,
                         ReadPacing pacing = {},
-                        std::chrono::milliseconds budget = CollectBudget)
+                        CollectBound bound = {})
 {
     co_await core::net::testing::anyOf(decodeUntil(client, std::move(done), out, pacing),
-                                       core::net::testing::sleepFor(loop, budget));
+                                       spendBound(loop, out, bound));
     client->close();
 }
 
-/// Collects exactly @p expected PDUs, or what arrived within @p budget.
+/// Collects exactly @p expected PDUs, or what arrived within @p bound.
 Task<void> collectPdus(core::net::EventLoop* loop,
                        core::net::ISocket* client,
                        std::size_t expected,
                        std::vector<proto::DecodedFrame>* out,
-                       std::chrono::milliseconds budget = CollectBudget)
+                       CollectBound bound = {})
 {
     co_await collectUntil(
-        loop, client, [expected](auto const& got) { return got.size() >= expected; }, out, {}, budget);
+        loop, client, [expected](auto const& got) { return got.size() >= expected; }, out, {}, bound);
 }
 
 /// @return Whether @p frame terminates a snapshot run.
@@ -331,7 +357,7 @@ struct HarnessOptions
     vtbackend::HostIdentity identity {};               ///< The machine the host says it runs on.
     uint64_t instance = 0;                             ///< Which run of the daemon the host is.
     /// The longest an exchange waits for the PDUs it counts on before it gives up on them.
-    std::chrono::milliseconds collectBudget = CollectBudget;
+    CollectBound collectBound = {};
     /// Who feeds the hosted terminals from their PTYs: the case itself, unless it asks for the pumps.
     vthost::SessionPumping pumping = vthost::SessionPumping::Manual;
     /// What makes each session's PTY; unset, a MockPty.
@@ -511,7 +537,7 @@ struct NativeHarness
         loop.blockOn(core::net::testing::allOf(
             session->run(),
             feedBytes(pair.second.get(), &bytes),
-            collectUntil(&loop, pair.second.get(), std::move(done), &received, {}, options.collectBudget),
+            collectUntil(&loop, pair.second.get(), std::move(done), &received, {}, options.collectBound),
             std::move(alongside)...));
         return received;
     }
@@ -1322,7 +1348,9 @@ TEST_CASE("an exchange counting on more PDUs than the session sends ends instead
     // of as a suite that never ends. Not through std::async: its future joins the thread when
     // destroyed, so the failing REQUIRE would unwind straight into the hang it reports.
     auto exchange = std::packaged_task<std::size_t()> { [] {
-        auto h = NativeHarness { { .collectBudget = 200ms } };
+        // The budget starts once the four PDUs the session does send are in, so it times only the fifth's
+        // absence: from the start, a loaded machine spends it before the four arrive and fails the count.
+        auto h = NativeHarness { { .collectBound = { .budget = 200ms, .from = 4 } } };
         std::ignore = newSession(h.host);
         return h.exchange({ proto::ClientHello {} }, 5).size();
     } };
@@ -2212,7 +2240,10 @@ TEST_CASE("a viewer sharing ProgramStatus receives the set", "[vthost][native][p
 
     SECTION("a viewer without the capability gets none")
     {
-        auto h = NativeHarness { HarnessOptions { .collectBudget = std::chrono::milliseconds { 300 } } };
+        // The budget starts once the attach snapshot is in -- when the status is written -- so it times only
+        // the absence of the ProgramStatus, not the snapshot's arrival as well.
+        auto h = NativeHarness { HarnessOptions {
+            .collectBound = { .budget = std::chrono::milliseconds { 300 }, .from = AttachSnapshotFrames } } };
         auto const sessionId = newSession(h.host);
         auto const received = h.exchangeUntil({ proto::DecodedPdu { proto::ClientHello {} } },
                                               hasProgramStatus,
@@ -5373,7 +5404,7 @@ class RememberedSelection final: public vthost::SessionStreamEvents
 
 } // namespace
 
-TEST_CASE("a lone client selects the most recently selected workspace", "[vthost][native][attach-intent]")
+TEST_CASE("a lone client selects the first workspace no window shows", "[vthost][native][attach-intent]")
 {
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
@@ -5399,13 +5430,22 @@ TEST_CASE("a lone client selects the most recently selected workspace", "[vthost
     {
         attachesTo(first);
     }
-    SECTION("a window selected the second: it is the default, though that window is gone")
+    SECTION("a window selected the second and is gone: the first is still the default")
+    {
+        auto earlier = RememberedSelection {};
+        earlier.selected = second->id().value;
+        h.host.noteClientAttached(&earlier);
+        h.host.noteClientDetached(&earlier, vthost::DetachKind::Dropped);
+        attachesTo(first);
+    }
+    SECTION("a window shows the first: the default is the second, which no window shows")
     {
         auto earlier = RememberedSelection {};
         h.host.noteClientAttached(&earlier);
-        h.host.noteSelected(earlier, second->id().value);
-        h.host.noteClientDetached(&earlier);
+        earlier.selected = first;
+        h.host.noteSelected(earlier);
         attachesTo(second->id().value);
+        h.host.noteClientDetached(&earlier, vthost::DetachKind::Dropped);
     }
 }
 
@@ -5566,9 +5606,15 @@ TEST_CASE("a workspace created elsewhere is laid out to every connection and mir
 
     REQUIRE(bothSeeIt(fromOne));
     REQUIRE(bothSeeIt(fromTwo));
-    CHECK(layoutWorkspaces(fromOne) == std::set<uint64_t> { first, laterWorkspace });
+    // The first connection shows the first workspace, so the second, launching too, got one of its own.
+    auto const* twoHello = serverHelloOf(fromTwo);
+    REQUIRE(twoHello != nullptr);
+    auto const secondOwn = twoHello->selectedWorkspace;
+    CHECK(secondOwn != first);
+    CHECK(secondOwn != laterWorkspace);
+    CHECK(layoutWorkspaces(fromOne) == std::set<uint64_t> { first, secondOwn, laterWorkspace });
     CHECK(snapshotSessions(fromOne) == sessionsOf(h.host, first));
-    CHECK(snapshotSessions(fromTwo) == sessionsOf(h.host, first));
+    CHECK(snapshotSessions(fromTwo) == sessionsOf(h.host, secondOwn));
 }
 
 TEST_CASE("the host counts an Attach connection as a client beside the census",
@@ -7980,7 +8026,6 @@ TEST_CASE("SelectWorkspace moves the full mirror to another workspace", "[vthost
     CHECK(snapshotSessions(received) == std::set<uint64_t> { oldSession, newSession });
     CHECK(deltaSessions(received) == std::set<uint64_t> { newSession });
     CHECK(h.session->selectedWorkspace() == second);
-    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { second });
     CHECK(h.host.visibility(first) == vthost::WorkspaceVisibility::Hidden);
     CHECK(h.host.visibility(second) == vthost::WorkspaceVisibility::Shown);
 }
@@ -8001,7 +8046,6 @@ TEST_CASE("SelectWorkspace 0 creates a workspace and selects it", "[vthost][nati
         *std::ranges::find_if(workspaces, [first](uint64_t workspace) { return workspace != first; });
     CHECK(h.session->selectedWorkspace() == created);
     CHECK(snapshotSessions(received).contains(*sessionsOf(h.host, created).begin()));
-    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { created });
 }
 
 TEST_CASE("SelectWorkspace naming no workspace keeps the selection, and one from a peer without "
@@ -8105,7 +8149,111 @@ TEST_CASE("a connection whose selected workspace ends selects another", "[vthost
     }
 
     CHECK(h.session->selectedWorkspace() == second);
-    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { second });
+}
+
+TEST_CASE("a connection whose workspace ends never moves to one another window shows",
+          "[vthost][native][daemon-follow]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const* shownElsewhere = h.host.createWorkspace();
+    auto const* hidden = h.host.createWorkspace();
+    REQUIRE((shownElsewhere != nullptr && hidden != nullptr));
+    auto const second = shownElsewhere->id().value;
+    auto const third = hidden->id().value;
+
+    // Another window shows the second workspace, which is the first one left in the daemon's order.
+    auto window = RememberedSelection {};
+    window.selected = second;
+    h.host.noteClientAttached(&window);
+
+    auto const movedToThird = [&](auto const& got) {
+        return batchEndSelects(got, third);
+    };
+    std::ignore =
+        h.exchangeUntil({ daemonFollowHello(proto::AttachIntentKind::Select, first) },
+                        movedToThird,
+                        closeLastTabOnce(&h, first, [&] { return snapshotRunCount(h.received) >= 1; }));
+
+    CHECK(h.session->selectedWorkspace() == third);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
+}
+
+TEST_CASE(
+    "a connection whose workspace ends while every other is shown selects none, the other window staying",
+    "[vthost][native][daemon-follow]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const* shownElsewhere = h.host.createWorkspace();
+    REQUIRE(shownElsewhere != nullptr);
+    auto const second = shownElsewhere->id().value;
+
+    // The other window shows the only workspace left: moving there would show it in two windows.
+    auto window = RememberedSelection {};
+    window.selected = second;
+    h.host.noteClientAttached(&window);
+
+    std::ignore = h.exchangeUntil(
+        { daemonFollowHello(proto::AttachIntentKind::Select, first) },
+        [](auto const& got) { return batchEndSelects(got, 0); },
+        closeLastTabOnce(&h, first, [&] { return snapshotRunCount(h.received) >= 1; }));
+
+    CHECK(h.session->selectedWorkspace() == 0); // this window closes, as closing a last tab does
+    CHECK(window.selected == second);           // the other keeps what it shows
+    CHECK(h.host.visibility(second) == vthost::WorkspaceVisibility::Shown);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
+}
+
+TEST_CASE("a Goodbye frees the workspace at once, and is refused without client-goodbye",
+          "[vthost][native][goodbye]")
+{
+    auto const hello = [](proto::Capability capability) {
+        auto hello = intentHello(proto::AttachIntentKind::Default);
+        hello.capabilities = proto::CapabilitySet::of({ proto::Capability::AttachIntent, capability });
+        return hello;
+    };
+
+    SECTION("said: the workspace is offered to the next attach")
+    {
+        auto h = NativeHarness {};
+        REQUIRE(h.host.createTab() != nullptr);
+        auto const first = h.host.workspaceId().value;
+        std::ignore = h.exchangeUntil({ hello(proto::Capability::ClientGoodbye),
+                                        proto::Goodbye {},
+                                        proto::FetchImage { .imageId = 4242 } },
+                                      imageGoneArrived);
+        REQUIRE(h.host.visibility(first) == vthost::WorkspaceVisibility::Shown);
+        h.session.reset();
+        CHECK_FALSE(h.host.shownForAttach().contains(first));
+    }
+    SECTION("not said: the end is a drop, and its workspace is held")
+    {
+        auto h = NativeHarness {};
+        REQUIRE(h.host.createTab() != nullptr);
+        auto const first = h.host.workspaceId().value;
+        std::ignore = h.exchangeUntil(
+            { hello(proto::Capability::ClientGoodbye), proto::FetchImage { .imageId = 4242 } },
+            imageGoneArrived);
+        h.session.reset();
+        CHECK(h.host.shownForAttach().contains(first));
+    }
+    SECTION("said without the capability: refused, and the end is a drop")
+    {
+        auto h = NativeHarness {};
+        REQUIRE(h.host.createTab() != nullptr);
+        auto const first = h.host.workspaceId().value;
+        auto const received = h.exchangeUntil(
+            { hello(proto::Capability::Heartbeat), proto::Goodbye {}, proto::FetchImage { .imageId = 4242 } },
+            imageGoneArrived);
+        CHECK(std::ranges::any_of(received, [](auto const& frame) {
+            return std::holds_alternative<proto::Unsupported>(frame.pdu);
+        }));
+        h.session.reset();
+        CHECK(h.host.shownForAttach().contains(first));
+    }
 }
 
 TEST_CASE("a connection whose only workspace ends selects none and creates none",
@@ -8350,7 +8498,6 @@ TEST_CASE("visibility is Shown while some connection selects it",
 
     h.session.reset();
     CHECK(h.host.visibility(first) == vthost::WorkspaceVisibility::Hidden);
-    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { first });
 }
 
 // {{{ status stream and raise role
@@ -9189,18 +9336,77 @@ TEST_CASE("a connection whose hello was accepted outlives the pre-authentication
     CHECK_FALSE(d.ended);
 }
 
-TEST_CASE("a unix-socket session has no pre-authentication deadline", "[vthost][native][auth][deadline]")
+namespace
 {
-    auto clock = core::platform::ManualClock { core::platform::SteadyTimePoint {} + 10s };
-    auto h = NativeHarness { HarnessOptions { .clock = &clock } };
-    auto ended = false;
-    h.loop.spawn(runUntilEnded(h.session.get(), &ended));
-    turnIdle(h.loop);
-    clock.advance(10min);
-    turnIdle(h.loop);
-    CHECK_FALSE(ended);
-    h.pair.second->close();
-    CHECK(turnUntil(h.loop, [&] { return ended; }));
+/// A local (non-TLS) connection served through makeNativeHandler on a ManualClock, its hello due
+/// @ref HelloTimeout after the accept.
+struct LocalDeadlineHarness
+{
+    static constexpr auto HelloTimeout = 5s;
+
+    core::platform::ManualClock clock { core::platform::SteadyTimePoint {} + 10s };
+    NativeHarness h { HarnessOptions { .clock = &clock } };
+    core::net::testing::SocketPair pair = makeConnection(h.loop, std::nullopt);
+    bool served = false;
+    bool clientSawEnd = false;
+    std::vector<proto::DecodedFrame> received;
+
+    LocalDeadlineHarness()
+    {
+        auto services = vthost::NativeSessionServices {};
+        services.handshake.helloTimeout = HelloTimeout;
+        auto const handler = vthost::makeNativeHandler(h.loop, h.host, std::move(services));
+        h.loop.spawn([](core::async::Task<void> serve, bool* done) -> Task<void> {
+            co_await std::move(serve);
+            *done = true;
+        }(handler(vthost::ConnectionId { .endpoint = "native", .index = 7 }, std::move(pair.first)),
+                                                                   &served));
+        h.loop.spawn(readAll(pair.second.get(), &received, &clientSawEnd));
+    }
+
+    /// Lets the connection end (its client closes) before anything it reaches is destroyed.
+    ~LocalDeadlineHarness()
+    {
+        pair.second->close();
+        std::ignore = turnUntil(h.loop, [this] { return served; });
+    }
+
+    LocalDeadlineHarness(LocalDeadlineHarness const&) = delete;
+    LocalDeadlineHarness& operator=(LocalDeadlineHarness const&) = delete;
+    LocalDeadlineHarness(LocalDeadlineHarness&&) = delete;
+    LocalDeadlineHarness& operator=(LocalDeadlineHarness&&) = delete;
+};
+} // namespace
+
+TEST_CASE("a local connection that sends no hello is closed at its hello deadline",
+          "[vthost][native][auth][deadline]")
+{
+    auto capture = core::log::ScopedCapture {};
+    auto d = LocalDeadlineHarness {};
+    turnIdle(d.h.loop);
+    d.clock.advance(LocalDeadlineHarness::HelloTimeout - 1s);
+    turnIdle(d.h.loop);
+    CHECK_FALSE(d.served); // a second early: still waiting
+    CHECK_FALSE(d.clientSawEnd);
+
+    d.clock.advance(2s);
+    CHECK(turnUntil(d.h.loop, [&] { return d.served && d.clientSawEnd; }));
+    CHECK(capture.contains("no hello was accepted within 5s"));
+}
+
+TEST_CASE("a local connection whose hello was accepted outlives its hello deadline",
+          "[vthost][native][auth][deadline]")
+{
+    auto d = LocalDeadlineHarness {};
+    auto const hello = encodeRequest({ proto::DecodedPdu { controlHello(std::nullopt) } });
+    d.h.loop.spawn(feedBytes(d.pair.second.get(), &hello));
+    CHECK(turnUntil(d.h.loop, [&] { return !d.received.empty(); }));
+    REQUIRE_FALSE(d.received.empty());
+    CHECK(admits(d.received.front()));
+
+    d.clock.advance(10min);
+    turnIdle(d.h.loop);
+    CHECK_FALSE(d.served);
 }
 
 TEST_CASE("a TLS listener with neither a key nor a token is refused", "[vthost][native][auth]")
@@ -9628,6 +9834,39 @@ TEST_CASE("a label change reaches every client", "[vthost][native][workspace-met
     };
     CHECK(MetaFixture::metasOf(one, skipOne) == expected);
     CHECK(MetaFixture::metasOf(other, skipOther) == expected);
+}
+
+TEST_CASE("a tab's label reaches every client in its workspace's layout", "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& one = f.attachSelecting(f.first);
+    auto& other = f.attachSelecting(f.second, OffersMeta::No);
+    f.settle();
+    auto const* tab = f.flush.h.host.model().workspace(vtworkspace::WorkspaceId { f.first })->activeTab();
+    auto const ref = vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Tab,
+                                            .uuid = *f.flush.h.host.objects().uuidOf(tab->id()) };
+    // The label the last layout of the first workspace a client received names the tab by.
+    auto const lastLabel = [&](FlushClient const& client) -> std::optional<std::string> {
+        auto label = std::optional<std::string> {};
+        for (auto const& frame: client.received)
+            if (auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu);
+                layout != nullptr && layout->workspace == f.first)
+                for (auto const& wireTab: layout->tabs)
+                    if (wireTab.tabId == tab->id().value)
+                        label = wireTab.label;
+        return label;
+    };
+    REQUIRE(lastLabel(one) == std::optional<std::string> { "" });
+
+    f.flush.h.host.objects().setLabel(ref, "build");
+    f.settle();
+    CHECK(lastLabel(one) == std::optional<std::string> { "build" });
+    CHECK(lastLabel(other) == std::optional<std::string> { "build" });
+
+    f.flush.h.host.objects().setLabel(ref, "");
+    f.settle();
+    CHECK(lastLabel(one) == std::optional<std::string> { "" });
+    CHECK(lastLabel(other) == std::optional<std::string> { "" });
 }
 
 TEST_CASE("a client without the capability gets none", "[vthost][native][workspace-meta]")

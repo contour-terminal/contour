@@ -39,6 +39,7 @@ PickerPopup {
 
     namePrefix: "commandPalette"
     model: root.paletteModel
+    groupCount: root.paletteModel ? root.paletteModel.groupCount : 0
     levelTitle: root.inLevel ? root.paletteModel.levelTitle : ""
     hintText: qsTr("Type a command or search…")
     emptyText: qsTr("No matching commands")

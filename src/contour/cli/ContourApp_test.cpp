@@ -8,11 +8,13 @@
 
 #include <core/Environment.hpp>
 #include <core/Utf8Path.hpp>
+#include <core/Utils.hpp>
 #include <core/log/LogStore.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <filesystem>
@@ -20,6 +22,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -291,4 +294,48 @@ TEST_CASE("ContourApp: --auth keys is refused before any token file is read", "[
     auto const err = refusedDaemonRun({ "--auth", "keys", "--access-file", "/nonexistent/access" });
     CHECK(err.contains("--auth keys accepts authorized keys alone"));
     CHECK_FALSE(err.contains("cannot read"));
+}
+
+namespace
+{
+
+/// Appends to @p clashes every option name @p command declares twice, by long or by short spelling, then
+/// does the same for each of its sub-commands. Two options of one name are one option to the parser, whose
+/// one value both meanings then read (`workspace new --label` once named both the daemon to reach and the
+/// workspace to make).
+/// @param command The command.
+/// @param path Its name, from `contour`.
+/// @param clashes Where the clashes go, as `PATH --NAME`.
+void collectOptionClashes(core::cli::Command const& command,
+                          std::string const& path,
+                          std::vector<std::string>& clashes)
+{
+    for (auto const& [index, option]: core::views::enumerate(command.options))
+    {
+        auto const later = std::span { command.options }.subspan(static_cast<std::size_t>(index) + 1);
+        auto const sameLong = [&](core::cli::Option const& other) {
+            return other.name.longName == option.name.longName;
+        };
+        auto const sameShort = [&](core::cli::Option const& other) {
+            return option.name.shortName != 0 && other.name.shortName == option.name.shortName;
+        };
+        if (std::ranges::any_of(later, sameLong))
+            clashes.push_back(std::format("{} --{}", path, option.name.longName));
+        if (std::ranges::any_of(later, sameShort))
+            clashes.push_back(std::format("{} -{}", path, option.name.shortName));
+    }
+    for (auto const& child: command.children)
+        collectOptionClashes(child, std::format("{} {}", path, child.name), clashes);
+}
+
+} // namespace
+
+TEST_CASE("ContourApp: no command declares an option name twice", "[contour][cli]")
+{
+    auto const app = contour::cli::ContourApp { core::defaultEnvironment() };
+    auto clashes = std::vector<std::string> {};
+    collectOptionClashes(app.parameterDefinition(), "contour", clashes);
+    for (auto const& clash: clashes)
+        UNSCOPED_INFO(clash);
+    CHECK(clashes.empty());
 }

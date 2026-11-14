@@ -620,6 +620,10 @@ class WindowController:
     /// Returns focus to the terminal and hides the ring (Escape, a pointer press, the terminal regaining
     /// focus). No-op when the chrome has no focus.
     Q_INVOKABLE void leaveChrome();
+    /// Activates the sidebar's row @p row, and, when it showed something, hands the keyboard to the terminal.
+    /// What Enter in the tree and the row's accessibility press action both do.
+    /// @param row The row.
+    Q_INVOKABLE void activateSidebarRow(int row);
 
     /// Gives keyboard focus to the active pane's display and ends the chrome's hold on it: what is due when a
     /// popup over this window closes, which leaves no window holding the keyboard.
@@ -1349,7 +1353,9 @@ class WindowController:
     /// Shows @p workspace because the user picked it (a sidebar row): selects it, and gives up a pending
     /// jump, row action or follow, as the user went elsewhere.
     /// @param workspace The workspace's id, as the window's directory lists it.
-    void showWorkspace(uint64_t workspace);
+    /// @return Requested when the window shows it or will; Refused when nothing was asked: the window has no
+    ///         directory source, or its source does not list the workspace.
+    [[nodiscard]] SelectResult showWorkspace(uint64_t workspace);
     /// Shows the pane a jump selected a workspace for, once the displayed workspace holds it, and counts it
     /// as seen. Nothing when no jump is pending or the pane is not there (yet). Called when a daemon's layout
     /// lands, and by displayWorkspace(), which then ends the jump either way.
@@ -1361,11 +1367,14 @@ class WindowController:
     /// @return Whether a sidebar action waits for a workspace to be shown, or for its pane to appear in it.
     [[nodiscard]] bool rowActionPending() const noexcept { return _pendingRowAction.has_value(); }
     /// Shows the workspace a daemon makes for @p pane, once its push lists it there: the first directory that
-    /// lists @p pane in a workspace the directory does not list now. A move into a new workspace is followed
-    /// so, as an in-process window shows the workspace it made. A jump elsewhere, a later follow, or
+    /// lists @p pane in a workspace @p asked does not list. A move into a new workspace is followed so, as an
+    /// in-process window shows the workspace it made. A jump elsewhere, a later follow, or
     /// session::TerminalSessionManager::RemoteMoveTimeout passing gives it up.
     /// @param pane The pane moved, by the daemon's key.
-    void followIntoNewWorkspace(PaneKey pane);
+    /// @param asked The directory the move was resolved against, read before its request went out: the
+    ///        daemon's push listing the new workspace may settle before this is called, and what it lists
+    ///        then must not count as listed already.
+    void followIntoNewWorkspace(PaneKey pane, WorkspaceDirectory const& asked);
     /// @return Whether a move into a new workspace waits to be followed there.
     [[nodiscard]] bool followPending() const noexcept { return _pendingFollow.has_value(); }
     /// Gives up every look that waits: a jump, a row action and a follow.
@@ -1966,7 +1975,7 @@ class WindowController:
     struct PendingFollow
     {
         PaneKey pane;                 ///< The pane moved.
-        std::vector<uint64_t> listed; ///< The workspaces listed when it was asked: none of them is new.
+        std::vector<uint64_t> listed; ///< The workspaces listed before it was asked: none of them is new.
         core::platform::SteadyTimePoint giveUp; ///< When it is no longer waited for.
     };
     std::optional<PendingFollow> _pendingFollow; ///< @see followIntoNewWorkspace

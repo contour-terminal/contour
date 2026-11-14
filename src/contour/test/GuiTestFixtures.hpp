@@ -268,11 +268,13 @@ class DaemonNamedBinding final: public contour::session::WindowBinding
     void windowClosed(vtworkspace::WorkspaceId /*window*/) override {}
     void lastWindowReleased() override {}
     /// Records what a new window was asked for.
-    [[nodiscard]] std::expected<void, std::string> openWindowLike(vtworkspace::WorkspaceId window,
-                                                                  std::optional<vtworkspace::TabId> activeTab,
-                                                                  QScreen* /*screen*/) override
+    [[nodiscard]] std::expected<void, std::string> openSiblingWindow(
+        vtworkspace::WorkspaceId window,
+        contour::session::SiblingShows shows,
+        std::optional<vtworkspace::TabId> activeTab,
+        QScreen* /*screen*/) override
     {
-        openedLike.emplace_back(window, activeTab);
+        opened.push_back(OpenedWindow { .window = window, .shows = shows, .activeTab = activeTab });
         return {};
     }
 
@@ -287,8 +289,16 @@ class DaemonNamedBinding final: public contour::session::WindowBinding
     /// What daemonKey() reports: bindings sharing one count their daemon once.
     std::optional<uint64_t> key = std::nullopt;
 
-    /// Every openWindowLike() call: the window asked from, and the tab it was to activate.
-    std::vector<std::pair<vtworkspace::WorkspaceId, std::optional<vtworkspace::TabId>>> openedLike;
+    /// One openSiblingWindow() call.
+    struct OpenedWindow
+    {
+        vtworkspace::WorkspaceId window;                            ///< The window asked from.
+        contour::session::SiblingShows shows;                       ///< What the new window was to show.
+        std::optional<vtworkspace::TabId> activeTab = std::nullopt; ///< The tab it was to activate.
+    };
+
+    /// Every openSiblingWindow() call, in order.
+    std::vector<OpenedWindow> opened;
 
     /// Says the daemon the binding names runs on another machine, as a saved host's or a `--connect-tcp` one
     /// does.

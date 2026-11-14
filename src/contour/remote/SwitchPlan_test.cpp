@@ -275,6 +275,23 @@ TEST_CASE("workspaceRowsOf counts each workspace's tabs", "[switch][plan]")
     CHECK(rows[0].visibility == vthost::WorkspaceVisibility::Hidden);
 }
 
+TEST_CASE("workspaceRowsOf names an unlabelled workspace by its active tab's label, else its title",
+          "[switch][plan]")
+{
+    auto info = vtcontrol::WorkspaceInfo {};
+    info.id = "workspace:00000000-0000-0000-0000-000000000001";
+    info.position = 1;
+    info.native = "9";
+    info.tabs = { vtcontrol::TabInfo { .label = "build", .title = "zsh", .isActive = true } };
+    auto const none = [](uint64_t) {
+        return std::optional<vtworkspace::WorkspaceId> {};
+    };
+
+    CHECK(contour::remote::workspaceRowsOf(std::vector { info }, none).at(0).name == "build");
+    info.tabs.front().label.clear();
+    CHECK(contour::remote::workspaceRowsOf(std::vector { info }, none).at(0).name == "zsh");
+}
+
 // A daemon no client attached to yet lists its own workspace, holding no tab: a window switched to it was
 // emptied, and closed -- the last window, so the application quit.
 TEST_CASE("workspaceRowsOf leaves out a workspace holding no tab", "[switch][plan]")
@@ -556,4 +573,42 @@ TEST_CASE("switcherWorkspacesOf makes a workspace's name fit for a row", "[switc
     CHECK(listed[0].name != rows[0].name);
     CHECK(listed[1].name == contour::window::rowTextOf(rows[1].name));
     CHECK(listed[1].name.size() < rows[1].name.size());
+}
+
+TEST_CASE("an in-process window's rows name each workspace it owns and resolve a choice among them",
+          "[switch][plan][inprocess]")
+{
+    using contour::remote::SwitchNoop;
+    using contour::remote::SwitchTo;
+    auto const tabOf = [](uint64_t id) {
+        return contour::window::DirectoryTab { .id = id, .title = {}, .label = "sh", .panes = {} };
+    };
+    auto const directory = contour::window::WorkspaceDirectory {
+        .workspaces = { contour::window::DirectoryWorkspace { .id = 4, .label = "one", .tabs = { tabOf(1) } },
+                        contour::window::DirectoryWorkspace {
+                            .id = 9, .label = "two", .tabs = { tabOf(1), tabOf(2) } } },
+        .selected = std::nullopt,
+    };
+    auto const window = vtworkspace::WorkspaceId { 4 };
+
+    auto const rows = contour::remote::inProcessWorkspaceRowsOf(directory, window);
+    REQUIRE(rows.size() == 2);
+    CHECK(rows[0].shownByWindowHere == window);
+    CHECK_FALSE(rows[1].shownByWindowHere.has_value());
+    CHECK(rows[1].tabs == 2);
+    CHECK(rows[0].ref != rows[1].ref);
+
+    // Choosing the row of the workspace the window does not show switches to it, by the id made of its own.
+    auto const choose = [&](vtcontrol::ObjectRef ref) {
+        return contour::remote::planSwitch(
+            contour::session::SwitchTarget {
+                .kind = vthost::proto::SwitchDaemonKind::Same, .daemon = {}, .workspace = ref },
+            rows,
+            window.value,
+            contour::remote::SameDaemon::Yes);
+    };
+    auto const other = choose(rows[1].ref);
+    REQUIRE(std::holds_alternative<SwitchTo>(other));
+    CHECK(std::get<SwitchTo>(other).workspace == 9);
+    CHECK(std::holds_alternative<SwitchNoop>(choose(rows[0].ref)));
 }

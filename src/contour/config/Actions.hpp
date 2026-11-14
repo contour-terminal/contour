@@ -398,9 +398,10 @@ using ActionVariant = std::variant<CancelSelection,
 ///
 /// A class of its own over the variant of all alternatives, rather than an alias of it, so that the
 /// variant's copy, move and destruction (each a visit table over every alternative) are instantiated once,
-/// in Actions.cpp, instead of in every translation unit that copies or destroys an Action or a struct
-/// holding one. Use it with std::get_if, std::holds_alternative, std::get and std::visit like the variant.
-class Action: public ActionVariant
+/// in Actions.cpp, ActionCopy.cpp and ActionMove.cpp, instead of in every translation unit that copies or
+/// destroys an Action or a struct holding one. Use it with std::get_if, std::holds_alternative, std::get and
+/// std::visit like the variant.
+class Action final: public ActionVariant
 {
   public:
     /// The variant this class is made of; use it where the variant itself is named (variant_size, ...).
@@ -421,6 +422,11 @@ class Action: public ActionVariant
     Action& operator=(Action&& other) noexcept;
     /// Destroys the held alternative.
     ~Action();
+
+  private:
+    /// Destroys this action and move-constructs @p other in its place.
+    /// @param other The action to take over.
+    void replaceWith(Action&& other) noexcept;
 };
 
 inline ActionList::iterator ActionList::begin() noexcept

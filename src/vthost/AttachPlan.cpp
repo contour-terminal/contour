@@ -4,8 +4,6 @@
 #include <algorithm>
 #include <ranges>
 
-#include <vthost/ViewRouting.hpp>
-
 namespace vthost
 {
 
@@ -29,20 +27,35 @@ namespace
                || intent.daemonInstance == context.instance;
     }
 
-    /// What a launch selects: the workspace selected last, else the first one with a tab. A daemon with no
-    /// tab at all gets its first one in the primary workspace, which is then the selection.
+    /// @return Whether some connection selects the workspace.
+    [[nodiscard]] bool isShown(WorkspaceSummary const& workspace) noexcept
+    {
+        return workspace.visibility == WorkspaceVisibility::Shown;
+    }
+
+    /// What a launch selects, as a new window does: the first hidden workspace that holds a tab, in the
+    /// daemon's order -- never one a window shows -- else a new workspace. A daemon with no tab at all gets
+    /// its first one in the primary workspace, unless a window shows that already.
     [[nodiscard]] AttachPlan launch(AttachContext const& context)
     {
-        auto const ids = workspacesWithTabs(context);
-        auto const selection = defaultSelection(ids, context.lastSelected);
-        if (!selection)
+        auto const hidden = std::ranges::find_if(context.workspaces, isLaunchable);
+        if (hidden != context.workspaces.end())
+            // A launch that names a working directory also opens a tab in it: the workspace it brings back
+            // leaves it nothing to create.
+            return { .select = hidden->id,
+                     .creation = context.workingDirectory == WorkingDirectoryStated::Yes
+                                     ? AttachCreation::TabInSelected
+                                     : AttachCreation::None };
+        auto const primaryShown =
+            std::ranges::any_of(context.workspaces, [&](WorkspaceSummary const& workspace) {
+                return workspace.id == context.primaryWorkspace && isShown(workspace);
+            });
+        auto const hasTab = [](WorkspaceSummary const& workspace) {
+            return workspace.tabCount > 0;
+        };
+        if (std::ranges::none_of(context.workspaces, hasTab) && !primaryShown)
             return { .select = context.primaryWorkspace, .creation = AttachCreation::FirstTabInPrimary };
-        // A launch that names a working directory also opens a tab in it: the workspaces it brings back
-        // leave it nothing to create.
-        return { .select = selection,
-                 .creation = context.workingDirectory == WorkingDirectoryStated::Yes
-                                 ? AttachCreation::TabInSelected
-                                 : AttachCreation::None };
+        return { .select = std::nullopt, .creation = AttachCreation::NewWorkspace };
     }
 } // namespace
 

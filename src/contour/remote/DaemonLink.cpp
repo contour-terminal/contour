@@ -158,10 +158,17 @@ namespace
     }
 
     /// Detaches every pane of @p sessions still alive: its session runs on in its daemon. Each is activated
-    /// and closed, as closeActivePane() closes the tab's active pane.
+    /// and closed, as closeActivePane() closes the tab's active pane. None of that is the user's doing, so
+    /// none of it is reported to the daemon, which keeps the tab and pane the user left active.
+    /// @param manager The manager of the panes' window.
+    /// @param owner The factory that owns the panes -- the one that heard of them, and would report their
+    ///        closing -- which is not the new link's when the window comes from another daemon.
+    /// @param sessions The panes' sessions.
     void detachPanes(session::TerminalSessionManager& manager,
+                     session::SessionFactory& owner,
                      std::span<QPointer<session::TerminalSession> const> sessions)
     {
+        auto const daemonOriginated = session::DaemonOriginatedScope { owner };
         for (auto const& session: sessions)
         {
             if (!session)
@@ -800,8 +807,11 @@ std::expected<void, std::string> DaemonLink::adoptWindow(vtworkspace::WorkspaceI
     auto previous = std::vector<QPointer<session::TerminalSession>> {};
     for (auto* const session: _sessions.sessionsOfWindow(window))
         previous.emplace_back(session);
+    // Those panes belong to what the window was bound to until now, which is not this link's controller when
+    // it comes from another daemon.
+    auto& owner = _sessions.factoryFor(window);
     bindDaemonWorkspace(*workspace, window);
-    detachPanes(_sessions, previous);
+    detachPanes(_sessions, owner, previous);
     return {};
 }
 
@@ -875,16 +885,33 @@ std::optional<uint64_t> DaemonLink::daemonKey() const
     return std::hash<vthost::ITransportFactory const*> {}(_siblingTemplate.controller.transport.get());
 }
 
-std::expected<void, std::string> DaemonLink::openWindowLike(vtworkspace::WorkspaceId window,
-                                                            std::optional<vtworkspace::TabId> activeTab,
-                                                            QScreen* screen)
+std::expected<void, std::string> DaemonLink::openSiblingWindow(vtworkspace::WorkspaceId window,
+                                                               session::SiblingShows shows,
+                                                               std::optional<vtworkspace::TabId> activeTab,
+                                                               QScreen* screen)
 {
     requireGuiThread();
-    if (!isLive() || !_shown || _shown->local != window)
+    if (!isLive())
         return std::unexpected(std::string { "this window shows no workspace of its daemon" });
     auto config = _siblingTemplate;
-    config.controller.intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Select,
-                                                             .workspace = _shown->daemonWorkspace };
+    switch (shows)
+    {
+        case session::SiblingShows::SameWorkspace:
+            if (!_shown || _shown->local != window)
+                return std::unexpected(std::string { "this window shows no workspace of its daemon" });
+            config.controller.intent =
+                vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Select,
+                                              .workspace = _shown->daemonWorkspace };
+            break;
+        case session::SiblingShows::DaemonsChoice:
+            // The daemon decides, as for a launch: a workspace no window shows, else a new one. It needs
+            // nothing the asking window shows, and no tab to activate.
+            config.controller.intent =
+                vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Default,
+                                              .workspace = 0 };
+            activeTab = std::nullopt;
+            break;
+    }
     config.controller.resumeFallback = NativeController::ResumeFallback::Nothing;
     auto const* const asking = _sessions.controllerDisplaying(window);
     config.opening = WindowOpening {
@@ -955,7 +982,7 @@ DaemonLink::Placement DaemonLink::placeWindow(uint64_t selected)
         // is not there yet binds it as it comes (bindPendingWindow()). Never the quick terminal, which is no
         // daemon workspace, nor a window another link serves.
         if (auto const* const boot = _sessions.applicationController();
-            boot != nullptr && _sessions.bindingOf(boot->displayedWorkspace()) == nullptr)
+            boot != nullptr && _sessions.isInProcessWindow(boot->displayedWorkspace()))
         {
             bindDaemonWorkspace(selected, boot->displayedWorkspace());
             return Placement::Placed;
@@ -998,7 +1025,7 @@ void DaemonLink::switchTo(uint64_t workspace)
     if (!_shown || _shown->local != fresh)
         return; // the window went while it was realized
     controller->displayWorkspace(fresh);
-    detachPanes(_sessions, previous);
+    detachPanes(_sessions, *_controller, previous);
     controller->dropWorkspaceIfEmpty(before);
     if (_switch && (_switch->to == workspace || (_switch->to == 0 && !_switch->before.contains(workspace))))
     {

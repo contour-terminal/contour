@@ -103,6 +103,7 @@ enum class PduType : uint8_t
     MoveWorkspace = 57,
     SetWorkspaceLabel = 58,
     CloseWorkspace = 59,
+    Goodbye = 60,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -247,7 +248,7 @@ struct WireCellPixelSize
 /// than the client's upgrade message. Accepted while daemon mode is experimental.
 enum class AttachIntentKind : uint8_t
 {
-    Default = 5,      ///< The daemon picks: the workspace of the last selection if any, else the first.
+    Default = 5,      ///< The daemon picks: the first workspace no window shows, else a new one.
     NewWorkspace = 6, ///< A new workspace of its own, selected at once.
     Select = 7,       ///< Exactly the workspace named in AttachIntent::workspace.
     Resume = 8,       ///< The workspace named after a reconnect; when it is gone, as Default.
@@ -1228,6 +1229,7 @@ struct WireTab
     uint64_t activePane = 0;
     uint64_t zoomedPane = 0; ///< 0 = not zoomed.
     std::string title = {};  ///< The runtime-title override; empty if none.
+    std::string label = {};  ///< The control-API label, which names the tab over its title; empty if none.
     uint8_t hasColor = 0;
     uint32_t color = 0; ///< 0xRRGGBB tab color when hasColor.
     WirePane root;
@@ -1809,6 +1811,17 @@ struct CloseWorkspace
     bool operator==(CloseWorkspace const&) const = default;
 };
 
+/// Client→server (Capability::ClientGoodbye): this connection ends on purpose, its window closed for good,
+/// and is not reconnecting. It is sent last, before the orderly close. The daemon then offers the workspace
+/// the window showed to the very next attach at once, where a connection that ends without it is a drop,
+/// whose workspace is kept from a new window for the reconnect grace.
+/// No body. A client sends it only to a daemon that shares the capability: an older one never sees it, and
+/// takes the connection's end for a drop, as it always did.
+struct Goodbye
+{
+    bool operator==(Goodbye const&) const = default;
+};
+
 /// Client→server (Capability::WorkspaceMeta): set a workspace's label, which is what the sidebar's rename
 /// does. The daemon applies it to the object registry, so every client is told through WorkspaceMeta, and
 /// every control-API subscriber through `workspace.labelChanged`. An empty label clears it; an unknown
@@ -1978,7 +1991,8 @@ using DecodedPdu = std::variant<Invalid,
                                 WorkspaceMeta,
                                 MoveWorkspace,
                                 SetWorkspaceLabel,
-                                CloseWorkspace>;
+                                CloseWorkspace,
+                                Goodbye>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

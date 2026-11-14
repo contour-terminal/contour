@@ -95,7 +95,7 @@ namespace
             switch (_view.level)
             {
                 case SwitcherLevel::Top:
-                    if (_view.scope == SwitcherScope::OneDaemon)
+                    if (listsOneDaemon(_view.scope))
                         addOneDaemon(_view.daemon);
                     else
                         addEverything();
@@ -218,7 +218,8 @@ namespace
                     add(std::move(row), group, title);
             }
             add(newWorkspaceRow(index), SwitcherGroup::Actions, "Actions");
-            if (_view.level == SwitcherLevel::Top && _view.origin == SwitcherOrigin::Chip)
+            if (_view.level == SwitcherLevel::Top && _view.origin == SwitcherOrigin::Chip
+                && _view.scope != SwitcherScope::WindowOnly)
                 add(plainRow(SwitcherRowKind::AllDaemons, "All daemons…"), SwitcherGroup::Actions, "Actions");
         }
 

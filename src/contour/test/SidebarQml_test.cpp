@@ -514,6 +514,44 @@ TEST_CASE("F2 opens the rename field and Enter commits (offscreen)", "[contour][
     }
 }
 
+TEST_CASE("Enter activates the tree's row and hands the keyboard to the terminal (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        auto* tree = scene.item(QStringLiteral("sidebarTree"));
+        REQUIRE(tree != nullptr);
+        scene.controller.focusSidebar();
+        REQUIRE(QTest::qWaitFor([&] { return tree->hasActiveFocus(); }, 1000));
+
+        QTest::keyClick(scene.window, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        CHECK_FALSE(scene.controller.sidebarHost().shown.empty());
+        CHECK(scene.controller.chromeFocusArea() == static_cast<int>(contour::window::ChromeArea::Terminal));
+    }
+}
+
+TEST_CASE("Enter on a tree with no row keeps the keyboard in the sidebar (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    auto scene = SidebarWindow { { .row = drawnRows().front() } };
+    auto* tree = scene.item(QStringLiteral("sidebarTree"));
+    REQUIRE(tree != nullptr);
+    scene.controller.focusSidebar();
+    REQUIRE(QTest::qWaitFor([&] { return tree->hasActiveFocus(); }, 1000));
+    // A filter nothing matches leaves the tree empty.
+    scene.controller.sidebarModel().setFilter(QStringLiteral("no row is called this"));
+    QCoreApplication::processEvents();
+    REQUIRE(scene.controller.sidebarModel().rowCount() == 0);
+
+    QTest::keyClick(scene.window, Qt::Key_Return);
+    QCoreApplication::processEvents();
+    CHECK(scene.controller.sidebarHost().shown.empty());
+    CHECK(scene.controller.chromeFocusArea() == static_cast<int>(contour::window::ChromeArea::Sidebar));
+}
+
 TEST_CASE("Escape returns focus to the terminal (offscreen)", "[contour][gui][qml][sidebar]")
 {
     for (auto const row: drawnRows())

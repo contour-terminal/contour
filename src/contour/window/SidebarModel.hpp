@@ -81,6 +81,13 @@ enum class RowSelection : uint8_t
 };
 Q_ENUM_NS(RowSelection)
 
+/// Whether activating a row showed anything. Not exposed to QML: only C++ asks.
+enum class RowActivation : uint8_t
+{
+    Nothing = 0, ///< The row is not there.
+    Shown,       ///< What the row names is shown.
+};
+
 /// What a close confirmation is about (@see window::CloseKind, which it mirrors).
 enum class CloseKind : uint8_t
 {
@@ -516,6 +523,11 @@ class SidebarModel: public QAbstractListModel
     /// pane is counted as seen.
     /// @param row The row.
     Q_INVOKABLE void activate(int row);
+    /// What activate() does, said back.
+    /// @param row The row.
+    /// @return Shown when the row named something that was shown; Nothing for a row the tree does not have
+    ///         (an empty or filtered-out tree), which changes nothing.
+    [[nodiscard]] sidebarrows::RowActivation activateRow(int row);
     /// Expands a collapsed row, collapses an expanded one.
     /// @param row The row.
     Q_INVOKABLE void toggle(int row);

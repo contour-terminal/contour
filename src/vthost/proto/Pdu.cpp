@@ -350,6 +350,10 @@ namespace
     {
         return std::to_underlying(PduType::MoveWorkspace);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(Goodbye const&) noexcept
+    {
+        return std::to_underlying(PduType::Goodbye);
+    }
     [[nodiscard]] constexpr uint64_t tagOf(CloseWorkspace const&) noexcept
     {
         return std::to_underlying(PduType::CloseWorkspace);
@@ -1037,6 +1041,10 @@ namespace
     {
     }
 
+    void encodeBody(Writer&, Goodbye const&)
+    {
+    }
+
     void encodeSoftGlyph(Writer& out, WireSoftGlyph const& glyph)
     {
         out.u8(glyph.position);
@@ -1314,6 +1322,7 @@ namespace
             out.varint(tab.activePane);
             out.varint(tab.zoomedPane);
             out.string(tab.title);
+            out.string(tab.label);
             out.u8(tab.hasColor);
             out.u32(tab.color);
             encodePane(out, tab.root);
@@ -2334,6 +2343,11 @@ namespace
         return PanesReprojected {};
     }
 
+    DecodeResult decodeGoodbye(Reader&)
+    {
+        return Goodbye {};
+    }
+
     DecodeResult decodeSelectWorkspace(Reader& in)
     {
         auto pdu = SelectWorkspace {};
@@ -2729,7 +2743,8 @@ namespace
             auto tab = WireTab {};
             if (!assign(in.varint(), tab.tabId, error) || !assign(in.varint(), tab.activePane, error)
                 || !assign(in.varint(), tab.zoomedPane, error) || !assign(in.string(), tab.title, error)
-                || !assign(in.u8(), tab.hasColor, error) || !assign(in.u32(), tab.color, error))
+                || !assign(in.string(), tab.label, error) || !assign(in.u8(), tab.hasColor, error)
+                || !assign(in.u32(), tab.color, error))
                 return std::unexpected(error);
             auto root = decodePane(in, /*depth=*/256);
             if (!root)
@@ -2811,6 +2826,7 @@ namespace
         DecodeRow { PduType::MoveWorkspace, decodeMoveWorkspace },
         DecodeRow { PduType::SetWorkspaceLabel, decodeSetWorkspaceLabel },
         DecodeRow { PduType::CloseWorkspace, decodeCloseWorkspace },
+        DecodeRow { PduType::Goodbye, decodeGoodbye },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

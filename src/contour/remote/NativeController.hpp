@@ -416,6 +416,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     ///         is built locally, not re-authored on the daemon).
     [[nodiscard]] bool isRealizingLayout() const;
 
+    /// @return Whether what happens to the panes is the daemon's doing (beginDaemonOriginated()): the
+    ///         presentation reports stay silent. Unlike a layout realization it changes nothing else.
+    [[nodiscard]] bool isDaemonOriginated() const;
+
     /// Pairs local @p tab with the daemon tab @p wireTab, the one it shows: a later push names the daemon
     /// tab, and the reconcile brings this tab in line with it. A daemon tab is paired with one local tab at
     /// most, so a pairing the daemon tab had before goes. GUI thread.
@@ -596,6 +600,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// SessionFactory: the user moved a divider, so the daemon's model — what a re-attaching client
     /// rebuilds from — is told the new ratio. @see proto::ResizeSplit.
     void reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty const* secondPty, double ratio) override;
+    /// SessionFactory: counts one more holder of the daemon-originated state (nests). Takes _mutex.
+    void beginDaemonOriginated() override;
+    /// SessionFactory: counts one holder less. Takes _mutex.
+    void endDaemonOriginated() override;
 
     /// SessionFactory: the user changed how a tab is presented, so the daemon's model -- and every other
     /// client -- is told: one proto::EditTab per field that differs from the last LayoutState this
@@ -769,7 +777,7 @@ class NativeController final: public QObject, public contour::session::SessionFa
     {
         if (_supervisor == nullptr)
             return false;
-        _supervisor->stop();
+        _supervisor->closeWindow();
         return true;
     }
     void closeReactorBindings() override { closeAllBindings(); }
@@ -1035,6 +1043,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     std::atomic<vthost::proto::WireColorPreference> _statedColors {
         vthost::proto::WireColorPreference::Unstated
     };
+    /// How many holders of the daemon-originated state there are; nested ones count each.
+    uint32_t _daemonOriginated = 0;
     bool _realizingLayout = false; ///< canCreateSession() is true while a layout is being realized.
     /// The request number of each move in flight, by the serial it went out under (@see requestRemoteMove).
     /// Reactor thread only.

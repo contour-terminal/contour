@@ -4,6 +4,7 @@
 #include <core/async/WhenAll.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
+#include <core/platform/Clock.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -49,6 +50,33 @@ class FakeBroker final: public vthost::IAskpassBroker
 
   private:
     std::atomic<std::chrono::milliseconds::rep> const* _openFor;
+};
+
+/// A broker whose wait to serve takes @p waitFor on @p clock, as the askpass broker's for the GUI to come up.
+class SlowServingBroker final: public vthost::IAskpassBroker
+{
+  public:
+    SlowServingBroker(core::platform::ManualClock& clock, vthost::PromptPause const& pause):
+        _clock { clock }, _pause { pause }
+    {
+    }
+    [[nodiscard]] core::async::Task<std::expected<void, std::string>> whenServing() override
+    {
+        _clock.advance(std::chrono::seconds { 5 });
+        // Counted while it waits, not only once it is over.
+        pausedWhileWaiting = _pause.total();
+        co_return std::expected<void, std::string> {};
+    }
+    [[nodiscard]] std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> open(
+        vthost::SshTarget const& /*target*/) override
+    {
+        return std::unexpected { std::string { "unused" } };
+    }
+    std::chrono::milliseconds pausedWhileWaiting {};
+
+  private:
+    core::platform::ManualClock& _clock;
+    vthost::PromptPause const& _pause;
 };
 
 /// A broker that cannot serve yet, as the askpass broker before the GUI's application object exists.
@@ -185,4 +213,18 @@ TEST_CASE("a pausing broker waits as the broker it wraps does", "[vthost][askpas
     auto const serving = core::async::syncRun(broker.whenServing());
     REQUIRE_FALSE(serving.has_value());
     CHECK(serving.error() == "not yet");
+}
+
+TEST_CASE("a pausing broker counts the wait to serve as prompt time", "[vthost][askpass]")
+{
+    // An identity file's passphrase waits for the GUI to come up before it can be asked: the attach's
+    // deadline is not charged for that wait.
+    auto clock = core::platform::ManualClock {};
+    auto const pause = std::make_shared<vthost::PromptPause>();
+    auto const inner = std::make_shared<SlowServingBroker>(clock, *pause);
+    auto broker = vthost::PausingAskpassBroker { inner, pause, clock };
+    REQUIRE(core::async::syncRun(broker.whenServing()).has_value());
+    CHECK(inner->pausedWhileWaiting == 5s);
+    CHECK(pause->total() == 5s);
+    CHECK(pause->openSessions() == 0);
 }

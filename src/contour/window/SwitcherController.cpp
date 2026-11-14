@@ -236,8 +236,11 @@ void SwitcherController::open(SwitcherOpening opening)
     else
     {
         // The saved hosts after the local daemons; the window's own first, or, on a saved host, that host.
+        // A window with no daemon lists its own workspaces and no saved host.
         _scope = _opening.scope;
-        _daemons = _services.savedHosts ? _services.savedHosts() : std::vector<SwitcherDaemon> {};
+        _daemons = _services.savedHosts && _scope != SwitcherScope::WindowOnly
+                       ? _services.savedHosts()
+                       : std::vector<SwitcherDaemon> {};
         if (auto const found =
                 std::ranges::find_if(_daemons, [&](auto const& each) { return isAt(each, own); });
             found != _daemons.end())
@@ -402,6 +405,7 @@ void SwitcherController::rebuild(std::optional<SwitcherRowIdentity> const& keep)
         beginResetModel();
         _rows = std::move(rows);
         endResetModel();
+        emit groupCountChanged(); // the rows updated in place above keep their groups (sameRows)
     }
     // Until the user takes the selection, it is the popup's: it follows the list as it fills.
     auto const next = [&] {
@@ -453,7 +457,7 @@ void SwitcherController::updatePresentation()
                 ? QString::fromStdString(switcherDescription(*row, currentInputs, currentView, _opening.mode))
                 : QString {},
         .footerHintSets = footerHintSetsOf(switcherFooterHintSets(
-            subject, switcherEscapeCommand(keyContext(0)), _services.style, _opening.mode)),
+            subject, switcherEscapeCommand(keyContext(0)), _services.style, _opening.mode, _scope)),
     };
     if (std::exchange(_presentation, std::move(next)) != _presentation)
         emit presentationChanged();
@@ -550,7 +554,7 @@ void SwitcherController::activateInNewWindow(int row)
     if (found == nullptr)
         return;
     auto const chosen = *found;
-    if (switcherRowKindRule(chosen.kind).newWindow == OpensInNewWindow::No)
+    if (switcherRowKindRule(chosen.kind).newWindow == OpensInNewWindow::No || !offersNewWindow(_scope))
     {
         activate(row);
         return;
@@ -668,15 +672,17 @@ QVariantList SwitcherController::rowMenu(int row)
                                   ? _services.workspaceMenu(_opening.window, id)
                                   : command::WorkspaceMenuState {};
     auto const menu = command::buildSwitcherRowMenu(
-        command::SwitcherRowMenuState { .name = chosen->title,
-                                        .owner = owner,
-                                        .workspace = sidebarState,
-                                        .returnMode = _opening.mode == session::SwitchMode::Open
-                                                          ? command::SwitcherMenuReturn::Open
-                                                          : command::SwitcherMenuReturn::Switch,
-                                        .shown = chosen->state == SwitcherWorkspaceState::ThisWindow
-                                                     ? command::SwitcherMenuShown::ThisWindow
-                                                     : command::SwitcherMenuShown::Elsewhere },
+        command::SwitcherRowMenuState {
+            .name = chosen->title,
+            .owner = owner,
+            .workspace = sidebarState,
+            .newWindow = offersNewWindow(_scope) ? command::SwitcherMenuNewWindow::Offered
+                                                 : command::SwitcherMenuNewWindow::Withheld,
+            .returnMode = _opening.mode == session::SwitchMode::Open ? command::SwitcherMenuReturn::Open
+                                                                     : command::SwitcherMenuReturn::Switch,
+            .shown = chosen->state == SwitcherWorkspaceState::ThisWindow
+                         ? command::SwitcherMenuShown::ThisWindow
+                         : command::SwitcherMenuShown::Elsewhere },
         _services.style);
 
     // The leading choices carry no action: they take the first actionIds, the sidebar's rows the rest.
@@ -981,6 +987,12 @@ QVariant SwitcherController::data(QModelIndex const& modelIndex, int role) const
 int SwitcherController::rowCount(QModelIndex const& parent) const
 {
     return parent.isValid() ? 0 : static_cast<int>(_rows.size());
+}
+
+int SwitcherController::groupCount() const noexcept
+{
+    return static_cast<int>(
+        std::ranges::count_if(_rows, [](SwitcherRow const& row) { return !row.groupTitle.empty(); }));
 }
 
 QHash<int, QByteArray> SwitcherController::roleNames() const

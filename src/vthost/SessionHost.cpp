@@ -507,6 +507,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _identity(std::move(config.identity)),
     _instance(config.instance),
     _clocks(config.clocks),
+    _reconnectGrace(config.reconnectGrace),
     _pageSize(_settings.pageSize),
     _pumping(config.pumping),
     _inputWatermarks(config.inputWatermarks),
@@ -1389,12 +1390,27 @@ void SessionHost::noteClientAttached(SessionStreamEvents* client)
         refreshAllWorkspaceGit();
 }
 
-void SessionHost::noteClientDetached(SessionStreamEvents const* client)
+void SessionHost::noteClientDetached(SessionStreamEvents const* client, DetachKind kind)
 {
     auto const counted = std::erase(_attachedClients, client) != 0;
     if (!counted)
         return;
     _focusSerials.erase(client);
+    // A window that said it closes leaves its workspace free at once, a hold from an earlier drop of the same
+    // window included; a lost connection is a reconnect.
+    if (auto const shown = client->selectedWorkspace(); shown != 0)
+    {
+        switch (kind)
+        {
+            case DetachKind::Closed: _reconnectHolds.erase(shown); break;
+            case DetachKind::Dropped: {
+                auto const now = _clocks.steady.now();
+                std::erase_if(_reconnectHolds, [now](auto const& hold) { return hold.second <= now; });
+                _reconnectHolds.insert_or_assign(shown, now + _reconnectGrace);
+                break;
+            }
+        }
+    }
     settleRaiseRole();
     // A switch asked of a window that is gone will never be answered.
     auto const gone = client->connectionId();
@@ -1408,11 +1424,10 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client)
             proto::SwitchReply { .outcome = proto::SwitchOutcome::Failed, .detail = "the window went away" });
 }
 
-void SessionHost::noteSelected(SessionStreamEvents const& client, uint64_t workspace)
+void SessionHost::noteSelected(SessionStreamEvents const& client)
 {
     if (!std::ranges::contains(_attachedClients, &client))
         return;
-    _lastSelected = workspace;
     settleRaiseRole();
 }
 
@@ -1467,6 +1482,19 @@ WorkspaceVisibility SessionHost::visibility(uint64_t workspace) const
                                })
                ? WorkspaceVisibility::Shown
                : WorkspaceVisibility::Hidden;
+}
+
+std::unordered_set<uint64_t> SessionHost::shownForAttach() const
+{
+    auto shown = std::unordered_set<uint64_t> {};
+    for (auto const* client: _attachedClients)
+        if (auto const selected = client->selectedWorkspace(); selected != 0)
+            shown.insert(selected);
+    auto const now = _clocks.steady.now();
+    for (auto const& [workspace, until]: _reconnectHolds)
+        if (now < until)
+            shown.insert(workspace);
+    return shown;
 }
 
 std::vector<ConnectionView> SessionHost::connectionViews() const

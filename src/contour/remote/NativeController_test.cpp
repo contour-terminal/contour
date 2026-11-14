@@ -364,6 +364,50 @@ TEST_CASE("attach controller mirrors a remote session over a real socket", "[att
     pane.terminal.reset(); // unbind (the controller outlives its ptys' registrations)
 }
 
+TEST_CASE("NativeController: a daemon-originated scope leaves the layout-realizing state alone",
+          "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    using contour::session::DaemonOriginatedScope;
+    REQUIRE_FALSE(controller.isRealizingLayout());
+    REQUIRE_FALSE(controller.canCreateSession());
+
+    SECTION("it makes no pane creatable, and ends as it began")
+    {
+        {
+            auto const scope = DaemonOriginatedScope { controller };
+            CHECK(controller.isDaemonOriginated());
+            CHECK_FALSE(controller.isRealizingLayout());
+            CHECK_FALSE(controller.canCreateSession());
+        }
+        CHECK_FALSE(controller.isDaemonOriginated());
+        CHECK_FALSE(controller.isRealizingLayout());
+    }
+    SECTION("a layout being realized is still being realized once it ends")
+    {
+        controller.setRealizingLayout(true);
+        {
+            auto const scope = DaemonOriginatedScope { controller };
+            CHECK(controller.isRealizingLayout());
+        }
+        CHECK(controller.isRealizingLayout());
+        CHECK(controller.canCreateSession());
+        controller.setRealizingLayout(false);
+    }
+    SECTION("nested scopes restore the one around them")
+    {
+        auto const outer = DaemonOriginatedScope { controller };
+        {
+            auto const inner = DaemonOriginatedScope { controller };
+            CHECK(controller.isDaemonOriginated());
+        }
+        CHECK(controller.isDaemonOriginated());
+    }
+}
+
 TEST_CASE("DaemonFixture: two fixtures serve two controllers at once", "[attach][controller][fixture]")
 {
     auto first = DaemonFixture { {}, {}, 7 };
@@ -1936,6 +1980,53 @@ TEST_CASE("a second client sees the first client's zoom, title and colour", "[at
 
     a.controller->stop();
     b.controller->stop();
+}
+
+TEST_CASE("a tab's control label names it in the window, over its title, until it is cleared",
+          "[attach][controller][sync-back]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("root");
+    auto gui = AttachedGui { daemon };
+    requireConnected(*gui.controller);
+    REQUIRE(waitUntil([&] {
+        auto const layout = gui.controller->settledLayout();
+        return layout && layout->tabs.size() == 1;
+    }));
+    gui.reconcile();
+    REQUIRE(gui.app.manager().model().workspace(gui.window.id)->tabCount() == 1);
+    gui.app.manager().model().setTabTitle(gui.tab().id(), "renamed");
+
+    // The label `contour label tab:… NAME` gives the daemon's only tab.
+    auto const labelTab = [&](std::string const& label) {
+        std::ignore = daemon.onDaemon([&] {
+            auto const* tab = daemon.host->model().workspace(daemon.host->workspaceId())->tabAt(0);
+            daemon.host->objects().setLabel(
+                vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Tab,
+                                       .uuid = *daemon.host->objects().uuidOf(tab->id()) },
+                label);
+            return 0;
+        });
+    };
+    // Whether the window's tab holds @p label, and its tab strip and its list name it @p name.
+    auto const shows = [&](std::string_view name, std::string_view label) {
+        return waitUntil([&] {
+            gui.reconcile();
+            auto const directory = gui.controller->directory();
+            return gui.tab().label() == label && gui.window->tabTitleOf(gui.tab().id()) == name
+                   && !directory.workspaces.empty() && !directory.workspaces.front().tabs.empty()
+                   && directory.workspaces.front().tabs.front().label == name;
+        });
+    };
+    REQUIRE(shows("renamed", ""));
+
+    labelTab("build");
+    CHECK(shows("build", "build"));
+
+    labelTab("");
+    CHECK(shows("renamed", ""));
+
+    gui.controller->stop();
 }
 
 // Regression: a departing client that moves the daemon's client area (here the smaller of a `smallest` pair)
@@ -4366,6 +4457,22 @@ TEST_CASE("an old daemon without DaemonFollow is refused with the upgrade messag
         waitUntil([&] { return controller->connectionState() == vthost::client::ConnectionState::Stopped; }));
     // Nothing is sent to it, whatever the window asks.
     CHECK_FALSE(controller->select(1).has_value());
+    controller->stop();
+}
+
+TEST_CASE("an attach that fails sends no Goodbye, so the daemon takes its end for a drop",
+          "[attach][controller][goodbye]")
+{
+    auto daemon = DaemonFixture { {}, servicesWithoutDaemonFollow() };
+    std::ignore = daemon.seedSession("first");
+    auto const first = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
+    auto timeline = TestTimeline {};
+    auto const controller = makeNativeController(daemon.endpoint(), timeline);
+    REQUIRE_FALSE(controller->connectAndWait(10s).has_value()); // refused: the failure stops the supervisor
+    REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.host->connectedClients() == 0; }));
+
+    // Nothing said the window closed on purpose: the workspace it was attached to is held for a reconnect.
+    CHECK(daemon.onDaemon([&] { return daemon.host->shownForAttach().contains(first); }));
     controller->stop();
 }
 

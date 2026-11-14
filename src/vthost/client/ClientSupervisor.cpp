@@ -74,6 +74,13 @@ void ClientSupervisor::stop()
         _current->detach();
 }
 
+void ClientSupervisor::closeWindow()
+{
+    _stop.request_stop();
+    if (_current)
+        _current->closeWindow();
+}
+
 void ClientSupervisor::retryNow()
 {
     auto const lock = std::lock_guard { _retryMutex };

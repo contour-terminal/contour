@@ -93,8 +93,8 @@ struct KeyAuthPolicy
     std::reference_wrapper<core::IRandom> random; ///< Where each challenge's nonce comes from.
 };
 
-// PreAuthTimeout, how long a connection on a network listener has to authenticate, lives in KeyAuth.hpp,
-// where a client that waits on it can name it too.
+// PreAuthTimeout, how long a connection has by default to authenticate, lives in KeyAuth.hpp, where a client
+// that waits on it can name it too.
 
 /// What the daemon side of the handshake admits: the token, versions and capabilities it requires
 /// and offers.
@@ -108,9 +108,14 @@ struct HandshakePolicy
     /// whose permissions are the gate, and for any endpoint without keys. Per connection, so set only by the
     /// handler that has the connection's TLS session in hand.
     std::optional<KeyAuthPolicy> keyAuth = std::nullopt;
+    /// How long a connection has, from its accept, to have a hello accepted: the TLS handler's budget for
+    /// the handshake and the hello together, the local handler's for the hello alone. A local peer is no
+    /// stranger, but one that says nothing would hold its connection -- and the relay of a stdio attach in
+    /// front of it -- for ever. The handlers turn it into @ref authDeadline as they accept.
+    std::chrono::milliseconds helloTimeout = PreAuthTimeout;
     /// The instant, on the event loop's clock, by which a hello must have been accepted; the connection is
-    /// closed at it otherwise. Empty for a unix socket, whose permissions are the gate. Per connection, as
-    /// it runs from the accept: set by the handler that knows when that was.
+    /// closed at it otherwise. Empty for a session constructed without a handler. Per connection, as it runs
+    /// from the accept: set by the handler that knows when that was, from @ref helloTimeout.
     std::optional<core::platform::SteadyTimePoint> authDeadline = std::nullopt;
     /// The protocol versions this endpoint speaks; the highest one shared with the client is agreed.
     proto::VersionRange versions = proto::SupportedVersions;
@@ -134,7 +139,8 @@ struct HandshakePolicy
                                                                    proto::Capability::SoftFonts,
                                                                    proto::Capability::WorkspaceSwitch,
                                                                    proto::Capability::DaemonFollow,
-                                                                   proto::Capability::WorkspaceMeta });
+                                                                   proto::Capability::WorkspaceMeta,
+                                                                   proto::Capability::ClientGoodbye });
 };
 
 /// When a connection sends a session's program-status set.
@@ -664,8 +670,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     [[nodiscard]] TabVerb serveTabVerb(proto::DecodedFrame const& frame);
 
     /// Serves @p frame if it is a SelectWorkspace or ReportFocus (Capability::DaemonFollow; ReportFocus is
-    /// read and ignored) or a SwitchReply (Capability::WorkspaceSwitch), refusing it when the
-    /// capability was not negotiated. Reported as a TabVerb: it is dispatched the same way.
+    /// read and ignored), a SwitchReply (Capability::WorkspaceSwitch) or a Goodbye
+    /// (Capability::ClientGoodbye), refusing it when the capability was not negotiated. Reported as a
+    /// TabVerb: it is dispatched the same way.
     /// @param frame The frame read.
     /// @return Served when it was one of them.
     [[nodiscard]] TabVerb serveWorkspaceVerb(proto::DecodedFrame const& frame);
@@ -789,9 +796,17 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     void openLayoutBatch();
 
     /// Selects another workspace when the selected one ended (left the model, or lost its last tab), before
-    /// a layout push: the one a launch would (@see defaultSelection), none when none is left. A connection
-    /// that selected none stays so.
+    /// a layout push: the one a launch takes (@see planAttach), so never one another window shows; none when
+    /// none is left. A connection that selected none stays so.
     void refreshSelection();
+
+    /// @return The daemon's workspaces ascending by id, with their tab counts and what an attach sees of them
+    ///         (SessionHost::shownForAttach), as of now.
+    [[nodiscard]] std::vector<WorkspaceSummary> workspaceSummaries() const;
+
+    /// @param workingDirectory The directory the attach states; empty when it states none.
+    /// @return What planAttach() decides from: workspaceSummaries() and the host's primary workspace.
+    [[nodiscard]] AttachContext attachContext(std::filesystem::path const& workingDirectory) const;
 
     /// Validates the peer's ClientHello and answers it. An Attach connection then becomes a client
     /// (see attachClient: the census ticket, the subscriptions, and the attach snapshot, spawning the
@@ -982,6 +997,12 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
 
     /// @return @p workspace's 0-based place in the daemon's workspace order; 0 for one the model lacks.
     [[nodiscard]] int positionOf(vtworkspace::WorkspaceId workspace) const;
+
+    /// Tells the client of a label the registry changed: a workspace's as a label delta, where the client
+    /// shares Capability::WorkspaceMeta; a tab's with its workspace's layout; a pane's not at all.
+    /// @param ref The object whose label changed.
+    /// @param label Its label now; empty when it was cleared.
+    void labelChanged(vtcontrol::ObjectRef const& ref, std::string_view label);
 
     /// Sends a label delta when @p ref is a workspace this connection was told of.
     /// @param ref The object whose label changed.
@@ -1368,6 +1389,8 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// Whether @ref requeueOnSendRoom is live, which @ref run waits out before it lets `this` go — kept
     /// apart from the set, which a closed session leaves while the waiter still holds `this`.
     RoomWaiter _roomWaiter = RoomWaiter::Idle;
+    /// How this connection's end is told to the host: Closed once the client said Goodbye, else a drop.
+    DetachKind _detachKind = DetachKind::Dropped;
     /// Whether the attached client shares Capability::DaemonFollow: it selects one workspace, is told the
     /// others' panes as summaries, and takes part in routing (followsDaemon()). Set as it attaches.
     enum class DaemonFollowing : uint8_t
@@ -1406,7 +1429,7 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// the last members, so they are released before anything they deliver to.
     std::optional<ScopedStreamSubscription> _streamSubscription;
     std::optional<ScopedModelSubscription> _layoutSubscription;
-    /// The registry's label changes, taken for a client sharing Capability::WorkspaceMeta.
+    /// The registry's label changes (@see labelChanged()).
     std::optional<ObjectRegistry::Subscription> _labelSubscription;
     UpgradeEnd _upgradeEnd = UpgradeEnd::Open;
     std::shared_ptr<UpgradeLink> _upgradeLink = std::make_shared<UpgradeLink>(UpgradeLink { this });
@@ -1440,8 +1463,9 @@ struct TlsKeyAuth
 };
 
 /// Composes a native connection handler that FIRST encrypts each accepted socket (server-side TLS), then
-/// serves the native protocol over it. Each connection has PreAuthTimeout, from its accept, to finish the TLS
-/// handshake and have its hello accepted; one that has not is closed.
+/// serves the native protocol over it. Each connection has HandshakePolicy::helloTimeout (PreAuthTimeout by
+/// default), from its accept, to finish the TLS handshake and have its hello accepted; one that has not is
+/// closed.
 /// @param loop The event loop every connection runs on; its clock times the deadline.
 /// @param host The session host every connection serves (not owned; outlives the handler).
 /// @param tls The server-side TLS context.
@@ -1456,8 +1480,9 @@ struct TlsKeyAuth
     NativeSessionServices services,
     TlsKeyAuth keyAuth);
 
-/// The daemon's connection-handler factory for native-protocol clients.
-/// @param loop The event loop every connection runs on.
+/// The daemon's connection-handler factory for native-protocol clients. Each connection has
+/// HandshakePolicy::helloTimeout, from its accept, to have its hello accepted; one that has not is closed.
+/// @param loop The event loop every connection runs on; its clock times the deadline.
 /// @param host The session host every connection serves (not owned; outlives the handler).
 /// @param services What each connection is constructed with.
 /// @return The handler.

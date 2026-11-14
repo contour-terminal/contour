@@ -152,6 +152,27 @@ enum class PaneShowing : uint8_t
     Shown,       ///< Its tab is active and the pane focused and seen.
 };
 
+/// Why newWorkspaceFor() made no workspace.
+enum class NewWorkspaceError : uint8_t
+{
+    NoActiveSession = 0, ///< The window has no pane to start the first shell beside.
+    FirstShellFailed,    ///< The first shell of the new workspace could not start.
+};
+
+/// What the user is told for @p error.
+/// @param error The failure.
+/// @return A lower-case sentence without a trailing period.
+[[nodiscard]] constexpr std::string_view describe(NewWorkspaceError error) noexcept
+{
+    switch (error)
+    {
+        case NewWorkspaceError::NoActiveSession:
+            return "this window has no active pane to start a workspace beside";
+        case NewWorkspaceError::FirstShellFailed: return "the new workspace's shell could not be started";
+    }
+    return {};
+}
+
 /// Why restartSession() started no new session.
 enum class RestartError : uint8_t
 {
@@ -431,7 +452,17 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// failed first session drops the workspace again.
     /// @param acting The session that triggered the action.
     /// @param cwd The folder the first shell starts in, as UTF-8; empty or "." for the profile's.
-    void newWorkspaceStartingIn(TerminalSession const& acting, std::string const& cwd);
+    /// @return The workspace made; none when no shell could start.
+    std::optional<vtworkspace::WorkspaceId> newWorkspaceStartingIn(TerminalSession const& acting,
+                                                                   std::string const& cwd);
+
+    /// (In-process) Makes a workspace for the window showing @p window, in the folder its active pane is in,
+    /// and shows it (newWorkspaceStartingIn()).
+    /// @param window The workspace the window shows.
+    /// @param label What to call it; empty to keep the folder's name.
+    /// @return The workspace made; why none was: the window has no pane to start beside, or no shell started.
+    [[nodiscard]] std::expected<vtworkspace::WorkspaceId, NewWorkspaceError> newWorkspaceFor(
+        vtworkspace::WorkspaceId window, std::string label);
 
     /// (In-process) Labels @p workspace, which the in-process directory of its window lists
     /// (InProcessDirectory); an empty label removes it. Not for a daemon's workspace, whose label is its
@@ -1549,6 +1580,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         manager was constructed with makes.
     [[nodiscard]] WindowBinding const* bindingOf(vtworkspace::WorkspaceId window) const noexcept;
 
+    /// @param window A window of this manager.
+    /// @return The factory that makes its sessions and is asked about them: its binding's (@see bindWindow),
+    ///         else the one this manager was constructed with. A window no binding claims -- the quick
+    ///         terminal among them -- is local, and that is the only rule.
+    [[nodiscard]] SessionFactory& factoryFor(vtworkspace::WorkspaceId window) const noexcept;
+
     /// The one record of which windows a binding serves: what bindWindow() bound to it, and neither a close
     /// nor a later bindWindow() took away since.
     /// @param binding A binding.
@@ -1578,6 +1615,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         window no binding serves, whose sessions run in-process.
     [[nodiscard]] std::optional<SwitchTarget> daemonTargetOf(vtworkspace::WorkspaceId window) const;
 
+    /// @param window A window of this manager.
+    /// @return Whether @p window is served by no binding at all: its sessions run in this process and it
+    ///         shows the workspaces it owns. (A tmux window has a binding without a daemon, and is not.)
+    [[nodiscard]] bool isInProcessWindow(vtworkspace::WorkspaceId window) const noexcept
+    {
+        return bindingOf(window) == nullptr;
+    }
+
     /// @param window A window.
     /// @return Whether the daemon the window is bound to runs on this machine; Local for a window with none.
     [[nodiscard]] window::DaemonLocality daemonLocalityOf(vtworkspace::WorkspaceId window) const;
@@ -1592,9 +1637,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         for a session no window holds.
     [[nodiscard]] std::string_view hostLabelOf(TerminalSession const& session) const noexcept;
 
-    /// New Window from @p acting's window: on a daemon, a window of a connection of its own opens, selecting
-    /// the workspace @p acting's window displays (WindowBinding::openWindowLike), instead of a local window
-    /// opening.
+    /// New Window from @p acting's window: on a daemon, a window of a connection of its own opens, showing
+    /// the daemon's first workspace no window shows, else a new one (SiblingShows::DaemonsChoice), instead
+    /// of a local window opening.
     /// @param acting The session the new window is asked from.
     /// @param screen Where the window opens; null for the default placement.
     /// @return Routed when the daemon's binding took the request; Local for a local window, which then opens
@@ -1988,12 +2033,6 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     void focusedSessionSeen();
 
     /// @param window A window of this manager.
-    /// @return The factory that makes its sessions and is asked about them: its binding's (@see bindWindow),
-    ///         else the one this manager was constructed with. A window no binding claims -- the quick
-    ///         terminal among them -- is local, and that is the only rule.
-    [[nodiscard]] SessionFactory& factoryFor(vtworkspace::WorkspaceId window) const noexcept;
-
-    /// @param window A window of this manager.
     /// @return What @p window is bound to, as it was bound (@see bindingOf); null for a local window.
     [[nodiscard]] WindowBinding* mutableBindingOf(vtworkspace::WorkspaceId window) const noexcept;
 
@@ -2316,19 +2355,21 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] static std::optional<window::WindowPosition> spawnPositionFor(QScreen* screen, QPoint at);
     /// Stages @p pending for the next window, spawned on @p screen at @p at (@see consumePendingTransplant).
     void spawnWindowFor(PendingTransplant const& pending, QScreen* screen, QPoint at);
-    /// Opens a window of a connection of its own on @p binding's daemon, showing what @p asking shows (New
-    /// Window, a tab torn off); one that cannot open is logged under @p what and told in @p asking.
+    /// Opens a window of a connection of its own on @p binding's daemon, beside @p asking; one that cannot
+    /// open is logged under @p what and told in @p asking.
     /// @param binding The daemon binding @p asking is bound to.
     /// @param asking The window asked from.
+    /// @param shows What the new window shows (a New Window, or a tab torn off).
     /// @param activeTab The tab the new window activates; none for the daemon's own choice.
     /// @param screen Where the window opens; null for the default placement.
     /// @param what What asked, for the log.
     /// @return Routed once the window's connection is under way; Refused otherwise.
-    RemoteRouting openDaemonWindowLike(WindowBinding& binding,
-                                       vtworkspace::WorkspaceId asking,
-                                       std::optional<vtworkspace::TabId> activeTab,
-                                       QScreen* screen,
-                                       std::string_view what) const;
+    RemoteRouting openSiblingWindow(WindowBinding& binding,
+                                    vtworkspace::WorkspaceId asking,
+                                    SiblingShows shows,
+                                    std::optional<vtworkspace::TabId> activeTab,
+                                    QScreen* screen,
+                                    std::string_view what) const;
     /// Tells the screen reader of the window @p moved landed in what happened.
     void announceMove(vtworkspace::MoveResult const& moved,
                       window::DropPayload payload,

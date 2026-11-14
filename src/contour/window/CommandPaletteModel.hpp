@@ -54,6 +54,9 @@ class CommandPaletteModel: public QAbstractListModel
     /// (the QML-facing carve-out): while it holds, refresh() leaves the open palette's rows, level and query
     /// alone, so a second OpenCommandPalette does not empty the list under a typed query.
     Q_PROPERTY(bool shown READ shown WRITE setShown NOTIFY shownChanged)
+    /// How many group headers the rows draw: the rows that open a group. With every row the same height, it
+    /// gives the list's height without laying the list out (PickerPopup sizes itself from it).
+    Q_PROPERTY(int groupCount READ groupCount NOTIFY groupCountChanged)
     QML_ELEMENT
     QML_UNCREATABLE("Created by the window controller")
 
@@ -126,11 +129,13 @@ class CommandPaletteModel: public QAbstractListModel
     [[nodiscard]] bool shown() const noexcept { return _isShown; }
     /// @param shown Whether the palette is on screen (the property is the parameter: QML's carve-out).
     void setShown(bool shown);
+    [[nodiscard]] int groupCount() const noexcept;
 
   signals:
     void filterChanged();
     void levelChanged();
     void shownChanged();
+    void groupCountChanged();
 
   private:
     /// Where the palette is, from _level.

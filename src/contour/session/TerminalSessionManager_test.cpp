@@ -4884,11 +4884,12 @@ TEST_CASE("TerminalSessionManager: New Window opens on the daemon only from a wi
     auto* const pane = manager.createSession(onDaemon.id);
     REQUIRE(pane != nullptr);
 
-    // A window on a daemon: a window of a connection of its own, selecting what this one displays.
+    // A window on a daemon: a window of a connection of its own, which the daemon gives a workspace no window
+    // shows -- not a clone of what this one displays.
     CHECK(manager.requestRemoteWindow(*pane, nullptr) == RemoteRouting::Routed);
-    REQUIRE(daemon.openedLike.size() == 1);
-    CHECK(daemon.openedLike.front().first == onDaemon.id);
-    CHECK_FALSE(daemon.openedLike.front().second.has_value());
+    REQUIRE(daemon.opened.size() == 1);
+    CHECK(daemon.opened.front().window == onDaemon.id);
+    CHECK(daemon.opened.front().shows == contour::session::SiblingShows::DaemonsChoice);
 
     // A binding with no daemon, and a window none serves, leave it to the caller.
     auto links = TwoLinks {};
@@ -4897,7 +4898,7 @@ TEST_CASE("TerminalSessionManager: New Window opens on the daemon only from a wi
     auto* const localPane = manager.createSession(local.id);
     REQUIRE(localPane != nullptr);
     CHECK(manager.requestRemoteWindow(*localPane, nullptr) == RemoteRouting::Local);
-    CHECK(daemon.openedLike.size() == 1);
+    CHECK(daemon.opened.size() == 1);
     contour::test::closeAllTabs(*local);
     contour::test::closeAllTabs(*onDaemon);
 }
@@ -5983,6 +5984,26 @@ TEST_CASE("TerminalSessionManager: an in-process window reorders its workspaces"
     CHECK(f.listed() == std::vector { f.second.value, f.first.value });
 }
 
+TEST_CASE("TerminalSessionManager: an in-process window lists the title a pane's program sets",
+          "[manager][workspace]")
+{
+    auto f = TwoWorkspaces {};
+    auto const before = f.controller().directorySource()->directory();
+    auto const& tab = before.workspaces.front().tabs.front();
+    REQUIRE(!tab.panes.empty());
+    auto* const session = f.manager().sessionForId(vtworkspace::SessionId { tab.panes.front().key.value });
+    REQUIRE(session != nullptr);
+    auto const changed =
+        QSignalSpy { &f.controller(), &contour::window::WindowController::workspaceDirectoryChanged };
+
+    // As a daemon window's list does: told of the change, it names the tab after its pane's new title.
+    session->terminal().writeToScreen("\033]2;build\007");
+    drainPosted();
+
+    CHECK(changed.count() >= 1);
+    CHECK(f.controller().directorySource()->directory().workspaces.front().tabs.front().label == "build");
+}
+
 TEST_CASE("TerminalSessionManager: an in-process window moves a tab into another workspace",
           "[manager][workspace]")
 {
@@ -6158,11 +6179,15 @@ class RoutingFactory final: public contour::session::SessionFactory
         contour::session::RemoteMove const& move) override
     {
         tabMoves.push_back(move);
+        if (onMove)
+            onMove();
         return moveRouting;
     }
 
     /// What requestRemoteMove() answers.
     contour::session::RemoteRouting moveRouting = contour::session::RemoteRouting::Routed;
+    /// What the daemon does before requestRemoteMove() returns: its answer may settle that soon.
+    std::function<void()> onMove;
 
     std::vector<std::pair<uint64_t, std::string>> renamed;
     std::vector<std::pair<uint64_t, uint32_t>> moved;
@@ -6642,6 +6667,40 @@ TEST_CASE("TerminalSessionManager: a daemon window's sidebar moves name the daem
     manager.releaseBinding(binding);
 }
 
+TEST_CASE("TerminalSessionManager: a move into a new workspace is followed when the daemon lists it at once",
+          "[manager][workspace][sidebar]")
+{
+    using contour::window::IntoNewWorkspace;
+    using contour::window::PaneKey;
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = RoutingFactory {};
+    auto binding = DaemonDirectoryBinding { factory };
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, binding);
+    auto& controller = *window.controller;
+
+    // The request goes out at once, and on a busy machine the daemon's push listing the workspace it made
+    // settles before the window starts waiting for it: that workspace is new all the same.
+    factory.onMove = [&binding] {
+        auto moved = binding.source.directory();
+        moved.workspaces[0].tabs.pop_back();
+        auto made = contour::window::DirectoryWorkspace {};
+        made.id = 30;
+        made.tabs.emplace_back().id = 300;
+        made.tabs.back().panes.emplace_back().key = PaneKey { 1001 };
+        moved.workspaces.push_back(made);
+        binding.source.replaced = moved;
+    };
+    manager.moveSidebarNode(controller, PaneKey { 1001 }, IntoNewWorkspace {});
+    REQUIRE(controller.followPending());
+    manager.notifyWorkspaceDirectoryChanged(binding);
+    CHECK_FALSE(controller.followPending());
+    CHECK(binding.source.selected == std::vector<uint64_t> { 30 });
+
+    manager.releaseBinding(binding);
+}
+
 TEST_CASE(
     "TerminalSessionManager: a join and a new workspace dropped in the sidebar wait for the drag to end",
     "[manager][workspace][sidebar]")
@@ -6813,7 +6872,7 @@ TEST_CASE("TerminalSessionManager: the user's own navigation gives up a pending 
     {
         manager.moveSidebarNode(controller, PaneKey { 1001 }, IntoNewWorkspace {});
         REQUIRE(controller.followPending());
-        controller.showWorkspace(20);
+        std::ignore = controller.showWorkspace(20);
         CHECK_FALSE(controller.followPending());
         CHECK(binding.source.selected == std::vector<uint64_t> { 20 });
         // The push that lists the new workspace no longer pulls the window there.

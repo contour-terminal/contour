@@ -616,6 +616,9 @@ TerminalSession* TerminalSessionManager::createBackingSession(
         refreshGitOfSession(session->modelSessionId());
         notifyDirectoriesChanged();
     });
+    // The lists name a tab after its pane's title, as a daemon window's do: told of a new one, they read it.
+    // Emitted on the parser thread, so queued to this one.
+    connect(session, &TerminalSession::titleChanged, this, [this] { notifyDirectoriesChanged(); });
     watchConfigFile();
 
     // Nor is it QML's to collect: QQmlEngine took sessions it was handed for garbage at random times, while
@@ -964,16 +967,19 @@ RemoteRouting TerminalSessionManager::requestRemoteWindow(TerminalSession const&
     auto* const binding = window != nullptr ? mutableBindingOf(window->id()) : nullptr;
     if (binding == nullptr || !binding->daemonTarget())
         return RemoteRouting::Local;
-    return openDaemonWindowLike(*binding, window->id(), std::nullopt, screen, "New Window");
+    // Not a window like this one: a new window shows a workspace no window shows.
+    return openSiblingWindow(
+        *binding, window->id(), SiblingShows::DaemonsChoice, std::nullopt, screen, "New Window");
 }
 
-RemoteRouting TerminalSessionManager::openDaemonWindowLike(WindowBinding& binding,
-                                                           vtworkspace::WorkspaceId asking,
-                                                           std::optional<vtworkspace::TabId> activeTab,
-                                                           QScreen* screen,
-                                                           std::string_view what) const
+RemoteRouting TerminalSessionManager::openSiblingWindow(WindowBinding& binding,
+                                                        vtworkspace::WorkspaceId asking,
+                                                        SiblingShows shows,
+                                                        std::optional<vtworkspace::TabId> activeTab,
+                                                        QScreen* screen,
+                                                        std::string_view what) const
 {
-    auto const opened = binding.openWindowLike(asking, activeTab, screen);
+    auto const opened = binding.openSiblingWindow(asking, shows, activeTab, screen);
     if (opened)
         return RemoteRouting::Routed;
     managerLog()("{}: {}", what, opened.error());
@@ -1423,13 +1429,13 @@ void TerminalSessionManager::newWorkspace(TerminalSession const& acting)
         return;
     }
     // A window whose binding has no daemon (a tmux window) holds what its binding gives it.
-    if (bindingOf(controller->displayedWorkspace()) != nullptr)
+    if (!isInProcessWindow(controller->displayedWorkspace()))
     {
         managerLog()("NewWorkspace: this window's workspaces come from what it is attached to.");
         postNotice(window::workspaceRefusedNotice(), &acting);
         return;
     }
-    newWorkspaceStartingIn(acting, acting.workingDirectory());
+    std::ignore = newWorkspaceStartingIn(acting, acting.workingDirectory());
 }
 
 namespace
@@ -1451,11 +1457,12 @@ namespace
     }
 } // namespace
 
-void TerminalSessionManager::newWorkspaceStartingIn(TerminalSession const& acting, std::string const& cwd)
+std::optional<vtworkspace::WorkspaceId> TerminalSessionManager::newWorkspaceStartingIn(
+    TerminalSession const& acting, std::string const& cwd)
 {
     auto* const controller = hostOf(&acting).controller;
     if (controller == nullptr)
-        return;
+        return std::nullopt;
     // Started where the pane that asked is, and named after that folder.
     auto const directory = knownDirectoryOf(cwd);
     auto const workspace = createWorkspaceIn(controller->windowId());
@@ -1470,9 +1477,25 @@ void TerminalSessionManager::newWorkspaceStartingIn(TerminalSession const& actin
         // No shell could be made: the window keeps the workspace it had, not an empty one.
         managerLog()("NewWorkspace: no session could be created; dropping the new workspace.");
         controller->dropWorkspaceIfEmpty(workspace);
-        return;
+        return std::nullopt;
     }
     nameNewWorkspace(workspace, directory);
+    return workspace;
+}
+
+std::expected<vtworkspace::WorkspaceId, NewWorkspaceError> TerminalSessionManager::newWorkspaceFor(
+    vtworkspace::WorkspaceId window, std::string label)
+{
+    auto const* const controller = controllerDisplaying(window);
+    auto const* const acting = controller != nullptr ? controller->activeSession() : nullptr;
+    if (acting == nullptr)
+        return std::unexpected(NewWorkspaceError::NoActiveSession);
+    auto const made = newWorkspaceStartingIn(*acting, acting->workingDirectory());
+    if (!made)
+        return std::unexpected(NewWorkspaceError::FirstShellFailed);
+    if (!label.empty())
+        setWorkspaceLabel(*made, std::move(label));
+    return *made;
 }
 
 std::string TerminalSessionManager::defaultWorkspaceName(std::filesystem::path const& directory)
@@ -1806,10 +1829,11 @@ void TerminalSessionManager::moveSidebarNodeRemotely(window::WindowController& w
     if (routing == RemoteRouting::Refused)
         postMoveRefused(window, window::MoveRefusedText);
     // The daemon makes the workspace and its push lists it: the window shows it then, as an in-process window
-    // shows the one it made.
+    // shows the one it made. What is new is judged against the directory read before the request went out:
+    // the request is sent at once, and the push listing the new workspace may settle before this line runs.
     else if (routing == RemoteRouting::Routed
              && std::holds_alternative<window::IntoNewWorkspace>(destination))
-        window.followIntoNewWorkspace(window::PaneKey { sources.front() });
+        window.followIntoNewWorkspace(window::PaneKey { sources.front() }, directory);
 }
 
 void TerminalSessionManager::moveSidebarNodeInProcess(window::WindowController& window,
@@ -2002,7 +2026,7 @@ void TerminalSessionManager::refreshWorkspaceGit(vtworkspace::WorkspaceId worksp
         return;
     // A window a daemon serves lists its daemon's git state; the daemon tracks it, and on its timer.
     auto const* const owner = controllerOwning(workspace);
-    if (owner == nullptr || bindingOf(owner->displayedWorkspace()) != nullptr)
+    if (owner == nullptr || !isInProcessWindow(owner->displayedWorkspace()))
         return;
     auto const* const activeTab =
         _model->workspace(workspace) != nullptr ? _model->workspace(workspace)->activeTab() : nullptr;
@@ -2035,17 +2059,12 @@ void TerminalSessionManager::requestSwitch(TerminalSession const& acting,
                                            SwitchMode mode)
 {
     auto const* const window = hostOf(&acting).window;
-    // An in-process window shows the Nth workspace it owns.
-    if (auto* const controller = hostOf(&acting).controller;
-        controller != nullptr && window != nullptr && mode == SwitchMode::Switch
-        && bindingOf(window->id()) == nullptr && target.kind == vthost::proto::SwitchDaemonKind::Same)
-        if (auto const* const at = std::get_if<WorkspaceAt>(&target.workspace);
-            at != nullptr && at->position > 0)
-        {
-            selectWorkspace(controller->windowId(), at->position - 1);
-            return;
-        }
-    if (window == nullptr || !daemonTargetOf(window->id()))
+    // An in-process window switches among the workspaces it owns, which the switching service does for it;
+    // another daemon is none of its business.
+    auto const inProcess = window != nullptr && isInProcessWindow(window->id())
+                           && target.kind == vthost::proto::SwitchDaemonKind::Same
+                           && mode == SwitchMode::Switch;
+    if (window == nullptr || (!inProcess && !daemonTargetOf(window->id())))
     {
         logNoDaemon("switch");
         return;
@@ -2082,14 +2101,31 @@ void TerminalSessionManager::cycleDaemon(TerminalSession const& acting, actions:
 void TerminalSessionManager::cycleWorkspace(TerminalSession const& acting, actions::CycleDirection direction)
 {
     auto const* const window = hostOf(&acting).window;
-    if (window == nullptr || !daemonTargetOf(window->id()))
+    auto const inProcess = window != nullptr && isInProcessWindow(window->id());
+    if (window == nullptr || (!inProcess && !daemonTargetOf(window->id())))
     {
         logNoDaemon("CycleWorkspace");
         return;
     }
-    auto const workspaces = _switchDirectory.workspacesOf(window->id());
-    // What is cached answers this press; the refresh is for the next one.
-    _switchDirectory.refresh();
+    auto workspaces = std::vector<KnownWorkspace> {};
+    if (inProcess)
+    {
+        // The window's own, in the order its sidebar, its switcher and SwitchToWorkspace number them.
+        auto const* const controller = hostOf(&acting).controller;
+        auto const* const source = controller != nullptr ? controller->directorySource() : nullptr;
+        auto const directory = source != nullptr ? source->directory() : window::WorkspaceDirectory {};
+        for (auto const& [position, listed]: window::switchableWorkspacesOf(directory))
+            workspaces.push_back(KnownWorkspace {
+                .position = position,
+                .name = listed->label,
+                .role = directory.selected == listed->id ? WorkspaceRole::Current : WorkspaceRole::Other });
+    }
+    else
+    {
+        workspaces = _switchDirectory.workspacesOf(window->id());
+        // What is cached answers this press; the refresh is for the next one.
+        _switchDirectory.refresh();
+    }
     auto const here = std::ranges::find_if(
         workspaces, [](KnownWorkspace const& workspace) { return workspace.role == WorkspaceRole::Current; });
     if (workspaces.size() < 2 || here == workspaces.end())
@@ -2153,13 +2189,18 @@ void TerminalSessionManager::openSwitcherOver(TerminalSession const& acting,
 {
     auto const* const window = hostOf(&acting).window;
     auto const daemon = window != nullptr ? daemonTargetOf(window->id()) : std::nullopt;
-    if (!daemon)
+    // An in-process window has no daemon, but several workspaces of its own: the popup lists those. Starting
+    // a daemon from it would have nothing to switch, so that is not offered.
+    auto const inProcess = window != nullptr && isInProcessWindow(window->id());
+    auto const servable = daemon.has_value() || (inProcess && prompt != window::SwitcherPrompt::NewDaemon);
+    if (!servable)
     {
         logNoDaemon(what);
         return;
     }
     // The palette's rows and the cycling actions read the directory; the popup asks the daemons itself.
-    _switchDirectory.refresh();
+    if (daemon)
+        _switchDirectory.refresh();
     auto* const controller = controllerHostingSession(&acting);
     if (controller == nullptr)
     {
@@ -2170,11 +2211,11 @@ void TerminalSessionManager::openSwitcherOver(TerminalSession const& acting,
     controller->sidebar().refreshNow();
     if (auto const shown = _app.openSwitcher(
             window::SwitcherOpening { .window = window->id(),
-                                      .windowDaemon = *daemon,
+                                      .windowDaemon = daemon.value_or(SwitchTarget {}),
                                       .mode = SwitchMode::Switch,
                                       .prompt = prompt,
                                       .pick = std::nullopt,
-                                      .scope = scope,
+                                      .scope = inProcess ? window::SwitcherScope::WindowOnly : scope,
                                       .windowWorkspaces = _app.windowWorkspacesOf(*controller, window->id()),
                                       .origin = control ? window::SwitcherOrigin::Chip
                                                         : window::SwitcherOrigin::Centred },
@@ -4518,7 +4559,8 @@ void TerminalSessionManager::tearOffTabToNewWindow(vtworkspace::WorkspaceId from
     // tab active there.
     if (auto* const binding = mutableBindingOf(from); binding != nullptr && binding->daemonTarget())
     {
-        std::ignore = openDaemonWindowLike(*binding, from, tab->id(), targetScreen, "Tab tear-off");
+        std::ignore = openSiblingWindow(
+            *binding, from, SiblingShows::SameWorkspace, tab->id(), targetScreen, "Tab tear-off");
         return;
     }
 

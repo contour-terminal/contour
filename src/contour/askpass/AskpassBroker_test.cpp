@@ -8,6 +8,7 @@
 #include <core/Random.hpp>
 #include <core/async/StopToken.hpp>
 #include <core/async/Task.hpp>
+#include <core/async/WhenAll.hpp>
 #include <core/async/WhenAny.hpp>
 #include <core/log/LogSink.hpp>
 #include <core/net/EventLoop.hpp>
@@ -44,6 +45,39 @@
 
 using namespace std::chrono_literals;
 using namespace contour::askpass;
+
+namespace contour::askpass
+{
+/// What the tests may see of, and do to, an AskpassBroker.
+struct AskpassBrokerTestAccess
+{
+    /// @return Whether @p broker's thread runs, serving sessions.
+    [[nodiscard]] static bool isServing(AskpassBroker const& broker) noexcept
+    {
+        return broker._state.load() == AskpassBroker::State::Serving;
+    }
+
+    /// @return How many coroutines wait in @p broker's whenServing().
+    [[nodiscard]] static std::size_t waiting(AskpassBroker const& broker)
+    {
+        return contour::platform::AsyncLatchTestAccess::waiting(broker._outcome);
+    }
+
+    /// Spins until @p count coroutines wait in @p broker's whenServing(): the wait is under way.
+    static void awaitWaiters(AskpassBroker const& broker, std::size_t count)
+    {
+        while (waiting(broker) != count)
+            std::this_thread::yield();
+    }
+
+    /// Has @p hook run just before @p broker starts its thread, under its life lock.
+    static void beforeThreadStart(AskpassBroker& broker, std::function<void()> hook)
+    {
+        auto const lock = std::scoped_lock { broker._lifeMutex };
+        broker._beforeThreadStart = std::move(hook);
+    }
+};
+} // namespace contour::askpass
 
 namespace
 {
@@ -226,11 +260,27 @@ class ServingWait
     std::thread _thread;
 };
 
-/// Spins until @p readiness has @p count parked waiters: the wait is under way, deterministically.
-void awaitWaiters(contour::platform::ApplicationReadiness const& readiness, std::size_t count)
+/// Says the application object exists from a coroutine on @p loop, once the loop has turned: the loop must
+/// still run while another of its coroutines waits in whenServing().
+core::async::Task<void> readyLater(core::net::EventLoop* loop,
+                                   contour::platform::ApplicationReadiness* application)
 {
-    while (readiness.waiting() != count)
-        std::this_thread::yield();
+    co_await loop->delay(std::chrono::milliseconds { 1 });
+    application->markReady();
+}
+
+core::async::Task<void> serveInto(AskpassBroker* broker,
+                                  std::optional<std::expected<void, std::string>>* served)
+{
+    *served = co_await broker->whenServing();
+}
+
+core::async::Task<void> serveWhileReadying(core::net::EventLoop* loop,
+                                           AskpassBroker* broker,
+                                           contour::platform::ApplicationReadiness* application,
+                                           std::optional<std::expected<void, std::string>>* served)
+{
+    co_await core::async::whenAll(serveInto(broker, served), readyLater(loop, application));
 }
 
 /// Sends @p request as a raw client would.
@@ -308,23 +358,23 @@ TEST_CASE("the askpass broker starts no thread before the application object exi
     auto sink = FakeSink {};
     auto const application = std::make_shared<ApplicationReadiness>(ApplicationReadiness::State::Pending);
     auto broker = AskpassBroker { sink, application, "/opt/contour/contour", random };
-    CHECK_FALSE(broker.isServing());
+    CHECK_FALSE(AskpassBrokerTestAccess::isServing(broker));
 
     // open() never waits: it fails while the object is not there, and starts nothing.
     auto const early = broker.open(targetOf());
     REQUIRE_FALSE(early.has_value());
     CHECK(early.error() == "cannot serve ssh's prompts: the application has not started yet");
-    CHECK_FALSE(broker.isServing());
+    CHECK_FALSE(AskpassBrokerTestAccess::isServing(broker));
 
-    // whenServing() parks its coroutine, not its loop, until the object is made; then the thread starts.
+    // whenServing() parks its coroutine, not its loop; whoever says the object exists starts the thread.
     auto waiting = ServingWait { broker };
-    awaitWaiters(*application, 1);
-    CHECK_FALSE(broker.isServing());
+    AskpassBrokerTestAccess::awaitWaiters(broker, 1);
+    CHECK_FALSE(AskpassBrokerTestAccess::isServing(broker));
     application->markReady();
+    CHECK(AskpassBrokerTestAccess::isServing(broker));
     auto const served = waiting.result();
     REQUIRE(served.has_value());
     CHECK(served->has_value());
-    CHECK(broker.isServing());
     auto session = broker.open(targetOf());
     REQUIRE(session.has_value());
     CHECK_FALSE(variablesOf(**session).at("CONTOUR_ASKPASS_ENDPOINT").empty());
@@ -338,15 +388,43 @@ TEST_CASE("the askpass broker serves nothing when the application object will no
     auto const application = std::make_shared<ApplicationReadiness>(ApplicationReadiness::State::Pending);
     auto broker = AskpassBroker { sink, application, "/opt/contour/contour", random };
     auto waiting = ServingWait { broker };
-    awaitWaiters(*application, 1);
+    AskpassBrokerTestAccess::awaitWaiters(broker, 1);
     // A launch that gives up before it made the QApplication lets the waiter go.
     application->abandon();
     auto const served = waiting.result();
     REQUIRE(served.has_value());
     REQUIRE_FALSE(served->has_value());
     CHECK(served->error() == "cannot serve ssh's prompts: the application did not start");
-    CHECK_FALSE(broker.isServing());
+    CHECK_FALSE(AskpassBrokerTestAccess::isServing(broker));
     CHECK(broker.open(targetOf()).error() == "cannot serve ssh's prompts: the application did not start");
+}
+
+TEST_CASE("the askpass broker serves nothing once the application object is going", "[askpass][broker]")
+{
+    // The links outlive the QApplication on the way out: a reconnect then must not start a Qt thread.
+    using contour::platform::ApplicationReadiness;
+    auto random = vthost::testing::CountingRandom {};
+    auto sink = FakeSink {};
+    auto const application = std::make_shared<ApplicationReadiness>(ApplicationReadiness::State::Ready);
+
+    SECTION("a broker made after it closed never starts")
+    {
+        application->close();
+        auto broker = AskpassBroker { sink, application, "/opt/contour/contour", random };
+        CHECK_FALSE(AskpassBrokerTestAccess::isServing(broker));
+        CHECK(broker.open(targetOf()).error() == "cannot serve ssh's prompts: the application has quit");
+        auto waiting = ServingWait { broker };
+        auto const served = waiting.result();
+        REQUIRE(served.has_value());
+        CHECK(served->error() == "cannot serve ssh's prompts: the application has quit");
+    }
+    SECTION("a broker that serves opens nothing more")
+    {
+        auto broker = AskpassBroker { sink, application, "/opt/contour/contour", random };
+        REQUIRE(AskpassBrokerTestAccess::isServing(broker));
+        application->close();
+        CHECK(broker.open(targetOf()).error() == "cannot serve ssh's prompts: the application has quit");
+    }
 }
 
 TEST_CASE("a stop ends the askpass broker's wait for the application object", "[askpass][broker]")
@@ -358,11 +436,77 @@ TEST_CASE("a stop ends the askpass broker's wait for the application object", "[
     auto const application = std::make_shared<ApplicationReadiness>(ApplicationReadiness::State::Pending);
     auto broker = AskpassBroker { sink, application, "/opt/contour/contour", random };
     auto waiting = ServingWait { broker };
-    awaitWaiters(*application, 1);
+    AskpassBrokerTestAccess::awaitWaiters(broker, 1);
     waiting.stop();
     CHECK_FALSE(waiting.result().has_value());
-    CHECK(application->waiting() == 0);
-    CHECK_FALSE(broker.isServing());
+    CHECK(AskpassBrokerTestAccess::waiting(broker) == 0);
+    CHECK_FALSE(AskpassBrokerTestAccess::isServing(broker));
+}
+
+TEST_CASE("the askpass broker's wait leaves its loop running", "[askpass][broker]")
+{
+    // The loop that awaits whenServing() goes on serving its other coroutines: here the one that says the
+    // application object exists, which a loop blocked by the wait would never get to.
+    using contour::platform::ApplicationReadiness;
+    auto random = vthost::testing::CountingRandom {};
+    auto sink = FakeSink {};
+    auto const application = std::make_shared<ApplicationReadiness>(ApplicationReadiness::State::Pending);
+    auto broker = AskpassBroker { sink, application, "/opt/contour/contour", random };
+    auto served = std::optional<std::expected<void, std::string>> {};
+    auto const backend = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *backend };
+    loop.blockOn(serveWhileReadying(&loop, &broker, application.get(), &served));
+    REQUIRE(served.has_value());
+    CHECK(served->has_value());
+    CHECK(AskpassBrokerTestAccess::isServing(broker));
+}
+
+TEST_CASE("a shutdown never races the askpass broker's thread start", "[askpass][broker]")
+{
+    using contour::platform::ApplicationReadiness;
+    auto random = vthost::testing::CountingRandom {};
+    auto sink = FakeSink {};
+    auto const application = std::make_shared<ApplicationReadiness>(ApplicationReadiness::State::Pending);
+
+    SECTION("a shutdown before the application object exists: the thread never starts")
+    {
+        auto broker = AskpassBroker { sink, application, "/opt/contour/contour", random };
+        auto starts = 0;
+        AskpassBrokerTestAccess::beforeThreadStart(broker, [&] { ++starts; });
+        broker.shutdown();
+        application->markReady();
+        CHECK(starts == 0);
+        CHECK_FALSE(AskpassBrokerTestAccess::isServing(broker));
+        CHECK(broker.open(targetOf()).error() == "the application no longer answers ssh's prompts");
+    }
+    SECTION("a shutdown and a destruction while the thread is being started wait for the start")
+    {
+        auto broker = std::make_unique<AskpassBroker>(sink, application, "/opt/contour/contour", random);
+        auto inStart = std::promise<void> {};
+        auto release = std::promise<void> {};
+        auto released = release.get_future().share();
+        auto starts = 0;
+        AskpassBrokerTestAccess::beforeThreadStart(*broker, [&] {
+            ++starts;
+            inStart.set_value();
+            released.wait();
+        });
+        // The GUI thread, saying the object exists, is held just before it starts the thread.
+        auto readying = std::thread { [&] { application->markReady(); } };
+        inStart.get_future().wait();
+        // Meanwhile the broker is shut down and destroyed on another thread: both wait for the start, and the
+        // destructor then stops the thread it started. A destroyed QThread that still runs aborts the
+        // process.
+        auto destroying = std::thread { [&] {
+            broker->shutdown();
+            broker.reset();
+        } };
+        release.set_value();
+        readying.join();
+        destroying.join();
+        CHECK(starts == 1);
+        CHECK(broker == nullptr);
+    }
 }
 
 TEST_CASE("the askpass broker's prompt ids come from the source it shares", "[askpass][broker]")

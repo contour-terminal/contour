@@ -1962,7 +1962,7 @@ TEST_CASE("workspace.list reports a workspace's visibility, clients and native i
     window.shown = {};
     list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
     CHECK(list->workspaces[0].visibility == "hidden");
-    h.host.noteClientDetached(&window);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("workspace.list reports hidden for an unselected workspace", "[vthost][control][switch]")
@@ -1988,7 +1988,7 @@ TEST_CASE("workspace.list reports hidden for an unselected workspace", "[vthost]
             CHECK(info.visibility == "hidden");
             CHECK(info.clients == 0);
         }
-    h.host.noteClientDetached(&window);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("workspace.switch asks one window and relays its answer", "[vthost][control][switch]")
@@ -2040,7 +2040,7 @@ TEST_CASE("workspace.switch asks one window and relays its answer", "[vthost][co
         CHECK((*answer)->outcome == name);
         CHECK((*answer)->detail == "why");
     }
-    h.host.noteClientDetached(&window);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("workspace.switch fails for a window that did not offer the capability",
@@ -2060,7 +2060,7 @@ TEST_CASE("workspace.switch fails for a window that did not offer the capability
     CHECK((*answer)->outcome == "failed");
     CHECK((*answer)->detail == "the window cannot switch (client too old)");
     CHECK(window.asked.empty());
-    h.host.noteClientDetached(&window);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("workspace.switch errors: no window, both targets, an unknown workspace",
@@ -2113,8 +2113,8 @@ TEST_CASE("switch without a workspace asks the raise holder", "[vthost][control]
     CHECK(first.asked.size() == 1);
     CHECK(second.asked.empty());
     CHECK(first.asked.front().workspace == workspace.value);
-    h.host.noteClientDetached(&first);
-    h.host.noteClientDetached(&second);
+    h.host.noteClientDetached(&first, vthost::DetachKind::Dropped);
+    h.host.noteClientDetached(&second, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("switch from a pane asks the window selecting the caller's workspace", "[vthost][control][switch]")
@@ -2139,8 +2139,8 @@ TEST_CASE("switch from a pane asks the window selecting the caller's workspace",
 
     CHECK(selectsCallers.asked.size() == 1);
     CHECK(selectsOther.asked.empty());
-    h.host.noteClientDetached(&selectsCallers);
-    h.host.noteClientDetached(&selectsOther);
+    h.host.noteClientDetached(&selectsCallers, vthost::DetachKind::Dropped);
+    h.host.noteClientDetached(&selectsOther, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("switch naming a workspace nobody selects is NotFound", "[vthost][control][switch]")
@@ -2166,7 +2166,7 @@ TEST_CASE("switch naming a workspace nobody selects is NotFound", "[vthost][cont
     CHECK((*answer).error().code == ControlErrorCode::NotFound);
     CHECK((*answer).error().message.starts_with("no window selects workspace"));
     CHECK(window.asked.empty());
-    h.host.noteClientDetached(&window);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("switch naming a workspace two windows select asks the one focused last",
@@ -2192,8 +2192,8 @@ TEST_CASE("switch naming a workspace two windows select asks the one focused las
 
     CHECK(first.asked.size() == 1);
     CHECK(second.asked.empty());
-    h.host.noteClientDetached(&first);
-    h.host.noteClientDetached(&second);
+    h.host.noteClientDetached(&first, vthost::DetachKind::Dropped);
+    h.host.noteClientDetached(&second, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("switch from a pane whose workspace nobody selects asks the raise holder",
@@ -2213,7 +2213,7 @@ TEST_CASE("switch from a pane whose workspace nobody selects asks the raise hold
 
     CHECK(window.asked.size() == 1);
     CHECK(window.asked.front().workspace == other->id().value);
-    h.host.noteClientDetached(&window);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("workspace.switch drops the answer of a connection that closed", "[vthost][control][switch]")
@@ -2231,5 +2231,5 @@ TEST_CASE("workspace.switch drops the answer of a connection that closed", "[vth
     h.host.completeSwitch({ .endpoint = "native", .index = 1 }, { .request = window.asked.front().request });
 
     CHECK_FALSE(answer.has_value());
-    h.host.noteClientDetached(&window);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
 }

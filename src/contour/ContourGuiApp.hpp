@@ -17,6 +17,7 @@
 #include <contour/input/KeyboardLayout.hpp>
 #include <contour/input/KeyboardPlatform.hpp>
 #include <contour/platform/AppearanceServices.hpp>
+#include <contour/platform/ApplicationReadiness.hpp>
 #include <contour/platform/ApplicationRestart.hpp>
 #include <contour/platform/ExecutionPolicySource.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
@@ -67,7 +68,6 @@
 #include <core/platform/FileSystem.hpp>
 #include <core/platform/SystemPower.hpp>
 
-#include <QtCore/QCoreApplication>
 #include <QtCore/QPointer>
 #include <QtCore/QRect>
 #include <QtCore/QRectF>
@@ -122,6 +122,7 @@ class IWasmBackend;
 namespace text
 {
 class FontLocator;
+class LastResortFontLocator;
 class NerdFontSymbolsLocator;
 } // namespace text
 
@@ -372,6 +373,9 @@ class ContourGuiApp:
     ///                     (the default) is the control API's, made on first use; tests pass a scripted one.
     /// @param workspaceGitProbe Reads the git state of the in-process windows' workspaces. Null (the default)
     ///                     is the native probe over this machine's disk and `git`; tests pass a scripted one.
+    /// @param applicationAtStart Whether a QApplication exists already. Pending (the default) for main(),
+    ///                     which makes it in terminalGuiAction(); tests, which make their own first, pass
+    ///                     Ready.
     explicit ContourGuiApp(
         core::Environment const& env,
         std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
@@ -398,7 +402,9 @@ class ContourGuiApp:
         std::function<void(int)> exitEventLoop = nullptr,
         window::BootstrapPromptFactory bootstrapPromptFactory = nullptr,
         std::unique_ptr<remote::IWorkspaceLister> startupLister = nullptr,
-        std::unique_ptr<vthost::IGitStatusProbe> workspaceGitProbe = nullptr);
+        std::unique_ptr<vthost::IGitStatusProbe> workspaceGitProbe = nullptr,
+        platform::ApplicationReadiness::State applicationAtStart =
+            platform::ApplicationReadiness::State::Pending);
     ~ContourGuiApp() override;
 
     /// What decides, once a dragged pane or tab no window took has ended, whether that was a drop outside
@@ -976,6 +982,12 @@ class ContourGuiApp:
     /// @return The locator, which lives as long as this app.
     [[nodiscard]] text::FontLocator& fontLocator(vtrasterizer::FontLocatorEngine engine);
 
+    /// Tells the user that no font can be loaded, on stderr, in the log and in a dialog: the one failure
+    /// that leaves nothing to draw a terminal with. Called before the first window, and by a display whose
+    /// renderer could not load its font after all; the caller ends the application.
+    /// @param reason What is missing, and what to do about it.
+    void reportUnusableFont(std::string const& reason) const;
+
     /// @return Where this host's menu bar lives, resolved once from the host at construction.
     [[nodiscard]] command::MenuBarPlacement menuBarPlacement() const noexcept { return _menuBarPlacement; }
 
@@ -1443,13 +1455,6 @@ class ContourGuiApp:
         std::make_shared<askpass::AskpassPromptRouter>([this] { showBootstrapPrompt(); },
                                                        [this] { refreshWindowAttention(); },
                                                        [this] { refreshAttachAttention(); });
-    /// Whether the QApplication exists yet, for the askpass broker's thread, which waits for it: with
-    /// `--host`, `contour client` makes the broker, and gets to its first session, before terminalGuiAction()
-    /// makes that object. Ready from the start where one exists already (the GUI tests make their own).
-    std::shared_ptr<platform::ApplicationReadiness> _applicationReadiness =
-        std::make_shared<platform::ApplicationReadiness>(
-            QCoreApplication::instance() != nullptr ? platform::ApplicationReadiness::State::Ready
-                                                    : platform::ApplicationReadiness::State::Pending);
     /// The ids of every prompt: the broker's sessions' and a daemon fingerprint's alike. Apart from the
     /// broker, so that a fingerprint prompt (`contour client --connect-tcp`) makes no broker.
     std::shared_ptr<askpass::AskpassPromptIds> _askpassPromptIds =
@@ -1605,6 +1610,10 @@ class ContourGuiApp:
     /// that listing. Declared after _knownDaemons, which its transport checks the daemon against: it is
     /// destroyed first, and its destruction stops a listing still under way -- the dial, the question about
     /// the daemon and the call -- before anything it borrows goes.
+    /// Whether the QApplication exists, for the askpass broker's thread, which runs only while it does: with
+    /// `--host`, `contour client` makes the broker, and gets to its first session, before terminalGuiAction()
+    /// makes that object, and its links outlive it on the way out. Shared with the broker.
+    std::shared_ptr<platform::ApplicationReadiness> _applicationReadiness;
     std::unique_ptr<remote::IWorkspaceLister> _startupLister;
     std::unique_ptr<platform::TaskbarProgressSink> _taskbarProgressSink;
     // The WebAssembly backend the extension runtime's engines are created from and its lanes prepared with;
@@ -1908,8 +1917,10 @@ class ContourGuiApp:
     // Latches logUnbuiltAppearanceSource(): a read before the sources can be built repeats on every read.
     mutable std::once_flag _unbuiltAppearanceSourceLogged;
     // The native font locator behind the bundled Nerd Fonts symbols font: built on the first request, once
-    // the application's own directory is known, and never changed afterwards.
+    // the application's own directory is known, and never changed afterwards. Beneath it the last-resort
+    // locator, which degrades a family the system lacks to any monospace font, then to any font at all.
     std::once_flag _fontLocatorBuilt;
+    std::unique_ptr<text::LastResortFontLocator> _lastResortFontLocator;
     std::unique_ptr<text::NerdFontSymbolsLocator> _nativeFontLocator;
     // The native menu presenter, built from the same services; it holds no callback into this app.
     std::unique_ptr<platform::INativeMenuPresenter> _nativeMenus;

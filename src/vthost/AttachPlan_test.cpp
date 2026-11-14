@@ -38,13 +38,48 @@ TEST_CASE("a Default launch selects the first workspace with a tab", "[vthost][a
     CHECK(planAttach({ .kind = AttachIntentKind::Default }, firstEmpty).select == Select { 2 });
 }
 
-TEST_CASE("a Default launch selects the workspace selected last while it is there", "[vthost][attach-plan]")
+namespace
 {
-    auto context = twoWorkspaces();
-    context.lastSelected = 3;
-    CHECK(planAttach({ .kind = AttachIntentKind::Default }, context).select == Select { 3 });
-    context.lastSelected = 99;
+/// @return A workspace that holds @p tabs tabs and is shown by some window.
+WorkspaceSummary shownWorkspace(uint64_t id, int tabs)
+{
+    return { .id = id, .tabCount = tabs, .visibility = WorkspaceVisibility::Shown };
+}
+} // namespace
+
+TEST_CASE("a Default launch never selects a workspace another window shows", "[vthost][attach-plan]")
+{
+    // The first workspace is shown: the launch takes the first hidden one, not the first.
+    auto context =
+        AttachContext { .primaryWorkspace = 1, .workspaces = { shownWorkspace(1, 2), { 3, 1 }, { 4, 1 } } };
+    CHECK(planAttach({ .kind = AttachIntentKind::Default }, context)
+          == AttachPlan { .select = 3, .creation = AttachCreation::None });
+    // A hidden first workspace is taken, whichever a window selected last.
+    context.workspaces = { { 1, 2 }, shownWorkspace(3, 1) };
     CHECK(planAttach({ .kind = AttachIntentKind::Default }, context).select == Select { 1 });
+}
+
+TEST_CASE("a Default launch onto a daemon whose workspaces are all shown creates a new one",
+          "[vthost][attach-plan]")
+{
+    auto const allShown =
+        AttachContext { .primaryWorkspace = 1, .workspaces = { shownWorkspace(1, 2), shownWorkspace(3, 1) } };
+    CHECK(planAttach({ .kind = AttachIntentKind::Default }, allShown)
+          == AttachPlan { .select = std::nullopt, .creation = AttachCreation::NewWorkspace });
+    // A shown fresh daemon (its one window still has no tab) is shown all the same.
+    auto const shownEmpty = AttachContext { .primaryWorkspace = 1, .workspaces = { shownWorkspace(1, 0) } };
+    CHECK(planAttach({ .kind = AttachIntentKind::Default }, shownEmpty).creation
+          == AttachCreation::NewWorkspace);
+}
+
+TEST_CASE("a Default launch that names a directory opens its tab in the new workspace",
+          "[vthost][attach-plan][cwd]")
+{
+    auto const context = AttachContext { .primaryWorkspace = 1,
+                                         .workspaces = { shownWorkspace(1, 2) },
+                                         .workingDirectory = WorkingDirectoryStated::Yes };
+    CHECK(planAttach({ .kind = AttachIntentKind::Default }, context)
+          == AttachPlan { .select = std::nullopt, .creation = AttachCreation::NewWorkspace });
 }
 
 TEST_CASE("NewWorkspace selects what it creates", "[vthost][attach-plan]")
@@ -117,7 +152,6 @@ TEST_CASE("ids of another run of the daemon name none of its workspaces", "[vtho
 {
     auto context =
         AttachContext { .primaryWorkspace = 1, .workspaces = { { 1, 1 }, { 2, 1 } }, .instance = 8 };
-    context.lastSelected = 1;
     auto const ofRun = [](AttachIntentKind kind, uint64_t instance) {
         return vthost::proto::AttachIntent { .kind = kind, .workspace = 2, .daemonInstance = instance };
     };
@@ -125,7 +159,7 @@ TEST_CASE("ids of another run of the daemon name none of its workspaces", "[vtho
     CHECK(planAttach(ofRun(AttachIntentKind::Select, 8), context).select == Select { 2 });
     CHECK(planAttach(ofRun(AttachIntentKind::Select, 0), context).select == Select { 2 });
     CHECK(planAttach(ofRun(AttachIntentKind::Resume, 8), context).select == Select { 2 });
-    // Another run's: a launch, which takes the workspace selected last.
+    // Another run's: a launch, which takes the first hidden workspace.
     CHECK(planAttach(ofRun(AttachIntentKind::Select, 7), context).select == Select { 1 });
     CHECK(planAttach(ofRun(AttachIntentKind::Resume, 7), context).select == Select { 1 });
     // A daemon that states no run of its own takes the ids as they are.

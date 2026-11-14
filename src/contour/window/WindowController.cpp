@@ -78,6 +78,7 @@
 #include <vtworkspace/PaneLayout.hpp>
 #include <vtworkspace/SessionModel.hpp>
 #include <vtworkspace/Tab.hpp>
+#include <vtworkspace/TabName.hpp>
 
 namespace contour::window
 {
@@ -122,7 +123,7 @@ class WindowController::SidebarHost final: public ISidebarHost
 
     void showPane(PaneKey pane) override { _window.jumpToPane(pane); }
 
-    void showWorkspace(uint64_t workspace) override { _window.showWorkspace(workspace); }
+    void showWorkspace(uint64_t workspace) override { std::ignore = _window.showWorkspace(workspace); }
 
     void markSeen(PaneKey pane) override { _window.noteDirectoryPaneSeenByKey(pane); }
 
@@ -1158,19 +1159,26 @@ QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab,
     // title.
     auto const tabName = session != nullptr ? session->name().value_or(windowTitle) : windowTitle;
 
-    // Same precedence as vtworkspace::Tab::title(), templated rather than resolved (the strip expands
-    // {index}/{title} placeholders, so it needs the raw template). The "is this tab named after one of
-    // its panes?" decision is Tab's — read it, do not restate it, or the strip and the status line end
-    // up disagreeing about what a zoomed tab is called.
+    // Same precedence as vtworkspace::Tab::title() (vtworkspace::tabNameSourceOf), templated rather than
+    // resolved (the strip expands {index}/{title} placeholders, so it needs the raw template). The "is this
+    // tab named after one of its panes?" decision is Tab's — read it, do not restate it, or the strip and the
+    // status line end up disagreeing about what a zoomed tab is called. A control label is a name, not a
+    // template: it shows as it is, as a workspace's does.
+    auto const names = tab->nameCandidates();
     auto templ = std::string_view {};
-    if (auto const& renamed = tab->runtimeTitle(); renamed.has_value())
-        templ = *renamed;
-    else if (tab->usesMultiplePanesLabel())
-        templ = vtworkspace::Tab::MultiplePanesLabel;
-    else if (session != nullptr)
-        templ = session->profile().tabLabel.value();
-    else
-        return QString::fromStdString(windowTitle);
+    switch (vtworkspace::tabNameSourceOf(names))
+    {
+        case vtworkspace::TabNameSource::Label: return QString::fromStdString(tab->label());
+        case vtworkspace::TabNameSource::Title: templ = names.title; break;
+        case vtworkspace::TabNameSource::Panes:
+            if (tab->usesMultiplePanesLabel())
+                templ = vtworkspace::Tab::MultiplePanesLabel;
+            else if (session != nullptr)
+                templ = session->profile().tabLabel.value();
+            else
+                return QString::fromStdString(windowTitle);
+            break;
+    }
 
     auto expanded = expandTabLabel(
         templ, TabLabelContext { .position = row + 1, .windowTitle = windowTitle, .tabName = tabName });
@@ -1916,6 +1924,7 @@ window::ChromeKeyOutcome WindowController::runChromeCommand(window::ChromeComman
         && command != ChromeCommand::Leave)
     {
         // The tree is QML's: it moves its own row focus, expands, renames and filters.
+        // Enter included: the tree names its row back (activateSidebarRow()), which only it knows.
         emit sidebarCommandRequested(static_cast<int>(command), text);
         return ChromeKeyOutcome::Handled;
     }
@@ -1969,6 +1978,14 @@ window::ChromeKeyOutcome WindowController::runChromeCommand(window::ChromeComman
         case ChromeCommand::OpenMenu: return ChromeKeyOutcome::Unhandled; // the sidebar's, handled above
     }
     return ChromeKeyOutcome::Unhandled;
+}
+
+void WindowController::activateSidebarRow(int row)
+{
+    // What the row names is shown in the window, and what is shown is what the user types into next. A row
+    // the tree does not have (an empty or filtered-out one) shows nothing, and the keyboard stays.
+    if (_sidebar->activateRow(row) == window::sidebarrows::RowActivation::Shown)
+        leaveChrome();
 }
 
 void WindowController::closeTabAskingIfBusy(int row)
@@ -3330,12 +3347,15 @@ void WindowController::cancelPendingNavigation() noexcept
     _pendingFollow.reset();
 }
 
-void WindowController::showWorkspace(uint64_t workspace)
+SelectResult WindowController::showWorkspace(uint64_t workspace)
 {
     // Navigating supersedes what waited for an earlier look.
     cancelPendingNavigation();
-    if (_directorySource != nullptr && _directorySource->directory().selected != workspace)
-        std::ignore = _directorySource->select(workspace);
+    if (_directorySource == nullptr)
+        return SelectResult::Refused;
+    if (_directorySource->directory().selected == workspace)
+        return SelectResult::Requested;
+    return _directorySource->select(workspace);
 }
 
 void WindowController::jumpToPane(PaneKey target)
@@ -3357,14 +3377,14 @@ void WindowController::jumpToPane(PaneKey target)
         _pendingJump.reset();
 }
 
-void WindowController::followIntoNewWorkspace(PaneKey pane)
+void WindowController::followIntoNewWorkspace(PaneKey pane, WorkspaceDirectory const& asked)
 {
     if (_directorySource == nullptr)
         return;
     _pendingFollow = PendingFollow {
         .pane = pane,
-        .listed = std::ranges::to<std::vector>(_directorySource->directory().workspaces
-                                               | std::views::transform(&DirectoryWorkspace::id)),
+        .listed =
+            std::ranges::to<std::vector>(asked.workspaces | std::views::transform(&DirectoryWorkspace::id)),
         .giveUp = _clock.now() + session::TerminalSessionManager::RemoteMoveTimeout,
     };
 }

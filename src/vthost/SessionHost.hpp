@@ -51,6 +51,7 @@
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -79,6 +80,7 @@
 #include <vthost/handover/HandoverCodec.hpp>
 #include <vthost/handover/HandoverImage.hpp>
 #include <vthost/proto/Pdu.hpp>
+#include <vthost/proto/ReconnectCeiling.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 #include <vtworkspace/ModelEvents.hpp>
 #include <vtworkspace/SessionModel.hpp>
@@ -221,6 +223,13 @@ using SessionSignalCallback = std::function<void(SessionSignal)>;
 
 /// Told how a requested window switch ended, once.
 using SwitchCompletion = std::function<void(proto::SwitchReply const&)>;
+
+/// How an attached connection ended, as the host takes it.
+enum class DetachKind : uint8_t
+{
+    Dropped = 0, ///< Lost with no word: the window is reconnecting, so its workspace is held for a while.
+    Closed,      ///< Ended on purpose (the client said Goodbye): its workspace is free at once.
+};
 
 /// Observer of the hosted sessions' output streams. Every callback fires on the loop thread; any
 /// number of observers may subscribe concurrently, so no observer ever silences another by
@@ -1000,6 +1009,10 @@ struct SessionHostConfig
     std::optional<handover::HandoverImage> handover {};
     /// Where the UUIDs of workspaces, tabs and panes come from. Tests pass a sequential one.
     std::shared_ptr<vtcontrol::UuidSource> uuids = vtcontrol::systemUuidSource();
+    /// How long after its connection dropped a window is taken to still show its workspace, so that an
+    /// attach does not take it (@see SessionHost::shownForAttach). The default is proto::ReconnectGrace: the
+    /// longest wait between two reconnect attempts of a client plus the time one may take to attach.
+    std::chrono::milliseconds reconnectGrace = proto::ReconnectGrace;
 };
 
 /// One session of a quiesced host.
@@ -1260,17 +1273,18 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Stops counting @p client, and fails the switches asked of its window. Idempotent, and a no-op for a
     /// client never counted.
     /// @param client The connection, by its stream observer.
-    void noteClientDetached(SessionStreamEvents const* client);
+    /// @param kind How the connection ended: a drop keeps its workspace from a new window for the reconnect
+    ///        grace (@see shownForAttach); a close frees it at once.
+    void noteClientDetached(SessionStreamEvents const* client, DetachKind kind);
 
     /// @return How many native Attach connections are handshaken. Neither a Control connection nor a tmux
     ///         gateway counts — unlike the daemon's ClientCensus, which counts every client for idle exit.
     [[nodiscard]] std::size_t connectedClients() const noexcept { return _attachedClients.size(); }
 
-    /// Records that the window on @p client selected @p workspace, which is then what a launch selects when
-    /// no other is asked for (@see lastSelectedWorkspace).
+    /// Records that the window on @p client selected a workspace, which it reports as
+    /// SessionStreamEvents::selectedWorkspace: the raise role is settled again.
     /// @param client The attached client; one never counted (@see noteClientAttached) is ignored.
-    /// @param workspace The workspace it selected.
-    void noteSelected(SessionStreamEvents const& client, uint64_t workspace);
+    void noteSelected(SessionStreamEvents const& client);
 
     /// Records that the window on @p client reported its focus. Gaining focus stamps the window with the
     /// next value of the host's counter, which the routing decisions order windows by; the raise role is
@@ -1290,12 +1304,16 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return Nothing once it is gone; else why nothing changed.
     std::expected<void, WorkspaceCloseError> closeWorkspace(vtworkspace::WorkspaceId workspace);
 
-    /// @return The workspace some window selected last; nullopt when none ever did.
-    [[nodiscard]] std::optional<uint64_t> lastSelectedWorkspace() const noexcept { return _lastSelected; }
-
     /// @param workspace A workspace.
     /// @return Shown while some attached client selects it, else Hidden.
     [[nodiscard]] WorkspaceVisibility visibility(uint64_t workspace) const;
+
+    /// What a connection that is attaching sees as shown: the workspaces some attached client selects, and
+    /// those a window's connection selected when it dropped within the reconnect grace
+    /// (SessionHostConfig::reconnectGrace), since that window is reconnecting to it and a new window must not
+    /// take it.
+    /// @return The ids of those workspaces, as of now.
+    [[nodiscard]] std::unordered_set<uint64_t> shownForAttach() const;
 
     /// @return One view per attached client that follows the daemon (SessionStreamEvents::followsDaemon), in
     ///         attach order: the connection and what it selects. The input of the routing decisions in
@@ -2121,9 +2139,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     vtbackend::HostIdentity _identity; ///< Handed to every session this host spawns.
     uint64_t _instance;                ///< @see instance()
     vtbackend::TerminalClocks _clocks; ///< Read by every session this host spawns.
-    vtpty::PageSize _pageSize;         ///< The RESOLVED authoritative client area (see pageSize()).
-    SessionPumping _pumping;           ///< Whether new sessions start their PTY pump thread.
-    InputWatermarks _inputWatermarks;  ///< @see SessionHostConfig::inputWatermarks
+    /// How long a dropped connection's workspace counts as shown to an attach. @see SessionHostConfig
+    std::chrono::milliseconds _reconnectGrace;
+    vtpty::PageSize _pageSize;        ///< The RESOLVED authoritative client area (see pageSize()).
+    SessionPumping _pumping;          ///< Whether new sessions start their PTY pump thread.
+    InputWatermarks _inputWatermarks; ///< @see SessionHostConfig::inputWatermarks
     ClientSizePolicy _sizePolicy;
     /// Where every session this host spawns looks up the paths printed on its screen.
     core::platform::FileSystem const& _fileSystem;
@@ -2318,8 +2338,8 @@ class SessionHost final: public vtworkspace::ModelEvents
                       std::string_view bytes,
                       std::optional<ConnectionId> from,
                       proto::InputKind kind);
-    /// The workspace some window selected last. @see noteSelected
-    std::optional<uint64_t> _lastSelected;
+    /// By workspace: until when a dropped connection's selection of it counts as shown to an attach.
+    std::unordered_map<uint64_t, core::platform::SteadyTimePoint> _reconnectHolds;
     /// Names the raise holder again, and tells the connection that gained the role and the one that lost it.
     void settleRaiseRole();
     /// The value the last focus report was stamped with. @see noteFocus

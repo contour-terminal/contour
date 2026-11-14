@@ -441,7 +441,7 @@ struct FollowedHost
 
     ~FollowedHost()
     {
-        f.host.noteClientDetached(&follower);
+        f.host.noteClientDetached(&follower, vthost::DetachKind::Dropped);
         f.host.unsubscribeStream(&recorder);
     }
 
@@ -554,7 +554,7 @@ TEST_CASE("the 30 s timer runs once a workspace's directory is known, follower o
     f.host.noteClientAttached(&plain);
     auto follower = FollowerClient {};
     f.host.noteClientAttached(&follower);
-    f.host.noteClientDetached(&follower);
+    f.host.noteClientDetached(&follower, vthost::DetachKind::Dropped);
     CHECK_FALSE(f.host.pollsWorkspaceGit());
 
     auto* terminal = f.host.terminal(tab->activePane()->session());
@@ -569,7 +569,7 @@ TEST_CASE("the 30 s timer runs once a workspace's directory is known, follower o
     f.settle();
     CHECK(f.host.pollsWorkspaceGit());
     CHECK(f.probe.asked == std::vector<std::filesystem::path> { "/r/a" });
-    f.host.noteClientDetached(&plain);
+    f.host.noteClientDetached(&plain, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("a tick of the timer probes the active pane's directory and tells what changed",
@@ -605,7 +605,7 @@ TEST_CASE("a tick of the timer probes the active pane's directory and tells what
     f.settle();
     CHECK(f.probe.asked.size() == probesBefore + 1);
     CHECK(recorder.seen.size() == 1);
-    f.host.noteClientDetached(&follower);
+    f.host.noteClientDetached(&follower, vthost::DetachKind::Dropped);
     f.host.unsubscribeStream(&recorder);
 }
 

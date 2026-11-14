@@ -1266,6 +1266,221 @@ TEST_CASE("WindowSwitcher: a window with no daemon behind it switches nowhere", 
     CHECK(host.started == 0);
 }
 
+namespace
+{
+/// A switcher over an app with no link at all, and a window of it that runs in this process, owning two
+/// workspaces (each with a tab) and showing the first.
+struct InProcessRig
+{
+    contour::test::MockPtySessionFactory* factory = nullptr;
+    contour::test::TestApp app { [this] {
+        auto made = std::make_unique<contour::test::MockPtySessionFactory>();
+        factory = made.get();
+        return made;
+    }() };
+    std::vector<std::unique_ptr<DaemonLink>> links;
+    TestTimeline timeline;
+    FakeApp host { app.manager(), links, timeline, {} };
+    contour::remote::WindowSwitcher switcher {
+        app.manager(),
+        host,
+        std::make_unique<FixtureLister>(std::map<std::string, DaemonFixture*> {}),
+        [this](contour::remote::SwitchPickRequest pick) {
+            picks.push_back(std::move(pick));
+            return std::expected<void, std::string> {};
+        },
+        contour::remote::SwitchDeadline {
+            .timeout = contour::remote::DefaultSwitchTimeout,
+            .timer = [](std::chrono::milliseconds, std::function<void()> const&) {},
+            .clock = host.clock }
+    };
+    std::vector<contour::remote::SwitchPickRequest> picks; ///< What the switcher popup was asked to show.
+    contour::test::ScopedControllerWithOsWindow window { app.manager() };
+    vtworkspace::WorkspaceId first;
+    vtworkspace::WorkspaceId second;
+
+    InProcessRig()
+    {
+        window->bindWindow(window.osWindow.get());
+        window->createNewTab();
+        first = window->displayedWorkspace();
+        second = app.manager().createWorkspaceIn(window->windowId());
+        app.manager().selectWorkspace(window->windowId(), 1);
+        window->createNewTab();
+        app.manager().selectWorkspace(window->windowId(), 0);
+    }
+
+    /// @return The ref the switcher's rows name workspace @p workspace by.
+    [[nodiscard]] vtcontrol::ObjectRef refOf(vtworkspace::WorkspaceId workspace)
+    {
+        auto const rows = switcher.windowWorkspaceRows(first);
+        auto const found = std::ranges::find(rows, workspace.value, &contour::remote::WorkspaceRow::id);
+        REQUIRE(found != rows.end());
+        return found->ref;
+    }
+
+    /// Asks for @p target in @p mode, and returns how it went.
+    [[nodiscard]] Told ask(contour::session::SwitchTarget target, SwitchMode mode = SwitchMode::Switch)
+    {
+        auto told = Told {};
+        switcher.request(window->displayedWorkspace(),
+                         std::move(target),
+                         mode,
+                         contour::session::NoLandingDeadline,
+                         told.completion());
+        return told;
+    }
+};
+} // namespace
+
+TEST_CASE("WindowSwitcher: a window that runs in-process lists and shows the workspaces it owns",
+          "[switch][inprocess]")
+{
+    auto rig = InProcessRig {};
+    REQUIRE(rig.switcher.windowWorkspaceRows(rig.first).size() == 2);
+
+    auto const told =
+        rig.ask({ .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = rig.refOf(rig.second) });
+    REQUIRE(told.outcome.has_value());
+    CHECK(told.outcome->has_value());
+    CHECK(rig.window->displayedWorkspace() == rig.second);
+}
+
+TEST_CASE("WindowSwitcher: a window that runs in-process makes the workspace it is asked for, named",
+          "[switch][inprocess]")
+{
+    auto rig = InProcessRig {};
+    auto told = Told {};
+    rig.switcher.createWorkspace(rig.window->displayedWorkspace(),
+                                 { .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = {} },
+                                 "billing",
+                                 SwitchMode::Switch,
+                                 told.completion());
+    REQUIRE(told.outcome.has_value());
+    CHECK(told.outcome->has_value());
+    REQUIRE(rig.window->ownedWorkspaces().size() == 3);
+    auto const made = rig.window->ownedWorkspaces().back();
+    CHECK(rig.window->displayedWorkspace() == made);
+    auto const rows = rig.switcher.windowWorkspaceRows(made);
+    auto const named = std::ranges::find(rows, made.value, &contour::remote::WorkspaceRow::id);
+    REQUIRE(named != rows.end());
+    CHECK(named->label == "billing");
+}
+
+TEST_CASE("WindowSwitcher: a window that runs in-process refuses another daemon and a new window",
+          "[switch][inprocess]")
+{
+    auto rig = InProcessRig {};
+    auto const elsewhere = rig.ask(to(daemonB()));
+    REQUIRE(elsewhere.outcome.has_value());
+    CHECK_FALSE(elsewhere.outcome->has_value());
+
+    auto const opened =
+        rig.ask({ .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = rig.refOf(rig.second) },
+                SwitchMode::Open);
+    REQUIRE(opened.outcome.has_value());
+    CHECK_FALSE(opened.outcome->has_value());
+    CHECK(rig.window->displayedWorkspace() == rig.first);
+}
+
+TEST_CASE("WindowSwitcher: a window that runs in-process asks which of its workspaces, among several",
+          "[switch][inprocess]")
+{
+    auto rig = InProcessRig {};
+    auto const told = rig.ask(
+        { .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = contour::session::AnyWorkspace {} });
+    REQUIRE(told.outcome.has_value());
+    REQUIRE(told.outcome->has_value());
+    CHECK(**told.outcome == SwitchOutcome::PickerShown);
+    REQUIRE(rig.picks.size() == 1);
+    CHECK(rig.picks.front().workspaces.size() == 2);
+    CHECK(rig.picks.front().window == rig.first);
+    CHECK(rig.window->displayedWorkspace() == rig.first);
+}
+
+TEST_CASE("WindowSwitcher: a window that runs in-process says why it made no workspace",
+          "[switch][inprocess]")
+{
+    auto rig = InProcessRig {};
+    SECTION("its first shell could not start")
+    {
+        rig.factory->creation = contour::test::MockPtySessionFactory::SessionCreation::Refused;
+        auto const told = rig.ask(
+            { .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = contour::session::NewWorkspace {} });
+        REQUIRE(told.outcome.has_value());
+        REQUIRE_FALSE(told.outcome->has_value());
+        CHECK(told.outcome->error()
+              == contour::session::describe(contour::session::NewWorkspaceError::FirstShellFailed));
+        CHECK(rig.window->ownedWorkspaces().size() == 2);
+    }
+    SECTION("the window has no pane to start it beside")
+    {
+        auto const made = rig.app.manager().newWorkspaceFor(vtworkspace::WorkspaceId { 987654 }, "x");
+        REQUIRE_FALSE(made.has_value());
+        CHECK(made.error() == contour::session::NewWorkspaceError::NoActiveSession);
+        CHECK(contour::session::describe(contour::session::NewWorkspaceError::NoActiveSession)
+              != contour::session::describe(contour::session::NewWorkspaceError::FirstShellFailed));
+    }
+}
+
+TEST_CASE("WindowSwitcher: a window that shows no workspace it was asked for says so, and takes no focus",
+          "[switch][inprocess]")
+{
+    auto rig = InProcessRig {};
+    // The window's directory lists no such workspace: nothing is asked, so nothing is shown.
+    CHECK(rig.window->showWorkspace(987654) == contour::window::SelectResult::Refused);
+    CHECK(rig.window->showWorkspace(rig.first.value) == contour::window::SelectResult::Requested);
+    CHECK(rig.window->displayedWorkspace() == rig.first);
+}
+
+TEST_CASE("WindowSwitcher: SwitchToWorkspace(N) in a window that runs in-process counts its directory, a "
+          "tab-less workspace included",
+          "[switch][inprocess]")
+{
+    auto rig = InProcessRig {};
+    // first, second, a workspace holding no tab, and a fourth that does.
+    auto const bare = rig.app.manager().createWorkspaceIn(rig.window->windowId());
+    auto const fourth = rig.app.manager().createWorkspaceIn(rig.window->windowId());
+    rig.app.manager().selectWorkspace(rig.window->windowId(), 3);
+    rig.window->createNewTab();
+    rig.app.manager().selectWorkspace(rig.window->windowId(), 0);
+    REQUIRE(rig.window->ownedWorkspaces().size() == 4);
+    REQUIRE(rig.window->displayedWorkspace() == rig.first);
+
+    auto const at = [&](uint32_t position) {
+        return rig.ask({ .kind = SwitchDaemonKind::Same,
+                         .daemon = {},
+                         .workspace = contour::session::WorkspaceAt { position } });
+    };
+    SECTION("the second is the second")
+    {
+        auto const told = at(2);
+        REQUIRE(told.outcome.has_value());
+        CHECK(told.outcome->has_value());
+        CHECK(rig.window->displayedWorkspace() == rig.second);
+    }
+    SECTION("the tab-less one takes its number, and is no place to switch to")
+    {
+        auto const told = at(3);
+        REQUIRE(told.outcome.has_value());
+        CHECK_FALSE(told.outcome->has_value());
+        CHECK(rig.window->displayedWorkspace() == rig.first);
+        // The picker and the sidebar number the rest by the same list.
+        auto const rows = rig.switcher.windowWorkspaceRows(rig.first);
+        REQUIRE(rows.size() == 3);
+        CHECK(rows[2].id == fourth.value);
+        CHECK(rows[2].position == 4);
+    }
+    SECTION("the one after it is the fourth")
+    {
+        auto const told = at(4);
+        REQUIRE(told.outcome.has_value());
+        CHECK(told.outcome->has_value());
+        CHECK(rig.window->displayedWorkspace() == fourth);
+    }
+    std::ignore = bare;
+}
+
 TEST_CASE("WindowSwitcher: a reconnect forgets the workspace a timed-out switch asked for",
           "[switch][link][timeout][reconnect]")
 {

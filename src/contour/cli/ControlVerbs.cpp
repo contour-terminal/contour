@@ -398,7 +398,7 @@ namespace
                                                   : vtcontrol::WorkspacePlacement::Existing,
             .cwd = f.text("cwd"),
             .command = toStrings(f.words()),
-            .label = f.text("label"),
+            .label = f.text("name"),
             .focus = f.isSet("no-focus") ? vtcontrol::FocusPolicy::Keep : vtcontrol::FocusPolicy::Take });
     }
 
@@ -430,7 +430,7 @@ namespace
             .ratioPercent = *ratio,
             .cwd = f.text("cwd"),
             .command = toStrings(f.words()),
-            .label = f.text("label"),
+            .label = f.text("name"),
             .focus = f.isSet("no-focus") ? vtcontrol::FocusPolicy::Keep : vtcontrol::FocusPolicy::Take });
     }
 
@@ -488,7 +488,7 @@ namespace
     {
         auto const f = VerbFlags { flags, "workspace.new" };
         return vtcontrol::encodeJson(
-            vtcontrol::CreateWorkspaceRequest { .cwd = f.text("cwd"), .label = f.text("label") });
+            vtcontrol::CreateWorkspaceRequest { .cwd = f.text("cwd"), .label = f.text("name") });
     }
 
     [[nodiscard]] Params buildWorkspaceRename(CLI::FlagStore const& flags)
@@ -774,8 +774,8 @@ namespace
             ControlVerb {
                 .path = "new",
                 .method = "tab.create",
-                .usage =
-                    "new [--workspace W | --new-workspace] [--cwd DIR] [--label L] [--no-focus] [-- CMD...]",
+                .usage = "new [--workspace W | --new-workspace] [--cwd DIR] [--name NAME] [--no-focus] [-- "
+                         "CMD...]",
                 .summary = "Opens a tab and prints its pane id.",
                 .options =
                     [] {
@@ -785,7 +785,7 @@ namespace
                             CLI::Option {
                                 "new-workspace", CLI::Value { false }, "Opens the tab in a new workspace." },
                             CLI::Option { "cwd", CLI::Value { ""s }, "The working directory.", "DIR" },
-                            CLI::Option { "label", CLI::Value { ""s }, "Labels the new tab.", "L" },
+                            CLI::Option { "name", CLI::Value { ""s }, "Labels the new tab NAME.", "NAME" },
                             noFocusOption(),
                         });
                     },
@@ -796,7 +796,7 @@ namespace
             ControlVerb {
                 .path = "split",
                 .method = "pane.split",
-                .usage = "split [--pane P] [--right | --below] [--ratio PCT] [--cwd DIR] [--label L] "
+                .usage = "split [--pane P] [--right | --below] [--ratio PCT] [--cwd DIR] [--name NAME] "
                          "[--no-focus] [-- CMD...]",
                 .summary = "Splits a pane and prints the new pane's id.",
                 .options =
@@ -810,7 +810,7 @@ namespace
                                           "The share of the old pane the new one gets, 1 to 99.",
                                           "PCT" },
                             CLI::Option { "cwd", CLI::Value { ""s }, "The working directory.", "DIR" },
-                            CLI::Option { "label", CLI::Value { ""s }, "Labels the new pane.", "L" },
+                            CLI::Option { "name", CLI::Value { ""s }, "Labels the new pane NAME.", "NAME" },
                             noFocusOption(),
                         });
                     },
@@ -895,16 +895,17 @@ namespace
             ControlVerb {
                 .path = "workspace.new",
                 .method = "workspace.create",
-                .usage = "workspace new [--cwd DIR] [--label L]",
+                .usage = "workspace new [--cwd DIR] [--name NAME]",
                 .summary = "Opens a workspace with one tab and prints its id.",
                 .options =
                     [] {
                         return withConnectionOptions({
                             CLI::Option { "cwd", CLI::Value { ""s }, "Where the first pane starts.", "DIR" },
-                            CLI::Option { "label",
+                            CLI::Option { "name",
                                           CLI::Value { ""s },
-                                          "Names the workspace; without it, after its folder.",
-                                          "L" },
+                                          "Labels the workspace NAME; without it, it is named after its "
+                                          "folder.",
+                                          "NAME" },
                         });
                     },
                 .verbatim = std::nullopt,

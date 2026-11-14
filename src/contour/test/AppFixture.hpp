@@ -149,7 +149,9 @@ class TestApp
             [this](int status) { _exitCodes.push_back(status); },
             bootstrapPromptFactory(),
             scriptedStartupLister(),
-            std::move(gitProbe))
+            std::move(gitProbe),
+            // test_main made the QApplication before any test app.
+            contour::platform::ApplicationReadiness::State::Ready)
     {
         parseTerminalVerb();
     }
@@ -191,7 +193,10 @@ class TestApp
             fakeSwitchDirectory(),
             [this](int status) { _exitCodes.push_back(status); },
             bootstrapPromptFactory(),
-            scriptedStartupLister())
+            scriptedStartupLister(),
+            nullptr, // the native git probe, as the default
+            // test_main made the QApplication before any test app.
+            contour::platform::ApplicationReadiness::State::Ready)
     {
         parseTerminalVerb();
     }
@@ -250,7 +255,10 @@ class TestApp
             fakeSwitchDirectory(),
             [this](int status) { _exitCodes.push_back(status); },
             bootstrapPromptFactory(),
-            scriptedStartupLister())
+            scriptedStartupLister(),
+            nullptr, // the native git probe, as the default
+            // test_main made the QApplication before any test app.
+            contour::platform::ApplicationReadiness::State::Ready)
     {
         std::vector<char const*> argv;
         argv.reserve(args.size() + 1);

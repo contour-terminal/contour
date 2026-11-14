@@ -16,9 +16,11 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <vthost/proto/Pdu.hpp>
+#include <vtworkspace/TabName.hpp>
 
 namespace contour::window
 {
@@ -50,9 +52,10 @@ struct DirectoryPane
 /// One tab: its panes in tree order (depth-first), so a split tab lists several.
 struct DirectoryTab
 {
-    uint64_t id = 0;                  ///< The tab's id within its workspace.
-    std::string title;                ///< The tab's own title as the daemon holds it; empty when it has none.
-    std::string label;                ///< What a list shows: the tab's title, else the first pane's.
+    uint64_t id = 0;   ///< The tab's id within its workspace.
+    std::string title; ///< The tab's own title as the daemon holds it; empty when it has none.
+    std::string label; ///< What a list shows (vtworkspace::tabNameOf): its control label, its title, its
+                       ///< first pane's.
     std::vector<DirectoryPane> panes; ///< Depth-first.
     bool operator==(DirectoryTab const&) const = default;
 };
@@ -101,6 +104,29 @@ struct WorkspaceDirectory
     std::optional<uint64_t> selected; ///< The workspace the window shows, if it follows one.
     bool operator==(WorkspaceDirectory const&) const = default;
 };
+
+/// A workspace a window can be switched to, with the place it is numbered by.
+struct SwitchableWorkspace
+{
+    uint32_t position = 0; ///< Its 1-based place in the directory, tab-less ones counted.
+    DirectoryWorkspace const* workspace = nullptr; ///< The workspace; points into the directory searched.
+};
+
+/// The workspaces of @p directory a window can be switched to, in its order: one holding no tab is left out,
+/// as it has nothing for a window to show, but still takes its number. The one list the switcher's rows, the
+/// positional SwitchToWorkspace and the cycling of workspaces read.
+/// @param directory A window's directory.
+/// @return The switchable workspaces; they live as long as @p directory does.
+[[nodiscard]] inline std::vector<SwitchableWorkspace> switchableWorkspacesOf(
+    WorkspaceDirectory const& directory)
+{
+    auto switchable = std::vector<SwitchableWorkspace> {};
+    for (auto const index: std::views::iota(std::size_t { 0 }, directory.workspaces.size()))
+        if (!directory.workspaces[index].tabs.empty())
+            switchable.push_back(SwitchableWorkspace { .position = static_cast<uint32_t>(index + 1),
+                                                       .workspace = &directory.workspaces[index] });
+    return switchable;
+}
 
 /// A tab of a directory with the workspace that lists it. Both point into the directory searched, so they
 /// live as long as it does.
@@ -320,10 +346,9 @@ namespace detail
             tab.id = wireTab.tabId;
             tab.title = wireTab.title;
             detail::collectPanes(wireTab.root, status, tab.panes);
-            if (!tab.title.empty())
-                tab.label = tab.title;
-            else if (!tab.panes.empty())
-                tab.label = tab.panes.front().title;
+            tab.label = vtworkspace::tabNameOf(
+                { .label = wireTab.label, .title = tab.title },
+                tab.panes.empty() ? std::string_view {} : std::string_view { tab.panes.front().title });
             workspace.tabs.push_back(std::move(tab));
         }
         directory.workspaces.push_back(std::move(workspace));

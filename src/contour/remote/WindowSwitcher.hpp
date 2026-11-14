@@ -104,6 +104,24 @@ class WindowSwitcher final: public SwitchingService
     [[nodiscard]] std::vector<WorkspaceRow> windowWorkspaceRows(vtworkspace::WorkspaceId window) override;
 
   private:
+    /// Carries out a switch for a window that runs in this process: it shows one of the workspaces it owns,
+    /// or makes a new one, named @p label when that is not empty. Nothing else is in reach of such a window:
+    /// another daemon, or a new window, is refused.
+    /// @param window The window.
+    /// @param target What to show; of the same daemon.
+    /// @param mode Replace what the window shows, or open a new window.
+    /// @param label What to call a new workspace.
+    /// @param done Told how it went.
+    void switchInProcess(vtworkspace::WorkspaceId window,
+                         session::SwitchTarget const& target,
+                         session::SwitchMode mode,
+                         std::string label,
+                         session::SwitchCompletion const& done);
+
+    /// @param window An in-process window.
+    /// @return The rows of the workspaces it owns, from its own directory.
+    [[nodiscard]] std::vector<WorkspaceRow> inProcessRows(vtworkspace::WorkspaceId window);
+
     /// The daemon a target names, as seen from the window's own link.
     struct Destination
     {

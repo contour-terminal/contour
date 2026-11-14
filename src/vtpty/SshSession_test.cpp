@@ -41,6 +41,14 @@ void writeFile(std::filesystem::path const& path, std::string_view contents)
     return host;
 }
 
+/// How long a reader in these cases waits on its own: far beyond WakeBound, so that a reader that returns
+/// within that bound can only have been woken, however slowly a loaded machine runs it.
+constexpr auto ReaderTimeout = std::chrono::seconds { 60 };
+
+/// How long a case waits for a woken reader to return. A bound, not a latency budget: only a wake that is
+/// lost altogether takes this long.
+constexpr auto WakeBound = std::chrono::seconds { 30 };
+
 } // namespace
 
 TEST_CASE("SSH reader wakeup interrupts the socket wait", "[ssh][threading]")
@@ -50,11 +58,11 @@ TEST_CASE("SSH reader wakeup interrupts the socket wait", "[ssh][threading]")
     auto entered = waiting.get_future();
     auto reader = std::async(std::launch::async, [&] {
         waiting.set_value();
-        return session.waitForSocket(std::chrono::seconds { 2 });
+        return session.waitForSocket(ReaderTimeout);
     });
     entered.wait();
     session.wakeupReader();
-    CHECK(reader.wait_for(std::chrono::milliseconds { 500 }) == std::future_status::ready);
+    CHECK(reader.wait_for(WakeBound) == std::future_status::ready);
     CHECK(reader.get() > 0);
 }
 
@@ -64,11 +72,11 @@ TEST_CASE("SSH reader wakeup interrupts the pre-login wait", "[ssh][threading]")
     auto reader = std::async(std::launch::async, [&] {
         auto buffers = crispy::BufferObjectPool<char> { 4096 };
         auto storage = buffers.allocateBufferObject();
-        auto const result = session.read(*storage, std::chrono::seconds { 2 }, 4096);
+        auto const result = session.read(*storage, ReaderTimeout, 4096);
         return std::pair { result.has_value(), errno };
     });
     session.wakeupReader();
-    CHECK(reader.wait_for(std::chrono::milliseconds { 500 }) == std::future_status::ready);
+    CHECK(reader.wait_for(WakeBound) == std::future_status::ready);
     auto const [hasResult, error] = reader.get();
     CHECK_FALSE(hasResult);
     CHECK(error == EINTR);
@@ -95,10 +103,10 @@ TEST_CASE("closing an SSH session wakes the pre-login reader", "[ssh][threading]
     auto reader = std::async(std::launch::async, [&] {
         auto buffers = crispy::BufferObjectPool<char> { 4096 };
         auto storage = buffers.allocateBufferObject();
-        return session.read(*storage, std::chrono::seconds { 2 }, 4096).has_value();
+        return session.read(*storage, ReaderTimeout, 4096).has_value();
     });
     session.close();
-    CHECK(reader.wait_for(std::chrono::milliseconds { 500 }) == std::future_status::ready);
+    CHECK(reader.wait_for(WakeBound) == std::future_status::ready);
     CHECK_FALSE(reader.get());
 }
 

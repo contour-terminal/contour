@@ -283,6 +283,15 @@ TEST_CASE("the daemon level lists that daemon's workspaces and its new workspace
     }
 }
 
+TEST_CASE("a window that reaches no other daemon is not offered All daemons…", "[switcher]")
+{
+    auto const daemons = boards();
+    auto const rows =
+        switcherRows(SwitcherInputs { .daemons = daemons },
+                     SwitcherView { .origin = SwitcherOrigin::Chip, .scope = SwitcherScope::WindowOnly });
+    CHECK(kindsOf(rows) == std::vector { Workspace, Workspace, Workspace, Workspace, NewWorkspace });
+}
+
 TEST_CASE("the chip scope lists the window's daemon, New Workspace and All daemons…", "[switcher]")
 {
     auto const daemons = boards();
