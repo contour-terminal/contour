@@ -224,7 +224,6 @@ struct UiStyleTokens
     std::string_view tabColorGlyph;
     std::string_view chipOpenGlyph;  ///< Opens a toolbar or host chip; empty where the chip is a shape.
     std::string_view chipCloseGlyph; ///< Closes a toolbar or host chip; empty where the chip is a shape.
-    std::string_view hostDotGlyph;   ///< The host chip's state dot; empty where it is a vector circle.
 
     /// A pane header's action buttons, indexed by @c PaneHeaderAction.
     std::array<std::string_view, PaneHeaderActionCount> paneActionGlyphs {};
@@ -451,7 +450,6 @@ namespace detail
         .tabColorGlyph = "",
         .chipOpenGlyph = "",
         .chipCloseGlyph = "",
-        .hostDotGlyph = "",
         .paneActionGlyphs = { "⊞", "⊟", "⤢", "✕" },
         // No line: the native rows split with the gap between two cards.
         .splitLineGlyphs = { "", "" },
@@ -545,7 +543,6 @@ namespace detail
         .tabColorGlyph = "▌",
         .chipOpenGlyph = "[",
         .chipCloseGlyph = "]",
-        .hostDotGlyph = "●",
         // The header row's buttons as the tui board sets them: Z for zoom, the light × for close. Split
         // right is the box-drawing cross every terminal font draws: monospace fonts set U+229E (⊞) as a
         // boxed X, which reads as Close.

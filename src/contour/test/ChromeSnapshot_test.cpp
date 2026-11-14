@@ -860,10 +860,10 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             }
             case SnapshotScript::RemoteConnected:
             case SnapshotScript::RemoteDisconnected: {
-                auto const* chip = scene.root().findChild<QQuickItem*>(QStringLiteral("hostChip"));
+                auto const* chip = scene.root().findChild<QQuickItem*>(QStringLiteral("workspaceChip"));
                 REQUIRE(chip != nullptr);
                 CHECK(chip->isVisible() == titleBar->isVisible());
-                auto const* status = chip->findChild<QObject*>(QStringLiteral("hostChipStatus"));
+                auto const* status = chip->findChild<QObject*>(QStringLiteral("workspaceChipStatus"));
                 REQUIRE(status != nullptr);
                 CHECK(status->property("text").toString().isEmpty()
                       == (variant.script == SnapshotScript::RemoteConnected));
@@ -1201,6 +1201,20 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             case SnapshotScript::SwitcherDiscovering:
             case SnapshotScript::SwitcherRowMenu:
             case SnapshotScript::SwitcherHover: checkSwitcherScript(scene, variant.script); break;
+            case SnapshotScript::DaemonLocal:
+            case SnapshotScript::DaemonLocalSingleTab: {
+                // The default daemon reads "local", with no dot: the chip is in the band for every row.
+                auto const* chip = scene.root().findChild<QQuickItem*>(QStringLiteral("workspaceChip"));
+                REQUIRE(chip != nullptr);
+                CHECK(chip->isVisible() == titleBar->isVisible());
+                auto const* daemon = chip->findChild<QObject*>(QStringLiteral("workspaceChipDaemon"));
+                auto const* dot = chip->findChild<QObject*>(QStringLiteral("workspaceChipDot"));
+                REQUIRE(daemon != nullptr);
+                REQUIRE(dot != nullptr);
+                CHECK(daemon->property("text").toString() == QStringLiteral("local"));
+                CHECK_FALSE(dot->property("visible").toBool());
+                break;
+            }
             case SnapshotScript::QuickTerminal: {
                 // The panel's frame, and a role that made the window a frameless tool window.
                 CHECK(scene.window().size() == ChromeSnapshotScene::quickTerminalPanelSize());

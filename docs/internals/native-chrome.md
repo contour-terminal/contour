@@ -157,7 +157,9 @@ bar), `window/TabWellLayout.hpp` and `window/TitleBandGeometry.hpp`. Keep the ke
 - **Tabs** are pills in a well; the badge slot is resolved by `window/TabBadge.hpp` with the fixed
   priority Blocked > Error > Working > Done > Output. OSC 7501 program status, the unseen-output dot and
   the finished-command badge share that one slot.
-- **Host chip** (`HostChip.qml`, `window/HostChipState.hpp`): Connected, Reconnecting, Disconnected.
+- **Location chip** (`WorkspaceChip.qml`, `window/LocationChip.hpp`, `window/HostChipState.hpp`): the one band
+  chip that names the daemon and the workspace, with the daemon's state (Connected, Reconnecting,
+  Disconnected) as a dot, a glyph on the Terminal row, and words while there is room.
   The daemon drift chip lives in the band's trailing area, never over the cells.
 - **Notices**: `window/NoticeModel.hpp` queues `Toast` (a transient pill) and `Banner` (a band below the
   title band that pushes the content down once). Config reload errors, "Copied N lines" and restore

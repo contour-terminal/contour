@@ -292,13 +292,11 @@ TEST_CASE("UiStyle: only the Terminal row draws the band's glyphs", "[uistyle]")
         CHECK(tokens.tabColorGlyph.empty());
         CHECK(tokens.chipOpenGlyph.empty());
         CHECK(tokens.chipCloseGlyph.empty());
-        CHECK(tokens.hostDotGlyph.empty());
     }
     auto const& terminal = uiStyleTokens(ChromeStyle::Terminal);
     CHECK(terminal.tabColorGlyph == "▌");
     CHECK(terminal.chipOpenGlyph == "[");
     CHECK(terminal.chipCloseGlyph == "]");
-    CHECK(terminal.hostDotGlyph == "●");
 }
 
 TEST_CASE("UiStyle: the pane glyphs per row", "[uistyle]")

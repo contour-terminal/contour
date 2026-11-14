@@ -207,7 +207,6 @@ namespace
             .tabColor = QString::fromUtf8(tokens.tabColorGlyph),
             .chipOpen = QString::fromUtf8(tokens.chipOpenGlyph),
             .chipClose = QString::fromUtf8(tokens.chipCloseGlyph),
-            .hostDot = QString::fromUtf8(tokens.hostDotGlyph),
             .paneActions = stringsOf(tokens.paneActionGlyphs),
             .splitLines = stringsOf(tokens.splitLineGlyphs),
             .restart = QString::fromUtf8(tokens.restartGlyph),
@@ -421,11 +420,6 @@ QVariantMap UiStyleProvider::hostChipLook(int state) const
              { QStringLiteral("accessibleState"), nameOf(look.accessibleState) } };
 }
 
-bool UiStyleProvider::isHostChipShown(QString const& hostLabel) const
-{
-    return hostChipPresence(hostLabel.toStdString()) == HostChipPresence::Shown;
-}
-
 QVariantMap UiStyleProvider::titleBand(int frame,
                                        int mode,
                                        int strip,
@@ -495,17 +489,27 @@ QVariantList UiStyleProvider::headerBarItems() const
 
 QVariantMap UiStyleProvider::tabWellLayout(qreal available, int tabCount) const
 {
-    auto const layout = layoutTabWell(available,
-                                      tabCount,
-                                      TabWellMetrics { .minTab = _metrics.minTabWidth,
-                                                       .maxTab = _metrics.maxTabWidth,
-                                                       .iconOnlyTab = (2 * _space.s5()) + _size.tabIcon(),
-                                                       .gap = wellGap(),
-                                                       .padding = wellPadding() });
+    auto const layout = layoutTabWell(available, tabCount, tabWellMetrics());
     return { { QStringLiteral("tabWidth"), layout.tabWidth },
              { QStringLiteral("wellWidth"), layout.wellWidth },
              { QStringLiteral("label"), nameOf(tabLabelModeName(layout.label)) },
              { QStringLiteral("scrolls"), layout.overflow == TabWellOverflow::Scrolls } };
+}
+
+TabWellMetrics UiStyleProvider::tabWellMetrics() const
+{
+    return TabWellMetrics { .minTab = _metrics.minTabWidth,
+                            .maxTab = _metrics.maxTabWidth,
+                            .iconOnlyTab = (2 * _space.s5()) + _size.tabIcon(),
+                            .gap = wellGap(),
+                            .padding = wellPadding() };
+}
+
+qreal UiStyleProvider::tabWellMinimum(int tabCount) const
+{
+    // One icon-only pill: the well can always scroll to the active tab beyond it.
+    auto const metrics = tabWellMetrics();
+    return tabCount <= 0 ? 0 : (2 * metrics.padding) + metrics.iconOnlyTab;
 }
 
 QVariantMap UiStyleProvider::palettePlacement(qreal windowWidth, qreal windowHeight) const

@@ -7026,13 +7026,69 @@ TEST_CASE("TerminalSessionManager: the chip's placement is decided by names", "[
     contour::test::ScopedController const daemon { manager };
     manager.bindWindow(daemon.id, onWork);
 
-    CHECK(daemon->locationChipPlace("shown", "tabs") == "band");
-    CHECK(daemon->locationChipPlace("reveal", "title") == "band");
-    CHECK(daemon->locationChipPlace("pinned", "breadcrumb") == "sidebar");
-    CHECK(daemon->locationChipPlace("hidden", "tabs") == "none");
-    CHECK(daemon->locationChipPlace("shown", "nonsense") == "none");
-    CHECK(inProcess->locationChipPlace("shown", "tabs") == "none");
-    CHECK(inProcess->locationChipPlace("shown", "chip+tabs") == "band");
+    CHECK(daemon->locationChipPlace("shown", "tabs", daemon->chipHosting()) == "band");
+    CHECK(daemon->locationChipPlace("reveal", "title", daemon->chipHosting()) == "band");
+    CHECK(daemon->locationChipPlace("pinned", "breadcrumb", daemon->chipHosting()) == "sidebar");
+    CHECK(daemon->locationChipPlace("hidden", "tabs", daemon->chipHosting()) == "none");
+    CHECK(daemon->locationChipPlace("shown", "nonsense", daemon->chipHosting()) == "none");
+    CHECK(inProcess->locationChipPlace("shown", "tabs", inProcess->chipHosting()) == "none");
+    CHECK(inProcess->locationChipPlace("shown", "chip+tabs", inProcess->chipHosting()) == "band");
+
+    manager.releaseBinding(onWork);
+}
+
+TEST_CASE("TerminalSessionManager: the chip's fit, texts and glyph come from the pure decisions",
+          "[manager][chip]")
+{
+    using contour::window::LocationChipFit;
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto onWork = contour::test::DaemonNamedBinding { factory,
+                                                      chipLabelTarget("work-build-server"),
+                                                      "work-build-server" };
+    contour::test::ScopedController const inProcess { manager };
+    contour::test::ScopedController const daemon { manager };
+    manager.bindWindow(daemon.id, onWork);
+
+    // The steps QML iterates are the table's rows, in elision order; each one's room admits that step and no
+    // earlier one. A new row in LocationChipSteps is therefore one edit.
+    auto const steps = daemon->chipFitSteps();
+    REQUIRE(steps.size() == static_cast<qsizetype>(contour::window::LocationChipSteps.size()));
+    CHECK(steps.size() + 1 == static_cast<qsizetype>(contour::window::LocationChipFitCount));
+    for (auto const index: std::views::iota(size_t { 0 }, contour::window::LocationChipSteps.size()))
+    {
+        auto const row = steps[static_cast<qsizetype>(index)].toMap();
+        auto const& step = contour::window::LocationChipSteps[index];
+        CHECK(row.value(QStringLiteral("fit")).toInt() == static_cast<int>(step.fit));
+        CHECK(row.value(QStringLiteral("key")).toString().toStdString() == step.key);
+        auto widths = QVariantMap {};
+        for (auto const rank: std::views::iota(qsizetype { 0 }, steps.size()))
+            widths.insert(steps[rank].toMap().value(QStringLiteral("key")).toString(),
+                          static_cast<int>(400 - (100 * rank)));
+        widths.insert(QStringLiteral("available"), 400 - (100 * static_cast<int>(index)));
+        CHECK(daemon->chipFit(widths) == static_cast<int>(step.fit));
+    }
+    CHECK(inProcess->chipHosting() == static_cast<int>(contour::window::DaemonHosting::InProcess));
+    CHECK(daemon->chipHosting() == static_cast<int>(contour::window::DaemonHosting::Daemon));
+    CHECK(daemon->chipFit({ { "full", 400 },
+                            { "noStateText", 300 },
+                            { "daemonElided", 200 },
+                            { "dotOnly", 100 },
+                            { "available", 50 } })
+          == static_cast<int>(LocationChipFit::WorkspaceElided));
+
+    CHECK(daemon->chipDaemonText(static_cast<int>(LocationChipFit::Full)) == "work-build-server");
+    CHECK(daemon->chipDaemonText(static_cast<int>(LocationChipFit::DaemonElided)) == "work-…rver");
+    CHECK(daemon->chipDaemonText(static_cast<int>(LocationChipFit::DotOnly)).isEmpty());
+    CHECK(daemon->chipDaemonText(99)
+          == daemon->chipDaemonText(static_cast<int>(LocationChipFit::WorkspaceElided)));
+    CHECK(inProcess->chipDaemonText(0).isEmpty());
+    CHECK(daemon->chipStatusText(static_cast<int>(LocationChipFit::NoStateText)).isEmpty());
+    CHECK(daemon->chipWorkspaceText(QStringLiteral("billing-and-invoices"),
+                                    static_cast<int>(LocationChipFit::WorkspaceElided))
+          == "billin…");
+    CHECK(daemon->chipStateGlyph() == QStringLiteral("●"));
 
     manager.releaseBinding(onWork);
 }

@@ -80,10 +80,10 @@ Item {
     readonly property Item driftSlot: driftSlotItem
     /// The tab strip, while the middle holds the tabs; null otherwise.
     readonly property Item tabStrip: tabStripLoader.item
-    /// The band's toolbar items that are on screen, in visual order: the host chip, the drift chip, then the
-    /// new-tab button. What the toolbar's keyboard focus walks (WindowController.focusedToolbarIndex).
+    /// The band's toolbar items that are on screen, in visual order: the location chip, the drift chip, then
+    /// the new-tab button. What the toolbar's keyboard focus walks (WindowController.focusedToolbarIndex).
     readonly property var toolbarItems: {
-        const items = [hostChipSlot.item, workspaceChipSlot.item, driftSlotItem.chip, newTabSlot.item]
+        const items = [workspaceChipSlot.item, driftSlotItem.chip, newTabSlot.item]
         return items.filter((item) => item !== null && item.visible)
     }
     /// Whether the window's keyboard focus is in the toolbar: an item that also holds active focus rings.
@@ -295,17 +295,18 @@ Item {
 
     // What the bar's parts before and after the tabs take, from their preferred widths, which do not
     // depend on the tabs: the tabs are left the rest, less the drag reserve.
-    readonly property real leadingPartsWidth: barRow.anchors.leftMargin + leadingSlot.Layout.preferredWidth
+    // The leading parts but the location chip: what the chip's room is computed from, since the chip's width
+    // follows its fit and its fit follows its room.
+    readonly property real leadingPartsWithoutChip: barRow.anchors.leftMargin + leadingSlot.Layout.preferredWidth
                                               + leadingSeparator.Layout.preferredWidth
                                               + leadingSeparator.Layout.leftMargin + leadingSeparator.Layout.rightMargin
                                               + sidebarToggleSlot.Layout.preferredWidth
                                               + sidebarToggleSlot.Layout.rightMargin
                                               + sidebarPart.Layout.preferredWidth
+                                              + leadingItems.Layout.preferredWidth + leadingItems.Layout.rightMargin
+    readonly property real leadingPartsWidth: root.leadingPartsWithoutChip
                                               + workspaceChipSlot.Layout.preferredWidth
                                               + workspaceChipSlot.Layout.leftMargin + workspaceChipSlot.Layout.rightMargin
-                                              + leadingItems.Layout.preferredWidth + leadingItems.Layout.rightMargin
-                                              + hostChipSlot.Layout.preferredWidth
-                                              + hostChipSlot.Layout.leftMargin + hostChipSlot.Layout.rightMargin
     readonly property real trailingPartsWidth: secureChipSlot.Layout.preferredWidth + secureChipSlot.Layout.rightMargin
                                                + driftSlotItem.Layout.preferredWidth + driftSlotItem.Layout.rightMargin
                                                + newTabSlot.Layout.preferredWidth + newTabSlot.Layout.rightMargin
@@ -320,6 +321,25 @@ Item {
                                                         - newTabSlot.Layout.preferredWidth - newTabSlot.Layout.rightMargin
                                                         - trailingSlot.Layout.preferredWidth
                                                         - chromeStyle.space.dragReserve)
+
+    // Where the location chip shows, the controller's call. It follows the daemon the window is bound to (an
+    // in-process window and a daemon's differ), which the controller announces as `chipHosting`: the call
+    // takes it, so the binding depends on it.
+    readonly property string chipPlace: {
+        // `!locationChipPlace` keeps a lightweight mock controller (offscreen tests) without the chip local.
+        if (!root.controller || !root.controller.locationChipPlace)
+            return "none"
+        return root.controller.locationChipPlace(root.presence, root.centre, root.controller.chipHosting)
+    }
+
+    // The room the location chip has: the bar less every other part, the drag reserve and the least the tab
+    // well keeps. Built from parts that do not read the chip, so the chip's fit does not loop through it.
+    readonly property real chipRoom: {
+        const strip = tabStripLoader.item
+        const well = strip ? chromeStyle.tabWellMinimum(strip.tabCount) + strip.fixedWidth : 0
+        return Math.max(0, root.width - root.leadingPartsWithoutChip - 2 * root.gap - root.trailingPartsWidth
+                           - chromeStyle.space.dragReserve - tabStripLoader.Layout.leftMargin - well)
+    }
 
     // The room the centred title has: the bar less twice the wider of its two ends, so it stays centred
     // on the bar without running under either end.
@@ -470,43 +490,26 @@ Item {
             }
         }
 
-        // The host a remote window is attached to. The band's only, and absent for a local window.
+        // The location chip, leading the tabs: it names the daemon and the workspace, and as the pop-up button
+        // it reads as it drops the switcher down below itself. Where it shows is the controller's call
+        // (WindowController.locationChipPlace); the tabs-only bar of a sidebar window has none (`isBand`).
         Loader {
-            id: hostChipSlot
-            active: root.isBand
+            id: workspaceChipSlot
+            objectName: "workspaceChipSlot"
+            active: root.isBand && !!root.controller && !!root.controller.sidebar && root.chipPlace === "band"
             readonly property bool shown: item !== null && item.visible
             Layout.alignment: Qt.AlignVCenter
             Layout.preferredWidth: shown ? item.implicitWidth : 0
             Layout.leftMargin: shown ? root.gap : 0
             Layout.rightMargin: shown ? root.gap : 0
-            sourceComponent: HostChip {
-                // `?? ""` keeps a lightweight mock controller (offscreen tests) without the property local.
-                hostLabel: root.controller ? (root.controller.hostLabel ?? "") : ""
-                connection: root.controller ? (root.controller.hostChipState ?? 0) : 0
-                focusRingShown: activeFocus && root.toolbarHasFocus
-                // Opens the switcher, as the ShowSwitcher action does. The chip sits beside the drag
-                // region, not in it, so the window-drag handlers never see its press.
-                onClicked: if (root.controller && root.controller.showSwitcher) root.controller.showSwitcher()
-            }
-        }
-
-        // The workspace chip, leading the tabs while the sidebar that would name the workspace is hidden. A
-        // pop-up button: it drops this window's workspaces down below itself.
-        Loader {
-            id: workspaceChipSlot
-            active: root.isBand && root.centre === "chip+tabs" && !!root.controller && !!root.controller.sidebar
-            readonly property bool shown: item !== null && item.visible
-            Layout.alignment: Qt.AlignVCenter
-            Layout.preferredWidth: shown ? item.implicitWidth : 0
-            Layout.leftMargin: shown && !hostChipSlot.shown ? root.gap : 0
-            Layout.rightMargin: shown ? root.gap : 0
             sourceComponent: WorkspaceChip {
                 id: workspaceChip
                 sidebar: root.controller.sidebar
+                controller: root.controller
+                // The step the room allows, from the chip's measured steps: its own width never feeds it.
+                fit: root.controller.chipFit(Object.assign({ available: root.chipRoom }, workspaceChip.fitWidths))
                 focusRingShown: activeFocus && root.toolbarHasFocus
                 isOpen: !!root.controller && !!root.controller.isWorkspaceDropdownOpen
-                openDescription: root.controller && root.controller.workspaceChipDescription
-                                 ? root.controller.workspaceChipDescription : ""
                 onClicked: if (root.controller && root.controller.showWorkspaceDropdown)
                     root.controller.showWorkspaceDropdown(workspaceChip.dropdownAnchor())
             }

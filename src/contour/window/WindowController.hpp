@@ -269,10 +269,18 @@ class WindowController:
     Q_PROPERTY(QString chipDaemonName READ chipDaemonName NOTIFY chipChanged)
     /// A window::DaemonDot's underlying value: whether the chip's status dot shows.
     Q_PROPERTY(int chipDaemonDot READ chipDaemonDot NOTIFY chipChanged)
+    /// The glyph that stands for the connection's state on the Terminal row, where no dot can be drawn.
+    Q_PROPERTY(QString chipStateGlyph READ chipStateGlyph NOTIFY chipChanged)
     /// What a screen reader says of the chip.
     Q_PROPERTY(QString chipAccessibleName READ chipAccessibleName NOTIFY chipChanged)
     /// What a screen reader adds: the connection's state and whether the switcher is open.
     Q_PROPERTY(QString chipAccessibleDescription READ chipAccessibleDescription NOTIFY chipChanged)
+    /// A window::DaemonHosting's underlying value: whether the window's sessions live in a daemon. The input
+    /// locationChipPlace() needs from the window, so a binding that passes it re-evaluates when it changes.
+    Q_PROPERTY(int chipHosting READ chipHosting NOTIFY chipChanged)
+    /// The fit steps in elision order, each { fit, key }: a window::LocationChipFit's underlying value and
+    /// the name chipFit() takes its width by (window::LocationChipSteps). QML measures and keys by this list.
+    Q_PROPERTY(QVariantList chipFitSteps READ chipFitSteps CONSTANT)
     Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
     // {{{ Panes
     // The panes the active tab shows: the leaves under its layout root (1 while zoomed or unsplit, 0 without
@@ -761,6 +769,25 @@ class WindowController:
 
     /// Where this window's toast goes now (placeToast()), from the band QML shows and the active pane's
     /// cursor row: asked as a toast shows.
+    /// @param fit A window::LocationChipFit's underlying value.
+    /// @return The daemon segment's text at that fit; empty for an in-process window.
+    Q_INVOKABLE [[nodiscard]] QString chipDaemonText(int fit) const;
+
+    /// @param fit A window::LocationChipFit's underlying value.
+    /// @return The state's words at that fit: only the whole chip carries them.
+    Q_INVOKABLE [[nodiscard]] QString chipStatusText(int fit) const;
+
+    /// @param workspace The workspace's name.
+    /// @param fit       A window::LocationChipFit's underlying value.
+    /// @return The workspace's text at that fit (locationChipWorkspaceText()).
+    Q_INVOKABLE [[nodiscard]] QString chipWorkspaceText(QString const& workspace, int fit) const;
+
+    /// @param widths What each fit step needs, as the keys `full`, `noStateText`, `daemonElided` and
+    ///               `dotOnly`, and the room as `available`, all in the same unit. A map, not a list, so
+    ///               the caller cannot swap two steps.
+    /// @return A window::LocationChipFit's underlying value: the first step that fits.
+    Q_INVOKABLE [[nodiscard]] int chipFit(QVariantMap const& widths) const;
+
     /// @param band The band's presence, by the name UiStyleProvider::titleBand() gives it ("shown", ...).
     /// @param edge Its edge, by name ("top" or "bottom").
     /// @param bandHeight The band's height, in logical pixels.
@@ -1582,6 +1609,9 @@ class WindowController:
     /// @return A window::DaemonDot as its underlying value.
     [[nodiscard]] int chipDaemonDot() const;
 
+    /// @return The glyph for the connection's state (daemonStateGlyph()).
+    [[nodiscard]] QString chipStateGlyph() const;
+
     /// @return What a screen reader says of the location chip.
     [[nodiscard]] QString chipAccessibleName() const;
 
@@ -1592,13 +1622,22 @@ class WindowController:
     /// @return The chip's tooltip.
     Q_INVOKABLE [[nodiscard]] QString chipToolTip(int fit) const;
 
+    /// @return A window::DaemonHosting as its underlying value.
+    [[nodiscard]] int chipHosting() const;
+
+    /// @return The chip's fit steps in elision order (window::LocationChipSteps), each { fit, key }.
+    [[nodiscard]] static QVariantList chipFitSteps();
+
     /// @param band The band's presence, by the name UiStyleProvider::titleBand() gives it ("hidden",
     ///             "shown", "reveal" or "pinned").
     /// @param centre The band centre's name (barCentreName()).
+    /// @param hosting The window's chipHosting: passed in, so the caller's binding depends on it.
     /// @return Where the chip shows for this window: "none", "band" or "sidebar"; "none" for a name no
     ///         presence or centre has. Names in and a name out is the QML carve-out, like
     ///         UiStyleProvider::titleBand().
-    Q_INVOKABLE [[nodiscard]] QString locationChipPlace(QString const& band, QString const& centre) const;
+    Q_INVOKABLE [[nodiscard]] QString locationChipPlace(QString const& band,
+                                                        QString const& centre,
+                                                        int hosting) const;
 
     /// The manager's host connection changed what the chip shows. @see hostChipState
     void notifyHostConnectionChanged() { emit hostChipStateChanged(); }

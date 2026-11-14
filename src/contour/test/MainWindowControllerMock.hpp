@@ -13,6 +13,8 @@
 #include <contour/test/SidebarFakes.hpp>
 #include <contour/window/CloseDialogTable.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/LocationChip.hpp>
+#include <contour/window/LocationChipSteps.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/NoticeModel.hpp>
 #include <contour/window/PromptHost.hpp>
@@ -39,6 +41,7 @@
 #include <QtCore/QVariantList>
 #include <QtGui/QColor>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -136,6 +139,15 @@ class MainWindowControllerMock: public QAbstractListModel
     Q_PROPERTY(QString workspaceChipDescription READ workspaceChipDescription NOTIFY switcherChanged)
     // Mirrors WindowController's host chip state (a window::HostChipState); a test sets it to drive the chip.
     Q_PROPERTY(int hostChipState READ hostChipState WRITE setHostChipState NOTIFY hostChipStateChanged)
+    // Mirrors WindowController's location chip, which names the daemon and the workspace in one control. A
+    // test sets daemonName (empty: an in-process window) and the host chip state to drive it.
+    Q_PROPERTY(QString chipDaemonName READ chipDaemonName NOTIFY chipChanged)
+    Q_PROPERTY(int chipDaemonDot READ chipDaemonDot NOTIFY chipChanged)
+    Q_PROPERTY(QString chipStateGlyph READ chipStateGlyph NOTIFY chipChanged)
+    Q_PROPERTY(QString chipAccessibleName READ chipAccessibleName NOTIFY chipChanged)
+    Q_PROPERTY(QString chipAccessibleDescription READ chipAccessibleDescription NOTIFY chipChanged)
+    Q_PROPERTY(int chipHosting READ chipHosting NOTIFY chipChanged)
+    Q_PROPERTY(QVariantList chipFitSteps READ chipFitSteps CONSTANT)
     // Mirrors WindowController's version string, which the About dialog shows.
     Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
     // Mirrors WindowController's host for ssh's login prompts, which Main.qml's AskpassDialog shows.
@@ -182,13 +194,130 @@ class MainWindowControllerMock: public QAbstractListModel
     // }}}
 
   public:
-    using QAbstractListModel::QAbstractListModel;
+    /// @param parent The QObject parent.
+    explicit MainWindowControllerMock(QObject* parent = nullptr): QAbstractListModel(parent)
+    {
+        // The chip follows the host label, the connection and the switcher, as WindowController's does.
+        connect(
+            this, &MainWindowControllerMock::hostLabelChanged, this, &MainWindowControllerMock::chipChanged);
+        connect(this,
+                &MainWindowControllerMock::hostChipStateChanged,
+                this,
+                &MainWindowControllerMock::chipChanged);
+        connect(
+            this, &MainWindowControllerMock::switcherChanged, this, &MainWindowControllerMock::chipChanged);
+    }
 
     /// Mirrors WindowController::hostLabel(): the attached host, set by a test before Main.qml loads.
     [[nodiscard]] QString const& hostLabel() const noexcept { return attachedHost; }
 
     /// Mirrors WindowController::hostChipState().
     [[nodiscard]] int hostChipState() const noexcept { return _hostChipState; }
+
+    /// A daemon window's daemon, as the chip names it; empty falls back to the attached host, and then to
+    /// an in-process window, which names no daemon.
+    QString daemonName {};
+    /// Whether the daemon runs on this machine; a window attached to a host is remote whatever this says.
+    window::DaemonLocality daemonLocality = window::DaemonLocality::Local;
+
+    /// @param name   The daemon the chip names from now on; empty for an in-process window.
+    /// @param locality Where it runs.
+    void setDaemon(QString name, window::DaemonLocality locality = window::DaemonLocality::Local)
+    {
+        daemonName = std::move(name);
+        daemonLocality = locality;
+        emit chipChanged();
+    }
+
+    /// Mirrors WindowController::chipDaemonName().
+    [[nodiscard]] QString chipDaemonName() const { return daemonName.isEmpty() ? attachedHost : daemonName; }
+
+    /// @return Whether the mock is a daemon window.
+    [[nodiscard]] window::DaemonHosting hosting() const
+    {
+        return chipDaemonName().isEmpty() ? window::DaemonHosting::InProcess : window::DaemonHosting::Daemon;
+    }
+
+    /// Mirrors WindowController::chipDaemonDot().
+    [[nodiscard]] int chipDaemonDot() const
+    {
+        auto const locality = !attachedHost.isEmpty() ? window::DaemonLocality::Remote : daemonLocality;
+        return static_cast<int>(window::daemonDotOf(locality, chipState()));
+    }
+
+    /// Mirrors WindowController::chipStateGlyph().
+    [[nodiscard]] QString chipStateGlyph() const
+    {
+        return QString::fromUtf8(window::daemonStateGlyph(chipState()));
+    }
+
+    /// Mirrors WindowController::chipAccessibleName().
+    [[nodiscard]] QString chipAccessibleName() const
+    {
+        return QString::fromStdString(
+            window::locationChipAccessibleName(chipDaemonName().toStdString(), _sidebar.summary()));
+    }
+
+    /// Mirrors WindowController::chipAccessibleDescription().
+    [[nodiscard]] QString chipAccessibleDescription() const
+    {
+        return QString::fromStdString(
+            window::locationChipAccessibleDescription(chipState(), workspaceChipDescription().toStdString()));
+    }
+
+    /// Mirrors WindowController::chipToolTip().
+    Q_INVOKABLE [[nodiscard]] QString chipToolTip(int fit) const
+    {
+        return QString::fromStdString(
+            window::locationChipToolTip(chipState(), chipFitOf(fit), chipDaemonName().toStdString()));
+    }
+
+    /// Mirrors WindowController::chipDaemonText().
+    Q_INVOKABLE [[nodiscard]] QString chipDaemonText(int fit) const
+    {
+        return QString::fromStdString(
+            window::locationChipDaemonText(chipDaemonName().toStdString(), chipFitOf(fit)));
+    }
+
+    /// Mirrors WindowController::chipStatusText().
+    Q_INVOKABLE [[nodiscard]] QString chipStatusText(int fit) const
+    {
+        return QString::fromStdString(window::locationChipStatusText(chipState(), chipFitOf(fit)));
+    }
+
+    /// Mirrors WindowController::chipWorkspaceText().
+    Q_INVOKABLE [[nodiscard]] QString chipWorkspaceText(QString const& workspace, int fit) const
+    {
+        return QString::fromStdString(
+            window::locationChipWorkspaceText(workspace.toStdString(), chipFitOf(fit)));
+    }
+
+    /// Mirrors WindowController::chipFit().
+    Q_INVOKABLE [[nodiscard]] int chipFit(QVariantMap const& widths) const
+    {
+        auto const widthOf = [&](std::string_view key) {
+            return widths.value(QString::fromUtf8(key.data(), static_cast<qsizetype>(key.size()))).toDouble();
+        };
+        return static_cast<int>(
+            window::locationChipFitFrom(widthOf, widths.value(QStringLiteral("available")).toDouble()));
+    }
+
+    /// Mirrors WindowController::chipFitSteps().
+    [[nodiscard]] static QVariantList chipFitSteps() { return window::locationChipStepList(); }
+
+    /// Mirrors WindowController::chipHosting().
+    [[nodiscard]] int chipHosting() const { return static_cast<int>(std::to_underlying(hosting())); }
+
+    /// Mirrors WindowController::locationChipPlace().
+    Q_INVOKABLE [[nodiscard]] QString locationChipPlace(QString const& band,
+                                                        QString const& centre,
+                                                        int hostingValue) const
+    {
+        return QString::fromUtf8(window::locationChipPlaceNamed(
+            band.toStdString(),
+            centre.toStdString(),
+            static_cast<window::DaemonHosting>(std::clamp(hostingValue, 0, 1))));
+    }
 
     /// What the connection reports, as WindowController::notifyHostConnectionChanged() would tell it.
     /// @param state A window::HostChipState as its underlying value.
@@ -710,6 +839,7 @@ class MainWindowControllerMock: public QAbstractListModel
     int newTabMenuOpenings = 0;           ///< How often the new-tab menu was asked for.
 
   signals:
+    void chipChanged();
     void switcherChanged();
     void switcherRequested(QVariant anchor);
     void switcherWithdrawn();
@@ -757,7 +887,20 @@ class MainWindowControllerMock: public QAbstractListModel
     QVariantList _tabContextMenuModel {};
     QVariantList _sidebarContextMenuModel {};
     QVariantList _newTabMenuModel {};
-    int _hostChipState = 0;        ///< @see hostChipState; 0 = HostChipState::Connected.
+    int _hostChipState = 0; ///< @see hostChipState; 0 = HostChipState::Connected.
+
+    /// @return The connection's state as the chip's pure decisions take it.
+    [[nodiscard]] window::HostChipState chipState() const
+    {
+        return static_cast<window::HostChipState>(_hostChipState);
+    }
+    /// @param fit A window::LocationChipFit's underlying value; out of range clamps.
+    [[nodiscard]] static window::LocationChipFit chipFitOf(int fit)
+    {
+        return static_cast<window::LocationChipFit>(
+            std::clamp(fit, 0, static_cast<int>(window::LocationChipFitCount) - 1));
+    }
+
     int _visiblePaneCount = 1;     ///< @see visiblePaneCount; one pane, unsplit.
     int _headerReveal = 0;         ///< @see headerReveal; 0 = HeaderReveal::None.
     qreal _titleBandHeight = 0;    ///< @see titleBandHeight; 0 = not measured.

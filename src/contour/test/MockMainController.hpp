@@ -113,6 +113,11 @@ struct MainWindowScene
     ClientFrameAffordances affordances = ClientFrameAffordances::None;
     /// How the window's chords are spelled (shortcutText()): the row's host spelling.
     command::ShortcutStyle shortcutStyle = command::ShortcutStyle::Text;
+    /// The daemon the window's chip names; empty falls back to @c hostLabel, and then to an in-process
+    /// window.
+    QString daemonName {};
+    /// Whether that daemon runs on this machine; a window attached to a host is remote whatever this says.
+    window::DaemonLocality daemonLocality = window::DaemonLocality::Local;
 };
 
 /// The client and daemon releases a drifted scene reports, as DaemonDriftModel_test assesses them.
@@ -218,6 +223,8 @@ class MockMainController: public MainWindowControllerMock
         _hostingNotice { _scene.hostingNotice }
     {
         attachedHost = _scene.hostLabel;
+        daemonName = _scene.daemonName;
+        daemonLocality = _scene.daemonLocality;
         shortcutStyle = _scene.shortcutStyle;
         setHostChipState(static_cast<int>(_scene.hostChipState));
         if (_scene.drift == snapshot::SnapshotDrift::Shown)

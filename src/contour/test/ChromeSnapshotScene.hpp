@@ -220,6 +220,7 @@ class ChromeSnapshotScene
         switch (connection)
         {
             case HostConnection::Local:
+            case HostConnection::LocalDaemon:
             case HostConnection::Connected: break;
             case HostConnection::Reconnecting: return window::HostChipState::Reconnecting;
             case HostConnection::Disconnected: return window::HostChipState::Disconnected;
@@ -309,6 +310,10 @@ class ChromeSnapshotScene
             .secure = scriptRow(variant.script).secure,
             .affordances = affordancesFor(variantHost(variant), scriptRow(variant.script).frame),
             .shortcutStyle = command::shortcutStyleFor(variantHost(variant)),
+            .daemonName = scriptRow(variant.script).connection == HostConnection::LocalDaemon
+                              ? QStringLiteral("local")
+                              : QString {},
+            .daemonLocality = window::DaemonLocality::Local,
         } },
         _newDefaults { newDefaultsOfferFor(scriptRow(variant.script).banner) },
         _settingsWindow { makeSettingsWindow() },

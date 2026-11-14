@@ -49,7 +49,7 @@ field on the settings page carries its own label.
 ## Keyboard access to the window chrome
 
 With `defaults_edition: native2026`, **Ctrl+F6** moves keyboard focus out of the terminal and into the
-window's chrome, and on through it: the terminal, then the tab bar, then the toolbar (the host chip, the
+window's chrome, and on through it: the terminal, then the tab bar, then the toolbar (the location chip, the
 daemon version chip and the new-tab button), then back to the terminal. **Ctrl+Shift+F6** walks the other
 way. On macOS **Ctrl+F5** goes straight to the toolbar and Ctrl+F6 moves between the areas. An area that is
 not shown, such as a tab bar hidden by `tab_bar_visibility`, is skipped.

@@ -196,6 +196,11 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
         QString name {};          ///< The name it must announce; any non-empty one when empty.
         int role = -1;            ///< The QAccessible::Role it must declare; any when -1.
     };
+    // The location chip names the workspace and the daemon it is on; the state goes in its description.
+    auto chipController = contour::test::MockMainController { contour::test::MainWindowScene {
+        .tabCount = 1,
+        .hostLabel = QStringLiteral("build-01"),
+        .hostChipState = contour::window::HostChipState::Reconnecting } };
     // The link pill names the session's link target and how to open it.
     auto linkSession = contour::test::MockSession {};
     linkSession.setLinkTarget(QStringLiteral("example.com"), QStringLiteral("Ctrl+Click to open"), true);
@@ -246,14 +251,13 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
                .swatches = 0,
                .name = QStringLiteral("Waiting for you"),
                .role = QAccessible::StaticText },
-        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/HostChip.qml"),
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/WorkspaceChip.qml"),
                .initialProperties =
-                   QVariantMap {
-                       { "hostLabel", QStringLiteral("build-01") },
-                       { "connection", static_cast<int>(contour::window::HostChipState::Reconnecting) } },
+                   QVariantMap { { "sidebar", QVariant::fromValue<QObject*>(chipController.sidebarObject()) },
+                                 { "controller", QVariant::fromValue<QObject*>(&chipController) } },
                .swatches = 0,
-               .name = QStringLiteral("Switch daemon or workspace (on build-01, reconnecting)"),
-               .role = QAccessible::Button },
+               .name = chipController.chipAccessibleName(),
+               .role = QAccessible::ButtonMenu },
         Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/ToolbarButton.qml"),
                .initialProperties = QVariantMap { { "glyph", QStringLiteral("+") },
                                                   { "accessibleName", QStringLiteral("New tab") } },

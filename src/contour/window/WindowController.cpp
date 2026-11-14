@@ -32,6 +32,7 @@
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/LocationChip.hpp>
+#include <contour/window/LocationChipSteps.hpp>
 #include <contour/window/PaneState.hpp>
 #include <contour/window/PromptHost.hpp>
 #include <contour/window/QtChromeKeys.hpp>
@@ -626,6 +627,16 @@ int WindowController::hostChipState() const noexcept
     return static_cast<int>(std::to_underlying(hostChipStateOf(_manager.hostConnection(_displayed))));
 }
 
+namespace
+{
+    /// @param fit A LocationChipFit's underlying value from QML; out of range clamps.
+    LocationChipFit chipFitOf(int fit) noexcept
+    {
+        return static_cast<LocationChipFit>(
+            std::min(static_cast<size_t>(std::max(fit, 0)), LocationChipFitCount - 1));
+    }
+} // namespace
+
 QString WindowController::chipDaemonName() const
 {
     return QString::fromStdString(_manager.daemonNameOf(_displayed));
@@ -635,6 +646,12 @@ int WindowController::chipDaemonDot() const
 {
     auto const state = hostChipStateOf(_manager.hostConnection(_displayed));
     return static_cast<int>(std::to_underlying(daemonDotOf(_manager.daemonLocalityOf(_displayed), state)));
+}
+
+QString WindowController::chipStateGlyph() const
+{
+    auto const state = hostChipStateOf(_manager.hostConnection(_displayed));
+    return QString::fromUtf8(daemonStateGlyph(state));
 }
 
 QString WindowController::chipAccessibleName() const
@@ -653,28 +670,50 @@ QString WindowController::chipAccessibleDescription() const
 QString WindowController::chipToolTip(int fit) const
 {
     auto const state = hostChipStateOf(_manager.hostConnection(_displayed));
-    auto const clamped = std::min(static_cast<size_t>(std::max(fit, 0)), LocationChipFitCount - 1);
     return QString::fromStdString(
-        locationChipToolTip(state, static_cast<LocationChipFit>(clamped), _manager.daemonNameOf(_displayed)));
+        locationChipToolTip(state, chipFitOf(fit), _manager.daemonNameOf(_displayed)));
 }
 
-QString WindowController::locationChipPlace(QString const& band, QString const& centre) const
+QString WindowController::chipDaemonText(int fit) const
 {
-    // The band's presences by name: a revealed or pinned band is on screen like a shown one.
-    using Presence = std::pair<std::string_view, BarPresence>;
-    constexpr auto Presences =
-        std::array { Presence { barPresenceName(BarPresence::Hidden), BarPresence::Hidden },
-                     Presence { barPresenceName(BarPresence::Shown), BarPresence::Shown },
-                     Presence { barPresenceName(BarPresence::RevealOnEdge), BarPresence::Shown },
-                     Presence { barPresenceName(BarPresence::Pinned), BarPresence::Shown } };
-    auto const presence = std::ranges::find(Presences, band.toStdString(), &Presence::first);
-    auto const bar = barCentreNamed(centre.toStdString());
-    if (presence == Presences.end() || !bar)
-        return QString::fromUtf8(locationChipPlaceName(LocationChipPlace::None));
-    auto const hosting =
-        _manager.isInProcessWindow(_displayed) ? DaemonHosting::InProcess : DaemonHosting::Daemon;
-    return QString::fromUtf8(
-        locationChipPlaceName(window::locationChipPlace(presence->second, *bar, hosting)));
+    return QString::fromStdString(locationChipDaemonText(_manager.daemonNameOf(_displayed), chipFitOf(fit)));
+}
+
+QString WindowController::chipStatusText(int fit) const
+{
+    auto const state = hostChipStateOf(_manager.hostConnection(_displayed));
+    return QString::fromStdString(locationChipStatusText(state, chipFitOf(fit)));
+}
+
+QString WindowController::chipWorkspaceText(QString const& workspace, int fit) const
+{
+    return QString::fromStdString(locationChipWorkspaceText(workspace.toStdString(), chipFitOf(fit)));
+}
+
+int WindowController::chipFit(QVariantMap const& widths) const
+{
+    auto const widthOf = [&](std::string_view key) {
+        return widths.value(QString::fromUtf8(key.data(), static_cast<qsizetype>(key.size()))).toDouble();
+    };
+    return static_cast<int>(std::to_underlying(
+        locationChipFitFrom(widthOf, widths.value(QStringLiteral("available")).toDouble())));
+}
+
+QVariantList WindowController::chipFitSteps()
+{
+    return locationChipStepList();
+}
+
+int WindowController::chipHosting() const
+{
+    return static_cast<int>(std::to_underlying(
+        _manager.isInProcessWindow(_displayed) ? DaemonHosting::InProcess : DaemonHosting::Daemon));
+}
+
+QString WindowController::locationChipPlace(QString const& band, QString const& centre, int hosting) const
+{
+    return QString::fromUtf8(locationChipPlaceNamed(
+        band.toStdString(), centre.toStdString(), static_cast<DaemonHosting>(std::clamp(hosting, 0, 1))));
 }
 
 QString WindowController::applicationVersion() const

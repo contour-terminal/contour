@@ -8,6 +8,8 @@
 
 #include <contour/test/PopupWaits.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
+#include <contour/window/LocationChip.hpp>
+#include <contour/window/LocationChipSteps.hpp>
 #include <contour/window/SwitcherController.hpp>
 #include <contour/window/SwitcherPresenter.hpp>
 
@@ -39,8 +41,33 @@ class MockSwitcherHost: public QObject, public window::SwitcherHost
     Q_PROPERTY(QObject* switcher READ switcher NOTIFY switcherChanged)
     Q_PROPERTY(bool isWorkspaceDropdownOpen READ isWorkspaceDropdownOpen NOTIFY switcherChanged)
     Q_PROPERTY(QString workspaceChipDescription READ workspaceChipDescription NOTIFY switcherChanged)
+    // The location chip of an in-process window: the workspace alone, no daemon segment, no dot.
+    Q_PROPERTY(QString chipDaemonName READ chipDaemonName CONSTANT)
+    Q_PROPERTY(int chipDaemonDot READ chipDaemonDot CONSTANT)
+    Q_PROPERTY(QString chipStateGlyph READ chipStateGlyph CONSTANT)
+    Q_PROPERTY(int hostChipState READ hostChipState CONSTANT)
+    Q_PROPERTY(QVariantList chipFitSteps READ chipFitSteps CONSTANT)
+    Q_PROPERTY(QString chipAccessibleName READ chipAccessibleName CONSTANT)
+    Q_PROPERTY(QString chipAccessibleDescription READ workspaceChipDescription NOTIFY switcherChanged)
 
   public:
+    [[nodiscard]] static QString chipDaemonName() { return {}; }
+    [[nodiscard]] static int chipDaemonDot() { return static_cast<int>(window::DaemonDot::Hidden); }
+    [[nodiscard]] static QString chipStateGlyph()
+    {
+        return QString::fromUtf8(window::daemonStateGlyph(window::HostChipState::Connected));
+    }
+    [[nodiscard]] static QVariantList chipFitSteps() { return window::locationChipStepList(); }
+    [[nodiscard]] static int hostChipState() { return static_cast<int>(window::HostChipState::Connected); }
+    [[nodiscard]] static QString chipAccessibleName() { return QStringLiteral("Workspace contour"); }
+    Q_INVOKABLE [[nodiscard]] static QString chipToolTip(int) { return QStringLiteral("Switch workspace"); }
+    Q_INVOKABLE [[nodiscard]] static QString chipDaemonText(int) { return {}; }
+    Q_INVOKABLE [[nodiscard]] static QString chipStatusText(int) { return {}; }
+    Q_INVOKABLE [[nodiscard]] static QString chipWorkspaceText(QString const& workspace, int)
+    {
+        return workspace;
+    }
+
     /// Mirrors WindowController::presentSwitcher().
     void presentSwitcher(window::SwitcherController* switcher, std::optional<QRectF> anchor) override
     {
@@ -142,8 +169,8 @@ Window {
         x: 40; y: 8
         sidebar: ({ currentWorkspaceTitle: "contour", workspaceChipMarked: false,
                     workspaceChipAccessibleName: "contour", workspaceChipGlyph: 0 })
+        controller: hostWindow.switcherHost
         isOpen: hostWindow.switcherHost.isWorkspaceDropdownOpen
-        openDescription: hostWindow.switcherHost.workspaceChipDescription
         onClicked: hostWindow.switcherHost.showWorkspaceDropdown(chip.dropdownAnchor())
     }
     Switcher {

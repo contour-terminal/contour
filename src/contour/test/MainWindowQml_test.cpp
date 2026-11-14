@@ -93,6 +93,7 @@
 #include <initializer_list>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <string_view>
 #include <tuple>
@@ -1311,21 +1312,26 @@ TEST_CASE("Main.qml remote chrome: a window attached to a host names it in its c
         controller.attachedHost = QStringLiteral("home");
         contour::test::QmlMessageCapture warnings;
         auto root = loadMainWindow(engine, controller, warnings);
+        // The chip fits its room, and a window that has none yet fits nothing but the workspace.
+        showWindow(*root);
 
         // No session has a title yet, so the title is the host alone (remoteWindowTitle).
         CHECK(root->property("title").toString() == QStringLiteral("home"));
-        // The chip replaces the strip's old host badge.
+        // The chip replaces the strip's old host badge, and absorbs the host chip.
         CHECK(root->findChild<QQuickItem*>(QStringLiteral("hostBadge")) == nullptr);
-        auto* chip = root->findChild<QQuickItem*>(QStringLiteral("hostChip"));
+        CHECK(root->findChild<QQuickItem*>(QStringLiteral("hostChip")) == nullptr);
+        auto* chip = root->findChild<QQuickItem*>(QStringLiteral("workspaceChip"));
         REQUIRE(chip != nullptr);
         CHECK(chip->isVisible());
-        auto const* label = chip->findChild<QObject*>(QStringLiteral("hostChipLabel"));
-        auto const* status = chip->findChild<QObject*>(QStringLiteral("hostChipStatus"));
-        auto const* dot = chip->findChild<QObject*>(QStringLiteral("hostChipDot"));
-        REQUIRE(label != nullptr);
+        auto const* daemon = chip->findChild<QObject*>(QStringLiteral("workspaceChipDaemon"));
+        auto const* status = chip->findChild<QObject*>(QStringLiteral("workspaceChipStatus"));
+        auto const* dot = chip->findChild<QObject*>(QStringLiteral("workspaceChipDot"));
+        auto const* workspace = chip->findChild<QObject*>(QStringLiteral("workspaceChipLabel"));
+        REQUIRE(daemon != nullptr);
         REQUIRE(status != nullptr);
         REQUIRE(dot != nullptr);
-        CHECK(label->property("text").toString() == QStringLiteral("home"));
+        REQUIRE(workspace != nullptr);
+        CHECK(daemon->property("text").toString() == QStringLiteral("home"));
 
         auto const* style = engine.rootContext()
                                 ->contextProperty(QStringLiteral("chromeStyle"))
@@ -1338,13 +1344,19 @@ TEST_CASE("Main.qml remote chrome: a window attached to a host names it in its c
             INFO("state: " << look.accessibleState);
             controller.setHostChipState(static_cast<int>(state));
             QCoreApplication::processEvents();
+            // The state's words show while the whole chip fits; the dot is a remote daemon's, always.
             CHECK(status->property("text").toString() == QString::fromUtf8(look.status));
             CHECK(dot->property("color").value<QColor>() == style->statusInk(static_cast<int>(look.dot)));
-            auto const expectedName = look.status.empty()
-                                          ? QStringLiteral("Switch daemon or workspace (on home)")
-                                          : QStringLiteral("Switch daemon or workspace (on home, %1)")
-                                                .arg(QString::fromUtf8(look.accessibleState));
-            CHECK(evaluateIn(*chip, QStringLiteral("Accessible.name")).toString() == expectedName);
+            CHECK(dot->property("visible").toBool());
+            auto const expectedDescription =
+                state == contour::window::HostChipState::Connected
+                    ? QStringLiteral("collapsed")
+                    : QString::fromStdString(
+                          contour::window::locationChipAccessibleDescription(state, "collapsed"));
+            CHECK(evaluateIn(*chip, QStringLiteral("Accessible.name")).toString()
+                  == QStringLiteral("Workspace %1 on home").arg(workspace->property("text").toString()));
+            CHECK(evaluateIn(*chip, QStringLiteral("Accessible.description")).toString()
+                  == expectedDescription);
         }
         CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 
@@ -1359,15 +1371,20 @@ TEST_CASE("Main.qml remote chrome: a window attached to a host names it in its c
                           Qt::NoModifier,
                           chip->mapToScene(QPointF(chip->width() / 2, chip->height() / 2)).toPoint());
         QCoreApplication::processEvents();
-        CHECK(controller.switcherRequests == 1);
+        // The chip drops the switcher below itself, as the old workspace chip did; ShowSwitcher centres it.
+        REQUIRE(controller.workspaceDropdownAnchor.has_value());
+        CHECK(controller.switcherRequests == 0);
 
+        controller.workspaceDropdownAnchor.reset();
         chip->forceActiveFocus();
         QTest::keyClick(window, Qt::Key_Space);
+        CHECK(controller.workspaceDropdownAnchor.has_value());
+        controller.workspaceDropdownAnchor.reset();
         QTest::keyClick(window, Qt::Key_Return);
-        CHECK(controller.switcherRequests == 3);
+        CHECK(controller.workspaceDropdownAnchor.has_value());
     }
 
-    SECTION("a local window")
+    SECTION("an in-process window")
     {
         QQmlEngine engine;
         MockMainController controller;
@@ -1376,14 +1393,12 @@ TEST_CASE("Main.qml remote chrome: a window attached to a host names it in its c
 
         CHECK(root->property("title").toString().isEmpty());
         CHECK(root->findChild<QQuickItem*>(QStringLiteral("hostBadge")) == nullptr);
-        auto const* chip = root->findChild<QQuickItem*>(QStringLiteral("hostChip"));
-        REQUIRE(chip != nullptr);
-        CHECK_FALSE(chip->isVisible());
-        CHECK(chip->width() == 0);
+        // No daemon to name, and the tabs are the band's centre: no chip at all.
+        CHECK(root->findChild<QQuickItem*>(QStringLiteral("workspaceChip")) == nullptr);
     }
 }
 
-TEST_CASE("Main.qml remote chrome: the host chip opens the switcher on every row, the Terminal row's too "
+TEST_CASE("Main.qml remote chrome: the location chip opens the switcher on every row, the Terminal row's too "
           "(offscreen)",
           "[contour][gui][qml][mainwindow][hostchip]")
 {
@@ -1398,7 +1413,7 @@ TEST_CASE("Main.qml remote chrome: the host chip opens the switcher on every row
     showWindow(*root);
     auto* window = qobject_cast<QQuickWindow*>(root.get());
     REQUIRE(window != nullptr);
-    auto* chip = root->findChild<QQuickItem*>(QStringLiteral("hostChip"));
+    auto* chip = root->findChild<QQuickItem*>(QStringLiteral("workspaceChip"));
     REQUIRE(chip != nullptr);
     REQUIRE(chip->isVisible());
 
@@ -1408,7 +1423,7 @@ TEST_CASE("Main.qml remote chrome: the host chip opens the switcher on every row
                       Qt::NoModifier,
                       chip->mapToScene(QPointF(chip->width() / 2, chip->height() / 2)).toPoint());
     QCoreApplication::processEvents();
-    CHECK(controller.switcherRequests == 1);
+    CHECK(controller.workspaceDropdownAnchor.has_value());
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
@@ -1448,6 +1463,136 @@ using contour::config::TabBarVisibility;
     return item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint();
 }
 } // namespace
+
+TEST_CASE("Main.qml location chip: a daemon window shows it in every band, the default daemon as `local` "
+          "(offscreen)",
+          "[contour][gui][qml][mainwindow][chip]")
+{
+    using contour::config::ChromeDensity;
+    using contour::config::SidebarVisibility;
+    using contour::config::TabPlacement;
+    /// What the band's middle holds on each row (MacOS, Fluent, ContourLinux, Terminal order); none where
+    /// the band itself is not on screen. The bands the rules in TitleBandRules give each scene: Pill rows
+    /// swap the tabs for the title, Joined keeps the tabs, and the flat rows (the header bar's, the
+    /// Terminal's) drop a lone tab's strip and its band; Minimal's bare band exists on Pill and Joined only.
+    using Centres = std::array<std::optional<std::string_view>, contour::config::detail::ChromeStyleCount>;
+    struct Scene
+    {
+        char const* name;
+        int tabCount;
+        TabBarVisibility visibility;
+        ChromeDensity density;
+        TabPlacement placement;
+        SidebarVisibility sidebar;
+        Centres centres;
+    };
+    auto const style =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    auto const scene = GENERATE(Scene { "tabs",
+                                        3,
+                                        TabBarVisibility::Always,
+                                        ChromeDensity::Comfortable,
+                                        TabPlacement::Top,
+                                        SidebarVisibility::Hidden,
+                                        { "tabs", "tabs", "tabs", "tabs" } },
+                                Scene { "title",
+                                        1,
+                                        TabBarVisibility::Multiple,
+                                        ChromeDensity::Comfortable,
+                                        TabPlacement::Top,
+                                        SidebarVisibility::Hidden,
+                                        { "title", "tabs", std::nullopt, std::nullopt } },
+                                Scene { "empty",
+                                        1,
+                                        TabBarVisibility::Multiple,
+                                        ChromeDensity::Minimal,
+                                        TabPlacement::Top,
+                                        SidebarVisibility::Hidden,
+                                        { "empty", "empty", std::nullopt, std::nullopt } },
+                                Scene { "chip+tabs",
+                                        3,
+                                        TabBarVisibility::Always,
+                                        ChromeDensity::Comfortable,
+                                        TabPlacement::Sidebar,
+                                        SidebarVisibility::Hidden,
+                                        { "chip+tabs", "chip+tabs", "chip+tabs", "chip+tabs" } },
+                                Scene { "breadcrumb",
+                                        3,
+                                        TabBarVisibility::Always,
+                                        ChromeDensity::Comfortable,
+                                        TabPlacement::Sidebar,
+                                        SidebarVisibility::Shown,
+                                        { "breadcrumb", "breadcrumb", "breadcrumb", "breadcrumb" } });
+    CAPTURE(static_cast<int>(style), scene.name);
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = scene.tabCount,
+                                                      .tabBarVisibility = scene.visibility,
+                                                      .daemonName = QStringLiteral("local") } };
+    controller.setTabPlacement(scene.placement);
+    contour::test::QmlMessageCapture warnings;
+    auto setup = rowSetup(style);
+    setup.density = scene.density;
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+    if (scene.sidebar == SidebarVisibility::Shown)
+        controller.showSidebar(240);
+    showWindow(*root);
+
+    auto& titleBar = named(*root, QStringLiteral("titleBar"));
+    auto const expected = scene.centres[static_cast<size_t>(style)];
+    CAPTURE(titleBar.property("centre").toString().toStdString());
+    CHECK(root->findChildren<QQuickItem*>(QStringLiteral("hostChip")).empty());
+
+    // The band is off screen exactly where the table says there is none, and holds what it says otherwise.
+    CHECK(titleBar.isVisible() == expected.has_value());
+    if (expected.has_value())
+        CHECK(titleBar.property("centre").toString().toStdString() == *expected);
+    auto const chipsInBand = [&] {
+        return std::ranges::count_if(
+            root->findChildren<QQuickItem*>(QStringLiteral("workspaceChip")),
+            [&](QQuickItem const* chip) { return chip->isVisible() && isInside(chip, &titleBar); });
+    };
+
+    // Where the band is not on screen, or the sidebar holds the chip (the breadcrumb centre), the band has
+    // none.
+    if (!expected.has_value() || *expected == "breadcrumb")
+    {
+        CHECK(chipsInBand() == 0);
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+        return;
+    }
+
+    // No chip is a decision of locationChipPlace; where a band shows one, it is one chip, with no host chip
+    // beside it.
+    REQUIRE(chipsInBand() == 1);
+    auto* chip = root->findChild<QQuickItem*>(QStringLiteral("workspaceChip"));
+    REQUIRE(chip != nullptr);
+    CHECK(isInside(chip, &titleBar));
+    CHECK(part(*chip, QStringLiteral("workspaceChipDaemon")).property("text").toString()
+          == QStringLiteral("local"));
+    CHECK_FALSE(part(*chip, QStringLiteral("workspaceChipDot")).isVisible());
+    CHECK(evaluateIn(*chip, QStringLiteral("Accessible.role")).toInt()
+          == static_cast<int>(QAccessible::ButtonMenu));
+    CHECK(evaluateIn(*chip, QStringLiteral("Accessible.name"))
+              .toString()
+              .endsWith(QStringLiteral(" on local")));
+
+    // The same window reconnecting: the dot and the words join the daemon segment.
+    controller.setHostChipState(static_cast<int>(contour::window::HostChipState::Reconnecting));
+    QCoreApplication::processEvents();
+    CHECK(part(*chip, QStringLiteral("workspaceChipStatus")).property("text").toString()
+          == QStringLiteral("Reconnecting…"));
+    CHECK((part(*chip, QStringLiteral("workspaceChipDot")).isVisible()
+           || part(*chip, QStringLiteral("workspaceChipDotGlyph")).isVisible()));
+
+    // An in-process window names no daemon, and keeps a chip only in the workspace-chip centre.
+    controller.setDaemon({});
+    QCoreApplication::processEvents();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete); // the Loader frees its item later
+    QCoreApplication::processEvents();
+    CHECK(root->findChildren<QQuickItem*>(QStringLiteral("workspaceChip")).size()
+          == (*expected == "chip+tabs" ? 1 : 0));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
 
 TEST_CASE("the band's title is the sticky command header while it lives there (offscreen)",
           "[contour][gui][qml][mainwindow][band][blocks]")
@@ -3158,7 +3303,8 @@ TEST_CASE("the assembled band has one title bar, holding the chip, the strip, it
         };
         CHECK(std::ranges::count(tree, QAccessible::TitleBar, &AccessibleNode::role) == 1);
         auto const chip = std::ranges::find_if(tree, [](AccessibleNode const& node) {
-            return node.name.startsWith(QStringLiteral("Switch daemon or workspace (on home"));
+            return node.role == QAccessible::ButtonMenu && node.name.startsWith(QStringLiteral("Workspace "))
+                   && node.name.endsWith(QStringLiteral(" on home"));
         });
         REQUIRE(chip != tree.end());
         CHECK(under(*chip, QAccessible::TitleBar));
@@ -3208,7 +3354,7 @@ TEST_CASE("a full-screen window keeps its band shown while its remote connection
 
         auto& titleBar = named(*root, QStringLiteral("titleBar"));
         auto& content = named(*root, QStringLiteral("content"));
-        auto& chip = named(*root, QStringLiteral("hostChip"));
+        auto& chip = named(*root, QStringLiteral("workspaceChip"));
         CHECK(titleBar.property("presence").toString() == QStringLiteral("pinned"));
         CHECK(titleBar.isVisible());
         CHECK(titleBar.y() == 0);
@@ -3230,8 +3376,11 @@ TEST_CASE("the tab bar at the bottom on macOS keeps the band at the top (offscre
           "[contour][gui][qml][mainwindow][band]")
 {
     QQmlEngine engine;
-    MockMainController controller { MainWindowScene {
-        .tabCount = 3, .tabBarPosition = contour::config::TabBarPosition::Bottom } };
+    // A daemon window, so the location chip is in the band beside the "+".
+    MockMainController controller { MainWindowScene { .tabCount = 3,
+                                                      .tabBarPosition =
+                                                          contour::config::TabBarPosition::Bottom,
+                                                      .daemonName = QStringLiteral("local") } };
     contour::test::QmlMessageCapture warnings;
     auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
     auto const* window = qobject_cast<QQuickWindow*>(root.get());
@@ -3249,7 +3398,7 @@ TEST_CASE("the tab bar at the bottom on macOS keeps the band at the top (offscre
     CHECK(root->findChildren<QQuickItem*>(QStringLiteral("tabList")).size() == 1);
     CHECK(root->findChildren<QQuickItem*>(QStringLiteral("newTabButton")).size() == 1);
     CHECK(isInside(&named(*root, QStringLiteral("newTabButton")), &titleBar));
-    CHECK(root->findChildren<QQuickItem*>(QStringLiteral("hostChip")).size() == 1);
+    CHECK(root->findChildren<QQuickItem*>(QStringLiteral("workspaceChip")).size() == 1);
     // The content runs between the two.
     CHECK(content.y() == titleBar.height());
     CHECK(content.y() + content.height() == tabsBar.y());
@@ -3279,17 +3428,24 @@ TEST_CASE("a one-tab remote window shows its band while its connection is interr
                                                               .hostChipState = state } };
             contour::test::QmlMessageCapture warnings;
             auto root = loadMainWindow(engine, controller, warnings, rowSetup(row));
+            // The chip fits its room: a window that has none yet fits nothing but the workspace.
+            showWindow(*root);
 
             auto& titleBar = named(*root, QStringLiteral("titleBar"));
             auto const interrupted = state != HostChipState::Connected;
             CHECK(titleBar.isVisible() == interrupted);
-            auto& chip = named(*root, QStringLiteral("hostChip"));
-            CHECK(isInside(&chip, &titleBar));
-            CHECK(chip.isVisible() == interrupted);
-            if (interrupted)
+            // A hidden band shows no chip at all; an interrupted connection brings the band, and the chip,
+            // back.
+            auto const* chip = root->findChild<QQuickItem*>(QStringLiteral("workspaceChip"));
+            if (!interrupted)
+                CHECK((chip == nullptr || !chip->isVisible()));
+            else
             {
+                REQUIRE(chip != nullptr);
+                CHECK(isInside(chip, &titleBar));
+                CHECK(chip->isVisible());
                 CHECK(titleBar.height() > 0);
-                CHECK(part(chip, QStringLiteral("hostChipStatus")).property("text").toString()
+                CHECK(part(*chip, QStringLiteral("workspaceChipStatus")).property("text").toString()
                       == QString::fromUtf8(look.status));
             }
             CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
@@ -3474,14 +3630,14 @@ TEST_CASE("the Terminal row snaps the native inset to cells and brackets its chi
     CHECK(std::fmod(snapped, cell) == Catch::Approx(0.0).margin(1e-6));
     CHECK(named(*root, QStringLiteral("leadingWindowControls")).width() == snapped);
 
-    auto& chip = named(*root, QStringLiteral("hostChip"));
-    auto const& open = part(chip, QStringLiteral("hostChipOpen"));
-    auto const& label = part(chip, QStringLiteral("hostChipLabel"));
-    auto const& close = part(chip, QStringLiteral("hostChipClose"));
+    auto& chip = named(*root, QStringLiteral("workspaceChip"));
+    auto const& open = part(chip, QStringLiteral("workspaceChipOpen"));
+    auto const& label = part(chip, QStringLiteral("workspaceChipLabel"));
+    auto const& close = part(chip, QStringLiteral("workspaceChipClose"));
     CHECK(open.property("text").toString() == QStringLiteral("["));
     CHECK(close.property("text").toString() == QStringLiteral("]"));
-    CHECK(part(chip, QStringLiteral("hostChipDotGlyph")).isVisible());
-    CHECK_FALSE(part(chip, QStringLiteral("hostChipDot")).isVisible());
+    CHECK(part(chip, QStringLiteral("workspaceChipDotGlyph")).isVisible());
+    CHECK_FALSE(part(chip, QStringLiteral("workspaceChipDot")).isVisible());
     CHECK(open.x() + open.width() <= label.x());
     CHECK(label.x() + label.width() <= close.x());
 
@@ -4108,19 +4264,19 @@ TEST_CASE("Main.qml notices: a banner pushes the content down, and shows its tex
 // }}}
 
 // {{{ Strong and medium type
-TEST_CASE("Main.qml: the host chip's name is bold, and the band's title medium (offscreen)",
+TEST_CASE("Main.qml: the location chip's workspace name is bold, and the band's title medium (offscreen)",
           "[contour][gui][qml][mainwindow][type]")
 {
-    SECTION("the host chip")
+    SECTION("the location chip")
     {
         QQmlEngine engine;
         MockMainController controller;
         controller.attachedHost = QStringLiteral("home");
         contour::test::QmlMessageCapture warnings;
         auto root = loadMainWindow(engine, controller, warnings);
-        auto* chip = root->findChild<QQuickItem*>(QStringLiteral("hostChip"));
+        auto* chip = root->findChild<QQuickItem*>(QStringLiteral("workspaceChip"));
         REQUIRE(chip != nullptr);
-        auto const* label = chip->findChild<QObject*>(QStringLiteral("hostChipLabel"));
+        auto const* label = chip->findChild<QObject*>(QStringLiteral("workspaceChipLabel"));
         REQUIRE(label != nullptr);
         CHECK(label->property("font").value<QFont>().weight() == QFont::Bold);
     }
@@ -4619,7 +4775,7 @@ TEST_CASE("the window reports what its chrome shows, and the toolbar's items wea
     showWindow(*root);
     activated(*root);
 
-    // The tab well, and three toolbar items in visual order: the host chip, the drift chip, the new-tab
+    // The tab well, and three toolbar items in visual order: the location chip, the drift chip, the new-tab
     // button.
     CHECK(controller.reportedTabsShown);
     CHECK(controller.reportedToolbarItems == 3);
@@ -4628,7 +4784,7 @@ TEST_CASE("the window reports what its chrome shows, and the toolbar's items wea
         auto& item = named(*root, QString::fromLatin1(itemName));
         return part(item, QStringLiteral("focusRing"));
     };
-    auto const items = std::array { "hostChip", "daemonDriftBadge", "newTabButton" };
+    auto const items = std::array { "workspaceChip", "daemonDriftBadge", "newTabButton" };
     for (auto const index: std::views::iota(std::size_t { 0 }, items.size()))
     {
         INFO("toolbar item: " << items[index]);

@@ -521,7 +521,6 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SearchBar.qml
         qml/SessionChrome.qml
         qml/TitleBar.qml
-        qml/HostChip.qml
         qml/WorkspaceChip.qml
         qml/Breadcrumb.qml
         qml/Sidebar.qml
