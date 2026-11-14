@@ -867,6 +867,54 @@ TEST_CASE("applyClientSize reprojects the leaves onto the new client area", "[vt
     CHECK(terminal->totalPageSize().columns.value == 100);
 }
 
+TEST_CASE("a pane size reported for a session that ended meanwhile is no error", "[vthost][host]")
+{
+    // The client states a pane's grid on its own thread, and the session can end on the daemon while that
+    // report is in flight: the report is stale, not malformed, and the client is told of the exit anyway.
+    auto h = HostHarness {};
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    auto const ended = tab->rootPane()->second()->session();
+    h.host.handleSessionExit(ended);
+    REQUIRE(h.host.terminal(ended) == nullptr);
+
+    auto errors = core::log::ScopedCapture { "error" };
+    auto sessions = core::log::ScopedCapture { "vthost.session" };
+    std::ignore = h.host.applyPaneSize(
+        &h.client,
+        ended,
+        vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(40) },
+        std::nullopt);
+    CHECK_FALSE(errors.contains("applyPaneSize"));
+    CHECK(sessions.contains(std::format("pane size for session {}", ended.value)));
+}
+
+TEST_CASE("a pane size reported for a session never minted stays an error", "[vthost][host]")
+{
+    // Only an id the host handed out and that ended is stale. Zero is never minted, and neither is any id
+    // from the next one on: those name no session that ever existed, which is a defect of the sender.
+    auto h = HostHarness {};
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const live = tab->rootPane()->session();
+    auto const never =
+        std::array { vtworkspace::SessionId { 0 }, vtworkspace::SessionId { live.value + 1000 } };
+    for (auto const session: never)
+    {
+        INFO("session " << session.value);
+        auto errors = core::log::ScopedCapture { "error" };
+        auto sessions = core::log::ScopedCapture { "vthost.session" };
+        std::ignore = h.host.applyPaneSize(
+            &h.client,
+            session,
+            vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(40) },
+            std::nullopt);
+        CHECK(errors.contains("applyPaneSize: unknown session"));
+        CHECK_FALSE(sessions.contains("it ended"));
+    }
+}
+
 TEST_CASE("applyPaneSize resizes one pane without disturbing the rest", "[vthost][host]")
 {
     auto h = HostHarness {};

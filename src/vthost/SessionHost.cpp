@@ -1774,7 +1774,14 @@ SizeChange SessionHost::applyPaneSize(SessionStreamEvents* client,
     auto* backing = terminal(session);
     if (backing == nullptr)
     {
-        errorLog()("applyPaneSize: unknown session {}", session.value);
+        // Ids are minted in order from 1 and never reused, so a nonzero one below the next to mint names a
+        // session that ended. The client states pane sizes from its own thread, so such a report can overtake
+        // the exit, which the client is told of regardless: stale, and dropped. An id never minted is a
+        // defect.
+        if (session.value != 0 && session.value < _nextSessionId)
+            sessionLog()("ignoring a pane size for session {}: it ended", session.value);
+        else
+            errorLog()("applyPaneSize: unknown session {}", session.value);
         // The cell just recorded is still the client's word: settle it so the host does not stay stale.
         return resizingWithCellPixelSize([] { return SizeChange::Unchanged; });
     }
