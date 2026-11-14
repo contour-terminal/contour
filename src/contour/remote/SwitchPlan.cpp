@@ -159,12 +159,9 @@ std::vector<WorkspaceRow> workspaceRowsOf(window::WorkspaceDirectory const& dire
                                           ShownHere const& shownHere)
 {
     auto rows = std::vector<WorkspaceRow> {};
-    for (auto const [index, workspace]: core::views::enumerate(directory.workspaces))
+    for (auto const& [position, listed]: window::switchableWorkspacesOf(directory))
     {
-        // As a listing's: one holding no tab has nothing for a window to show.
-        if (workspace.tabs.empty())
-            continue;
-        auto const position = static_cast<uint32_t>(index + 1);
+        auto const& workspace = *listed;
         auto shown = shownHere(workspace.id);
         rows.push_back(WorkspaceRow {
             .id = workspace.id,

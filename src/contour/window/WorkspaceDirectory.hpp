@@ -105,6 +105,29 @@ struct WorkspaceDirectory
     bool operator==(WorkspaceDirectory const&) const = default;
 };
 
+/// A workspace a window can be switched to, with the place it is numbered by.
+struct SwitchableWorkspace
+{
+    uint32_t position = 0;                         ///< Its 1-based place in the directory, tab-less ones counted.
+    DirectoryWorkspace const* workspace = nullptr; ///< The workspace; points into the directory searched.
+};
+
+/// The workspaces of @p directory a window can be switched to, in its order: one holding no tab is left out,
+/// as it has nothing for a window to show, but still takes its number. The one list the switcher's rows, the
+/// positional SwitchToWorkspace and the cycling of workspaces read.
+/// @param directory A window's directory.
+/// @return The switchable workspaces; they live as long as @p directory does.
+[[nodiscard]] inline std::vector<SwitchableWorkspace> switchableWorkspacesOf(
+    WorkspaceDirectory const& directory)
+{
+    auto switchable = std::vector<SwitchableWorkspace> {};
+    for (auto const index: std::views::iota(std::size_t { 0 }, directory.workspaces.size()))
+        if (!directory.workspaces[index].tabs.empty())
+            switchable.push_back(SwitchableWorkspace { .position = static_cast<uint32_t>(index + 1),
+                                                       .workspace = &directory.workspaces[index] });
+    return switchable;
+}
+
 /// A tab of a directory with the workspace that lists it. Both point into the directory searched, so they
 /// live as long as it does.
 struct ListedTab

@@ -1272,7 +1272,12 @@ namespace
 /// workspaces (each with a tab) and showing the first.
 struct InProcessRig
 {
-    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::MockPtySessionFactory* factory = nullptr;
+    contour::test::TestApp app { [this] {
+        auto made = std::make_unique<contour::test::MockPtySessionFactory>();
+        factory = made.get();
+        return made;
+    }() };
     std::vector<std::unique_ptr<DaemonLink>> links;
     TestTimeline timeline;
     FakeApp host { app.manager(), links, timeline, {} };
@@ -1280,12 +1285,16 @@ struct InProcessRig
         app.manager(),
         host,
         std::make_unique<FixtureLister>(std::map<std::string, DaemonFixture*> {}),
-        [](contour::remote::SwitchPickRequest const&) { return std::expected<void, std::string> {}; },
+        [this](contour::remote::SwitchPickRequest pick) {
+            picks.push_back(std::move(pick));
+            return std::expected<void, std::string> {};
+        },
         contour::remote::SwitchDeadline {
             .timeout = contour::remote::DefaultSwitchTimeout,
             .timer = [](std::chrono::milliseconds, std::function<void()> const&) {},
             .clock = host.clock }
     };
+    std::vector<contour::remote::SwitchPickRequest> picks; ///< What the switcher popup was asked to show.
     contour::test::ScopedControllerWithOsWindow window { app.manager() };
     vtworkspace::WorkspaceId first;
     vtworkspace::WorkspaceId second;
@@ -1372,6 +1381,102 @@ TEST_CASE("WindowSwitcher: a window that runs in-process refuses another daemon 
     REQUIRE(opened.outcome.has_value());
     CHECK_FALSE(opened.outcome->has_value());
     CHECK(rig.window->displayedWorkspace() == rig.first);
+}
+
+TEST_CASE("WindowSwitcher: a window that runs in-process asks which of its workspaces, among several",
+          "[switch][inprocess]")
+{
+    auto rig = InProcessRig {};
+    auto const told =
+        rig.ask({ .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = contour::session::AnyWorkspace {} });
+    REQUIRE(told.outcome.has_value());
+    REQUIRE(told.outcome->has_value());
+    CHECK(**told.outcome == SwitchOutcome::PickerShown);
+    REQUIRE(rig.picks.size() == 1);
+    CHECK(rig.picks.front().workspaces.size() == 2);
+    CHECK(rig.picks.front().window == rig.first);
+    CHECK(rig.window->displayedWorkspace() == rig.first);
+}
+
+TEST_CASE("WindowSwitcher: a window that runs in-process says why it made no workspace", "[switch][inprocess]")
+{
+    auto rig = InProcessRig {};
+    SECTION("its first shell could not start")
+    {
+        rig.factory->creation = contour::test::MockPtySessionFactory::SessionCreation::Refused;
+        auto const told = rig.ask(
+            { .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = contour::session::NewWorkspace {} });
+        REQUIRE(told.outcome.has_value());
+        REQUIRE_FALSE(told.outcome->has_value());
+        CHECK(told.outcome->error() == contour::session::describe(contour::session::NewWorkspaceError::FirstShellFailed));
+        CHECK(rig.window->ownedWorkspaces().size() == 2);
+    }
+    SECTION("the window has no pane to start it beside")
+    {
+        auto const made = rig.app.manager().newWorkspaceFor(vtworkspace::WorkspaceId { 987654 }, "x");
+        REQUIRE_FALSE(made.has_value());
+        CHECK(made.error() == contour::session::NewWorkspaceError::NoActiveSession);
+        CHECK(contour::session::describe(contour::session::NewWorkspaceError::NoActiveSession)
+              != contour::session::describe(contour::session::NewWorkspaceError::FirstShellFailed));
+    }
+}
+
+TEST_CASE("WindowSwitcher: a window that shows no workspace it was asked for says so, and takes no focus",
+          "[switch][inprocess]")
+{
+    auto rig = InProcessRig {};
+    // The window's directory lists no such workspace: nothing is asked, so nothing is shown.
+    CHECK(rig.window->showWorkspace(987654) == contour::window::SelectResult::Refused);
+    CHECK(rig.window->showWorkspace(rig.first.value) == contour::window::SelectResult::Requested);
+    CHECK(rig.window->displayedWorkspace() == rig.first);
+}
+
+TEST_CASE("WindowSwitcher: SwitchToWorkspace(N) in a window that runs in-process counts its directory, a "
+          "tab-less workspace included",
+          "[switch][inprocess]")
+{
+    auto rig = InProcessRig {};
+    // first, second, a workspace holding no tab, and a fourth that does.
+    auto const bare = rig.app.manager().createWorkspaceIn(rig.window->windowId());
+    auto const fourth = rig.app.manager().createWorkspaceIn(rig.window->windowId());
+    rig.app.manager().selectWorkspace(rig.window->windowId(), 3);
+    rig.window->createNewTab();
+    rig.app.manager().selectWorkspace(rig.window->windowId(), 0);
+    REQUIRE(rig.window->ownedWorkspaces().size() == 4);
+    REQUIRE(rig.window->displayedWorkspace() == rig.first);
+
+    auto const at = [&](uint32_t position) {
+        return rig.ask({ .kind = SwitchDaemonKind::Same,
+                         .daemon = {},
+                         .workspace = contour::session::WorkspaceAt { position } });
+    };
+    SECTION("the second is the second")
+    {
+        auto const told = at(2);
+        REQUIRE(told.outcome.has_value());
+        CHECK(told.outcome->has_value());
+        CHECK(rig.window->displayedWorkspace() == rig.second);
+    }
+    SECTION("the tab-less one takes its number, and is no place to switch to")
+    {
+        auto const told = at(3);
+        REQUIRE(told.outcome.has_value());
+        CHECK_FALSE(told.outcome->has_value());
+        CHECK(rig.window->displayedWorkspace() == rig.first);
+        // The picker and the sidebar number the rest by the same list.
+        auto const rows = rig.switcher.windowWorkspaceRows(rig.first);
+        REQUIRE(rows.size() == 3);
+        CHECK(rows[2].id == fourth.value);
+        CHECK(rows[2].position == 4);
+    }
+    SECTION("the one after it is the fourth")
+    {
+        auto const told = at(4);
+        REQUIRE(told.outcome.has_value());
+        CHECK(told.outcome->has_value());
+        CHECK(rig.window->displayedWorkspace() == fourth);
+    }
+    std::ignore = bare;
 }
 
 TEST_CASE("WindowSwitcher: a reconnect forgets the workspace a timed-out switch asked for",

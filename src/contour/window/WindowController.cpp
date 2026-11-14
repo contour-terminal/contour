@@ -123,7 +123,7 @@ class WindowController::SidebarHost final: public ISidebarHost
 
     void showPane(PaneKey pane) override { _window.jumpToPane(pane); }
 
-    void showWorkspace(uint64_t workspace) override { _window.showWorkspace(workspace); }
+    void showWorkspace(uint64_t workspace) override { std::ignore = _window.showWorkspace(workspace); }
 
     void markSeen(PaneKey pane) override { _window.noteDirectoryPaneSeenByKey(pane); }
 
@@ -3346,12 +3346,15 @@ void WindowController::cancelPendingNavigation() noexcept
     _pendingFollow.reset();
 }
 
-void WindowController::showWorkspace(uint64_t workspace)
+SelectResult WindowController::showWorkspace(uint64_t workspace)
 {
     // Navigating supersedes what waited for an earlier look.
     cancelPendingNavigation();
-    if (_directorySource != nullptr && _directorySource->directory().selected != workspace)
-        std::ignore = _directorySource->select(workspace);
+    if (_directorySource == nullptr)
+        return SelectResult::Refused;
+    if (_directorySource->directory().selected == workspace)
+        return SelectResult::Requested;
+    return _directorySource->select(workspace);
 }
 
 void WindowController::jumpToPane(PaneKey target)

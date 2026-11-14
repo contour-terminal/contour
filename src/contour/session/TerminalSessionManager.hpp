@@ -152,6 +152,26 @@ enum class PaneShowing : uint8_t
     Shown,       ///< Its tab is active and the pane focused and seen.
 };
 
+/// Why newWorkspaceFor() made no workspace.
+enum class NewWorkspaceError : uint8_t
+{
+    NoActiveSession = 0, ///< The window has no pane to start the first shell beside.
+    FirstShellFailed,    ///< The first shell of the new workspace could not start.
+};
+
+/// What the user is told for @p error.
+/// @param error The failure.
+/// @return A lower-case sentence without a trailing period.
+[[nodiscard]] constexpr std::string_view describe(NewWorkspaceError error) noexcept
+{
+    switch (error)
+    {
+        case NewWorkspaceError::NoActiveSession: return "this window has no active pane to start a workspace beside";
+        case NewWorkspaceError::FirstShellFailed: return "the new workspace's shell could not be started";
+    }
+    return {};
+}
+
 /// Why restartSession() started no new session.
 enum class RestartError : uint8_t
 {
@@ -439,9 +459,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// and shows it (newWorkspaceStartingIn()).
     /// @param window The workspace the window shows.
     /// @param label What to call it; empty to keep the folder's name.
-    /// @return The workspace made; none when the window has no pane to start beside, or no shell started.
-    std::optional<vtworkspace::WorkspaceId> newWorkspaceFor(vtworkspace::WorkspaceId window,
-                                                            std::string label);
+    /// @return The workspace made; why none was: the window has no pane to start beside, or no shell started.
+    [[nodiscard]] std::expected<vtworkspace::WorkspaceId, NewWorkspaceError> newWorkspaceFor(
+        vtworkspace::WorkspaceId window, std::string label);
 
     /// (In-process) Labels @p workspace, which the in-process directory of its window lists
     /// (InProcessDirectory); an empty label removes it. Not for a daemon's workspace, whose label is its

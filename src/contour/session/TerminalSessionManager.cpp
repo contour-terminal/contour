@@ -1476,17 +1476,19 @@ std::optional<vtworkspace::WorkspaceId> TerminalSessionManager::newWorkspaceStar
     return workspace;
 }
 
-std::optional<vtworkspace::WorkspaceId> TerminalSessionManager::newWorkspaceFor(
+std::expected<vtworkspace::WorkspaceId, NewWorkspaceError> TerminalSessionManager::newWorkspaceFor(
     vtworkspace::WorkspaceId window, std::string label)
 {
     auto const* const controller = controllerDisplaying(window);
     auto const* const acting = controller != nullptr ? controller->activeSession() : nullptr;
     if (acting == nullptr)
-        return std::nullopt;
+        return std::unexpected(NewWorkspaceError::NoActiveSession);
     auto const made = newWorkspaceStartingIn(*acting, acting->workingDirectory());
-    if (made && !label.empty())
+    if (!made)
+        return std::unexpected(NewWorkspaceError::FirstShellFailed);
+    if (!label.empty())
         setWorkspaceLabel(*made, std::move(label));
-    return made;
+    return *made;
 }
 
 std::string TerminalSessionManager::defaultWorkspaceName(std::filesystem::path const& directory)
@@ -2092,14 +2094,32 @@ void TerminalSessionManager::cycleDaemon(TerminalSession const& acting, actions:
 void TerminalSessionManager::cycleWorkspace(TerminalSession const& acting, actions::CycleDirection direction)
 {
     auto const* const window = hostOf(&acting).window;
-    if (window == nullptr || !daemonTargetOf(window->id()))
+    auto const inProcess = window != nullptr && isInProcessWindow(window->id());
+    if (window == nullptr || (!inProcess && !daemonTargetOf(window->id())))
     {
         logNoDaemon("CycleWorkspace");
         return;
     }
-    auto const workspaces = _switchDirectory.workspacesOf(window->id());
-    // What is cached answers this press; the refresh is for the next one.
-    _switchDirectory.refresh();
+    auto workspaces = std::vector<KnownWorkspace> {};
+    if (inProcess)
+    {
+        // The window's own, in the order its sidebar, its switcher and SwitchToWorkspace number them.
+        auto const* const controller = hostOf(&acting).controller;
+        auto const* const source = controller != nullptr ? controller->directorySource() : nullptr;
+        auto const directory = source != nullptr ? source->directory() : window::WorkspaceDirectory {};
+        for (auto const& [position, listed]: window::switchableWorkspacesOf(directory))
+            workspaces.push_back(KnownWorkspace { .position = position,
+                                                  .name = listed->label,
+                                                  .role = directory.selected == listed->id
+                                                              ? WorkspaceRole::Current
+                                                              : WorkspaceRole::Other });
+    }
+    else
+    {
+        workspaces = _switchDirectory.workspacesOf(window->id());
+        // What is cached answers this press; the refresh is for the next one.
+        _switchDirectory.refresh();
+    }
     auto const here = std::ranges::find_if(
         workspaces, [](KnownWorkspace const& workspace) { return workspace.role == WorkspaceRole::Current; });
     if (workspaces.size() < 2 || here == workspaces.end())

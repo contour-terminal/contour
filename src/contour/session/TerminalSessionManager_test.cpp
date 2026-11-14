@@ -6872,7 +6872,7 @@ TEST_CASE("TerminalSessionManager: the user's own navigation gives up a pending 
     {
         manager.moveSidebarNode(controller, PaneKey { 1001 }, IntoNewWorkspace {});
         REQUIRE(controller.followPending());
-        controller.showWorkspace(20);
+        std::ignore = controller.showWorkspace(20);
         CHECK_FALSE(controller.followPending());
         CHECK(binding.source.selected == std::vector<uint64_t> { 20 });
         // The push that lists the new workspace no longer pulls the window there.

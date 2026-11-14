@@ -327,25 +327,41 @@ void WindowSwitcher::switchInProcess(vtworkspace::WorkspaceId window,
             std::unexpected(std::string { "this window has no daemon to open a workspace of in a new one" }));
         return;
     }
-    auto const decision = planSwitch(target, inProcessRows(window), window.value, SameDaemon::Yes);
+    auto const rows = inProcessRows(window);
+    auto const decision = planSwitch(target, rows, window.value, SameDaemon::Yes);
     if (auto const* const to = std::get_if<SwitchTo>(&decision))
     {
         if (to->workspace == 0)
         {
-            if (!_sessions.newWorkspaceFor(window, std::move(label)))
+            if (auto const made = _sessions.newWorkspaceFor(window, std::move(label)); !made)
             {
-                done(std::unexpected(std::string { "no workspace could be made" }));
+                done(std::unexpected(std::string { session::describe(made.error()) }));
                 return;
             }
         }
-        else
-            controller->showWorkspace(to->workspace);
+        else if (controller->showWorkspace(to->workspace) == window::SelectResult::Refused)
+        {
+            done(std::unexpected(std::string { "this window cannot show that workspace" }));
+            return;
+        }
         // What was chosen is what the user types into next.
         controller->focusActiveDisplay();
         done(vthost::proto::SwitchOutcome::Switched);
     }
     else if (std::holds_alternative<SwitchNoop>(decision))
         done(vthost::proto::SwitchOutcome::Switched);
+    else if (std::holds_alternative<SwitchPick>(decision))
+    {
+        // Several workspaces and none named: the user's to pick, among this window's own.
+        auto shown = _picker(SwitchPickRequest { .window = window,
+                                                 .target = target,
+                                                 .mode = mode,
+                                                 .workspaces = rows });
+        if (shown)
+            done(vthost::proto::SwitchOutcome::PickerShown);
+        else
+            done(std::unexpected(std::move(shown.error())));
+    }
     else
         done(std::unexpected(std::string { "no such workspace in this window" }));
 }
