@@ -533,31 +533,6 @@ TEST_CASE("a workspace whose window said it closes is offered to the very next a
     CHECK(h.host.visibilityForAttach(workspace) == WorkspaceVisibility::Shown);
 }
 
-TEST_CASE("the last selection is remembered, and only an attached client's counts",
-          "[vthost][host][selection]")
-{
-    auto h = HostHarness {};
-    CHECK_FALSE(h.host.lastSelectedWorkspace().has_value());
-
-    auto stranger = SelectingClient {};
-    h.host.noteSelected(stranger, 4);
-    CHECK_FALSE(h.host.lastSelectedWorkspace().has_value());
-
-    auto first = SelectingClient {};
-    auto second = SelectingClient {};
-    h.host.noteClientAttached(&first);
-    h.host.noteClientAttached(&second);
-    h.host.noteSelected(first, 2);
-    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { 2 });
-    h.host.noteSelected(second, 3);
-    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { 3 });
-
-    // What a window selected stays the default after it went, for the launch that follows.
-    h.host.noteClientDetached(&second);
-    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { 3 });
-    h.host.noteClientDetached(&first);
-}
-
 TEST_CASE("a focus report bumps that connection's focus serial", "[vthost][host][focus]")
 {
     auto h = HostHarness {};

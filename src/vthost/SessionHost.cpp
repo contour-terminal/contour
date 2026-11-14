@@ -1417,11 +1417,10 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client)
             proto::SwitchReply { .outcome = proto::SwitchOutcome::Failed, .detail = "the window went away" });
 }
 
-void SessionHost::noteSelected(SessionStreamEvents const& client, uint64_t workspace)
+void SessionHost::noteSelected(SessionStreamEvents const& client)
 {
     if (!std::ranges::contains(_attachedClients, &client))
         return;
-    _lastSelected = workspace;
     settleRaiseRole();
 }
 

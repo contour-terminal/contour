@@ -794,9 +794,14 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     void openLayoutBatch();
 
     /// Selects another workspace when the selected one ended (left the model, or lost its last tab), before
-    /// a layout push: the one a launch would (@see defaultSelection), none when none is left. A connection
-    /// that selected none stays so.
+    /// a layout push: the one a launch takes (@see planAttach), so never one another window shows; none when
+    /// none is left. A connection that selected none stays so.
     void refreshSelection();
+
+    /// @param workingDirectory The directory the attach states; empty when it states none.
+    /// @return What planAttach() decides from: the daemon's workspaces with their tab counts and what an
+    ///         attach sees of them, as of now.
+    [[nodiscard]] AttachContext attachContext(std::filesystem::path const& workingDirectory);
 
     /// Validates the peer's ClientHello and answers it. An Attach connection then becomes a client
     /// (see attachClient: the census ticket, the subscriptions, and the attach snapshot, spawning the

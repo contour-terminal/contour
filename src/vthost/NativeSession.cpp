@@ -1113,16 +1113,10 @@ void NativeSession::refreshSelection()
     if (selected != nullptr && _selectedTabs == SelectedTabs::NeverHeld)
         return;
     // The connection moves on to the one a launch would take; with none left it selects none, which
-    // its window takes as the end of what it showed.
-    auto const ids = std::ranges::to<std::vector>(
-        std::views::iota(0, model.workspaceCount())
-        | std::views::transform([&model](int index) { return model.workspaceAt(index); })
-        | std::views::filter([](vtworkspace::Workspace const* workspace) {
-              return workspace != nullptr && workspace->tabCount() > 0;
-          })
-        | std::views::transform(
-            [](vtworkspace::Workspace const* workspace) { return workspace->id().value; }));
-    auto const next = defaultSelection(ids, _host.lastSelectedWorkspace());
+    // its window takes as the end of what it showed. A launch that would create something finds nothing.
+    auto const plan =
+        planAttach(proto::AttachIntent { .kind = proto::AttachIntentKind::Default }, attachContext({}));
+    auto const next = plan.creation == AttachCreation::None ? plan.select : std::nullopt;
     connectionLog()("{}: workspace {} ended; selecting {}", _id, _selectedWorkspace, next.value_or(0));
     if (!next)
     {
@@ -1176,7 +1170,7 @@ void NativeSession::selectWorkspace(vtworkspace::WorkspaceId workspace)
         errorLog()("{}: not selecting workspace {}: there is none", _id, workspace.value);
         return;
     }
-    _host.noteSelected(*this, workspace.value);
+    _host.noteSelected(*this);
     if (_selectedWorkspace == workspace.value)
         return;
     _selectedWorkspace = workspace.value;
@@ -3140,8 +3134,7 @@ void NativeSession::attachClient(uint64_t serial,
             send(0, proto::DecodedPdu { request });
 }
 
-void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
-                                      std::filesystem::path const& workingDirectory)
+AttachContext NativeSession::attachContext(std::filesystem::path const& workingDirectory)
 {
     auto& model = _host.model();
     auto context = AttachContext { .primaryWorkspace = _host.workspaceId().value,
@@ -3158,8 +3151,14 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
                                    .tabCount = workspace->tabCount(),
                                    .visibility = _host.visibilityForAttach(workspace->id().value) });
     std::ranges::sort(context.workspaces, {}, &WorkspaceSummary::id);
+    return context;
+}
 
-    auto const plan = planAttach(intent, context);
+void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
+                                      std::filesystem::path const& workingDirectory)
+{
+    auto& model = _host.model();
+    auto const plan = planAttach(intent, attachContext(workingDirectory));
     _host.noteClientAttached(this);
     _services.control.get().clientAttached(std::format("{}", _id));
     // Set directly: the attach walk queues the snapshots of the selected workspace once the hello is sent.
@@ -3167,7 +3166,7 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
     {
         _selectedWorkspace = *plan.select;
         _selectedTabs = SelectedTabs::NeverHeld;
-        _host.noteSelected(*this, _selectedWorkspace);
+        _host.noteSelected(*this);
     }
 
     switch (plan.creation)
@@ -3182,7 +3181,7 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
             {
                 connectionLog()("{}: attaching to a new workspace {}", _id, workspace->id().value);
                 _selectedWorkspace = workspace->id().value;
-                _host.noteSelected(*this, _selectedWorkspace);
+                _host.noteSelected(*this);
             }
             else
                 errorLog()("{}: the workspace this attach asked for could not be created", _id);

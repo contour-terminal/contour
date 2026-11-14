@@ -1266,11 +1266,10 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///         gateway counts — unlike the daemon's ClientCensus, which counts every client for idle exit.
     [[nodiscard]] std::size_t connectedClients() const noexcept { return _attachedClients.size(); }
 
-    /// Records that the window on @p client selected @p workspace, which is then what a launch selects when
-    /// no other is asked for (@see lastSelectedWorkspace).
+    /// Records that the window on @p client selected a workspace, which it reports as
+    /// SessionStreamEvents::selectedWorkspace: the raise role is settled again.
     /// @param client The attached client; one never counted (@see noteClientAttached) is ignored.
-    /// @param workspace The workspace it selected.
-    void noteSelected(SessionStreamEvents const& client, uint64_t workspace);
+    void noteSelected(SessionStreamEvents const& client);
 
     /// Records that the window on @p client reported its focus. Gaining focus stamps the window with the
     /// next value of the host's counter, which the routing decisions order windows by; the raise role is
@@ -1289,9 +1288,6 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param workspace The workspace.
     /// @return Nothing once it is gone; else why nothing changed.
     std::expected<void, WorkspaceCloseError> closeWorkspace(vtworkspace::WorkspaceId workspace);
-
-    /// @return The workspace some window selected last; nullopt when none ever did.
-    [[nodiscard]] std::optional<uint64_t> lastSelectedWorkspace() const noexcept { return _lastSelected; }
 
     /// @param workspace A workspace.
     /// @return Shown while some attached client selects it, else Hidden.
@@ -2329,8 +2325,6 @@ class SessionHost final: public vtworkspace::ModelEvents
                       std::string_view bytes,
                       std::optional<ConnectionId> from,
                       proto::InputKind kind);
-    /// The workspace some window selected last. @see noteSelected
-    std::optional<uint64_t> _lastSelected;
     /// A workspace a dropped connection selected, and until when it counts as shown to an attach.
     struct ReconnectHold
     {

@@ -1236,10 +1236,9 @@ creates a tab for it; a `Select` or `Resume` that finds its workspace never adds
 A workspace is *shown* when some connection selects it and *hidden* when none does
 (`vthost::visibilityOf`; `SessionHost::visibility`, reported by `workspace.list` as `visibility`). There is
 nothing else to remember: no connection owns a workspace, nothing is claimed, and a window that goes away
-simply stops selecting. `SessionHost` keeps the workspace some connection selected last
-(`lastSelectedWorkspace()`) for the next `Default`, and it rides in the workspace snapshot and the live
-upgrade's handover image. A workspace the control API creates is selected by nobody until a window selects
-it.
+simply stops selecting. A connection whose workspace ends picks its next one by the same rule as a `Default`
+(`planAttach`), so never one another window shows. A workspace the control API creates is selected by nobody
+until a window selects it.
 
 The handshake runs negotiate -> plan -> create -> `ServerHello` (whose `selectedWorkspace` names the
 selection) -> `LayoutState` per workspace -> snapshots of the selected workspace's sessions. The plan runs

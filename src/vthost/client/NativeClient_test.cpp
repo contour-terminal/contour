@@ -2512,7 +2512,6 @@ TEST_CASE("a resumed connection selects the workspace it had", "[vthost][attach]
     h.drive(detachOnLayout(&h));
 
     CHECK(h.client->selectedWorkspace() == Had);
-    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { Had });
 }
 
 TEST_CASE("a client selects a workspace at runtime, and resumes the one it selects now",
@@ -2603,7 +2602,6 @@ TEST_CASE("selecting workspace 0 names the created workspace once its batch ends
 
     CHECK(delivery.has_value());
     CHECK(h.client->selectedWorkspace() != first);
-    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { h.client->selectedWorkspace() });
 }
 
 TEST_CASE("the selection arrives in ServerHello and LayoutBatchEnd", "[vthost][attach][intent]")
@@ -2628,7 +2626,6 @@ TEST_CASE("the selection arrives in ServerHello and LayoutBatchEnd", "[vthost][a
     h.drive(std::move(scenario));
 
     CHECK(selectedByHello == first);
-    CHECK(h.client->selectedWorkspace() == h.host.lastSelectedWorkspace());
     CHECK(h.client->selectedWorkspace() != first);
 }
 

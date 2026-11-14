@@ -83,18 +83,4 @@ namespace detail
     return raiseHolder(views);
 }
 
-/// Picks the workspace a connection selects when it attaches.
-/// @param workspacesInOrder The daemon's workspaces in display order.
-/// @param lastSelected The workspace the window selected last time, if any.
-/// @return @p lastSelected if still listed, else the first workspace, else nullopt.
-[[nodiscard]] constexpr std::optional<uint64_t> defaultSelection(std::span<uint64_t const> workspacesInOrder,
-                                                                 std::optional<uint64_t> lastSelected)
-{
-    if (lastSelected && std::ranges::contains(workspacesInOrder, *lastSelected))
-        return lastSelected;
-    if (workspacesInOrder.empty())
-        return std::nullopt;
-    return workspacesInOrder.front();
-}
-
 } // namespace vthost
