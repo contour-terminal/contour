@@ -107,9 +107,15 @@ struct ControllerOptions
     /// clients that share a session names the workspace in each: a second plain launch is given a workspace
     /// of its own.
     vthost::proto::AttachIntent intent = { .kind = vthost::proto::AttachIntentKind::Default, .workspace = 0 };
+    /// What its attach deadlines are measured on; the steady clock by default. It must outlive the
+    /// controller.
+    core::platform::IClock const* clock = &core::platform::defaultSteadyClock();
     /// Whether the daemon may ask it to switch its windows; it may, as the GUI's.
     contour::remote::NativeController::SwitchRequests switchRequests =
         contour::remote::NativeController::SwitchRequests::Answered;
+    /// What it does when the workspace it selects holds no tab; it waits, as a window switching there does.
+    contour::remote::NativeController::EmptyWorkspace emptyWorkspace =
+        contour::remote::NativeController::EmptyWorkspace::Wait;
 };
 
 /// A TLS transport to @p endpoint, trusting what the endpoint's expected fingerprint says and keeping its
@@ -151,11 +157,12 @@ struct ControllerOptions
         .attachSettings = std::move(options.attachSettings),
         .sessionSettings = std::move(options.sessionSettings),
         .colorPreference = std::move(options.colorPreference),
-        .clock = core::platform::defaultSteadyClock(),
+        .clock = *options.clock,
         .timeline = timeline.timeline,
         .powerMonitor = options.powerMonitor,
         .backoff = options.backoff,
         .switchRequests = options.switchRequests,
+        .emptyWorkspace = options.emptyWorkspace,
     };
 }
 
@@ -200,6 +207,17 @@ class StopOnExit
     return services;
 }
 
+/// The services of a daemon that predates Capability::LaunchFirstTab: it does not offer it, so a client's
+/// launch of a workspace holding no tab is not given a first one.
+/// @return The services to give a DaemonFixture.
+[[nodiscard]] inline vthost::NativeSessionServices servicesWithoutLaunchFirstTab()
+{
+    auto services = vthost::NativeSessionServices {};
+    std::erase(services.handshake.capabilities.idents,
+               std::to_underlying(vthost::proto::Capability::LaunchFirstTab));
+    return services;
+}
+
 /// A daemon end of a connection that the fixture can drop, as a crashing daemon would: it is listed in
 /// @c live for as long as it exists.
 class DroppableSocket final: public core::net::testing::SocketDecorator
@@ -231,7 +249,8 @@ class ClientFrameCounts
     /// The PDU kinds counted.
     static constexpr auto Kinds = std::array { vthost::proto::PduType::ResizeRequest,
                                                vthost::proto::PduType::Heartbeat,
-                                               vthost::proto::PduType::ResizePane };
+                                               vthost::proto::PduType::ResizePane,
+                                               vthost::proto::PduType::OpenFirstTab };
 
     /// @param type A counted kind.
     /// @return How many PDUs of @p type arrived so far; 0 for a kind that is not counted.
@@ -265,6 +284,7 @@ class ClientFrameCounts
             auto const lock = std::lock_guard { _areasMutex };
             _helloCells.push_back(hello->cellPixelSize);
             _helloDirectories.push_back(hello->workingDirectory);
+            _hellos.push_back(*hello);
             _helloHistories.push_back(hello->sessionSettings.transform(
                 [](auto const& settings) { return settings.historyLineCount; }));
         }
@@ -292,6 +312,14 @@ class ClientFrameCounts
         checkDecoded();
         auto const lock = std::lock_guard { _areasMutex };
         return _helloCells;
+    }
+
+    /// @return Every ClientHello received so far, in arrival order.
+    [[nodiscard]] std::vector<vthost::proto::ClientHello> hellos() const
+    {
+        checkDecoded();
+        auto const lock = std::lock_guard { _areasMutex };
+        return _hellos;
     }
 
     /// @return The working directory each ClientHello stated so far (empty for none), in arrival order.
@@ -330,6 +358,7 @@ class ClientFrameCounts
     std::atomic<uint64_t> _decodeErrors {};
     mutable std::mutex _areasMutex {};
     std::vector<vtpty::PageSize> _areas {};                                        ///< Under _areasMutex.
+    std::vector<vthost::proto::ClientHello> _hellos {};                            ///< Under _areasMutex.
     std::vector<std::optional<vthost::proto::WireCellPixelSize>> _requestCells {}; ///< Under _areasMutex.
     std::vector<std::optional<vthost::proto::WireCellPixelSize>> _paneCells {};    ///< Under _areasMutex.
     std::vector<std::optional<vthost::proto::WireCellPixelSize>> _helloCells {};   ///< Under _areasMutex.

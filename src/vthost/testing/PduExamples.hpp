@@ -260,6 +260,7 @@ namespace vthost::testing
           proto::DecodedPdu { proto::MoveWorkspace { .workspace = 3, .toPosition = 1 } } },
         { proto::PduType::CloseWorkspace, proto::DecodedPdu { proto::CloseWorkspace { .workspace = 3 } } },
         { proto::PduType::Goodbye, proto::DecodedPdu { proto::Goodbye {} } },
+        { proto::PduType::OpenFirstTab, proto::DecodedPdu { proto::OpenFirstTab { .workspace = 4 } } },
         { proto::PduType::SetWorkspaceLabel,
           proto::DecodedPdu { proto::SetWorkspaceLabel { .workspace = 3, .label = "secret-label" } } },
     };

@@ -140,7 +140,8 @@ struct HandshakePolicy
                                                                    proto::Capability::WorkspaceSwitch,
                                                                    proto::Capability::DaemonFollow,
                                                                    proto::Capability::WorkspaceMeta,
-                                                                   proto::Capability::ClientGoodbye });
+                                                                   proto::Capability::ClientGoodbye,
+                                                                   proto::Capability::LaunchFirstTab });
 };
 
 /// When a connection sends a session's program-status set.
@@ -448,15 +449,11 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// @param workspace The workspace.
     void sendWorkspaceLayout(vtworkspace::Workspace& workspace);
 
-    /// Requests a snapshot of every session @p workspace shows that a move brought in from a workspace
-    /// another client shows: one not yet mirrored to this client, already in the model as its last layout
-    /// batch ended, and with no snapshot pending. Its shell may say nothing more for a long time. A session
-    /// spawned since is mirrored as its first output comes, as before.
+    /// Requests a snapshot of every session @p workspace shows that is not yet mirrored to this client and
+    /// has no snapshot pending: one a move brought in, or one spawned since, whose screen may stay empty (a
+    /// shell before its prompt) so that no output would ever make the first snapshot.
     /// @param workspace The selected workspace.
     void requestArrivedSnapshots(vtworkspace::Workspace& workspace);
-
-    /// Records every session the host's model shows now (@ref _sessionsAtLastLayout).
-    void noteModelSessions();
 
     /// Forgets every session mirrored to this client that the selected workspace does not show any more: one
     /// a move took to another workspace, or one left behind by a selection. One that comes back is then
@@ -670,9 +667,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     [[nodiscard]] TabVerb serveTabVerb(proto::DecodedFrame const& frame);
 
     /// Serves @p frame if it is a SelectWorkspace or ReportFocus (Capability::DaemonFollow; ReportFocus is
-    /// read and ignored), a SwitchReply (Capability::WorkspaceSwitch) or a Goodbye
-    /// (Capability::ClientGoodbye), refusing it when the capability was not negotiated. Reported as a
-    /// TabVerb: it is dispatched the same way.
+    /// read and ignored), a SwitchReply (Capability::WorkspaceSwitch), a Goodbye
+    /// (Capability::ClientGoodbye) or an OpenFirstTab (Capability::LaunchFirstTab), refusing it when the
+    /// capability was not negotiated. Reported as a TabVerb: it is dispatched the same way.
     /// @param frame The frame read.
     /// @return Served when it was one of them.
     [[nodiscard]] TabVerb serveWorkspaceVerb(proto::DecodedFrame const& frame);
@@ -683,6 +680,11 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
         Refused = 0, ///< The connection lacks the permission; the frame was answered Unsupported.
         Granted,     ///< Serve the frame.
     };
+
+    /// Opens the first tab of the workspace @p named, in the directory the hello stated, when this connection
+    /// still selects it and it still exists and holds none (an OpenFirstTab, Capability::LaunchFirstTab).
+    /// @param named The workspace the client saw hold no tab.
+    void openFirstTab(uint64_t named);
 
     /// Refuses @p frame unless the connection holds @p permission: answered Unsupported, and why logged.
     /// @param permission What serving @p frame needs.
@@ -1341,10 +1343,13 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
         Held,          ///< It held at least one.
     };
     SelectedTabs _selectedTabs = SelectedTabs::NeverHeld;
-    /// Every session the host's model showed as this connection's last layout batch ended, in any workspace:
-    /// a session of a followed workspace that is among them and is not mirrored to this client yet came in by
-    /// a move (@see requestArrivedSnapshots), and one that is not was spawned since.
-    std::unordered_set<uint64_t> _sessionsAtLastLayout;
+    /// Whether the attach walk has queued the snapshots of the sessions the selected workspace held.
+    enum class AttachSnapshots : uint8_t
+    {
+        NotYetQueued = 0, ///< Not yet: a layout pushed before it requests none of its own.
+        Queued,           ///< It has: a session that appears after it is requested as its layout is pushed.
+    };
+    AttachSnapshots _attachSnapshots = AttachSnapshots::NotYetQueued;
     LayoutObserver _layoutObserver;
     /// Answers the client's unknown PDUs, and holds back the ones it said it does not know.
     proto::UnsupportedTracker _unsupported;
@@ -1372,6 +1377,8 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     std::unordered_map<uint64_t, uint64_t> _softFontsSent;
     /// When the idle check of the echo state is next due. @see checkInputEchoWhenDue
     core::platform::SteadyTimePoint _nextInputEchoCheck {};
+    /// When this connection's hello was accepted: what the elapsed times of the attach log count from.
+    core::platform::SteadyTimePoint _attachedAt {};
     /// Until when the idle check keeps itself armed. @see noteInputEchoActivity
     core::platform::SteadyTimePoint _inputEchoActiveUntil {};
     /// Sessions awaiting a full-grid snapshot, in the order they were asked for.
@@ -1391,6 +1398,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     RoomWaiter _roomWaiter = RoomWaiter::Idle;
     /// How this connection's end is told to the host: Closed once the client said Goodbye, else a drop.
     DetachKind _detachKind = DetachKind::Dropped;
+    /// The directory the hello stated the attach's own session starts in (@ref attachSpawnRequest); empty for
+    /// none. Kept for the first tab an OpenFirstTab asks for, which is the attach's session as well.
+    std::filesystem::path _attachDirectory;
     /// Whether the attached client shares Capability::DaemonFollow: it selects one workspace, is told the
     /// others' panes as summaries, and takes part in routing (followsDaemon()). Set as it attaches.
     enum class DaemonFollowing : uint8_t

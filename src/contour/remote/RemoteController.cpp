@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/Logging.hpp>
 #include <contour/remote/ReactorThread.hpp>
 #include <contour/remote/RemoteController.hpp>
 
@@ -133,11 +134,18 @@ void RemoteController::restartConnecting()
         _stopPhase = StopPhase::Running;
         _state = State::Connecting;
         _failure.clear();
-        _transportReturnedAt.reset();
+        beginAttachAttempt(lock);
     }
     _connectStartedAt = _clock.now();
     _reactor.restart([this](core::net::EventLoop* loop) { return runClient(loop); },
                      [this](std::string const& reason) { reactorDied(reason); });
+}
+
+void RemoteController::beginAttachAttempt(std::lock_guard<std::mutex> const& /*held*/)
+{
+    _transportReturnedAt.reset();
+    _attachProgressTicks.store(NoProgress, std::memory_order_relaxed);
+    _promptTimeAtProgress.store(0, std::memory_order_relaxed);
 }
 
 void RemoteController::noteTransportReturned()
@@ -149,8 +157,68 @@ void RemoteController::noteTransportReturned()
     notePhaseChange();
 }
 
+void RemoteController::noteAttachProgress()
+{
+    // The prompt time first: a reader that sees the progress sees the prompt time that went with it.
+    _promptTimeAtProgress.store(promptTime().count(), std::memory_order_relaxed);
+    _attachProgressTicks.store(_clock.now().time_since_epoch().count(), std::memory_order_release);
+}
+
+void RemoteController::bindPromptPause(std::shared_ptr<vthost::PromptPause const> pause)
+{
+    auto const lock = std::lock_guard { _promptPauseMutex };
+    _promptPause = std::move(pause);
+}
+
+std::chrono::milliseconds RemoteController::promptTime() const
+{
+    auto pause = std::shared_ptr<vthost::PromptPause const> {};
+    {
+        auto const lock = std::lock_guard { _promptPauseMutex };
+        pause = _promptPause;
+    }
+    return pause ? pause->total() : std::chrono::milliseconds::zero();
+}
+
+AttachPhase RemoteController::attachPhase() const
+{
+    if (_attachProgressTicks.load(std::memory_order_relaxed) != NoProgress)
+        return AttachPhase::AwaitingFirstSession;
+    auto const lock = std::lock_guard { _mutex };
+    return _transportReturnedAt ? AttachPhase::Handshaking : AttachPhase::Connecting;
+}
+
+std::string RemoteController::timeOut(core::platform::SteadyTimePoint started)
+{
+    auto const phase = attachPhase();
+    auto const message = connectTimeoutMessage(phase);
+    attachLog()("attach: gave up after {} ms, {}: {}",
+                std::chrono::duration_cast<std::chrono::milliseconds>(_clock.now() - started).count(),
+                describe(phase),
+                message);
+    stop();
+    return message;
+}
+
+core::platform::SteadyTimePoint RemoteController::extendedByProgress(core::platform::SteadyTimePoint deadline,
+                                                                     vthost::AttachBudget const& budget) const
+{
+    auto const ticks = _attachProgressTicks.load(std::memory_order_acquire);
+    if (ticks == NoProgress)
+        return deadline;
+    auto const lastProgress = core::platform::SteadyTimePoint { core::platform::SteadyDuration { ticks } };
+    // Only the prompts open since that progress extend what it allows: those before it are in it already.
+    // Never more than this attempt's own, whichever total the progress was measured against.
+    auto const promptedSince = std::clamp(
+        promptTime() - std::chrono::milliseconds { _promptTimeAtProgress.load(std::memory_order_relaxed) },
+        std::chrono::milliseconds::zero(),
+        budget.paused());
+    return std::max(deadline, lastProgress + budget.handshake + promptedSince);
+}
+
 std::expected<void, std::string> RemoteController::awaitConnected(vthost::AttachBudget budget)
 {
+    bindPromptPause(budget.pause);
     startConnecting();
     // How the wait ends: the phase left Connecting, or the bound ran out.
     auto const settled = [this](MuxConnectOutcome const& outcome) -> std::expected<void, std::string> {
@@ -159,8 +227,7 @@ std::expected<void, std::string> RemoteController::awaitConnected(vthost::Attach
         return {};
     };
     auto const timedOut = [this]() -> std::expected<void, std::string> {
-        stop();
-        return std::unexpected(connectTimeoutMessage());
+        return std::unexpected(timeOut(*_connectStartedAt));
     };
     auto const returnedAt = [this] {
         auto const lock = std::lock_guard { _mutex };
@@ -192,8 +259,8 @@ std::expected<void, std::string> RemoteController::awaitConnected(vthost::Attach
         auto slice = vthost::TransportReturnPollInterval;
         if (deadline)
         {
-            auto const left =
-                std::chrono::ceil<std::chrono::milliseconds>(*deadline + budget.paused() - _clock.now());
+            auto const left = std::chrono::ceil<std::chrono::milliseconds>(
+                extendedByProgress(*deadline + budget.paused(), budget) - _clock.now());
             // Past the deadline, one last look without waiting: an attach that settled while the last slice
             // overslept has settled, and is not to be stopped for the scheduler's delay.
             slice = std::clamp(left, std::chrono::milliseconds::zero(), slice);
@@ -220,10 +287,14 @@ std::optional<core::platform::SteadyTimePoint> RemoteController::attachDeadline(
     // returned, from the later of that and the first look: a handshake that stalls fails once the bound has
     // passed, whatever number of looks it took.
     // Neither counts the time the user spent answering a prompt the transport asked (AttachBudget::pause).
+    // A daemon that makes headway is not given up on while it does (noteAttachProgress()).
     if (budget.connect)
-        return attachBoundDeadline(*budget.connect, *_connectStartedAt, *_pollStartedAt) + budget.paused();
+        return extendedByProgress(attachBoundDeadline(*budget.connect, *_connectStartedAt, *_pollStartedAt)
+                                      + budget.paused(),
+                                  budget);
     if (returnedAt)
-        return std::max(*returnedAt, *_pollStartedAt) + budget.handshake + budget.paused();
+        return extendedByProgress(std::max(*returnedAt, *_pollStartedAt) + budget.handshake + budget.paused(),
+                                  budget);
     return std::nullopt;
 }
 
@@ -238,6 +309,7 @@ std::optional<std::chrono::milliseconds> RemoteController::untilAttachDeadline(v
 
 std::optional<std::expected<void, std::string>> RemoteController::pollConnected(vthost::AttachBudget budget)
 {
+    bindPromptPause(budget.pause);
     startConnecting();
     {
         auto const lock = std::lock_guard { _mutex };
@@ -250,14 +322,14 @@ std::optional<std::expected<void, std::string>> RemoteController::pollConnected(
     }
     if (auto const deadline = attachDeadline(budget); deadline && _clock.now() >= *deadline)
     {
-        stop();
-        return std::unexpected(connectTimeoutMessage());
+        return std::unexpected(timeOut(*_connectStartedAt));
     }
     return std::nullopt;
 }
 
 std::expected<void, std::string> RemoteController::connectAndWait(vthost::AttachBudget timeout)
 {
+    bindPromptPause(timeout.pause);
     startConnecting();
     return awaitConnected(timeout);
 }

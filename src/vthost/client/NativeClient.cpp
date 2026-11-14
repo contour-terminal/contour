@@ -412,7 +412,8 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
                            SwitchRequestHandler onSwitchRequest,
                            PaneSummaryHandler onPaneSummary,
                            RaiseRoleHandler onRaiseRole,
-                           WorkspaceMetaHandler onWorkspaceMeta):
+                           WorkspaceMetaHandler onWorkspaceMeta,
+                           SnapshotProgressHandler onSnapshotProgress):
     _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
@@ -432,6 +433,7 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _onPaneSummary(std::move(onPaneSummary)),
     _onRaiseRole(std::move(onRaiseRole)),
     _onWorkspaceMeta(std::move(onWorkspaceMeta)),
+    _onSnapshotProgress(std::move(onSnapshotProgress)),
     _liveness(liveness),
     _keyAuth(_handshake.keySource ? std::optional { KeyAuthenticator { _handshake.keySource } }
                                   : std::nullopt),
@@ -736,6 +738,15 @@ Delivery NativeClient::reportFocus(proto::WindowFocus focus)
     return Delivery::Sent;
 }
 
+Delivery NativeClient::requestFirstTab(uint64_t workspace)
+{
+    // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
+    if (!shares(proto::Capability::LaunchFirstTab)
+        || send(proto::DecodedPdu { proto::OpenFirstTab { .workspace = workspace } }) == 0)
+        return Delivery::Unsupported;
+    return Delivery::Sent;
+}
+
 void NativeClient::performOperation(proto::PerformOperation request)
 {
     send(proto::DecodedPdu { std::move(request) });
@@ -851,7 +862,15 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
         // Publish only a screen that is whole. A mid-run piece leaves the mirror holding part of
         // a grid, and handing that to a frontend would have it repaint a snapshot it has only
         // half received — the rows not yet delivered rendering as absent until the run finishes.
-        if (_onUpdate && !screen.snapshotInProgress)
+        // Returning here skips only the first-snapshot log and _onUpdate: the delta is applied above.
+        if (screen.snapshotInProgress)
+        {
+            if (_onSnapshotProgress)
+                _onSnapshotProgress();
+            return;
+        }
+        noteFirstSnapshot(delta->session);
+        if (_onUpdate)
             _onUpdate(screen, *delta);
         return;
     }
@@ -927,8 +946,32 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
         "attach: ignoring unexpected {} (serial {})", proto::toString(proto::typeOf(pdu)), frame.serial);
 }
 
+void NativeClient::noteFirstSnapshot(uint64_t session)
+{
+    if (_firstSnapshot != FirstSnapshot::Awaited)
+        return;
+    _firstSnapshot = FirstSnapshot::Logged;
+    clientLog()("attach: first snapshot received (session {}, {}) {} ms after the hello",
+                session,
+                _attachSessions.contains(session) ? "the attach's own" : "not the attach's own",
+                sinceAttachStarted().count());
+    _attachSessions.clear();
+}
+
 void NativeClient::handleLayout(proto::LayoutState const& layout)
 {
+    if (_firstSnapshot == FirstSnapshot::Awaited && layout.workspace == _selectedWorkspace)
+    {
+        auto const collect = [this](auto const& self, proto::WirePane const& pane) -> void {
+            if (pane.isSplit())
+                for (auto const& child: pane.children)
+                    self(self, child);
+            else
+                _attachSessions.insert(pane.session);
+        };
+        for (auto const& tab: layout.tabs)
+            collect(collect, tab.root);
+    }
     if (_onLayout && _pendingEdits.empty())
         _onLayout(layout);
     else if (_onLayout)
@@ -1076,7 +1119,9 @@ void NativeClient::handleServerHello(proto::ServerHello const& hello)
     _selectedWorkspace = hello.selectedWorkspace;
     _negotiated = std::move(*outcome);
     _handshakeTimer.reset();
-    clientLog()("attach: connected (protocol v{})", _negotiated->version);
+    clientLog()("attach: connected (protocol v{}), the daemon answered the hello after {} ms",
+                _negotiated->version,
+                sinceAttachStarted().count());
     // Only a daemon that echoes is probed: an older one would answer every Heartbeat Unsupported.
     if (shares(proto::Capability::Heartbeat))
         armLivenessTick();
@@ -1101,6 +1146,11 @@ std::string NativeClient::refusalMessage() const
         return {};
     auto const words = proto::describe(*_refusal, proto::PeerRole::Daemon);
     return _keyAuth ? _keyAuth->explainRefusal(words) : words;
+}
+
+std::chrono::milliseconds NativeClient::sinceAttachStarted() const
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(_loop.clock().now() - _attachStartedAt);
 }
 
 void NativeClient::armHandshakeDeadline()
@@ -1174,7 +1224,8 @@ core::async::Task<void> NativeClient::run()
 {
     // Silence is measured from the hello, once the daemon answered it; until then the handshake deadline is
     // what gives up on a daemon that never does.
-    _liveness.noteInbound(_loop.clock().now());
+    _attachStartedAt = _loop.clock().now();
+    _liveness.noteInbound(_attachStartedAt);
     armHandshakeDeadline();
     // A client with a key and no token lets the daemon speak first: its challenge is what the proof covers.
     if (!waitsForChallenge())

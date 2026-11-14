@@ -20,15 +20,18 @@
 #include <core/async/Task.hpp>
 #include <core/platform/Clock.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include <vthost/AttachBudget.hpp>
@@ -128,6 +131,27 @@ struct MuxConnectOutcome
 /// (a fontconfig rebuild, a wedged desktop portal) would otherwise report a healthy daemon as timed out.
 /// A budget shorter than this is waited in full and no longer.
 inline constexpr auto MinimumConnectAwait = std::chrono::milliseconds { 2000 };
+
+/// How far an attach had come when it was given up on: what it was still waiting for.
+enum class AttachPhase : uint8_t
+{
+    Connecting = 0,       ///< The transport has not yet handed out its connection.
+    Handshaking,          ///< Connected; the daemon has not yet answered the hello.
+    AwaitingFirstSession, ///< The daemon answered; its first session has not yet arrived.
+};
+
+/// @param phase An attach phase.
+/// @return The phase in words, for the log: what the attach was still waiting for.
+[[nodiscard]] constexpr std::string_view describe(AttachPhase phase) noexcept
+{
+    switch (phase)
+    {
+        case AttachPhase::Connecting: return "connecting";
+        case AttachPhase::Handshaking: return "waiting for the handshake answer";
+        case AttachPhase::AwaitingFirstSession: return "waiting for the first session";
+    }
+    return {};
+}
 
 /// Where a controller's run is in being stopped.
 enum class StopPhase : uint8_t
@@ -233,6 +257,9 @@ class RemoteController
     /// @return Nothing on success; a human-readable reason on failure.
     [[nodiscard]] std::expected<void, std::string> connectAndWait(vthost::AttachBudget timeout);
 
+    /// @return What the attach of the current attempt is waiting for now. Safe from any thread.
+    [[nodiscard]] AttachPhase attachPhase() const;
+
     /// Starts a new connect, on a fresh reactor, after the last one ended -- failed, was refused, or was
     /// stopped. The phase goes back to Connecting and the budget of awaitConnected() counts from now.
     /// A run that is still going must not be restarted: the caller asks first (@see isConnecting).
@@ -259,6 +286,9 @@ class RemoteController
     [[nodiscard]] bool isWindingDown() const;
 
   protected:
+    /// What _attachProgressTicks holds before the attach made any headway.
+    static constexpr auto NoProgress = std::numeric_limits<core::platform::SteadyDuration::rep>::min();
+
     /// @param clock What awaitConnected() measures its budget on, from startConnecting() to the deadline.
     ///        Borrowed: it must outlive the controller.
     /// @param detachBound How long a stop lets a detached client end its connection in order before it
@@ -279,8 +309,9 @@ class RemoteController
     [[nodiscard]] virtual bool detachOnReactor() = 0;
     /// Closes every bound pty on the FIRST stop (EOF to each backing session).
     virtual void closeReactorBindings() = 0;
-    /// The failure message when the wait times out before the handshake completes.
-    [[nodiscard]] virtual std::string connectTimeoutMessage() const = 0;
+    /// The failure message when the wait times out before the first session arrives.
+    /// @param phase What the attach was still waiting for when it was given up on.
+    [[nodiscard]] virtual std::string connectTimeoutMessage(AttachPhase phase) const = 0;
     /// The failure message when the connection closes before reaching Ready.
     [[nodiscard]] virtual std::string connectClosedMessage() const = 0;
 
@@ -322,6 +353,35 @@ class RemoteController
     /// AttachBudget runs from now. Called on the reactor thread, each time a connection is made.
     void noteTransportReturned();
 
+    /// Records that the daemon made headway with the attach (it answered the hello, sent a layout), so that
+    /// a wait bound by wall clock does not give up on an attach that is moving, only on one that stalled:
+    /// awaitConnected() and pollConnected() allow the handshake bound again from each such moment, plus the
+    /// time prompts were open since it (a prompt answered before it is inside it already). A big
+    /// scrollback or a busy daemon takes longer than the bound to deliver everything, never to say anything.
+    /// Safe from any thread, and with _mutex held.
+    ///
+    /// There is deliberately no overall cap on a wait that keeps being extended: a daemon that keeps
+    /// delivering is not dead, and liveness ends one that is. Progress and the prompt time it was read at
+    /// are two atomics, stored with no ordering between them beyond release/acquire on the tick; a reader
+    /// that pairs a new tick with the previous prompt time only ever allows slightly more, never less.
+    void noteAttachProgress();
+
+    /// Starts a new attach attempt's bookkeeping: the progress, the prompt time it was read at and the
+    /// return of the transport belong to the attempt before, so that a timeout names the phase of this one.
+    /// Called as every attempt begins: a (re)start, and each connection the supervisor seeks again.
+    /// @param held Proof that _mutex is held.
+    void beginAttachAttempt(std::lock_guard<std::mutex> const& held);
+
+    /// Names where the prompt time of the attach is read from, for noteAttachProgress(). Called by the waits
+    /// before the attach starts, with the budget they were given.
+    /// @param pause Where the time prompts were open is kept; null for none.
+    void bindPromptPause(std::shared_ptr<vthost::PromptPause const> pause);
+
+    /// Gives up on the attach: logs where it stood, stops the controller.
+    /// @param started When the attach began, on _clock.
+    /// @return The failure message naming what the attach was still waiting for.
+    [[nodiscard]] std::string timeOut(core::platform::SteadyTimePoint started);
+
     core::platform::IClock const& _clock;
     /// When pollConnected() was first called; empty until it was. GUI thread only.
     std::optional<core::platform::SteadyTimePoint> _pollStartedAt;
@@ -335,8 +395,24 @@ class RemoteController
     /// When the transport last handed out its connection; empty before. Guarded by _mutex.
     std::optional<core::platform::SteadyTimePoint> _transportReturnedAt;
     StopPhase _stopPhase = StopPhase::Running; ///< Guarded by _mutex.
+    /// The tick count (on _clock) of the latest noteAttachProgress(); `NoProgress` before the first.
+    std::atomic<core::platform::SteadyDuration::rep> _attachProgressTicks = NoProgress;
+    /// What PromptPause::total() read at the latest noteAttachProgress(): the prompt time up to then, which
+    /// is inside that progress already and so extends nothing after it.
+    std::atomic<std::chrono::milliseconds::rep> _promptTimeAtProgress = 0;
+    mutable std::mutex _promptPauseMutex; ///< Guards _promptPause, which a progress on the reactor reads.
+    std::shared_ptr<vthost::PromptPause const> _promptPause; ///< See bindPromptPause().
 
   private:
+    /// @return The time prompts have been open in all, as of now; zero when none are tracked.
+    [[nodiscard]] std::chrono::milliseconds promptTime() const;
+
+    /// @param deadline When the attach would be given up on for want of progress otherwise.
+    /// @param budget The attach's budget, whose handshake bound is the longest the daemon may stay silent.
+    /// @return @p deadline, or the later instant the latest noteAttachProgress() allows.
+    [[nodiscard]] core::platform::SteadyTimePoint extendedByProgress(
+        core::platform::SteadyTimePoint deadline, vthost::AttachBudget const& budget) const;
+
     /// @return What a stop posts onto the reactor: the client's detach, or a cancel when there is none.
     [[nodiscard]] std::function<void()> detachOrCancel();
 

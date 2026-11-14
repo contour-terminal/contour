@@ -134,7 +134,7 @@ class FixtureLister final: public contour::remote::IWorkspaceLister
             listed =
                 std::unexpected(contour::remote::ListFailure { .reason = "cannot connect to the daemon" });
         else
-            listed = describe(*found->second);
+            listed = describe(*found->second, staleHoldingTab);
         QMetaObject::invokeMethod(
             &_receiver,
             [done = std::move(done), listed = std::move(listed)]() mutable { done(std::move(listed)); },
@@ -171,11 +171,15 @@ class FixtureLister final: public contour::remote::IWorkspaceLister
     /// The daemons whose listing the user declines to trust, by label.
     std::set<std::string> declined;
     std::vector<std::string> created; ///< The labels a workspace was created with, in order.
+    /// Daemon workspaces the listing still shows holding a tab, though they hold none by the time a switch
+    /// lands: the last tab closed since the listing was taken.
+    std::set<uint64_t> staleHoldingTab;
 
   private:
-    [[nodiscard]] static std::vector<vtcontrol::WorkspaceInfo> describe(DaemonFixture& daemon)
+    [[nodiscard]] static std::vector<vtcontrol::WorkspaceInfo> describe(
+        DaemonFixture& daemon, std::set<uint64_t> const& staleHoldingTab)
     {
-        return daemon.onDaemon([&daemon] {
+        return daemon.onDaemon([&daemon, &staleHoldingTab] {
             auto infos = std::vector<vtcontrol::WorkspaceInfo> {};
             auto const& model = daemon.host->model();
             for (auto const index: std::views::iota(0, model.workspaceCount()))
@@ -188,7 +192,9 @@ class FixtureLister final: public contour::remote::IWorkspaceLister
                 info.position = static_cast<uint32_t>(index + 1);
                 info.native = std::to_string(id.value);
                 info.visibility = std::string { vthost::nameOf(daemon.host->visibility(id.value)) };
-                info.tabs.resize(static_cast<std::size_t>(model.workspaceAt(index)->tabCount()));
+                info.tabs.resize(staleHoldingTab.contains(id.value)
+                                     ? 1
+                                     : static_cast<std::size_t>(model.workspaceAt(index)->tabCount()));
                 infos.push_back(std::move(info));
             }
             return infos;
@@ -318,14 +324,27 @@ struct ManualSwitchTimer
         std::function<void()> fire;
     };
     std::vector<Armed> armed; ///< What is armed and not fired, in arming order.
+    /// When a deadline fires: when the test says (Manual), or the moment it is armed (AtOnce), before the
+    /// link it bounds read anything from its daemon.
+    enum class Firing : uint8_t
+    {
+        Manual = 0,
+        AtOnce,
+    };
+    Firing firing = Firing::Manual;
 
     /// @param clock What the switch's time is read from.
     [[nodiscard]] contour::remote::SwitchDeadline deadline(core::platform::IClock const& clock)
     {
         return contour::remote::SwitchDeadline {
             .timeout = contour::remote::DefaultSwitchTimeout,
-            .timer = [this](std::chrono::milliseconds delay,
-                            std::function<void()> fire) { armed.push_back({ delay, std::move(fire) }); },
+            .timer =
+                [this](std::chrono::milliseconds delay, std::function<void()> fire) {
+                    if (firing == Firing::AtOnce)
+                        fire();
+                    else
+                        armed.push_back({ delay, std::move(fire) });
+                },
             .clock = clock,
         };
     }
@@ -1161,6 +1180,140 @@ TEST_CASE("WindowSwitcher: a deadline of a switch that landed gives nothing up",
     CHECK(rig.launchLink().workspaceOf(rig.shown()) == rig.aWorkspaces[1]);
     CHECK(visibilityOn(rig.a, rig.aWorkspaces[1]) == WorkspaceVisibility::Shown);
     CHECK_FALSE(rig.window->controller->notices().toastText().contains("Could not switch"));
+}
+
+// A workspace holding no tab is no failure to show: the switch keeps waiting for the tab the user opens
+// there, however long it takes, and only a lost connection ends it. (A daemon no client attached to yet
+// holds one, its own; the listing the switch was resolved from may also be stale, the last tab closed
+// since.)
+TEST_CASE("WindowSwitcher: a switch to a workspace holding no tab waits for one, with no deadline",
+          "[switch][link][timeout]")
+{
+    auto rig = SwitchRig { DaemonBStart::Fresh };
+    auto const before = rig.windowSessions();
+    auto const bOwn = rig.b.onDaemon([&] { return rig.b.host->workspaceId().value; });
+    rig.lister->staleHoldingTab.insert(bOwn);
+    auto told = Told {};
+    rig.switcher->request(rig.shown(),
+                          to(daemonB(), "1"),
+                          SwitchMode::Switch,
+                          contour::session::NoLandingDeadline,
+                          told.completion());
+    REQUIRE(waitUntil([&] { return showing(rig.b, bOwn) == 1; }, 2000));
+    REQUIRE(rig.timer.armed.size() == 1);
+    auto const& link = *rig.links.back();
+    REQUIRE(waitUntil([&] { return link.switchWait() == contour::remote::SwitchWait::ForFirstTab; }));
+
+    // The deadline passes, which would fail a switch whose target never shows: nothing fails here.
+    rig.timer.fireAll();
+    drainGuiEvents();
+    CHECK_FALSE(told.outcome.has_value());
+    CHECK_FALSE(rig.window->controller->notices().toastText().contains("Could not switch"));
+    CHECK(showing(rig.b, bOwn) == 1); // the link it started still holds the workspace
+
+    SECTION("a tab opened there completes the switch, and the window shows it")
+    {
+        std::ignore = rig.b.seedSession("first");
+
+        REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 5000));
+        CHECK(*told.outcome == SwitchOutcome::Switched);
+        REQUIRE(rig.windowLink() != nullptr);
+        CHECK(rig.windowLink()->address() == daemonB());
+        CHECK(rig.windowLink()->workspaceOf(rig.shown()) == bOwn);
+        REQUIRE(waitUntil([&] { return !rig.app.manager().sessionsOfWindow(rig.shown()).empty(); }));
+        CHECK(rig.showsNoneOf(before));
+    }
+    SECTION("a connection lost meanwhile still fails the switch")
+    {
+        rig.b.dropConnections();
+
+        REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 5000));
+        CHECK_FALSE(told.outcome->has_value());
+        CHECK(rig.windowLink() == &rig.launchLink());
+        CHECK_FALSE(rig.showsNoneOf(before));
+    }
+}
+
+// The wait is decided as the target's layout arrives, not when the deadline passes: a deadline that passes
+// before any settled layout arrived still fails the switch, on the bound an unsettled target always had.
+TEST_CASE("WindowSwitcher: a deadline passing before the target's layout arrived still fails the switch",
+          "[switch][link][timeout]")
+{
+    auto rig = SwitchRig { DaemonBStart::Fresh };
+    auto const before = rig.windowSessions();
+    auto const bOwn = rig.b.onDaemon([&] { return rig.b.host->workspaceId().value; });
+    rig.lister->staleHoldingTab.insert(bOwn);
+    auto told = Told {};
+    rig.timer.firing = ManualSwitchTimer::Firing::AtOnce;
+    rig.switcher->request(rig.shown(),
+                          to(daemonB(), "1"),
+                          SwitchMode::Switch,
+                          contour::session::NoLandingDeadline,
+                          told.completion());
+    drainGuiEvents();
+
+    REQUIRE(told.outcome.has_value());
+    CHECK_FALSE(told.outcome->has_value());
+    CHECK(told.outcome->error().contains("in time"));
+    CHECK(rig.window->controller->notices().toastText().contains("Could not switch"));
+    CHECK_FALSE(rig.showsNoneOf(before));
+}
+
+// A switch waiting for a tab ends for a newer switch of its window, quietly: the window is not locked by it.
+TEST_CASE("WindowSwitcher: a switch waiting for a tab ends for a newer switch of the window",
+          "[switch][link][timeout]")
+{
+    auto rig = SwitchRig { DaemonBStart::Fresh };
+    auto const bOwn = rig.b.onDaemon([&] { return rig.b.host->workspaceId().value; });
+    rig.lister->staleHoldingTab.insert(bOwn);
+    auto waiting = Told {};
+    rig.switcher->request(rig.shown(),
+                          to(daemonB(), "1"),
+                          SwitchMode::Switch,
+                          contour::session::NoLandingDeadline,
+                          waiting.completion());
+    REQUIRE(waitUntil([&] { return showing(rig.b, bOwn) == 1; }, 2000));
+    REQUIRE(waitUntil(
+        [&] { return rig.links.back()->switchWait() == contour::remote::SwitchWait::ForFirstTab; }));
+    rig.timer.fireAll();
+    drainGuiEvents();
+    REQUIRE_FALSE(waiting.outcome.has_value());
+
+    CHECK(rig.request(to(daemonA(), "2")) == SwitchOutcome::Switched);
+
+    REQUIRE(waiting.outcome.has_value());
+    CHECK_FALSE(waiting.outcome->has_value());
+    CHECK(waiting.outcome->error().contains("newer switch"));
+    CHECK_FALSE(rig.window->controller->notices().toastText().contains("Could not switch"));
+    CHECK(rig.windowLink() == &rig.launchLink());
+}
+
+// A window that closes while its switch waits for a tab ends that switch: no deadline bounds it any more.
+TEST_CASE("WindowSwitcher: the close of a window ends the switch it waits in", "[switch][link][timeout]")
+{
+    auto rig = SwitchRig { DaemonBStart::Fresh };
+    auto const bOwn = rig.b.onDaemon([&] { return rig.b.host->workspaceId().value; });
+    rig.lister->staleHoldingTab.insert(bOwn);
+    auto told = Told {};
+    rig.switcher->request(rig.shown(),
+                          to(daemonB(), "1"),
+                          SwitchMode::Switch,
+                          contour::session::NoLandingDeadline,
+                          told.completion());
+    REQUIRE(waitUntil([&] { return showing(rig.b, bOwn) == 1; }, 2000));
+    REQUIRE(waitUntil(
+        [&] { return rig.links.back()->switchWait() == contour::remote::SwitchWait::ForFirstTab; }));
+    rig.timer.fireAll();
+    drainGuiEvents();
+    REQUIRE_FALSE(told.outcome.has_value());
+
+    rig.switcher->windowClosed(rig.shown());
+
+    REQUIRE(told.outcome.has_value());
+    CHECK_FALSE(told.outcome->has_value());
+    CHECK_FALSE(rig.window->controller->notices().toastText().contains("Could not switch"));
+    // The window's id is free of it: a closed window's switch does not linger.
+    rig.switcher->windowClosed(rig.shown());
 }
 
 TEST_CASE("WindowSwitcher: a daemon of several workspaces asks the user, and a cancel changes nothing",

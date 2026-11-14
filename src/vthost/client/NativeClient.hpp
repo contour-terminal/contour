@@ -330,6 +330,9 @@ class NativeClient final
     /// Told what the daemon states of a workspace besides its layout (Capability::WorkspaceMeta): in full
     /// after the hello and for a workspace created since, then a delta for each change.
     using WorkspaceMetaHandler = std::function<void(proto::WorkspaceMeta const&)>;
+    /// Told that a piece of a snapshot still being received arrived: the daemon is delivering, however long
+    /// the whole takes. A frontend waiting for its first session counts that as headway, not as silence.
+    using SnapshotProgressHandler = std::function<void()>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
     using HandshakeHandler = std::function<void()>;
 
@@ -405,6 +408,7 @@ class NativeClient final
     /// @param onRaiseRole Told the role this connection has for raising (Capability::DaemonFollow).
     /// @param onWorkspaceMeta Told what the daemon states of each workspace besides its layout
     ///        (Capability::WorkspaceMeta).
+    /// @param onSnapshotProgress Told of each piece of a snapshot that is not yet whole.
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -422,7 +426,8 @@ class NativeClient final
                  SwitchRequestHandler onSwitchRequest = {},
                  PaneSummaryHandler onPaneSummary = {},
                  RaiseRoleHandler onRaiseRole = {},
-                 WorkspaceMetaHandler onWorkspaceMeta = {});
+                 WorkspaceMetaHandler onWorkspaceMeta = {},
+                 SnapshotProgressHandler onSnapshotProgress = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -512,6 +517,14 @@ class NativeClient final
     /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares
     ///         Capability::DaemonFollow.
     [[nodiscard]] Delivery reportFocus(proto::WindowFocus focus);
+
+    /// Asks the daemon to open the first tab of the workspace this connection selects, which holds none (a
+    /// launch that named it).
+    /// @param workspace The daemon workspace the client saw hold no tab: the daemon opens the tab only if it
+    ///        still does.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares
+    ///         Capability::LaunchFirstTab.
+    [[nodiscard]] Delivery requestFirstTab(uint64_t workspace);
 
     /// @return What this connection does with a bell or notification, as the daemon last stated it; Quiet
     ///         until it does.
@@ -728,6 +741,9 @@ class NativeClient final
     /// again after each keyed hello, since the time a signature takes is not the daemon's to answer for.
     void armHandshakeDeadline();
 
+    /// @return How long ago run() began, on the loop's clock.
+    [[nodiscard]] std::chrono::milliseconds sinceAttachStarted() const;
+
     /// Answers each AuthChallenge the daemon sends with the next key's proof, until the connection ends.
     [[nodiscard]] core::async::Task<void> answerChallenges();
 
@@ -819,6 +835,21 @@ class NativeClient final
     PaneSummaryHandler _onPaneSummary;
     RaiseRoleHandler _onRaiseRole;
     WorkspaceMetaHandler _onWorkspaceMeta;
+    SnapshotProgressHandler _onSnapshotProgress;
+    /// When run() began: what the elapsed times of the attach log count from.
+    core::platform::SteadyTimePoint _attachStartedAt {};
+    /// Whether the first whole snapshot has been logged, once per connection.
+    enum class FirstSnapshot : uint8_t
+    {
+        Awaited = 0,
+        Logged,
+    };
+    FirstSnapshot _firstSnapshot = FirstSnapshot::Awaited;
+    /// Logs the first whole snapshot of the connection, once: which session it was, and whether the attach's.
+    void noteFirstSnapshot(uint64_t session);
+    /// The sessions the layouts of the selected workspace named before the first whole snapshot arrived: the
+    /// attach's own, for the log of that snapshot. Emptied once it is logged.
+    std::set<uint64_t> _attachSessions;
     proto::RaiseRole _raiseRole = proto::RaiseRole::Quiet; ///< @see raiseRole()
     HandshakeHandler _onHandshake;                         ///< @see setHandshakeHandler()
     std::map<uint64_t, RemoteScreen> _screens;

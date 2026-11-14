@@ -1330,6 +1330,14 @@ class SessionHost final: public vtworkspace::ModelEvents
     vtworkspace::Tab* createTab(SessionSpawnRequest const& request = {},
                                 std::optional<vtworkspace::SessionId> beside = std::nullopt);
 
+    /// Creates a tab in a named workspace, backed by a freshly spawned session: what createTab() does once it
+    /// knows the workspace, and the way to give one that holds no tab (so names no session) its first.
+    /// @param workspace The workspace to create the tab in.
+    /// @param request What this creation overrides about the session it spawns.
+    /// @return The created tab, or nullptr on failure (nothing is leaked).
+    vtworkspace::Tab* createTabIn(vtworkspace::WorkspaceId workspace,
+                                  SessionSpawnRequest const& request = {});
+
     /// Creates a NEW workspace with a first tab (an empty workspace is useless), backed by
     /// a fresh session — the daemon side of a client "new workspace" (B4).
     /// @param request What this creation overrides about the session it spawns.

@@ -136,6 +136,18 @@ class NativeController final: public QObject, public contour::session::SessionFa
         Nothing,
     };
 
+    /// What the first connection does when the workspace it selects (proto::AttachIntentKind::Select) holds
+    /// no tab.
+    enum class EmptyWorkspace : uint8_t
+    {
+        /// Waits for a tab: a window switching there shows it once it holds one (WindowSwitcher).
+        Wait = 0,
+        /// Asks the daemon for a first shell there (proto::OpenFirstTab, once): a launch that named the
+        /// workspace (`contour --workspace N`), which would otherwise show nothing. A daemon that does not
+        /// share proto::Capability::LaunchFirstTab is not asked, and the launch waits as it did before.
+        OpenFirstTab,
+    };
+
     /// Whether this client answers the daemon's requests to switch a window (proto::SwitchRequest).
     enum class SwitchRequests : uint8_t
     {
@@ -190,6 +202,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
         ResumeFallback resumeFallback = ResumeFallback::Launch;
         /// Whether the daemon may ask this client to switch its windows.
         SwitchRequests switchRequests = SwitchRequests::Answered;
+        /// What the first connection does about a selected workspace that holds no tab.
+        EmptyWorkspace emptyWorkspace = EmptyWorkspace::Wait;
     };
 
     /// @param config What the controller is built with.
@@ -784,9 +798,15 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// A reactor that died mid-run never reaches the supervisor's own Failed, so this reports it: without
     /// connectionClosed() the GUI never stop()s the controller, and Reconnect is refused for good.
     void reactorDied(std::string const& reason) override;
-    [[nodiscard]] std::string connectTimeoutMessage() const override
+    [[nodiscard]] std::string connectTimeoutMessage(AttachPhase phase) const override
     {
-        return "timed out waiting for the daemon's snapshot";
+        switch (phase)
+        {
+            case AttachPhase::Connecting: return "timed out connecting to the daemon";
+            case AttachPhase::Handshaking: return "the daemon did not answer";
+            case AttachPhase::AwaitingFirstSession: return "the daemon is busy and sent no session in time";
+        }
+        return "timed out waiting for the daemon";
     }
     [[nodiscard]] std::string connectClosedMessage() const override
     {
@@ -994,6 +1014,15 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @see Config::resumeFallback. Under _mutex: read on the reactor as a reconnect is made, and changed by
     /// resumeAsLaunch() on the GUI thread.
     ResumeFallback _resumeFallback;
+    EmptyWorkspace _emptyWorkspace; ///< @see Config::emptyWorkspace
+    /// Whether the first tab was asked of the daemon (EmptyWorkspace::OpenFirstTab): once per connection.
+    /// Under _mutex.
+    enum class FirstTab : uint8_t
+    {
+        NotAsked = 0,
+        Asked,
+    };
+    FirstTab _firstTab = FirstTab::NotAsked;
     SwitchRequests _switchRequests;          ///< @see Config::switchRequests
     std::string _profileName;                ///< Stated in every ClientHello.
     std::filesystem::path _workingDirectory; ///< Stated in the first connection's ClientHello only.

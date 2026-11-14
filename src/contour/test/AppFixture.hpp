@@ -201,6 +201,47 @@ class TestApp
         parseTerminalVerb();
     }
 
+    /// Marks a TestApp whose window switching is the app's own WindowSwitcher, not the recording double.
+    struct RealWindowSwitching
+    {
+    };
+
+    /// A test app that dispatches switches to the app's real WindowSwitcher, built as the application builds
+    /// it: on the session manager that is not constructed yet. Its switching() is not available.
+    explicit TestApp(RealWindowSwitching /*real*/):
+        _sessionFiles { &_fileSystem },
+        _app(
+            _environment,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            defaultSpeech(),
+            makeOutputFiles(),
+            clocks(),
+            testHostIdentity(),
+            _sessionFiles,
+            nullptr,
+            linkServices(),
+            nullptr,
+            std::make_unique<InMemoryWindowPositionStore>(),
+            contour::platform::nullAppearanceServices(),
+            core::platform::defaultSteadyClock().now(),
+            settingsWindowFactory(),
+            shellIntegrationServices(),
+            scriptedDragEndProbe(),
+            nullptr,
+            nullptr, // the real switcher
+            fakeSwitchDirectory(),
+            [this](int status) { _exitCodes.push_back(status); },
+            bootstrapPromptFactory(),
+            scriptedStartupLister(),
+            nullptr,
+            contour::platform::ApplicationReadiness::State::Ready)
+    {
+        parseTerminalVerb();
+    }
+
     /// Where the sessions of a test app look up paths, link detection's probes included.
     enum class SessionFiles : uint8_t
     {

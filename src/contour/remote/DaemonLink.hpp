@@ -67,6 +67,14 @@ enum class WindowAdoption : uint8_t
 /// workspace it shows now, or why it does not.
 using SwitchLanded = std::function<void(std::expected<uint64_t, std::string>)>;
 
+/// What a switch that has not landed yet waits for.
+enum class SwitchWait : uint8_t
+{
+    ForTarget = 0, ///< The workspace to show: the daemon is yet to state it, or to say it holds a tab.
+    ForFirstTab,   ///< A tab: the daemon stated the workspace, and it holds none. That is for the user to
+                   ///< end, so no deadline bounds it (WindowSwitcher), but a lost connection does.
+};
+
 /// A link a window switch started (WindowSwitcher), and what it does once its connection shows the workspace
 /// its intent names (a new one for proto::AttachIntentKind::NewWorkspace).
 struct SwitchArrival
@@ -288,6 +296,11 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     [[nodiscard]] std::expected<void, std::string> selectWorkspace(uint64_t workspace,
                                                                    SwitchLanded landed = {});
 
+    /// @return What the switch under way, or the one this link's arrival tells, waits for: ForFirstTab once
+    ///         the connection's settled layout of its target workspace is here and holds no tab; ForTarget
+    ///         otherwise, and when no switch is under way.
+    [[nodiscard]] SwitchWait switchWait() const;
+
     /// A switch selectWorkspace() started that is not wanted any more (it took too long): the connection
     /// selects again what the window displays, the window stays as it was, and the switch's landed callback
     /// is told @p reason. No-op when no switch of @p window is under way.
@@ -437,6 +450,14 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     /// @return The daemon workspace a link a switch started shows: the one its connection selects; none
     ///         before the daemon said.
     [[nodiscard]] std::optional<uint64_t> arrivalWorkspace() const;
+    /// @return The daemon workspace the switch under way waits to see shown: the pending switch's, once the
+    ///         daemon selects it; the arrival workspace of a link a switch started; none otherwise.
+    [[nodiscard]] std::optional<uint64_t> switchTarget() const;
+    /// Latches ForFirstTab when the switch target's settled layout is here and holds no tab. Called as
+    /// layouts arrive.
+    void noteSwitchTargetSettled();
+    /// Ends a wait for a first tab, if one was latched, and logs how it ended.
+    void endSwitchWait(std::string_view how);
     /// @return The workspace the window is to display: what the connection selects, unless a switch that was
     ///         given up still waits for its revert (@see cancelSwitch()).
     [[nodiscard]] uint64_t followedSelection();
@@ -551,6 +572,9 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
         SwitchLanded landed; ///< Told how it went.
     };
     std::optional<PendingSwitch> _switch;
+    /// What the switch under way waits for (switchWait()): decided as the target's settled layout arrives
+    /// (noteSwitchTargetSettled()), and back to ForTarget when the switch ends (endSwitchWait()).
+    SwitchWait _switchWait = SwitchWait::ForTarget;
     /// What a given-up switch selected again (cancelSwitch()): until the daemon states it, a batch still
     /// stating the given-up selection is not followed. Forgotten with the connection.
     std::optional<uint64_t> _revertTo;

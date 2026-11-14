@@ -8256,6 +8256,132 @@ TEST_CASE("a Goodbye frees the workspace at once, and is refused without client-
     }
 }
 
+TEST_CASE("an OpenFirstTab opens a shell in the empty workspace selected, and is refused without "
+          "launch-first-tab",
+          "[vthost][native][launch-first-tab]")
+{
+    auto const hello = [](uint64_t workspace, proto::Capability capability) {
+        auto hello = intentHello(proto::AttachIntentKind::Select, { workspace });
+        hello.capabilities = proto::CapabilitySet::of({ proto::Capability::AttachIntent, capability });
+        return hello;
+    };
+    auto const tabsOf = [](NativeHarness& h, uint64_t workspace) {
+        return h.host.model().workspace(vtworkspace::WorkspaceId { workspace })->tabCount();
+    };
+
+    SECTION("asked of an empty workspace: its first tab is opened, once")
+    {
+        auto h = NativeHarness {};
+        REQUIRE(h.host.createTab() != nullptr);
+        auto const empty = h.host.createEmptyWorkspace().id().value;
+        std::ignore = h.exchangeUntil({ hello(empty, proto::Capability::LaunchFirstTab),
+                                        proto::OpenFirstTab { .workspace = empty },
+                                        proto::OpenFirstTab { .workspace = empty },
+                                        proto::FetchImage { .imageId = 4242 } },
+                                      imageGoneArrived);
+        CHECK(h.session->selectedWorkspace() == empty);
+        CHECK(tabsOf(h, empty) == 1); // the second ask found it holding one
+    }
+    SECTION("asked of a workspace that holds a tab: nothing is opened")
+    {
+        auto h = NativeHarness {};
+        REQUIRE(h.host.createTab() != nullptr);
+        auto const first = h.host.workspaceId().value;
+        std::ignore = h.exchangeUntil({ hello(first, proto::Capability::LaunchFirstTab),
+                                        proto::OpenFirstTab { .workspace = first },
+                                        proto::FetchImage { .imageId = 4242 } },
+                                      imageGoneArrived);
+        CHECK(tabsOf(h, first) == 1);
+    }
+    SECTION("asked of a workspace the connection selects no more: nothing is opened")
+    {
+        auto h = NativeHarness {};
+        REQUIRE(h.host.createTab() != nullptr);
+        auto const first = h.host.workspaceId().value;
+        auto const empty = h.host.createEmptyWorkspace().id().value;
+        auto moved = hello(empty, proto::Capability::LaunchFirstTab);
+        moved.capabilities = proto::CapabilitySet::of({ proto::Capability::AttachIntent,
+                                                        proto::Capability::LaunchFirstTab,
+                                                        proto::Capability::DaemonFollow });
+        // The selection moved on between the client's send and the daemon's read.
+        std::ignore = h.exchangeUntil({ moved,
+                                        proto::SelectWorkspace { .workspace = first },
+                                        proto::OpenFirstTab { .workspace = empty },
+                                        proto::FetchImage { .imageId = 4242 } },
+                                      imageGoneArrived);
+        CHECK(h.session->selectedWorkspace() == first);
+        CHECK(tabsOf(h, empty) == 0);
+    }
+    SECTION("asked of a workspace that does not exist: nothing is opened, and nothing breaks")
+    {
+        auto h = NativeHarness {};
+        REQUIRE(h.host.createTab() != nullptr);
+        auto const first = h.host.workspaceId().value;
+        std::ignore = h.exchangeUntil({ hello(first, proto::Capability::LaunchFirstTab),
+                                        proto::OpenFirstTab { .workspace = 987654 },
+                                        proto::FetchImage { .imageId = 4242 } },
+                                      imageGoneArrived);
+        CHECK(tabsOf(h, first) == 1);
+    }
+    SECTION("asked without the capability: refused, and nothing is opened")
+    {
+        auto h = NativeHarness {};
+        REQUIRE(h.host.createTab() != nullptr);
+        auto const empty = h.host.createEmptyWorkspace().id().value;
+        auto const received = h.exchangeUntil({ hello(empty, proto::Capability::Heartbeat),
+                                                proto::OpenFirstTab { .workspace = empty },
+                                                proto::FetchImage { .imageId = 4242 } },
+                                              imageGoneArrived);
+        CHECK(std::ranges::any_of(received, [](auto const& frame) {
+            return std::holds_alternative<proto::Unsupported>(frame.pdu);
+        }));
+        CHECK(tabsOf(h, empty) == 0);
+    }
+}
+
+namespace
+{
+
+/// Once @p workspace holds its one session: its application writes, as a shell's first output does, and the
+/// flush is kicked.
+Task<void> writeOnceTabOpened(NativeHarness* h, uint64_t workspace)
+{
+    co_await awaitGate(&h->loop, [h, workspace] { return sessionsOf(h->host, workspace).size() == 1; });
+    auto const id = vtworkspace::SessionId { *sessionsOf(h->host, workspace).begin() };
+    h->host.terminal(id)->writeToScreen("first output");
+    h->session->sessionScreenUpdated(id);
+}
+
+} // namespace
+
+// A tab opened in the selected workspace is snapshotted when its layout goes out (requestArrivedSnapshots),
+// and its first output also asks for a mirror: the session is mirrored and snapshotted once, not twice.
+TEST_CASE("a session spawned in the selected workspace is snapshotted once, whatever its first output does",
+          "[vthost][native][launch-first-tab]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const empty = h.host.createEmptyWorkspace().id().value;
+    auto hello = intentHello(proto::AttachIntentKind::Select, { empty });
+    hello.capabilities =
+        proto::CapabilitySet::of({ proto::Capability::AttachIntent, proto::Capability::LaunchFirstTab });
+
+    auto const received = h.exchangeUntil(
+        { hello, proto::OpenFirstTab { .workspace = empty } },
+        imageGoneArrived,
+        writeOnceTabOpened(&h, empty),
+        probeOnce(&h.loop, h.pair.second.get(), [&h] { return snapshotRunCount(h.received) >= 1; }));
+
+    auto const spawned = sessionsOf(h.host, empty);
+    REQUIRE(spawned.size() == 1);
+    CHECK(snapshotSessions(received) == spawned);
+    CHECK(snapshotRunCount(received) == 1);
+    CHECK(std::ranges::count_if(
+              received,
+              [](auto const& frame) { return std::holds_alternative<proto::SessionState>(frame.pdu); })
+          == 1);
+}
+
 TEST_CASE("a connection whose only workspace ends selects none and creates none",
           "[vthost][native][daemon-follow]")
 {

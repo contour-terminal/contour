@@ -48,6 +48,15 @@
 
 using contour::test::TestApp;
 
+// The switcher is built before the session manager it works on (the app wires the two cyclically), so
+// constructing it must not touch the manager: the app starting at all is the proof.
+TEST_CASE("the app constructs with its real WindowSwitcher", "[contour][app][switch]")
+{
+    TestApp app { TestApp::RealWindowSwitching {} };
+
+    CHECK(app.app().profileName() == "main");
+}
+
 TEST_CASE("ContourGuiApp resolves the default profile and its config", "[contour][app]")
 {
     TestApp app;

@@ -354,6 +354,10 @@ namespace
     {
         return std::to_underlying(PduType::Goodbye);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(OpenFirstTab const&) noexcept
+    {
+        return std::to_underlying(PduType::OpenFirstTab);
+    }
     [[nodiscard]] constexpr uint64_t tagOf(CloseWorkspace const&) noexcept
     {
         return std::to_underlying(PduType::CloseWorkspace);
@@ -1049,6 +1053,11 @@ namespace
 
     void encodeBody(Writer&, Goodbye const&)
     {
+    }
+
+    void encodeBody(Writer& out, OpenFirstTab const& pdu)
+    {
+        out.varint(pdu.workspace);
     }
 
     void encodeSoftGlyph(Writer& out, WireSoftGlyph const& glyph)
@@ -2364,6 +2373,15 @@ namespace
         return Goodbye {};
     }
 
+    DecodeResult decodeOpenFirstTab(Reader& in)
+    {
+        auto pdu = OpenFirstTab {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.workspace, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
     DecodeResult decodeSelectWorkspace(Reader& in)
     {
         auto pdu = SelectWorkspace {};
@@ -2843,6 +2861,7 @@ namespace
         DecodeRow { PduType::SetWorkspaceLabel, decodeSetWorkspaceLabel },
         DecodeRow { PduType::CloseWorkspace, decodeCloseWorkspace },
         DecodeRow { PduType::Goodbye, decodeGoodbye },
+        DecodeRow { PduType::OpenFirstTab, decodeOpenFirstTab },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

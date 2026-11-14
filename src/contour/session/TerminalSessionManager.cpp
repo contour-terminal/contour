@@ -2764,6 +2764,7 @@ void TerminalSessionManager::removeWindowController(window::WindowId windowId)
     }
     _inProcessDirectories.erase(windowId);
     _focusOrder.erase(windowId);
+    _windowSwitching.windowClosed(workspace);
     _app.refreshWindowAttention();
     _taskbarProgressSink.removeWindow(windowId.value);
     if (controller != nullptr)
