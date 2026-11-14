@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /// @file
-/// The operating system's half of DaemonBinary.hpp: the process id, and the replacement of the process
-/// image.
+/// The operating system's half of DaemonBinary.hpp: the replacement of the process image. The process id
+/// is ProcessId.cpp's, in vthost_image beside DaemonBinary.cpp, which asks for it.
 
 // clang-format off
 #ifdef _WIN32
@@ -71,15 +71,6 @@ std::unique_ptr<ProcessImageReplacer> makeNativeProcessImageReplacer()
     return std::make_unique<ExecReplacer>();
 #else
     return std::make_unique<UnsupportedReplacer>();
-#endif
-}
-
-std::uint64_t currentProcessId() noexcept
-{
-#ifdef _WIN32
-    return ::GetCurrentProcessId();
-#else
-    return static_cast<std::uint64_t>(::getpid());
 #endif
 }
 
