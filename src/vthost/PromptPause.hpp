@@ -6,6 +6,9 @@
 /// outer deadline cannot see a question put to the user, as AttachBudget::promptsOpen's comment says of ssh.
 /// Used for the passphrase of an `identity_file`, asked while the handshake runs.
 
+#include <core/async/Task.hpp>
+#include <core/platform/Clock.hpp>
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -83,16 +86,23 @@ class PausingAskpassBroker final: public IAskpassBroker
 {
   public:
     /// @param inner Opens the sessions.
-    /// @param pause Told how long their prompts are open; shared with whoever reads it.
-    PausingAskpassBroker(std::shared_ptr<IAskpassBroker> inner, std::shared_ptr<PromptPause> pause):
-        _inner { std::move(inner) }, _pause { std::move(pause) }
+    /// @param pause Told how long their prompts are open, and how long the wait for @p inner to serve takes;
+    ///        shared with whoever reads it.
+    /// @param clock Measures that wait; borrowed.
+    PausingAskpassBroker(std::shared_ptr<IAskpassBroker> inner,
+                         std::shared_ptr<PromptPause> pause,
+                         core::platform::IClock const& clock = core::platform::defaultSteadyClock()):
+        _inner { std::move(inner) }, _pause { std::move(pause) }, _clock { clock }
     {
     }
 
     /// @copydoc IAskpassBroker::whenServing
+    /// The wait counts as prompt time: it waits for the application that asks the prompts, which the GUI may
+    /// still be making, and the attach's deadline must not be charged for it.
     [[nodiscard]] core::async::Task<std::expected<void, std::string>> whenServing() override
     {
-        return _inner->whenServing();
+        auto const waiting = Waiting { *_pause, _clock };
+        co_return co_await _inner->whenServing();
     }
 
     /// @copydoc IAskpassBroker::open
@@ -106,6 +116,35 @@ class PausingAskpassBroker final: public IAskpassBroker
     }
 
   private:
+    /// Counts the time from its construction to its destruction as one prompt session of a PromptPause.
+    class Waiting
+    {
+      public:
+        Waiting(PromptPause& pause, core::platform::IClock const& clock):
+            _pause { pause },
+            _clock { clock },
+            _began { clock.now() },
+            _id { _pause.open([this] { return elapsed(); }) }
+        {
+        }
+        ~Waiting() { _pause.close(_id, elapsed()); }
+        Waiting(Waiting const&) = delete;
+        Waiting& operator=(Waiting const&) = delete;
+        Waiting(Waiting&&) = delete;
+        Waiting& operator=(Waiting&&) = delete;
+
+      private:
+        [[nodiscard]] std::chrono::milliseconds elapsed() const
+        {
+            return std::chrono::ceil<std::chrono::milliseconds>(_clock.now() - _began);
+        }
+
+        PromptPause& _pause;
+        core::platform::IClock const& _clock;
+        core::platform::SteadyTimePoint _began;
+        PromptPause::SessionId _id;
+    };
+
     class Session final: public IAskpassSession
     {
       public:
@@ -138,6 +177,7 @@ class PausingAskpassBroker final: public IAskpassBroker
 
     std::shared_ptr<IAskpassBroker> _inner;
     std::shared_ptr<PromptPause> _pause;
+    core::platform::IClock const& _clock;
 };
 
 } // namespace vthost

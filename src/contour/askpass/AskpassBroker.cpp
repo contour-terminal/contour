@@ -508,13 +508,17 @@ AskpassBroker::AskpassBroker(std::shared_ptr<AskpassPromptRouter> router,
     _clock { clock },
     _config { std::move(config) },
     _random { random },
-    _worker { std::make_unique<QObject>() }
+    _worker { std::make_unique<QObject>() },
+    _followed { std::nullopt }
 {
     Require(_promptIds != nullptr);
     Require(_application != nullptr);
-    // Not started here: startServing() starts it, once the application object exists.
     _thread.setObjectName(QStringLiteral("askpass-broker"));
     _worker->moveToThread(&_thread);
+    // Told the application object's state at once -- the thread starts here if it exists already -- and
+    // every later one, on the thread that settles it.
+    _followed.emplace(_application->subscribe(
+        [this](platform::ApplicationReadiness::State application) { follow(application); }));
 }
 
 AskpassBroker::AskpassBroker(IAskpassPromptSink& sink,
@@ -536,73 +540,97 @@ AskpassBroker::AskpassBroker(IAskpassPromptSink& sink,
 
 void AskpassBroker::shutdown()
 {
-    _state = State::ShutDown;
-    _state.notify_all();
+    {
+        auto const lock = std::scoped_lock { _lifeMutex };
+        end(State::ShutDown);
+    }
     _router->shutdown();
 }
 
 AskpassBroker::~AskpassBroker()
 {
+    // Why no QThread is destroyed while it runs, nor stopped while it is being started: a start happens only
+    // in follow(), on the thread that settles the readiness, under the readiness's lock and _lifeMutex.
+    // Dropping the subscription takes the readiness's lock, so once it returns no follow() runs or will run;
+    // taking _lifeMutex after it then finds any start that did run complete. What is left is a thread that
+    // either never started or runs, and quit() and wait() handle both.
+    _followed.reset();
+    {
+        auto const lock = std::scoped_lock { _lifeMutex };
+        end(State::ShutDown);
+    }
     // Every session is gone by now (they are destroyed before the broker), so nothing is left on the thread.
     _thread.quit();
     _thread.wait();
 }
 
-std::expected<void, std::string> AskpassBroker::startServing()
+void AskpassBroker::follow(platform::ApplicationReadiness::State application)
 {
-    auto observed = _state.load();
-    if (observed == State::NotStarted)
+    auto const lock = std::scoped_lock { _lifeMutex };
+    switch (application)
     {
-        // Qt runs no event loop on a thread of its own before the application object exists.
-        switch (_application->state())
-        {
-            case platform::ApplicationReadiness::State::Ready: break;
-            case platform::ApplicationReadiness::State::Pending:
-                return std::unexpected { std::string {
-                    "cannot serve ssh's prompts: the application has not started yet" } };
-            case platform::ApplicationReadiness::State::Abandoned:
-                return std::unexpected { std::string {
-                    "cannot serve ssh's prompts: the application did not start" } };
-        }
-        if (_state.compare_exchange_strong(observed, State::Starting))
-        {
+        case platform::ApplicationReadiness::State::Pending: return;
+        case platform::ApplicationReadiness::State::Ready:
+            // Only from NotStarted: a shutdown() that came first is final, and checked under the same lock.
+            if (_state.load() != State::NotStarted)
+                return;
+            if (_beforeThreadStart)
+                _beforeThreadStart();
             _thread.start();
-            auto const outcome = _thread.isRunning() ? State::Serving : State::Failed;
-            // Not over a shutdown() that came meanwhile.
-            auto starting = State::Starting;
-            if (_state.compare_exchange_strong(starting, outcome) && outcome == State::Failed)
-                errorLog()("askpass: the prompt server's thread failed to start; ssh runs without "
-                           "prompts");
-            _state.notify_all();
-            observed = _state.load();
-        }
+            if (!_thread.isRunning())
+            {
+                errorLog()("askpass: the prompt server's thread failed to start; ssh runs without prompts");
+                end(State::Failed);
+                return;
+            }
+            _state = State::Serving;
+            std::ignore = _outcome.set(std::expected<void, std::string> {});
+            return;
+        case platform::ApplicationReadiness::State::Abandoned: end(State::Abandoned); return;
+        case platform::ApplicationReadiness::State::Closed: end(State::Closed); return;
     }
-    // Another caller is starting it: QThread::start() returns as soon as the thread exists.
-    while (observed == State::Starting)
-    {
-        _state.wait(State::Starting);
-        observed = _state.load();
-    }
-    switch (observed)
+}
+
+void AskpassBroker::end(State to)
+{
+    auto const current = _state.load();
+    if (current != State::NotStarted && current != State::Serving)
+        return;
+    _state = to;
+    // A thread that runs is left to the destructor: it stops and joins it.
+    std::ignore = _outcome.set(serving());
+}
+
+std::expected<void, std::string> AskpassBroker::serving() const
+{
+    switch (_state.load())
     {
         case State::Serving: return {};
+        case State::NotStarted:
+            return std::unexpected { std::string {
+                "cannot serve ssh's prompts: the application has not started yet" } };
         case State::Failed:
             return std::unexpected { std::string {
                 "cannot serve ssh's prompts: the prompt server's thread failed to start" } };
+        case State::Abandoned:
+            return std::unexpected { std::string {
+                "cannot serve ssh's prompts: the application did not start" } };
+        case State::Closed:
+            return std::unexpected { std::string { "cannot serve ssh's prompts: the application has quit" } };
         case State::ShutDown:
             return std::unexpected { std::string { "the application no longer answers ssh's prompts" } };
-        case State::NotStarted:
-        case State::Starting: break;
     }
-    return std::unexpected { std::string { "cannot serve ssh's prompts: the prompt server did not start" } };
+    return std::unexpected { std::string { "cannot serve ssh's prompts" } };
 }
 
 core::async::Task<std::expected<void, std::string>> AskpassBroker::whenServing()
 {
-    // Parks the awaiting coroutine, never its loop, until the GUI has made the application object; a stop of
-    // that coroutine (its link stopped, its attach given up) ends the wait.
-    std::ignore = co_await _application->whenSettled();
-    co_return startServing();
+    // Parks the awaiting coroutine, never its loop, until the thread started or never will; a stop of that
+    // coroutine (its link stopped, its attach given up) ends the wait. What it says may have changed since
+    // (the application is going): the current state has the last word.
+    if (auto const outcome = co_await _outcome.wait(); !outcome)
+        co_return outcome;
+    co_return serving();
 }
 
 std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> AskpassBroker::open(
@@ -614,8 +642,8 @@ std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> AskpassBrok
 std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> AskpassBroker::open(
     vthost::SshTarget const& target, AskpassRouteId route)
 {
-    if (auto const serving = startServing(); !serving)
-        return std::unexpected { serving.error() };
+    if (auto const served = serving(); !served)
+        return std::unexpected { served.error() };
     auto state = std::make_shared<SessionState>();
     auto nonce = randomHex(_random, 32).toStdString();
     auto const name = QString::fromLatin1("contour-askpass-") + QString::fromLatin1(randomHex(_random, 8));

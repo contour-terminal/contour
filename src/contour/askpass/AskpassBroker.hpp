@@ -8,6 +8,7 @@
 #include <contour/askpass/AskpassPromptRouter.hpp>
 #include <contour/askpass/AskpassPromptSink.hpp>
 #include <contour/platform/ApplicationReadiness.hpp>
+#include <contour/platform/AsyncLatch.hpp>
 
 #include <core/Random.hpp>
 #include <core/platform/Clock.hpp>
@@ -22,6 +23,8 @@
 #include <expected>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 
 #include <vthost/Askpass.hpp>
@@ -52,11 +55,13 @@ struct AskpassBrokerConfig
 /// there before it returns, from whichever thread it is called on (so a failure to listen is its error, and
 /// the transport runs without prompts), and a session closes its server there when destroyed on any thread.
 ///
-/// The thread starts only once the application object exists: Qt runs no event loop without it, and
+/// The thread runs only while the application object exists: Qt runs no event loop without it, and
 /// `contour client --host` makes the broker, and gets to its first session, while the GUI is still booting --
 /// a thread started then warned "QEventLoop: Cannot be used without QCoreApplication" and on Linux crashed
-/// the process now and again. whenServing() waits for that object without holding up the awaiting loop, and
-/// starts the thread; open() never waits, and fails while the object is not there.
+/// the process now and again. So the thread is started by whoever says the object exists
+/// (ApplicationReadiness::markReady(), on the GUI thread), or by the constructor where it exists already;
+/// never by a session's loop. Once the object will not come, or is going, nothing starts it. whenServing()
+/// waits for the outcome without holding up the awaiting loop; open() never waits.
 /// All socket work (reading requests, the nonce check, the caps and timeouts, the writing of answers) runs
 /// on that thread; only the sink is asked, and told of a helper's going, on the thread the broker was made
 /// on, by queued calls. A helper that connects before that thread serves events waits for its answer, and so
@@ -69,7 +74,7 @@ class AskpassBroker final: public QObject, public vthost::IAskpassBroker
     ///        run an event loop for any prompt to be asked.
     /// @param promptIds Hands out each prompt's id; shared with the prompts the application asks itself.
     /// @param application Whether the application object exists, which the broker's thread waits for; not
-    ///        null.
+    ///        null. The thread is started on the thread that marks it ready, or here if it is ready already.
     /// @param executablePath The program ssh runs as its askpass helper: this application's own.
     /// @param random Where each session's nonce and endpoint name come from; borrowed. Called from whichever
     ///        thread open() is.
@@ -112,11 +117,8 @@ class AskpassBroker final: public QObject, public vthost::IAskpassBroker
     /// transport factories hold it too.
     void shutdown();
 
-    /// @return Whether the broker's thread runs, serving sessions. Any thread.
-    [[nodiscard]] bool isServing() const noexcept { return _state.load() == State::Serving; }
-
     /// @copydoc vthost::IAskpassBroker::whenServing
-    /// Waits for the application object, then starts the broker's thread.
+    /// Waits, without holding up the awaiting loop, until the broker's thread has started or never will.
     [[nodiscard]] core::async::Task<std::expected<void, std::string>> whenServing() override;
 
     /// @copydoc vthost::IAskpassBroker::open
@@ -132,10 +134,30 @@ class AskpassBroker final: public QObject, public vthost::IAskpassBroker
         vthost::SshTarget const& target, AskpassRouteId route);
 
   private:
-    /// Starts the broker's thread if the application object exists and nobody started it yet; never waits for
-    /// the object.
-    /// @return Why no session can be served, if none can.
-    [[nodiscard]] std::expected<void, std::string> startServing();
+    friend struct AskpassBrokerTestAccess;
+
+    /// Where the broker's life stands. Every state but NotStarted and Serving is final, and only Serving
+    /// serves.
+    enum class State : std::uint8_t
+    {
+        NotStarted = 0, ///< The application object does not exist yet: nothing is served, nothing started.
+        Serving,        ///< The thread runs: sessions are served.
+        Failed,         ///< The thread did not start.
+        Abandoned,      ///< The application object will not be made: the thread never starts.
+        Closed,         ///< The application object is going: nothing more is served.
+        ShutDown,       ///< shutdown() ran: nothing more is served.
+    };
+
+    /// Follows the application object: starts the thread once it exists, and ends the service once it will
+    /// not come or is going. Runs on the thread that settles @p application's readiness, under its lock.
+    void follow(platform::ApplicationReadiness::State application);
+
+    /// Moves to the final state @p to, unless the broker is in one already, and tells the waiters.
+    /// _lifeMutex held.
+    void end(State to);
+
+    /// @return Whether a session can be opened now, and if not, why.
+    [[nodiscard]] std::expected<void, std::string> serving() const;
 
     std::shared_ptr<AskpassPromptRouter> _router;
     std::shared_ptr<AskpassPromptIds> _promptIds;
@@ -144,20 +166,21 @@ class AskpassBroker final: public QObject, public vthost::IAskpassBroker
     core::platform::IClock const& _clock;
     AskpassBrokerConfig _config;
     core::IRandom& _random;
-    /// Where the broker's life stands.
-    enum class State : std::uint8_t
-    {
-        NotStarted = 0, ///< The broker's thread has not started yet: the first startServing() starts it.
-        Starting,       ///< One startServing() is starting the thread; the others wait for it.
-        Serving,        ///< The thread runs: sessions are served.
-        Failed,         ///< The thread did not start: no session can be served.
-        ShutDown,       ///< shutdown() ran: nothing is served any more.
-    };
+    /// Held across every change of _state, the thread's start included, and by the destructor before it
+    /// stops the thread: so a start is never half done when anyone else looks, or when the thread is stopped.
+    std::mutex _lifeMutex;
+    /// Written under _lifeMutex, read without it: open() and whenServing() never wait for a start.
     std::atomic<State> _state { State::NotStarted };
+    /// Told once whether the broker serves: when its thread started, or it never will.
+    platform::AsyncLatch<std::expected<void, std::string>> _outcome;
+    /// Runs just before the thread is started, with _lifeMutex held: a test's seam for the interleavings.
+    std::function<void()> _beforeThreadStart;
     QThread _thread; ///< Serves the sessions' servers.
     /// Lives on _thread; the context the work for it is posted to. Declared after the thread, which is
     /// stopped and joined by the destructor's body, before it is destroyed.
     std::unique_ptr<QObject> _worker;
+    /// Follows _application; dropped first in the destructor, so that no start begins once it runs.
+    std::optional<platform::ApplicationReadiness::Subscription> _followed;
 };
 
 /// The broker as one window sees it: every session it opens shows its prompts in that window.
