@@ -19,23 +19,29 @@ Item {
     id: root
     objectName: "workspaceChip"
 
-    /// A click, a tap, the accessibility press action, or Space/Return while focused.
+    /// A click, a tap, the accessibility press action, or Space/Return while focused. The chip answers it
+    /// itself, by opening the switcher below it; a host that needs more listens to it as well.
     signal clicked()
 
     /// The window's sidebar model, which names the workspace and decides the marker.
     required property var sidebar
-    /// The window's controller, which owns the chip's model (`chip`).
+    /// The window's controller, which owns the chip's model (`chip`) and opens the switcher.
     required property var controller
-    /// How much of the chip fits, a window::LocationChipFit as its underlying value: the title bar's to set,
-    /// from `fitWidths` and the room it leaves (never from the chip's own width, which would loop).
-    property int fit: 0
+    /// The room the chip has to fit itself in, in pixels. The title band's chip is fitted by the band's
+    /// allocation instead, which sets `fit` from the room it shares with the tabs.
+    property real available: 0
+    /// How much of the chip fits, a window::LocationChipFit as its underlying value: by default the first step
+    /// whose width fits `available`, never from the chip's own width (which would loop).
+    property int fit: root.chip.fitFor(Object.assign({ available: root.available }, root.fitWidths))
     /// Whether the chip names the daemon alone (`local ▾`, the control that heads the sidebar) rather than the
     /// daemon and the workspace: the same chip, the workspace segment left out.
     property bool daemonOnly: false
-    /// Whether keyboard focus is on the chip and the chrome says so: the host's to set.
-    property bool focusRingShown: false
+    /// Whether keyboard focus is in the chrome's toolbar: with the chip's own focus, the chip wears the ring.
+    property bool toolbarHasFocus: false
+    /// Whether keyboard focus is on the chip and the chrome says so.
+    readonly property bool focusRingShown: root.activeFocus && root.toolbarHasFocus
     /// Whether the dropdown the chip opened is open: the chip wears its pressed fill meanwhile.
-    property bool isOpen: false
+    readonly property bool isOpen: !!root.controller && !!root.controller.isWorkspaceDropdownOpen
     // Whether the dropdown was open as the press began: that press closed it, and its release must not open
     // it again (ui-ux rule 2).
     property bool _wasOpenAtPress: false
@@ -148,6 +154,9 @@ Item {
             event.accepted = true
         }
     }
+
+    onClicked: if (root.controller && root.controller.showWorkspaceDropdown)
+        root.controller.showWorkspaceDropdown(root.dropdownAnchor())
 
     implicitWidth: row.implicitWidth + (root.bracketed ? 0 : chromeStyle.space.s5 + chromeStyle.space.s5)
     implicitHeight: chromeStyle.size.hostChip

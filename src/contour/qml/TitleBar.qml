@@ -329,6 +329,9 @@ Item {
     // and centre are and whether its sidebar is on screen. `chip` keeps a lightweight mock controller
     // (offscreen tests) without the chip local.
     readonly property string chipPlace: root.controller && root.controller.chip ? root.controller.chip.place : "none"
+    // Whether the daemon control stands in the header bar's sidebar part, in the heading's place: the one
+    // answer the heading's visibility and the control's loading both follow.
+    readonly property bool daemonChipInHeader: sidebarPart.shown && root.chipPlace === "sidebar" && !!root.controller
 
     // How the band's room is shared between the location chip and the tab well (UiStyleProvider.allocateBand):
     // the bar less every other part, the drag reserve and the strip's fixed parts is what the two share, and the
@@ -479,7 +482,7 @@ Item {
 
             Text {
                 objectName: "headerSidebarTitle"
-                visible: root.chipPlace !== "sidebar"
+                visible: !root.daemonChipInHeader
                 anchors.left: parent.left
                 anchors.right: sidebarPartRow.left
                 anchors.verticalCenter: parent.verticalCenter
@@ -495,22 +498,16 @@ Item {
             // The daemon control, in the heading's place while the sidebar shows: the band holds no chip then.
             Loader {
                 id: headerDaemonChipSlot
-                active: sidebarPart.shown && root.chipPlace === "sidebar" && !!root.controller
+                active: root.daemonChipInHeader
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
                 sourceComponent: WorkspaceChip {
-                    id: headerDaemonChip
                     objectName: "headerSidebarDaemonChip"
                     daemonOnly: true
                     sidebar: root.controller.sidebar
                     controller: root.controller
-                    fit: root.controller.chip.fitFor(Object.assign({ available: Math.max(0, sidebarPartRow.x
-                                                                                         - chromeStyle.space.s3) },
-                                                                  headerDaemonChip.fitWidths))
-                    focusRingShown: activeFocus && root.toolbarHasFocus
-                    isOpen: !!root.controller && !!root.controller.isWorkspaceDropdownOpen
-                    onClicked: if (root.controller && root.controller.showWorkspaceDropdown)
-                        root.controller.showWorkspaceDropdown(headerDaemonChip.dropdownAnchor())
+                    available: Math.max(0, sidebarPartRow.x - chromeStyle.space.s3)
+                    toolbarHasFocus: root.toolbarHasFocus
                 }
             }
 
@@ -568,15 +565,12 @@ Item {
             Layout.leftMargin: shown ? root.gap : 0
             Layout.rightMargin: shown ? root.gap : 0
             sourceComponent: WorkspaceChip {
-                id: workspaceChip
                 sidebar: root.controller.sidebar
                 controller: root.controller
-                // The step the room allows, from the chip's measured steps: its own width never feeds it.
+                // The step the band's allocation gives it from the chip's measured steps: its own width never
+                // feeds it.
                 fit: root.bandAllocation.fit
-                focusRingShown: activeFocus && root.toolbarHasFocus
-                isOpen: !!root.controller && !!root.controller.isWorkspaceDropdownOpen
-                onClicked: if (root.controller && root.controller.showWorkspaceDropdown)
-                    root.controller.showWorkspaceDropdown(workspaceChip.dropdownAnchor())
+                toolbarHasFocus: root.toolbarHasFocus
             }
         }
 

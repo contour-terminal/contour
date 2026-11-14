@@ -156,8 +156,6 @@ Window {
         sidebar: ({ currentWorkspaceTitle: "contour", workspaceChipMarked: false,
                     workspaceChipGlyph: 0 })
         controller: hostWindow.switcherHost
-        isOpen: hostWindow.switcherHost.isWorkspaceDropdownOpen
-        onClicked: hostWindow.switcherHost.showWorkspaceDropdown(chip.dropdownAnchor())
     }
     Switcher {
         id: popup

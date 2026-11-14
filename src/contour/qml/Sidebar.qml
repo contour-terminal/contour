@@ -58,6 +58,9 @@ Rectangle {
     /// The daemon control heading the title row, while it shows there; null otherwise. A toolbar item: the
     /// chrome's keyboard walk visits it (Main.qml).
     readonly property Item daemonChip: daemonChipSlot.item
+    /// Whether the daemon control heads the title row, in the heading's place: the one answer the heading's
+    /// visibility and the control's loading both follow.
+    readonly property bool daemonChipShown: root.chipPlace === "sidebar" && !!root.controller && titleRow.visible
     /// The tree (a ListView), for the tests.
     readonly property alias tree: tree
 
@@ -197,7 +200,7 @@ Rectangle {
 
         Text {
             objectName: "sidebarTitle"
-            visible: chromeStyle.sidebar.named && root.chipPlace !== "sidebar"
+            visible: chromeStyle.sidebar.named && !root.daemonChipShown
             anchors.left: toggleButton.visible ? toggleButton.right : parent.left
             anchors.leftMargin: toggleButton.visible ? chromeStyle.space.s3
                               : chromeStyle.snapToCells(root.controlsInset) + chromeStyle.space.s4
@@ -216,25 +219,19 @@ Rectangle {
         // the toggle): the band holds no chip while the sidebar shows, so the daemon is named here alone.
         Loader {
             id: daemonChipSlot
-            active: root.chipPlace === "sidebar" && !!root.controller && titleRow.visible
+            active: root.daemonChipShown
             anchors.left: toggleButton.visible ? toggleButton.right : parent.left
             anchors.leftMargin: toggleButton.visible ? chromeStyle.space.s3
                               : chromeStyle.snapToCells(root.controlsInset) + chromeStyle.space.s4
             anchors.verticalCenter: parent.verticalCenter
             sourceComponent: WorkspaceChip {
-                id: daemonChip
                 objectName: "sidebarDaemonChip"
                 daemonOnly: true
                 sidebar: root.model
                 controller: root.controller
-                // The step the row's room allows (the filter and "+" buttons stand to its right).
-                fit: root.controller.chip.fitFor(Object.assign({ available: Math.max(0, titleButtons.x - daemonChipSlot.x
-                                                                                     - titleRow.gap) },
-                                                              daemonChip.fitWidths))
-                focusRingShown: activeFocus && (root.controller.focusedToolbarIndex ?? -1) >= 0
-                isOpen: !!root.controller && !!root.controller.isWorkspaceDropdownOpen
-                onClicked: if (root.controller && root.controller.showWorkspaceDropdown)
-                    root.controller.showWorkspaceDropdown(daemonChip.dropdownAnchor())
+                // The room the row has (the filter and "+" buttons stand to its right).
+                available: Math.max(0, titleButtons.x - daemonChipSlot.x - titleRow.gap)
+                toolbarHasFocus: (root.controller.focusedToolbarIndex ?? -1) >= 0
             }
         }
 
