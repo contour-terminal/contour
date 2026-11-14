@@ -1390,15 +1390,14 @@ void SessionHost::noteClientAttached(SessionStreamEvents* client)
         refreshAllWorkspaceGit();
 }
 
-void SessionHost::noteClientDetached(SessionStreamEvents const* client)
+void SessionHost::noteClientDetached(SessionStreamEvents const* client, DetachKind kind)
 {
     auto const counted = std::erase(_attachedClients, client) != 0;
     if (!counted)
         return;
     _focusSerials.erase(client);
     // A window that said it closes leaves its workspace free at once; a lost connection is a reconnect.
-    auto const closed = std::erase(_closingClients, client) != 0;
-    if (auto const shown = client->selectedWorkspace(); shown != 0 && !closed)
+    if (auto const shown = client->selectedWorkspace(); shown != 0 && kind == DetachKind::Dropped)
     {
         auto const now = _clocks.steady.now();
         std::erase_if(_reconnectHolds, [now](ReconnectHold const& hold) { return hold.until <= now; });
@@ -1430,8 +1429,6 @@ void SessionHost::noteFocus(SessionStreamEvents const& client, proto::WindowFocu
         return;
     if (focus == proto::WindowFocus::Focused)
         _focusSerials[&client] = ++_focusCounter;
-    if (focus == proto::WindowFocus::Closing && !std::ranges::contains(_closingClients, &client))
-        _closingClients.push_back(&client);
     settleRaiseRole();
 }
 

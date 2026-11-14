@@ -468,10 +468,10 @@ TEST_CASE("a workspace is Shown while some connection selects it, and Hidden oth
     // One window moving on leaves it shown by the other; the last one leaving hides it.
     first.selected = workspace + 1;
     CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Shown);
-    h.host.noteClientDetached(&second);
+    h.host.noteClientDetached(&second, vthost::DetachKind::Dropped);
     CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Hidden);
     CHECK(h.host.visibility(workspace + 1) == WorkspaceVisibility::Shown);
-    h.host.noteClientDetached(&first);
+    h.host.noteClientDetached(&first, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("a workspace whose window's connection dropped stays shown to an attach for the reconnect grace",
@@ -499,7 +499,7 @@ TEST_CASE("a workspace whose window's connection dropped stays shown to an attac
     auto window = SelectingClient {};
     window.selected = workspace;
     host.noteClientAttached(&window);
-    host.noteClientDetached(&window);
+    host.noteClientDetached(&window, vthost::DetachKind::Dropped);
 
     // Nobody shows it, but its window is reconnecting: a new window must not take it.
     CHECK(host.visibility(workspace) == WorkspaceVisibility::Hidden);
@@ -510,9 +510,10 @@ TEST_CASE("a workspace whose window's connection dropped stays shown to an attac
     CHECK(host.visibilityForAttach(workspace) == WorkspaceVisibility::Hidden);
 }
 
-TEST_CASE("a workspace whose window said it closes is offered to the very next attach",
+TEST_CASE("a workspace whose window closed on purpose is offered to the very next attach",
           "[vthost][host][visibility]")
 {
+    using vthost::DetachKind;
     using vthost::WorkspaceVisibility;
     auto h = HostHarness {};
     REQUIRE(h.host.createTab() != nullptr);
@@ -521,15 +522,14 @@ TEST_CASE("a workspace whose window said it closes is offered to the very next a
     auto closing = SelectingClient {};
     closing.selected = workspace;
     h.host.noteClientAttached(&closing);
-    h.host.noteFocus(closing, vthost::proto::WindowFocus::Closing);
-    h.host.noteClientDetached(&closing);
+    h.host.noteClientDetached(&closing, DetachKind::Closed);
     CHECK(h.host.visibilityForAttach(workspace) == WorkspaceVisibility::Hidden);
 
     // A drop with no word before it is a window reconnecting.
     auto dropped = SelectingClient {};
     dropped.selected = workspace;
     h.host.noteClientAttached(&dropped);
-    h.host.noteClientDetached(&dropped);
+    h.host.noteClientDetached(&dropped, DetachKind::Dropped);
     CHECK(h.host.visibilityForAttach(workspace) == WorkspaceVisibility::Shown);
 }
 
@@ -578,10 +578,10 @@ TEST_CASE("connectionViews lists the attached clients in attach order with what 
     CHECK(views[1].connection == second.id);
     CHECK(views[1].selected == 6);
 
-    h.host.noteClientDetached(&first);
+    h.host.noteClientDetached(&first, vthost::DetachKind::Dropped);
     REQUIRE(h.host.connectionViews().size() == 1);
     CHECK(h.host.connectionViews().front().connection == second.id);
-    h.host.noteClientDetached(&second);
+    h.host.noteClientDetached(&second, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("a client that does not follow the daemon is in no view and never raises",
@@ -602,8 +602,8 @@ TEST_CASE("a client that does not follow the daemon is in no view and never rais
     CHECK(views.front().connection == window.id);
     CHECK(h.host.raiseHolderNow() == std::optional { window.id });
 
-    h.host.noteClientDetached(&bench);
-    h.host.noteClientDetached(&window);
+    h.host.noteClientDetached(&bench, vthost::DetachKind::Dropped);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("createTab seeds a backing session handed back by the allocator", "[vthost][host]")
@@ -5554,8 +5554,8 @@ TEST_CASE("clientsShowing lists the attached clients that select a workspace", "
     second.selected = workspace;
     CHECK(h.host.clientsShowing(workspace) == std::vector { nativeConnection(1), nativeConnection(2) });
     CHECK(h.host.clientsShowing(999).empty());
-    h.host.noteClientDetached(&first);
-    h.host.noteClientDetached(&second);
+    h.host.noteClientDetached(&first, vthost::DetachKind::Dropped);
+    h.host.noteClientDetached(&second, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("requestSwitch completes with the client's reply, or fails", "[vthost][host][switch]")
@@ -5620,13 +5620,13 @@ TEST_CASE("requestSwitch completes with the client's reply, or fails", "[vthost]
     SECTION("the window going away fails it")
     {
         h.host.requestSwitch(nativeConnection(1), shown, target, record);
-        h.host.noteClientDetached(&window);
+        h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
         REQUIRE(outcomes.size() == 1);
         CHECK(outcomes.front().outcome == SwitchOutcome::Failed);
         CHECK(outcomes.front().detail == "the window went away");
     }
-    h.host.noteClientDetached(&window);
-    h.host.noteClientDetached(&old);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
+    h.host.noteClientDetached(&old, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("requestSwitch fails when the window stays silent", "[vthost][host][switch]")
@@ -5658,7 +5658,7 @@ TEST_CASE("requestSwitch fails when the window stays silent", "[vthost][host][sw
     REQUIRE(outcomes.size() == 1);
     CHECK(outcomes.front().outcome == vthost::proto::SwitchOutcome::Failed);
     CHECK(outcomes.front().detail == "no answer from the window");
-    host.noteClientDetached(&window);
+    host.noteClientDetached(&window, vthost::DetachKind::Dropped);
 }
 
 namespace

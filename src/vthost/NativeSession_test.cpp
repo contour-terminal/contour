@@ -5435,7 +5435,7 @@ TEST_CASE("a lone client selects the first workspace no window shows", "[vthost]
         auto earlier = RememberedSelection {};
         earlier.selected = second->id().value;
         h.host.noteClientAttached(&earlier);
-        h.host.noteClientDetached(&earlier);
+        h.host.noteClientDetached(&earlier, vthost::DetachKind::Dropped);
         attachesTo(first);
     }
     SECTION("a window shows the first: the default is the second, which no window shows")
@@ -5445,7 +5445,7 @@ TEST_CASE("a lone client selects the first workspace no window shows", "[vthost]
         earlier.selected = first;
         h.host.noteSelected(earlier);
         attachesTo(second->id().value);
-        h.host.noteClientDetached(&earlier);
+        h.host.noteClientDetached(&earlier, vthost::DetachKind::Dropped);
     }
 }
 
@@ -8177,7 +8177,57 @@ TEST_CASE("a connection whose workspace ends never moves to one another window s
                         closeLastTabOnce(&h, first, [&] { return snapshotRunCount(h.received) >= 1; }));
 
     CHECK(h.session->selectedWorkspace() == third);
-    h.host.noteClientDetached(&window);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
+}
+
+TEST_CASE("a Goodbye frees the workspace at once, and is refused without client-goodbye",
+          "[vthost][native][goodbye]")
+{
+    using vthost::WorkspaceVisibility;
+    auto const hello = [](proto::Capability capability) {
+        auto hello = intentHello(proto::AttachIntentKind::Default);
+        hello.capabilities = proto::CapabilitySet::of({ proto::Capability::AttachIntent, capability });
+        return hello;
+    };
+
+    SECTION("said: the workspace is offered to the next attach")
+    {
+        auto h = NativeHarness {};
+        REQUIRE(h.host.createTab() != nullptr);
+        auto const first = h.host.workspaceId().value;
+        std::ignore = h.exchangeUntil({ hello(proto::Capability::ClientGoodbye),
+                                        proto::Goodbye {},
+                                        proto::FetchImage { .imageId = 4242 } },
+                                      imageGoneArrived);
+        REQUIRE(h.host.visibility(first) == WorkspaceVisibility::Shown);
+        h.session.reset();
+        CHECK(h.host.visibilityForAttach(first) == WorkspaceVisibility::Hidden);
+    }
+    SECTION("not said: the end is a drop, and its workspace is held")
+    {
+        auto h = NativeHarness {};
+        REQUIRE(h.host.createTab() != nullptr);
+        auto const first = h.host.workspaceId().value;
+        std::ignore = h.exchangeUntil(
+            { hello(proto::Capability::ClientGoodbye), proto::FetchImage { .imageId = 4242 } },
+            imageGoneArrived);
+        h.session.reset();
+        CHECK(h.host.visibilityForAttach(first) == WorkspaceVisibility::Shown);
+    }
+    SECTION("said without the capability: refused, and the end is a drop")
+    {
+        auto h = NativeHarness {};
+        REQUIRE(h.host.createTab() != nullptr);
+        auto const first = h.host.workspaceId().value;
+        auto const received = h.exchangeUntil(
+            { hello(proto::Capability::Heartbeat), proto::Goodbye {}, proto::FetchImage { .imageId = 4242 } },
+            imageGoneArrived);
+        CHECK(std::ranges::any_of(received, [](auto const& frame) {
+            return std::holds_alternative<proto::Unsupported>(frame.pdu);
+        }));
+        h.session.reset();
+        CHECK(h.host.visibilityForAttach(first) == WorkspaceVisibility::Shown);
+    }
 }
 
 TEST_CASE("a connection whose only workspace ends selects none and creates none",

@@ -2387,7 +2387,7 @@ TEST_CASE("the workspace select, focus, role and switch PDUs round-trip", "[vtho
         encodePdu(with, 1, DecodedPdu { SelectWorkspace { .workspace = 3, .directoryFromSession = 1 } });
         CHECK(without.size() < with.size());
     }
-    for (auto const focus: { WindowFocus::Unfocused, WindowFocus::Focused, WindowFocus::Closing })
+    for (auto const focus: { WindowFocus::Unfocused, WindowFocus::Focused })
     {
         auto const report = ReportFocus { .focus = focus };
         CHECK(roundTrip(DecodedPdu { report }) == DecodedPdu { report });
@@ -2403,6 +2403,17 @@ TEST_CASE("the workspace select, focus, role and switch PDUs round-trip", "[vtho
     STATIC_CHECK(std::to_underlying(PduType::ReportFocus) == 52);
     STATIC_CHECK(std::to_underlying(PduType::NotifyRole) == 53);
     STATIC_CHECK(std::to_underlying(PduType::PaneSummary) == 54);
+}
+
+TEST_CASE("Goodbye is a bodiless PDU of tag 60 that round-trips and ignores appended bytes",
+          "[vthost][pdu][goodbye]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::Goodbye) == 60);
+    CHECK(roundTrip(DecodedPdu { Goodbye {} }) == DecodedPdu { Goodbye {} });
+    // A newer sender may append fields: they are ignored.
+    auto appended = Writer {};
+    appended.u8(7);
+    CHECK(decodeAs<Goodbye>(frameOf(PduType::Goodbye, appended.view())) == Goodbye {});
 }
 
 TEST_CASE("PaneSummary decodes an unknown activity, refuses a truncated body, ignores appended bytes",

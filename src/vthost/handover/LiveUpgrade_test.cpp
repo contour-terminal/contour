@@ -632,7 +632,7 @@ TEST_CASE("a client that does not go is closed at once half way through the sett
         return isAttached ? 1 : 0;
     };
     u.hooks.onAbort = [&] {
-        u.live->host.noteClientDetached(&stuck);
+        u.live->host.noteClientDetached(&stuck, vthost::DetachKind::Dropped);
         isAttached = false;
     };
     auto const log = core::log::ScopedCapture { "vthost.daemon" };
@@ -708,7 +708,7 @@ TEST_CASE("a daemon that shuts down while an upgrade settles resumes no listener
     CHECK(upgrade.state() == UpgradeState::Idle);
 
     // Every session was resumed all the same.
-    u.live->host.noteClientDetached(&stuck);
+    u.live->host.noteClientDetached(&stuck, vthost::DetachKind::Dropped);
     u.live->host.writeInput(id, "after-shutdown");
     REQUIRE(u.live->eventually([&] { return u.live->pageText(id).contains("after-shutdown"); }));
 }

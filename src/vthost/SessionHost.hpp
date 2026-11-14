@@ -1260,7 +1260,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Stops counting @p client, and fails the switches asked of its window. Idempotent, and a no-op for a
     /// client never counted.
     /// @param client The connection, by its stream observer.
-    void noteClientDetached(SessionStreamEvents const* client);
+    /// @param kind How the connection ended: a drop keeps its workspace from a new window for the reconnect
+    ///        grace (@see visibilityForAttach); a close frees it at once.
+    void noteClientDetached(SessionStreamEvents const* client, DetachKind kind);
 
     /// @return How many native Attach connections are handshaken. Neither a Control connection nor a tmux
     ///         gateway counts — unlike the daemon's ClientCensus, which counts every client for idle exit.
@@ -2332,8 +2334,6 @@ class SessionHost final: public vtworkspace::ModelEvents
         core::platform::SteadyTimePoint until {};
     };
     std::vector<ReconnectHold> _reconnectHolds;
-    /// The attached clients that said their window closes for good (proto::WindowFocus::Closing).
-    std::vector<SessionStreamEvents const*> _closingClients;
     /// Names the raise holder again, and tells the connection that gained the role and the one that lost it.
     void settleRaiseRole();
     /// The value the last focus report was stamped with. @see noteFocus

@@ -362,7 +362,7 @@ NativeSession::NativeSession(core::net::EventLoop& loop,
 NativeSession::~NativeSession()
 {
     _upgradeLink->session = nullptr;
-    _host.noteClientDetached(this);
+    _host.noteClientDetached(this, _detachKind);
     // Beside the count it mirrors, so that the event and connectedClients() never disagree; only for a
     // connection that was told attached.
     if (_phase == ConnectionPhase::Viewing)
@@ -2530,6 +2530,14 @@ NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame con
             refuse(frame);
         else
             _host.noteFocus(*this, std::get<proto::ReportFocus>(frame.pdu).focus);
+        return TabVerb::Served;
+    }
+    if (std::holds_alternative<proto::Goodbye>(frame.pdu))
+    {
+        if (!_negotiated->shared.contains(proto::Capability::ClientGoodbye))
+            refuse(frame);
+        else
+            _detachKind = DetachKind::Closed;
         return TabVerb::Served;
     }
     if (auto const* reply = std::get_if<proto::SwitchReply>(&frame.pdu))

@@ -350,6 +350,10 @@ namespace
     {
         return std::to_underlying(PduType::MoveWorkspace);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(Goodbye const&) noexcept
+    {
+        return std::to_underlying(PduType::Goodbye);
+    }
     [[nodiscard]] constexpr uint64_t tagOf(CloseWorkspace const&) noexcept
     {
         return std::to_underlying(PduType::CloseWorkspace);
@@ -1034,6 +1038,10 @@ namespace
     }
 
     void encodeBody(Writer&, PanesReprojected const&)
+    {
+    }
+
+    void encodeBody(Writer&, Goodbye const&)
     {
     }
 
@@ -2335,6 +2343,11 @@ namespace
         return PanesReprojected {};
     }
 
+    DecodeResult decodeGoodbye(Reader&)
+    {
+        return Goodbye {};
+    }
+
     DecodeResult decodeSelectWorkspace(Reader& in)
     {
         auto pdu = SelectWorkspace {};
@@ -2359,7 +2372,7 @@ namespace
         if (!assign(in.u8(), focus, error))
             return std::unexpected(error);
         // A state a newer peer knows is the weaker claim: the window does not have the focus.
-        pdu.focus = enumOrElse(focus, WindowFocus::Closing, WindowFocus::Unfocused);
+        pdu.focus = enumOrElse(focus, WindowFocus::Focused, WindowFocus::Unfocused);
         return pdu;
     }
 
@@ -2813,6 +2826,7 @@ namespace
         DecodeRow { PduType::MoveWorkspace, decodeMoveWorkspace },
         DecodeRow { PduType::SetWorkspaceLabel, decodeSetWorkspaceLabel },
         DecodeRow { PduType::CloseWorkspace, decodeCloseWorkspace },
+        DecodeRow { PduType::Goodbye, decodeGoodbye },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

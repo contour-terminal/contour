@@ -64,7 +64,6 @@ namespace
     constexpr auto FocusNames = std::array {
         EnumName { .value = WindowFocus::Unfocused, .name = "unfocused" },
         EnumName { .value = WindowFocus::Focused, .name = "focused" },
-        EnumName { .value = WindowFocus::Closing, .name = "closing" },
     };
 
     constexpr auto RoleNames = std::array {
@@ -601,6 +600,7 @@ namespace
                                           core::escape(std::get<DaemonUpgrading>(pdu).toRelease));
                    } },
         TraceRow { PduType::PanesReprojected, "PanesReprojected", nullptr },
+        TraceRow { PduType::Goodbye, "Goodbye", nullptr },
         TraceRow { PduType::SoftFontState,
                    "SoftFontState",
                    +[](DecodedPdu const& pdu) {

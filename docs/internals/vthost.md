@@ -166,6 +166,7 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `WorkspaceSwitch` | 24 | `workspace-switch` | `SwitchRequest` / `SwitchReply`: the daemon asks one window (the caller's, else the raise holder) to switch to another daemon or workspace, and the client answers with the outcome |
 | `DaemonFollow` | 28 | `daemon-follow` | `SelectWorkspace` / `ReportFocus` / `NotifyRole` / `PaneSummary`: a connection selects one workspace and is sent it in full, the others as summaries, and the daemon routes bells, clipboard writes and switch requests by the windows' focus (see [which workspace a client selects](#which-workspace-a-client-selects)) |
 | `WorkspaceMeta` | 29 | `workspace-meta` | `WorkspaceMeta`: each workspace's label, control id and git state, in full after the hello and for a workspace created since, and as a delta on each change (see [workspace metadata](#workspace-metadata)) |
+| `ClientGoodbye` | 30 | `client-goodbye` | `Goodbye` (tag 60, client->server, no body): the client says its connection ends on purpose, its window closed for good, sent last before the orderly close. The daemon then frees the workspace the window showed for the very next attach at once; without it (an older daemon or client) the end is a drop, whose workspace a new window leaves alone for a reconnect grace |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -1239,6 +1240,11 @@ nothing else to remember: no connection owns a workspace, nothing is claimed, an
 simply stops selecting. A connection whose workspace ends picks its next one by the same rule as a `Default`
 (`planAttach`), so never one another window shows. A workspace the control API creates is selected by nobody
 until a window selects it.
+
+A connection that drops (no `Goodbye` before its end) is a window reconnecting, so the workspace it showed still
+counts as shown to an attach for the reconnect grace; `SessionHost::noteClientDetached` takes the end as
+`DetachKind::Dropped`. One that said `Goodbye` ends as `DetachKind::Closed` and frees its workspace at once. Only
+an attach asks (`SessionHost::visibilityForAttach`); `workspace.list` reports what is selected right now.
 
 The handshake runs negotiate -> plan -> create -> `ServerHello` (whose `selectedWorkspace` names the
 selection) -> `LayoutState` per workspace -> snapshots of the selected workspace's sessions. The plan runs

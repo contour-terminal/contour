@@ -103,6 +103,7 @@ enum class PduType : uint8_t
     MoveWorkspace = 57,
     SetWorkspaceLabel = 58,
     CloseWorkspace = 59,
+    Goodbye = 60,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1659,10 +1660,6 @@ enum class WindowFocus : uint8_t
 {
     Unfocused = 0, ///< The window lost focus.
     Focused = 1,   ///< The window gained focus.
-    /// The window is closed for good, and does not lose its workspace to a reconnect: the connection ends
-    /// next. It is unfocused as well. A daemon from before it reads it as Unfocused (a value a newer peer
-    /// knows decodes to the weaker claim), and takes the connection's end for a drop.
-    Closing = 2,
 };
 
 /// Client→server (Capability::DaemonFollow): select the one workspace this connection displays in full.
@@ -1812,6 +1809,17 @@ struct CloseWorkspace
 {
     uint64_t workspace = 0; ///< The daemon's workspace id.
     bool operator==(CloseWorkspace const&) const = default;
+};
+
+/// Client→server (Capability::ClientGoodbye): this connection ends on purpose, its window closed for good,
+/// and is not reconnecting. It is sent last, before the orderly close. The daemon then offers the workspace
+/// the window showed to the very next attach at once, where a connection that ends without it is a drop,
+/// whose workspace is kept from a new window for the reconnect grace.
+/// No body. A client sends it only to a daemon that shares the capability: an older one never sees it, and
+/// takes the connection's end for a drop, as it always did.
+struct Goodbye
+{
+    bool operator==(Goodbye const&) const = default;
 };
 
 /// Client→server (Capability::WorkspaceMeta): set a workspace's label, which is what the sidebar's rename
@@ -1983,7 +1991,8 @@ using DecodedPdu = std::variant<Invalid,
                                 WorkspaceMeta,
                                 MoveWorkspace,
                                 SetWorkspaceLabel,
-                                CloseWorkspace>;
+                                CloseWorkspace,
+                                Goodbye>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.
