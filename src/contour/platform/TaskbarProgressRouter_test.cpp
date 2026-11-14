@@ -50,6 +50,32 @@ TEST_CASE("TaskbarProgressRouter.nothing_reported_shows_nothing", "[contour][tas
     CHECK(router.resolve(Epoch) == TaskbarProgress {});
 }
 
+TEST_CASE("TaskbarProgressRouter.delays_running_progress_per_session", "[contour][taskbar][progress]")
+{
+    auto router = TaskbarProgressRouter {};
+    router.onProgress(1, at(ProgressState::Indeterminate, 0), Epoch);
+    router.onProgress(2, at(ProgressState::Normal, 10), Epoch + 200ms);
+    router.onProgress(1, at(ProgressState::Normal, 60), Epoch + 400ms);
+
+    CHECK(router.resolve(Epoch + 499ms, {}, 500ms).state == ProgressState::Inactive);
+    CHECK(router.nextReveal(Epoch + 499ms, 500ms) == Epoch + 500ms);
+    CHECK(router.resolve(Epoch + 500ms, {}, 500ms) == TaskbarProgress { ProgressState::Normal, 60 });
+    CHECK(router.nextReveal(Epoch + 500ms, 500ms) == Epoch + 700ms);
+    CHECK(router.resolve(Epoch + 500ms, {}, 0ms) == TaskbarProgress { ProgressState::Normal, 10 });
+    CHECK(router.resolve(Epoch + 500ms, 50ms, 500ms).state == ProgressState::Inactive);
+
+    router.onProgress(2, at(ProgressState::Paused, 10), Epoch + 510ms);
+    CHECK(router.resolve(Epoch + 510ms, {}, 500ms) == TaskbarProgress { ProgressState::Paused, 10 });
+    CHECK_FALSE(router.nextReveal(Epoch + 510ms, 500ms).has_value());
+    router.onProgress(2, at(ProgressState::Normal, 20), Epoch + 520ms);
+    CHECK(router.progressFor(2, Epoch + 520ms, 500ms) == at(ProgressState::Normal, 20));
+    router.onProgress(2, at(ProgressState::Inactive, 0), Epoch + 530ms);
+    router.onProgress(2, at(ProgressState::Normal, 0), Epoch + 540ms);
+    CHECK(router.progressFor(2, Epoch + 541ms, 500ms).state == ProgressState::Inactive);
+    router.onSessionClosed(2);
+    CHECK_FALSE(router.nextReveal(Epoch + 541ms, 500ms).has_value());
+}
+
 TEST_CASE("Taskbar progress retains updates until ready and replays after recreation",
           "[contour][taskbar][progress]")
 {

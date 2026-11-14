@@ -3155,17 +3155,12 @@ vtbackend::RGBColor TerminalSession::liveBackground() const
     return _terminal.colorPalette().defaultBackground;
 }
 
-void TerminalSession::progressChanged(vtbackend::Progress /*progress*/)
+void TerminalSession::progressChanged(vtbackend::Progress progress)
 {
-    // OSC 9;4. Same threading constraint as setWindowFrameColor() above: this runs on the parser
-    // thread with Terminal::_stateMutex held, and the tab-strip refresh reads the terminal back
-    // through resolvedProgress(), which takes that same non-recursive mutex. Post it to the GUI
-    // thread, through postToManager for the reason it gives.
-    // The value itself is not carried across: the refresh reads it back from the terminal, so the
-    // strip cannot paint a state older than the one in effect when the posted call finally runs.
-    postToManager([id = modelSessionId()](TerminalSessionManager& manager) {
-        manager.refreshTabProgressForSession(id);
-    });
+    // Keep every transition in order: a clear followed by a new start in the same PTY read
+    // must still restart the show delay. The GUI consumes these reports without the terminal lock.
+    postToManager([id = modelSessionId(), progress, now = _app.terminalClocks().steady.now()](
+                      TerminalSessionManager& manager) { manager.recordProgress(id, progress, now); });
 }
 
 void TerminalSession::programStatusChanged(vtbackend::ProgramStatusChange const& /*change*/)

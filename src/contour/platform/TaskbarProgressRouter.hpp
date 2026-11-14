@@ -69,11 +69,47 @@ class TaskbarProgressRouter
         if (progress.state == vtbackend::ProgressState::Inactive)
             _reports.erase(session);
         else
-            _reports[session] = Report { .progress = progress, .at = now };
+        {
+            auto& report = _reports.try_emplace(session, Report { .startedAt = now }).first->second;
+            report.progress = progress;
+            report.at = now;
+            if (progress.state == vtbackend::ProgressState::Error
+                || progress.state == vtbackend::ProgressState::Paused)
+                report.reveal = Reveal::Immediate;
+        }
     }
 
     /// Forgets @p session entirely, for a pane that closed.
     void onSessionClosed(SessionKey session) { _reports.erase(session); }
+
+    /// Progress shown in the tab strip for a single session.
+    /// @param session The session whose tab progress is requested.
+    /// @param now Current monotonic time.
+    /// @param delay How long running progress waits before appearing.
+    /// @return The visible progress, or an inactive indicator.
+    [[nodiscard]] vtbackend::Progress progressFor(SessionKey session,
+                                                  std::chrono::steady_clock::time_point now,
+                                                  std::chrono::milliseconds delay) const
+    {
+        auto const report = _reports.find(session);
+        return report != _reports.end() && isVisible(report->second, now, delay) ? report->second.progress
+                                                                                 : vtbackend::Progress {};
+    }
+
+    /// Earliest future reveal among reports that are still waiting.
+    /// @param now Current monotonic time.
+    /// @param delay How long running progress waits before appearing.
+    /// @return Next reveal, or nullopt when no report is waiting.
+    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> nextReveal(
+        std::chrono::steady_clock::time_point now, std::chrono::milliseconds delay) const
+    {
+        auto next = std::optional<std::chrono::steady_clock::time_point> {};
+        for (auto const& report: _reports | std::views::values)
+            if (!isVisible(report, now, delay))
+                if (auto const reveal = report.startedAt + delay; !next || reveal < *next)
+                    next = reveal;
+        return next;
+    }
 
     /// What the taskbar should show for this window at @p now.
     ///
@@ -90,22 +126,26 @@ class TaskbarProgressRouter
     ///        an application that dies mid-operation and strands a bar. A parameter rather than a
     ///        member for the same reason @p now is: the caller owns the configured value, which can
     ///        change on config reload, and a test states it outright.
+    /// @param delay How long running progress waits before appearing.
     /// @return What to show; Inactive means "show nothing".
     [[nodiscard]] TaskbarProgress resolve(std::chrono::steady_clock::time_point now,
-                                          std::chrono::milliseconds timeout = {}) const
+                                          std::chrono::milliseconds timeout = {},
+                                          std::chrono::milliseconds delay = {}) const
     {
-        return resolveFor([](SessionKey) { return true; }, now, timeout);
+        return resolveFor([](SessionKey) { return true; }, now, timeout, delay);
     }
 
     /// Resolves the same policy for sessions belonging to one window, without copying their reports.
     /// @param includes Selects the sessions hosted by that window.
     /// @param now Current monotonic time.
     /// @param timeout Staleness limit; zero disables expiry.
+    /// @param delay How long running progress waits before appearing.
     /// @return The selected sessions' aggregate.
     template <typename Predicate>
     [[nodiscard]] TaskbarProgress resolveFor(Predicate includes,
                                              std::chrono::steady_clock::time_point now,
-                                             std::chrono::milliseconds timeout = {}) const
+                                             std::chrono::milliseconds timeout = {},
+                                             std::chrono::milliseconds delay = {}) const
     {
         // Ranked lexicographically on (severity, -percentage): higher severity wins, and among equals
         // the LEAST complete does -- so the bar reflects the work still outstanding rather than the
@@ -117,7 +157,7 @@ class TaskbarProgressRouter
         auto best = std::pair { -1, 0 }; // below every real rank, so the first live report takes it
         for (auto const& [session, report]: _reports)
         {
-            if (!includes(session) || isStale(report, now, timeout))
+            if (!includes(session) || isStale(report, now, timeout) || !isVisible(report, now, delay))
                 continue;
             if (auto const rank = rankOf(report.progress); rank > best)
             {
@@ -146,11 +186,26 @@ class TaskbarProgressRouter
     }
 
   private:
+    enum class Reveal : uint8_t
+    {
+        Delayed,
+        Immediate,
+    };
+
     struct Report
     {
-        vtbackend::Progress progress;
-        std::chrono::steady_clock::time_point at;
+        vtbackend::Progress progress {};
+        std::chrono::steady_clock::time_point at {};
+        std::chrono::steady_clock::time_point startedAt {};
+        Reveal reveal = Reveal::Delayed;
     };
+
+    [[nodiscard]] static constexpr bool isVisible(Report const& report,
+                                                  std::chrono::steady_clock::time_point now,
+                                                  std::chrono::milliseconds delay) noexcept
+    {
+        return report.reveal == Reveal::Immediate || now - report.startedAt >= delay;
+    }
 
     /// How loudly a state should speak when several sessions report at once. Higher wins.
     ///

@@ -283,6 +283,13 @@ constexpr StringLiteral HyperlinkHoverTooltipConfig {
     "\n"
 };
 
+constexpr StringLiteral ProgressShowDelayConfig {
+    "{comment} Delay before running or busy OSC 9;4 progress appears on tabs and desktop indicators,\n"
+    "{comment} in milliseconds. 0 shows it immediately. Paused and error states always appear immediately.\n"
+    "progress_show_delay: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral ProgressTimeoutConfig {
     "{comment} How long an application's progress indicator (OSC 9;4) stays on screen without being\n"
     "{comment} updated, in milliseconds. 0 (the default) disables expiry: the indicator persists\n"
@@ -2635,6 +2642,14 @@ constexpr StringLiteral HyperlinkHoverTooltipWeb {
     "\n"
 };
 
+constexpr StringLiteral ProgressShowDelayWeb {
+    "\n"
+    "How long running or busy [OSC 9;4](../vt-extensions/osc-9-4-progress.md) progress waits before "
+    "appearing on tabs and desktop indicators, in milliseconds. The default is `500`. "
+    "Set it to `0` to show progress immediately. Paused and error states always appear immediately.\n"
+    "\n"
+};
+
 constexpr StringLiteral ProgressTimeoutWeb {
     "\n"
     "How long an application's progress indicator ([OSC 9;4](../vt-extensions/osc-9-4-progress.md)) "
@@ -3817,6 +3832,10 @@ struct Text<AccessibilityCaretReporting>:
 };
 template <>
 struct Text<HyperlinkHoverTooltip>: DocumentationEntry<HyperlinkHoverTooltipConfig, HyperlinkHoverTooltipWeb>
+{
+};
+template <>
+struct Text<ProgressShowDelay>: DocumentationEntry<ProgressShowDelayConfig, ProgressShowDelayWeb>
 {
 };
 template <>

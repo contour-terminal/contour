@@ -1216,6 +1216,11 @@ struct Config
         editionDefaults(defaultsEdition).hyperlinkHoverTooltip
     };
 
+    /// How long running OSC 9;4 progress waits before appearing on tabs and desktop indicators.
+    ConfigEntry<std::chrono::milliseconds, documentation::ProgressShowDelay> progressShowDelay {
+        std::chrono::milliseconds { 500 }
+    };
+
     /// How long an OSC 9;4 progress indicator survives without an update. Zero disables expiry, which
     /// is the sequence's own behaviour: the indicator persists until the application clears it.
     ConfigEntry<std::chrono::milliseconds, documentation::ProgressTimeout> progressTimeout {

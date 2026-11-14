@@ -57,6 +57,7 @@ namespace
         scalar<&Config::accessibilityAnnouncements>("accessibility_announcements"),
         scalar<&Config::accessibilityCaretReporting>("accessibility_caret_reporting"),
         scalar<&Config::hyperlinkHoverTooltip>("hyperlink_hover_tooltip"),
+        scalar<&Config::progressShowDelay>("progress_show_delay"),
         scalar<&Config::progressTimeout>("progress_timeout"),
         scalar<&Config::notificationCloseTimeout>("notification_close_timeout"),
         scalar<&Config::tabBarPosition>("tab_bar_position"),

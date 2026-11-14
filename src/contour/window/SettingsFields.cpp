@@ -1399,13 +1399,15 @@ namespace
     /// @param get     Reads the effective value from the configuration.
     /// @param lowest  The smallest accepted value.
     /// @param highest The largest accepted value; std::numeric_limits<int>::max() for no bound.
+    /// @param unit    The unit displayed beside the value.
     /// @return The descriptor, whose range is [@p lowest, @p highest].
     GlobalFieldDescriptor globalIntField(QString key,
                                          QString label,
                                          QString help,
                                          std::function<int(config::Config const&)> get,
                                          int lowest,
-                                         int highest)
+                                         int highest,
+                                         NumberUnit unit = NumberUnit::None)
     {
         auto const unbounded = highest == std::numeric_limits<int>::max();
         return { .key = std::move(key),
@@ -1430,7 +1432,7 @@ namespace
                                         .max = unbounded ? Unbounded : static_cast<double>(highest),
                                         .step = 1.0,
                                         .decimals = 0,
-                                        .unit = NumberUnit::None },
+                                        .unit = unit },
                  .control = {} };
     }
 
@@ -1647,6 +1649,7 @@ namespace
         GlobalFieldGroupRow { .key = "tab_bar_position", .group = SettingsGroup::AppearanceTabBar },
         GlobalFieldGroupRow { .key = "tab_bar_visibility", .group = SettingsGroup::AppearanceTabBar },
         GlobalFieldGroupRow { .key = "tab_placement", .group = SettingsGroup::AppearanceTabBar },
+        GlobalFieldGroupRow { .key = "progress_show_delay", .group = SettingsGroup::AppearanceTabBar },
         GlobalFieldGroupRow { .key = "gutter.", .group = SettingsGroup::ShellGutter },
         GlobalFieldGroupRow { .key = "command_blocks.", .group = SettingsGroup::ShellCommandBlocks },
         GlobalFieldGroupRow { .key = "folding.", .group = SettingsGroup::ShellFolding },
@@ -1702,6 +1705,15 @@ std::vector<GlobalFieldDescriptor> const& globalFieldDescriptors()
                             "Switch tabs on horizontal wheel",
                             "A horizontal wheel tilt or trackpad swipe switches to the previous/next tab.",
                             [](config::Config const& c) { return c.tabSwitchOnHorizontalWheel.value(); }),
+            globalIntField(
+                "progress_show_delay",
+                "Progress show delay",
+                "How long running or busy progress waits before appearing on tabs and desktop indicators. "
+                "Enter 0 to show it immediately.",
+                [](config::Config const& c) { return static_cast<int>(c.progressShowDelay.value().count()); },
+                0,
+                std::numeric_limits<int>::max(),
+                NumberUnit::Milliseconds),
             hotkeyField(),
             globalBoolField("quick_terminal.hide_on_focus_loss",
                             "Hide when it loses focus",
