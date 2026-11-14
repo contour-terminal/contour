@@ -124,6 +124,8 @@ if(NOT CONTOUR_STD_HAS_JTHREAD)
     check_cxx_source_compiles("${_jthreadProbe}" CONTOUR_STD_HAS_EXPERIMENTAL_JTHREAD)
     if(CONTOUR_STD_HAS_EXPERIMENTAL_JTHREAD)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexperimental-library")
+        # Objective-C++ sources (the Cocoa adapters and their tests) include the same headers, so they need it too.
+        set(CMAKE_OBJCXX_FLAGS "${CMAKE_OBJCXX_FLAGS} -fexperimental-library")
     endif()
 endif()
 cmake_pop_check_state()

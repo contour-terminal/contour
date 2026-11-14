@@ -131,21 +131,26 @@ TEST_CASE("Command is the application modifier", "[input][platform][mac]")
 TEST_CASE("the input method is bypassed only for an Option key acting as Alt", "[input][platform][mac]")
 {
     auto const left = macPlatform(OptionAsAlt::Left);
-    CHECK(left->inputMethodRouteFor(MacLeftOption) == InputMethodRoute::Bypass);
-    CHECK(left->inputMethodRouteFor(MacRightOption) == InputMethodRoute::ToInputMethod);
-    CHECK(left->inputMethodRouteFor(0) == InputMethodRoute::ToInputMethod);
-    // Option without side bits says Option is held, not which: nothing named is known to be down.
-    CHECK(left->inputMethodRouteFor(MacOption) == InputMethodRoute::ToInputMethod);
-
-    CHECK(macPlatform(OptionAsAlt::Off)->inputMethodRouteFor(MacLeftOption)
+    CHECK(left->inputMethodRouteFor({ .modifiers = MacLeftOption, .virtualKey = 0 })
+          == InputMethodRoute::Bypass);
+    CHECK(left->inputMethodRouteFor({ .modifiers = MacRightOption, .virtualKey = 0 })
           == InputMethodRoute::ToInputMethod);
-    CHECK(macPlatform(OptionAsAlt::Both)->inputMethodRouteFor(MacRightOption) == InputMethodRoute::Bypass);
+    CHECK(left->inputMethodRouteFor({ .modifiers = 0, .virtualKey = 0 }) == InputMethodRoute::ToInputMethod);
+    // Option without side bits says Option is held, not which: nothing named is known to be down.
+    CHECK(left->inputMethodRouteFor({ .modifiers = MacOption, .virtualKey = 0 })
+          == InputMethodRoute::ToInputMethod);
+
+    CHECK(macPlatform(OptionAsAlt::Off)->inputMethodRouteFor({ .modifiers = MacLeftOption, .virtualKey = 0 })
+          == InputMethodRoute::ToInputMethod);
+    CHECK(
+        macPlatform(OptionAsAlt::Both)->inputMethodRouteFor({ .modifiers = MacRightOption, .virtualKey = 0 })
+        == InputMethodRoute::Bypass);
 
     // No other platform has a keystroke to keep from its input method.
     for (auto const kind: { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32 })
         CHECK(contour::input::makeKeyboardPlatform(
                   kind, { .optionAsAlt = OptionAsAlt::Both }, *contour::input::makeXkbKeyboardLayout(nullptr))
-                  ->inputMethodRouteFor(MacLeftOption)
+                  ->inputMethodRouteFor({ .modifiers = MacLeftOption, .virtualKey = 0 })
               == InputMethodRoute::ToInputMethod);
 }
 
@@ -168,4 +173,59 @@ TEST_CASE("Control+Command with a vertical arrow normalizes to the chord CycleWo
             CHECK(event.modifiers.chord == vtbackend::Modifiers { Modifier::Control, Modifier::Super });
         }
     }
+}
+
+TEST_CASE("the input method is bypassed for the chords macOS's input context swallows",
+          "[input][platform][mac]")
+{
+    // StandardKeyBinding.dict's writing-direction chords (contour-terminal/contour#2356).
+    using namespace contour::input;
+    auto const platform = macPlatform(OptionAsAlt::Off);
+    auto constexpr Space = uint32_t { 0x31 }; // kVK_Space
+    auto constexpr KeyC = uint32_t { 0x08 };  // kVK_ANSI_C
+    auto constexpr UpArrow = uint32_t { 0x7e };
+    auto constexpr CtrlCmd = MacControlBit | MacCommandBit;
+    auto constexpr CtrlOptCmd = MacControlBit | MacOptionBit | MacCommandBit;
+
+    for (auto const key: { MacKeyDownArrow, MacKeyLeftArrow, MacKeyRightArrow })
+        for (auto const flags: { CtrlCmd, CtrlOptCmd, CtrlCmd | MacLeftOption, CtrlOptCmd | MacRightOption })
+        {
+            INFO("key " << key << " flags " << flags);
+            CHECK(platform->inputMethodRouteFor({ .modifiers = flags, .virtualKey = key })
+                  == InputMethodRoute::Bypass);
+        }
+
+    // The arrows arrive with Function and NumericPad set, and every key may carry device-dependent bits
+    // (here the left Control and Command keys): none of it changes the verdict.
+    auto constexpr ArrowFlags = uint32_t { 0x00800000 | 0x00200000 };
+    for (auto const key: { MacKeyDownArrow, MacKeyLeftArrow, MacKeyRightArrow })
+        for (auto const device: { uint32_t { 0 }, uint32_t { 0x00000001 | 0x00000008 } })
+        {
+            INFO("key " << key << " device " << device);
+            CHECK(platform->inputMethodRouteFor(
+                      { .modifiers = ArrowFlags | CtrlCmd | device, .virtualKey = key })
+                  == InputMethodRoute::Bypass);
+            CHECK(platform->inputMethodRouteFor(
+                      { .modifiers = ArrowFlags | CtrlOptCmd | device, .virtualKey = key })
+                  == InputMethodRoute::Bypass);
+        }
+
+    // Everything else keeps its input method: the Character Viewer chord, a Command shortcut during
+    // composition, and the arrows that reach the terminal anyway.
+    CHECK(platform->inputMethodRouteFor({ .modifiers = CtrlCmd, .virtualKey = Space })
+          == InputMethodRoute::ToInputMethod);
+    CHECK(platform->inputMethodRouteFor({ .modifiers = MacCommandBit, .virtualKey = KeyC })
+          == InputMethodRoute::ToInputMethod);
+    CHECK(platform->inputMethodRouteFor({ .modifiers = MacCommandBit, .virtualKey = MacKeyDownArrow })
+          == InputMethodRoute::ToInputMethod);
+    CHECK(platform->inputMethodRouteFor({ .modifiers = CtrlCmd, .virtualKey = UpArrow })
+          == InputMethodRoute::ToInputMethod);
+    CHECK(platform->inputMethodRouteFor({ .modifiers = CtrlCmd | MacShiftBit, .virtualKey = MacKeyDownArrow })
+          == InputMethodRoute::ToInputMethod);
+    CHECK(platform->inputMethodRouteFor({ .modifiers = MacControlBit, .virtualKey = MacKeyDownArrow })
+          == InputMethodRoute::ToInputMethod);
+    CHECK(platform->inputMethodRouteFor({ .modifiers = MacOptionBit, .virtualKey = MacKeyDownArrow })
+          == InputMethodRoute::ToInputMethod);
+    CHECK(platform->inputMethodRouteFor({ .modifiers = 0, .virtualKey = MacKeyDownArrow })
+          == InputMethodRoute::ToInputMethod);
 }

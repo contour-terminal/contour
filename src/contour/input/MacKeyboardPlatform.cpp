@@ -42,9 +42,13 @@ namespace
             return result;
         }
 
-        [[nodiscard]] InputMethodRoute inputMethodRouteFor(uint32_t nativeModifiers) const override
+        [[nodiscard]] InputMethodRoute inputMethodRouteFor(NativeChord const& chord) const override
         {
-            auto const down = optionKeySideOf(nativeModifiers);
+            // The chords macOS's input context swallows (contour-terminal/contour#2356; remove with the Qt
+            // fix).
+            if (macInputContextSwallows(chord))
+                return InputMethodRoute::Bypass;
+            auto const down = optionKeySideOf(chord.modifiers);
             if (down == config::OptionKeySide::None)
                 return InputMethodRoute::ToInputMethod;
             return config::optionKeyRoleForHeldChord(_policy.optionAsAlt, down) == config::OptionKeyRole::Alt

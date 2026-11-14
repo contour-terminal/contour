@@ -8,6 +8,8 @@
 #include <contour/input/KeyboardLayout.hpp>
 #include <contour/input/NativeKeyEvent.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -30,6 +32,54 @@ inline constexpr uint32_t MacLeftOptionBit = 0x00000020;
 /// The bit of macOS's device-dependent modifier flags (`NX_DEVICERALTKEYMASK`) set while the right Option key
 /// is down.
 inline constexpr uint32_t MacRightOptionBit = 0x00000040;
+
+/// The device-independent modifier flags of macOS (`NSEventModifierFlag*`), as QKeyEvent::nativeModifiers()
+/// carries them.
+inline constexpr uint32_t MacShiftBit = 0x00020000;   ///< `NSEventModifierFlagShift`.
+inline constexpr uint32_t MacControlBit = 0x00040000; ///< `NSEventModifierFlagControl`.
+inline constexpr uint32_t MacOptionBit = 0x00080000;  ///< `NSEventModifierFlagOption`.
+inline constexpr uint32_t MacCommandBit = 0x00100000; ///< `NSEventModifierFlagCommand`.
+
+/// The virtual key codes (`kVK_*`) of the arrow keys on macOS, as QKeyEvent::nativeVirtualKey() carries them.
+inline constexpr uint32_t MacKeyLeftArrow = 0x7b;  ///< `kVK_LeftArrow`.
+inline constexpr uint32_t MacKeyRightArrow = 0x7c; ///< `kVK_RightArrow`.
+inline constexpr uint32_t MacKeyDownArrow = 0x7d;  ///< `kVK_DownArrow`.
+
+/// A key press as the platform names it: the native modifier flags and the native virtual key together, so
+/// that the two same-typed values cannot be passed the wrong way round.
+struct NativeChord
+{
+    uint32_t modifiers = 0;  ///< QKeyEvent::nativeModifiers(); in a table row, exactly the Shift, Control,
+                             ///< Option and Command flags held.
+    uint32_t virtualKey = 0; ///< QKeyEvent::nativeVirtualKey().
+};
+
+/// The chords the input context swallows: StandardKeyBinding.dict maps them to text writing-direction
+/// commands (makeBaseWritingDirection*, makeTextWritingDirection*), and Qt (QNSView) then delivers no key
+/// press for them at all, so a terminal keybinding on one never fires. One row per chord.
+///
+/// WORKAROUND for that Qt bug, tracked in contour-terminal/contour#2356: remove this table, its use in
+/// MacKeyboardPlatform::inputMethodRouteFor(), and the CocoaKeyDelivery test once Qt is fixed.
+inline constexpr std::array MacNativeChords {
+    NativeChord { .modifiers = MacControlBit | MacCommandBit, .virtualKey = MacKeyDownArrow },
+    NativeChord { .modifiers = MacControlBit | MacCommandBit, .virtualKey = MacKeyLeftArrow },
+    NativeChord { .modifiers = MacControlBit | MacCommandBit, .virtualKey = MacKeyRightArrow },
+    NativeChord { .modifiers = MacControlBit | MacOptionBit | MacCommandBit, .virtualKey = MacKeyDownArrow },
+    NativeChord { .modifiers = MacControlBit | MacOptionBit | MacCommandBit, .virtualKey = MacKeyLeftArrow },
+    NativeChord { .modifiers = MacControlBit | MacOptionBit | MacCommandBit, .virtualKey = MacKeyRightArrow },
+};
+
+/// Whether macOS's input context swallows a key press (see MacNativeChords; #2356).
+/// @param chord The key press: the arrows carry Function and NumericPad, and every key may carry
+///        device-dependent bits, none of which a row names, so only Shift, Control, Option and Command count.
+/// @return True where the chord is a row of the table.
+[[nodiscard]] constexpr bool macInputContextSwallows(NativeChord const& chord) noexcept
+{
+    auto constexpr Compared = MacShiftBit | MacControlBit | MacOptionBit | MacCommandBit;
+    return std::ranges::any_of(MacNativeChords, [&](NativeChord const& row) {
+        return row.virtualKey == chord.virtualKey && row.modifiers == (chord.modifiers & Compared);
+    });
+}
 
 /// Which Option keys are down, as macOS's device-dependent modifier flags report them.
 /// A pure function of the bits on every host, so that it is tested everywhere; only the macOS normalizer
@@ -113,10 +163,13 @@ class KeyboardPlatform
     /// @return The event as the platform means it; KeyEvent::isUnhandled() when it means nothing here.
     [[nodiscard]] virtual KeyEvent normalize(NativeKeyEvent const& event) const = 0;
 
-    /// Whether the platform input method should see a keystroke held with these modifiers.
-    /// @param nativeModifiers The value of QKeyEvent::nativeModifiers().
-    /// @return Bypass where a held key is one the input method must not compose with.
-    [[nodiscard]] virtual InputMethodRoute inputMethodRouteFor(uint32_t nativeModifiers) const = 0;
+    /// Whether the platform input method should see a keystroke.
+    ///
+    /// On macOS that is not so for an Option key acting as Alt, which must not start a dead key, nor for the
+    /// Control+Command arrow chords the input context swallows (contour-terminal/contour#2356).
+    /// @param chord The keystroke's QKeyEvent::nativeModifiers() and QKeyEvent::nativeVirtualKey().
+    /// @return Bypass where the input method must not see the keystroke.
+    [[nodiscard]] virtual InputMethodRoute inputMethodRouteFor(NativeChord const& chord) const = 0;
 };
 
 /// The chord a key press holds, decided as @p platform decides it for the terminal -- so that AltGr on

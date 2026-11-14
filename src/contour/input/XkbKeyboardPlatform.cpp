@@ -29,7 +29,7 @@ namespace
 
         /// Nothing on X11 or Wayland bypasses the input method: no modifier there means Alt on one side and
         /// composes on the other.
-        [[nodiscard]] InputMethodRoute inputMethodRouteFor(uint32_t /*nativeModifiers*/) const override
+        [[nodiscard]] InputMethodRoute inputMethodRouteFor(NativeChord const& /*chord*/) const override
         {
             return InputMethodRoute::ToInputMethod;
         }
