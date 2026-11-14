@@ -2323,27 +2323,21 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] static std::optional<window::WindowPosition> spawnPositionFor(QScreen* screen, QPoint at);
     /// Stages @p pending for the next window, spawned on @p screen at @p at (@see consumePendingTransplant).
     void spawnWindowFor(PendingTransplant const& pending, QScreen* screen, QPoint at);
-    /// Opens a window of a connection of its own on @p binding's daemon, showing what @p asking shows (a tab
-    /// torn off); one that cannot open is logged under @p what and told in @p asking.
+    /// Opens a window of a connection of its own on @p binding's daemon, beside @p asking; one that cannot
+    /// open is logged under @p what and told in @p asking.
     /// @param binding The daemon binding @p asking is bound to.
     /// @param asking The window asked from.
+    /// @param shows What the new window shows (a New Window, or a tab torn off).
     /// @param activeTab The tab the new window activates; none for the daemon's own choice.
     /// @param screen Where the window opens; null for the default placement.
     /// @param what What asked, for the log.
     /// @return Routed once the window's connection is under way; Refused otherwise.
-    RemoteRouting openDaemonWindowLike(WindowBinding& binding,
-                                       vtworkspace::WorkspaceId asking,
-                                       std::optional<vtworkspace::TabId> activeTab,
-                                       QScreen* screen,
-                                       std::string_view what) const;
-    /// @param opened What a binding answered to a request to open a window beside @p asking.
-    /// @param asking The window asked from.
-    /// @param what What asked, for the log.
-    /// @return Routed when the window's connection is under way; else it is logged under @p what, told in
-    ///         @p asking, and Refused.
-    RemoteRouting routeOpened(std::expected<void, std::string> const& opened,
-                              vtworkspace::WorkspaceId asking,
-                              std::string_view what) const;
+    RemoteRouting openSiblingWindow(WindowBinding& binding,
+                                    vtworkspace::WorkspaceId asking,
+                                    SiblingShows shows,
+                                    std::optional<vtworkspace::TabId> activeTab,
+                                    QScreen* screen,
+                                    std::string_view what) const;
     /// Tells the screen reader of the window @p moved landed in what happened.
     void announceMove(vtworkspace::MoveResult const& moved,
                       window::DropPayload payload,

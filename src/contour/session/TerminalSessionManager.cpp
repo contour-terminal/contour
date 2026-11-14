@@ -961,26 +961,18 @@ RemoteRouting TerminalSessionManager::requestRemoteWindow(TerminalSession const&
     if (binding == nullptr || !binding->daemonTarget())
         return RemoteRouting::Local;
     // Not a window like this one: a new window shows a workspace no window shows.
-    return routeOpened(
-        binding->openSiblingWindow(window->id(), SiblingShows::DaemonsChoice, std::nullopt, screen),
-        window->id(),
-        "New Window");
+    return openSiblingWindow(
+        *binding, window->id(), SiblingShows::DaemonsChoice, std::nullopt, screen, "New Window");
 }
 
-RemoteRouting TerminalSessionManager::openDaemonWindowLike(WindowBinding& binding,
-                                                           vtworkspace::WorkspaceId asking,
-                                                           std::optional<vtworkspace::TabId> activeTab,
-                                                           QScreen* screen,
-                                                           std::string_view what) const
+RemoteRouting TerminalSessionManager::openSiblingWindow(WindowBinding& binding,
+                                                        vtworkspace::WorkspaceId asking,
+                                                        SiblingShows shows,
+                                                        std::optional<vtworkspace::TabId> activeTab,
+                                                        QScreen* screen,
+                                                        std::string_view what) const
 {
-    return routeOpened(
-        binding.openSiblingWindow(asking, SiblingShows::SameWorkspace, activeTab, screen), asking, what);
-}
-
-RemoteRouting TerminalSessionManager::routeOpened(std::expected<void, std::string> const& opened,
-                                                  vtworkspace::WorkspaceId asking,
-                                                  std::string_view what) const
-{
+    auto const opened = binding.openSiblingWindow(asking, shows, activeTab, screen);
     if (opened)
         return RemoteRouting::Routed;
     managerLog()("{}: {}", what, opened.error());
@@ -4485,7 +4477,8 @@ void TerminalSessionManager::tearOffTabToNewWindow(vtworkspace::WorkspaceId from
     // tab active there.
     if (auto* const binding = mutableBindingOf(from); binding != nullptr && binding->daemonTarget())
     {
-        std::ignore = openDaemonWindowLike(*binding, from, tab->id(), targetScreen, "Tab tear-off");
+        std::ignore = openSiblingWindow(
+            *binding, from, SiblingShows::SameWorkspace, tab->id(), targetScreen, "Tab tear-off");
         return;
     }
 
