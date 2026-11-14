@@ -45,20 +45,12 @@ namespace
     return rows;
 }
 
-[[nodiscard]] GridMetrics gridMetricsFor(ImageSize cellSize)
-{
-    return GridMetrics { .pageSize = PageSize { LineCount(24), ColumnCount(80) },
-                         .cellSize = cellSize,
-                         .baseline = 0,
-                         .underline = { .position = 1, .thickness = 1 } };
-}
-
 /// Holds the renderer and everything it borrows, so a test gets its commands in one expression.
 class SoftFontProbe
 {
   public:
     explicit SoftFontProbe(ImageSize cellSize, uint32_t tileCount = 64):
-        _gridMetrics { gridMetricsFor(cellSize) }, _renderer { _gridMetrics }, _tileCount { tileCount }
+        _gridMetrics { gridMetricsFor(cellSize, 1) }, _renderer { _gridMetrics }, _tileCount { tileCount }
     {
         _renderer.setRenderTarget(_renderTarget, _allocator);
         configureAtlas();
@@ -77,13 +69,11 @@ class SoftFontProbe
   private:
     void configureAtlas()
     {
-        _atlas = std::make_unique<Renderable::TextureAtlas>(
-            _renderTarget.textureScheduler(),
-            atlas::AtlasProperties { .format = atlas::Format::Red,
-                                     .tileSize = _gridMetrics.cellSize,
-                                     .hashCount = crispy::StrongHashtableSize { 64 },
-                                     .tileCount = crispy::LRUCapacity { _tileCount },
-                                     .directMappingCount = _allocator.currentlyAllocatedCount });
+        _atlas = makeTestAtlas(_renderTarget,
+                               _allocator,
+                               _gridMetrics.cellSize,
+                               atlas::Format::Red,
+                               crispy::LRUCapacity { _tileCount });
         _renderer.setTextureAtlas(*_atlas);
     }
 

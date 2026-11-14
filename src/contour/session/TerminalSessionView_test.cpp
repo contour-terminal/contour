@@ -1148,6 +1148,29 @@ TEST_CASE("TerminalSession: a config reload keeps success marks in sync with the
     CHECK(session->terminal().settings().gutter.successRailMark == expectedMark);
 }
 
+TEST_CASE("TerminalSession: a config reload hands the display the reloaded box-drawing style",
+          "[contour][session][view]")
+{
+    // The style is fixed when the renderer is built, so a reload that changed it must say so, or the
+    // renderer goes on drawing the old one. Parsing no longer reaches into the renderer to do it.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto surface = contour::test::FakeDisplaySurface {};
+    surface.attachedSession = session.get();
+    session->attachDisplay(surface);
+
+    auto reloaded = testApp.app().config();
+    reloaded.boxArcStyle.value() = vtrasterizer::BoxDrawingStyle::ArcStyle::Elliptic;
+    reloaded.brailleStyle.value() = vtrasterizer::BoxDrawingStyle::BrailleStyle::Solid;
+    session->applyReloadedConfig(reloaded, reloaded.defaultProfileName.value());
+
+    REQUIRE(surface.boxDrawingStylesSet.size() == 1);
+    CHECK(surface.boxDrawingStylesSet.back() == contour::config::boxDrawingStyleFor(reloaded));
+    CHECK(surface.boxDrawingStylesSet.back().arcStyle == vtrasterizer::BoxDrawingStyle::ArcStyle::Elliptic);
+
+    session->detachDisplay(surface);
+}
+
 TEST_CASE("TerminalSession: a profile switch re-applies sticky_header to the terminal",
           "[contour][session][stickyheader]")
 {

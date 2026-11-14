@@ -27,6 +27,7 @@
 #include <core/platform/PathUtils.hpp>
 
 #include <libunicode/convert.h>
+#include <libunicode/utf8.h>
 
 #include <yaml-cpp/emitter.h>
 
@@ -1955,11 +1956,8 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("layouts", c.layouts);
         loadFromEntry("hosts", c.hosts);
         loadFromEntry("git_drawings", c.gitDrawings);
-        vtrasterizer::BoxDrawingRenderer::setGitDrawingsStyle(c.gitDrawings.value());
         loadFromEntry("box_arc_style", c.boxArcStyle);
-        vtrasterizer::BoxDrawingRenderer::setArcStyle(c.boxArcStyle.value());
         loadFromEntry("braille_style", c.brailleStyle);
-        vtrasterizer::BoxDrawingRenderer::setBrailleStyle(c.brailleStyle.value());
 
         // loadFromEntry("color_schemes", c.colorschemes); // NB: This is always loaded lazily
         loadFromEntry("input_mapping", c.inputMappings);
@@ -4656,9 +4654,9 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 }
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     vtrasterizer::BoxDrawingRenderer::ArcStyle& where)
+                                     vtrasterizer::BoxDrawingStyle::ArcStyle& where)
 {
-    using ArcStyle = vtrasterizer::BoxDrawingRenderer::ArcStyle;
+    using ArcStyle = vtrasterizer::BoxDrawingStyle::ArcStyle;
     if (auto const child = node[entry])
     {
         auto const styleName = core::toLower(child.as<std::string>());
@@ -4678,11 +4676,11 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 }
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle& where)
+                                     vtrasterizer::BoxDrawingStyle::GitDrawingsStyle& where)
 {
     where = {};
-    using BranchStyle = vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle::BranchStyle;
-    using MergeCommitStyle = vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle::MergeCommitStyle;
+    using BranchStyle = vtrasterizer::BoxDrawingStyle::GitDrawingsStyle::BranchStyle;
+    using MergeCommitStyle = vtrasterizer::BoxDrawingStyle::GitDrawingsStyle::MergeCommitStyle;
 
     auto const parseBranchStyle = [&](std::string const& style) -> std::optional<BranchStyle> {
         auto const styleName = core::toLower(style);
@@ -4729,9 +4727,9 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 }
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     vtrasterizer::BoxDrawingRenderer::BrailleStyle& where)
+                                     vtrasterizer::BoxDrawingStyle::BrailleStyle& where)
 {
-    using BrailleStyle = vtrasterizer::BoxDrawingRenderer::BrailleStyle;
+    using BrailleStyle = vtrasterizer::BoxDrawingStyle::BrailleStyle;
     if (auto const child = node[entry])
     {
         auto const styleName = core::toLower(child.as<std::string>());

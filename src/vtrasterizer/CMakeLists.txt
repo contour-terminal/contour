@@ -2,6 +2,7 @@ set(_header_files
     AtlasBudget.hpp
     BackgroundRenderer.hpp
     BoxDrawingRenderer.hpp
+    BoxDrawingStyle.hpp
     SoftFontRenderer.hpp
     ChipRenderer.hpp
     CursorRenderer.hpp

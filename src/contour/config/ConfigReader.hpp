@@ -499,9 +499,9 @@ struct YAMLConfigReader
     [[nodiscard]] std::optional<ExtensionConfig> readExtension(std::string name,
                                                                YAML::Node const& settings,
                                                                std::string_view keyPath) const;
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::ArcStyle& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::BrailleStyle& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingStyle::ArcStyle& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingStyle::GitDrawingsStyle& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingStyle::BrailleStyle& where);
 
 
     void defaultSettings(vtpty::Process::ExecInfo& shell);
@@ -1110,10 +1110,9 @@ struct Writer
         return format(doc, shape, blinking, blinkingInterval);
     }
 
-    [[nodiscard]] std::string format(std::string_view doc,
-                                     vtrasterizer::BoxDrawingRenderer::ArcStyle const& v)
+    [[nodiscard]] std::string format(std::string_view doc, vtrasterizer::BoxDrawingStyle::ArcStyle const& v)
     {
-        using ArcStyle = vtrasterizer::BoxDrawingRenderer::ArcStyle;
+        using ArcStyle = vtrasterizer::BoxDrawingStyle::ArcStyle;
         switch (v)
         {
             case ArcStyle::Elliptic: return format(doc, "elliptic");
@@ -1123,9 +1122,9 @@ struct Writer
     }
 
     [[nodiscard]] std::string format(std::string_view doc,
-                                     vtrasterizer::BoxDrawingRenderer::BrailleStyle const& v)
+                                     vtrasterizer::BoxDrawingStyle::BrailleStyle const& v)
     {
-        using BrailleStyle = vtrasterizer::BoxDrawingRenderer::BrailleStyle;
+        using BrailleStyle = vtrasterizer::BoxDrawingStyle::BrailleStyle;
         switch (v)
         {
             case BrailleStyle::Font: return format(doc, "font");
@@ -1141,10 +1140,10 @@ struct Writer
     }
 
     [[nodiscard]] std::string format(std::string_view doc,
-                                     vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle const& v)
+                                     vtrasterizer::BoxDrawingStyle::GitDrawingsStyle const& v)
     {
-        using ArcStyle = vtrasterizer::BoxDrawingRenderer::ArcStyle;
-        using DrawingStyle = vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle;
+        using ArcStyle = vtrasterizer::BoxDrawingStyle::ArcStyle;
+        using DrawingStyle = vtrasterizer::BoxDrawingStyle::GitDrawingsStyle;
         auto const arc = [&]() -> std::string_view {
             switch (v.arcStyle)
             {

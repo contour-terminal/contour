@@ -8,6 +8,7 @@
 #include <core/log/Assert.hpp>
 #include <core/log/LogStore.hpp>
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
@@ -887,24 +888,65 @@ namespace detail
                 /*U+F60D  */ Box {}.circle(Line::Light).horizontal(branchLine).vertical(branchLine),
             };
         }
-        // constinit: guarantees constant initialization, so no dynamic (and possibly throwing)
-        // initializer runs at static-init time. Still mutable -- setGitStyles() reassigns it.
-        constinit auto branchDrawingDefinitions = getBranchBoxes();
+        using BranchBoxes = decltype(getBranchBoxes());
+        using GitDrawingsStyle = BoxDrawingStyle::GitDrawingsStyle;
 
-        constexpr bool isGitBranchDrawing(char32_t codepoint)
+        constexpr auto MergeCommitLines = std::array {
+            std::pair { GitDrawingsStyle::MergeCommitStyle::Solid, Line::Heavy },
+            std::pair { GitDrawingsStyle::MergeCommitStyle::Bullet, Line::Double },
+        };
+
+        constexpr auto BranchLines = std::array {
+            std::pair { GitDrawingsStyle::BranchStyle::None, Line::NoLine },
+            std::pair { GitDrawingsStyle::BranchStyle::Thin, Line::Light },
+            std::pair { GitDrawingsStyle::BranchStyle::Double, Line::Double },
+            std::pair { GitDrawingsStyle::BranchStyle::Thick, Line::Heavy },
+        };
+
+        /// Whether @p table pairs every value of its enumeration, from zero up to @p last, with its line, in
+        /// order -- so that the enumerator indexes the table.
+        template <typename Table, typename Enum>
+        constexpr bool indexedByEnum(Table const& table, Enum last) noexcept
         {
-            bool const gitBranchBox =
-                codepoint >= 0xF5D0 && codepoint < 0xF5D0 + branchDrawingDefinitions.size();
-            return gitBranchBox && branchDrawingDefinitions[0].rightval != Line::NoLine;
+            return table.size() == static_cast<size_t>(last) + 1
+                   && std::ranges::all_of(std::views::iota(0zu, table.size()), [&table](size_t index) {
+                          return static_cast<size_t>(table[index].first) == index;
+                      });
         }
-        constexpr auto getBoxDrawing(char32_t codepoint) -> std::optional<Box>
-        {
-            auto const standardBox = codepoint >= 0x2500 && codepoint <= 0x257F;
-            if (!(standardBox || isGitBranchDrawing(codepoint)))
-                return std::nullopt;
+        static_assert(indexedByEnum(MergeCommitLines, GitDrawingsStyle::MergeCommitStyle::Bullet));
+        static_assert(indexedByEnum(BranchLines, GitDrawingsStyle::BranchStyle::Thick));
 
-            return standardBox ? BoxDrawingDefinitions[codepoint - 0x2500]
-                               : branchDrawingDefinitions[codepoint - 0xF5D0];
+        /// The git-graph glyphs for every merge-commit and branch style, built at compile time, so a
+        /// renderer only ever selects one table and nothing is rebuilt (or shared and mutated) at run time.
+        constexpr auto BranchBoxTables = [] {
+            auto tables = std::array<BranchBoxes, MergeCommitLines.size() * BranchLines.size()> {};
+            for (auto const& [mergeCommitStyle, mergeCommitLine]: MergeCommitLines)
+                for (auto const& [branchStyle, branchLine]: BranchLines)
+                    tables[(static_cast<size_t>(mergeCommitStyle) * BranchLines.size())
+                           + static_cast<size_t>(branchStyle)] = getBranchBoxes(mergeCommitLine, branchLine);
+            return tables;
+        }();
+
+        /// The git-graph glyph table @p style draws with.
+        constexpr BranchBoxes const& branchBoxesFor(GitDrawingsStyle style) noexcept
+        {
+            return BranchBoxTables[(static_cast<size_t>(style.mergeCommitStyle) * BranchLines.size())
+                                   + static_cast<size_t>(style.branchStyle)];
+        }
+
+        /// Whether @p codepoint is one of Contour's git-graph glyphs, whatever the style.
+        constexpr bool isGitBranchCodepoint(char32_t codepoint) noexcept
+        {
+            return codepoint >= 0xF5D0 && codepoint < 0xF5D0 + std::tuple_size_v<BranchBoxes>;
+        }
+
+        constexpr auto getBoxDrawing(char32_t codepoint, GitDrawingsStyle gitStyle) -> std::optional<Box>
+        {
+            if (codepoint >= 0x2500 && codepoint <= 0x257F)
+                return BoxDrawingDefinitions[codepoint - 0x2500];
+            if (isGitBranchCodepoint(codepoint))
+                return branchBoxesFor(gitStyle)[codepoint - 0xF5D0];
+            return std::nullopt;
         }
 
         // {{{ block element construction
@@ -1828,35 +1870,32 @@ namespace detail
             // 2 5
             // 6 7
 
-            static bool isBraille(char32_t codepoint)
+            /// Whether @p codepoint is a Braille pattern, whatever the style.
+            static constexpr bool isBraille(char32_t codepoint) noexcept
             {
-                return CurrentStyle != Style::Font and codepoint >= 0x2800 and codepoint <= 0x28FF;
+                return codepoint >= 0x2800 and codepoint <= 0x28FF;
             }
 
-            using Style = BoxDrawingRenderer::BrailleStyle;
-            inline static Style CurrentStyle = Style::Circle;
-            static void setStyle(Style newStyle) { CurrentStyle = newStyle; }
+            using Style = BoxDrawingStyle::BrailleStyle;
 
-            static auto build(char32_t codepoint,
+            static auto build(Style style,
+                              char32_t codepoint,
                               ImageSize size,
                               [[maybe_unused]] size_t th,
                               [[maybe_unused]] size_t ss)
             {
                 uint8_t const value = codepoint - 0x2800;
-                switch (CurrentStyle)
+                switch (style)
                 {
                     using enum Style;
                     case Solid: return buildSolid(value, size);
                     case Circle: [[fallthrough]];
-                    case CircleEmpty: return buildCircle(value, size, th, ss, CurrentStyle == CircleEmpty);
+                    case CircleEmpty: return buildCircle(value, size, th, ss, style == CircleEmpty);
                     case Square: [[fallthrough]];
-                    case SquareEmpty: return buildSquare(value, size, th, 1, CurrentStyle == SquareEmpty);
+                    case SquareEmpty: return buildSquare(value, size, th, 1, style == SquareEmpty);
                     case AASquare: [[fallthrough]];
-                    case AASquareEmpty:
-                        return buildSquare(value, size, th, ss, CurrentStyle == AASquareEmpty);
-                    case Font:
-                        (void) SoftRequire(false);
-                        return atlas::Buffer(static_cast<std::size_t>(*size.width * *size.height));
+                    case AASquareEmpty: return buildSquare(value, size, th, ss, style == AASquareEmpty);
+                    case Font: break; // Left to the font: render() declines it before a tile is built.
                 }
                 (void) SoftRequire(false);
                 return atlas::Buffer(static_cast<std::size_t>(*size.width * *size.height));
@@ -2056,41 +2095,32 @@ namespace detail
     } // namespace
 } // namespace detail
 
-void BoxDrawingRenderer::setGitDrawingsStyle(BoxDrawingRenderer::GitDrawingsStyle newStyle)
+BoxDrawingRenderer::BoxDrawingRenderer(GridMetrics const& gridMetrics, BoxDrawingStyle style):
+    Renderable { gridMetrics }, _resolved { resolve(style) }
 {
-    using GitBranchStyle = BoxDrawingRenderer::GitDrawingsStyle::BranchStyle;
-    using MergeCommitStyle = BoxDrawingRenderer::GitDrawingsStyle::MergeCommitStyle;
+}
 
-    if (DefaultArcStyle == ArcStyle::Elliptic && newStyle.branchStyle != GitBranchStyle::Thin)
-    {
-        // log warning ??
-        newStyle.arcStyle = ArcStyle::Round;
-    }
-    auto mcLine = [&] {
-        switch (newStyle.mergeCommitStyle)
-        {
-            case MergeCommitStyle::Solid: return detail::Line::Heavy;
-            case MergeCommitStyle::Bullet: return detail::Line::Double;
-            default: assert(false); return detail::Line::Double;
-        }
-    }();
-    auto branchLine = [&] {
-        switch (newStyle.branchStyle)
-        {
-            case GitBranchStyle::Thin: return detail::Line::Light;
-            case GitBranchStyle::Thick: return detail::Line::Heavy;
-            case GitBranchStyle::Double: return detail::Line::Double;
-            case GitBranchStyle::None: return detail::Line::NoLine;
-            default: assert(false); return detail::Line::Light;
-        }
-    }();
-    DefaultGitArcStyle = newStyle.arcStyle;
-    detail::branchDrawingDefinitions = detail::getBranchBoxes(mcLine, branchLine);
-}
-void BoxDrawingRenderer::setBrailleStyle(BoxDrawingRenderer::BrailleStyle newStyle)
+auto BoxDrawingRenderer::resolve(BoxDrawingStyle style) noexcept -> ResolvedStyle
 {
-    detail::Braille::setStyle(newStyle);
+    // The style takes lanes of its own, its high word in the second and its low word in the third: mixed
+    // into the glyph's lane (the fourth), it would flip its subIndex and flag bits, and a style change would
+    // find another tile of the same glyph.
+    auto const key = style.atlasKey();
+    return ResolvedStyle { .style = style,
+                           .atlasLane = crispy::StrongHash {
+                               0, static_cast<uint32_t>(key >> 32U), static_cast<uint32_t>(key), 0 } };
 }
+
+bool BoxDrawingRenderer::leavesToFont(char32_t codepoint) const noexcept
+{
+    if (detail::Braille::isBraille(codepoint))
+        return _resolved.style.brailleStyle == BoxDrawingStyle::BrailleStyle::Font;
+    if (detail::isGitBranchCodepoint(codepoint))
+        return _resolved.style.gitDrawings.branchStyle
+               == BoxDrawingStyle::GitDrawingsStyle::BranchStyle::None;
+    return false;
+}
+
 void BoxDrawingRenderer::setRenderTarget(RenderTarget& renderTarget,
                                          DirectMappingAllocator& directMappingAllocator)
 {
@@ -2110,8 +2140,11 @@ bool BoxDrawingRenderer::render(vtbackend::LineOffset line,
                                 vtbackend::LineFlags flags,
                                 vtbackend::RGBColor color)
 {
+    if (leavesToFont(codepoint))
+        return false;
+
     auto const width = flags & vtbackend::LineFlag::DoubleWidth ? 2 : 1;
-    for (int i = 0; i < width; ++i)
+    for (auto const i: std::views::iota(0, width))
     {
         Renderable::AtlasTileAttributes const* data = getOrCreateCachedTileAttributes(codepoint, flags, i);
         if (!data)
@@ -2270,7 +2303,8 @@ Renderable::AtlasTileAttributes const* BoxDrawingRenderer::getOrCreateCachedTile
     // Layout: [Codepoint 21][Flags 8][SubIndex 1] -> 30 bits used.
     auto const cacheKey = (static_cast<uint32_t>(codepoint) << 9)
                           | (static_cast<uint32_t>(cacheKeyFlags) << 1) | static_cast<uint32_t>(subIndex);
-    return textureAtlas().getOrTryEmplace(crispy::StrongHash { 31, 13, 8, cacheKey },
+    auto const atlasKey = crispy::StrongHash { 31, 13, 8, cacheKey } * _resolved.atlasLane;
+    return textureAtlas().getOrTryEmplace(atlasKey,
                                           [this, codepoint, flags, subIndex](atlas::TileLocation tileLocation)
                                               -> optional<TextureAtlas::TileCreateData> {
                                               return createTileData(codepoint, flags, tileLocation, subIndex);
@@ -2294,21 +2328,21 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
         return a <= codepoint && codepoint <= b;
     };
 
-    return ascending(0x239B, 0x23B3)                // mathematical brackets and symbols
-           || ascending(0x2500, 0x259F)             // box drawing, block elements, shades
-           || codepoint == 0x25B6                   // ▶ BLACK RIGHT-POINTING TRIANGLE
-           || codepoint == 0x25BC                   // ▼ BLACK DOWN-POINTING TRIANGLE
-           || isContourGlyph(codepoint)             // Contour's own: the fold column, gutter status marks
-           || ascending(0x1FB00, 0x1FBAF)           // more block sextants
-           || ascending(0x1FBF0, 0x1FBF9)           // digits
-           || ascending(0xEE00, 0xEE05)             // progress bar (Fira Code)
-           || detail::isGitBranchDrawing(codepoint) //
-           || detail::Braille::isBraille(codepoint) //
-           || ascending(0xE0B0, 0xE0B4)             // solid and thin dividers, right half circle
-           || codepoint == 0xE0B6                   // 
-           || ascending(0xE0B8, 0xE0BF)             // corner triangles and diagonal separators
-           || codepoint == 0xE0D6                   // 
-           || codepoint == 0xE0D7                   // 
+    return ascending(0x239B, 0x23B3)                  // mathematical brackets and symbols
+           || ascending(0x2500, 0x259F)               // box drawing, block elements, shades
+           || codepoint == 0x25B6                     // ▶ BLACK RIGHT-POINTING TRIANGLE
+           || codepoint == 0x25BC                     // ▼ BLACK DOWN-POINTING TRIANGLE
+           || isContourGlyph(codepoint)               // Contour's own: the fold column, gutter status marks
+           || ascending(0x1FB00, 0x1FBAF)             // more block sextants
+           || ascending(0x1FBF0, 0x1FBF9)             // digits
+           || ascending(0xEE00, 0xEE05)               // progress bar (Fira Code)
+           || detail::isGitBranchCodepoint(codepoint) // git graph, unless the style leaves it to the font
+           || detail::Braille::isBraille(codepoint)   // Braille, unless the style leaves it to the font
+           || ascending(0xE0B0, 0xE0B4)               // solid and thin dividers, right half circle
+           || codepoint == 0xE0B6                     // 
+           || ascending(0xE0B8, 0xE0BF)               // corner triangles and diagonal separators
+           || codepoint == 0xE0D6                     // 
+           || codepoint == 0xE0D7                     // 
         ;
 }
 
@@ -2349,7 +2383,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
     };
 
     if (detail::Braille::isBraille(codepoint))
-        return Braille::build(codepoint, size, lineThickness, 4);
+        return Braille::build(_resolved.style.brailleStyle, codepoint, size, lineThickness, 4);
 
     // TODO: just check notcurses-info to get an idea what may be missing
     // clang-format off
@@ -3292,13 +3326,15 @@ static auto buildBox(detail::Box box,
 optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
                                                              ImageSize size,
                                                              int lineThickness,
-                                                             size_t supersampling)
+                                                             size_t supersampling) const
 {
-    auto box = detail::getBoxDrawing(codepoint);
+    auto const box = detail::getBoxDrawing(codepoint, _resolved.style.gitDrawings);
     if (not box)
         return std::nullopt;
-    auto lArcStyle = detail::isGitBranchDrawing(codepoint) ? DefaultGitArcStyle : DefaultArcStyle;
-    auto image = buildBox(*box, size, lineThickness, supersampling, lArcStyle == ArcStyle::Elliptic);
+    auto const arcStyle = detail::isGitBranchCodepoint(codepoint) ? _resolved.style.effectiveGitArcStyle()
+                                                                  : _resolved.style.arcStyle;
+    auto image =
+        buildBox(*box, size, lineThickness, supersampling, arcStyle == BoxDrawingStyle::ArcStyle::Elliptic);
     boxDrawingLog()("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(codepoint), size);
     return image;
 }

@@ -7758,6 +7758,10 @@ bool TerminalSession::reloadConfig(config::Config newConfig, string const& profi
     // clang-format on
 
     _config = std::move(newConfig);
+    // Global rather than per-profile, so it rides on the reload, not on activateProfile(). The renderer was
+    // built with the previous style and keeps it until told.
+    if (_display != nullptr)
+        _display->setBoxDrawingStyle(config::boxDrawingStyleFor(_config));
     // Passive config-file reload: keep the user's live window size (default Preserve policy). Only an
     // explicit profile switch re-fits the window to the profile's terminal_size.
     activateProfile(profileName);

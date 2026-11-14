@@ -68,13 +68,11 @@ class DecorationProbe
         _gridMetrics { gridMetrics }, _renderer { _gridMetrics, hyperlinkNormal, hyperlinkHover }
     {
         _renderer.setRenderTarget(_renderTarget, _allocator);
-        _atlas = std::make_unique<Renderable::TextureAtlas>(
-            _renderTarget.textureScheduler(),
-            atlas::AtlasProperties { .format = atlas::Format::RGBA,
-                                     .tileSize = _gridMetrics.cellSize,
-                                     .hashCount = crispy::StrongHashtableSize { 64 },
-                                     .tileCount = crispy::LRUCapacity { 64 },
-                                     .directMappingCount = _allocator.currentlyAllocatedCount });
+        _atlas = makeTestAtlas(_renderTarget,
+                               _allocator,
+                               _gridMetrics.cellSize,
+                               atlas::Format::RGBA,
+                               crispy::LRUCapacity { 64 });
         _renderer.setTextureAtlas(*_atlas);
     }
 

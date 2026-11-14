@@ -288,6 +288,7 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     void resizeWindow(vtbackend::Width, vtbackend::Height) final;
     void setFonts(vtrasterizer::FontDescriptions fontDescriptions) final;
     bool setFontSize(text::FontSize newFontSize) final;
+    void setBoxDrawingStyle(vtrasterizer::BoxDrawingStyle style) final;
 
     /// The font size the renderer has actually loaded (its published font descriptions), which may differ
     /// from a just-requested size while a staged change is pending or after a swallowed font-load failure.

@@ -384,6 +384,10 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
         host->seedTabBarVisibility(_session->config().tabBarVisibility.value());
     }
 
+    // The session's configuration's: the style a renderer built here starts with, and the one a renderer
+    // already drawing another tab is switched to below.
+    auto const boxDrawingStyle = config::boxDrawingStyleFor(_session->config());
+
     if (!_renderer)
     {
         auto const timer = crispy::ScopedTimer(startupLog, "Renderer construction");
@@ -414,6 +418,7 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
                 _session->app().fontLocator(profile().fonts.value().fontLocator),
                 _session->profile().hyperlinkDecoration.value().normal,
                 _session->profile().hyperlinkDecoration.value().hover,
+                boxDrawingStyle,
                 _session->config().textScalingMethod.value());
         }
         catch (std::exception const& failure)
@@ -477,6 +482,11 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
         // grid refit so applyDisplaySizeToGrid() fits against the final cell size; setFonts() itself already
         // reflows the grid, and both steps are idempotent when nothing changed.
         setFonts(_session->profile().fonts.value());
+
+        // The box-drawing style is the session's configuration's, and the renderer keeps whatever the
+        // last-active tab's configuration set -- a reload whose profile is gone leaves a session on the
+        // configuration it ran under, which may differ from the one another tab reloaded into.
+        setBoxDrawingStyle(boxDrawingStyle);
 
         // attachDisplay() above only round-trips the session's stale page size
         // (resizeScreen(totalPageSize(), pixelSize())); for a live window the WINDOW is the size authority,
@@ -2305,6 +2315,19 @@ void TerminalDisplay::toggleInputMethodEditorHandling()
     auto const enabled = !static_cast<bool>(flags() & Flag::ItemAcceptsInputMethod);
     displayLog()("{} IME (input method editor) handling", enabled ? "Enabling" : "Disabling");
     setFlag(Flag::ItemAcceptsInputMethod, enabled);
+}
+
+void TerminalDisplay::setBoxDrawingStyle(vtrasterizer::BoxDrawingStyle style)
+{
+    // No renderer yet: the one setSession() builds takes the style from the configuration itself. An
+    // unchanged style -- a reload that left it alone, a tab switch between sessions of one configuration --
+    // costs neither a reconfiguration nor a frame.
+    if (!_renderer || _renderer->boxDrawingStyle() == style)
+        return;
+
+    // Staged for the render thread, which applies it at the top of the next frame.
+    _renderer->setBoxDrawingStyle(style);
+    scheduleRedraw();
 }
 
 void TerminalDisplay::setHyperlinkDecoration(vtrasterizer::Decorator normal, vtrasterizer::Decorator hover)

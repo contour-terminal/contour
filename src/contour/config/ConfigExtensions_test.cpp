@@ -2031,11 +2031,38 @@ profiles:
         shell: /bin/sh
 )"sv);
 
-    using Box = vtrasterizer::BoxDrawingRenderer;
+    using Box = vtrasterizer::BoxDrawingStyle;
     CHECK(config.boxArcStyle.value() == Box::ArcStyle::Elliptic);
     CHECK(config.brailleStyle.value() == Box::BrailleStyle::AASquare);
     CHECK(config.gitDrawings.value().branchStyle == Box::GitDrawingsStyle::BranchStyle::Double);
     CHECK(config.gitDrawings.value().mergeCommitStyle == Box::GitDrawingsStyle::MergeCommitStyle::Solid);
+
+    // The three keys reach the renderer as one value, whatever order they were read in.
+    auto const style = contour::config::boxDrawingStyleFor(config);
+    CHECK(style.arcStyle == Box::ArcStyle::Elliptic);
+    CHECK(style.brailleStyle == Box::BrailleStyle::AASquare);
+    CHECK(style.gitDrawings == config.gitDrawings.value());
+}
+
+TEST_CASE("Config: elliptic git arcs with a branch style other than thin draw round git arcs", "[config]")
+{
+    // `arc_style` has effect only where `branch_style` is `thin`, whatever `box_arc_style` says.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+box_arc_style: elliptic
+git_drawings:
+    arc_style: elliptic
+    branch_style: thick
+    merge_commit_style: bullet
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    using Box = vtrasterizer::BoxDrawingStyle;
+    CHECK(config.gitDrawings.value().arcStyle == Box::ArcStyle::Elliptic); // parsed as written
+    CHECK(contour::config::boxDrawingStyleFor(config).effectiveGitArcStyle() == Box::ArcStyle::Round);
 }
 
 TEST_CASE("Config: on_mouse_select action parses each enum arm", "[config]")

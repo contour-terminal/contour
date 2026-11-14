@@ -67,6 +67,7 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                  FontDescriptions& fontDescriptions,
                  FontKeys const& fontKeys,
                  TextRendererEvents& eventHandler,
+                 BoxDrawingStyle boxDrawingStyle,
                  GlyphScaler const& glyphScaler = defaultGlyphScaler());
 
     /// The strategy used when no other is injected. @see GlyphScalingMethod.
@@ -96,6 +97,13 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     /// Renderer::applyFontDescriptions() does.
     /// @param textShaper The shaper to shape and rasterize through from now on.
     void setTextShaper(text::Shaper& textShaper) noexcept { _textShaper = &textShaper; }
+
+    /// Replaces the style the builtin box drawing draws with.
+    ///
+    /// Live configuration reload, as BoxDrawingRenderer::setStyle() documents; the owning Renderer applies
+    /// it on the render thread (@see Renderer::setBoxDrawingStyle).
+    /// @param style The new style.
+    void setBoxDrawingStyle(BoxDrawingStyle style) noexcept { _boxDrawingRenderer.setStyle(style); }
 
     void updateFontMetrics();
 
