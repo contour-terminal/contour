@@ -4605,13 +4605,27 @@ std::vector<window::SwitcherWorkspace> ContourGuiApp::windowWorkspacesOf(window:
 
 std::expected<void, std::string> ContourGuiApp::showSwitchPick(remote::SwitchPickRequest const& pick)
 {
-    auto const daemon = _sessionManager.daemonTargetOf(pick.window);
-    if (!daemon)
-        return std::unexpected(std::string { "the window went away" });
     auto* const controller = _sessionManager.controllerDisplaying(pick.window);
     if (controller == nullptr)
         return std::unexpected(std::string { "the window went away" });
     controller->sidebar().refreshNow(); // its rows as of now, not as of its last rebuild
+    auto const daemon = _sessionManager.daemonTargetOf(pick.window);
+    if (!daemon)
+    {
+        if (!_sessionManager.isInProcessWindow(pick.window))
+            return std::unexpected(std::string { "the window went away" });
+        // No daemon to scope the pick to: the window's own workspaces are the popup's, as for the chip.
+        return openSwitcher(
+            window::SwitcherOpening { .window = pick.window,
+                                      .windowDaemon = session::SwitchTarget {},
+                                      .mode = pick.mode,
+                                      .prompt = window::SwitcherPrompt::Browse,
+                                      .pick = std::nullopt,
+                                      .scope = window::SwitcherScope::WindowOnly,
+                                      .windowWorkspaces = windowWorkspacesOf(*controller, pick.window),
+                                      .origin = window::SwitcherOrigin::Centred },
+            *controller);
+    }
     return openSwitcher(
         window::SwitcherOpening {
             .window = pick.window,

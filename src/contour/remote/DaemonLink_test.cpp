@@ -1055,6 +1055,60 @@ TEST_CASE("DaemonLink: what its controller signals after stop() is ignored", "[a
     manager.releaseBinding(link);
 }
 
+namespace
+{
+/// A factory another daemon's window was bound to: it counts what it is told of its panes being detached.
+class DetachRecordingFactory final: public contour::session::SessionFactory
+{
+  public:
+    [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(std::optional<std::string> /*cwd*/,
+                                                        std::optional<vtbackend::PageSize> pageSize,
+                                                        std::optional<vtpty::Process::ExecInfo> /*command*/,
+                                                        std::optional<std::string> /*profile*/) override
+    {
+        return std::make_unique<vtpty::MockPty>(
+            pageSize.value_or(vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) }));
+    }
+    void beginDaemonOriginated() override { ++begun; }
+    void endDaemonOriginated() override { ++ended; }
+
+    int begun = 0; ///< How often beginDaemonOriginated() was called.
+    int ended = 0; ///< How often endDaemonOriginated() was called.
+};
+} // namespace
+
+TEST_CASE("DaemonLink: adopting a window of another daemon marks that daemon's panes, not the adopter's, "
+          "as detached by the window",
+          "[attach][link][switch]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 1);
+    auto rig = LinkRig { daemon.endpoint() };
+    auto& manager = rig.app.manager();
+    auto const window = contour::test::ScopedController { manager };
+    window->createNewTab();
+    auto old = DetachRecordingFactory {};
+    auto oldBinding = contour::test::DaemonNamedBinding {
+        old,
+        contour::session::SwitchTarget {
+            .kind = vthost::proto::SwitchDaemonKind::Label, .daemon = "elsewhere", .workspace = {} }
+    };
+    manager.bindWindow(window.id, oldBinding);
+    REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
+    REQUIRE(waitUntil([&] { return rig.link->canAdoptWindow(window.id).has_value(); }));
+
+    REQUIRE(rig.link->adoptWindow(window.id).has_value());
+
+    // The old panes belong to the old binding's factory: it was held, once, and let go.
+    CHECK(old.begun == 1);
+    CHECK(old.ended == 1);
+    // And the adopter's own state is as it was.
+    REQUIRE(rig.link->liveController() != nullptr);
+    CHECK_FALSE(rig.link->liveController()->isDaemonOriginated());
+    CHECK_FALSE(rig.link->liveController()->isRealizingLayout());
+    manager.releaseBinding(oldBinding);
+}
+
 TEST_CASE("DaemonLink: a link destroyed unstopped releases its windows", "[attach][link]")
 {
     auto daemon = DaemonFixture {};
@@ -1881,6 +1935,78 @@ TEST_CASE("DaemonLink: a window switched back before the panes it left ended sho
     requireDrivesPane(daemon, manager, boot.windowId, pane, "quick");
     endClosedSessions(firstPanes);
     drainGuiEvents();
+}
+
+TEST_CASE("DaemonLink: a window switched to another workspace and back shows the tab it left active",
+          "[attach][link][switch]")
+{
+    auto daemon = DaemonFixture {};
+    auto const ids = seedWorkspaces(daemon, 2);
+    auto const pane = onlyPaneOf(daemon, ids[0]);
+    auto rig = LinkRig { daemon.endpoint(), {}, {}, selecting(ids[0]) };
+    auto& manager = rig.app.manager();
+    auto const boot = contour::test::ScopedController { manager };
+    REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
+    REQUIRE(waitUntil([&] { return rig.link->workspaceOf(boot.id) == ids[0]; }));
+    REQUIRE(waitUntil([&] { return !sessionsOf(manager, boot.id).empty(); }));
+
+    // A second and a third tab, made on the daemon; the window leaves the second one active.
+    daemon.onDaemon([&] {
+        std::ignore = daemon.host->createTab({}, pane);
+        std::ignore = daemon.host->createTab({}, pane);
+        return 0;
+    });
+    auto const displayed = [&] {
+        return manager.controllerOf(boot.windowId)->displayedWorkspace();
+    };
+    REQUIRE(waitUntil([&] { return manager.model().workspace(displayed())->tabCount() == 3; }));
+    manager.activateTab(boot.id, 1);
+    auto const activeRow = [&] {
+        auto const* const workspace = manager.model().workspace(displayed());
+        return workspace->indexOf(workspace->activeTab()->id());
+    };
+    REQUIRE(activeRow() == 1);
+    drainGuiEvents();
+
+    switchAwayAndBack(rig, boot, ids);
+    REQUIRE(waitUntil([&] { return manager.model().workspace(displayed())->tabCount() == 3; }));
+    CHECK(activeRow() == 1);
+}
+
+TEST_CASE("DaemonLink: a window switched to another workspace and back shows the pane it left active",
+          "[attach][link][switch]")
+{
+    auto daemon = DaemonFixture {};
+    auto const ids = seedWorkspaces(daemon, 2);
+    auto rig = LinkRig { daemon.endpoint(), {}, {}, selecting(ids[0]) };
+    auto& manager = rig.app.manager();
+    auto const boot = contour::test::ScopedController { manager };
+    REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
+    REQUIRE(waitUntil([&] { return rig.link->workspaceOf(boot.id) == ids[0]; }));
+    REQUIRE(waitUntil([&] { return !sessionsOf(manager, boot.id).empty(); }));
+
+    // The one tab split in two on the daemon.
+    daemon.onDaemon([&] {
+        auto* const tab = daemon.host->model().workspace(vtworkspace::WorkspaceId { ids[0] })->tabAt(0);
+        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        return 0;
+    });
+    auto const displayed = [&] {
+        return manager.controllerOf(boot.windowId)->displayedWorkspace();
+    };
+    auto const tabOf = [&] {
+        return manager.model().workspace(displayed())->tabAt(0);
+    };
+    REQUIRE(waitUntil([&] { return !tabOf()->rootPane()->isLeaf(); }));
+    // The window leaves the first pane active: the daemon made the second one, which a clobbering detach
+    // (panes closed in order, the last one activated) would leave active instead.
+    manager.model().setActivePane(tabOf()->id(), tabOf()->rootPane()->first()->id());
+    REQUIRE(tabOf()->activePane() == tabOf()->rootPane()->first());
+    drainGuiEvents();
+
+    switchAwayAndBack(rig, boot, ids);
+    REQUIRE(waitUntil([&] { return !tabOf()->rootPane()->isLeaf(); }));
+    CHECK(tabOf()->activePane() == tabOf()->rootPane()->first());
 }
 
 TEST_CASE("DaemonLink: a client started after one switched away and back shows and drives the pane",

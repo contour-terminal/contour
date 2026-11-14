@@ -159,12 +159,9 @@ std::vector<WorkspaceRow> workspaceRowsOf(window::WorkspaceDirectory const& dire
                                           ShownHere const& shownHere)
 {
     auto rows = std::vector<WorkspaceRow> {};
-    for (auto const [index, workspace]: core::views::enumerate(directory.workspaces))
+    for (auto const& [position, listed]: window::switchableWorkspacesOf(directory))
     {
-        // As a listing's: one holding no tab has nothing for a window to show.
-        if (workspace.tabs.empty())
-            continue;
-        auto const position = static_cast<uint32_t>(index + 1);
+        auto const& workspace = *listed;
         auto shown = shownHere(workspace.id);
         rows.push_back(WorkspaceRow {
             .id = workspace.id,
@@ -182,6 +179,14 @@ std::vector<WorkspaceRow> workspaceRowsOf(window::WorkspaceDirectory const& dire
         });
     }
     return rows;
+}
+
+std::vector<WorkspaceRow> inProcessWorkspaceRowsOf(window::WorkspaceDirectory const& directory,
+                                                   vtworkspace::WorkspaceId window)
+{
+    return workspaceRowsOf(directory, [window](uint64_t id) {
+        return id == window.value ? std::optional { window } : std::nullopt;
+    });
 }
 
 bool namesControlId(session::WorkspaceTarget const& workspace)

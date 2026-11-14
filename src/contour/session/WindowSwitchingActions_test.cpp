@@ -15,7 +15,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <ranges>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -265,7 +267,9 @@ TEST_CASE("a window with no daemon has no switching rows and refreshes nothing",
     CHECK(rig.app.switchDirectory().refreshes == 0);
 }
 
-TEST_CASE("every switching action is a no-op for a window whose sessions run in-process", "[switch][session]")
+TEST_CASE("only the switches among its own workspaces reach the switcher for a window whose sessions run "
+          "in-process",
+          "[switch][session]")
 {
     auto rig = SwitchRig { std::nullopt };
     rig.app.switchDirectory().workspaces = { { .position = 1, .name = "a", .role = WorkspaceRole::Current },
@@ -282,7 +286,43 @@ TEST_CASE("every switching action is a no-op for a window whose sessions run in-
     rig.run(ShowSwitcher {});
     rig.run(NewDaemon {});
 
-    CHECK(rig.requests().empty());
+    // The one switch such a window can make is among its own workspaces: the switching service gets it
+    // (WindowSwitcher), and refuses the rest itself.
+    REQUIRE(rig.requests().size() == 1);
+    CHECK(rig.requests().front().target.workspace
+          == contour::session::WorkspaceTarget { contour::session::WorkspaceAt { 2 } });
+    CHECK(rig.requests().front().mode == SwitchMode::Switch);
+    CHECK(rig.app.switchDirectory().refreshes == 0);
+}
+
+TEST_CASE("CycleWorkspace in a window whose sessions run in-process cycles the workspaces it owns",
+          "[switch][session]")
+{
+    auto rig = SwitchRig { std::nullopt };
+    auto& manager = rig.app.manager();
+    auto const windowId = rig.window->windowId();
+    // Three workspaces of the window, each holding a tab; the first is shown.
+    for (auto const index: std::views::iota(1, 3))
+    {
+        std::ignore = manager.createWorkspaceIn(windowId);
+        manager.selectWorkspace(windowId, static_cast<size_t>(index));
+        rig.window->createNewTab();
+    }
+    manager.selectWorkspace(windowId, 0);
+    using namespace contour::actions;
+    auto const positionOf = [](auto const& request) {
+        auto const* const at = std::get_if<contour::session::WorkspaceAt>(&request.target.workspace);
+        return at != nullptr ? at->position : 0;
+    };
+
+    rig.run(CycleWorkspace { CycleDirection::Next });
+    rig.run(CycleWorkspace { CycleDirection::Previous });
+
+    REQUIRE(rig.requests().size() == 2);
+    CHECK(positionOf(rig.requests()[0]) == 2);
+    CHECK(positionOf(rig.requests()[1]) == 3); // wrapped around
+    CHECK(rig.requests()[0].mode == SwitchMode::Switch);
+    // Nothing to ask a daemon for.
     CHECK(rig.app.switchDirectory().refreshes == 0);
 }
 
@@ -407,11 +447,13 @@ TEST_CASE("NewWorkspace creates and selects a workspace in the same window, in-p
         CHECK(rig.app.manager().controllerDisplaying(rig.window->ownedWorkspaces()[2])
               == rig.window.controller);
 
-        // The session switching action picks among them by 1-based position, without asking any daemon.
-        // Run from the session of the first workspace, which now sits hidden.
+        // The session switching action names one of them by 1-based position and leaves the showing to the
+        // switching service (WindowSwitcher, which asks no daemon of an in-process window).
         rig.run(SwitchToWorkspace { 1 });
-        CHECK(rig.window->displayedWorkspace() == first);
-        CHECK(rig.requests().empty());
+        REQUIRE(rig.requests().size() == 1);
+        CHECK(rig.requests().front().target.workspace
+              == contour::session::WorkspaceTarget { contour::session::WorkspaceAt { 1 } });
+        CHECK(rig.window->displayedWorkspace() != first); // the mock service shows nothing
     }
     SECTION("a window a daemon serves has the daemon make the workspace, and selects it")
     {

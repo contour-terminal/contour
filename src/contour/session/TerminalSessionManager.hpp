@@ -152,6 +152,27 @@ enum class PaneShowing : uint8_t
     Shown,       ///< Its tab is active and the pane focused and seen.
 };
 
+/// Why newWorkspaceFor() made no workspace.
+enum class NewWorkspaceError : uint8_t
+{
+    NoActiveSession = 0, ///< The window has no pane to start the first shell beside.
+    FirstShellFailed,    ///< The first shell of the new workspace could not start.
+};
+
+/// What the user is told for @p error.
+/// @param error The failure.
+/// @return A lower-case sentence without a trailing period.
+[[nodiscard]] constexpr std::string_view describe(NewWorkspaceError error) noexcept
+{
+    switch (error)
+    {
+        case NewWorkspaceError::NoActiveSession:
+            return "this window has no active pane to start a workspace beside";
+        case NewWorkspaceError::FirstShellFailed: return "the new workspace's shell could not be started";
+    }
+    return {};
+}
+
 /// Why restartSession() started no new session.
 enum class RestartError : uint8_t
 {
@@ -431,7 +452,17 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// failed first session drops the workspace again.
     /// @param acting The session that triggered the action.
     /// @param cwd The folder the first shell starts in, as UTF-8; empty or "." for the profile's.
-    void newWorkspaceStartingIn(TerminalSession const& acting, std::string const& cwd);
+    /// @return The workspace made; none when no shell could start.
+    std::optional<vtworkspace::WorkspaceId> newWorkspaceStartingIn(TerminalSession const& acting,
+                                                                   std::string const& cwd);
+
+    /// (In-process) Makes a workspace for the window showing @p window, in the folder its active pane is in,
+    /// and shows it (newWorkspaceStartingIn()).
+    /// @param window The workspace the window shows.
+    /// @param label What to call it; empty to keep the folder's name.
+    /// @return The workspace made; why none was: the window has no pane to start beside, or no shell started.
+    [[nodiscard]] std::expected<vtworkspace::WorkspaceId, NewWorkspaceError> newWorkspaceFor(
+        vtworkspace::WorkspaceId window, std::string label);
 
     /// (In-process) Labels @p workspace, which the in-process directory of its window lists
     /// (InProcessDirectory); an empty label removes it. Not for a daemon's workspace, whose label is its
@@ -1556,6 +1587,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         manager was constructed with makes.
     [[nodiscard]] WindowBinding const* bindingOf(vtworkspace::WorkspaceId window) const noexcept;
 
+    /// @param window A window of this manager.
+    /// @return The factory that makes its sessions and is asked about them: its binding's (@see bindWindow),
+    ///         else the one this manager was constructed with. A window no binding claims -- the quick
+    ///         terminal among them -- is local, and that is the only rule.
+    [[nodiscard]] SessionFactory& factoryFor(vtworkspace::WorkspaceId window) const noexcept;
+
     /// The one record of which windows a binding serves: what bindWindow() bound to it, and neither a close
     /// nor a later bindWindow() took away since.
     /// @param binding A binding.
@@ -1584,6 +1621,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @return The daemon @p window is on, as a switch names it (WindowBinding::daemonTarget); none for a
     ///         window no binding serves, whose sessions run in-process.
     [[nodiscard]] std::optional<SwitchTarget> daemonTargetOf(vtworkspace::WorkspaceId window) const;
+
+    /// @param window A window of this manager.
+    /// @return Whether @p window is served by no binding at all: its sessions run in this process and it
+    ///         shows the workspaces it owns. (A tmux window has a binding without a daemon, and is not.)
+    [[nodiscard]] bool isInProcessWindow(vtworkspace::WorkspaceId window) const noexcept
+    {
+        return bindingOf(window) == nullptr;
+    }
 
     /// @param window A window.
     /// @return Whether the daemon the window is bound to runs on this machine; Local for a window with none.
@@ -1993,12 +2038,6 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Tells the focused session that the user is looking at it, when it is on screen and focus did
     /// not move to say so: its window was activated again, or restored. @see TerminalSession::paneSeen
     void focusedSessionSeen();
-
-    /// @param window A window of this manager.
-    /// @return The factory that makes its sessions and is asked about them: its binding's (@see bindWindow),
-    ///         else the one this manager was constructed with. A window no binding claims -- the quick
-    ///         terminal among them -- is local, and that is the only rule.
-    [[nodiscard]] SessionFactory& factoryFor(vtworkspace::WorkspaceId window) const noexcept;
 
     /// @param window A window of this manager.
     /// @return What @p window is bound to, as it was bound (@see bindingOf); null for a local window.

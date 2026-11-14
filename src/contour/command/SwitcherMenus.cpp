@@ -27,10 +27,11 @@ std::vector<SwitcherMenuRow> buildSwitcherRowMenu(SwitcherRowMenuState const& st
                                               .availability = state.shown == SwitcherMenuShown::ThisWindow
                                                                   ? RowAvailability::Disabled
                                                                   : RowAvailability::Enabled });
-        rows.emplace_back(SwitcherChoiceRow { .choice = SwitcherMenuChoice::OpenInNewWindow,
-                                              .title = "Open in New Window",
-                                              .shortcut = enterText(style, vtbackend::Modifier::Shift),
-                                              .availability = RowAvailability::Enabled });
+        if (state.newWindow == SwitcherMenuNewWindow::Offered)
+            rows.emplace_back(SwitcherChoiceRow { .choice = SwitcherMenuChoice::OpenInNewWindow,
+                                                  .title = "Open in New Window",
+                                                  .shortcut = enterText(style, vtbackend::Modifier::Shift),
+                                                  .availability = RowAvailability::Enabled });
     }
     else
         rows.emplace_back(SwitcherChoiceRow { .choice = SwitcherMenuChoice::OpenInNewWindow,

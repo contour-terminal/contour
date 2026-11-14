@@ -23,6 +23,7 @@
 #include <initializer_list>
 #include <ranges>
 #include <span>
+#include <tuple>
 #include <utility>
 #include <variant>
 
@@ -615,9 +616,14 @@ void SidebarModel::announceNewNeeds(WorkspaceDirectory const& directory)
 
 void SidebarModel::activate(int row)
 {
+    std::ignore = activateRow(row);
+}
+
+sidebarrows::RowActivation SidebarModel::activateRow(int row)
+{
     auto const* const shown = rowAt(row);
     if (shown == nullptr)
-        return;
+        return sidebarrows::RowActivation::Nothing;
     switch (shown->key.kind)
     {
         case SidebarRowKind::Workspace: _host.showWorkspace(shown->key.workspace); break;
@@ -630,6 +636,7 @@ void SidebarModel::activate(int row)
             break;
     }
     noteChanged();
+    return sidebarrows::RowActivation::Shown;
 }
 
 void SidebarModel::setExpansion(int row, RowExpansion wanted)

@@ -462,6 +462,16 @@ class SessionFactory
     /// @param presentation How the tab is presented here.
     virtual void reportTabPresentation(LocalTabPresentation const& /*presentation*/) {}
 
+    /// Attach mode: what happens to this factory's panes from now until the matching endDaemonOriginated() is
+    /// the daemon's doing, or the window's own housekeeping, and none of it is how the user presents a tab or
+    /// its splits: reportTabPresentation() and reportSplitRatio() say nothing meanwhile. Nothing else changes
+    /// -- sessions are still made, and splits and moves still routed. Calls nest. A local factory does
+    /// nothing. Use DaemonOriginatedScope.
+    virtual void beginDaemonOriginated() {}
+
+    /// Ends what the matching beginDaemonOriginated() began; the state before it is back.
+    virtual void endDaemonOriginated() {}
+
     /// Attach mode: authors the CLOSE of the pane backed by @p pty on the DAEMON, so a session the
     /// user really ended does not linger there headless.
     ///
@@ -572,6 +582,28 @@ class AppSessionFactory final: public SessionFactory
 
     ContourGuiApp& _app;
     std::shared_ptr<vtpty::ProcessPlacement> _placement;
+};
+
+/// Holds a factory in the state of its panes being changed by the daemon, or by the window's housekeeping,
+/// for the scope's lifetime (@see SessionFactory::beginDaemonOriginated). Nests, in any factory.
+class [[nodiscard]] DaemonOriginatedScope
+{
+  public:
+    /// @param factory The factory whose panes change. Borrowed for the scope's lifetime.
+    explicit DaemonOriginatedScope(SessionFactory& factory): _factory { factory }
+    {
+        _factory.beginDaemonOriginated();
+    }
+
+    DaemonOriginatedScope(DaemonOriginatedScope const&) = delete;
+    DaemonOriginatedScope& operator=(DaemonOriginatedScope const&) = delete;
+    DaemonOriginatedScope(DaemonOriginatedScope&&) = delete;
+    DaemonOriginatedScope& operator=(DaemonOriginatedScope&&) = delete;
+
+    ~DaemonOriginatedScope() { _factory.endDaemonOriginated(); }
+
+  private:
+    SessionFactory& _factory;
 };
 
 } // namespace contour::session

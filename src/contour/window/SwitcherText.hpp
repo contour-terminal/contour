@@ -212,7 +212,7 @@ static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SwitcherHi
 /// @param escape What Escape does (switcherEscapeCommand): ClearFilter, Back or Close.
 /// @param style How to spell the keys.
 /// @param mode What Return does: switch this window, or (an Open pick) open a new one.
-/// @return `↩ Switch · ⇧↩ New Window · ⎋ Close`.
+/// @return (over every daemon) `↩ Switch · ⇧↩ New Window · ⎋ Close`.
 [[nodiscard]] std::string switcherFooterHints(SwitcherHintSubject subject,
                                               SwitcherCommand escape,
                                               command::ShortcutStyle style,
@@ -225,11 +225,14 @@ static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SwitcherHi
 /// @param escape What Escape does (switcherEscapeCommand).
 /// @param style How to spell the keys.
 /// @param mode What Return does.
+/// @param scope The popup's scope: where it offers no new window (offersNewWindow()), Shift+Return has no
+///        hint.
 /// @return `↩ Switch · ⇧↩ New Window · ⎋ Close`, then `↩ Switch · ⎋ Close`.
 [[nodiscard]] std::vector<std::string> switcherFooterHintSets(SwitcherHintSubject subject,
                                                               SwitcherCommand escape,
                                                               command::ShortcutStyle style,
-                                                              session::SwitchMode mode);
+                                                              session::SwitchMode mode,
+                                                              SwitcherScope scope);
 
 /// The New Daemon prompt's state for the label typed.
 struct SwitcherLabelState

@@ -123,7 +123,7 @@ class WindowController::SidebarHost final: public ISidebarHost
 
     void showPane(PaneKey pane) override { _window.jumpToPane(pane); }
 
-    void showWorkspace(uint64_t workspace) override { _window.showWorkspace(workspace); }
+    void showWorkspace(uint64_t workspace) override { std::ignore = _window.showWorkspace(workspace); }
 
     void markSeen(PaneKey pane) override { _window.noteDirectoryPaneSeenByKey(pane); }
 
@@ -1929,6 +1929,7 @@ window::ChromeKeyOutcome WindowController::runChromeCommand(window::ChromeComman
         && command != ChromeCommand::Leave)
     {
         // The tree is QML's: it moves its own row focus, expands, renames and filters.
+        // Enter included: the tree names its row back (activateSidebarRow()), which only it knows.
         emit sidebarCommandRequested(static_cast<int>(command), text);
         return ChromeKeyOutcome::Handled;
     }
@@ -1982,6 +1983,14 @@ window::ChromeKeyOutcome WindowController::runChromeCommand(window::ChromeComman
         case ChromeCommand::OpenMenu: return ChromeKeyOutcome::Unhandled; // the sidebar's, handled above
     }
     return ChromeKeyOutcome::Unhandled;
+}
+
+void WindowController::activateSidebarRow(int row)
+{
+    // What the row names is shown in the window, and what is shown is what the user types into next. A row
+    // the tree does not have (an empty or filtered-out one) shows nothing, and the keyboard stays.
+    if (_sidebar->activateRow(row) == window::sidebarrows::RowActivation::Shown)
+        leaveChrome();
 }
 
 void WindowController::closeTabAskingIfBusy(int row)
@@ -3343,12 +3352,15 @@ void WindowController::cancelPendingNavigation() noexcept
     _pendingFollow.reset();
 }
 
-void WindowController::showWorkspace(uint64_t workspace)
+SelectResult WindowController::showWorkspace(uint64_t workspace)
 {
     // Navigating supersedes what waited for an earlier look.
     cancelPendingNavigation();
-    if (_directorySource != nullptr && _directorySource->directory().selected != workspace)
-        std::ignore = _directorySource->select(workspace);
+    if (_directorySource == nullptr)
+        return SelectResult::Refused;
+    if (_directorySource->directory().selected == workspace)
+        return SelectResult::Requested;
+    return _directorySource->select(workspace);
 }
 
 void WindowController::jumpToPane(PaneKey target)

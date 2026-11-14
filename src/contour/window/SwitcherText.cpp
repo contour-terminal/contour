@@ -168,10 +168,10 @@ std::string switcherDescription(SwitcherRow const& row,
     switch (row.kind)
     {
         case SwitcherRowKind::Workspace:
-            if (mode == session::SwitchMode::Open)
+            if (mode == session::SwitchMode::Open && offersNewWindow(view.scope))
                 return std::format("Open {} in a new window", row.title);
             if (view.level == SwitcherLevel::Top && view.origin == SwitcherOrigin::Chip
-                && view.scope == SwitcherScope::OneDaemon)
+                && listsOneDaemon(view.scope))
                 return joined({ row.title, row.status.gitText });
             if (row.daemon != inputs.windowDaemon)
                 return std::format("Move this window to {}{}{}", daemon, LabelSeparator, row.title);
@@ -203,9 +203,13 @@ SwitcherHintSubject switcherHintSubject(SwitcherRow const& row) noexcept
 std::vector<std::string> switcherFooterHintSets(SwitcherHintSubject subject,
                                                 SwitcherCommand escape,
                                                 command::ShortcutStyle style,
-                                                session::SwitchMode mode)
+                                                session::SwitchMode mode,
+                                                SwitcherScope scope)
 {
     auto row = SwitcherHintRows.at(static_cast<std::size_t>(subject));
+    // A window without a daemon has none to open in a new window either.
+    if (!offersNewWindow(scope))
+        row.shiftEnterVerb = {};
     // A pick an Open asked for: Return opens a new window already, and Shift+Return does nothing more.
     if (mode == session::SwitchMode::Open && !row.openVerb.empty())
     {
@@ -262,7 +266,7 @@ std::string switcherFooterHints(SwitcherHintSubject subject,
                                 command::ShortcutStyle style,
                                 session::SwitchMode mode)
 {
-    return switcherFooterHintSets(subject, escape, style, mode).front();
+    return switcherFooterHintSets(subject, escape, style, mode, SwitcherScope::Everything).front();
 }
 
 SwitcherLabelState switcherLabelState(std::string_view label,
@@ -304,7 +308,7 @@ std::string switcherHintText(SwitcherView const& view, std::string_view daemonNa
         case SwitcherLevel::Daemon: return std::format("Filter workspaces on {}…", daemonName);
         case SwitcherLevel::Top: break;
     }
-    if (view.scope == SwitcherScope::OneDaemon)
+    if (listsOneDaemon(view.scope))
         return std::format("Filter workspaces on {}…", daemonName);
     return "Switch workspace or daemon…";
 }

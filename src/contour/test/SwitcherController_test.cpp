@@ -221,6 +221,46 @@ TEST_CASE("Switcher: Return on a daemon drills in; Escape comes back to the daem
     }
 }
 
+TEST_CASE("Switcher: a window reaching no other daemon lists its own workspaces and looks for none",
+          "[contour][switcher]")
+{
+    auto s = Switcher {};
+    s.controller->open(window::SwitcherOpening { .window = ThisWindow,
+                                                 .windowDaemon = switcherLabelled("work"),
+                                                 .mode = SwitchMode::Switch,
+                                                 .prompt = window::SwitcherPrompt::Browse,
+                                                 .pick = std::nullopt,
+                                                 .scope = window::SwitcherScope::WindowOnly,
+                                                 .windowWorkspaces = workWorkspaces(),
+                                                 .origin = window::SwitcherOrigin::Chip });
+    auto const titles = s.titles();
+    CHECK(std::ranges::contains(titles, "contour"));
+    CHECK(std::ranges::contains(titles, "New Workspace"));
+    CHECK_FALSE(std::ranges::contains(titles, "All daemons…"));
+    CHECK_FALSE(std::ranges::contains(titles, "Looking for other daemons…"));
+    CHECK_FALSE(std::ranges::contains(titles, "home"));
+    CHECK(s.world.listed.empty());
+}
+
+TEST_CASE("Switcher: a window reaching no other daemon is offered no new window", "[contour][switcher]")
+{
+    auto s = Switcher {};
+    s.controller->open(window::SwitcherOpening { .window = ThisWindow,
+                                                 .windowDaemon = switcherLabelled("work"),
+                                                 .mode = SwitchMode::Switch,
+                                                 .prompt = window::SwitcherPrompt::Browse,
+                                                 .pick = std::nullopt,
+                                                 .scope = window::SwitcherScope::WindowOnly,
+                                                 .windowWorkspaces = workWorkspaces(),
+                                                 .origin = window::SwitcherOrigin::Chip });
+    s.select("New Workspace", SwitcherRowKind::NewWorkspace);
+
+    // Shift+Return does what Return does: it switches this window, and opens no other.
+    CHECK(s.press(Qt::Key_Return, Qt::ShiftModifier));
+    REQUIRE(s.world.requested.size() == 1);
+    CHECK(s.world.requested[0].mode == SwitchMode::Switch);
+}
+
 TEST_CASE("Switcher: typing lists the matches of every listed local daemon", "[contour][switcher]")
 {
     auto s = Switcher {};

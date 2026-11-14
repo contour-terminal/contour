@@ -122,7 +122,25 @@ enum class SwitcherScope : uint8_t
     Everything = 0, ///< Every daemon, grouped; the ShowSwitcher action, or the chip's dropdown widened.
     OneDaemon,      ///< One daemon's workspaces alone: the chip's dropdown, or the daemon a switch asked to
                     ///< pick a workspace of.
+    WindowOnly,     ///< The window has no daemon (an in-process window): its own workspaces alone, and no
+                    ///< other daemon is looked for or offered.
 };
+
+/// @param scope A top level's scope.
+/// @return Whether it lists the workspaces of a single daemon (or of the window alone), not every daemon.
+[[nodiscard]] constexpr bool listsOneDaemon(SwitcherScope scope) noexcept
+{
+    return scope != SwitcherScope::Everything;
+}
+
+/// @param scope A top level's scope.
+/// @return Whether a pick in it can open a workspace in a new window. A window without a daemon has no daemon
+///         to open one of in another window, so the Shift+Return and Open in New Window choices are not
+///         offered.
+[[nodiscard]] constexpr bool offersNewWindow(SwitcherScope scope) noexcept
+{
+    return scope != SwitcherScope::WindowOnly;
+}
 
 /// Whether looking for other local daemons is still under way.
 enum class SwitcherDiscovery : uint8_t

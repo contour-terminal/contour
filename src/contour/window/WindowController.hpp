@@ -620,6 +620,10 @@ class WindowController:
     /// Returns focus to the terminal and hides the ring (Escape, a pointer press, the terminal regaining
     /// focus). No-op when the chrome has no focus.
     Q_INVOKABLE void leaveChrome();
+    /// Activates the sidebar's row @p row, and, when it showed something, hands the keyboard to the terminal.
+    /// What Enter in the tree and the row's accessibility press action both do.
+    /// @param row The row.
+    Q_INVOKABLE void activateSidebarRow(int row);
 
     /// Gives keyboard focus to the active pane's display and ends the chrome's hold on it: what is due when a
     /// popup over this window closes, which leaves no window holding the keyboard.
@@ -1349,7 +1353,9 @@ class WindowController:
     /// Shows @p workspace because the user picked it (a sidebar row): selects it, and gives up a pending
     /// jump, row action or follow, as the user went elsewhere.
     /// @param workspace The workspace's id, as the window's directory lists it.
-    void showWorkspace(uint64_t workspace);
+    /// @return Requested when the window shows it or will; Refused when nothing was asked: the window has no
+    ///         directory source, or its source does not list the workspace.
+    [[nodiscard]] SelectResult showWorkspace(uint64_t workspace);
     /// Shows the pane a jump selected a workspace for, once the displayed workspace holds it, and counts it
     /// as seen. Nothing when no jump is pending or the pane is not there (yet). Called when a daemon's layout
     /// lands, and by displayWorkspace(), which then ends the jump either way.

@@ -97,3 +97,14 @@ TEST_CASE("where Return opens a new window, the menu leads with that alone", "[s
                                  .shortcut = enterText(ShortcutStyle::MacGlyphs),
                                  .availability = RowAvailability::Enabled });
 }
+
+TEST_CASE("a window without a daemon is offered no Open in New Window", "[switcher][sidebarmenu]")
+{
+    auto const menu =
+        buildSwitcherRowMenu(SwitcherRowMenuState { .name = "docs",
+                                                    .owner = SwitcherMenuOwner::OtherDaemon,
+                                                    .workspace = {},
+                                                    .newWindow = SwitcherMenuNewWindow::Withheld },
+                             ShortcutStyle::MacGlyphs);
+    CHECK(titlesOf(menu) == std::vector<std::string> { "Switch to docs" });
+}
