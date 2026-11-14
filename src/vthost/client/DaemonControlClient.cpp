@@ -329,14 +329,13 @@ namespace
     template <typename T>
     std::expected<T, ControlError> bounded(core::net::EventLoop& loop,
                                            core::async::Task<std::expected<T, ControlError>> work,
-                                           AttachBudget budget,
+                                           AttachBudget const& budget,
                                            TransportReturnMark* transportReturned)
     {
         // Each call connects afresh: what an earlier one saw says nothing about this one.
         if (transportReturned != nullptr)
             transportReturned->reset();
-        auto result =
-            loop.blockOn(withAttachBudget(&loop, std::move(work), std::move(budget), transportReturned));
+        auto result = loop.blockOn(withAttachBudget(&loop, std::move(work), budget, transportReturned));
         if (!result)
             return std::unexpected(fail(ControlErrorCode::Timeout, ""));
         return std::move(*result);
