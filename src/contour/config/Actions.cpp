@@ -14,14 +14,14 @@ using core::toLower;
 namespace contour::actions
 {
 
-// The special members of Action and ActionList live here, and only here: the variant's and the vector's
-// copy, move and destruction over the 129 alternatives are instantiated in this translation unit, not in
-// every includer.
+// The special members of Action and ActionList live out of line, so the variant's and the vector's copy,
+// move and destruction over every alternative are instantiated once, not in every includer. The copy and
+// the move (with the assignments built on them) each get a translation unit of their own, ActionCopy.cpp
+// and ActionMove.cpp: libstdc++ builds each of them from a nest of unions as deep as the alternative's
+// index, so they are the costliest templates in the tree, and GCC needs about 2 GB for each of them.
+// Together with the visits and the catalog below they ran a 16 GB CI machine out of memory.
 Action::Action() = default;
-Action::Action(Action const& other) = default;
-Action::Action(Action&& other) noexcept = default;
-Action& Action::operator=(Action const& other) = default;
-Action& Action::operator=(Action&& other) noexcept = default;
+
 Action::~Action() = default;
 
 ActionList::ActionList() = default;

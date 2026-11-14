@@ -6,6 +6,8 @@
 # Anything here that needs a QObject, a QML property or a widget belongs a layer up.
 add_library(contour_config STATIC
     AccessibilityPreferences.hpp
+    ActionCopy.cpp
+    ActionMove.cpp
     Actions.cpp Actions.hpp
     AtomicFileWrite.cpp AtomicFileWrite.hpp
     BlockActionEnums.hpp

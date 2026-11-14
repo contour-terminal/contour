@@ -574,3 +574,31 @@ TEST_CASE("actions::Action is a value type of its own", "[actions]")
     REQUIRE(copy.has_value());
     CHECK(std::holds_alternative<actions::CreateNewTab>(*copy));
 }
+
+TEST_CASE("actions: assignment replaces the held alternative, string-carrying ones included", "[actions]")
+{
+    // Action's assignments destroy the held alternative and construct the new one rather than going
+    // through std::variant's (see ActionMove.cpp); this pins that the result is the same.
+    auto const source =
+        actions::Action { actions::WriteScreen { "hello, a string too long for the SSO buffer" } };
+
+    auto target =
+        actions::Action { actions::LaunchLayout { "another string, equally long as it needs to be" } };
+    target = source; // copy-assign across alternatives
+    REQUIRE(std::holds_alternative<actions::WriteScreen>(target));
+    CHECK(std::get<actions::WriteScreen>(target).chars == "hello, a string too long for the SSO buffer");
+
+    auto movedFrom = source;
+    auto moved = actions::Action { actions::ToggleFullscreen {} };
+    moved = std::move(movedFrom); // move-assign across alternatives
+    REQUIRE(std::holds_alternative<actions::WriteScreen>(moved));
+    CHECK(std::get<actions::WriteScreen>(moved).chars == "hello, a string too long for the SSO buffer");
+
+    auto const& self = target;
+    target = self; // self-assignment keeps the value
+    REQUIRE(std::holds_alternative<actions::WriteScreen>(target));
+    CHECK(std::get<actions::WriteScreen>(target).chars == "hello, a string too long for the SSO buffer");
+
+    target = actions::Action { actions::ResizePane { actions::Direction::Left } }; // same-type-slot reuse
+    REQUIRE(std::holds_alternative<actions::ResizePane>(target));
+}
