@@ -1929,10 +1929,8 @@ window::ChromeKeyOutcome WindowController::runChromeCommand(window::ChromeComman
         && command != ChromeCommand::Leave)
     {
         // The tree is QML's: it moves its own row focus, expands, renames and filters.
+        // Enter included: the tree names its row back (activateSidebarRow()), which only it knows.
         emit sidebarCommandRequested(static_cast<int>(command), text);
-        // What Enter activates is shown in the window, and what is shown is what the user types into next.
-        if (command == ChromeCommand::Activate)
-            leaveChrome();
         return ChromeKeyOutcome::Handled;
     }
     auto const inTabs = _chromeArea == window::ChromeArea::Tabs;
@@ -1985,6 +1983,14 @@ window::ChromeKeyOutcome WindowController::runChromeCommand(window::ChromeComman
         case ChromeCommand::OpenMenu: return ChromeKeyOutcome::Unhandled; // the sidebar's, handled above
     }
     return ChromeKeyOutcome::Unhandled;
+}
+
+void WindowController::activateSidebarRow(int row)
+{
+    // What the row names is shown in the window, and what is shown is what the user types into next. A row
+    // the tree does not have (an empty or filtered-out one) shows nothing, and the keyboard stays.
+    if (_sidebar->activateRow(row) == window::sidebarrows::RowActivation::Shown)
+        leaveChrome();
 }
 
 void WindowController::closeTabAskingIfBusy(int row)

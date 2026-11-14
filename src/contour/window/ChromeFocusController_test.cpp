@@ -693,8 +693,7 @@ TEST_CASE("the sidebar's keys are requested of the tree, and typed text promotes
     CHECK(f.area() == ChromeArea::Terminal);
 }
 
-TEST_CASE("Enter on a row of the sidebar's tree activates it and hands the keyboard to the terminal",
-          "[windowcontroller][chromefocus][sidebar]")
+TEST_CASE("Enter in the sidebar's tree asks the tree for its row, which it names back", "[windowcontroller][chromefocus][sidebar]")
 {
     using contour::window::ChromeCommand;
     auto const f = ChromeFixture {};
@@ -706,7 +705,32 @@ TEST_CASE("Enter on a row of the sidebar's tree activates it and hands the keybo
     CHECK(f.chromeKey(Qt::Key_Return));
     REQUIRE(spy.count() == 1);
     CHECK(spy.at(0).at(0).toInt() == static_cast<int>(ChromeCommand::Activate));
-    CHECK(f.area() == ChromeArea::Terminal);
+    // Which row is the tree's to say: until it does, the keyboard stays.
+    CHECK(f.area() == ChromeArea::Sidebar);
+}
+
+TEST_CASE("activating a row of the sidebar's tree hands the keyboard to the terminal, only when it showed one",
+          "[windowcontroller][chromefocus][sidebar]")
+{
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    controller.focusSidebar();
+    REQUIRE(f.area() == ChromeArea::Sidebar);
+    controller.sidebar().refreshNow();
+    REQUIRE(controller.sidebar().rowCount() > 0);
+
+    SECTION("a row that is not there (an empty or filtered-out tree) keeps the keyboard in the sidebar")
+    {
+        controller.activateSidebarRow(-1);
+        CHECK(f.area() == ChromeArea::Sidebar);
+        controller.activateSidebarRow(controller.sidebar().rowCount());
+        CHECK(f.area() == ChromeArea::Sidebar);
+    }
+    SECTION("a row that is there is shown, and the terminal takes the keyboard")
+    {
+        controller.activateSidebarRow(0);
+        CHECK(f.area() == ChromeArea::Terminal);
+    }
 }
 
 TEST_CASE("Escape in the sidebar's tree clears a typed filter before it leaves",

@@ -620,6 +620,10 @@ class WindowController:
     /// Returns focus to the terminal and hides the ring (Escape, a pointer press, the terminal regaining
     /// focus). No-op when the chrome has no focus.
     Q_INVOKABLE void leaveChrome();
+    /// Activates the sidebar's row @p row, and, when it showed something, hands the keyboard to the terminal.
+    /// What Enter in the tree and the row's accessibility press action both do.
+    /// @param row The row.
+    Q_INVOKABLE void activateSidebarRow(int row);
 
     /// Gives keyboard focus to the active pane's display and ends the chrome's hold on it: what is due when a
     /// popup over this window closes, which leaves no window holding the keyboard.

@@ -126,12 +126,7 @@ Item {
     Accessible.selected: row.selected
     Accessible.focusable: true
     Accessible.focused: row.keyboardFocused
-    Accessible.onPressAction: {
-        row.sidebar.activate(row.index)
-        // As Enter on the row does: what it showed is what the user types into next.
-        if (row.controller && row.controller.leaveChrome)
-            row.controller.leaveChrome()
-    }
+    Accessible.onPressAction: if (row.controller) row.controller.activateSidebarRow(row.index)
 
     /// Opens the inline editor on the row's name: a workspace's label or a tab's title.
     function startRename() {

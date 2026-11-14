@@ -76,7 +76,7 @@ Rectangle {
         case root.commands.next: tree.incrementCurrentIndex(); break
         case root.commands.first: tree.currentIndex = 0; break
         case root.commands.last: tree.currentIndex = tree.count - 1; break
-        case root.commands.activate: root.model.activate(current); break
+        case root.commands.activate: root.controller.activateSidebarRow(current); break
         case root.commands.collapse: tree.currentIndex = root.model.collapseOrParent(current); break
         case root.commands.expand: tree.currentIndex = root.model.expandOrChild(current); break
         case root.commands.rename: root.renameRow(current); break
