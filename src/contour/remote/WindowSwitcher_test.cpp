@@ -1387,8 +1387,8 @@ TEST_CASE("WindowSwitcher: a window that runs in-process asks which of its works
           "[switch][inprocess]")
 {
     auto rig = InProcessRig {};
-    auto const told =
-        rig.ask({ .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = contour::session::AnyWorkspace {} });
+    auto const told = rig.ask(
+        { .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = contour::session::AnyWorkspace {} });
     REQUIRE(told.outcome.has_value());
     REQUIRE(told.outcome->has_value());
     CHECK(**told.outcome == SwitchOutcome::PickerShown);
@@ -1398,7 +1398,8 @@ TEST_CASE("WindowSwitcher: a window that runs in-process asks which of its works
     CHECK(rig.window->displayedWorkspace() == rig.first);
 }
 
-TEST_CASE("WindowSwitcher: a window that runs in-process says why it made no workspace", "[switch][inprocess]")
+TEST_CASE("WindowSwitcher: a window that runs in-process says why it made no workspace",
+          "[switch][inprocess]")
 {
     auto rig = InProcessRig {};
     SECTION("its first shell could not start")
@@ -1408,7 +1409,8 @@ TEST_CASE("WindowSwitcher: a window that runs in-process says why it made no wor
             { .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = contour::session::NewWorkspace {} });
         REQUIRE(told.outcome.has_value());
         REQUIRE_FALSE(told.outcome->has_value());
-        CHECK(told.outcome->error() == contour::session::describe(contour::session::NewWorkspaceError::FirstShellFailed));
+        CHECK(told.outcome->error()
+              == contour::session::describe(contour::session::NewWorkspaceError::FirstShellFailed));
         CHECK(rig.window->ownedWorkspaces().size() == 2);
     }
     SECTION("the window has no pane to start it beside")

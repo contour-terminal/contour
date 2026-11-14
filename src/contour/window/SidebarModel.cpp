@@ -22,8 +22,8 @@
 #include <format>
 #include <initializer_list>
 #include <ranges>
-#include <tuple>
 #include <span>
+#include <tuple>
 #include <utility>
 #include <variant>
 

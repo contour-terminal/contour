@@ -297,25 +297,40 @@ TEST_CASE("Escape on the New Daemon level clears the label first, then goes back
 TEST_CASE("a narrow footer gives Shift+Return up first, then →, and keeps Return and Escape", "[switcher]")
 {
     auto const style = ShortcutStyle::MacGlyphs;
-    CHECK(
-        switcherFooterHintSets(SwitcherHintSubject::Daemon, SwitcherCommand::Back, style, SwitchMode::Switch, SwitcherScope::Everything)
-        == std::vector<std::string> { "↩ Open · ⇧↩ New Window · → Open daemon · ⎋ Back",
-                                      "↩ Open · → Open daemon · ⎋ Back",
-                                      "↩ Open · ⎋ Back" });
-    CHECK(switcherFooterHintSets(
-              SwitcherHintSubject::Workspace, SwitcherCommand::Close, ShortcutStyle::Text, SwitchMode::Switch, SwitcherScope::Everything)
+    CHECK(switcherFooterHintSets(SwitcherHintSubject::Daemon,
+                                 SwitcherCommand::Back,
+                                 style,
+                                 SwitchMode::Switch,
+                                 SwitcherScope::Everything)
+          == std::vector<std::string> { "↩ Open · ⇧↩ New Window · → Open daemon · ⎋ Back",
+                                        "↩ Open · → Open daemon · ⎋ Back",
+                                        "↩ Open · ⎋ Back" });
+    CHECK(switcherFooterHintSets(SwitcherHintSubject::Workspace,
+                                 SwitcherCommand::Close,
+                                 ShortcutStyle::Text,
+                                 SwitchMode::Switch,
+                                 SwitcherScope::Everything)
           == std::vector<std::string> { "Enter Switch · Shift+Enter New Window · Escape Close",
                                         "Enter Switch · Escape Close" });
     // Nothing to give up: one set.
-    CHECK(switcherFooterHintSets(SwitcherHintSubject::None, SwitcherCommand::Close, style, SwitchMode::Switch, SwitcherScope::Everything)
+    CHECK(switcherFooterHintSets(SwitcherHintSubject::None,
+                                 SwitcherCommand::Close,
+                                 style,
+                                 SwitchMode::Switch,
+                                 SwitcherScope::Everything)
           == std::vector<std::string> { "⎋ Close" });
     // The widest set is the footer's hints.
     for (auto const subject: { SwitcherHintSubject::Workspace, SwitcherHintSubject::NewDaemon })
-        CHECK(switcherFooterHintSets(subject, SwitcherCommand::Close, style, SwitchMode::Switch, SwitcherScope::Everything).front()
+        CHECK(switcherFooterHintSets(
+                  subject, SwitcherCommand::Close, style, SwitchMode::Switch, SwitcherScope::Everything)
+                  .front()
               == switcherFooterHints(subject, SwitcherCommand::Close, style, SwitchMode::Switch));
     // Escape is never given up: every set ends in it.
-    for (auto const& hints: switcherFooterHintSets(
-             SwitcherHintSubject::NewWorkspace, SwitcherCommand::Close, style, SwitchMode::Switch, SwitcherScope::Everything))
+    for (auto const& hints: switcherFooterHintSets(SwitcherHintSubject::NewWorkspace,
+                                                   SwitcherCommand::Close,
+                                                   style,
+                                                   SwitchMode::Switch,
+                                                   SwitcherScope::Everything))
         CHECK(hints.ends_with("⎋ Close"));
 }
 

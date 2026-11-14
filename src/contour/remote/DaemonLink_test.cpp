@@ -1066,8 +1066,8 @@ class DetachRecordingFactory final: public contour::session::SessionFactory
                                                         std::optional<vtpty::Process::ExecInfo> /*command*/,
                                                         std::optional<std::string> /*profile*/) override
     {
-        return std::make_unique<vtpty::MockPty>(pageSize.value_or(vtbackend::PageSize {
-            vtbackend::LineCount(25), vtbackend::ColumnCount(80) }));
+        return std::make_unique<vtpty::MockPty>(
+            pageSize.value_or(vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) }));
     }
     void beginDaemonOriginated() override { ++begun; }
     void endDaemonOriginated() override { ++ended; }
@@ -1088,11 +1088,11 @@ TEST_CASE("DaemonLink: adopting a window of another daemon marks that daemon's p
     auto const window = contour::test::ScopedController { manager };
     window->createNewTab();
     auto old = DetachRecordingFactory {};
-    auto oldBinding = contour::test::DaemonNamedBinding { old,
-                                                          contour::session::SwitchTarget {
-                                                              .kind = vthost::proto::SwitchDaemonKind::Label,
-                                                              .daemon = "elsewhere",
-                                                              .workspace = {} } };
+    auto oldBinding = contour::test::DaemonNamedBinding {
+        old,
+        contour::session::SwitchTarget {
+            .kind = vthost::proto::SwitchDaemonKind::Label, .daemon = "elsewhere", .workspace = {} }
+    };
     manager.bindWindow(window.id, oldBinding);
     REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
     REQUIRE(waitUntil([&] { return rig.link->canAdoptWindow(window.id).has_value(); }));

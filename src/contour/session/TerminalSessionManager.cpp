@@ -2108,11 +2108,10 @@ void TerminalSessionManager::cycleWorkspace(TerminalSession const& acting, actio
         auto const* const source = controller != nullptr ? controller->directorySource() : nullptr;
         auto const directory = source != nullptr ? source->directory() : window::WorkspaceDirectory {};
         for (auto const& [position, listed]: window::switchableWorkspacesOf(directory))
-            workspaces.push_back(KnownWorkspace { .position = position,
-                                                  .name = listed->label,
-                                                  .role = directory.selected == listed->id
-                                                              ? WorkspaceRole::Current
-                                                              : WorkspaceRole::Other });
+            workspaces.push_back(KnownWorkspace {
+                .position = position,
+                .name = listed->label,
+                .role = directory.selected == listed->id ? WorkspaceRole::Current : WorkspaceRole::Other });
     }
     else
     {

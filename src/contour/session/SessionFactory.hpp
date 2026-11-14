@@ -584,8 +584,8 @@ class AppSessionFactory final: public SessionFactory
     std::shared_ptr<vtpty::ProcessPlacement> _placement;
 };
 
-/// Holds a factory in the state of its panes being changed by the daemon, or by the window's housekeeping, for
-/// the scope's lifetime (@see SessionFactory::beginDaemonOriginated). Nests, in any factory.
+/// Holds a factory in the state of its panes being changed by the daemon, or by the window's housekeeping,
+/// for the scope's lifetime (@see SessionFactory::beginDaemonOriginated). Nests, in any factory.
 class [[nodiscard]] DaemonOriginatedScope
 {
   public:

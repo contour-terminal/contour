@@ -166,7 +166,8 @@ enum class NewWorkspaceError : uint8_t
 {
     switch (error)
     {
-        case NewWorkspaceError::NoActiveSession: return "this window has no active pane to start a workspace beside";
+        case NewWorkspaceError::NoActiveSession:
+            return "this window has no active pane to start a workspace beside";
         case NewWorkspaceError::FirstShellFailed: return "the new workspace's shell could not be started";
     }
     return {};

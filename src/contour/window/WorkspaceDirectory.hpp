@@ -108,7 +108,7 @@ struct WorkspaceDirectory
 /// A workspace a window can be switched to, with the place it is numbered by.
 struct SwitchableWorkspace
 {
-    uint32_t position = 0;                         ///< Its 1-based place in the directory, tab-less ones counted.
+    uint32_t position = 0; ///< Its 1-based place in the directory, tab-less ones counted.
     DirectoryWorkspace const* workspace = nullptr; ///< The workspace; points into the directory searched.
 };
 

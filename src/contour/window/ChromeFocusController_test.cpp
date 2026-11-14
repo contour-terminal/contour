@@ -693,7 +693,8 @@ TEST_CASE("the sidebar's keys are requested of the tree, and typed text promotes
     CHECK(f.area() == ChromeArea::Terminal);
 }
 
-TEST_CASE("Enter in the sidebar's tree asks the tree for its row, which it names back", "[windowcontroller][chromefocus][sidebar]")
+TEST_CASE("Enter in the sidebar's tree asks the tree for its row, which it names back",
+          "[windowcontroller][chromefocus][sidebar]")
 {
     using contour::window::ChromeCommand;
     auto const f = ChromeFixture {};
@@ -709,8 +710,9 @@ TEST_CASE("Enter in the sidebar's tree asks the tree for its row, which it names
     CHECK(f.area() == ChromeArea::Sidebar);
 }
 
-TEST_CASE("activating a row of the sidebar's tree hands the keyboard to the terminal, only when it showed one",
-          "[windowcontroller][chromefocus][sidebar]")
+TEST_CASE(
+    "activating a row of the sidebar's tree hands the keyboard to the terminal, only when it showed one",
+    "[windowcontroller][chromefocus][sidebar]")
 {
     auto const f = ChromeFixture {};
     auto& controller = f.controller();

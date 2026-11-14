@@ -671,18 +671,17 @@ QVariantList SwitcherController::rowMenu(int row)
                                   ? _services.workspaceMenu(_opening.window, id)
                                   : command::WorkspaceMenuState {};
     auto const menu = command::buildSwitcherRowMenu(
-        command::SwitcherRowMenuState { .name = chosen->title,
-                                        .owner = owner,
-                                        .workspace = sidebarState,
-                                        .newWindow = offersNewWindow(_scope)
-                                                         ? command::SwitcherMenuNewWindow::Offered
-                                                         : command::SwitcherMenuNewWindow::Withheld,
-                                        .returnMode = _opening.mode == session::SwitchMode::Open
-                                                          ? command::SwitcherMenuReturn::Open
-                                                          : command::SwitcherMenuReturn::Switch,
-                                        .shown = chosen->state == SwitcherWorkspaceState::ThisWindow
-                                                     ? command::SwitcherMenuShown::ThisWindow
-                                                     : command::SwitcherMenuShown::Elsewhere },
+        command::SwitcherRowMenuState {
+            .name = chosen->title,
+            .owner = owner,
+            .workspace = sidebarState,
+            .newWindow = offersNewWindow(_scope) ? command::SwitcherMenuNewWindow::Offered
+                                                 : command::SwitcherMenuNewWindow::Withheld,
+            .returnMode = _opening.mode == session::SwitchMode::Open ? command::SwitcherMenuReturn::Open
+                                                                     : command::SwitcherMenuReturn::Switch,
+            .shown = chosen->state == SwitcherWorkspaceState::ThisWindow
+                         ? command::SwitcherMenuShown::ThisWindow
+                         : command::SwitcherMenuShown::Elsewhere },
         _services.style);
 
     // The leading choices carry no action: they take the first actionIds, the sidebar's rows the rest.

@@ -353,10 +353,8 @@ void WindowSwitcher::switchInProcess(vtworkspace::WorkspaceId window,
     else if (std::holds_alternative<SwitchPick>(decision))
     {
         // Several workspaces and none named: the user's to pick, among this window's own.
-        auto shown = _picker(SwitchPickRequest { .window = window,
-                                                 .target = target,
-                                                 .mode = mode,
-                                                 .workspaces = rows });
+        auto shown = _picker(
+            SwitchPickRequest { .window = window, .target = target, .mode = mode, .workspaces = rows });
         if (shown)
             done(vthost::proto::SwitchOutcome::PickerShown);
         else

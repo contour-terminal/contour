@@ -62,8 +62,8 @@ struct SwitcherRowMenuState
     SwitcherMenuOwner owner = SwitcherMenuOwner::WindowDaemon; ///< Whose it is.
     WorkspaceMenuState workspace {}; ///< The sidebar's view of it; read for the window's daemon only.
     SwitcherMenuNewWindow newWindow = SwitcherMenuNewWindow::Offered; ///< Whether a new window is a choice.
-    SwitcherMenuReturn returnMode = SwitcherMenuReturn::Switch; ///< What Return does.
-    SwitcherMenuShown shown = SwitcherMenuShown::Elsewhere;     ///< Whether this window shows it.
+    SwitcherMenuReturn returnMode = SwitcherMenuReturn::Switch;       ///< What Return does.
+    SwitcherMenuShown shown = SwitcherMenuShown::Elsewhere;           ///< Whether this window shows it.
 };
 
 /// One of the menu's leading rows: what Return or Shift+Return would do. It carries no action, so nothing but
