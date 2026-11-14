@@ -108,7 +108,10 @@ namespace
     }
 
     /// Serializes the host workspace's whole tab/pane layout for the LayoutState PDU.
-    [[nodiscard]] proto::LayoutState serializeLayout(vtworkspace::Workspace& workspace)
+    /// @param workspace The workspace.
+    /// @param objects Where its tabs' control-API labels are.
+    [[nodiscard]] proto::LayoutState serializeLayout(vtworkspace::Workspace& workspace,
+                                                     ObjectRegistry const& objects)
     {
         auto layout = proto::LayoutState {};
         layout.workspace = workspace.id().value;
@@ -126,6 +129,9 @@ namespace
                 wireTab.zoomedPane = zoomed->value;
             if (auto const& title = tab->runtimeTitle())
                 wireTab.title = *title;
+            if (auto const uuid = objects.uuidOf(tab->id()))
+                wireTab.label = objects.labelOf(
+                    vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Tab, .uuid = *uuid });
             if (auto const color = tab->color())
             {
                 wireTab.hasColor = 1;
@@ -706,6 +712,23 @@ void NativeSession::forgetRemovedWorkspaceMeta()
     });
 }
 
+void NativeSession::labelChanged(vtcontrol::ObjectRef const& ref, std::string_view label)
+{
+    switch (ref.kind)
+    {
+        case vtcontrol::ObjectKind::Workspace:
+            if (sharesWorkspaceMeta())
+                workspaceLabelChanged(ref, label);
+            return;
+        case vtcontrol::ObjectKind::Tab:
+            // A tab's label travels in its workspace's layout, which names the tab by it.
+            if (auto const handle = _host.objects().find(ref))
+                layoutChanged(_host.model().workspaceOfTab(std::get<vtworkspace::TabId>(*handle)));
+            return;
+        case vtcontrol::ObjectKind::Pane: return;
+    }
+}
+
 void NativeSession::workspaceLabelChanged(vtcontrol::ObjectRef const& ref, std::string_view label)
 {
     if (ref.kind != vtcontrol::ObjectKind::Workspace || _phase != ConnectionPhase::Viewing || _closed)
@@ -972,7 +995,7 @@ void NativeSession::sendWorkspaceLayout(vtworkspace::Workspace& workspace)
     // Asked before the layout goes out, and streamed after it: the client has the pane by then.
     if (workspace.id().value == _selectedWorkspace)
         requestArrivedSnapshots(workspace);
-    sendLayout(serializeLayout(workspace));
+    sendLayout(serializeLayout(workspace, _host.objects()));
     announceWorkspaceMeta(workspace);
 }
 
@@ -2791,7 +2814,9 @@ void NativeSession::preAuthExpired()
 {
     if (_closed)
         return;
-    errorLog()("{}: no hello was accepted within {}s of the accept; closing", _id, PreAuthTimeout.count());
+    errorLog()("{}: no hello was accepted within {} of the accept; closing",
+               _id,
+               std::chrono::duration_cast<std::chrono::seconds>(_services.handshake.helloTimeout));
     _closed = true;
     // The queue closes _connection too, which resumes the parked read and ends the flow that owns this.
     _writer.close();
@@ -2966,11 +2991,8 @@ void NativeSession::attachClient(uint64_t serial,
     _clientTicket = _services.daemon.get().admitClient();
     _streamSubscription.emplace(_host, *this, &SessionHost::subscribeStream, &SessionHost::unsubscribeStream);
     _layoutSubscription.emplace(_host, _layoutObserver, &SessionHost::subscribe, &SessionHost::unsubscribe);
-    if (negotiated.shared.contains(proto::Capability::WorkspaceMeta))
-        _labelSubscription.emplace(
-            _host.objects().onLabelChanged([this](vtcontrol::ObjectRef const& ref, std::string_view label) {
-                workspaceLabelChanged(ref, label);
-            }));
+    _labelSubscription.emplace(_host.objects().onLabelChanged(
+        [this](vtcontrol::ObjectRef const& ref, std::string_view label) { labelChanged(ref, label); }));
 
     // Adopted BEFORE the spawn below: that session exists because THIS client attached, so it
     // inherits this client's profile like any tab the client goes on to open. A profile the host
@@ -3356,7 +3378,10 @@ ConnectionHandler makeNativeHandler(core::net::EventLoop& loop,
     // so the captures never outlive an activation frame.
     return [&loop, &host, services = std::move(services)](ConnectionId id,
                                                           std::unique_ptr<core::net::ISocket> connection) {
-        return serveNativeClient(&loop, &host, std::move(id), std::move(connection), services);
+        auto connectionServices = services;
+        connectionServices.handshake.authDeadline = loop.clock().now() + services.handshake.helloTimeout;
+        return serveNativeClient(
+            &loop, &host, std::move(id), std::move(connection), std::move(connectionServices));
     };
 }
 
@@ -3367,6 +3392,7 @@ namespace
     {
         core::net::ISocket* socket;
         ConnectionId const* id;
+        std::chrono::milliseconds timeout; ///< The budget it missed, for the log.
     };
 
     /// One TLS client's lifetime: the handshake settled first, so that its channel binding is known before
@@ -3381,17 +3407,18 @@ namespace
     {
         // From the accept: the TLS handshake and then the hello share this one budget, so a peer that
         // stalls in either is closed. Closing the socket ends whatever is parked on it.
-        auto const deadline = loop->clock().now() + PreAuthTimeout;
+        auto const deadline = loop->clock().now() + services.handshake.helloTimeout;
         services.handshake.authDeadline = deadline;
-        auto expiry = HandshakeExpiry { .socket = socket.get(), .id = &id };
+        auto expiry =
+            HandshakeExpiry { .socket = socket.get(), .id = &id, .timeout = services.handshake.helloTimeout };
         auto handshakeTimer = core::net::DeadlineTimer {
             *loop,
             deadline,
             [](void* state) {
                 auto const& stalled = *static_cast<HandshakeExpiry*>(state);
-                errorLog()("{}: the TLS handshake was not finished within {}s of the accept; closing",
+                errorLog()("{}: the TLS handshake was not finished within {} of the accept; closing",
                            *stalled.id,
-                           PreAuthTimeout.count());
+                           std::chrono::duration_cast<std::chrono::seconds>(stalled.timeout));
                 stalled.socket->close();
             },
             &expiry

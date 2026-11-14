@@ -1228,6 +1228,7 @@ struct WireTab
     uint64_t activePane = 0;
     uint64_t zoomedPane = 0; ///< 0 = not zoomed.
     std::string title = {};  ///< The runtime-title override; empty if none.
+    std::string label = {};  ///< The control-API label, which names the tab over its title; empty if none.
     uint8_t hasColor = 0;
     uint32_t color = 0; ///< 0xRRGGBB tab color when hasColor.
     WirePane root;

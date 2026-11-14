@@ -500,9 +500,9 @@ namespace
                || kind == vthost::proto::TabEditKind::ActivateTab;
     }
 
-    /// Brings how @p local is presented -- its active and zoomed pane, title, colour, and whether it is its
-    /// window's active tab -- in line with how the daemon presents @p wire, so a change another client made
-    /// arrives here too. @pre sameTree(), so every leaf of @p wire has its local session in @p bound.
+    /// Brings how @p local is presented -- its active and zoomed pane, title, label, colour, and whether it
+    /// is its window's active tab -- in line with how the daemon presents @p wire, so a change another client
+    /// made arrives here too. @pre sameTree(), so every leaf of @p wire has its local session in @p bound.
     ///
     /// The edits are the ones this client would report were the daemon's presentation its own
     /// (vthost::client::tabEditsToReport, read the other way round), applied to the local model by the
@@ -546,6 +546,8 @@ namespace
             edit.session = session->value;
             std::ignore = vthost::applyTabEdit(model, edit);
         }
+        // The label is the daemon's alone (the control API sets it), so it is taken, never reported back.
+        model.setTabLabel(local.id(), wire.label);
     }
 
     /// Closes every pane of @p window whose remote session no layout of @p alive names: a pane closed on the

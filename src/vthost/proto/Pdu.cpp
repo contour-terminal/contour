@@ -1314,6 +1314,7 @@ namespace
             out.varint(tab.activePane);
             out.varint(tab.zoomedPane);
             out.string(tab.title);
+            out.string(tab.label);
             out.u8(tab.hasColor);
             out.u32(tab.color);
             encodePane(out, tab.root);
@@ -2729,7 +2730,8 @@ namespace
             auto tab = WireTab {};
             if (!assign(in.varint(), tab.tabId, error) || !assign(in.varint(), tab.activePane, error)
                 || !assign(in.varint(), tab.zoomedPane, error) || !assign(in.string(), tab.title, error)
-                || !assign(in.u8(), tab.hasColor, error) || !assign(in.u32(), tab.color, error))
+                || !assign(in.string(), tab.label, error) || !assign(in.u8(), tab.hasColor, error)
+                || !assign(in.u32(), tab.color, error))
                 return std::unexpected(error);
             auto root = decodePane(in, /*depth=*/256);
             if (!root)

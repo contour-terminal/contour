@@ -34,13 +34,13 @@ pane.
 | Verb | What it does |
 | --- | --- |
 | `contour ls [--workspace W]` | Lists workspaces, tabs and panes as a tree; ids are shortened to their last 8 hex digits and `*` marks the active ones. |
-| `contour new [--workspace W \| --new-workspace] [--cwd DIR] [--label L] [--no-focus] [-- CMD...]` | Opens a tab and prints its pane id. Without `--cwd` the shell starts in the calling pane's directory, when run from one. |
-| `contour split [--pane P] [--right \| --below] [--ratio PCT] [--cwd DIR] [--label L] [--no-focus] [-- CMD...]` | Splits a pane and prints the new pane's id. Without `--cwd` the shell starts in the split pane's directory. |
+| `contour new [--workspace W \| --new-workspace] [--cwd DIR] [--name NAME] [--no-focus] [-- CMD...]` | Opens a tab, labelled `NAME` with `--name`, and prints its pane id. Without `--cwd` the shell starts in the calling pane's directory, when run from one. |
+| `contour split [--pane P] [--right \| --below] [--ratio PCT] [--cwd DIR] [--name NAME] [--no-focus] [-- CMD...]` | Splits a pane, labelling the new one `NAME` with `--name`, and prints the new pane's id. Without `--cwd` the shell starts in the split pane's directory. |
 | `contour send [--pane P] [--enter] [--wait] TEXT...\|-` | Types text into a pane. `--enter` appends a carriage return, `-` reads standard input, `--wait` waits for the command the text starts and exits with that command's own status. |
 | `contour pane capture [--pane P] [--scrollback N \| --all]` | Prints a pane's text. |
 | `contour close [--pane P \| --tab T]` | Closes a pane, or a tab with all its panes. |
-| `contour label OBJECT LABEL` | Labels a workspace, tab or pane (`contour label pane:018f logs`); an empty label clears it. |
-| `contour workspace new [--cwd DIR] [--label L]` | Opens a workspace with one tab and prints its id. The shell starts in `--cwd`, and the workspace is named after that folder (its repository's, inside one) unless `--label` names it. |
+| `contour label OBJECT LABEL` | Labels a workspace, tab or pane (`contour label pane:018f logs`); an empty label clears it. A workspace's or a tab's label is the name its windows show for it, in the sidebar, the tab strip and the switcher, over its title; cleared, it shows its title again. |
+| `contour workspace new [--cwd DIR] [--name NAME]` | Opens a workspace with one tab and prints its id. The shell starts in `--cwd`, and the workspace is named after that folder (its repository's, inside one) unless `--name` labels it. |
 | `contour workspace rename WORKSPACE LABEL` | Renames a workspace, which `object.setLabel` does too; an empty label clears it. Every window listing it shows the new name. |
 | `contour workspace close WORKSPACE` | Closes a workspace with all its tabs and panes, and ends their shells. Whatever it holds at that moment goes, in one step, and the workspace is removed. The daemon's last workspace cannot be closed. |
 | `contour workspace move --to N WORKSPACE` | Moves a workspace to position `N` of the workspace order, counted from 1 as `contour ls` lists them; a position past the end puts it last. |
@@ -72,7 +72,7 @@ Every verb takes:
 | --- | --- |
 | `--json` | Prints the reply JSON as received, plus a newline, instead of the human form. |
 | `--daemon PATH\|HOST:PORT\|NAME\|URL` | The daemon. Defaults to `$CONTOUR_DAEMON`, then the default socket. A verb never starts a daemon. |
-| `--label L` | A local daemon, by the label it serves (`contour daemon --label L`), resolved as `contour client --label` does. Instead of `--daemon`: giving both exits 2. |
+| `--label L` | A local daemon, by the label it serves (`contour daemon --label L`), resolved as `contour client --label` does. Instead of `--daemon`: giving both exits 2. On every verb `--label` picks the daemon; the verbs that make a workspace, tab or pane label it with `--name`. |
 | `--token-file FILE` | The token a `HOST:PORT` daemon expects. |
 | `--tls-ca FILE` | The CA certificate (PEM) a `HOST:PORT` daemon is verified against. |
 

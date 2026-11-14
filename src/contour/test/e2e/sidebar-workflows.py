@@ -105,8 +105,7 @@ class Desktop:
                      "QT_LOGGING_RULES"):
             if name in os.environ:
                 env[name] = os.environ[name]
-        # The control verbs reach the private daemon through it; its label would collide with the verbs' own
-        # --label (a pane's or a workspace's). An in-process window is given none to find.
+        # The control verbs reach the private daemon through it. An in-process window is given none to find.
         if not self.in_process:
             env["CONTOUR_DAEMON"] = os.path.join(self.root, "run", "contour", LABEL)
         if gui:
@@ -353,6 +352,11 @@ class Desktop:
     def key(self, *keys):
         self.xdotool("key", "--clearmodifiers", *keys)
         time.sleep(0.25)
+
+    def type(self, text):
+        """Types `text` into the focused window, as the keyboard would."""
+        self.xdotool("type", "--clearmodifiers", "--delay", 20, text)
+        time.sleep(0.25)
     # }}}
 
     # {{{ pixels
@@ -557,13 +561,17 @@ def band(item, which):
 
 
 def name_tab(d, tab, name):
-    """Labels a tab for the control API, and titles its pane (OSC 2) for the screen: the sidebar and the tab
-    strip name a tab by its title, not by its control label."""
+    """Labels a tab through the control API, and waits for the window to show it: a tab's label names it in
+    the sidebar and the tab strip."""
     d.cli("label", tab["id"], name)
-    d.cli("send", "--pane", tab["panes"][0]["id"], "--enter", "--", f"printf '\\033]2;{name}\\007'")
-    deadline_loop(15, f"the tab titled {name!r}",
+    deadline_loop(15, f"the tab labelled {name!r}",
                   lambda: d.find("sidebarRow", required=False, title=name, kind=TAB)
                   or d.find("tabItem", required=False, tabTitle=name), interval=0.2)
+
+
+def title_shown_pane(d, title):
+    """Titles the shown pane's terminal (OSC 2) by typing a printf into its shell."""
+    d.type(f"printf '\\033]2;{title}\\007'\n")
 
 
 def two_workspaces(d):
@@ -578,12 +586,10 @@ def two_workspaces(d):
 
 
 def new_tab(d, workspace, label):
-    """Opens a tab in a workspace and labels it. Labelled afterwards: a verb's own --label is taken for the
-    connection option of the same name (reported in round6-report.md)."""
-    pane = d.cli("new", "--workspace", workspace)
-    tab = next(t for w in d.workspaces() for t in w["tabs"] if any(p["id"] == pane for p in t["panes"]))
-    name_tab(d, tab, label)
+    """Opens a tab in a workspace, labelled `label`, and waits for the sidebar to show it."""
+    d.cli("new", "--workspace", workspace, "--name", label)
     settle(d, f"the tab {label}", lambda s: label in tab_labels(d, workspace))
+    row(d, label, TAB)
 
 
 def tab_labels(d, workspace):
@@ -798,23 +804,42 @@ def case_keyboard_switch(d):
 def case_in_process_tab_row_to_empty_area(d):
     """Without a daemon: a tab row dropped on the sidebar's empty area gets a workspace of its own. The drop is
     handled inside the OS drag's loop, which runs on the very rows the move rebuilds -- the move waits for the
-    loop to return, or the window would destroy the row it is dragged from. Rows are told apart by their order:
-    an in-process window serves no control API to title them through."""
+    loop to return, or the window would destroy the row it is dragged from. An in-process window serves no
+    control API, so its tabs are told apart by the titles their shells set (OSC 2), which its rows show as a
+    daemon window's do."""
     d.click(Desktop.centre(d.wait_item("terminalPane")))
+    title_shown_pane(d, "t1")
+    row(d, "t1", TAB)
     d.key("ctrl+shift+t")
-    tabs = items_when(d, 2, "sidebarRow", kind=TAB)
+    items_when(d, 2, "sidebarRow", kind=TAB)
+    title_shown_pane(d, "t2")
+    moving = row(d, "t2", TAB)
     expect(len(items_when(d, 1, "sidebarRow", kind=WORKSPACE)) == 1, "expected one workspace")
-    moving = max(tabs, key=lambda item: item["y"])
     empty = d.wait_item("sidebarTreeEmptyDrop")
     drop_onto(d, Desktop.centre(moving), Desktop.centre(empty), "sidebarTreeEmptyDrop")
     workspaces = sorted(items_when(d, 2, "sidebarRow", kind=WORKSPACE), key=lambda item: item["y"])
-    under_new = [t for t in d.items("sidebarRow", kind=TAB) if t["y"] > workspaces[1]["y"]]
-    expect(len(under_new) == 1, f"{len(under_new)} tab rows under the new workspace, not 1")
-    under_old = [t for t in d.items("sidebarRow", kind=TAB) if workspaces[0]["y"] < t["y"] < workspaces[1]["y"]]
-    expect(len(under_old) <= 1, "the first workspace kept the moved tab")
+    under_new = [t["props"].get("title") for t in d.items("sidebarRow", kind=TAB) if t["y"] > workspaces[1]["y"]]
+    expect(under_new == ["t2"], f"the tab rows under the new workspace are {under_new}, not ['t2']")
+    under_old = [t["props"].get("title") for t in d.items("sidebarRow", kind=TAB)
+                 if workspaces[0]["y"] < t["y"] < workspaces[1]["y"]]
+    expect(under_old == ["t1"], f"the tab rows under the first workspace are {under_old}, not ['t1']")
     expect(d.alive("client"), "the window ended")
     expect_panes_draw(d)
 
+
+def case_tab_label_names_the_tab(d):
+    """A tab's control-API label is what its sidebar row shows, over the title its shell set (OSC 2); clearing
+    the label gives the row back that title."""
+    tab = d.workspaces()[0]["tabs"][0]
+    d.click(Desktop.centre(d.wait_item("terminalPane")))
+    title_shown_pane(d, "shell-title")
+    row(d, "shell-title", TAB)
+    d.cli("label", tab["id"], "build")
+    row(d, "build", TAB)
+    d.wait_gone("sidebarRow", title="shell-title", kind=TAB)
+    d.cli("label", tab["id"], "")
+    row(d, "shell-title", TAB)
+    d.wait_gone("sidebarRow", title="build", kind=TAB)
 
 
 def case_ctrl_d_quits_clean(d):

@@ -10,6 +10,8 @@
 
 #include <array>
 #include <format>
+#include <iterator>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -178,8 +180,36 @@ FontSourceList DirectWriteLocator::locate(FontDescription const& fd)
 
 FontSourceList DirectWriteLocator::all()
 {
-    // TODO;
-    return {};
+    // One face per family, its regular one: what LastResortFontLocator falls back to when neither the
+    // configured family nor Consolas is installed. Fixed-pitch faces first, so that the first entry is a
+    // monospace font whenever the system has one.
+    FontSourceList monospaced;
+    FontSourceList proportional;
+    auto const familyCount = _d->systemFontCollection->GetFontFamilyCount();
+    for (auto const familyIndex: std::views::iota(UINT32 { 0 }, familyCount))
+    {
+        ComPtr<IDWriteFontFamily> family;
+        if (FAILED(_d->systemFontCollection->GetFontFamily(familyIndex, &family)))
+            continue;
+        ComPtr<IDWriteFont> font;
+        if (FAILED(family->GetFirstMatchingFont(
+                DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, &font)))
+            continue;
+        ComPtr<IDWriteFontFace> face;
+        if (FAILED(font->CreateFontFace(&face)))
+            continue;
+        auto path = core::toUtf8(getFontPath(face.Get()));
+        if (path.empty())
+            continue;
+        ComPtr<IDWriteFont1> font1;
+        auto& output = SUCCEEDED(font.As(&font1)) && font1->IsMonospacedFont() ? monospaced : proportional;
+        output.emplace_back(
+            FontPath { .value = std::move(path), .collectionIndex = static_cast<int>(face->GetIndex()) });
+    }
+    monospaced.insert(monospaced.end(),
+                      std::make_move_iterator(proportional.begin()),
+                      std::make_move_iterator(proportional.end()));
+    return monospaced;
 }
 
 FontSourceList DirectWriteLocator::resolve(gsl::span<char32_t const> codepoints)

@@ -2,6 +2,7 @@
 #include <vtpty/MockPty.hpp>
 
 #include <core/Utf8Path.hpp>
+#include <core/log/LogSink.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IListener.hpp>
 #include <core/net/IoBackend.hpp>
@@ -114,16 +115,6 @@ class CountingStarter final: public vthost::DaemonStarter
     int* _calls;
 };
 
-/// Serves one native connection's whole flow.
-core::async::Task<void> serveNative(core::net::EventLoop* loop,
-                                    vthost::SessionHost* host,
-                                    vthost::ConnectionId id,
-                                    std::unique_ptr<core::net::ISocket> connection)
-{
-    auto session = vthost::NativeSession { *loop, *host, std::move(id), std::move(connection) };
-    co_await session.run();
-}
-
 /// Tells @p listening that the loop serves. Spawned after the acceptor's serve(), it runs once that flow has
 /// suspended in its first accept: the ready queue is first-in first-out, and whenAny() starts its children
 /// inline.
@@ -144,6 +135,11 @@ core::async::Task<void> idleUntil(core::net::EventLoop* loop, std::stop_token st
 class ServedDaemon
 {
   public:
+    /// How long a connection here has for its hello: well within a case's patience, so that a client whose
+    /// half-close the daemon never sees still ends (@see the case "a client's half-close made before the
+    /// daemon accepts reaches it"), while far beyond what a healthy hello takes.
+    static constexpr auto HelloTimeout = std::chrono::milliseconds { 2'000 };
+
     /// Binds the native socket beside @p controlSocket and returns once it accepts.
     ///
     /// "Accepts" is an accept PARKED on the listener, not just a bound one: a client could otherwise connect
@@ -176,14 +172,13 @@ class ServedDaemon
                 core::defaultEnvironment(),
                 vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual }
             };
+            auto services = vthost::NativeSessionServices {};
+            services.handshake.helloTimeout = HelloTimeout;
             auto acceptor =
                 vthost::ConnectionAcceptor { loop,
                                              "native",
                                              std::move(*listener),
-                                             [&loop, &host](vthost::ConnectionId const& id,
-                                                            std::unique_ptr<core::net::ISocket> connection) {
-                                                 return serveNative(&loop, &host, id, std::move(connection));
-                                             } };
+                                             vthost::makeNativeHandler(loop, host, std::move(services)) };
             loop.spawn(acceptor.serve());
             loop.spawn(announceServing(&listening));
             loop.blockOn(idleUntil(&loop, std::move(stop)));
@@ -197,6 +192,12 @@ class ServedDaemon
   private:
     std::jthread _thread;
 };
+
+/// The relay of a case against a ServedDaemon: its deadline outlasts the daemon's hello budget, so that a
+/// daemon that never sees the client is still the side that ends the connection, as in production; and it
+/// bounds every attach of the case, so that none waits for ever on a daemon that does not answer.
+constexpr auto AttachRelay =
+    vthost::RelayConfig { .daemonReplyDeadline = std::chrono::milliseconds { 10'000 } };
 
 /// Encodes one ClientHello as a client's first frame.
 [[nodiscard]] std::vector<std::byte> clientHelloFrame()
@@ -289,6 +290,30 @@ TEST_CASE("stdio attach writes the ready preamble and nothing else before the cl
     client.b->closeWrite();    // lets the relay's client→daemon thread finish
 }
 
+TEST_CASE("stdio attach gives up, by name, on a daemon that sends nothing", "[vthost][stdio]")
+{
+    auto capture = core::log::ScopedCapture {};
+    auto const client = makeMemoryStreamPair();
+    auto const daemon = makeMemoryStreamPair();
+    auto attach = std::async(std::launch::async, [&]() {
+        return vthost::runStdioAttach(
+            client.a,
+            [&]() -> std::expected<std::shared_ptr<IByteStream>, std::string> { return daemon.a; },
+            vthost::RelayConfig { .daemonReplyDeadline = std::chrono::milliseconds { 50 } });
+    });
+
+    CHECK(readText(*client.b, vthost::StdioPreambleReady.size()) == vthost::StdioPreambleReady);
+    writeText(*client.b, "hello");
+    CHECK(readText(*daemon.b, 5) == "hello"); // delivered, and never answered
+
+    CHECK(attach.get() == EXIT_FAILURE);
+    CHECK(readText(*client.b, 1).empty()); // the client's stream ends, with no stray bytes
+    CHECK(capture.contains("daemon sent nothing within 0.05s"));
+
+    client.b->closeWrite(); // lets the relay's client→daemon thread finish
+    daemon.b->closeWrite(); // lets its daemon→client thread finish
+}
+
 TEST_CASE("stdio attach reports a connector failure as an error preamble", "[vthost][stdio]")
 {
     auto const client = makeMemoryStreamPair();
@@ -315,8 +340,8 @@ TEST_CASE("stdio attach reaches a real daemon", "[vthost][stdio][afunix]")
         std::make_unique<CountingStarter>([]() -> std::expected<void, std::string> { return {}; }, &starts));
 
     auto const client = makeMemoryStreamPair();
-    auto attach =
-        std::async(std::launch::async, [&]() { return vthost::runStdioAttach(client.a, connector); });
+    auto attach = std::async(std::launch::async,
+                             [&]() { return vthost::runStdioAttach(client.a, connector, AttachRelay); });
 
     REQUIRE(readText(*client.b, vthost::StdioPreambleReady.size()) == vthost::StdioPreambleReady);
     REQUIRE(client.b->writeAll(clientHelloFrame()).has_value());
@@ -346,8 +371,8 @@ TEST_CASE("stdio attach starts the daemon through the starter when none serves",
                                                               &starts));
 
         auto const client = makeMemoryStreamPair();
-        auto attach =
-            std::async(std::launch::async, [&]() { return vthost::runStdioAttach(client.a, connector); });
+        auto attach = std::async(std::launch::async,
+                                 [&]() { return vthost::runStdioAttach(client.a, connector, AttachRelay); });
 
         CHECK(readText(*client.b, vthost::StdioPreambleReady.size()) == vthost::StdioPreambleReady);
         CHECK(starts == 1);

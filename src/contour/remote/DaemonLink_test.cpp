@@ -1208,15 +1208,19 @@ TEST_CASE("ContourGuiApp: an ssh prompt is held for its own window until that wi
     CHECK(router->isHolding(contour::askpass::AnyWindow));
 
     // Minimised is not on screen either, where the platform has the state: what comes next is held again.
+    // Waited on, not slept on: the state arrives when the platform says so, and it is what the window's
+    // controller reads (WindowController::isExposed()).
+    auto const isMinimized = [&] {
+        return osWindow.windowStates().testFlag(Qt::WindowMinimized);
+    };
     osWindow.showMinimized();
-    QTest::qWait(50);
-    if (osWindow.windowStates().testFlag(Qt::WindowMinimized))
+    if (QTest::qWaitFor(isMinimized, 1000))
     {
         app.app().refreshWindowAttention();
         ask(secondRoute, 5);
         CHECK(router->isHolding(secondRoute));
         osWindow.showNormal();
-        QTest::qWait(50);
+        CHECK(QTest::qWaitFor([&] { return !isMinimized() && osWindow.isVisible(); }, 5000));
         app.app().refreshWindowAttention();
         CHECK_FALSE(router->isHolding(secondRoute));
     }

@@ -78,6 +78,7 @@
 #include <vtworkspace/PaneLayout.hpp>
 #include <vtworkspace/SessionModel.hpp>
 #include <vtworkspace/Tab.hpp>
+#include <vtworkspace/TabName.hpp>
 
 namespace contour::window
 {
@@ -1163,19 +1164,26 @@ QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab,
     // title.
     auto const tabName = session != nullptr ? session->name().value_or(windowTitle) : windowTitle;
 
-    // Same precedence as vtworkspace::Tab::title(), templated rather than resolved (the strip expands
-    // {index}/{title} placeholders, so it needs the raw template). The "is this tab named after one of
-    // its panes?" decision is Tab's — read it, do not restate it, or the strip and the status line end
-    // up disagreeing about what a zoomed tab is called.
+    // Same precedence as vtworkspace::Tab::title() (vtworkspace::tabNameSourceOf), templated rather than
+    // resolved (the strip expands {index}/{title} placeholders, so it needs the raw template). The "is this
+    // tab named after one of its panes?" decision is Tab's — read it, do not restate it, or the strip and the
+    // status line end up disagreeing about what a zoomed tab is called. A control label is a name, not a
+    // template: it shows as it is, as a workspace's does.
+    auto const names = tab->nameCandidates();
     auto templ = std::string_view {};
-    if (auto const& renamed = tab->runtimeTitle(); renamed.has_value())
-        templ = *renamed;
-    else if (tab->usesMultiplePanesLabel())
-        templ = vtworkspace::Tab::MultiplePanesLabel;
-    else if (session != nullptr)
-        templ = session->profile().tabLabel.value();
-    else
-        return QString::fromStdString(windowTitle);
+    switch (vtworkspace::tabNameSourceOf(names))
+    {
+        case vtworkspace::TabNameSource::Label: return QString::fromStdString(tab->label());
+        case vtworkspace::TabNameSource::Title: templ = names.title; break;
+        case vtworkspace::TabNameSource::Panes:
+            if (tab->usesMultiplePanesLabel())
+                templ = vtworkspace::Tab::MultiplePanesLabel;
+            else if (session != nullptr)
+                templ = session->profile().tabLabel.value();
+            else
+                return QString::fromStdString(windowTitle);
+            break;
+    }
 
     auto expanded = expandTabLabel(
         templ, TabLabelContext { .position = row + 1, .windowTitle = windowTitle, .tabName = tabName });

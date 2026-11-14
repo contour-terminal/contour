@@ -101,6 +101,7 @@
 
 #include <text_shaper/BundledFonts.hpp>
 #include <text_shaper/FontLocator.hpp>
+#include <text_shaper/LastResortFontLocator.hpp>
 #include <text_shaper/NerdFontSymbolRanges.hpp>
 #include <text_shaper/NerdFontSymbolsLocator.hpp>
 
@@ -166,6 +167,7 @@
 #include <QtQuick/QSGRendererInterface>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QFileDialog>
+#include <QtWidgets/QMessageBox>
 
 #include <algorithm>
 #include <array>
@@ -3080,12 +3082,22 @@ text::FontLocator& ContourGuiApp::fontLocator(vtrasterizer::FontLocatorEngine en
             if (auto const directories = bundledFontDirectories(executable->parent_path());
                 !directories.paths.empty())
                 symbolsFont = directories.paths.front() / text::NerdFontSymbolsFileName;
-        _nativeFontLocator = std::make_unique<text::NerdFontSymbolsLocator>(platformLocator, symbolsFont);
+        _lastResortFontLocator = std::make_unique<text::LastResortFontLocator>(platformLocator);
+        _nativeFontLocator =
+            std::make_unique<text::NerdFontSymbolsLocator>(*_lastResortFontLocator, symbolsFont);
         startupLog()("Nerd Fonts symbols font {}: {}.",
                      _nativeFontLocator->hasSymbolsFont() ? "bundled" : "not found",
                      core::pathToUtf8(symbolsFont));
     });
     return *_nativeFontLocator;
+}
+
+void ContourGuiApp::reportUnusableFont(std::string const& reason) const
+{
+    errorLog()("{}", reason);
+    std::cerr << std::format("contour: {}\n", reason);
+    // Windows' GUI build has no console to show stderr in: the dialog is what the user sees.
+    QMessageBox::critical(nullptr, QStringLiteral("Contour"), QString::fromStdString(reason));
 }
 
 int ContourGuiApp::fontConfigAction()
@@ -3292,6 +3304,19 @@ int ContourGuiApp::terminalGuiAction()
     setupQCoreApplication();
 
     registerBundledFonts();
+
+    // Refused here, before any window: a system on which not even a last-resort font can be found has
+    // nothing to draw a terminal with, and the renderer would otherwise fail inside the first window.
+    {
+        auto const& fonts = _config.profile(_config.defaultProfileName.value())->fonts.value();
+        auto const primary = text::locatePrimaryFont(fontLocator(fonts.fontLocator), fonts.regular);
+        if (!primary)
+        {
+            reportUnusableFont(text::describe(primary.error(), fonts.regular));
+            return EXIT_FAILURE;
+        }
+        startupLog()("Primary font: {}", *primary);
+    }
 
     if (startupLog.isEnabled())
     {

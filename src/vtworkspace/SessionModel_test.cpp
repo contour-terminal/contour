@@ -671,6 +671,26 @@ TEST_CASE("SessionModel: an empty or blank tab title resets to the default templ
     CHECK_FALSE(tab->runtimeTitle().has_value());
 }
 
+TEST_CASE("SessionModel: a tab's label notifies as its title does", "[vtworkspace][model][title]")
+{
+    Fixture f;
+    auto* win = f.model.createWorkspace();
+    auto* tab = f.model.createTab(win->id());
+
+    f.model.setTabLabel(tab->id(), "build");
+    CHECK(tab->label() == "build");
+    CHECK(f.events.sawPrefix(std::format("title:{}", tab->id().value)));
+
+    // The same label again changes nothing, so nothing is told.
+    f.events.log.clear();
+    f.model.setTabLabel(tab->id(), "build");
+    CHECK(f.events.log.empty());
+
+    f.model.setTabLabel(tab->id(), "");
+    CHECK(tab->label().empty());
+    CHECK(f.events.sawPrefix(std::format("title:{}", tab->id().value)));
+}
+
 TEST_CASE("SessionModel: color palette is non-empty and shared", "[vtworkspace][model][color]")
 {
     Fixture const f;

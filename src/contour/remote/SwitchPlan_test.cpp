@@ -275,6 +275,23 @@ TEST_CASE("workspaceRowsOf counts each workspace's tabs", "[switch][plan]")
     CHECK(rows[0].visibility == vthost::WorkspaceVisibility::Hidden);
 }
 
+TEST_CASE("workspaceRowsOf names an unlabelled workspace by its active tab's label, else its title",
+          "[switch][plan]")
+{
+    auto info = vtcontrol::WorkspaceInfo {};
+    info.id = "workspace:00000000-0000-0000-0000-000000000001";
+    info.position = 1;
+    info.native = "9";
+    info.tabs = { vtcontrol::TabInfo { .label = "build", .title = "zsh", .isActive = true } };
+    auto const none = [](uint64_t) {
+        return std::optional<vtworkspace::WorkspaceId> {};
+    };
+
+    CHECK(contour::remote::workspaceRowsOf(std::vector { info }, none).at(0).name == "build");
+    info.tabs.front().label.clear();
+    CHECK(contour::remote::workspaceRowsOf(std::vector { info }, none).at(0).name == "zsh");
+}
+
 // A daemon no client attached to yet lists its own workspace, holding no tab: a window switched to it was
 // emptied, and closed -- the last window, so the application quit.
 TEST_CASE("workspaceRowsOf leaves out a workspace holding no tab", "[switch][plan]")

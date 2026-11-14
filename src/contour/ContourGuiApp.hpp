@@ -122,6 +122,7 @@ class IWasmBackend;
 namespace text
 {
 class FontLocator;
+class LastResortFontLocator;
 class NerdFontSymbolsLocator;
 } // namespace text
 
@@ -975,6 +976,12 @@ class ContourGuiApp:
     /// @param engine Which locator the configuration asks for.
     /// @return The locator, which lives as long as this app.
     [[nodiscard]] text::FontLocator& fontLocator(vtrasterizer::FontLocatorEngine engine);
+
+    /// Tells the user that no font can be loaded, on stderr, in the log and in a dialog: the one failure
+    /// that leaves nothing to draw a terminal with. Called before the first window, and by a display whose
+    /// renderer could not load its font after all; the caller ends the application.
+    /// @param reason What is missing, and what to do about it.
+    void reportUnusableFont(std::string const& reason) const;
 
     /// @return Where this host's menu bar lives, resolved once from the host at construction.
     [[nodiscard]] command::MenuBarPlacement menuBarPlacement() const noexcept { return _menuBarPlacement; }
@@ -1908,8 +1915,10 @@ class ContourGuiApp:
     // Latches logUnbuiltAppearanceSource(): a read before the sources can be built repeats on every read.
     mutable std::once_flag _unbuiltAppearanceSourceLogged;
     // The native font locator behind the bundled Nerd Fonts symbols font: built on the first request, once
-    // the application's own directory is known, and never changed afterwards.
+    // the application's own directory is known, and never changed afterwards. Beneath it the last-resort
+    // locator, which degrades a family the system lacks to any monospace font, then to any font at all.
     std::once_flag _fontLocatorBuilt;
+    std::unique_ptr<text::LastResortFontLocator> _lastResortFontLocator;
     std::unique_ptr<text::NerdFontSymbolsLocator> _nativeFontLocator;
     // The native menu presenter, built from the same services; it holds no callback into this app.
     std::unique_ptr<platform::INativeMenuPresenter> _nativeMenus;

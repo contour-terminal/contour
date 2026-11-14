@@ -16,9 +16,11 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <vthost/proto/Pdu.hpp>
+#include <vtworkspace/TabName.hpp>
 
 namespace contour::window
 {
@@ -50,9 +52,10 @@ struct DirectoryPane
 /// One tab: its panes in tree order (depth-first), so a split tab lists several.
 struct DirectoryTab
 {
-    uint64_t id = 0;                  ///< The tab's id within its workspace.
-    std::string title;                ///< The tab's own title as the daemon holds it; empty when it has none.
-    std::string label;                ///< What a list shows: the tab's title, else the first pane's.
+    uint64_t id = 0;   ///< The tab's id within its workspace.
+    std::string title; ///< The tab's own title as the daemon holds it; empty when it has none.
+    std::string label; ///< What a list shows (vtworkspace::tabNameOf): its control label, its title, its
+                       ///< first pane's.
     std::vector<DirectoryPane> panes; ///< Depth-first.
     bool operator==(DirectoryTab const&) const = default;
 };
@@ -320,10 +323,9 @@ namespace detail
             tab.id = wireTab.tabId;
             tab.title = wireTab.title;
             detail::collectPanes(wireTab.root, status, tab.panes);
-            if (!tab.title.empty())
-                tab.label = tab.title;
-            else if (!tab.panes.empty())
-                tab.label = tab.panes.front().title;
+            tab.label = vtworkspace::tabNameOf(
+                { .label = wireTab.label, .title = tab.title },
+                tab.panes.empty() ? std::string_view {} : std::string_view { tab.panes.front().title });
             workspace.tabs.push_back(std::move(tab));
         }
         directory.workspaces.push_back(std::move(workspace));

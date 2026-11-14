@@ -1938,6 +1938,53 @@ TEST_CASE("a second client sees the first client's zoom, title and colour", "[at
     b.controller->stop();
 }
 
+TEST_CASE("a tab's control label names it in the window, over its title, until it is cleared",
+          "[attach][controller][sync-back]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("root");
+    auto gui = AttachedGui { daemon };
+    requireConnected(*gui.controller);
+    REQUIRE(waitUntil([&] {
+        auto const layout = gui.controller->settledLayout();
+        return layout && layout->tabs.size() == 1;
+    }));
+    gui.reconcile();
+    REQUIRE(gui.app.manager().model().workspace(gui.window.id)->tabCount() == 1);
+    gui.app.manager().model().setTabTitle(gui.tab().id(), "renamed");
+
+    // The label `contour label tab:… NAME` gives the daemon's only tab.
+    auto const labelTab = [&](std::string const& label) {
+        std::ignore = daemon.onDaemon([&] {
+            auto const* tab = daemon.host->model().workspace(daemon.host->workspaceId())->tabAt(0);
+            daemon.host->objects().setLabel(
+                vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Tab,
+                                       .uuid = *daemon.host->objects().uuidOf(tab->id()) },
+                label);
+            return 0;
+        });
+    };
+    // Whether the window's tab holds @p label, and its tab strip and its list name it @p name.
+    auto const shows = [&](std::string_view name, std::string_view label) {
+        return waitUntil([&] {
+            gui.reconcile();
+            auto const directory = gui.controller->directory();
+            return gui.tab().label() == label && gui.window->tabTitleOf(gui.tab().id()) == name
+                   && !directory.workspaces.empty() && !directory.workspaces.front().tabs.empty()
+                   && directory.workspaces.front().tabs.front().label == name;
+        });
+    };
+    REQUIRE(shows("renamed", ""));
+
+    labelTab("build");
+    CHECK(shows("build", "build"));
+
+    labelTab("");
+    CHECK(shows("renamed", ""));
+
+    gui.controller->stop();
+}
+
 // Regression: a departing client that moves the daemon's client area (here the smaller of a `smallest` pair)
 // re-projects every pane onto the new one, which used to discard the per-pane grids the survivor refined. The
 // survivor's own geometry did not change, so nothing on its side re-reports them: its split panes stayed on
