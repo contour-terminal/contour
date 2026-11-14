@@ -136,7 +136,8 @@ inline constexpr auto ChipSwitcherScope = SwitcherScope::Everything;
 [[nodiscard]] constexpr SwitcherScope switcherScopeFor(SwitcherScope requested,
                                                        DaemonHosting hosting) noexcept
 {
-    return hosting == DaemonHosting::InProcess ? SwitcherScope::WindowOnly : requested;
+    return daemonHostingPolicy(hosting).reach == SwitcherReach::OwnWorkspacesOnly ? SwitcherScope::WindowOnly
+                                                                                  : requested;
 }
 
 /// @param scope A top level's scope.

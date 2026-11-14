@@ -282,3 +282,21 @@ TEST_CASE("locationChip.workspaceText", "[LocationChip]")
     CHECK(locationChipWorkspaceText(family + family + family + family, LocationChipFit::WorkspaceElided)
           == family + family + family + "…");
 }
+
+TEST_CASE("daemonHosting.policy", "[LocationChip]")
+{
+    // Every hosting has a row, in enumerator order, and the chip and the switcher read the same one.
+    CHECK(DaemonHostingPolicies.size() == DaemonHostingCount);
+    for (auto const& row: DaemonHostingPolicies)
+        CHECK(&daemonHostingPolicy(row.hosting) == &row);
+    auto const& daemon = daemonHostingPolicy(DaemonHosting::Daemon);
+    CHECK(daemon.naming == ChipNaming::NamesDaemon);
+    CHECK(daemon.reach == SwitcherReach::AsAsked);
+    auto const& inProcess = daemonHostingPolicy(DaemonHosting::InProcess);
+    CHECK(inProcess.naming == ChipNaming::WorkspaceOnly);
+    CHECK(inProcess.reach == SwitcherReach::OwnWorkspacesOnly);
+    // A host that is no daemon names none, and keeps the scope asked, as it always has.
+    auto const& other = daemonHostingPolicy(DaemonHosting::OtherHost);
+    CHECK(other.naming == ChipNaming::WorkspaceOnly);
+    CHECK(other.reach == SwitcherReach::AsAsked);
+}

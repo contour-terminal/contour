@@ -533,9 +533,11 @@ enum class SidebarShown : uint8_t
 
 /// @param band    Whether the title band shows.
 /// @param centre  What the band's middle holds.
-/// @param hosting Whether the sessions live in a daemon.
+/// @param hosting What serves the window (its row in DaemonHostingPolicies says whether the chip names a
+///                daemon).
 /// @param sidebar Whether the workspace sidebar shows.
-/// @return Where the chip shows: a daemon's chip follows the band's centre, a window with no daemon
+/// @return Where the chip shows: a chip that names a daemon follows the band's centre, a window with no
+/// daemon
 ///         (in-process or attached to a tmux host) shows the chip only in the band's workspace-chip centre.
 ///         With no band, a daemon window's chip heads the sidebar when that shows, so the daemon is named
 ///         somewhere.
@@ -544,18 +546,16 @@ enum class SidebarShown : uint8_t
                                                             DaemonHosting hosting,
                                                             SidebarShown sidebar) noexcept
 {
+    auto const names = daemonHostingPolicy(hosting).naming == ChipNaming::NamesDaemon;
     if (band == BarPresence::Hidden)
-        return hosting == DaemonHosting::Daemon && sidebar == SidebarShown::Yes ? LocationChipPlace::Sidebar
-                                                                                : LocationChipPlace::None;
+        return names && sidebar == SidebarShown::Yes ? LocationChipPlace::Sidebar : LocationChipPlace::None;
     switch (centre)
     {
-        case BarCentre::Breadcrumb:
-            return hosting == DaemonHosting::Daemon ? LocationChipPlace::Sidebar : LocationChipPlace::None;
+        case BarCentre::Breadcrumb: return names ? LocationChipPlace::Sidebar : LocationChipPlace::None;
         case BarCentre::ChipAndTabs: return LocationChipPlace::Band;
         case BarCentre::Empty:
         case BarCentre::Tabs:
-        case BarCentre::Title:
-            return hosting == DaemonHosting::Daemon ? LocationChipPlace::Band : LocationChipPlace::None;
+        case BarCentre::Title: return names ? LocationChipPlace::Band : LocationChipPlace::None;
     }
     return LocationChipPlace::None;
 }
