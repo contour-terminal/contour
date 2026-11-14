@@ -455,6 +455,10 @@ ThemedWindow
             window: appWindow
             bandHeight: titleBar.implicitHeight
             titleInHeaderBar: sidebarSlot.titleInHeaderBar
+            chipPlace: appWindow.win && appWindow.win.locationChipPlace
+                       ? appWindow.win.locationChipPlace(appWindow.band.band || "", appWindow.band.centre || "",
+                                                         appWindow.win.chipHosting, sidebarSlot.shown ? 1 : 0)
+                       : "none"
             sidebarToggle: appWindow.sidebarToggle
             controlsInset: appWindow.bandMode === 1 ? 0 : ((appWindow.win && appWindow.win.nativeControlsInset) || 0)
         }

@@ -32,6 +32,9 @@ Rectangle {
     /// Whether the header bar above draws the title row (UiStyleProvider.sidebarTitleInHeaderBar): then the
     /// sidebar draws none of its own.
     property bool titleInHeaderBar: false
+    /// Where the location chip shows (WindowController.locationChipPlace, Main.qml's to ask): "sidebar" puts
+    /// the daemon control at the head of the title row, where the heading would be.
+    property string chipPlace: "none"
     /// The sidebar's toggle as UiStyleProvider::sidebarToggle answers it (Main.qml): `host` "sidebar" puts it
     /// at the title row's leading end, at the spot the band holds it while the sidebar is hidden, and `label`
     /// is what it says.
@@ -191,7 +194,7 @@ Rectangle {
 
         Text {
             objectName: "sidebarTitle"
-            visible: chromeStyle.sidebar.named
+            visible: chromeStyle.sidebar.named && root.chipPlace !== "sidebar"
             anchors.left: toggleButton.visible ? toggleButton.right : parent.left
             anchors.leftMargin: toggleButton.visible ? chromeStyle.space.s3
                               : chromeStyle.snapToCells(root.controlsInset) + chromeStyle.space.s4
@@ -204,6 +207,32 @@ Rectangle {
             elide: Text.ElideRight
             Accessible.role: Accessible.Heading
             Accessible.name: text
+        }
+
+        // The daemon control, heading the row in the heading's place (or, on a row with no heading, right after
+        // the toggle): the band holds no chip while the sidebar shows, so the daemon is named here alone.
+        Loader {
+            id: daemonChipSlot
+            active: root.chipPlace === "sidebar" && !!root.controller && titleRow.visible
+            anchors.left: toggleButton.visible ? toggleButton.right : parent.left
+            anchors.leftMargin: toggleButton.visible ? chromeStyle.space.s3
+                              : chromeStyle.snapToCells(root.controlsInset) + chromeStyle.space.s4
+            anchors.verticalCenter: parent.verticalCenter
+            sourceComponent: WorkspaceChip {
+                id: daemonChip
+                objectName: "sidebarDaemonChip"
+                daemonOnly: true
+                sidebar: root.model
+                controller: root.controller
+                // The step the row's room allows (the filter and "+" buttons stand to its right).
+                fit: root.controller.chipFit(Object.assign({ available: Math.max(0, titleButtons.x - daemonChipSlot.x
+                                                                                  - titleRow.gap) },
+                                                           daemonChip.fitWidths))
+                focusRingShown: activeFocus
+                isOpen: !!root.controller && !!root.controller.isWorkspaceDropdownOpen
+                onClicked: if (root.controller && root.controller.showWorkspaceDropdown)
+                    root.controller.showWorkspaceDropdown(daemonChip.dropdownAnchor())
+            }
         }
 
         Row {

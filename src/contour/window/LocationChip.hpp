@@ -312,17 +312,28 @@ enum class LocationChipPlace : uint8_t
     Sidebar,  ///< In the workspace sidebar's header.
 };
 
+/// Whether the workspace sidebar is on screen.
+enum class SidebarShown : uint8_t
+{
+    No = 0, ///< No sidebar.
+    Yes,    ///< The sidebar shows.
+};
+
 /// @param band    Whether the title band shows.
 /// @param centre  What the band's middle holds.
 /// @param hosting Whether the sessions live in a daemon.
+/// @param sidebar Whether the workspace sidebar shows.
 /// @return Where the chip shows: a daemon's chip follows the band's centre, an in-process window shows the
-///         chip only in the band's workspace-chip centre.
+///         chip only in the band's workspace-chip centre. With no band, a daemon window's chip heads the
+///         sidebar when that shows, so the daemon is named somewhere.
 [[nodiscard]] constexpr LocationChipPlace locationChipPlace(BarPresence band,
                                                             BarCentre centre,
-                                                            DaemonHosting hosting) noexcept
+                                                            DaemonHosting hosting,
+                                                            SidebarShown sidebar) noexcept
 {
     if (band == BarPresence::Hidden)
-        return LocationChipPlace::None;
+        return hosting == DaemonHosting::Daemon && sidebar == SidebarShown::Yes ? LocationChipPlace::Sidebar
+                                                                                : LocationChipPlace::None;
     switch (centre)
     {
         case BarCentre::Breadcrumb:
@@ -353,11 +364,13 @@ enum class LocationChipPlace : uint8_t
 ///                 like a shown one.
 /// @param centre  The band centre's name (barCentreName()).
 /// @param hosting Whether the sessions live in a daemon.
+/// @param sidebar Whether the workspace sidebar shows.
 /// @return locationChipPlaceName() of where the chip shows; "none" for a name no presence or centre has.
 ///         Names in and a name out is the QML carve-out, like UiStyleProvider::titleBand().
 [[nodiscard]] inline std::string_view locationChipPlaceNamed(std::string_view band,
                                                              std::string_view centre,
-                                                             DaemonHosting hosting) noexcept
+                                                             DaemonHosting hosting,
+                                                             SidebarShown sidebar) noexcept
 {
     using Presence = std::pair<std::string_view, BarPresence>;
     constexpr auto Presences =
@@ -369,7 +382,7 @@ enum class LocationChipPlace : uint8_t
     auto const bar = barCentreNamed(centre);
     if (presence == Presences.end() || !bar)
         return locationChipPlaceName(LocationChipPlace::None);
-    return locationChipPlaceName(locationChipPlace(presence->second, *bar, hosting));
+    return locationChipPlaceName(locationChipPlace(presence->second, *bar, hosting, sidebar));
 }
 
 } // namespace contour::window

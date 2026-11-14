@@ -116,34 +116,39 @@ TEST_CASE("locationChip.place", "[LocationChip]")
     constexpr auto centres = std::array {
         BarCentre::Empty, BarCentre::Tabs, BarCentre::Title, BarCentre::Breadcrumb, BarCentre::ChipAndTabs
     };
-    for (auto const band: bands)
-        for (auto const centre: centres)
-        {
-            auto const daemon = locationChipPlace(band, centre, DaemonHosting::Daemon);
-            auto const inProcess = locationChipPlace(band, centre, DaemonHosting::InProcess);
-            auto expectedDaemon = LocationChipPlace::Band;
-            if (band == BarPresence::Hidden)
-                expectedDaemon = LocationChipPlace::None;
-            else if (centre == BarCentre::Breadcrumb)
-                expectedDaemon = LocationChipPlace::Sidebar;
-            auto const expectedInProcess = band != BarPresence::Hidden && centre == BarCentre::ChipAndTabs
-                                               ? LocationChipPlace::Band
-                                               : LocationChipPlace::None;
-            CHECK(daemon == expectedDaemon);
-            CHECK(inProcess == expectedInProcess);
-        }
+    for (auto const sidebar: { SidebarShown::No, SidebarShown::Yes })
+        for (auto const band: bands)
+            for (auto const centre: centres)
+            {
+                auto const daemon = locationChipPlace(band, centre, DaemonHosting::Daemon, sidebar);
+                auto const inProcess = locationChipPlace(band, centre, DaemonHosting::InProcess, sidebar);
+                auto expectedDaemon = LocationChipPlace::Band;
+                if (band == BarPresence::Hidden)
+                    expectedDaemon =
+                        sidebar == SidebarShown::Yes ? LocationChipPlace::Sidebar : LocationChipPlace::None;
+                else if (centre == BarCentre::Breadcrumb)
+                    expectedDaemon = LocationChipPlace::Sidebar;
+                auto const expectedInProcess = band != BarPresence::Hidden && centre == BarCentre::ChipAndTabs
+                                                   ? LocationChipPlace::Band
+                                                   : LocationChipPlace::None;
+                CHECK(daemon == expectedDaemon);
+                CHECK(inProcess == expectedInProcess);
+            }
 }
 
 TEST_CASE("locationChip.placeNamed", "[LocationChip]")
 {
-    CHECK(locationChipPlaceNamed("shown", "tabs", DaemonHosting::Daemon) == "band");
-    CHECK(locationChipPlaceNamed("reveal", "title", DaemonHosting::Daemon) == "band");
-    CHECK(locationChipPlaceNamed("pinned", "breadcrumb", DaemonHosting::Daemon) == "sidebar");
-    CHECK(locationChipPlaceNamed("hidden", "tabs", DaemonHosting::Daemon) == "none");
-    CHECK(locationChipPlaceNamed("shown", "tabs", DaemonHosting::InProcess) == "none");
-    CHECK(locationChipPlaceNamed("shown", "chip+tabs", DaemonHosting::InProcess) == "band");
-    CHECK(locationChipPlaceNamed("nonsense", "tabs", DaemonHosting::Daemon) == "none");
-    CHECK(locationChipPlaceNamed("shown", "nonsense", DaemonHosting::Daemon) == "none");
+    CHECK(locationChipPlaceNamed("shown", "tabs", DaemonHosting::Daemon, SidebarShown::No) == "band");
+    CHECK(locationChipPlaceNamed("reveal", "title", DaemonHosting::Daemon, SidebarShown::No) == "band");
+    CHECK(locationChipPlaceNamed("pinned", "breadcrumb", DaemonHosting::Daemon, SidebarShown::No)
+          == "sidebar");
+    CHECK(locationChipPlaceNamed("hidden", "tabs", DaemonHosting::Daemon, SidebarShown::No) == "none");
+    CHECK(locationChipPlaceNamed("shown", "tabs", DaemonHosting::InProcess, SidebarShown::No) == "none");
+    CHECK(locationChipPlaceNamed("shown", "chip+tabs", DaemonHosting::InProcess, SidebarShown::No) == "band");
+    CHECK(locationChipPlaceNamed("hidden", "tabs", DaemonHosting::Daemon, SidebarShown::Yes) == "sidebar");
+    CHECK(locationChipPlaceNamed("hidden", "tabs", DaemonHosting::InProcess, SidebarShown::Yes) == "none");
+    CHECK(locationChipPlaceNamed("nonsense", "tabs", DaemonHosting::Daemon, SidebarShown::No) == "none");
+    CHECK(locationChipPlaceNamed("shown", "nonsense", DaemonHosting::Daemon, SidebarShown::No) == "none");
 }
 
 TEST_CASE("locationChip.placeName", "[LocationChip]")

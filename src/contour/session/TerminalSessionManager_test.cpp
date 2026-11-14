@@ -7026,13 +7026,14 @@ TEST_CASE("TerminalSessionManager: the chip's placement is decided by names", "[
     contour::test::ScopedController const daemon { manager };
     manager.bindWindow(daemon.id, onWork);
 
-    CHECK(daemon->locationChipPlace("shown", "tabs", daemon->chipHosting()) == "band");
-    CHECK(daemon->locationChipPlace("reveal", "title", daemon->chipHosting()) == "band");
-    CHECK(daemon->locationChipPlace("pinned", "breadcrumb", daemon->chipHosting()) == "sidebar");
-    CHECK(daemon->locationChipPlace("hidden", "tabs", daemon->chipHosting()) == "none");
-    CHECK(daemon->locationChipPlace("shown", "nonsense", daemon->chipHosting()) == "none");
-    CHECK(inProcess->locationChipPlace("shown", "tabs", inProcess->chipHosting()) == "none");
-    CHECK(inProcess->locationChipPlace("shown", "chip+tabs", inProcess->chipHosting()) == "band");
+    CHECK(daemon->locationChipPlace("shown", "tabs", daemon->chipHosting(), 0) == "band");
+    CHECK(daemon->locationChipPlace("reveal", "title", daemon->chipHosting(), 0) == "band");
+    CHECK(daemon->locationChipPlace("pinned", "breadcrumb", daemon->chipHosting(), 0) == "sidebar");
+    CHECK(daemon->locationChipPlace("hidden", "tabs", daemon->chipHosting(), 0) == "none");
+    CHECK(daemon->locationChipPlace("shown", "nonsense", daemon->chipHosting(), 0) == "none");
+    CHECK(daemon->locationChipPlace("hidden", "tabs", daemon->chipHosting(), 1) == "sidebar");
+    CHECK(inProcess->locationChipPlace("shown", "tabs", inProcess->chipHosting(), 0) == "none");
+    CHECK(inProcess->locationChipPlace("shown", "chip+tabs", inProcess->chipHosting(), 0) == "band");
 
     manager.releaseBinding(onWork);
 }

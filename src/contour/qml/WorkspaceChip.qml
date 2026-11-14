@@ -29,6 +29,9 @@ Item {
     /// How much of the chip fits, a window::LocationChipFit as its underlying value: the title bar's to set,
     /// from `fitWidths` and the room it leaves (never from the chip's own width, which would loop).
     property int fit: 0
+    /// Whether the chip names the daemon alone (`local ▾`, the control that heads the sidebar) rather than the
+    /// daemon and the workspace: the same chip, the workspace segment left out.
+    property bool daemonOnly: false
     /// Whether keyboard focus is on the chip and the chrome says so: the host's to set.
     property bool focusRingShown: false
     /// Whether the dropdown the chip opened is open: the chip wears its pressed fill meanwhile.
@@ -109,6 +112,8 @@ Item {
         }
         if (status !== "")
             width += root.gap + root._span(fontMetrics, status)
+        if (root.daemonOnly)
+            return width
         if (daemon !== "")
             width += root.gap + root._span(fontMetrics, chromeStyle.breadcrumbGlyph)
         return width + (leading ? root.gap : 0) + root._span(strongMetrics, workspace)
@@ -239,7 +244,7 @@ Item {
 
         Text {
             objectName: "workspaceChipSeparator"
-            visible: root.daemonText !== ""
+            visible: root.daemonText !== "" && !root.daemonOnly
             anchors.verticalCenter: parent.verticalCenter
             Accessible.ignored: true
             leftPadding: root.gap
@@ -251,6 +256,7 @@ Item {
 
         Text {
             objectName: "workspaceChipLabel"
+            visible: !root.daemonOnly
             anchors.verticalCenter: parent.verticalCenter
             Accessible.ignored: true
             // The room after whatever leads: the dot or the daemon segment.

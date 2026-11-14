@@ -1632,12 +1632,14 @@ class WindowController:
     ///             "shown", "reveal" or "pinned").
     /// @param centre The band centre's name (barCentreName()).
     /// @param hosting The window's chipHosting: passed in, so the caller's binding depends on it.
+    /// @param sidebarShown A window::SidebarShown's underlying value: whether the sidebar is on screen.
     /// @return Where the chip shows for this window: "none", "band" or "sidebar"; "none" for a name no
     ///         presence or centre has. Names in and a name out is the QML carve-out, like
     ///         UiStyleProvider::titleBand().
     Q_INVOKABLE [[nodiscard]] QString locationChipPlace(QString const& band,
                                                         QString const& centre,
-                                                        int hosting) const;
+                                                        int hosting,
+                                                        int sidebarShown) const;
 
     /// The manager's host connection changed what the chip shows. @see hostChipState
     void notifyHostConnectionChanged() { emit hostChipStateChanged(); }

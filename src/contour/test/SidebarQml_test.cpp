@@ -2183,3 +2183,163 @@ TEST_CASE("the location chip's tooltip names the switcher and the chord bound no
     CHECK(unbound->property("text").toString().startsWith(QStringLiteral("Switch workspace or daemon")));
 }
 // }}}
+
+// {{{ The daemon control heading the sidebar
+
+namespace
+{
+/// The daemon control a shown sidebar carries: its own title row's, or on a row whose header bar draws that
+/// row, the header bar's part above the sidebar.
+[[nodiscard]] QQuickItem* sidebarDaemonChipOf(SidebarWindow const& scene)
+{
+    if (auto* own = scene.visibleItem(QStringLiteral("sidebarDaemonChip")); own != nullptr)
+        return own;
+    return scene.visibleItem(QStringLiteral("headerSidebarDaemonChip"));
+}
+} // namespace
+
+TEST_CASE("a shown sidebar's daemon control names the daemon and the band holds no chip (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+    scene.controller.setDaemon(QStringLiteral("local"));
+    QCoreApplication::processEvents();
+
+    auto* chip = sidebarDaemonChipOf(scene);
+    REQUIRE(chip != nullptr);
+    CHECK(chipPart(*chip, "workspaceChipDaemon")
+              ->property("text")
+              .toString()
+              .startsWith(QStringLiteral("local")));
+    CHECK(chipPart(*chip, "workspaceChipCaret")->isVisible());
+    // The daemon alone: no workspace segment, and the daemon is named nowhere else.
+    CHECK_FALSE(chipPart(*chip, "workspaceChipLabel")->isVisible());
+    CHECK_FALSE(chipPart(*chip, "workspaceChipSeparator")->isVisible());
+    CHECK_FALSE(chipPart(*chip, "workspaceChipDot")->isVisible());
+    CHECK_FALSE(chipPart(*chip, "workspaceChipDotGlyph")->isVisible());
+    CHECK(scene.visibleItem(QStringLiteral("workspaceChip")) == nullptr);
+    if (row == ChromeStyle::Terminal)
+        CHECK(chipSpelling(*chip) == QStringLiteral("[local ▾]"));
+
+    // The same tooltip as the band's chip.
+    auto const* host = chip->findChild<QQuickItem*>(QStringLiteral("kitToolTipHost"));
+    REQUIRE(host != nullptr);
+    CHECK(host->property("text").toString().startsWith(QStringLiteral("Switch workspace or daemon")));
+    CHECK(host->property("shortcutCommand").toString() == QStringLiteral("ShowSwitcher"));
+    CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+}
+
+TEST_CASE("a shown sidebar's daemon control adds the dot and the state when not connected (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    using contour::window::DaemonLocality;
+    using contour::window::HostChipState;
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+    scene.controller.setDaemon(QStringLiteral("starfive"), DaemonLocality::Remote);
+    scene.controller.setHostChipState(static_cast<int>(HostChipState::Reconnecting));
+    QCoreApplication::processEvents();
+
+    auto* chip = sidebarDaemonChipOf(scene);
+    REQUIRE(chip != nullptr);
+    auto const bracketed = row == ChromeStyle::Terminal;
+    CHECK(chipPart(*chip, "workspaceChipDot")->isVisible() == !bracketed);
+    CHECK(chipPart(*chip, "workspaceChipDotGlyph")->isVisible() == bracketed);
+    // The sidebar's room is short: the state's words are the first thing to give way, the dot never does.
+    CHECK(chipPart(*chip, "workspaceChipStatus")->isVisible() == (chip->property("fit").toInt() == 0));
+    CHECK_FALSE(chipPart(*chip, "workspaceChipLabel")->isVisible());
+    if (bracketed)
+    {
+        CHECK(chip->property("fit").toInt() == 0);
+        CHECK(chipSpelling(*chip) == QStringLiteral("[◑ starfive Reconnecting… ▾]"));
+    }
+    CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+}
+
+TEST_CASE("clicking a shown sidebar's daemon control drops the switcher down below it (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+    scene.controller.setDaemon(QStringLiteral("local"));
+    QCoreApplication::processEvents();
+    auto* chip = sidebarDaemonChipOf(scene);
+    REQUIRE(chip != nullptr);
+
+    scene.click(*chip);
+    REQUIRE(scene.controller.workspaceDropdownAnchor.has_value());
+    auto const chipRect = sceneRectOf(*chip);
+    auto const& anchor = *scene.controller.workspaceDropdownAnchor;
+    CHECK(anchor.left() == Catch::Approx(chipRect.left()));
+    CHECK(anchor.top() == Catch::Approx(chipRect.top()));
+    CHECK(anchor.bottom() == Catch::Approx(chipRect.bottom()));
+    auto const* attached = accessibleOf(*chip);
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::ButtonMenu);
+}
+
+TEST_CASE("in process a shown sidebar keeps its heading and carries no daemon control (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+    CHECK(sidebarDaemonChipOf(scene) == nullptr);
+    auto* title = scene.visibleItem(QStringLiteral("sidebarTitle"));
+    if (title == nullptr)
+        title = scene.visibleItem(QStringLiteral("headerSidebarTitle"));
+    // macOS leaves the row unnamed (no heading to replace); the others read "Workspaces".
+    if (row == ChromeStyle::MacOS)
+        CHECK(title == nullptr);
+    else
+    {
+        REQUIRE(title != nullptr);
+        CHECK(title->property("text").toString() == QStringLiteral("Workspaces"));
+    }
+}
+
+TEST_CASE("with no band, a shown sidebar's daemon control is the one place that names the daemon (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    auto hiddenBands = 0;
+    for (auto const row:
+         { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row,
+                                       .visibility = contour::config::SidebarVisibility::Shown,
+                                       .placement = contour::config::TabPlacement::Top,
+                                       .tabBar = contour::config::TabBarVisibility::Never } };
+        scene.controller.setDaemon(QStringLiteral("local"));
+        QCoreApplication::processEvents();
+        auto const* bar = scene.item(QStringLiteral("titleBar"));
+        REQUIRE(bar != nullptr);
+        auto const bandHidden = bar->property("presence").toString() == QStringLiteral("hidden");
+        // A row whose rules still draw a band names the daemon there; this case is the band-less ones.
+        if (!bandHidden)
+            continue;
+        ++hiddenBands;
+
+        // Whether the band is there or not, the daemon is named once, at the sidebar's head.
+        auto* chip = sidebarDaemonChipOf(scene);
+        REQUIRE(chip != nullptr);
+        CHECK(chipPart(*chip, "workspaceChipDaemon")
+                  ->property("text")
+                  .toString()
+                  .startsWith(QStringLiteral("local")));
+        CHECK(scene.visibleItem(QStringLiteral("workspaceChip")) == nullptr);
+        if (bandHidden)
+            CHECK(chip->objectName() == QStringLiteral("sidebarDaemonChip"));
+    }
+    // The scenario is real: some row draws no band here.
+    CHECK(hiddenBands > 0);
+}
+// }}}

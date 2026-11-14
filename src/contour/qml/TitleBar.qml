@@ -329,7 +329,8 @@ Item {
         // `!locationChipPlace` keeps a lightweight mock controller (offscreen tests) without the chip local.
         if (!root.controller || !root.controller.locationChipPlace)
             return "none"
-        return root.controller.locationChipPlace(root.presence, root.centre, root.controller.chipHosting)
+        return root.controller.locationChipPlace(root.presence, root.centre, root.controller.chipHosting,
+                                                 (root.controller.sidebarWidth || 0) > 0 ? 1 : 0)
     }
 
     // The room the location chip has: the bar less every other part, the drag reserve and the least the tab
@@ -437,6 +438,7 @@ Item {
 
             Text {
                 objectName: "headerSidebarTitle"
+                visible: root.chipPlace !== "sidebar"
                 anchors.left: parent.left
                 anchors.right: sidebarPartRow.left
                 anchors.verticalCenter: parent.verticalCenter
@@ -447,6 +449,28 @@ Item {
                 elide: Text.ElideRight
                 Accessible.role: Accessible.Heading
                 Accessible.name: text
+            }
+
+            // The daemon control, in the heading's place while the sidebar shows: the band holds no chip then.
+            Loader {
+                id: headerDaemonChipSlot
+                active: root.chipPlace === "sidebar" && !!root.controller
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                sourceComponent: WorkspaceChip {
+                    id: headerDaemonChip
+                    objectName: "headerSidebarDaemonChip"
+                    daemonOnly: true
+                    sidebar: root.controller.sidebar
+                    controller: root.controller
+                    fit: root.controller.chipFit(Object.assign({ available: Math.max(0, sidebarPartRow.x
+                                                                                      - chromeStyle.space.s3) },
+                                                               headerDaemonChip.fitWidths))
+                    focusRingShown: activeFocus && root.toolbarHasFocus
+                    isOpen: !!root.controller && !!root.controller.isWorkspaceDropdownOpen
+                    onClicked: if (root.controller && root.controller.showWorkspaceDropdown)
+                        root.controller.showWorkspaceDropdown(headerDaemonChip.dropdownAnchor())
+                }
             }
 
             Row {

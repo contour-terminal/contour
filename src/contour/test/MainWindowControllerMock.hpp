@@ -311,12 +311,14 @@ class MainWindowControllerMock: public QAbstractListModel
     /// Mirrors WindowController::locationChipPlace().
     Q_INVOKABLE [[nodiscard]] QString locationChipPlace(QString const& band,
                                                         QString const& centre,
-                                                        int hostingValue) const
+                                                        int hostingValue,
+                                                        int sidebarShown) const
     {
         return QString::fromUtf8(window::locationChipPlaceNamed(
             band.toStdString(),
             centre.toStdString(),
-            static_cast<window::DaemonHosting>(std::clamp(hostingValue, 0, 1))));
+            static_cast<window::DaemonHosting>(std::clamp(hostingValue, 0, 1)),
+            static_cast<window::SidebarShown>(std::clamp(sidebarShown, 0, 1))));
     }
 
     /// What the connection reports, as WindowController::notifyHostConnectionChanged() would tell it.

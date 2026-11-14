@@ -710,10 +710,16 @@ int WindowController::chipHosting() const
         _manager.isInProcessWindow(_displayed) ? DaemonHosting::InProcess : DaemonHosting::Daemon));
 }
 
-QString WindowController::locationChipPlace(QString const& band, QString const& centre, int hosting) const
+QString WindowController::locationChipPlace(QString const& band,
+                                            QString const& centre,
+                                            int hosting,
+                                            int sidebarShown) const
 {
-    return QString::fromUtf8(locationChipPlaceNamed(
-        band.toStdString(), centre.toStdString(), static_cast<DaemonHosting>(std::clamp(hosting, 0, 1))));
+    return QString::fromUtf8(
+        locationChipPlaceNamed(band.toStdString(),
+                               centre.toStdString(),
+                               static_cast<DaemonHosting>(std::clamp(hosting, 0, 1)),
+                               static_cast<SidebarShown>(std::clamp(sidebarShown, 0, 1))));
 }
 
 QString WindowController::applicationVersion() const
