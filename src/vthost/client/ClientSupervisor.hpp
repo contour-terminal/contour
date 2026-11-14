@@ -27,6 +27,7 @@
 #include <vthost/client/ConnectionState.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/proto/Pdu.hpp>
+#include <vthost/proto/ReconnectCeiling.hpp>
 
 namespace vthost::client
 {
@@ -34,8 +35,9 @@ namespace vthost::client
 /// How long to wait before each reconnect attempt.
 struct BackoffSchedule
 {
-    std::chrono::milliseconds first { 250 };    ///< The wait before the first retry.
-    std::chrono::milliseconds ceiling { 5000 }; ///< The longest wait; the doubling stops here.
+    std::chrono::milliseconds first { 250 }; ///< The wait before the first retry.
+    std::chrono::milliseconds ceiling =
+        proto::ReconnectCeiling; ///< The longest wait; the doubling stops here.
 };
 
 /// @param schedule The schedule.
@@ -97,6 +99,11 @@ class ClientSupervisor
     /// daemon start the transport has under way included, which is not waited out. Call on the loop's
     /// thread, where the client lives.
     void stop();
+
+    /// As stop(), for a window the user closed: the current client says Goodbye first
+    /// (NativeClient::closeWindow), so the daemon frees the window's workspace at once. stop() is for every
+    /// other end, a failed attach among them, which sends no word and so reads to the daemon as a drop.
+    void closeWindow();
 
     /// Cuts the reconnect backoff short: the wait under way ends at once and the next attempt starts, or,
     /// while an attempt is under way, the wait after it is skipped. Does nothing outside a reconnect. Unlike

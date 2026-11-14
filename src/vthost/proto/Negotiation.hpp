@@ -123,6 +123,10 @@ enum class Capability : uint8_t
     /// The peer states each workspace's label, control id and git state (WorkspaceMeta): in full after the
     /// hello and for a workspace created since, and as a delta on each change.
     WorkspaceMeta = 29,
+    /// The peer reads a Goodbye: the client says its connection ends on purpose, and the daemon frees the
+    /// workspace its window showed at once instead of holding it for the reconnect grace. Without it a
+    /// client's end is a drop, which is what an older daemon takes it for.
+    ClientGoodbye = 30,
 };
 
 /// One row of the table naming a Capability.
@@ -161,6 +165,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::InputKinds, .name = "input-kinds" },
     CapabilityRow { .capability = Capability::DaemonFollow, .name = "daemon-follow" },
     CapabilityRow { .capability = Capability::WorkspaceMeta, .name = "workspace-meta" },
+    CapabilityRow { .capability = Capability::ClientGoodbye, .name = "client-goodbye" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

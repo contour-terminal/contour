@@ -1599,9 +1599,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         for a session no window holds.
     [[nodiscard]] std::string_view hostLabelOf(TerminalSession const& session) const noexcept;
 
-    /// New Window from @p acting's window: on a daemon, a window of a connection of its own opens, selecting
-    /// the workspace @p acting's window displays (WindowBinding::openWindowLike), instead of a local window
-    /// opening.
+    /// New Window from @p acting's window: on a daemon, a window of a connection of its own opens, showing
+    /// the daemon's first workspace no window shows, else a new one (SiblingShows::DaemonsChoice), instead
+    /// of a local window opening.
     /// @param acting The session the new window is asked from.
     /// @param screen Where the window opens; null for the default placement.
     /// @return Routed when the daemon's binding took the request; Local for a local window, which then opens
@@ -2323,19 +2323,21 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] static std::optional<window::WindowPosition> spawnPositionFor(QScreen* screen, QPoint at);
     /// Stages @p pending for the next window, spawned on @p screen at @p at (@see consumePendingTransplant).
     void spawnWindowFor(PendingTransplant const& pending, QScreen* screen, QPoint at);
-    /// Opens a window of a connection of its own on @p binding's daemon, showing what @p asking shows (New
-    /// Window, a tab torn off); one that cannot open is logged under @p what and told in @p asking.
+    /// Opens a window of a connection of its own on @p binding's daemon, beside @p asking; one that cannot
+    /// open is logged under @p what and told in @p asking.
     /// @param binding The daemon binding @p asking is bound to.
     /// @param asking The window asked from.
+    /// @param shows What the new window shows (a New Window, or a tab torn off).
     /// @param activeTab The tab the new window activates; none for the daemon's own choice.
     /// @param screen Where the window opens; null for the default placement.
     /// @param what What asked, for the log.
     /// @return Routed once the window's connection is under way; Refused otherwise.
-    RemoteRouting openDaemonWindowLike(WindowBinding& binding,
-                                       vtworkspace::WorkspaceId asking,
-                                       std::optional<vtworkspace::TabId> activeTab,
-                                       QScreen* screen,
-                                       std::string_view what) const;
+    RemoteRouting openSiblingWindow(WindowBinding& binding,
+                                    vtworkspace::WorkspaceId asking,
+                                    SiblingShows shows,
+                                    std::optional<vtworkspace::TabId> activeTab,
+                                    QScreen* screen,
+                                    std::string_view what) const;
     /// Tells the screen reader of the window @p moved landed in what happened.
     void announceMove(vtworkspace::MoveResult const& moved,
                       window::DropPayload payload,

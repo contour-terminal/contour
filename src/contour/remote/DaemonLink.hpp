@@ -244,11 +244,14 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     /// @return Its daemon as every link to it names it: by the name a switch gives it, or, for one no switch
     ///         can name, by its transport.
     [[nodiscard]] std::optional<uint64_t> daemonKey() const override;
-    /// Starts a link of its own to this link's daemon that selects what @p window displays and opens a window
-    /// for it (IDaemonLinkHost::startWindowLink).
-    [[nodiscard]] std::expected<void, std::string> openWindowLike(vtworkspace::WorkspaceId window,
-                                                                  std::optional<vtworkspace::TabId> activeTab,
-                                                                  QScreen* screen) override;
+    /// Starts a link of its own to this link's daemon and opens a window for it (IDaemonLinkHost::
+    /// startWindowLink): one that selects what @p window displays, or one that attaches as a launch does (the
+    /// first workspace no window shows, else a new one), which needs no workspace of @p window.
+    [[nodiscard]] std::expected<void, std::string> openSiblingWindow(
+        vtworkspace::WorkspaceId window,
+        session::SiblingShows shows,
+        std::optional<vtworkspace::TabId> activeTab,
+        QScreen* screen) override;
 
     /// @return The daemon as a window switch names it (DaemonLinkConfig::address).
     [[nodiscard]] DaemonAddress const& address() const noexcept { return _siblingTemplate.address; }

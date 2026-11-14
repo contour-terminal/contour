@@ -152,6 +152,15 @@ TEST_CASE("capability 29 is workspace-meta", "[vthost][negotiation][workspace-me
     CHECK(meta->name == "workspace-meta");
 }
 
+TEST_CASE("capability 30 is client-goodbye", "[vthost][negotiation][goodbye]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::ClientGoodbye) == 30);
+    auto const goodbye =
+        std::ranges::find(CapabilityTable, Capability::ClientGoodbye, &CapabilityRow::capability);
+    REQUIRE(goodbye != CapabilityTable.end());
+    CHECK(goodbye->name == "client-goodbye");
+}
+
 TEST_CASE("the workspace switch capability keeps its ident and name",
           "[vthost][negotiation][workspace-follow]")
 {

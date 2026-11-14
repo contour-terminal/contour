@@ -139,7 +139,8 @@ struct HandshakePolicy
                                                                    proto::Capability::SoftFonts,
                                                                    proto::Capability::WorkspaceSwitch,
                                                                    proto::Capability::DaemonFollow,
-                                                                   proto::Capability::WorkspaceMeta });
+                                                                   proto::Capability::WorkspaceMeta,
+                                                                   proto::Capability::ClientGoodbye });
 };
 
 /// When a connection sends a session's program-status set.
@@ -669,8 +670,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     [[nodiscard]] TabVerb serveTabVerb(proto::DecodedFrame const& frame);
 
     /// Serves @p frame if it is a SelectWorkspace or ReportFocus (Capability::DaemonFollow; ReportFocus is
-    /// read and ignored) or a SwitchReply (Capability::WorkspaceSwitch), refusing it when the
-    /// capability was not negotiated. Reported as a TabVerb: it is dispatched the same way.
+    /// read and ignored), a SwitchReply (Capability::WorkspaceSwitch) or a Goodbye
+    /// (Capability::ClientGoodbye), refusing it when the capability was not negotiated. Reported as a
+    /// TabVerb: it is dispatched the same way.
     /// @param frame The frame read.
     /// @return Served when it was one of them.
     [[nodiscard]] TabVerb serveWorkspaceVerb(proto::DecodedFrame const& frame);
@@ -794,9 +796,17 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     void openLayoutBatch();
 
     /// Selects another workspace when the selected one ended (left the model, or lost its last tab), before
-    /// a layout push: the one a launch would (@see defaultSelection), none when none is left. A connection
-    /// that selected none stays so.
+    /// a layout push: the one a launch takes (@see planAttach), so never one another window shows; none when
+    /// none is left. A connection that selected none stays so.
     void refreshSelection();
+
+    /// @return The daemon's workspaces ascending by id, with their tab counts and what an attach sees of them
+    ///         (SessionHost::shownForAttach), as of now.
+    [[nodiscard]] std::vector<WorkspaceSummary> workspaceSummaries() const;
+
+    /// @param workingDirectory The directory the attach states; empty when it states none.
+    /// @return What planAttach() decides from: workspaceSummaries() and the host's primary workspace.
+    [[nodiscard]] AttachContext attachContext(std::filesystem::path const& workingDirectory) const;
 
     /// Validates the peer's ClientHello and answers it. An Attach connection then becomes a client
     /// (see attachClient: the census ticket, the subscriptions, and the attach snapshot, spawning the
@@ -1379,6 +1389,8 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// Whether @ref requeueOnSendRoom is live, which @ref run waits out before it lets `this` go — kept
     /// apart from the set, which a closed session leaves while the waiter still holds `this`.
     RoomWaiter _roomWaiter = RoomWaiter::Idle;
+    /// How this connection's end is told to the host: Closed once the client said Goodbye, else a drop.
+    DetachKind _detachKind = DetachKind::Dropped;
     /// Whether the attached client shares Capability::DaemonFollow: it selects one workspace, is told the
     /// others' panes as summaries, and takes part in routing (followsDaemon()). Set as it attaches.
     enum class DaemonFollowing : uint8_t

@@ -5404,7 +5404,7 @@ class RememberedSelection final: public vthost::SessionStreamEvents
 
 } // namespace
 
-TEST_CASE("a lone client selects the most recently selected workspace", "[vthost][native][attach-intent]")
+TEST_CASE("a lone client selects the first workspace no window shows", "[vthost][native][attach-intent]")
 {
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
@@ -5430,13 +5430,22 @@ TEST_CASE("a lone client selects the most recently selected workspace", "[vthost
     {
         attachesTo(first);
     }
-    SECTION("a window selected the second: it is the default, though that window is gone")
+    SECTION("a window selected the second and is gone: the first is still the default")
+    {
+        auto earlier = RememberedSelection {};
+        earlier.selected = second->id().value;
+        h.host.noteClientAttached(&earlier);
+        h.host.noteClientDetached(&earlier, vthost::DetachKind::Dropped);
+        attachesTo(first);
+    }
+    SECTION("a window shows the first: the default is the second, which no window shows")
     {
         auto earlier = RememberedSelection {};
         h.host.noteClientAttached(&earlier);
-        h.host.noteSelected(earlier, second->id().value);
-        h.host.noteClientDetached(&earlier);
+        earlier.selected = first;
+        h.host.noteSelected(earlier);
         attachesTo(second->id().value);
+        h.host.noteClientDetached(&earlier, vthost::DetachKind::Dropped);
     }
 }
 
@@ -5597,9 +5606,15 @@ TEST_CASE("a workspace created elsewhere is laid out to every connection and mir
 
     REQUIRE(bothSeeIt(fromOne));
     REQUIRE(bothSeeIt(fromTwo));
-    CHECK(layoutWorkspaces(fromOne) == std::set<uint64_t> { first, laterWorkspace });
+    // The first connection shows the first workspace, so the second, launching too, got one of its own.
+    auto const* twoHello = serverHelloOf(fromTwo);
+    REQUIRE(twoHello != nullptr);
+    auto const secondOwn = twoHello->selectedWorkspace;
+    CHECK(secondOwn != first);
+    CHECK(secondOwn != laterWorkspace);
+    CHECK(layoutWorkspaces(fromOne) == std::set<uint64_t> { first, secondOwn, laterWorkspace });
     CHECK(snapshotSessions(fromOne) == sessionsOf(h.host, first));
-    CHECK(snapshotSessions(fromTwo) == sessionsOf(h.host, first));
+    CHECK(snapshotSessions(fromTwo) == sessionsOf(h.host, secondOwn));
 }
 
 TEST_CASE("the host counts an Attach connection as a client beside the census",
@@ -8011,7 +8026,6 @@ TEST_CASE("SelectWorkspace moves the full mirror to another workspace", "[vthost
     CHECK(snapshotSessions(received) == std::set<uint64_t> { oldSession, newSession });
     CHECK(deltaSessions(received) == std::set<uint64_t> { newSession });
     CHECK(h.session->selectedWorkspace() == second);
-    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { second });
     CHECK(h.host.visibility(first) == vthost::WorkspaceVisibility::Hidden);
     CHECK(h.host.visibility(second) == vthost::WorkspaceVisibility::Shown);
 }
@@ -8032,7 +8046,6 @@ TEST_CASE("SelectWorkspace 0 creates a workspace and selects it", "[vthost][nati
         *std::ranges::find_if(workspaces, [first](uint64_t workspace) { return workspace != first; });
     CHECK(h.session->selectedWorkspace() == created);
     CHECK(snapshotSessions(received).contains(*sessionsOf(h.host, created).begin()));
-    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { created });
 }
 
 TEST_CASE("SelectWorkspace naming no workspace keeps the selection, and one from a peer without "
@@ -8136,7 +8149,111 @@ TEST_CASE("a connection whose selected workspace ends selects another", "[vthost
     }
 
     CHECK(h.session->selectedWorkspace() == second);
-    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { second });
+}
+
+TEST_CASE("a connection whose workspace ends never moves to one another window shows",
+          "[vthost][native][daemon-follow]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const* shownElsewhere = h.host.createWorkspace();
+    auto const* hidden = h.host.createWorkspace();
+    REQUIRE((shownElsewhere != nullptr && hidden != nullptr));
+    auto const second = shownElsewhere->id().value;
+    auto const third = hidden->id().value;
+
+    // Another window shows the second workspace, which is the first one left in the daemon's order.
+    auto window = RememberedSelection {};
+    window.selected = second;
+    h.host.noteClientAttached(&window);
+
+    auto const movedToThird = [&](auto const& got) {
+        return batchEndSelects(got, third);
+    };
+    std::ignore =
+        h.exchangeUntil({ daemonFollowHello(proto::AttachIntentKind::Select, first) },
+                        movedToThird,
+                        closeLastTabOnce(&h, first, [&] { return snapshotRunCount(h.received) >= 1; }));
+
+    CHECK(h.session->selectedWorkspace() == third);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
+}
+
+TEST_CASE(
+    "a connection whose workspace ends while every other is shown selects none, the other window staying",
+    "[vthost][native][daemon-follow]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const* shownElsewhere = h.host.createWorkspace();
+    REQUIRE(shownElsewhere != nullptr);
+    auto const second = shownElsewhere->id().value;
+
+    // The other window shows the only workspace left: moving there would show it in two windows.
+    auto window = RememberedSelection {};
+    window.selected = second;
+    h.host.noteClientAttached(&window);
+
+    std::ignore = h.exchangeUntil(
+        { daemonFollowHello(proto::AttachIntentKind::Select, first) },
+        [](auto const& got) { return batchEndSelects(got, 0); },
+        closeLastTabOnce(&h, first, [&] { return snapshotRunCount(h.received) >= 1; }));
+
+    CHECK(h.session->selectedWorkspace() == 0); // this window closes, as closing a last tab does
+    CHECK(window.selected == second);           // the other keeps what it shows
+    CHECK(h.host.visibility(second) == vthost::WorkspaceVisibility::Shown);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
+}
+
+TEST_CASE("a Goodbye frees the workspace at once, and is refused without client-goodbye",
+          "[vthost][native][goodbye]")
+{
+    auto const hello = [](proto::Capability capability) {
+        auto hello = intentHello(proto::AttachIntentKind::Default);
+        hello.capabilities = proto::CapabilitySet::of({ proto::Capability::AttachIntent, capability });
+        return hello;
+    };
+
+    SECTION("said: the workspace is offered to the next attach")
+    {
+        auto h = NativeHarness {};
+        REQUIRE(h.host.createTab() != nullptr);
+        auto const first = h.host.workspaceId().value;
+        std::ignore = h.exchangeUntil({ hello(proto::Capability::ClientGoodbye),
+                                        proto::Goodbye {},
+                                        proto::FetchImage { .imageId = 4242 } },
+                                      imageGoneArrived);
+        REQUIRE(h.host.visibility(first) == vthost::WorkspaceVisibility::Shown);
+        h.session.reset();
+        CHECK_FALSE(h.host.shownForAttach().contains(first));
+    }
+    SECTION("not said: the end is a drop, and its workspace is held")
+    {
+        auto h = NativeHarness {};
+        REQUIRE(h.host.createTab() != nullptr);
+        auto const first = h.host.workspaceId().value;
+        std::ignore = h.exchangeUntil(
+            { hello(proto::Capability::ClientGoodbye), proto::FetchImage { .imageId = 4242 } },
+            imageGoneArrived);
+        h.session.reset();
+        CHECK(h.host.shownForAttach().contains(first));
+    }
+    SECTION("said without the capability: refused, and the end is a drop")
+    {
+        auto h = NativeHarness {};
+        REQUIRE(h.host.createTab() != nullptr);
+        auto const first = h.host.workspaceId().value;
+        auto const received = h.exchangeUntil(
+            { hello(proto::Capability::Heartbeat), proto::Goodbye {}, proto::FetchImage { .imageId = 4242 } },
+            imageGoneArrived);
+        CHECK(std::ranges::any_of(received, [](auto const& frame) {
+            return std::holds_alternative<proto::Unsupported>(frame.pdu);
+        }));
+        h.session.reset();
+        CHECK(h.host.shownForAttach().contains(first));
+    }
 }
 
 TEST_CASE("a connection whose only workspace ends selects none and creates none",
@@ -8381,7 +8498,6 @@ TEST_CASE("visibility is Shown while some connection selects it",
 
     h.session.reset();
     CHECK(h.host.visibility(first) == vthost::WorkspaceVisibility::Hidden);
-    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { first });
 }
 
 // {{{ status stream and raise role

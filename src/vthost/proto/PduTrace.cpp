@@ -600,6 +600,7 @@ namespace
                                           core::escape(std::get<DaemonUpgrading>(pdu).toRelease));
                    } },
         TraceRow { PduType::PanesReprojected, "PanesReprojected", nullptr },
+        TraceRow { PduType::Goodbye, "Goodbye", nullptr },
         TraceRow { PduType::SoftFontState,
                    "SoftFontState",
                    +[](DecodedPdu const& pdu) {

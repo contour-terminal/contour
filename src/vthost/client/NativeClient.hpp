@@ -610,8 +610,14 @@ class NativeClient final
     /// @param settings The new preference; nullopt for whatever the daemon hosts with.
     void restateSessionSettings(std::optional<proto::WireSessionSettings> settings);
 
-    /// Closes the connection; run() finishes.
+    /// Closes the connection with no word to the daemon, which takes the end for a drop (a window
+    /// reconnecting): what a failure ends with. run() finishes.
     void detach();
+
+    /// Closes the connection because the user closed the window: first says Goodbye to a daemon that shares
+    /// Capability::ClientGoodbye, which then frees the window's workspace at once instead of holding it for a
+    /// reconnect. run() flushes the Goodbye to the transport before it closes it. Otherwise as detach().
+    void closeWindow();
 
     /// The system is about to sleep: no liveness verdict until it wakes, or until
     /// LivenessPolicy::announcedSleepGrace passes without the sleep. Ignored unless the connection is

@@ -50,10 +50,10 @@ Then attach in any of these ways:
   [after you trust its fingerprint in a dialog](#the-first-contact-pinning-the-daemon); `--daemon-fingerprint SHA256:…`
   settles it beforehand.
 
-Attaching to a host works like launching Contour against that daemon: the window selects the workspace the
-daemon had selected last, or its first one (see
+Attaching to a host works like launching Contour against that daemon: the window selects the first
+workspace of the daemon that no window shows, or a new one (see
 [shown and hidden workspaces](persistent-sessions.md#shown-and-hidden-workspaces)). Attaching from a second
-machine selects a workspace of its own choosing, not a mirror of what the first one shows.
+machine never mirrors what a window shows already.
 To look at one particular workspace, name it:
 
 ```sh

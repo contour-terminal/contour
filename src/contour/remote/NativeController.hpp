@@ -769,7 +769,7 @@ class NativeController final: public QObject, public contour::session::SessionFa
     {
         if (_supervisor == nullptr)
             return false;
-        _supervisor->stop();
+        _supervisor->closeWindow();
         return true;
     }
     void closeReactorBindings() override { closeAllBindings(); }

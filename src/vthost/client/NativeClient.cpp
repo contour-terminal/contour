@@ -764,6 +764,16 @@ void NativeClient::replySwitch(proto::SwitchReply reply)
     send(proto::DecodedPdu { std::move(reply) });
 }
 
+void NativeClient::closeWindow()
+{
+    // The window is done with its workspace: a daemon that shares the capability frees it for the next
+    // attach, which may then take it. Queued ahead of the close, which run() flushes before it half-closes
+    // (closeGracefully); to any other daemon the end is a drop, as it always was.
+    if (!_detached && shares(proto::Capability::ClientGoodbye))
+        send(proto::DecodedPdu { proto::Goodbye {} });
+    detach();
+}
+
 void NativeClient::detach()
 {
     _detached = true;

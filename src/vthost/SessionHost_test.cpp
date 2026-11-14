@@ -468,35 +468,137 @@ TEST_CASE("a workspace is Shown while some connection selects it, and Hidden oth
     // One window moving on leaves it shown by the other; the last one leaving hides it.
     first.selected = workspace + 1;
     CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Shown);
-    h.host.noteClientDetached(&second);
+    h.host.noteClientDetached(&second, vthost::DetachKind::Dropped);
     CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Hidden);
     CHECK(h.host.visibility(workspace + 1) == WorkspaceVisibility::Shown);
-    h.host.noteClientDetached(&first);
+    h.host.noteClientDetached(&first, vthost::DetachKind::Dropped);
 }
 
-TEST_CASE("the last selection is remembered, and only an attached client's counts",
-          "[vthost][host][selection]")
+TEST_CASE("a workspace whose window's connection dropped stays shown to an attach for the reconnect grace",
+          "[vthost][host][visibility]")
 {
+    using vthost::WorkspaceVisibility;
+    constexpr auto Grace = std::chrono::milliseconds { 2000 };
+    auto clock = core::platform::ManualClock {};
+    auto wall = core::platform::ManualWallClock {};
+    core::net::testing::ScriptedBackend source;
+    core::net::EventLoop loop { source };
+    SessionHost host { loop,
+                       [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                           return std::make_unique<vtpty::MockPty>(size);
+                       },
+                       vtbackend::Settings {},
+                       core::defaultEnvironment(),
+                       vthost::SessionHostConfig {
+                           .pumping = vthost::SessionPumping::Manual,
+                           .clocks =
+                               vtbackend::TerminalClocks { .steady = clock,
+                                                           .wall = wall,
+                                                           .localTime = &vtbackend::fixedOffsetLocalTime<> },
+                           .reconnectGrace = Grace } };
+    REQUIRE(host.createTab() != nullptr);
+    auto const workspace = host.workspaceId().value;
+
+    auto window = SelectingClient {};
+    window.selected = workspace;
+    host.noteClientAttached(&window);
+    host.noteClientDetached(&window, vthost::DetachKind::Dropped);
+
+    // Nobody shows it, but its window is reconnecting: a new window must not take it.
+    CHECK(host.visibility(workspace) == WorkspaceVisibility::Hidden);
+    CHECK(host.shownForAttach().contains(workspace));
+    clock.advance(Grace - std::chrono::milliseconds { 1 });
+    CHECK(host.shownForAttach().contains(workspace));
+
+    // The window drops again after reconnecting: the grace runs from that drop, and is kept once.
+    host.noteClientAttached(&window);
+    host.noteClientDetached(&window, vthost::DetachKind::Dropped);
+    clock.advance(Grace - std::chrono::milliseconds { 1 });
+    CHECK(host.shownForAttach().contains(workspace));
+    clock.advance(std::chrono::milliseconds { 1 });
+    CHECK_FALSE(host.shownForAttach().contains(workspace));
+}
+
+TEST_CASE("a workspace whose window closed on purpose is offered to the very next attach",
+          "[vthost][host][visibility]")
+{
+    using vthost::DetachKind;
     auto h = HostHarness {};
-    CHECK_FALSE(h.host.lastSelectedWorkspace().has_value());
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId().value;
 
-    auto stranger = SelectingClient {};
-    h.host.noteSelected(stranger, 4);
-    CHECK_FALSE(h.host.lastSelectedWorkspace().has_value());
+    auto closing = SelectingClient {};
+    closing.selected = workspace;
+    h.host.noteClientAttached(&closing);
+    h.host.noteClientDetached(&closing, DetachKind::Closed);
+    CHECK_FALSE(h.host.shownForAttach().contains(workspace));
 
-    auto first = SelectingClient {};
-    auto second = SelectingClient {};
-    h.host.noteClientAttached(&first);
-    h.host.noteClientAttached(&second);
-    h.host.noteSelected(first, 2);
-    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { 2 });
-    h.host.noteSelected(second, 3);
-    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { 3 });
+    // A drop with no word before it is a window reconnecting.
+    auto dropped = SelectingClient {};
+    dropped.selected = workspace;
+    h.host.noteClientAttached(&dropped);
+    h.host.noteClientDetached(&dropped, DetachKind::Dropped);
+    CHECK(h.host.shownForAttach().contains(workspace));
+}
 
-    // What a window selected stays the default after it went, for the launch that follows.
-    h.host.noteClientDetached(&second);
-    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { 3 });
-    h.host.noteClientDetached(&first);
+TEST_CASE("a window that dropped, resumed and then closed on purpose leaves its workspace free at once",
+          "[vthost][host][visibility]")
+{
+    using vthost::DetachKind;
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId().value;
+
+    auto window = SelectingClient {};
+    window.selected = workspace;
+    h.host.noteClientAttached(&window);
+    h.host.noteClientDetached(&window, DetachKind::Dropped);
+    REQUIRE(h.host.shownForAttach().contains(workspace)); // held for the reconnect
+
+    // It reconnects within the grace, then says goodbye: the earlier hold must not outlive that word.
+    h.host.noteClientAttached(&window);
+    h.host.noteClientDetached(&window, DetachKind::Closed);
+    CHECK_FALSE(h.host.shownForAttach().contains(workspace));
+}
+
+TEST_CASE("the reconnect hold outlasts the backoff ceiling by the time an attempt takes to attach",
+          "[vthost][host][visibility]")
+{
+    using vthost::proto::HandshakeDeadline;
+    using vthost::proto::ReconnectCeiling;
+    using vthost::proto::ReconnectGrace;
+    STATIC_CHECK(ReconnectGrace == ReconnectCeiling + HandshakeDeadline);
+
+    auto clock = core::platform::ManualClock {};
+    auto wall = core::platform::ManualWallClock {};
+    core::net::testing::ScriptedBackend source;
+    core::net::EventLoop loop { source };
+    // The default grace: nothing states one.
+    SessionHost host { loop,
+                       [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                           return std::make_unique<vtpty::MockPty>(size);
+                       },
+                       vtbackend::Settings {},
+                       core::defaultEnvironment(),
+                       vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                   .clocks = vtbackend::TerminalClocks {
+                                                       .steady = clock,
+                                                       .wall = wall,
+                                                       .localTime = &vtbackend::fixedOffsetLocalTime<> } } };
+    REQUIRE(host.createTab() != nullptr);
+    auto const workspace = host.workspaceId().value;
+    auto window = SelectingClient {};
+    window.selected = workspace;
+    host.noteClientAttached(&window);
+    host.noteClientDetached(&window, vthost::DetachKind::Dropped);
+
+    // The last retry starts a ceiling after the drop and may take a whole handshake to attach.
+    clock.advance(ReconnectCeiling + std::chrono::milliseconds { 1 });
+    CHECK(host.shownForAttach().contains(workspace));
+    clock.advance(HandshakeDeadline - std::chrono::milliseconds { 2 });
+    CHECK(host.shownForAttach().contains(workspace));
+    clock.advance(std::chrono::milliseconds { 1 });
+    CHECK_FALSE(host.shownForAttach().contains(workspace));
 }
 
 TEST_CASE("a focus report bumps that connection's focus serial", "[vthost][host][focus]")
@@ -544,10 +646,10 @@ TEST_CASE("connectionViews lists the attached clients in attach order with what 
     CHECK(views[1].connection == second.id);
     CHECK(views[1].selected == 6);
 
-    h.host.noteClientDetached(&first);
+    h.host.noteClientDetached(&first, vthost::DetachKind::Dropped);
     REQUIRE(h.host.connectionViews().size() == 1);
     CHECK(h.host.connectionViews().front().connection == second.id);
-    h.host.noteClientDetached(&second);
+    h.host.noteClientDetached(&second, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("a client that does not follow the daemon is in no view and never raises",
@@ -568,8 +670,8 @@ TEST_CASE("a client that does not follow the daemon is in no view and never rais
     CHECK(views.front().connection == window.id);
     CHECK(h.host.raiseHolderNow() == std::optional { window.id });
 
-    h.host.noteClientDetached(&bench);
-    h.host.noteClientDetached(&window);
+    h.host.noteClientDetached(&bench, vthost::DetachKind::Dropped);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("createTab seeds a backing session handed back by the allocator", "[vthost][host]")
@@ -5520,8 +5622,8 @@ TEST_CASE("clientsShowing lists the attached clients that select a workspace", "
     second.selected = workspace;
     CHECK(h.host.clientsShowing(workspace) == std::vector { nativeConnection(1), nativeConnection(2) });
     CHECK(h.host.clientsShowing(999).empty());
-    h.host.noteClientDetached(&first);
-    h.host.noteClientDetached(&second);
+    h.host.noteClientDetached(&first, vthost::DetachKind::Dropped);
+    h.host.noteClientDetached(&second, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("requestSwitch completes with the client's reply, or fails", "[vthost][host][switch]")
@@ -5586,13 +5688,13 @@ TEST_CASE("requestSwitch completes with the client's reply, or fails", "[vthost]
     SECTION("the window going away fails it")
     {
         h.host.requestSwitch(nativeConnection(1), shown, target, record);
-        h.host.noteClientDetached(&window);
+        h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
         REQUIRE(outcomes.size() == 1);
         CHECK(outcomes.front().outcome == SwitchOutcome::Failed);
         CHECK(outcomes.front().detail == "the window went away");
     }
-    h.host.noteClientDetached(&window);
-    h.host.noteClientDetached(&old);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
+    h.host.noteClientDetached(&old, vthost::DetachKind::Dropped);
 }
 
 TEST_CASE("requestSwitch fails when the window stays silent", "[vthost][host][switch]")
@@ -5624,7 +5726,7 @@ TEST_CASE("requestSwitch fails when the window stays silent", "[vthost][host][sw
     REQUIRE(outcomes.size() == 1);
     CHECK(outcomes.front().outcome == vthost::proto::SwitchOutcome::Failed);
     CHECK(outcomes.front().detail == "no answer from the window");
-    host.noteClientDetached(&window);
+    host.noteClientDetached(&window, vthost::DetachKind::Dropped);
 }
 
 namespace

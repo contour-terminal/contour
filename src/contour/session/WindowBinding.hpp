@@ -28,6 +28,13 @@ namespace contour::session
 /// Why UpgradeDaemon does nothing in a window that has no daemon behind it.
 inline constexpr std::string_view NoDaemonToUpgrade = "this window has no daemon to upgrade";
 
+/// What a window opened beside another on a daemon shows (WindowBinding::openSiblingWindow).
+enum class SiblingShows : uint8_t
+{
+    DaemonsChoice = 0, ///< As a second launch: the first workspace no window shows, else a new one.
+    SameWorkspace,     ///< The workspace the asking window displays, as a tab torn off it does.
+};
+
 /// What a window's remote sessions are bound to: the daemon connection that hosts them.
 ///
 /// Implemented by remote::DaemonLink and unknown to session/ beyond this interface, so that session/ names
@@ -123,16 +130,18 @@ class WindowBinding
     ///         once; none for a binding with no daemon. GUI thread.
     [[nodiscard]] virtual std::optional<uint64_t> daemonKey() const { return std::nullopt; }
 
-    /// Opens another window on the daemon behind the binding, selecting the workspace @p window displays:
-    /// New Window, or a tab torn off @p window, which the new window shows as its active tab. Nothing moves:
-    /// both windows show the daemon's workspace. GUI thread.
+    /// Opens another window on the daemon behind the binding. Nothing moves: a window of a connection of its
+    /// own opens beside @p window. GUI thread.
     /// @param window The window bound here that asks.
+    /// @param shows What the new window shows: the workspace @p window displays (a tab torn off it), or the
+    ///        daemon's choice as for a second launch (New Window).
     /// @param activeTab The tab of @p window the new window activates once it shows the workspace; none for
-    ///        the daemon's own choice.
+    ///        the daemon's own choice. Read for SiblingShows::SameWorkspace only.
     /// @param screen Where the window opens; null for the default placement.
     /// @return Nothing once the window's connection is under way; why not, for a binding with no daemon.
-    [[nodiscard]] virtual std::expected<void, std::string> openWindowLike(
+    [[nodiscard]] virtual std::expected<void, std::string> openSiblingWindow(
         vtworkspace::WorkspaceId /*window*/,
+        SiblingShows /*shows*/,
         std::optional<vtworkspace::TabId> /*activeTab*/,
         QScreen* /*screen*/)
     {

@@ -166,6 +166,7 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `WorkspaceSwitch` | 24 | `workspace-switch` | `SwitchRequest` / `SwitchReply`: the daemon asks one window (the caller's, else the raise holder) to switch to another daemon or workspace, and the client answers with the outcome |
 | `DaemonFollow` | 28 | `daemon-follow` | `SelectWorkspace` / `ReportFocus` / `NotifyRole` / `PaneSummary`: a connection selects one workspace and is sent it in full, the others as summaries, and the daemon routes bells, clipboard writes and switch requests by the windows' focus (see [which workspace a client selects](#which-workspace-a-client-selects)) |
 | `WorkspaceMeta` | 29 | `workspace-meta` | `WorkspaceMeta`: each workspace's label, control id and git state, in full after the hello and for a workspace created since, and as a delta on each change (see [workspace metadata](#workspace-metadata)) |
+| `ClientGoodbye` | 30 | `client-goodbye` | `Goodbye` (tag 60, client->server, no body): the client says its connection ends on purpose, its window closed for good, sent last before the orderly close. The daemon then frees the workspace the window showed for the very next attach at once; without it (an older daemon or client) the end is a drop, whose workspace a new window leaves alone for a reconnect grace |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -1081,11 +1082,13 @@ and that connection selects one workspace (see [which workspace a client selects
 The window displays the selected workspace, realized into a local workspace of the window's; every other workspace
 of the daemon is an entry of the window's directory (`NativeController::directory()`), fed by the layouts pushed
 for every workspace and the status stream of the panes the connection does not mirror. A launch opens one window,
-whose connection's `Default` intent selects the daemon's most recently selected workspace, else its first;
-`--workspace W` states `Select{W}`. New Window starts a link of its own to the same daemon target, selecting the
-workspace its window displays (`WindowBinding::openWindowLike`); so does a tab torn off a window, whose new window
-activates that tab once it has realized the workspace. Nothing moves for either: both windows show the daemon's
-one workspace, each through local sessions of its own, and closing one leaves the other as it was.
+whose connection's `Default` intent selects the daemon's first workspace that no connection selects (`planAttach`, `AttachPlan.cpp`), else
+creates one; `--workspace W` states `Select{W}`. New Window starts a link of its own to the same daemon target
+with the same `Default` intent (`WindowBinding::openSiblingWindow` with `SiblingShows::DaemonsChoice`), so it
+too never shows a workspace another window shows. A tab torn off a window starts a link selecting the workspace
+its window displays (`SiblingShows::SameWorkspace`), whose new window
+activates that tab once it has realized the workspace. Nothing moves: both windows show the daemon's one
+workspace, each through local sessions of its own, and closing one leaves the other as it was.
 
 A window switches workspaces in place. `DaemonLink::selectWorkspace()` sends `SelectWorkspace`; once a
 `LayoutBatchEnd` states the new selection and that workspace holds a tab, the link realizes it into a fresh local
@@ -1214,7 +1217,7 @@ that connection selects and what attaching creates:
 
 | Intent | Selects | Creates |
 | --- | --- | --- |
-| `Default` (no capability: every client before intents) | the workspace some connection selected last, else the first with a tab | the first tab, on a daemon with no tab at all; with a working directory stated, a tab in the selected workspace |
+| `Default` (no capability: every client before intents) | the first workspace with a tab that no connection selects | a new workspace when every one is shown; the first tab, on a daemon with no tab at all; with a working directory stated, a tab in the selected workspace |
 | `NewWorkspace` | a new workspace of its own | that workspace |
 | `Select` | the named workspace, if it exists; else as `Default` | nothing |
 | `Resume` | the named workspace, if it survived holding a tab; else as `Default` | as `Default` when it did not survive |
@@ -1234,10 +1237,16 @@ creates a tab for it; a `Select` or `Resume` that finds its workspace never adds
 A workspace is *shown* when some connection selects it and *hidden* when none does
 (`vthost::visibilityOf`; `SessionHost::visibility`, reported by `workspace.list` as `visibility`). There is
 nothing else to remember: no connection owns a workspace, nothing is claimed, and a window that goes away
-simply stops selecting. `SessionHost` keeps the workspace some connection selected last
-(`lastSelectedWorkspace()`) for the next `Default`, and it rides in the workspace snapshot and the live
-upgrade's handover image. A workspace the control API creates is selected by nobody until a window selects
-it.
+simply stops selecting. A connection whose workspace ends picks its next one by the same rule as a `Default`
+(`planAttach`), so never one another window shows. A workspace the control API creates is selected by nobody
+until a window selects it.
+
+A connection that drops (no `Goodbye` before its end) is a window reconnecting, so the workspace it showed still
+counts as shown to an attach for the reconnect grace (`SessionHostConfig::reconnectGrace`, by default
+`proto::ReconnectGrace`: the longest wait of a client's reconnect backoff, `proto::ReconnectCeiling`, plus the
+`proto::HandshakeDeadline` its last attempt may take to attach); `SessionHost::noteClientDetached` takes the end as
+`DetachKind::Dropped`. One that said `Goodbye` ends as `DetachKind::Closed` and frees its workspace at once. Only
+an attach asks (`SessionHost::shownForAttach`, read once per attach); `workspace.list` reports what is selected right now.
 
 The handshake runs negotiate -> plan -> create -> `ServerHello` (whose `selectedWorkspace` names the
 selection) -> `LayoutState` per workspace -> snapshots of the selected workspace's sessions. The plan runs

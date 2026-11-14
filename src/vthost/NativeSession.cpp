@@ -362,7 +362,7 @@ NativeSession::NativeSession(core::net::EventLoop& loop,
 NativeSession::~NativeSession()
 {
     _upgradeLink->session = nullptr;
-    _host.noteClientDetached(this);
+    _host.noteClientDetached(this, _detachKind);
     // Beside the count it mirrors, so that the event and connectedClients() never disagree; only for a
     // connection that was told attached.
     if (_phase == ConnectionPhase::Viewing)
@@ -1112,17 +1112,11 @@ void NativeSession::refreshSelection()
     }
     if (selected != nullptr && _selectedTabs == SelectedTabs::NeverHeld)
         return;
-    // The connection moves on to the one a launch would take; with none left it selects none, which
-    // its window takes as the end of what it showed.
-    auto const ids = std::ranges::to<std::vector>(
-        std::views::iota(0, model.workspaceCount())
-        | std::views::transform([&model](int index) { return model.workspaceAt(index); })
-        | std::views::filter([](vtworkspace::Workspace const* workspace) {
-              return workspace != nullptr && workspace->tabCount() > 0;
-          })
-        | std::views::transform(
-            [](vtworkspace::Workspace const* workspace) { return workspace->id().value; }));
-    auto const next = defaultSelection(ids, _host.lastSelectedWorkspace());
+    // The connection moves on to the first workspace a launch would bring back; with none left it selects
+    // none, which its window takes as the end of what it showed, as closing a last tab does.
+    auto const summaries = workspaceSummaries();
+    auto const launchable = std::ranges::find_if(summaries, isLaunchable);
+    auto const next = launchable != summaries.end() ? std::optional { launchable->id } : std::nullopt;
     connectionLog()("{}: workspace {} ended; selecting {}", _id, _selectedWorkspace, next.value_or(0));
     if (!next)
     {
@@ -1176,7 +1170,7 @@ void NativeSession::selectWorkspace(vtworkspace::WorkspaceId workspace)
         errorLog()("{}: not selecting workspace {}: there is none", _id, workspace.value);
         return;
     }
-    _host.noteSelected(*this, workspace.value);
+    _host.noteSelected(*this);
     if (_selectedWorkspace == workspace.value)
         return;
     _selectedWorkspace = workspace.value;
@@ -2538,6 +2532,14 @@ NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame con
             _host.noteFocus(*this, std::get<proto::ReportFocus>(frame.pdu).focus);
         return TabVerb::Served;
     }
+    if (std::holds_alternative<proto::Goodbye>(frame.pdu))
+    {
+        if (!_negotiated->shared.contains(proto::Capability::ClientGoodbye))
+            refuse(frame);
+        else
+            _detachKind = DetachKind::Closed;
+        return TabVerb::Served;
+    }
     if (auto const* reply = std::get_if<proto::SwitchReply>(&frame.pdu))
     {
         if (!_negotiated->shared.contains(proto::Capability::WorkspaceSwitch))
@@ -3140,25 +3142,38 @@ void NativeSession::attachClient(uint64_t serial,
             send(0, proto::DecodedPdu { request });
 }
 
+std::vector<WorkspaceSummary> NativeSession::workspaceSummaries() const
+{
+    auto& model = _host.model();
+    auto summaries = std::vector<WorkspaceSummary> {};
+    // A workspace whose last session ended is gone, unless it was the only one: that one is listed as a fresh
+    // daemon's empty one is, which a launch gives its first tab.
+    auto const shown = _host.shownForAttach();
+    for (auto const i: std::views::iota(0, model.workspaceCount()))
+        if (auto const* workspace = model.workspaceAt(i); workspace != nullptr)
+            summaries.push_back(WorkspaceSummary { .id = workspace->id().value,
+                                                   .tabCount = workspace->tabCount(),
+                                                   .visibility = shown.contains(workspace->id().value)
+                                                                     ? WorkspaceVisibility::Shown
+                                                                     : WorkspaceVisibility::Hidden });
+    std::ranges::sort(summaries, {}, &WorkspaceSummary::id);
+    return summaries;
+}
+
+AttachContext NativeSession::attachContext(std::filesystem::path const& workingDirectory) const
+{
+    return AttachContext { .primaryWorkspace = _host.workspaceId().value,
+                           .workspaces = workspaceSummaries(),
+                           .workingDirectory = workingDirectory.empty() ? WorkingDirectoryStated::No
+                                                                        : WorkingDirectoryStated::Yes,
+                           .instance = _host.instance() };
+}
+
 void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
                                       std::filesystem::path const& workingDirectory)
 {
     auto& model = _host.model();
-    auto context = AttachContext { .primaryWorkspace = _host.workspaceId().value,
-                                   .workspaces = {},
-                                   .workingDirectory = workingDirectory.empty() ? WorkingDirectoryStated::No
-                                                                                : WorkingDirectoryStated::Yes,
-                                   .instance = _host.instance(),
-                                   .lastSelected = _host.lastSelectedWorkspace() };
-    // A workspace whose last session ended is gone, unless it was the only one: that one is listed as a fresh
-    // daemon's empty one is, which a launch gives its first tab.
-    for (auto const i: std::views::iota(0, model.workspaceCount()))
-        if (auto const* workspace = model.workspaceAt(i); workspace != nullptr)
-            context.workspaces.push_back(
-                WorkspaceSummary { .id = workspace->id().value, .tabCount = workspace->tabCount() });
-    std::ranges::sort(context.workspaces, {}, &WorkspaceSummary::id);
-
-    auto const plan = planAttach(intent, context);
+    auto const plan = planAttach(intent, attachContext(workingDirectory));
     _host.noteClientAttached(this);
     _services.control.get().clientAttached(std::format("{}", _id));
     // Set directly: the attach walk queues the snapshots of the selected workspace once the hello is sent.
@@ -3166,7 +3181,7 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
     {
         _selectedWorkspace = *plan.select;
         _selectedTabs = SelectedTabs::NeverHeld;
-        _host.noteSelected(*this, _selectedWorkspace);
+        _host.noteSelected(*this);
     }
 
     switch (plan.creation)
@@ -3181,7 +3196,7 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
             {
                 connectionLog()("{}: attaching to a new workspace {}", _id, workspace->id().value);
                 _selectedWorkspace = workspace->id().value;
-                _host.noteSelected(*this, _selectedWorkspace);
+                _host.noteSelected(*this);
             }
             else
                 errorLog()("{}: the workspace this attach asked for could not be created", _id);

@@ -93,22 +93,3 @@ TEST_CASE("switchTarget follows the workspace when named and the raise holder ot
     for (auto const& row: rows)
         CHECK(switchTarget(row.views, row.workspace) == row.expected);
 }
-
-TEST_CASE("defaultSelection keeps the last selection while it exists", "[vthost][routing]")
-{
-    struct Row
-    {
-        Ids workspaces;
-        std::optional<uint64_t> last;
-        std::optional<uint64_t> expected;
-    };
-    auto const rows = std::vector<Row> {
-        { {}, std::nullopt, std::nullopt },
-        { {}, 5, std::nullopt },
-        { { 4, 5, 6 }, 5, 5 },
-        { { 4, 5, 6 }, 9, 4 },
-        { { 4, 5, 6 }, std::nullopt, 4 },
-    };
-    for (auto const& row: rows)
-        CHECK(defaultSelection(row.workspaces, row.last) == row.expected);
-}

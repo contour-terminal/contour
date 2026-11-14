@@ -70,8 +70,8 @@ input_mapping:
   - { mods: [Control, Shift], key: H, action: AttachToHost, name: home }
 ```
 
-A host is attached like a launch against its daemon: one window, which shows the workspace the daemon had
-selected last and switches between the daemon's other workspaces in place. `contour client --host
+A host is attached like a launch against its daemon: one window, which shows the first workspace of the daemon
+no window shows (else a new one) and switches between the daemon's other workspaces in place. `contour client --host
 NAME --workspace W` shows the workspace `W` first. A window that is already open can move to a saved host
 with the `SwitchToDaemon` and `OpenDaemon` actions, which take `host: NAME`; see
 [Key Mapping](key-mapping.md#switching-daemons-and-workspaces).

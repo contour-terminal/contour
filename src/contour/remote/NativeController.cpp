@@ -89,6 +89,7 @@ namespace
             vthost::proto::Capability::SoftFonts,
             vthost::proto::Capability::DaemonFollow,
             vthost::proto::Capability::WorkspaceMeta,
+            vthost::proto::Capability::ClientGoodbye,
         });
         if (switchRequests == NativeController::SwitchRequests::Answered)
             offered.idents.push_back(std::to_underlying(vthost::proto::Capability::WorkspaceSwitch));

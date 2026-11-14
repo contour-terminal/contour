@@ -52,6 +52,7 @@
 
 using namespace std::chrono_literals;
 using namespace contour::remote::testing;
+using contour::session::SiblingShows;
 
 namespace
 {
@@ -385,12 +386,13 @@ core::async::Task<void> serveFirstOnly(vthost::ConnectionHandler serve,
 
 } // namespace
 
-TEST_CASE("DaemonLink: a launch opens one window selecting the most recent workspace", "[attach][link]")
+TEST_CASE("DaemonLink: a launch opens one window selecting the first hidden workspace", "[attach][link]")
 {
     using vthost::WorkspaceVisibility;
     auto daemon = DaemonFixture {};
     auto const ids = seedWorkspaces(daemon, 3);
-    // Another connection selected the second last: that is the daemon's most recent selection.
+    // Another connection selected the second last, and went: that leaves every workspace hidden, and the
+    // launch takes the first of them, not the one selected last.
     {
         auto otherTimeline = TestTimeline {};
         auto const other = makeNativeController(
@@ -410,20 +412,75 @@ TEST_CASE("DaemonLink: a launch opens one window selecting the most recent works
     REQUIRE(pollUntilAttached(link, 10s).has_value());
 
     // The boot window displays it; no other window, and no other connection, comes.
-    REQUIRE(waitUntil([&] { return link.workspaceOf(boot.id) == ids[1]; }));
+    REQUIRE(waitUntil([&] { return link.workspaceOf(boot.id) == ids[0]; }));
     REQUIRE(waitUntil([&] { return !sessionsOf(manager, boot.id).empty(); }));
     drainGuiEvents();
     CHECK(rig.host.opened.empty());
     CHECK(rig.host.windowLinks.empty());
     CHECK(std::ranges::to<std::vector>(manager.windowsBoundTo(link)) == std::vector { boot.id });
     CHECK(daemon.onDaemon([&daemon] { return daemon.live.size(); }) == 1);
-    CHECK(visibilityOn(daemon, ids[1]) == WorkspaceVisibility::Shown);
-    CHECK(visibilityOn(daemon, ids[0]) == WorkspaceVisibility::Hidden);
+    CHECK(visibilityOn(daemon, ids[0]) == WorkspaceVisibility::Shown);
+    CHECK(visibilityOn(daemon, ids[1]) == WorkspaceVisibility::Hidden);
     CHECK(visibilityOn(daemon, ids[2]) == WorkspaceVisibility::Hidden);
     // The others are entries of the window's directory, every one of them.
     auto const directory = link.liveController()->directory();
     CHECK(directory.workspaces.size() == 3);
-    CHECK(directory.selected == ids[1]);
+    CHECK(directory.selected == ids[0]);
+}
+
+TEST_CASE("DaemonLink: New Window shows the first hidden workspace, else a new one", "[attach][link]")
+{
+    using vthost::WorkspaceVisibility;
+    auto daemon = DaemonFixture {};
+    auto const ids = seedWorkspaces(daemon, 2);
+    auto rig = LinkRig { daemon.endpoint(), "home", {}, launch() };
+    auto const boot = contour::test::ScopedController { rig.app.manager() };
+    REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
+    REQUIRE(waitUntil([&] { return rig.link->workspaceOf(boot.id) == ids[0]; }));
+    REQUIRE(waitUntil([&] { return !sessionsOf(rig.app.manager(), boot.id).empty(); }));
+
+    // The launch's window shows the first; a New Window shows the second, which no window showed.
+    REQUIRE(
+        rig.link->openSiblingWindow(boot.id, SiblingShows::DaemonsChoice, std::nullopt, nullptr).has_value());
+    REQUIRE(waitUntil([&] { return rig.host.opened.size() == 1; }));
+    REQUIRE(waitUntil([&] { return visibilityOn(daemon, ids[1]) == WorkspaceVisibility::Shown; }));
+    CHECK(daemon.onDaemon([&] { return showing(daemon, ids[0]); }) == 1);
+    CHECK(daemon.onDaemon([&] { return showing(daemon, ids[1]); }) == 1);
+    CHECK(daemon.onDaemon([&] { return daemon.host->model().workspaceCount(); }) == 2);
+
+    // Every workspace is shown now: the next New Window gets a workspace of its own.
+    REQUIRE(
+        rig.link->openSiblingWindow(boot.id, SiblingShows::DaemonsChoice, std::nullopt, nullptr).has_value());
+    REQUIRE(waitUntil([&] { return rig.host.opened.size() == 2; }));
+    REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.host->model().workspaceCount() == 3; }));
+    auto const shownBy = daemon.onDaemon([&] {
+        return std::ranges::to<std::vector>(
+            std::views::iota(0, daemon.host->model().workspaceCount())
+            | std::views::transform([&](int index) {
+                  return showing(daemon, daemon.host->model().workspaceAt(index)->id().value);
+              }));
+    });
+    CHECK(shownBy == std::vector<std::size_t> { 1, 1, 1 });
+}
+
+TEST_CASE(
+    "DaemonLink: the daemon's choice needs no workspace of the asking window, a same-workspace one does",
+    "[attach][link]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 1);
+    auto rig = LinkRig { daemon.endpoint(), "home", {}, launch() };
+    auto const boot = contour::test::ScopedController { rig.app.manager() };
+    REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
+    REQUIRE(waitUntil([&] { return !sessionsOf(rig.app.manager(), boot.id).empty(); }));
+
+    // A window this link does not show: the launch rule asks nothing of it, a copy of it has nothing to copy.
+    auto const stranger = vtworkspace::WorkspaceId { boot.id.value + 1000 };
+    CHECK(rig.link->openSiblingWindow(stranger, SiblingShows::DaemonsChoice, std::nullopt, nullptr)
+              .has_value());
+    CHECK_FALSE(rig.link->openSiblingWindow(stranger, SiblingShows::SameWorkspace, std::nullopt, nullptr)
+                    .has_value());
+    CHECK(waitUntil([&] { return rig.host.opened.size() == 1; }));
 }
 
 // Review (PR 3, item 7): a window closed while it switched to a new workspace failed the switch, but the
@@ -605,8 +662,10 @@ TEST_CASE("DaemonLink: links of one daemon keep one launch role while they recon
     REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
     REQUIRE(waitUntil([&] { return rig.link->workspaceOf(boot.id).has_value(); }));
     // Two New Windows, each a link of its own to the daemon.
-    REQUIRE(rig.link->openWindowLike(boot.id, std::nullopt, nullptr).has_value());
-    REQUIRE(rig.link->openWindowLike(boot.id, std::nullopt, nullptr).has_value());
+    REQUIRE(
+        rig.link->openSiblingWindow(boot.id, SiblingShows::SameWorkspace, std::nullopt, nullptr).has_value());
+    REQUIRE(
+        rig.link->openSiblingWindow(boot.id, SiblingShows::SameWorkspace, std::nullopt, nullptr).has_value());
     REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.live.size() == 3; }));
     auto const holders = [&] {
         return std::ranges::count_if(rig.host.links(),
@@ -1359,7 +1418,8 @@ struct TwoWindowsOneWorkspace
         REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
         REQUIRE(waitUntil([&] { return rig.link->workspaceOf(boot.id).has_value(); }));
         REQUIRE(waitUntil([&] { return !sessionsOf(manager(), boot.id).empty(); }));
-        REQUIRE(rig.link->openWindowLike(boot.id, std::nullopt, nullptr).has_value());
+        REQUIRE(rig.link->openSiblingWindow(boot.id, SiblingShows::SameWorkspace, std::nullopt, nullptr)
+                    .has_value());
         REQUIRE(waitUntil(
             [&] { return rig.host.opened.size() == 1 && !sessionsOf(manager(), secondWindow()).empty(); }));
         REQUIRE(rig.host.windowLinks.size() == 1);
@@ -1836,7 +1896,8 @@ TEST_CASE("DaemonLink: a client started after one switched away and back shows a
     }
     REQUIRE(daemon.waitUntilOnDaemon([&daemon] { return daemon.live.empty(); }));
 
-    // The client restarts: a new one attaches as a launch does, and shows the workspace selected last.
+    // The client restarts: a new one attaches as a launch does, and shows the workspace its predecessor
+    // closed, which is the first no window shows.
     auto rig = LinkRig { daemon.endpoint(), {}, {}, launch() };
     auto const boot = contour::test::ScopedController { rig.app.manager() };
     REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
@@ -2705,7 +2766,8 @@ TEST_CASE("DaemonLink: a New Window that never loads tells the window it was ask
 
     rig.host.windowLoad = FakeLinkHost::WindowLoad::Fails;
     auto const endingsBefore = rig.host.endings;
-    REQUIRE(rig.link->openWindowLike(boot.id, std::nullopt, nullptr).has_value());
+    REQUIRE(
+        rig.link->openSiblingWindow(boot.id, SiblingShows::SameWorkspace, std::nullopt, nullptr).has_value());
 
     REQUIRE(waitUntil([&] { return rig.host.windowsAsked == 1; }, 3000));
     REQUIRE(waitUntil(
