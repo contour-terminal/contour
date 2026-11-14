@@ -1616,6 +1616,26 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] std::optional<SwitchTarget> daemonTargetOf(vtworkspace::WorkspaceId window) const;
 
     /// @param window A window of this manager.
+    /// @return What the location chip calls @p window's daemon (window::locationDaemonName, from
+    ///         daemonTargetOf() and hostLabelOf()); empty for a window whose sessions run in-process.
+    [[nodiscard]] std::string daemonNameOf(vtworkspace::WorkspaceId window) const;
+
+    /// What the switcher opens with over @p window: every daemon for a daemon window, its own workspaces
+    /// alone for an in-process one (window::switcherScopeFor), whatever @p scope asks.
+    /// @param window The window the popup opens over.
+    /// @param prompt What the popup shows first.
+    /// @param scope The scope the action asked for.
+    /// @param origin Where the popup opens from.
+    /// @param windowWorkspaces The window's own daemon's workspaces, as its sidebar shows them.
+    /// @return The opening.
+    [[nodiscard]] window::SwitcherOpening switcherOpeningFor(
+        vtworkspace::WorkspaceId window,
+        window::SwitcherPrompt prompt,
+        window::SwitcherScope scope,
+        window::SwitcherOrigin origin,
+        std::vector<window::SwitcherWorkspace> windowWorkspaces) const;
+
+    /// @param window A window of this manager.
     /// @return Whether @p window is served by no binding at all: its sessions run in this process and it
     ///         shows the workspaces it owns. (A tmux window has a binding without a daemon, and is not.)
     [[nodiscard]] bool isInProcessWindow(vtworkspace::WorkspaceId window) const noexcept

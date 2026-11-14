@@ -464,6 +464,8 @@ class SidebarModel: public QAbstractListModel
     }
     /// @return The row of the tab the window shows, or -1.
     [[nodiscard]] int currentIndex() const noexcept { return _currentIndex; }
+    /// @return The summary the workspace chip shows, as of the last refresh.
+    [[nodiscard]] SidebarSummary const& summary() const noexcept { return _summary; }
     /// @return The shown workspace's name.
     [[nodiscard]] QString currentWorkspaceTitle() const
     {

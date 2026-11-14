@@ -263,6 +263,16 @@ class WindowController:
     Q_PROPERTY(QObject* promptHost READ promptHost CONSTANT)
     // A window::HostChipState as its underlying value: where the connection to that host stands.
     Q_PROPERTY(int hostChipState READ hostChipState NOTIFY hostChipStateChanged)
+    // The location chip, which names the window's daemon and workspace in one control. Every property below
+    // changes with chipChanged().
+    /// The daemon's name as the chip shows it; empty for an in-process window.
+    Q_PROPERTY(QString chipDaemonName READ chipDaemonName NOTIFY chipChanged)
+    /// A window::DaemonDot's underlying value: whether the chip's status dot shows.
+    Q_PROPERTY(int chipDaemonDot READ chipDaemonDot NOTIFY chipChanged)
+    /// What a screen reader says of the chip.
+    Q_PROPERTY(QString chipAccessibleName READ chipAccessibleName NOTIFY chipChanged)
+    /// What a screen reader adds: the connection's state and whether the switcher is open.
+    Q_PROPERTY(QString chipAccessibleDescription READ chipAccessibleDescription NOTIFY chipChanged)
     Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
     // {{{ Panes
     // The panes the active tab shows: the leaves under its layout root (1 while zoomed or unsplit, 0 without
@@ -1566,6 +1576,30 @@ class WindowController:
     /// @return A window::HostChipState as its underlying value; Connected for a local window.
     [[nodiscard]] int hostChipState() const noexcept;
 
+    /// @return The daemon's name as the location chip shows it; empty for an in-process window.
+    [[nodiscard]] QString chipDaemonName() const;
+
+    /// @return A window::DaemonDot as its underlying value.
+    [[nodiscard]] int chipDaemonDot() const;
+
+    /// @return What a screen reader says of the location chip.
+    [[nodiscard]] QString chipAccessibleName() const;
+
+    /// @return What a screen reader adds to the chip's name.
+    [[nodiscard]] QString chipAccessibleDescription() const;
+
+    /// @param fit A window::LocationChipFit's underlying value: how much of the chip fits.
+    /// @return The chip's tooltip.
+    Q_INVOKABLE [[nodiscard]] QString chipToolTip(int fit) const;
+
+    /// @param band The band's presence, by the name UiStyleProvider::titleBand() gives it ("hidden",
+    ///             "shown", "reveal" or "pinned").
+    /// @param centre The band centre's name (barCentreName()).
+    /// @return Where the chip shows for this window: "none", "band" or "sidebar"; "none" for a name no
+    ///         presence or centre has. Names in and a name out is the QML carve-out, like
+    ///         UiStyleProvider::titleBand().
+    Q_INVOKABLE [[nodiscard]] QString locationChipPlace(QString const& band, QString const& centre) const;
+
     /// The manager's host connection changed what the chip shows. @see hostChipState
     void notifyHostConnectionChanged() { emit hostChipStateChanged(); }
 
@@ -1733,6 +1767,10 @@ class WindowController:
     void workspaceDirectoryChanged();
     /// @see hostChipState
     void hostChipStateChanged();
+
+    /// What the location chip shows changed: the host label or connection, the sidebar's summary or whether
+    /// the switcher is open.
+    void chipChanged();
     /// @see requestNotification.
     void notificationRequested(QString const& title, QString const& body);
     /// @see requestBell.

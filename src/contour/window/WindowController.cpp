@@ -31,6 +31,7 @@
 #include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/LocationChip.hpp>
 #include <contour/window/PaneState.hpp>
 #include <contour/window/PromptHost.hpp>
 #include <contour/window/QtChromeKeys.hpp>
@@ -65,12 +66,14 @@
 #include <QtQml/QQmlEngine>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
 #include <mutex>
 #include <ranges>
+#include <string_view>
 #include <tuple>
 #include <utility>
 
@@ -259,6 +262,10 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     connect(this, &WindowController::tabBarShouldShowChanged, this, &WindowController::refreshTitleBand);
     connect(this, &WindowController::tabBarPositionChanged, this, &WindowController::refreshTitleBand);
     connect(this, &WindowController::hostChipStateChanged, this, &WindowController::refreshTitleBand);
+    // Everything the location chip shows follows one of these.
+    connect(this, &WindowController::hostLabelChanged, this, &WindowController::chipChanged);
+    connect(this, &WindowController::hostChipStateChanged, this, &WindowController::chipChanged);
+    connect(this, &WindowController::switcherChanged, this, &WindowController::chipChanged);
     connect(this, &WindowController::countChanged, this, &WindowController::clampChromeFocus);
     // The drag is the manager's, as QDrag::exec is process-wide; this window only says whose pane it carries.
     connect(&_manager,
@@ -286,6 +293,7 @@ void WindowController::initSidebar()
             &SidebarModel::summaryChanged,
             this,
             &WindowController::otherWorkspacesUrgencyChanged);
+    connect(_sidebar.get(), &SidebarModel::summaryChanged, this, &WindowController::chipChanged);
     refreshSidebarPresence();
 }
 
@@ -616,6 +624,57 @@ QString WindowController::shortcutText(QString const& commandName) const
 int WindowController::hostChipState() const noexcept
 {
     return static_cast<int>(std::to_underlying(hostChipStateOf(_manager.hostConnection(_displayed))));
+}
+
+QString WindowController::chipDaemonName() const
+{
+    return QString::fromStdString(_manager.daemonNameOf(_displayed));
+}
+
+int WindowController::chipDaemonDot() const
+{
+    auto const state = hostChipStateOf(_manager.hostConnection(_displayed));
+    return static_cast<int>(std::to_underlying(daemonDotOf(_manager.daemonLocalityOf(_displayed), state)));
+}
+
+QString WindowController::chipAccessibleName() const
+{
+    return QString::fromStdString(
+        locationChipAccessibleName(_manager.daemonNameOf(_displayed), _sidebar->summary()));
+}
+
+QString WindowController::chipAccessibleDescription() const
+{
+    auto const state = hostChipStateOf(_manager.hostConnection(_displayed));
+    return QString::fromStdString(
+        locationChipAccessibleDescription(state, workspaceChipDescription().toStdString()));
+}
+
+QString WindowController::chipToolTip(int fit) const
+{
+    auto const state = hostChipStateOf(_manager.hostConnection(_displayed));
+    auto const clamped = std::min(static_cast<size_t>(std::max(fit, 0)), LocationChipFitCount - 1);
+    return QString::fromStdString(
+        locationChipToolTip(state, static_cast<LocationChipFit>(clamped), _manager.daemonNameOf(_displayed)));
+}
+
+QString WindowController::locationChipPlace(QString const& band, QString const& centre) const
+{
+    // The band's presences by name: a revealed or pinned band is on screen like a shown one.
+    using Presence = std::pair<std::string_view, BarPresence>;
+    constexpr auto Presences =
+        std::array { Presence { barPresenceName(BarPresence::Hidden), BarPresence::Hidden },
+                     Presence { barPresenceName(BarPresence::Shown), BarPresence::Shown },
+                     Presence { barPresenceName(BarPresence::RevealOnEdge), BarPresence::Shown },
+                     Presence { barPresenceName(BarPresence::Pinned), BarPresence::Shown } };
+    auto const presence = std::ranges::find(Presences, band.toStdString(), &Presence::first);
+    auto const bar = barCentreNamed(centre.toStdString());
+    if (presence == Presences.end() || !bar)
+        return QString::fromUtf8(locationChipPlaceName(LocationChipPlace::None));
+    auto const hosting =
+        _manager.isInProcessWindow(_displayed) ? DaemonHosting::InProcess : DaemonHosting::Daemon;
+    return QString::fromUtf8(
+        locationChipPlaceName(window::locationChipPlace(presence->second, *bar, hosting)));
 }
 
 QString WindowController::applicationVersion() const

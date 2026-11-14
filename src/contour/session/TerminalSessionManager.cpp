@@ -15,6 +15,7 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/ChromeKeys.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/LocationChip.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/QtString.hpp>
@@ -938,6 +939,31 @@ std::optional<SwitchTarget> TerminalSessionManager::daemonTargetOf(vtworkspace::
     if (binding == nullptr)
         return std::nullopt;
     return binding->daemonTarget();
+}
+
+std::string TerminalSessionManager::daemonNameOf(vtworkspace::WorkspaceId window) const
+{
+    auto const target = daemonTargetOf(window);
+    return target ? window::locationDaemonName(*target, hostLabelOf(window)) : std::string {};
+}
+
+window::SwitcherOpening TerminalSessionManager::switcherOpeningFor(
+    vtworkspace::WorkspaceId window,
+    window::SwitcherPrompt prompt,
+    window::SwitcherScope scope,
+    window::SwitcherOrigin origin,
+    std::vector<window::SwitcherWorkspace> windowWorkspaces) const
+{
+    auto const kind = isInProcessWindow(window) ? window::SwitcherWindowKind::InProcess
+                                                : window::SwitcherWindowKind::Daemon;
+    return window::SwitcherOpening { .window = window,
+                                     .windowDaemon = daemonTargetOf(window).value_or(SwitchTarget {}),
+                                     .mode = SwitchMode::Switch,
+                                     .prompt = prompt,
+                                     .pick = std::nullopt,
+                                     .scope = window::switcherScopeFor(scope, kind),
+                                     .windowWorkspaces = std::move(windowWorkspaces),
+                                     .origin = origin };
 }
 
 window::DaemonLocality TerminalSessionManager::daemonLocalityOf(vtworkspace::WorkspaceId window) const
@@ -2210,17 +2236,11 @@ void TerminalSessionManager::openSwitcherOver(TerminalSession const& acting,
     // The window's own workspaces are its sidebar's, as of now.
     controller->sidebar().refreshNow();
     if (auto const shown = _app.openSwitcher(
-            window::SwitcherOpening {
-                .window = window->id(),
-                .windowDaemon = daemon.value_or(SwitchTarget {}),
-                .mode = SwitchMode::Switch,
-                .prompt = prompt,
-                .pick = std::nullopt,
-                .scope = window::switcherScopeFor(scope,
-                                                  inProcess ? window::SwitcherWindowKind::InProcess
-                                                            : window::SwitcherWindowKind::Daemon),
-                .windowWorkspaces = _app.windowWorkspacesOf(*controller, window->id()),
-                .origin = control ? window::SwitcherOrigin::Chip : window::SwitcherOrigin::Centred },
+            switcherOpeningFor(window->id(),
+                               prompt,
+                               scope,
+                               control ? window::SwitcherOrigin::Chip : window::SwitcherOrigin::Centred,
+                               _app.windowWorkspacesOf(*controller, window->id())),
             *controller,
             control);
         !shown)
