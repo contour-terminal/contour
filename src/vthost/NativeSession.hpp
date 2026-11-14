@@ -1372,6 +1372,8 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     std::unordered_map<uint64_t, uint64_t> _softFontsSent;
     /// When the idle check of the echo state is next due. @see checkInputEchoWhenDue
     core::platform::SteadyTimePoint _nextInputEchoCheck {};
+    /// When this connection's hello was accepted: what the elapsed times of the attach log count from.
+    core::platform::SteadyTimePoint _attachedAt {};
     /// Until when the idle check keeps itself armed. @see noteInputEchoActivity
     core::platform::SteadyTimePoint _inputEchoActiveUntil {};
     /// Sessions awaiting a full-grid snapshot, in the order they were asked for.

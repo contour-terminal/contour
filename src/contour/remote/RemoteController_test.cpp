@@ -346,7 +346,11 @@ class ConnectingController final: public contour::remote::RemoteController
     ~ConnectingController() { stop(); }
 
     using RemoteController::isConnected;
+    using RemoteController::noteAttachProgress;
     using RemoteController::noteTransportReturned;
+
+    /// What the attach was still waiting for when it timed out; empty if it did not.
+    mutable std::optional<contour::remote::AttachPhase> timedOutIn;
 
     /// @return Whether stop() has torn the controller down.
     [[nodiscard]] bool stopped() const
@@ -378,7 +382,11 @@ class ConnectingController final: public contour::remote::RemoteController
     }
     [[nodiscard]] bool detachOnReactor() override { return false; }
     void closeReactorBindings() override {}
-    [[nodiscard]] std::string connectTimeoutMessage() const override { return "timed out"; }
+    [[nodiscard]] std::string connectTimeoutMessage(contour::remote::AttachPhase phase) const override
+    {
+        timedOutIn = phase;
+        return "timed out";
+    }
     [[nodiscard]] std::string connectClosedMessage() const override { return "closed"; }
 
   private:
@@ -470,7 +478,10 @@ class StalledController final: public contour::remote::RemoteController
     }
     [[nodiscard]] bool detachOnReactor() override { return true; }
     void closeReactorBindings() override { ++bindingsClosed; }
-    [[nodiscard]] std::string connectTimeoutMessage() const override { return "timed out"; }
+    [[nodiscard]] std::string connectTimeoutMessage(contour::remote::AttachPhase /*phase*/) const override
+    {
+        return "timed out";
+    }
     [[nodiscard]] std::string connectClosedMessage() const override { return "closed"; }
 };
 
@@ -595,6 +606,61 @@ TEST_CASE("awaitConnected past its budget fails with the timeout message and sto
     REQUIRE_FALSE(waited.has_value());
     CHECK(awaited.error() == waited.error());
     CHECK(awaited.error() == "timed out");
+}
+
+TEST_CASE("a timed-out attach names the phase it was still waiting for", "[remote][mux][controller]")
+{
+    using contour::remote::AttachPhase;
+    {
+        auto controller = ConnectingController { core::platform::defaultSteadyClock() };
+        REQUIRE_FALSE(controller.connectAndWait(50ms).has_value());
+        CHECK(controller.timedOutIn == AttachPhase::Connecting);
+    }
+    {
+        auto controller = ConnectingController { core::platform::defaultSteadyClock() };
+        controller.startConnecting();
+        controller.noteTransportReturned();
+        REQUIRE_FALSE(controller.awaitConnected(50ms).has_value());
+        CHECK(controller.timedOutIn == AttachPhase::Handshaking);
+    }
+    {
+        auto controller = ConnectingController { core::platform::defaultSteadyClock() };
+        controller.startConnecting();
+        controller.noteTransportReturned();
+        controller.noteAttachProgress();
+        REQUIRE_FALSE(controller.awaitConnected(50ms).has_value());
+        CHECK(controller.timedOutIn == AttachPhase::AwaitingFirstSession);
+    }
+}
+
+TEST_CASE("an attach that keeps making headway outlives the budget; one that stalls does not",
+          "[remote][mux][controller]")
+{
+    // A daemon with a big scrollback takes longer than the budget to deliver its first session while saying
+    // something all along: it is waited for. The same daemon gone quiet is given up on after the bound.
+    // On a clock the test moves, so no wait depends on how the scheduler treats a loaded machine.
+    constexpr auto Budget = std::chrono::milliseconds { 5s };
+    auto clock = core::platform::ManualClock {};
+    auto progressing = ConnectingController { clock };
+    progressing.startConnecting();
+    progressing.noteTransportReturned();
+    CHECK_FALSE(progressing.pollConnected(Budget).has_value());
+    auto const started = clock.now();
+    for ([[maybe_unused]] auto const step: std::views::iota(0, 4))
+    {
+        clock.advance(3s); // each short of the bound, together well beyond it
+        progressing.noteAttachProgress();
+        CHECK_FALSE(progressing.pollConnected(Budget).has_value());
+    }
+    CHECK(clock.now() - started > Budget);
+
+    // It then goes quiet: the bound runs from its last word.
+    clock.advance(Budget - 1ms);
+    CHECK_FALSE(progressing.pollConnected(Budget).has_value());
+    clock.advance(2ms);
+    auto const stalled = progressing.pollConnected(Budget);
+    REQUIRE(stalled.has_value());
+    CHECK_FALSE(stalled->has_value());
 }
 
 TEST_CASE("awaitConnected counts its budget from startConnecting", "[remote][mux][controller]")
@@ -782,4 +848,48 @@ TEST_CASE(
     auto const settled = controller.pollConnected(budget);
     REQUIRE(settled.has_value());
     CHECK_FALSE(settled->has_value());
+}
+
+TEST_CASE("a prompt answered before the daemon's last word is counted once, one after it is counted too",
+          "[remote][mux][controller]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto controller = ConnectingController { clock };
+    auto const pause = std::make_shared<vthost::PromptPause>();
+    auto const budget = vthost::AttachBudget::promptsOpen(1s).pausedBy(pause);
+    controller.noteTransportReturned();
+    CHECK_FALSE(controller.pollConnected(budget).has_value());
+
+    // The passphrase takes ten seconds, and the daemon speaks right after: the ten seconds are in the bound
+    // already, so the daemon's word allows one second from now, not eleven.
+    auto const first = pause->open([&clock] {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(clock.now().time_since_epoch());
+    });
+    clock.advance(10s);
+    pause->close(first, 10s);
+    controller.noteAttachProgress();
+    CHECK(controller.untilAttachDeadline(budget) == std::optional { 1000ms });
+    clock.advance(1001ms);
+    auto const stalled = controller.pollConnected(budget);
+    REQUIRE(stalled.has_value());
+    CHECK_FALSE(stalled->has_value());
+}
+
+TEST_CASE("a prompt asked after the daemon's last word extends the bound by the time it was open",
+          "[remote][mux][controller]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto controller = ConnectingController { clock };
+    auto const pause = std::make_shared<vthost::PromptPause>();
+    auto const budget = vthost::AttachBudget::promptsOpen(1s).pausedBy(pause);
+    controller.noteTransportReturned();
+    CHECK_FALSE(controller.pollConnected(budget).has_value());
+    controller.noteAttachProgress();
+
+    auto const session = pause->open([&clock] {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(clock.now().time_since_epoch());
+    });
+    clock.advance(10s);
+    pause->close(session, 10s);
+    CHECK(controller.untilAttachDeadline(budget) == std::optional { 1000ms });
 }

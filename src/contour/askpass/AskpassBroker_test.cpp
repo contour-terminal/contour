@@ -811,7 +811,10 @@ class PromptingController final: public contour::remote::RemoteController
     }
     [[nodiscard]] bool detachOnReactor() override { return false; }
     void closeReactorBindings() override {}
-    [[nodiscard]] std::string connectTimeoutMessage() const override { return "timed out"; }
+    [[nodiscard]] std::string connectTimeoutMessage(contour::remote::AttachPhase /*phase*/) const override
+    {
+        return "timed out";
+    }
     [[nodiscard]] std::string connectClosedMessage() const override { return "closed"; }
 
   private:
@@ -1026,7 +1029,10 @@ class OpeningController final: public contour::remote::RemoteController
     }
     [[nodiscard]] bool detachOnReactor() override { return false; }
     void closeReactorBindings() override {}
-    [[nodiscard]] std::string connectTimeoutMessage() const override { return "timed out"; }
+    [[nodiscard]] std::string connectTimeoutMessage(contour::remote::AttachPhase /*phase*/) const override
+    {
+        return "timed out";
+    }
     [[nodiscard]] std::string connectClosedMessage() const override { return "closed"; }
 
   private:

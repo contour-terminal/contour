@@ -389,7 +389,9 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             [this](vthost::proto::PaneSummary const& summary) { onPaneSummary(summary); } },
         NativeClient::RaiseRoleHandler { [this](vthost::proto::RaiseRole role) { onRaiseRole(role); } },
         NativeClient::WorkspaceMetaHandler {
-            [this](vthost::proto::WorkspaceMeta const& meta) { onWorkspaceMeta(meta); } });
+            [this](vthost::proto::WorkspaceMeta const& meta) { onWorkspaceMeta(meta); } },
+        // A snapshot piece is the daemon delivering: the wait for the first session is not out of time yet.
+        NativeClient::SnapshotProgressHandler { [this] { noteAttachProgress(); } });
 }
 
 core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
@@ -469,13 +471,14 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
         }
         switch (state)
         {
-            case ConnectionState::Connecting: break;
+            case ConnectionState::Connecting: beginAttachAttempt(lock); break;
             case ConnectionState::NeedsAttention: break; // set above, by the controller itself
             case ConnectionState::Connected:
                 _client = _supervisor != nullptr ? _supervisor->current() : nullptr;
                 // Each connection's own: a reconnect can reach an upgraded or downgraded daemon.
                 _negotiated.reset();
                 captureHandshake();
+                noteAttachProgress(); // the daemon answered the hello
                 if (_client != nullptr)
                     restored = _client->restoredCounts();
                 if (_acceptedConnections != 0)
@@ -522,6 +525,8 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                 forgetInputEchoes();
                 // Before the first session arrived the attach still waits; awaitConnected() sees it through.
                 if (_state == State::Ready)
+                // The next connection is an attempt of its own: what the lost one made headway in is not its.
+                beginAttachAttempt(lock);
                     _state = State::Reconnecting;
                 attachLog()("Lost the connection to {} ({}); {}.",
                             where,
@@ -812,6 +817,7 @@ void NativeController::onLayout(vthost::proto::LayoutState const& layout)
     {
         auto const lock = std::lock_guard { _mutex };
         captureHandshake();
+        noteAttachProgress();
         // A daemon that ends its pushes settles them itself (onLayoutBatchEnd); one that does not settles
         // each frame as it comes, as before there were batches.
         batched = layoutBatchShared();

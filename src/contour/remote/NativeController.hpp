@@ -784,9 +784,15 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// A reactor that died mid-run never reaches the supervisor's own Failed, so this reports it: without
     /// connectionClosed() the GUI never stop()s the controller, and Reconnect is refused for good.
     void reactorDied(std::string const& reason) override;
-    [[nodiscard]] std::string connectTimeoutMessage() const override
+    [[nodiscard]] std::string connectTimeoutMessage(AttachPhase phase) const override
     {
-        return "timed out waiting for the daemon's snapshot";
+        switch (phase)
+        {
+            case AttachPhase::Connecting: return "timed out connecting to the daemon";
+            case AttachPhase::Handshaking: return "the daemon did not answer";
+            case AttachPhase::AwaitingFirstSession: return "the daemon is busy and sent no session in time";
+        }
+        return "timed out waiting for the daemon";
     }
     [[nodiscard]] std::string connectClosedMessage() const override
     {

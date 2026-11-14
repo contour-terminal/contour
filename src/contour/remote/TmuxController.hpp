@@ -328,7 +328,7 @@ class TmuxController final:
         return true;
     }
     void closeReactorBindings() override { closeAllPanes(); }
-    [[nodiscard]] std::string connectTimeoutMessage() const override
+    [[nodiscard]] std::string connectTimeoutMessage(AttachPhase /*phase*/) const override
     {
         return "timed out waiting for the tmux session's first pane";
     }

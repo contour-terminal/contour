@@ -2045,7 +2045,14 @@ core::async::Task<void> NativeSession::streamSnapshots(SpawnedFlowClaim claim)
         pushInputEcho(session);
         // A snapshot that stated only the newest records that fit had buildPush queue the older
         // remainder as increments, which the debounce holds back until this run is off the wire.
+        auto const rows = built->delta.lines.size();
         co_await sendSnapshotPieces(std::move(built->delta), session);
+        connectionLog()(
+            "{}: snapshot of session {} sent ({} rows), {} ms after the hello",
+            _id,
+            session.value,
+            rows,
+            std::chrono::duration_cast<std::chrono::milliseconds>(_loop.clock().now() - _attachedAt).count());
         // Left behind by a selection made while the pieces went out.
         if (!mirrorsSession(session))
             forgetSession(session);
@@ -2990,6 +2997,7 @@ void NativeSession::attachClient(uint64_t serial,
                                                                              : DaemonFollowing::No;
     // Counted, and subscribed, first: the spawn below fans out to the subscribers, as it did when every
     // connection subscribed before its hello.
+    _attachedAt = _loop.clock().now();
     _clientTicket = _services.daemon.get().admitClient();
     _streamSubscription.emplace(_host, *this, &SessionHost::subscribeStream, &SessionHost::unsubscribeStream);
     _layoutSubscription.emplace(_host, _layoutObserver, &SessionHost::subscribe, &SessionHost::unsubscribe);
@@ -3174,6 +3182,10 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
 {
     auto& model = _host.model();
     auto const plan = planAttach(intent, attachContext(workingDirectory));
+    connectionLog()("{}: attach plan: select {}, creation {}",
+                    _id,
+                    plan.select ? std::format("workspace {}", *plan.select) : std::string { "none yet" },
+                    std::to_underlying(plan.creation));
     _host.noteClientAttached(this);
     _services.control.get().clientAttached(std::format("{}", _id));
     // Set directly: the attach walk queues the snapshots of the selected workspace once the hello is sent.
