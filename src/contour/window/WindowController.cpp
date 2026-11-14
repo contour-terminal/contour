@@ -263,11 +263,18 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     connect(this, &WindowController::tabBarShouldShowChanged, this, &WindowController::refreshTitleBand);
     connect(this, &WindowController::tabBarPositionChanged, this, &WindowController::refreshTitleBand);
     connect(this, &WindowController::hostChipStateChanged, this, &WindowController::refreshTitleBand);
-    // Everything the location chip shows follows one of these.
-    connect(this, &WindowController::hostLabelChanged, this, &WindowController::chipChanged);
-    connect(this, &WindowController::hostChipStateChanged, this, &WindowController::chipChanged);
-    connect(this, &WindowController::sidebarWidthChanged, this, &WindowController::chipChanged);
-    connect(this, &WindowController::switcherChanged, this, &WindowController::chipChanged);
+    // Everything the location chip shows follows one of these (the band's own changes reach it through
+    // refreshTitleBand).
+    for (auto const signal: { &WindowController::hostLabelChanged,
+                              &WindowController::hostChipStateChanged,
+                              &WindowController::sidebarVisibilityChanged,
+                              &WindowController::sidebarWidthChanged,
+                              &WindowController::switcherChanged,
+                              &WindowController::tabBarShouldShowChanged,
+                              &WindowController::tabBarPositionChanged,
+                              &WindowController::tabPlacementChanged,
+                              &WindowController::titleBarVisibleChanged })
+        connect(this, signal, this, &WindowController::refreshChip);
     connect(this, &WindowController::countChanged, this, &WindowController::clampChromeFocus);
     // The drag is the manager's, as QDrag::exec is process-wide; this window only says whose pane it carries.
     connect(&_manager,
@@ -295,7 +302,9 @@ void WindowController::initSidebar()
             &SidebarModel::summaryChanged,
             this,
             &WindowController::otherWorkspacesUrgencyChanged);
-    connect(_sidebar.get(), &SidebarModel::summaryChanged, this, &WindowController::chipChanged);
+    // Built with the sidebar it reads the workspace from, once everything else it reads exists.
+    _chip = std::make_unique<LocationChipModel>(chipInputs());
+    connect(_sidebar.get(), &SidebarModel::summaryChanged, this, &WindowController::refreshChip);
     refreshSidebarPresence();
 }
 
@@ -628,97 +637,33 @@ int WindowController::hostChipState() const noexcept
     return static_cast<int>(std::to_underlying(hostChipStateOf(_manager.hostConnection(_displayed))));
 }
 
-QString WindowController::chipDaemonName() const
+LocationChipModel* WindowController::chip() const noexcept
 {
-    return QString::fromStdString(_manager.daemonNameOf(_displayed));
+    return _chip.get();
 }
 
-int WindowController::chipDaemonDot() const
+LocationChipInputs WindowController::chipInputs() const
 {
-    auto const state = hostChipStateOf(_manager.hostConnection(_displayed));
-    return static_cast<int>(std::to_underlying(daemonDotOf(_manager.daemonLocalityOf(_displayed), state)));
+    auto const band = titleBand();
+    auto const& summary = _sidebar->summary();
+    return LocationChipInputs {
+        .daemon = _manager.daemonNameOf(_displayed),
+        .hosting = _manager.hostingOf(_displayed),
+        .locality = _manager.daemonLocalityOf(_displayed),
+        .state = hostChipStateOf(_manager.hostConnection(_displayed)),
+        .workspace = summary.currentWorkspace,
+        .otherWorkspaces = summary.otherWorkspaces,
+        .disclosure = isWorkspaceDropdownOpen() ? ChipDisclosure::Expanded : ChipDisclosure::Collapsed,
+        .band = band.band,
+        .centre = band.centre,
+        .sidebar = sidebarWidth() > 0 ? SidebarShown::Yes : SidebarShown::No,
+    };
 }
 
-QStringList WindowController::chipStateGlyphs()
+void WindowController::refreshChip()
 {
-    return locationChipStateGlyphList();
-}
-
-QString WindowController::chipStateGlyph() const
-{
-    auto const state = hostChipStateOf(_manager.hostConnection(_displayed));
-    return QString::fromUtf8(daemonStateGlyph(state));
-}
-
-QString WindowController::chipAccessibleName() const
-{
-    return QString::fromStdString(locationChipAccessibleName(
-        _manager.daemonNameOf(_displayed), _sidebar->summary().currentWorkspace, QtTranslated {}));
-}
-
-QString WindowController::chipDaemonAccessibleName() const
-{
-    return QString::fromStdString(
-        locationChipDaemonAccessibleName(_manager.daemonNameOf(_displayed), QtTranslated {}));
-}
-
-QString WindowController::chipAccessibleDescription() const
-{
-    auto const state = hostChipStateOf(_manager.hostConnection(_displayed));
-    auto const disclosure = isWorkspaceDropdownOpen() ? ChipDisclosure::Expanded : ChipDisclosure::Collapsed;
-    return QString::fromStdString(locationChipAccessibleDescription(
-        state, _sidebar->summary().otherWorkspaces, disclosure, QtTranslated {}));
-}
-
-QString WindowController::chipToolTip(int fit) const
-{
-    auto const state = hostChipStateOf(_manager.hostConnection(_displayed));
-    return QString::fromStdString(locationChipToolTip(
-        state, locationChipFitOf(fit), _manager.daemonNameOf(_displayed), QtTranslated {}));
-}
-
-QString WindowController::chipDaemonText(int fit) const
-{
-    return QString::fromStdString(
-        locationChipDaemonText(_manager.daemonNameOf(_displayed), locationChipFitOf(fit)));
-}
-
-QString WindowController::chipStatusText(int fit) const
-{
-    auto const state = hostChipStateOf(_manager.hostConnection(_displayed));
-    return QString::fromStdString(locationChipStatusText(state, locationChipFitOf(fit), QtTranslated {}));
-}
-
-QString WindowController::chipWorkspaceText(QString const& workspace, int fit) const
-{
-    return QString::fromStdString(locationChipWorkspaceText(workspace.toStdString(), locationChipFitOf(fit)));
-}
-
-int WindowController::chipFit(QVariantMap const& widths) const
-{
-    return locationChipFitOfWidths(widths);
-}
-
-QVariantList WindowController::chipFitSteps()
-{
-    return locationChipStepList();
-}
-
-int WindowController::chipLeastFit()
-{
-    return static_cast<int>(std::to_underlying(LocationChipFit::WorkspaceElided));
-}
-
-int WindowController::chipHosting() const
-{
-    return static_cast<int>(std::to_underlying(_manager.hostingOf(_displayed)));
-}
-
-QString WindowController::locationChipPlace(QString const& band, QString const& centre) const
-{
-    auto const sidebar = sidebarWidth() > 0 ? SidebarShown::Yes : SidebarShown::No;
-    return QString::fromUtf8(locationChipPlaceNamed(
-        band.toStdString(), centre.toStdString(), _manager.hostingOf(_displayed), sidebar));
+    if (_chip != nullptr)
+        _chip->setInputs(chipInputs());
 }
 
 QString WindowController::applicationVersion() const
@@ -2866,8 +2811,10 @@ TitleBandGeometry WindowController::titleBandGeometry() const
 
 void WindowController::refreshTitleBand()
 {
-    // A chrome-row change (refreshChromeDependents) reaches the window here: the row's radius may differ.
+    // A chrome-row change (refreshChromeDependents) reaches the window here: the row's radius may differ, and
+    // the band's centre, which decides where the location chip shows.
     refreshWindowCornerRadius();
+    refreshChip();
 
     if (_osWindow == nullptr)
         return;

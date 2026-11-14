@@ -256,7 +256,7 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
                    QVariantMap { { "sidebar", QVariant::fromValue<QObject*>(chipController.sidebarObject()) },
                                  { "controller", QVariant::fromValue<QObject*>(&chipController) } },
                .swatches = 0,
-               .name = chipController.chipAccessibleName(),
+               .name = chipController.chip()->accessibleName(),
                .role = QAccessible::ButtonMenu },
         // The control that names the daemon alone, heading the sidebar, is named for what it shows.
         Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/WorkspaceChip.qml"),
@@ -265,7 +265,7 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
                                  { "controller", QVariant::fromValue<QObject*>(&chipController) },
                                  { "daemonOnly", true } },
                .swatches = 0,
-               .name = chipController.chipDaemonAccessibleName(),
+               .name = chipController.chip()->daemonAccessibleName(),
                .role = QAccessible::ButtonMenu },
         Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/ToolbarButton.qml"),
                .initialProperties = QVariantMap { { "glyph", QStringLiteral("+") },

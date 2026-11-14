@@ -229,6 +229,12 @@ class MockMainController: public MainWindowControllerMock
         daemonLocality = _scene.daemonLocality;
         shortcutStyle = _scene.shortcutStyle;
         setHostChipState(static_cast<int>(_scene.hostChipState));
+        // The band's inputs this mock owns, which the chip's place follows.
+        for (auto const signal: { &MockMainController::tabBarShouldShowChanged,
+                                  &MockMainController::tabBarPositionChanged,
+                                  &MockMainController::titleBarVisibleChanged })
+            connect(this, signal, this, &MockMainController::refreshChip);
+        refreshChip();
         if (_scene.drift == snapshot::SnapshotDrift::Shown)
             _drift.show(vthost::client::assessDrift(
                 DriftClientVersion, DriftDaemonVersion, vthost::client::LayoutAfterRestart::Lost));
@@ -244,6 +250,19 @@ class MockMainController: public MainWindowControllerMock
     [[nodiscard]] QObject* daemonDriftObject() noexcept { return hasDrift() ? &_drift : nullptr; }
 
     [[nodiscard]] int activeTabIndex() const noexcept { return rowOf(_activeTabId); }
+
+  protected:
+    /// @return The band decision's inputs from this mock's own frame, tab-bar gate and edge, over the base's.
+    [[nodiscard]] window::TitleBandInputs titleBandInputs() const override
+    {
+        auto inputs = MainWindowControllerMock::titleBandInputs();
+        inputs.frame = _titleBarVisible ? window::WindowFrame::NativeFrame : window::WindowFrame::ClientBand;
+        inputs.strip = _tabBarShouldShow ? window::TabStripGate::Shown : window::TabStripGate::Hidden;
+        inputs.position = static_cast<config::TabBarPosition>(_tabBarPosition);
+        return inputs;
+    }
+
+  public:
     /// @return The focused window::ChromeArea as its underlying value.
     [[nodiscard]] int chromeFocusArea() const noexcept { return static_cast<int>(_chromeArea); }
     /// @return The focused tab's row while the tab well has focus, else -1.
@@ -967,7 +986,10 @@ class MockMainController: public MainWindowControllerMock
     QQmlEngine::setObjectOwnership(&controller, QQmlEngine::CppOwnership);
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    installChromeStyle(engine, chrome);
+    // The chip's place follows the band, which the chrome row decides: the mock takes the row as the real
+    // window's application does (ContourGuiApp::titleBandOf).
+    controller.bandRow = installChromeStyle(engine, chrome)->titleBandRow();
+    controller.refreshChip();
     QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/Main.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();

@@ -24,7 +24,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -86,7 +85,7 @@ enum class LocationChipFit : uint8_t
     WorkspaceElided, ///< Not even that fits: the workspace name is elided.
 };
 
-/// Every @c LocationChipFit, the table its count and its conversion from QML's int come from.
+/// Every @c LocationChipFit, the table its count comes from.
 inline constexpr auto LocationChipFits = std::array { LocationChipFit::Full,
                                                       LocationChipFit::NoStateText,
                                                       LocationChipFit::DaemonElided,
@@ -97,74 +96,41 @@ static_assert(enumValuesAreDense(LocationChipFits));
 /// Number of @c LocationChipFit enumerators.
 inline constexpr size_t LocationChipFitCount = LocationChipFits.size();
 
-/// @param value A window::LocationChipFit's underlying value, as QML hands it over.
-/// @return The enumerator, or nothing for a value that is none of them.
-[[nodiscard]] constexpr std::optional<LocationChipFit> locationChipFitFromInt(int value) noexcept
-{
-    return enumFromInt(LocationChipFits, value);
-}
-
-/// The width each fit step needs, in the units of the available room.
-struct LocationChipWidths
-{
-    double full = 0;         ///< For @c LocationChipFit::Full.
-    double noStateText = 0;  ///< For @c LocationChipFit::NoStateText.
-    double daemonElided = 0; ///< For @c LocationChipFit::DaemonElided.
-    double dotOnly = 0;      ///< For @c LocationChipFit::DotOnly.
-};
-
 /// The least workspace cells the chip keeps before the `…`: it keeps whole grapheme clusters until they cover
 /// that many, so six CJK characters (twelve cells) give three. The caller reserves that width, so the chip
 /// never goes narrower.
 inline constexpr std::size_t LocationChipWorkspaceFloor = 6;
 
-/// One of the fit steps that is chosen by a width: which fit it is, the key its width goes by, and which
-/// member of @c LocationChipWidths holds it.
+/// One fit step: which fit it is and the key its width goes by.
 struct LocationChipStep
 {
-    LocationChipFit fit;                ///< The step.
-    std::string_view key;               ///< The name QML measures the step's width by.
-    double LocationChipWidths::* width; ///< Where its width lives.
+    LocationChipFit fit;  ///< The step.
+    std::string_view key; ///< The name QML measures the step's width by.
 };
 
-/// The steps a width decides, in elision order: the chip takes the first whose width fits. The single source
-/// of that order and of the width keys: @c locationChipFit, @c locationChipFitFrom and QML (through
-/// WindowController::chipFitSteps) all read this table, so a new step is one row here. @c WorkspaceElided
-/// has no row: it is what is left when none fits.
+/// The steps in elision order: the chip takes the first whose width fits. The single source of that order and
+/// of the width keys: @c locationChipFit and QML (through LocationChipModel::steps) both read this table, so
+/// a new step is one row here. The last row is what is left when no other fits; its width is the least the
+/// chip ever needs.
 inline constexpr auto LocationChipSteps = std::array {
-    LocationChipStep { .fit = LocationChipFit::Full, .key = "full", .width = &LocationChipWidths::full },
-    LocationChipStep { .fit = LocationChipFit::NoStateText,
-                       .key = "noStateText",
-                       .width = &LocationChipWidths::noStateText },
-    LocationChipStep { .fit = LocationChipFit::DaemonElided,
-                       .key = "daemonElided",
-                       .width = &LocationChipWidths::daemonElided },
-    LocationChipStep {
-        .fit = LocationChipFit::DotOnly, .key = "dotOnly", .width = &LocationChipWidths::dotOnly },
+    LocationChipStep { .fit = LocationChipFit::Full, .key = "full" },
+    LocationChipStep { .fit = LocationChipFit::NoStateText, .key = "noStateText" },
+    LocationChipStep { .fit = LocationChipFit::DaemonElided, .key = "daemonElided" },
+    LocationChipStep { .fit = LocationChipFit::DotOnly, .key = "dotOnly" },
+    LocationChipStep { .fit = LocationChipFit::WorkspaceElided, .key = "workspaceElided" },
 };
+static_assert(LocationChipSteps.size() == LocationChipFitCount,
+              "LocationChipSteps must have a row per LocationChipFit");
 
-/// @param widths    What each step needs.
+/// @param widthOf   Gives the width of a step by its key, in the units of @p available.
 /// @param available The room the chip has.
 /// @return The first step whose width fits, @c WorkspaceElided when none does.
-[[nodiscard]] constexpr LocationChipFit locationChipFit(LocationChipWidths const& widths,
-                                                        double available) noexcept
-{
-    for (auto const& step: LocationChipSteps)
-        if (widths.*(step.width) <= available)
-            return step.fit;
-    return LocationChipFit::WorkspaceElided;
-}
-
-/// @param widthOf   Gives the width of a step by its key (a missing key answering 0), as a QML map does.
-/// @param available The room the chip has.
-/// @return locationChipFit() of the widths @p widthOf names.
 template <typename WidthOf>
-[[nodiscard]] constexpr LocationChipFit locationChipFitFrom(WidthOf const& widthOf, double available)
+[[nodiscard]] constexpr LocationChipFit locationChipFit(WidthOf const& widthOf, double available)
 {
-    auto widths = LocationChipWidths {};
-    for (auto const& step: LocationChipSteps)
-        widths.*(step.width) = widthOf(step.key);
-    return locationChipFit(widths, available);
+    auto const fitting = std::ranges::find_if(
+        LocationChipSteps, [&](LocationChipStep const& step) { return widthOf(step.key) <= available; });
+    return fitting != LocationChipSteps.end() ? fitting->fit : LocationChipFit::WorkspaceElided;
 }
 
 /// The longest daemon name, in cells, the chip shows while it elides the name.
@@ -228,6 +194,62 @@ namespace detail
     }
 } // namespace detail
 
+namespace detail
+{
+    /// @param daemon   The daemon's name; empty for an in-process window.
+    /// @param clusters @p daemon's grapheme clusters.
+    /// @param fit      How much of the chip fits.
+    /// @return locationChipDaemonText() of a name that is already split.
+    [[nodiscard]] inline std::string daemonTextOf(std::string_view daemon,
+                                                  std::span<Cluster const> clusters,
+                                                  LocationChipFit fit)
+    {
+        switch (fit)
+        {
+            case LocationChipFit::Full:
+            case LocationChipFit::NoStateText: return std::string(daemon);
+            case LocationChipFit::DaemonElided: {
+                if (cellsOf(clusters) <= LocationChipDaemonElidedMax)
+                    return std::string(daemon);
+                auto const keep = LocationChipDaemonElidedMax - 1; // The ellipsis takes one cell.
+                auto const head = countWithin(clusters, (keep + 1) / 2);
+                auto const headCells = cellsOf(clusters.first(head));
+                // The tail is what fits from the back, in the cells the head left of the budget.
+                auto const reversed = std::vector<Cluster>(clusters.rbegin(), clusters.rend());
+                auto const tail = countWithin(reversed, keep - headCells);
+                return joined(clusters.first(head)) + "…" + joined(clusters.last(tail));
+            }
+            case LocationChipFit::DotOnly:
+            case LocationChipFit::WorkspaceElided: return {};
+        }
+        return {};
+    }
+
+    /// @param workspace The workspace's name.
+    /// @param clusters  @p workspace's grapheme clusters.
+    /// @param fit       How much of the chip fits.
+    /// @return locationChipWorkspaceText() of a name that is already split.
+    [[nodiscard]] inline std::string workspaceTextOf(std::string_view workspace,
+                                                     std::span<Cluster const> clusters,
+                                                     LocationChipFit fit)
+    {
+        if (fit != LocationChipFit::WorkspaceElided)
+            return std::string(workspace);
+        auto kept = std::size_t { 0 };
+        auto cells = std::size_t { 0 };
+        for (auto const& cluster: clusters)
+        {
+            if (cells >= LocationChipWorkspaceFloor)
+                break;
+            cells += cluster.cells;
+            ++kept;
+        }
+        if (kept >= clusters.size())
+            return std::string(workspace);
+        return joined(clusters.first(kept)) + "…";
+    }
+} // namespace detail
+
 /// @param daemon The daemon's name; empty for an in-process window.
 /// @param fit    How much of the chip fits.
 /// @return The daemon segment's text: the whole name down to NoStateText, the name middle-elided to at most
@@ -235,27 +257,7 @@ namespace detail
 ///         nothing from DotOnly on.
 [[nodiscard]] inline std::string locationChipDaemonText(std::string_view daemon, LocationChipFit fit)
 {
-    switch (fit)
-    {
-        case LocationChipFit::Full:
-        case LocationChipFit::NoStateText: return std::string(daemon);
-        case LocationChipFit::DaemonElided: {
-            auto const clusters = detail::clustersOf(daemon);
-            if (detail::cellsOf(clusters) <= LocationChipDaemonElidedMax)
-                return std::string(daemon);
-            auto const keep = LocationChipDaemonElidedMax - 1; // The ellipsis takes one cell.
-            auto const head = detail::countWithin(clusters, (keep + 1) / 2);
-            auto const headCells = detail::cellsOf(std::span(clusters).first(head));
-            // The tail is what fits from the back, in the cells the head left of the budget.
-            auto const reversed = std::vector<detail::Cluster>(clusters.rbegin(), clusters.rend());
-            auto const tail = detail::countWithin(reversed, keep - headCells);
-            return detail::joined(std::span(clusters).first(head)) + "…"
-                   + detail::joined(std::span(clusters).last(tail));
-        }
-        case LocationChipFit::DotOnly:
-        case LocationChipFit::WorkspaceElided: return {};
-    }
-    return {};
+    return detail::daemonTextOf(daemon, detail::clustersOf(daemon), fit);
 }
 
 /// Turns a source sentence into what the user reads: Qt's translation in the application, the sentence itself
@@ -313,21 +315,7 @@ template <typename Translate = SourceText>
 ///         already covers stays whole.
 [[nodiscard]] inline std::string locationChipWorkspaceText(std::string_view workspace, LocationChipFit fit)
 {
-    if (fit != LocationChipFit::WorkspaceElided)
-        return std::string(workspace);
-    auto const clusters = detail::clustersOf(workspace);
-    auto kept = std::size_t { 0 };
-    auto cells = std::size_t { 0 };
-    for (auto const& cluster: clusters)
-    {
-        if (cells >= LocationChipWorkspaceFloor)
-            break;
-        cells += cluster.cells;
-        ++kept;
-    }
-    if (kept >= clusters.size())
-        return std::string(workspace);
-    return detail::joined(std::span(clusters).first(kept)) + "…";
+    return detail::workspaceTextOf(workspace, detail::clustersOf(workspace), fit);
 }
 
 /// Whether the switcher the chip opens is on screen.
@@ -488,6 +476,46 @@ template <typename Translate = SourceText>
                           std::array<std::string_view, 2> { daemon, action });
 }
 
+/// What the chip says at one fit step, all of it: the texts QML lays out and the tooltip it hangs.
+struct LocationChipStepText
+{
+    LocationChipFit fit;   ///< The step.
+    std::string_view key;  ///< The name QML measures the step's width by (LocationChipSteps).
+    std::string daemon;    ///< The daemon segment (locationChipDaemonText).
+    std::string status;    ///< The state's words (locationChipStatusText).
+    std::string workspace; ///< The workspace's text (locationChipWorkspaceText).
+    std::string tooltip;   ///< The tooltip (locationChipToolTip).
+};
+
+/// The chip's texts at every fit step, in LocationChipSteps' order, splitting each name into grapheme
+/// clusters once for all of them.
+/// @param state     What the connection looks like.
+/// @param daemon    The daemon's name; empty for an in-process window.
+/// @param workspace The workspace's name.
+/// @param translate Gives a source sentence's translation.
+/// @return One row per step.
+template <typename Translate = SourceText>
+[[nodiscard]] std::vector<LocationChipStepText> locationChipStepTexts(
+    HostChipState state,
+    std::string_view daemon,
+    std::string_view workspace,
+    Translate const& translate = Translate {})
+{
+    auto const daemonClusters = detail::clustersOf(daemon);
+    auto const workspaceClusters = detail::clustersOf(workspace);
+    return LocationChipSteps | std::views::transform([&](LocationChipStep const& step) {
+               return LocationChipStepText {
+                   .fit = step.fit,
+                   .key = step.key,
+                   .daemon = detail::daemonTextOf(daemon, daemonClusters, step.fit),
+                   .status = locationChipStatusText(state, step.fit, translate),
+                   .workspace = detail::workspaceTextOf(workspace, workspaceClusters, step.fit),
+                   .tooltip = locationChipToolTip(state, step.fit, daemon, translate),
+               };
+           })
+           | std::ranges::to<std::vector>();
+}
+
 /// Where the location chip shows.
 enum class LocationChipPlace : uint8_t
 {
@@ -543,31 +571,6 @@ enum class SidebarShown : uint8_t
         case LocationChipPlace::Sidebar: return "sidebar";
     }
     return "none";
-}
-
-/// @param band    The band's presence by name (barPresenceName()); a revealed or pinned band is on screen
-///                 like a shown one.
-/// @param centre  The band centre's name (barCentreName()).
-/// @param hosting Whether the sessions live in a daemon.
-/// @param sidebar Whether the workspace sidebar shows.
-/// @return locationChipPlaceName() of where the chip shows; "none" for a name no presence or centre has.
-///         Names in and a name out is the QML carve-out, like UiStyleProvider::titleBand().
-[[nodiscard]] inline std::string_view locationChipPlaceNamed(std::string_view band,
-                                                             std::string_view centre,
-                                                             DaemonHosting hosting,
-                                                             SidebarShown sidebar) noexcept
-{
-    using Presence = std::pair<std::string_view, BarPresence>;
-    constexpr auto Presences =
-        std::array { Presence { barPresenceName(BarPresence::Hidden), BarPresence::Hidden },
-                     Presence { barPresenceName(BarPresence::Shown), BarPresence::Shown },
-                     Presence { barPresenceName(BarPresence::RevealOnEdge), BarPresence::Shown },
-                     Presence { barPresenceName(BarPresence::Pinned), BarPresence::Shown } };
-    auto const presence = std::ranges::find(Presences, band, &Presence::first);
-    auto const bar = barCentreNamed(centre);
-    if (presence == Presences.end() || !bar)
-        return locationChipPlaceName(LocationChipPlace::None);
-    return locationChipPlaceName(locationChipPlace(presence->second, *bar, hosting, sidebar));
 }
 
 } // namespace contour::window

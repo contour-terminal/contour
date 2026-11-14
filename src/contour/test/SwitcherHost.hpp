@@ -8,8 +8,7 @@
 
 #include <contour/test/PopupWaits.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
-#include <contour/window/LocationChip.hpp>
-#include <contour/window/LocationChipSteps.hpp>
+#include <contour/window/LocationChipModel.hpp>
 #include <contour/window/SwitcherController.hpp>
 #include <contour/window/SwitcherPresenter.hpp>
 
@@ -28,6 +27,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <utility>
 
 namespace contour::test
 {
@@ -41,31 +41,21 @@ class MockSwitcherHost: public QObject, public window::SwitcherHost
     Q_PROPERTY(QObject* switcher READ switcher NOTIFY switcherChanged)
     Q_PROPERTY(bool isWorkspaceDropdownOpen READ isWorkspaceDropdownOpen NOTIFY switcherChanged)
     // The location chip of an in-process window: the workspace alone, no daemon segment, no dot.
-    Q_PROPERTY(QString chipDaemonName READ chipDaemonName CONSTANT)
-    Q_PROPERTY(int chipDaemonDot READ chipDaemonDot CONSTANT)
-    Q_PROPERTY(QString chipStateGlyph READ chipStateGlyph CONSTANT)
-    Q_PROPERTY(int hostChipState READ hostChipState CONSTANT)
-    Q_PROPERTY(QVariantList chipFitSteps READ chipFitSteps CONSTANT)
-    Q_PROPERTY(QString chipAccessibleName READ chipAccessibleName CONSTANT)
-    Q_PROPERTY(QString chipAccessibleDescription READ chipAccessibleDescription NOTIFY switcherChanged)
+    Q_PROPERTY(contour::window::LocationChipModel* chip READ chip CONSTANT)
 
   public:
-    [[nodiscard]] static QString chipDaemonName() { return {}; }
-    [[nodiscard]] static int chipDaemonDot() { return static_cast<int>(window::DaemonDot::Hidden); }
-    [[nodiscard]] static QString chipStateGlyph()
+    MockSwitcherHost()
     {
-        return QString::fromUtf8(window::daemonStateGlyph(window::HostChipState::Connected));
+        connect(this, &MockSwitcherHost::switcherChanged, this, [this] {
+            auto inputs = _chip.inputs();
+            inputs.disclosure = isWorkspaceDropdownOpen() ? window::ChipDisclosure::Expanded
+                                                          : window::ChipDisclosure::Collapsed;
+            _chip.setInputs(std::move(inputs));
+        });
     }
-    [[nodiscard]] static QVariantList chipFitSteps() { return window::locationChipStepList(); }
-    [[nodiscard]] static int hostChipState() { return static_cast<int>(window::HostChipState::Connected); }
-    [[nodiscard]] static QString chipAccessibleName() { return QStringLiteral("Workspace contour"); }
-    Q_INVOKABLE [[nodiscard]] static QString chipToolTip(int) { return QStringLiteral("Switch workspace"); }
-    Q_INVOKABLE [[nodiscard]] static QString chipDaemonText(int) { return {}; }
-    Q_INVOKABLE [[nodiscard]] static QString chipStatusText(int) { return {}; }
-    Q_INVOKABLE [[nodiscard]] static QString chipWorkspaceText(QString const& workspace, int)
-    {
-        return workspace;
-    }
+
+    /// @return The chip's model: an in-process window's, naming the workspace `contour`.
+    [[nodiscard]] window::LocationChipModel* chip() noexcept { return &_chip; }
 
     /// Mirrors WindowController::presentSwitcher().
     void presentSwitcher(window::SwitcherController* switcher, std::optional<QRectF> anchor) override
@@ -108,10 +98,6 @@ class MockSwitcherHost: public QObject, public window::SwitcherHost
 
     [[nodiscard]] QObject* switcher() const { return _switcher.data(); }
     [[nodiscard]] bool isWorkspaceDropdownOpen() const { return _switcher && _anchor.has_value(); }
-    [[nodiscard]] QString chipAccessibleDescription() const
-    {
-        return isWorkspaceDropdownOpen() ? QStringLiteral("expanded") : QStringLiteral("collapsed");
-    }
 
     std::function<void(QRectF)> onDropdown; ///< What the chip's click does; nothing when unset.
     int dropdowns = 0;                      ///< How often the chip asked for its dropdown.
@@ -132,6 +118,7 @@ class MockSwitcherHost: public QObject, public window::SwitcherHost
 
     QPointer<window::SwitcherController> _switcher;
     std::optional<QRectF> _anchor;
+    window::LocationChipModel _chip { window::LocationChipInputs { .workspace = "contour" } };
 };
 
 /// A window hosting Switcher.qml and a workspace chip, over a MockSwitcherHost: Main.qml's wiring and the

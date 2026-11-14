@@ -1561,8 +1561,8 @@ TEST_CASE("Main.qml location chip: a daemon window shows it in every band, the d
         return;
     }
 
-    // No chip is a decision of locationChipPlace; where a band shows one, it is one chip, with no host chip
-    // beside it.
+    // No chip is a decision of the chip model's place; where a band shows one, it is one chip, with no host
+    // chip beside it.
     REQUIRE(chipsInBand() == 1);
     auto* chip = root->findChild<QQuickItem*>(QStringLiteral("workspaceChip"));
     REQUIRE(chip != nullptr);

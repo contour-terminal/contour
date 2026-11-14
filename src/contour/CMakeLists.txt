@@ -349,6 +349,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/ChromeStyleHost.hpp
         window/NoticeModel.hpp
         window/SidebarModel.hpp
+        window/LocationChipModel.hpp
         window/NoticeQueue.hpp
         window/ToastPlacement.hpp
         window/SaveLayoutCheck.hpp
@@ -426,6 +427,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/PermissionPrompt.cpp
         window/NoticeModel.cpp
         window/SidebarModel.cpp
+        window/LocationChipModel.cpp
         window/QuickTerminalController.cpp
         session/TerminalSession.cpp
         session/TerminalSessionKeyInput.cpp
@@ -1063,6 +1065,7 @@ if(CONTOUR_FRONTEND_GUI)
             session/PermissionPrompt_test.cpp
             window/NoticeModel_test.cpp
             window/SidebarModel_test.cpp
+            window/LocationChipModel_test.cpp
             test/MainWindowControllerMock.hpp
             test/SwitcherHost.hpp
             test/MockMainController.hpp

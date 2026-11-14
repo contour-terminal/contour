@@ -32,7 +32,7 @@ Rectangle {
     /// Whether the header bar above draws the title row (UiStyleProvider.sidebarTitleInHeaderBar): then the
     /// sidebar draws none of its own.
     property bool titleInHeaderBar: false
-    /// Where the location chip shows (WindowController.locationChipPlace, Main.qml's to ask): "sidebar" puts
+    /// Where the location chip shows (WindowController.chip.place, Main.qml's to pass): "sidebar" puts
     /// the daemon control at the head of the title row, where the heading would be.
     property string chipPlace: "none"
     /// The sidebar's toggle as UiStyleProvider::sidebarToggle answers it (Main.qml): `host` "sidebar" puts it
@@ -228,9 +228,9 @@ Rectangle {
                 sidebar: root.model
                 controller: root.controller
                 // The step the row's room allows (the filter and "+" buttons stand to its right).
-                fit: root.controller.chipFit(Object.assign({ available: Math.max(0, titleButtons.x - daemonChipSlot.x
-                                                                                  - titleRow.gap) },
-                                                           daemonChip.fitWidths))
+                fit: root.controller.chip.fitFor(Object.assign({ available: Math.max(0, titleButtons.x - daemonChipSlot.x
+                                                                                     - titleRow.gap) },
+                                                              daemonChip.fitWidths))
                 focusRingShown: activeFocus && (root.controller.focusedToolbarIndex ?? -1) >= 0
                 isOpen: !!root.controller && !!root.controller.isWorkspaceDropdownOpen
                 onClicked: if (root.controller && root.controller.showWorkspaceDropdown)

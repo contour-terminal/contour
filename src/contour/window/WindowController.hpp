@@ -22,6 +22,7 @@
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/HeldModifierReveal.hpp>
+#include <contour/window/LocationChipModel.hpp>
 #include <contour/window/MenuRouting.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/NoticeModel.hpp>
@@ -175,8 +176,6 @@ class WindowController:
     /// Whether the switcher this window presents hangs from its workspace chip: the chip wears its open fill.
     /// A QML-facing predicate, hence a bool.
     Q_PROPERTY(bool isWorkspaceDropdownOpen READ isWorkspaceDropdownOpen NOTIFY switcherChanged)
-    /// The workspace chip's accessible description: "expanded" while its dropdown is open, else "collapsed"
-    /// (Qt has no expanded state for a button).
     Q_PROPERTY(QVariantList sidebarContextMenuModel READ sidebarContextMenuModel NOTIFY
                    sidebarContextMenuModelChanged)
     Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
@@ -262,35 +261,9 @@ class WindowController:
     Q_PROPERTY(QObject* promptHost READ promptHost CONSTANT)
     // A window::HostChipState as its underlying value: where the connection to that host stands.
     Q_PROPERTY(int hostChipState READ hostChipState NOTIFY hostChipStateChanged)
-    // The location chip, which names the window's daemon and workspace in one control. Every property below
-    // changes with chipChanged().
-    /// The daemon's name as the chip shows it; empty for an in-process window.
-    Q_PROPERTY(QString chipDaemonName READ chipDaemonName NOTIFY chipChanged)
-    /// A window::DaemonDot's underlying value: whether the chip's status dot shows.
-    Q_PROPERTY(int chipDaemonDot READ chipDaemonDot NOTIFY chipChanged)
-    /// The glyph that stands for the connection's state on the Terminal row, where no dot can be drawn.
-    Q_PROPERTY(QString chipStateGlyph READ chipStateGlyph NOTIFY chipChanged)
-    /// The glyph of every connection state: the title band reserves the widest, so the chip's least width
-    /// does not depend on the state.
-    Q_PROPERTY(QStringList chipStateGlyphs READ chipStateGlyphs CONSTANT)
-    /// What a screen reader says of the chip: what it shows (`Workspace billing on starfive`).
-    Q_PROPERTY(QString chipAccessibleName READ chipAccessibleName NOTIFY chipChanged)
-    /// What a screen reader says of the control that names the daemon alone, the sidebar's head
-    /// (`Daemon local`).
-    Q_PROPERTY(QString chipDaemonAccessibleName READ chipDaemonAccessibleName NOTIFY chipChanged)
-    /// What a screen reader adds: the connection's state, what another workspace asks and whether the
-    /// switcher is open.
-    Q_PROPERTY(QString chipAccessibleDescription READ chipAccessibleDescription NOTIFY chipChanged)
-    /// A window::DaemonHosting's underlying value: what serves the window's sessions. locationChipPlace()
-    /// reads it, and the sidebar's width, from the window itself; a QML binding that calls it reads this
-    /// property too, so it re-evaluates when either changes (chipChanged).
-    Q_PROPERTY(int chipHosting READ chipHosting NOTIFY chipChanged)
-    /// The fit steps in elision order, each { fit, key }: a window::LocationChipFit's underlying value and
-    /// the name chipFit() takes its width by (window::LocationChipSteps). QML measures and keys by this list.
-    Q_PROPERTY(QVariantList chipFitSteps READ chipFitSteps CONSTANT)
-    /// The last fit step, a window::LocationChipFit's underlying value: the narrowest the chip gets, which
-    /// the title band reserves room for so it can never be squeezed past it.
-    Q_PROPERTY(int chipLeastFit READ chipLeastFit CONSTANT)
+    /// The location chip, which names the window's daemon and workspace in one control: its whole surface
+    /// (window::LocationChipModel).
+    Q_PROPERTY(contour::window::LocationChipModel* chip READ chip CONSTANT)
     Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
     // {{{ Panes
     // The panes the active tab shows: the leaves under its layout root (1 while zoomed or unsplit, 0 without
@@ -777,25 +750,6 @@ class WindowController:
     /// @return This window's notices, as the `notices` property hands them to QML.
     [[nodiscard]] NoticeModel* noticesForQml() noexcept { return &_notices; }
 
-    /// @param fit A window::LocationChipFit's underlying value.
-    /// @return The daemon segment's text at that fit; empty for an in-process window.
-    Q_INVOKABLE [[nodiscard]] QString chipDaemonText(int fit) const;
-
-    /// @param fit A window::LocationChipFit's underlying value.
-    /// @return The state's words at that fit: only the whole chip carries them.
-    Q_INVOKABLE [[nodiscard]] QString chipStatusText(int fit) const;
-
-    /// @param workspace The workspace's name.
-    /// @param fit       A window::LocationChipFit's underlying value.
-    /// @return The workspace's text at that fit (locationChipWorkspaceText()).
-    Q_INVOKABLE [[nodiscard]] QString chipWorkspaceText(QString const& workspace, int fit) const;
-
-    /// @param widths What each fit step needs, as the keys `full`, `noStateText`, `daemonElided` and
-    ///               `dotOnly`, and the room as `available`, all in the same unit. A map, not a list, so
-    ///               the caller cannot swap two steps.
-    /// @return A window::LocationChipFit's underlying value: the first step that fits.
-    Q_INVOKABLE [[nodiscard]] int chipFit(QVariantMap const& widths) const;
-
     /// Where this window's toast goes now (placeToast()), from the band QML shows and the active pane's
     /// cursor row: asked as a toast shows.
     /// @param band The band's presence, by the name UiStyleProvider::titleBand() gives it ("shown", ...).
@@ -1169,6 +1123,11 @@ class WindowController:
     /// the opaque band for its lifetime (R-g). Cheap to repeat: every hook (expose, palette, scale, screen,
     /// window state, safe area, a chrome refresh) calls it. GUI thread.
     void refreshTitleBand();
+
+    /// Moves the location chip's model to the window's state now (chipInputs()): what serves it, its
+    /// connection, the workspace, the switcher, and where the band and the sidebar are. The model notifies
+    /// only the readers whose inputs changed, so calling it for any of those changes is cheap.
+    void refreshChip();
 
     /// Where this window's band and tabs go now (ContourGuiApp::titleBandOf): the decision Main.qml asks
     /// UiStyleProvider::titleBand for, from the same inputs -- the frame, the mode, the tab-bar gate, its
@@ -1622,47 +1581,8 @@ class WindowController:
     /// @return A window::HostChipState as its underlying value; Connected for a local window.
     [[nodiscard]] int hostChipState() const noexcept;
 
-    /// @return The daemon's name as the location chip shows it; empty for an in-process window.
-    [[nodiscard]] QString chipDaemonName() const;
-
-    /// @return A window::DaemonDot as its underlying value.
-    [[nodiscard]] int chipDaemonDot() const;
-
-    /// @return The glyph for the connection's state (daemonStateGlyph()).
-    [[nodiscard]] QString chipStateGlyph() const;
-
-    /// @return The glyph of every connection state (window::LocationChipStateRows).
-    [[nodiscard]] static QStringList chipStateGlyphs();
-
-    /// @return What a screen reader says of the location chip.
-    [[nodiscard]] QString chipAccessibleName() const;
-
-    /// @return What a screen reader says of the daemon-only control that heads the sidebar.
-    [[nodiscard]] QString chipDaemonAccessibleName() const;
-
-    /// @return What a screen reader adds to the chip's name.
-    [[nodiscard]] QString chipAccessibleDescription() const;
-
-    /// @param fit A window::LocationChipFit's underlying value: how much of the chip fits.
-    /// @return The chip's tooltip.
-    Q_INVOKABLE [[nodiscard]] QString chipToolTip(int fit) const;
-
-    /// @return A window::DaemonHosting as its underlying value.
-    [[nodiscard]] int chipHosting() const;
-
-    /// @return The chip's fit steps in elision order (window::LocationChipSteps), each { fit, key }.
-    [[nodiscard]] static QVariantList chipFitSteps();
-
-    /// @return The chip's last fit step (window::LocationChipFit::WorkspaceElided) as its underlying value.
-    [[nodiscard]] static int chipLeastFit();
-
-    /// @param band The band's presence, by the name UiStyleProvider::titleBand() gives it ("hidden",
-    ///             "shown", "reveal" or "pinned").
-    /// @param centre The band centre's name (barCentreName()).
-    /// @return Where the chip shows for this window, which knows what serves it and whether its sidebar is on
-    ///         screen: "none", "band" or "sidebar"; "none" for a name no presence or centre has. Names in and
-    ///         a name out is the QML carve-out, like UiStyleProvider::titleBand().
-    Q_INVOKABLE [[nodiscard]] QString locationChipPlace(QString const& band, QString const& centre) const;
+    /// @return The location chip's model: what every surface that shows the chip reads.
+    [[nodiscard]] LocationChipModel* chip() const noexcept;
 
     /// The manager's host connection changed what the chip shows. @see hostChipState
     void notifyHostConnectionChanged() { emit hostChipStateChanged(); }
@@ -1832,9 +1752,6 @@ class WindowController:
     /// @see hostChipState
     void hostChipStateChanged();
 
-    /// What the location chip shows changed: the host label or connection, the sidebar's summary or whether
-    /// the switcher is open.
-    void chipChanged();
     /// @see requestNotification.
     void notificationRequested(QString const& title, QString const& body);
     /// @see requestBell.
@@ -2128,6 +2045,9 @@ class WindowController:
     class SidebarHost;
     /// Builds the sidebar and its host, once the window exists.
     void initSidebar();
+    /// @return The location chip's inputs as the window stands now.
+    [[nodiscard]] LocationChipInputs chipInputs() const;
+    std::unique_ptr<LocationChipModel> _chip;     ///< The location chip's surface; built with the sidebar.
     std::vector<vtworkspace::WorkspaceId> _owned; ///< Every workspace of this window; @see ownedWorkspaces
     TabAttention _attention;                      ///< This window's seen-state, by PaneKey.
     /// Shows the ssh prompts of the attaches this window started; attached to the app's router for the

@@ -456,9 +456,7 @@ ThemedWindow
             window: appWindow
             bandHeight: titleBar.implicitHeight
             titleInHeaderBar: sidebarSlot.titleInHeaderBar
-            chipPlace: appWindow.win && appWindow.win.locationChipPlace
-                       ? appWindow.chipPlaceOf(appWindow.win)
-                       : "none"
+            chipPlace: appWindow.win && appWindow.win.chip ? appWindow.win.chip.place : "none"
             sidebarToggle: appWindow.sidebarToggle
             controlsInset: appWindow.bandMode === 1 ? 0 : ((appWindow.win && appWindow.win.nativeControlsInset) || 0)
         }
@@ -578,13 +576,6 @@ ThemedWindow
         if (driftChip.visible && !driftChip.inBand)
             items.push(driftChip)
         return items
-    }
-    // Where the location chip shows for `controller`: its call, which knows what serves the window and
-    // whether its sidebar shows. A call QML cannot track, so the binding reads `chipHosting`, which changes
-    // with either (chipChanged).
-    function chipPlaceOf(controller) {
-        controller.chipHosting
-        return controller.locationChipPlace(appWindow.band.band || "", appWindow.band.centre || "")
     }
     // Whether keyboard focus is in the toolbar, which an item that also holds active focus rings by.
     readonly property bool toolbarHasFocus: !!appWindow.win && (appWindow.win.focusedToolbarIndex ?? -1) >= 0

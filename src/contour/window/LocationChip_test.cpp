@@ -38,29 +38,51 @@ TEST_CASE("locationChip.daemonDot", "[LocationChip]")
 
 TEST_CASE("locationChip.steps", "[LocationChip]")
 {
-    // The table is every fit but the last in enumerator order, with distinct keys: it is the one place the
-    // elision order and the width keys live.
-    STATIC_REQUIRE(LocationChipSteps.size() + 1 == LocationChipFitCount);
+    // The table is every fit in enumerator order, with distinct keys: it is the one place the elision order
+    // and the width keys live.
+    STATIC_REQUIRE(LocationChipSteps.size() == LocationChipFitCount);
     for (auto const index: std::views::iota(size_t { 0 }, LocationChipSteps.size()))
         CHECK(std::to_underlying(LocationChipSteps[index].fit) == index);
     CHECK(std::ranges::adjacent_find(LocationChipSteps, {}, &LocationChipStep::key)
           == LocationChipSteps.end());
     // Each row's key reads its own width: widthOf names the step, and only that step fits.
     for (auto const& step: LocationChipSteps)
-        CHECK(locationChipFitFrom([&](std::string_view key) { return key == step.key ? 10.0 : 1000.0; }, 10)
+        CHECK(locationChipFit([&](std::string_view key) { return key == step.key ? 10.0 : 1000.0; }, 10)
               == step.fit);
 }
 
 TEST_CASE("locationChip.fit", "[LocationChip]")
 {
-    constexpr auto Widths = LocationChipWidths { 300, 220, 160, 110 };
-    CHECK(locationChipFit(Widths, 400) == LocationChipFit::Full);
-    CHECK(locationChipFit(Widths, 300) == LocationChipFit::Full);
-    CHECK(locationChipFit(Widths, 250) == LocationChipFit::NoStateText);
-    CHECK(locationChipFit(Widths, 200) == LocationChipFit::DaemonElided);
-    CHECK(locationChipFit(Widths, 120) == LocationChipFit::DotOnly);
-    CHECK(locationChipFit(Widths, 90) == LocationChipFit::WorkspaceElided);
-    CHECK(locationChipFit(Widths, 10) == LocationChipFit::WorkspaceElided);
+    auto const widthOf = [](std::string_view key) {
+        return key == "full" ? 300.0 : key == "noStateText" ? 220.0 : key == "daemonElided" ? 160.0 : 110.0;
+    };
+    CHECK(locationChipFit(widthOf, 400) == LocationChipFit::Full);
+    CHECK(locationChipFit(widthOf, 300) == LocationChipFit::Full);
+    CHECK(locationChipFit(widthOf, 250) == LocationChipFit::NoStateText);
+    CHECK(locationChipFit(widthOf, 200) == LocationChipFit::DaemonElided);
+    CHECK(locationChipFit(widthOf, 120) == LocationChipFit::DotOnly);
+    CHECK(locationChipFit(widthOf, 90) == LocationChipFit::WorkspaceElided);
+    CHECK(locationChipFit(widthOf, 10) == LocationChipFit::WorkspaceElided);
+}
+
+TEST_CASE("locationChip.stepTexts", "[LocationChip]")
+{
+    auto const texts =
+        locationChipStepTexts(HostChipState::Reconnecting, "work-build-server", "billing-and-invoices");
+    REQUIRE(texts.size() == LocationChipSteps.size());
+    for (auto const index: std::views::iota(size_t { 0 }, texts.size()))
+    {
+        CHECK(texts[index].fit == LocationChipSteps[index].fit);
+        CHECK(texts[index].key == LocationChipSteps[index].key);
+        // Each row says what the per-fit functions say.
+        CHECK(texts[index].daemon == locationChipDaemonText("work-build-server", texts[index].fit));
+        CHECK(texts[index].status == locationChipStatusText(HostChipState::Reconnecting, texts[index].fit));
+        CHECK(texts[index].workspace == locationChipWorkspaceText("billing-and-invoices", texts[index].fit));
+        CHECK(texts[index].tooltip
+              == locationChipToolTip(HostChipState::Reconnecting, texts[index].fit, "work-build-server"));
+    }
+    CHECK(texts[std::to_underlying(LocationChipFit::DaemonElided)].daemon == "work-…rver");
+    CHECK(texts[std::to_underlying(LocationChipFit::WorkspaceElided)].workspace == "billin…");
 }
 
 TEST_CASE("locationChip.accessibleName", "[LocationChip]")
@@ -189,32 +211,6 @@ TEST_CASE("locationChip.place", "[LocationChip]")
     };
     for (auto const& row: rows)
         CHECK(locationChipPlace(row.band, row.centre, row.hosting, row.sidebar) == row.expected);
-}
-
-TEST_CASE("locationChip.placeNamed", "[LocationChip]")
-{
-    CHECK(locationChipPlaceNamed("shown", "tabs", DaemonHosting::Daemon, SidebarShown::No) == "band");
-    CHECK(locationChipPlaceNamed("reveal", "title", DaemonHosting::Daemon, SidebarShown::No) == "band");
-    CHECK(locationChipPlaceNamed("pinned", "breadcrumb", DaemonHosting::Daemon, SidebarShown::No)
-          == "sidebar");
-    CHECK(locationChipPlaceNamed("hidden", "tabs", DaemonHosting::Daemon, SidebarShown::No) == "none");
-    CHECK(locationChipPlaceNamed("shown", "tabs", DaemonHosting::InProcess, SidebarShown::No) == "none");
-    CHECK(locationChipPlaceNamed("shown", "chip+tabs", DaemonHosting::InProcess, SidebarShown::No) == "band");
-    CHECK(locationChipPlaceNamed("hidden", "tabs", DaemonHosting::Daemon, SidebarShown::Yes) == "sidebar");
-    CHECK(locationChipPlaceNamed("hidden", "tabs", DaemonHosting::InProcess, SidebarShown::Yes) == "none");
-    CHECK(locationChipPlaceNamed("hidden", "tabs", DaemonHosting::OtherHost, SidebarShown::Yes) == "none");
-    CHECK(locationChipPlaceNamed("shown", "chip+tabs", DaemonHosting::OtherHost, SidebarShown::No) == "band");
-    CHECK(locationChipPlaceNamed("nonsense", "tabs", DaemonHosting::Daemon, SidebarShown::No) == "none");
-    CHECK(locationChipPlaceNamed("shown", "nonsense", DaemonHosting::Daemon, SidebarShown::No) == "none");
-}
-
-TEST_CASE("locationChip.fitFromInt", "[LocationChip]")
-{
-    CHECK(locationChipFitFromInt(0) == LocationChipFit::Full);
-    CHECK(locationChipFitFromInt(4) == LocationChipFit::WorkspaceElided);
-    CHECK(locationChipFitFromInt(static_cast<int>(LocationChipFitCount)) == std::nullopt);
-    CHECK(locationChipFitFromInt(-1) == std::nullopt);
-    STATIC_REQUIRE(LocationChipFits.size() == LocationChipFitCount);
 }
 
 TEST_CASE("locationChip.placeName", "[LocationChip]")

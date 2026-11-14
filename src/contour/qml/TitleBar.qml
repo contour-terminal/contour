@@ -325,16 +325,10 @@ Item {
                                                         - trailingSlot.Layout.preferredWidth
                                                         - chromeStyle.space.dragReserve)
 
-    // Where the location chip shows, the controller's call: it knows what serves the window and whether its
-    // sidebar is on screen. A call QML cannot track, so the binding reads `chipHosting`, which changes with
-    // either (chipChanged).
-    readonly property string chipPlace: {
-        // `!locationChipPlace` keeps a lightweight mock controller (offscreen tests) without the chip local.
-        if (!root.controller || !root.controller.locationChipPlace)
-            return "none"
-        root.controller.chipHosting
-        return root.controller.locationChipPlace(root.presence, root.centre)
-    }
+    // Where the location chip shows: the chip model's call, which knows what serves the window, where its band
+    // and centre are and whether its sidebar is on screen. `chip` keeps a lightweight mock controller
+    // (offscreen tests) without the chip local.
+    readonly property string chipPlace: root.controller && root.controller.chip ? root.controller.chip.place : "none"
 
     // The room the location chip has: the bar less every other part, the drag reserve and what the tab well
     // needs to keep every tab labelled, so the chip gives way before any tab goes icon-only. With many tabs
@@ -496,9 +490,9 @@ Item {
                     daemonOnly: true
                     sidebar: root.controller.sidebar
                     controller: root.controller
-                    fit: root.controller.chipFit(Object.assign({ available: Math.max(0, sidebarPartRow.x
-                                                                                      - chromeStyle.space.s3) },
-                                                               headerDaemonChip.fitWidths))
+                    fit: root.controller.chip.fitFor(Object.assign({ available: Math.max(0, sidebarPartRow.x
+                                                                                         - chromeStyle.space.s3) },
+                                                                  headerDaemonChip.fitWidths))
                     focusRingShown: activeFocus && root.toolbarHasFocus
                     isOpen: !!root.controller && !!root.controller.isWorkspaceDropdownOpen
                     onClicked: if (root.controller && root.controller.showWorkspaceDropdown)
@@ -549,7 +543,7 @@ Item {
 
         // The location chip, leading the tabs: it names the daemon and the workspace, and as the pop-up button
         // it reads as it drops the switcher down below itself. Where it shows is the controller's call
-        // (WindowController.locationChipPlace); the tabs-only bar of a sidebar window has none (`isBand`).
+        // (WindowController.chip.place); the tabs-only bar of a sidebar window has none (`isBand`).
         Loader {
             id: workspaceChipSlot
             objectName: "workspaceChipSlot"
@@ -564,7 +558,7 @@ Item {
                 sidebar: root.controller.sidebar
                 controller: root.controller
                 // The step the room allows, from the chip's measured steps: its own width never feeds it.
-                fit: root.controller.chipFit(Object.assign({ available: root.chipRoom }, workspaceChip.fitWidths))
+                fit: root.controller.chip.fitFor(Object.assign({ available: root.chipRoom }, workspaceChip.fitWidths))
                 focusRingShown: activeFocus && root.toolbarHasFocus
                 isOpen: !!root.controller && !!root.controller.isWorkspaceDropdownOpen
                 onClicked: if (root.controller && root.controller.showWorkspaceDropdown)

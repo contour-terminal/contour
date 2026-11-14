@@ -9,8 +9,8 @@
 // and the chip is the workspace alone.
 //
 // Every decision -- the daemon's name, whether the dot shows, which fit step the room allows, what each step
-// says, the tooltip, the accessible words -- is the controller's (window/LocationChip.hpp). The chip measures
-// its steps (`fitWidths`) and lays out whichever `fit` the title bar sets from the room it computes. Rest,
+// says, the tooltip, the accessible words -- is the chip model's (WindowController.chip, window/LocationChipModel.hpp).
+// The chip measures its steps (`fitWidths`) and lays out whichever `fit` the title bar sets from the room it computes. Rest,
 // hover and pressed follow the toolbar buttons' kit fills; keyboard focus wears the focus ring; on the
 // Terminal row it is a run of bracketed cells whose widths are whole cells.
 import QtQuick
@@ -24,7 +24,7 @@ Item {
 
     /// The window's sidebar model, which names the workspace and decides the marker.
     required property var sidebar
-    /// The window's controller, which decides everything else the chip says (WindowController's chip* members).
+    /// The window's controller, which owns the chip's model (`chip`).
     required property var controller
     /// How much of the chip fits, a window::LocationChipFit as its underlying value: the title bar's to set,
     /// from `fitWidths` and the room it leaves (never from the chip's own width, which would loop).
@@ -40,38 +40,33 @@ Item {
     // it again (ui-ux rule 2).
     property bool _wasOpenAtPress: false
 
-    // What makes the controller's answers about the chip stale: its daemon, the connection's state glyph and
-    // the dot's decision. Read inside every binding that calls one of its invokables, which QML cannot track.
-    readonly property string _revision: root.controller.chipDaemonName + "|" + root.controller.chipStateGlyph
-                                        + "|" + root.controller.chipDaemonDot
-    readonly property string workspaceName: root.sidebar ? root.sidebar.currentWorkspaceTitle : ""
+    /// The chip's model: everything the chip says, and the texts at every fit step.
+    readonly property var chip: root.controller.chip
+    /// The fit steps in elision order, each { fit, key, daemon, status, workspace, tooltip }: the model's to say,
+    /// so the order and the keys have one source. A step is at the position its `fit` names.
+    readonly property var fitSteps: root.chip.steps
+    /// The step the current `fit` names.
+    readonly property var step: root.fitSteps[root.fit]
     readonly property bool marked: !!root.sidebar && root.sidebar.workspaceChipMarked
     readonly property bool bracketed: chromeStyle.chipOpenGlyph !== ""
     readonly property real gap: root.bracketed ? chromeStyle.cellWidth : chromeStyle.space.s3
-    /// Whether the status dot (or, bracketed, its state glyph) shows: the controller's call, zero meaning no.
-    readonly property bool dotShown: root.controller.chipDaemonName !== "" && root.controller.chipDaemonDot !== 0
+    /// Whether the status dot (or, bracketed, its state glyph) shows: the model's call.
+    readonly property bool dotShown: root.chip.dotShown
     // How the connection looks: the dot's ink follows the palette.
     readonly property var look: chromeStyle.paletteRevision < 0
-                                ? ({}) : chromeStyle.hostChipLook(root.controller.hostChipState ?? 0)
+                                ? ({}) : chromeStyle.hostChipLook(root.chip.connectionState)
     readonly property color dotInk: root.look.dot !== undefined ? root.look.dot : "transparent"
     /// What the daemon segment, the state and the workspace say at the current fit.
-    readonly property string daemonText: { root._revision; return root.controller.chipDaemonText(root.fit) }
-    readonly property string statusText: { root._revision; return root.controller.chipStatusText(root.fit) }
-    readonly property string workspaceText: {
-        root._revision
-        return root.controller.chipWorkspaceText(root.workspaceName, root.fit)
-    }
-    /// The fit steps `fitWidths` measures, each { fit, key }, in elision order: the controller's to say
-    /// (WindowController.chipFitSteps), so the order and the keys have one source.
-    readonly property var fitSteps: root.controller.chipFitSteps
-    /// What each fit step needs, by the keys WindowController.chipFit takes, in pixels (whole cells on the
-    /// Terminal row). Independent of `fit`, so the title bar can choose `fit` from it.
+    readonly property string daemonText: root.step.daemon
+    readonly property string statusText: root.step.status
+    readonly property string workspaceText: root.step.workspace
+    /// What each fit step needs, by the steps' keys, in pixels (whole cells on the Terminal row). Independent
+    /// of `fit`, so the title bar can choose `fit` from it.
     readonly property var fitWidths: {
-        root._revision
         fontMetrics.font
         strongMetrics.font
         const widths = {}
-        root.fitSteps.forEach(step => { widths[step.key] = root._widthAt(step.fit) })
+        root.fitSteps.forEach(step => { widths[step.key] = root._widthAt(step) })
         return widths
     }
 
@@ -79,10 +74,9 @@ Item {
     /// never made narrower than that. Counted with the state dot and the attention marker present, whether or
     /// not they are, so the window's minimum does not move with the connection or with another workspace.
     readonly property real leastWidth: {
-        root._revision
         fontMetrics.font
         strongMetrics.font
-        return root._widthAt(root.controller.chipLeastFit, true)
+        return root._widthAt(root.fitSteps[root.fitSteps.length - 1], true)
     }
 
     FontMetrics {
@@ -104,17 +98,17 @@ Item {
     // The state glyph's width on the Terminal row: the current one's, or with `reserved` the widest of them.
     function _dotSpan(reserved) {
         if (!reserved)
-            return root._span(fontMetrics, root.controller.chipStateGlyph)
-        return Math.max(...root.controller.chipStateGlyphs.map(glyph => root._span(fontMetrics, glyph)))
+            return root._span(fontMetrics, root.chip.stateGlyph)
+        return Math.max(...root.chip.stateGlyphs.map(glyph => root._span(fontMetrics, glyph)))
     }
 
     // What the chip needs at one fit step: what stays whatever fits (the ends, the caret and the marker) and
     // the dot, the daemon, the state and the workspace as that step says them. `reserved` counts the dot (of a
     // chip that names a daemon) and the marker as shown, whether or not they are.
     function _widthAt(step, reserved) {
-        const daemon = root.controller.chipDaemonText(step)
-        const status = root.controller.chipStatusText(step)
-        const workspace = root.controller.chipWorkspaceText(root.workspaceName, step)
+        const daemon = step.daemon
+        const status = step.status
+        const workspace = step.workspace
         let width = root.bracketed ? root._span(fontMetrics, chromeStyle.chipOpenGlyph + chromeStyle.chipCloseGlyph)
                                    : 2 * chromeStyle.space.s5
         width += caret.leftPadding + root._span(strongMetrics, chromeStyle.menuGlyph)
@@ -123,7 +117,7 @@ Item {
         else
             width += markerSlot.visible ? markerSlot.width : 0
         let leading = false
-        if (root.dotShown || (reserved && root.controller.chipDaemonName !== "")) {
+        if (root.dotShown || (reserved && root.chip.daemonName !== "")) {
             width += root.bracketed ? root._dotSpan(reserved) : chromeStyle.size.hostDot
             leading = true
         }
@@ -144,8 +138,8 @@ Item {
     Accessible.focusable: root.focusRingShown
     Accessible.focused: root.focusRingShown
     // What it shows: the workspace and its daemon, or the daemon alone where it heads the sidebar.
-    Accessible.name: root.daemonOnly ? root.controller.chipDaemonAccessibleName : root.controller.chipAccessibleName
-    Accessible.description: root.controller.chipAccessibleDescription
+    Accessible.name: root.daemonOnly ? root.chip.daemonAccessibleName : root.chip.accessibleName
+    Accessible.description: root.chip.accessibleDescription
     Accessible.onPressAction: root.clicked()
 
     Keys.onPressed: function(event) {
@@ -189,7 +183,7 @@ Item {
 
     // What a click does, with the chord that does the same: the window's switcher opens centred from the key.
     KitToolTipHost {
-        text: { root._revision; return root.controller.chipToolTip(root.fit) }
+        text: root.step.tooltip
         shortcutCommand: "ShowSwitcher"
         toolTipName: "workspaceChipToolTip"
     }
@@ -233,7 +227,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             Accessible.ignored: true
             textFormat: Text.PlainText
-            text: root.controller.chipStateGlyph
+            text: root.chip.stateGlyph
             font: chromeStyle.type.footnote
             color: root.dotInk
         }
