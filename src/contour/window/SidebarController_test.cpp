@@ -689,7 +689,7 @@ namespace
                                                 .id = id };
 }
 
-/// What the workspace chip's dropdown opens with over @p window: its own daemon's workspaces alone.
+/// What the workspace chip's dropdown opens with over @p window: every daemon, its own first.
 [[nodiscard]] contour::window::SwitcherOpening chipOpening(vtworkspace::WorkspaceId window)
 {
     return contour::window::SwitcherOpening {
@@ -700,7 +700,7 @@ namespace
         .mode = contour::session::SwitchMode::Switch,
         .prompt = contour::window::SwitcherPrompt::Browse,
         .pick = std::nullopt,
-        .scope = contour::window::SwitcherScope::OneDaemon,
+        .scope = contour::window::SwitcherScope::Everything,
         .windowWorkspaces = { ownWorkspace(1, "contour") },
         .origin = contour::window::SwitcherOrigin::Chip,
     };

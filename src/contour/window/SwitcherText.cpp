@@ -145,11 +145,6 @@ SwitcherDetail switcherDetail(SwitcherRow const& row,
                      .separator = {},
                      .command = {},
                      .tail = {} };
-        case SwitcherRowKind::AllDaemons:
-            return { .text = std::string { inputs.showSwitcherShortcut },
-                     .separator = {},
-                     .command = {},
-                     .tail = {} };
         case SwitcherRowKind::NewDaemon:
         case SwitcherRowKind::Discovering:
         case SwitcherRowKind::Connecting:
@@ -187,7 +182,6 @@ std::string switcherDescription(SwitcherRow const& row,
                 == LabelVerdict::Running)
                 return switcherLabelActionTitle(row.target.daemon, LabelVerdict::Running);
             return "Starts a new daemon with one workspace";
-        case SwitcherRowKind::AllDaemons: return "Show every daemon";
         case SwitcherRowKind::Discovering:
         case SwitcherRowKind::Connecting:
         case SwitcherRowKind::Failure: break;

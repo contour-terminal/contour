@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/command/FuzzyFilter.hpp>
+#include <contour/window/LocationChip.hpp>
 #include <contour/window/SwitcherRows.hpp>
 
 #include <algorithm>
@@ -177,7 +178,7 @@ namespace
         }
 
         /// The workspaces of daemon @p index (matching, best first, while filtering), or what stands in for
-        /// them while it is listed; then its New Workspace, and All daemons… from the chip.
+        /// them while it is listed; then its New Workspace.
         void addOneDaemon(std::size_t index)
         {
             if (!hasDaemon(index))
@@ -218,9 +219,6 @@ namespace
                     add(std::move(row), group, title);
             }
             add(newWorkspaceRow(index), SwitcherGroup::Actions, "Actions");
-            if (_view.level == SwitcherLevel::Top && _view.origin == SwitcherOrigin::Chip
-                && _view.scope != SwitcherScope::WindowOnly)
-                add(plainRow(SwitcherRowKind::AllDaemons, "All daemons…"), SwitcherGroup::Actions, "Actions");
         }
 
         /// @return @p workspace's row ranked by how well it matches the filter; none when it does not.
@@ -397,7 +395,10 @@ SwitcherStatus daemonStatusOf(SwitcherDaemon const& daemon)
 
 std::string switcherDaemonName(session::SwitchTarget const& address)
 {
-    return address.kind == SwitchDaemonKind::Same ? std::string { "this daemon" } : address.daemon;
+    // The switcher's own rows say "this daemon" of the one the window is on; elsewhere it is named as the
+    // chip names it.
+    return address.kind == SwitchDaemonKind::Same ? std::string { "this daemon" }
+                                                  : locationDaemonName(address, {});
 }
 
 SwitcherRowIdentity switcherRowIdentity(SwitcherRow const& row)

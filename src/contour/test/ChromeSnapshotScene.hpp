@@ -1520,7 +1520,7 @@ class ChromeSnapshotScene
             .mode = session::SwitchMode::Switch,
             .prompt = window::SwitcherPrompt::Browse,
             .pick = std::nullopt,
-            .scope = window::SwitcherScope::OneDaemon,
+            .scope = window::SwitcherScope::Everything,
             .windowWorkspaces = workspaces,
             .origin = window::SwitcherOrigin::Chip });
         _controller.presentSwitcher(_switcher.get(), _controller.workspaceDropdownAnchor);
@@ -1612,16 +1612,13 @@ class ChromeSnapshotScene
     }
 
     /// @return The switcher's services over the boards' world: @p discovery finds the other daemons (none for
-    ///         null), each is listed at once, nothing is switched, and `All daemons…` shows the chord the
-    ///         scene binds to ShowSwitcher.
+    ///         null), each is listed at once, and nothing is switched.
     /// @param windowWorkspaces What a listing of the window's own daemon would say.
     [[nodiscard]] window::SwitcherServices switcherServices(
         std::shared_ptr<cli::IDaemonDiscovery> discovery,
         std::vector<window::SwitcherWorkspace> windowWorkspaces)
     {
         auto const style = command::shortcutStyleFor(variantHost(_variant));
-        auto const index = command::shortcutIndex(_config, style);
-        auto const chord = index.find(command::commandId(actions::ShowSwitcher {}));
         return window::SwitcherServices {
             .discovery = std::move(discovery),
             .savedHosts = [] { return std::vector<window::SwitcherDaemon> {}; },
@@ -1639,8 +1636,6 @@ class ChromeSnapshotScene
             .startDaemon = nullptr,
             .now = [] { return std::chrono::system_clock::time_point { SwitcherNow }; },
             .style = style,
-            .showSwitcherShortcut = [shortcut = chord != index.end() ? chord->second
-                                                                     : std::string {}] { return shortcut; },
             .workspaceMenu =
                 [](vtworkspace::WorkspaceId, uint64_t workspace) {
                     return command::WorkspaceMenuState { .position = static_cast<std::size_t>(workspace),

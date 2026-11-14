@@ -217,12 +217,10 @@ inline constexpr auto SwitcherKeyRows = std::array {
 };
 
 /// @param context Where the key is pressed.
-/// @return Whether the popup is nested: in a level, or in the chip's dropdown widened to every daemon, from
-///         where Back returns rather than closing.
+/// @return Whether the popup is nested: in a level, from where Back returns rather than closing.
 [[nodiscard]] constexpr bool isNested(SwitcherKeyContext const& context) noexcept
 {
-    return context.level != SwitcherLevel::Top
-           || (context.origin == SwitcherOrigin::Chip && context.scope == SwitcherScope::Everything);
+    return context.level != SwitcherLevel::Top;
 }
 
 /// @param condition A row's condition.

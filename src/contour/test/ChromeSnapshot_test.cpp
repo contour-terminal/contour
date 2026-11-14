@@ -1183,28 +1183,14 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 break;
             case SnapshotScript::SidebarChipDropdown: {
                 static_cast<void>(checkSidebarScript(scene, variant));
-                // The dropdown lists this window's daemon's workspaces, and nothing else.
+                // The dropdown is the full switcher, hanging below the chip.
                 auto const* dropdown = scene.workspaceDropdown();
                 REQUIRE(dropdown != nullptr);
                 CHECK(dropdown->property("visible").toBool());
-                // All daemons… names ShowSwitcher's chord as the picture's platform binds and spells it,
-                // whichever machine renders it.
                 auto const* switcher = scene.switcher();
                 REQUIRE(switcher != nullptr);
-                auto const& rows = switcher->rows();
-                auto const all =
-                    std::ranges::find(rows, "All daemons…", &contour::window::SwitcherRow::title);
-                REQUIRE(all != rows.end());
-                auto const index = switcher->index(static_cast<int>(std::distance(rows.begin(), all)));
-                auto const chord =
-                    switcher
-                        ->data(index,
-                               static_cast<int>(contour::window::SwitcherController::Roles::DetailTextRole))
-                        .toString();
-                CHECK(chord
-                      == (variantHost(variant) == contour::config::HostPlatform::MacOS
-                              ? QStringLiteral("⇧⌘R")
-                              : QStringLiteral("Ctrl+Shift+R")));
+                CHECK_FALSE(std::ranges::contains(
+                    switcher->rows(), "All daemons…", &contour::window::SwitcherRow::title));
                 break;
             }
             case SnapshotScript::Switcher:

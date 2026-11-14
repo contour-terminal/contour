@@ -119,12 +119,31 @@ enum class SwitcherOrigin : uint8_t
 /// Whether the top level lists every daemon or one daemon's workspaces.
 enum class SwitcherScope : uint8_t
 {
-    Everything = 0, ///< Every daemon, grouped; the ShowSwitcher action, or the chip's dropdown widened.
-    OneDaemon,      ///< One daemon's workspaces alone: the chip's dropdown, or the daemon a switch asked to
-                    ///< pick a workspace of.
+    Everything = 0, ///< Every daemon, grouped; the ShowSwitcher action, and the workspace chip's popup.
+    OneDaemon,      ///< One daemon's workspaces alone: the daemon a switch asked to pick a workspace of.
     WindowOnly,     ///< The window has no daemon (an in-process window): its own workspaces alone, and no
                     ///< other daemon is looked for or offered.
 };
+
+/// What a window is served by, which decides what its switcher can list.
+enum class SwitcherWindowKind : uint8_t
+{
+    Daemon = 0, ///< The window is on a daemon.
+    InProcess,  ///< The window has no daemon: only its own workspaces exist for it.
+};
+
+/// What the workspace chip opens: every daemon, the full switcher below the chip.
+inline constexpr auto ChipSwitcherScope = SwitcherScope::Everything;
+
+/// @param requested The scope the action asked for.
+/// @param window What serves the window the popup opens over.
+/// @return The scope the popup opens with: a window without a daemon lists its own workspaces alone, whatever
+///         was asked.
+[[nodiscard]] constexpr SwitcherScope switcherScopeFor(SwitcherScope requested,
+                                                       SwitcherWindowKind window) noexcept
+{
+    return window == SwitcherWindowKind::InProcess ? SwitcherScope::WindowOnly : requested;
+}
 
 /// @param scope A top level's scope.
 /// @return Whether it lists the workspaces of a single daemon (or of the window alone), not every daemon.
@@ -157,7 +176,7 @@ enum class SwitcherGroup : uint8_t
     OtherDaemons,     ///< The other daemons, local ones first, then saved hosts.
     Matches,          ///< What typing found: the matching workspaces of every listed local daemon.
     DaemonWorkspaces, ///< The workspaces of a daemon drilled into, or a pick's.
-    Actions,          ///< New Workspace, New Daemon…, All daemons….
+    Actions,          ///< New Workspace, New Daemon….
 };
 
 /// What a row of the popup is.
@@ -167,7 +186,6 @@ enum class SwitcherRowKind : uint8_t
     Daemon,        ///< Another daemon: choosing it drills into its level.
     NewWorkspace,  ///< `New Workspace`, or `New Workspace “query”`: creates one and switches to it.
     NewDaemon,     ///< `New Daemon…`: drills into the label prompt.
-    AllDaemons,    ///< `All daemons…`: widens the chip's dropdown to every daemon.
     Discovering,   ///< `Looking for other daemons…`, while discovery runs.
     Connecting,    ///< `Connecting to host…`, while a daemon drilled into is being listed.
     LabelAction,   ///< The New Daemon level's one action: start the daemon, or switch to the running one.
@@ -182,7 +200,6 @@ enum class SwitcherHintSubject : uint8_t
     Daemon,          ///< A daemon row.
     NewWorkspace,    ///< New Workspace.
     NewDaemon,       ///< New Daemon….
-    AllDaemons,      ///< All daemons….
     CreateDaemon,    ///< The New Daemon level's action for an available label.
     SwitchToRunning, ///< The New Daemon level's action for a label that runs already.
 };
@@ -271,13 +288,6 @@ inline constexpr auto SwitcherRowKindRules = std::array {
                           .role = SwitcherRowRole::Action,
                           .awaits = AwaitsAnswer::No,
                           .button = NewWindowButton::No },
-    SwitcherRowKindRule { .kind = SwitcherRowKind::AllDaemons,
-                          .drillsIn = DrillsIn::Yes,
-                          .newWindow = OpensInNewWindow::No,
-                          .hints = SwitcherHintSubject::AllDaemons,
-                          .role = SwitcherRowRole::Action,
-                          .awaits = AwaitsAnswer::No,
-                          .button = NewWindowButton::No },
     SwitcherRowKindRule { .kind = SwitcherRowKind::Discovering,
                           .drillsIn = DrillsIn::No,
                           .newWindow = OpensInNewWindow::No,
@@ -359,9 +369,6 @@ struct SwitcherInputs
     std::size_t windowDaemon =
         0; ///< The daemon the window the popup is over is on, an index into @c daemons.
     SwitcherDiscovery discovery = SwitcherDiscovery::Settled; ///< Whether other daemons are still looked for.
-    /// The chord bound to ShowSwitcher, as the platform spells it: the `All daemons…` row's detail, since
-    /// that row widens the dropdown to what the chord opens. Empty while nothing binds it.
-    std::string_view showSwitcherShortcut {};
 };
 
 /// Where in the popup the user is, and what they typed.
@@ -436,10 +443,9 @@ enum class LabelVerdict : uint8_t
 ///   "Workspaces", best first, ties by daemon then position, each with its daemon's pill; the daemons whose
 ///   name matches under "Other daemons"; then `New Workspace “query”`. A saved host's workspaces are never
 ///   matched: it is matched by its name alone.
-/// - Top, one daemon (the chip's dropdown, a pick), or the Daemon level: that daemon's workspaces (those
-///   matching, best first, when typed), kept while a listing refreshes them; a connecting row while it is
-///   listed for the first time; a failure row saying why it could not be listed; then its New Workspace, and
-///   from the chip All daemons….
+/// - Top, one daemon (a pick, or a window with no daemon), or the Daemon level: that daemon's workspaces
+///   (those matching, best first, when typed), kept while a listing refreshes them; a connecting row while it
+///   is listed for the first time; a failure row saying why it could not be listed; then its New Workspace.
 /// - NewDaemon: the one action a valid label offers, else nothing.
 /// @param inputs What the list is made of.
 /// @param view Where the user is and what they typed.
@@ -456,7 +462,7 @@ enum class LabelVerdict : uint8_t
 
 /// What tells one row from every other across a rebuild: its kind and its target. Every row bound to a daemon
 /// names that daemon in its target (a workspace, a daemon, a New Workspace, a label action); the rows without
-/// a target (New Daemon…, All daemons…, the looking, connecting and failure rows) are one of a kind in a
+/// a target (New Daemon…, the looking, connecting and failure rows) are one of a kind in a
 /// view, so their kind alone tells them apart. A daemon's index is not part of it: discovery reorders the
 /// daemons.
 struct SwitcherRowIdentity

@@ -203,11 +203,10 @@ TEST_CASE("switcherDescription names what Return does", "[switcher]")
     CHECK(describe(switcherRows(inputs, levelView), "api-docs", levelView)
           == "Move this window to home · api-docs");
 
-    auto const chipView = SwitcherView { .origin = SwitcherOrigin::Chip, .scope = SwitcherScope::OneDaemon };
+    auto const chipView = SwitcherView { .origin = SwitcherOrigin::Chip, .scope = SwitcherScope::WindowOnly };
     auto const chip = switcherRows(inputs, chipView);
     CHECK(describe(chip, "contour", chipView) == "contour · main ↑2");
     CHECK(describe(chip, "api-gateway", chipView) == "api-gateway");
-    CHECK(describe(chip, "All daemons…", chipView) == "Show every daemon");
 
     auto const newDaemonView = SwitcherView { .level = SwitcherLevel::NewDaemon, .filter = "research" };
     auto const newDaemon = switcherRows(inputs, newDaemonView);
@@ -361,8 +360,6 @@ TEST_CASE("switcherHintSubject follows the selected row", "[switcher]")
 {
     auto row = SwitcherRow {};
     CHECK(switcherHintSubject(row) == SwitcherHintSubject::Workspace);
-    row.kind = SwitcherRowKind::AllDaemons;
-    CHECK(switcherHintSubject(row) == SwitcherHintSubject::AllDaemons);
     row.kind = SwitcherRowKind::Discovering;
     CHECK(switcherHintSubject(row) == SwitcherHintSubject::None);
 }
@@ -423,20 +420,6 @@ TEST_CASE("switcherLabelState judges the label as it is typed", "[switcher]")
                                   .actionTitle = {},
                                   .equivalentCommand = {},
                                   .subject = SwitcherHintSubject::None });
-}
-
-TEST_CASE("All daemons… shows the chord bound to ShowSwitcher, and nothing while none is", "[switcher]")
-{
-    auto list = daemons();
-    auto const chip = SwitcherView { .origin = SwitcherOrigin::Chip, .scope = SwitcherScope::OneDaemon };
-
-    auto const bound = SwitcherInputs { .daemons = list, .showSwitcherShortcut = "Ctrl+Shift+R" };
-    CHECK(switcherDetail(rowTitled(switcherRows(bound, chip), "All daemons…"), bound, Now)
-          == SwitcherDetail { .text = "Ctrl+Shift+R", .separator = {}, .command = {}, .tail = {} });
-
-    auto const unbound = SwitcherInputs { .daemons = list };
-    CHECK(switcherDetail(rowTitled(switcherRows(unbound, chip), "All daemons…"), unbound, Now)
-          == SwitcherDetail {});
 }
 
 TEST_CASE("a window without a daemon is offered no way to open a workspace in a new window", "[switcher]")

@@ -82,7 +82,6 @@ static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SwitcherDe
 /// - A daemon: how many workspaces it holds, or how its listing stands (`Looking…`, the failure, `Not
 ///   connected`).
 /// - New Workspace: `on ‹daemon›`.
-/// - All daemons…: the chord bound to ShowSwitcher, or nothing while none is.
 /// @param row The row.
 /// @param inputs What the list was made of.
 /// @param now The wall clock, for another daemon's times.
@@ -142,11 +141,6 @@ inline constexpr auto SwitcherHintRows = std::array {
                       .enterVerb = "Open",
                       .shiftEnterVerb = {},
                       .rightVerb = "Open",
-                      .openVerb = {} },
-    SwitcherHintRow { .subject = SwitcherHintSubject::AllDaemons,
-                      .enterVerb = "Show",
-                      .shiftEnterVerb = {},
-                      .rightVerb = "Show",
                       .openVerb = {} },
     SwitcherHintRow { .subject = SwitcherHintSubject::CreateDaemon,
                       .enterVerb = "Create",

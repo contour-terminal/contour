@@ -71,9 +71,6 @@ struct SwitcherServices
     std::function<std::chrono::system_clock::time_point()> now {};
     /// How the footer, the row menu and the label prompt spell keys.
     command::ShortcutStyle style = command::ShortcutStyle::Text;
-    /// The chord bound to ShowSwitcher, spelled in @c style, from the bindings as they are now; empty while
-    /// nothing binds it. Read as the popup opens: `All daemons…` shows it.
-    std::function<std::string()> showSwitcherShortcut {};
     /// The sidebar's view of one of the window's own daemon's workspaces, by its daemon id, for its row menu.
     std::function<command::WorkspaceMenuState(vtworkspace::WorkspaceId window, uint64_t workspace)>
         workspaceMenu {};
@@ -433,9 +430,8 @@ class SwitcherController: public QAbstractListModel
     SwitcherSelectionOrigin _selectionOrigin = SwitcherSelectionOrigin::Opening;
     Presentation _presentation;
     SwitcherLabelState _labelState;
-    std::string _labelFailure;         ///< Why the last start failed; cleared as the label changes.
-    std::string _showSwitcherShortcut; ///< SwitcherServices::showSwitcherShortcut, as of the opening.
-    bool _isBusy = false;              ///< @see isBusy(); the QML-facing predicate's member.
+    std::string _labelFailure; ///< Why the last start failed; cleared as the label changes.
+    bool _isBusy = false;      ///< @see isBusy(); the QML-facing predicate's member.
     RowMenu _rowMenu;
     /// The discoveries and starts under way, their answers handed back here; joined first, as the controller
     /// goes, and the ones that ended as the next one starts.

@@ -2155,7 +2155,7 @@ void TerminalSessionManager::showSwitcher(TerminalSession const& acting)
 void TerminalSessionManager::showWorkspaceDropdown(TerminalSession const& acting, QRectF chip)
 {
     openSwitcherOver(
-        acting, window::SwitcherPrompt::Browse, "WorkspaceChip", window::SwitcherScope::OneDaemon, chip);
+        acting, window::SwitcherPrompt::Browse, "WorkspaceChip", window::ChipSwitcherScope, chip);
 }
 
 void TerminalSessionManager::newDaemon(TerminalSession const& acting)
@@ -2210,15 +2210,17 @@ void TerminalSessionManager::openSwitcherOver(TerminalSession const& acting,
     // The window's own workspaces are its sidebar's, as of now.
     controller->sidebar().refreshNow();
     if (auto const shown = _app.openSwitcher(
-            window::SwitcherOpening { .window = window->id(),
-                                      .windowDaemon = daemon.value_or(SwitchTarget {}),
-                                      .mode = SwitchMode::Switch,
-                                      .prompt = prompt,
-                                      .pick = std::nullopt,
-                                      .scope = inProcess ? window::SwitcherScope::WindowOnly : scope,
-                                      .windowWorkspaces = _app.windowWorkspacesOf(*controller, window->id()),
-                                      .origin = control ? window::SwitcherOrigin::Chip
-                                                        : window::SwitcherOrigin::Centred },
+            window::SwitcherOpening {
+                .window = window->id(),
+                .windowDaemon = daemon.value_or(SwitchTarget {}),
+                .mode = SwitchMode::Switch,
+                .prompt = prompt,
+                .pick = std::nullopt,
+                .scope = window::switcherScopeFor(scope,
+                                                  inProcess ? window::SwitcherWindowKind::InProcess
+                                                            : window::SwitcherWindowKind::Daemon),
+                .windowWorkspaces = _app.windowWorkspacesOf(*controller, window->id()),
+                .origin = control ? window::SwitcherOrigin::Chip : window::SwitcherOrigin::Centred },
             *controller,
             control);
         !shown)

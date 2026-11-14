@@ -783,8 +783,8 @@ class WindowController:
     /// the host chip's click.
     Q_INVOKABLE void showSwitcher() const;
 
-    /// Opens the switcher as the workspace chip's dropdown: below the chip, listing this window's daemon's
-    /// workspaces alone (TerminalSessionManager::showWorkspaceDropdown()).
+    /// Opens the switcher below the workspace chip: every daemon's workspaces for a daemon window, the
+    /// window's own for an in-process one (TerminalSessionManager::showWorkspaceDropdown()).
     /// @param chip The chip in the window's scene coordinates.
     Q_INVOKABLE void showWorkspaceDropdown(QRectF const& chip) const;
 

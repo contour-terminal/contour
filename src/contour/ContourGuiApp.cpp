@@ -4557,13 +4557,6 @@ window::SwitcherServices ContourGuiApp::switcherServices()
             },
         .now = [] { return std::chrono::system_clock::now(); },
         .style = command::platformShortcutStyle(),
-        .showSwitcherShortcut =
-            [this] {
-                // The bindings as they are now: a ReloadConfig may have rebound it.
-                auto const index = command::shortcutIndex(_config, command::platformShortcutStyle());
-                auto const found = index.find(command::commandId(actions::ShowSwitcher {}));
-                return found != index.end() ? found->second : std::string {};
-            },
         .workspaceMenu =
             [this](vtworkspace::WorkspaceId window, uint64_t workspace) {
                 auto const* const controller = _sessionManager.controllerDisplaying(window);

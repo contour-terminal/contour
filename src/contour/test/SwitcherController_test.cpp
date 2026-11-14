@@ -236,7 +236,6 @@ TEST_CASE("Switcher: a window reaching no other daemon lists its own workspaces 
     auto const titles = s.titles();
     CHECK(std::ranges::contains(titles, "contour"));
     CHECK(std::ranges::contains(titles, "New Workspace"));
-    CHECK_FALSE(std::ranges::contains(titles, "All daemons…"));
     CHECK_FALSE(std::ranges::contains(titles, "Looking for other daemons…"));
     CHECK_FALSE(std::ranges::contains(titles, "home"));
     CHECK(s.world.listed.empty());
@@ -490,33 +489,37 @@ TEST_CASE("Switcher: the footer follows the selected row", "[contour][switcher]"
                                          SwitchMode::Switch));
 }
 
-TEST_CASE("Switcher: the chip scope widens to every daemon and Escape narrows it back", "[contour][switcher]")
+TEST_CASE("Switcher: the chip opens every daemon, and Escape closes it", "[contour][switcher]")
 {
     auto s = Switcher {};
     QSignalSpy const cancelled { s.controller.get(), &window::SwitcherController::cancelled };
-    s.open(window::SwitcherOrigin::Chip, window::SwitcherScope::OneDaemon);
+    s.open(window::SwitcherOrigin::Chip, window::SwitcherScope::Everything);
 
-    // The window's own daemon is its sidebar's: listed, never "Connecting to work…".
-    CHECK(s.titles()
-          == std::vector<std::string> {
-              "contour", "api-gateway", "docs", "scratch", "New Workspace", "All daemons…" });
-    CHECK(s.world.listed.empty());
-    CHECK(s.controller->hintText() == "Filter workspaces on work…");
-    CHECK(s.controller->footerDescription() == "api-gateway");
-
-    s.select("All daemons…", SwitcherRowKind::AllDaemons);
-    CHECK(s.press(Qt::Key_Return));
-    CHECK(s.controller->scope() == window::SwitcherScope::Everything);
+    // The window's own daemon is its sidebar's: listed first, never "Connecting to work…".
     REQUIRE(s.settled());
+    CHECK(s.titles().front() == "contour");
     CHECK(std::ranges::contains(s.titles(), "home"));
     CHECK(std::ranges::contains(s.titles(), "ci-box"));
+    CHECK_FALSE(std::ranges::contains(s.titles(), "All daemons…"));
+    CHECK(s.controller->scope() == window::SwitcherScope::Everything);
 
-    CHECK(s.press(Qt::Key_Escape));
-    CHECK(s.controller->scope() == window::SwitcherScope::OneDaemon);
-    CHECK(s.selected().kind == SwitcherRowKind::AllDaemons);
-    CHECK(cancelled.isEmpty());
-    CHECK(s.press(Qt::Key_Escape));
-    CHECK(cancelled.size() == 1);
+    SECTION("Escape closes it from the top")
+    {
+        CHECK(s.press(Qt::Key_Escape));
+        CHECK(cancelled.size() == 1);
+    }
+    SECTION("inside a daemon, Escape returns to the top, then closes")
+    {
+        s.select("home", SwitcherRowKind::Daemon);
+        CHECK(s.press(Qt::Key_Return));
+        CHECK(s.controller->level() == static_cast<int>(window::SwitcherLevel::Daemon));
+        CHECK(s.press(Qt::Key_Escape));
+        CHECK(s.controller->level() == static_cast<int>(window::SwitcherLevel::Top));
+        CHECK(s.controller->scope() == window::SwitcherScope::Everything);
+        CHECK(cancelled.isEmpty());
+        CHECK(s.press(Qt::Key_Escape));
+        CHECK(cancelled.size() == 1);
+    }
 }
 
 TEST_CASE("Switcher: the selection stays on New Daemon… while the looking row comes and goes",
@@ -736,21 +739,6 @@ TEST_CASE("Switcher: the daemon drilled into stays it while a discovery reorders
     CHECK(
         s.role(s.rowOf("ci-box", SwitcherRowKind::Daemon), window::SwitcherController::Roles::DetailTextRole)
         == "Not connected");
-}
-
-TEST_CASE("Switcher: All daemons… shows the chord bound to ShowSwitcher", "[contour][switcher]")
-{
-    auto const bound = GENERATE(as<std::string> {}, "Ctrl+Shift+R", "");
-    auto s = Switcher {};
-    auto services = s.world.services();
-    services.showSwitcherShortcut = [bound] {
-        return std::string { bound };
-    };
-    s.controller = std::make_unique<window::SwitcherController>(std::move(services));
-    s.open(window::SwitcherOrigin::Chip, window::SwitcherScope::OneDaemon);
-    CHECK(s.role(s.rowOf("All daemons…", SwitcherRowKind::AllDaemons),
-                 window::SwitcherController::Roles::DetailTextRole)
-          == QString::fromStdString(bound));
 }
 
 TEST_CASE("Switcher: the level and discovery tell QML of their own changes", "[contour][switcher]")

@@ -112,8 +112,7 @@ struct Fixture
                                                   .mode = SwitchMode::Switch,
                                                   .prompt = window::SwitcherPrompt::Browse,
                                                   .pick = std::nullopt,
-                                                  .scope = chip ? window::SwitcherScope::OneDaemon
-                                                                : window::SwitcherScope::Everything,
+                                                  .scope = window::SwitcherScope::Everything,
                                                   .windowWorkspaces = workWorkspaces(),
                                                   .origin = chip ? window::SwitcherOrigin::Chip
                                                                  : window::SwitcherOrigin::Centred },
