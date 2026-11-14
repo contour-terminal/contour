@@ -454,9 +454,8 @@ TEST_CASE("DaemonLink: New Window shows the first hidden workspace, else a new o
         return std::ranges::to<std::vector>(
             std::views::iota(0, daemon.host->model().workspaceCount())
             | std::views::transform([&](int index) {
-                  return daemon.host->clientsShowing(daemon.host->model().workspaceAt(index)->id().value);
-              })
-            | std::views::transform(&std::vector<vthost::ConnectionId>::size));
+                  return showing(daemon, daemon.host->model().workspaceAt(index)->id().value);
+              }));
     });
     CHECK(shownBy == std::vector<std::size_t> { 1, 1, 1 });
 }

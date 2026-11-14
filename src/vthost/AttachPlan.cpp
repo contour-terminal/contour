@@ -4,8 +4,6 @@
 #include <algorithm>
 #include <ranges>
 
-#include <vthost/ViewRouting.hpp>
-
 namespace vthost
 {
 
@@ -54,7 +52,10 @@ namespace
             std::ranges::any_of(context.workspaces, [&](WorkspaceSummary const& workspace) {
                 return workspace.id == context.primaryWorkspace && isShown(workspace);
             });
-        if (workspacesWithTabs(context).empty() && !primaryShown)
+        auto const hasTab = [](WorkspaceSummary const& workspace) {
+            return workspace.tabCount > 0;
+        };
+        if (std::ranges::none_of(context.workspaces, hasTab) && !primaryShown)
             return { .select = context.primaryWorkspace, .creation = AttachCreation::FirstTabInPrimary };
         return { .select = std::nullopt, .creation = AttachCreation::NewWorkspace };
     }
