@@ -3156,7 +3156,7 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
             context.workspaces.push_back(
                 WorkspaceSummary { .id = workspace->id().value,
                                    .tabCount = workspace->tabCount(),
-                                   .visibility = _host.visibility(workspace->id().value) });
+                                   .visibility = _host.visibilityForAttach(workspace->id().value) });
     std::ranges::sort(context.workspaces, {}, &WorkspaceSummary::id);
 
     auto const plan = planAttach(intent, context);

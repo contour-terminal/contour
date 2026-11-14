@@ -1297,6 +1297,17 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return Shown while some attached client selects it, else Hidden.
     [[nodiscard]] WorkspaceVisibility visibility(uint64_t workspace) const;
 
+    /// What a connection that is attaching sees: visibility(), except that a workspace whose window's
+    /// connection dropped within the reconnect grace (ReconnectGrace) is still Shown, since that window is
+    /// reconnecting to it and a new window must not take it.
+    /// @param workspace A workspace.
+    /// @return Shown, or Hidden.
+    [[nodiscard]] WorkspaceVisibility visibilityForAttach(uint64_t workspace) const;
+
+    /// How long after its connection dropped a window is taken to still show its workspace: the longest wait
+    /// between two reconnect attempts of the client (client::BackoffSchedule::ceiling).
+    [[nodiscard]] static std::chrono::milliseconds reconnectGrace() noexcept;
+
     /// @return One view per attached client that follows the daemon (SessionStreamEvents::followsDaemon), in
     ///         attach order: the connection and what it selects. The input of the routing decisions in
     ///         ViewRouting.hpp.
@@ -2320,6 +2331,15 @@ class SessionHost final: public vtworkspace::ModelEvents
                       proto::InputKind kind);
     /// The workspace some window selected last. @see noteSelected
     std::optional<uint64_t> _lastSelected;
+    /// A workspace a dropped connection selected, and until when it counts as shown to an attach.
+    struct ReconnectHold
+    {
+        uint64_t workspace = 0;
+        core::platform::SteadyTimePoint until {};
+    };
+    std::vector<ReconnectHold> _reconnectHolds;
+    /// The attached clients that said their window closes for good (proto::WindowFocus::Closing).
+    std::vector<SessionStreamEvents const*> _closingClients;
     /// Names the raise holder again, and tells the connection that gained the role and the one that lost it.
     void settleRaiseRole();
     /// The value the last focus report was stamped with. @see noteFocus

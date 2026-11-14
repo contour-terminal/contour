@@ -247,7 +247,7 @@ struct WireCellPixelSize
 /// than the client's upgrade message. Accepted while daemon mode is experimental.
 enum class AttachIntentKind : uint8_t
 {
-    Default = 5,      ///< The daemon picks: the workspace of the last selection if any, else the first.
+    Default = 5,      ///< The daemon picks: the first workspace no window shows, else a new one.
     NewWorkspace = 6, ///< A new workspace of its own, selected at once.
     Select = 7,       ///< Exactly the workspace named in AttachIntent::workspace.
     Resume = 8,       ///< The workspace named after a reconnect; when it is gone, as Default.
@@ -1659,6 +1659,10 @@ enum class WindowFocus : uint8_t
 {
     Unfocused = 0, ///< The window lost focus.
     Focused = 1,   ///< The window gained focus.
+    /// The window is closed for good, and does not lose its workspace to a reconnect: the connection ends
+    /// next. It is unfocused as well. A daemon from before it reads it as Unfocused (a value a newer peer
+    /// knows decodes to the weaker claim), and takes the connection's end for a drop.
+    Closing = 2,
 };
 
 /// Client→server (Capability::DaemonFollow): select the one workspace this connection displays in full.

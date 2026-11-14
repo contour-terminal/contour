@@ -64,6 +64,7 @@ namespace
     constexpr auto FocusNames = std::array {
         EnumName { .value = WindowFocus::Unfocused, .name = "unfocused" },
         EnumName { .value = WindowFocus::Focused, .name = "focused" },
+        EnumName { .value = WindowFocus::Closing, .name = "closing" },
     };
 
     constexpr auto RoleNames = std::array {

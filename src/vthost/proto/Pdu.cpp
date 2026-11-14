@@ -2359,7 +2359,7 @@ namespace
         if (!assign(in.u8(), focus, error))
             return std::unexpected(error);
         // A state a newer peer knows is the weaker claim: the window does not have the focus.
-        pdu.focus = enumOrElse(focus, WindowFocus::Focused, WindowFocus::Unfocused);
+        pdu.focus = enumOrElse(focus, WindowFocus::Closing, WindowFocus::Unfocused);
         return pdu;
     }
 

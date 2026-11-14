@@ -30,6 +30,7 @@
 #include <vthost/RerunPolicy.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/TappingPty.hpp>
+#include <vthost/client/ClientSupervisor.hpp>
 #include <vthost/control/LoopControlBridge.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/PaneLayout.hpp>
@@ -1395,6 +1396,14 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client)
     if (!counted)
         return;
     _focusSerials.erase(client);
+    // A window that said it closes leaves its workspace free at once; a lost connection is a reconnect.
+    auto const closed = std::erase(_closingClients, client) != 0;
+    if (auto const shown = client->selectedWorkspace(); shown != 0 && !closed)
+    {
+        auto const now = _clocks.steady.now();
+        std::erase_if(_reconnectHolds, [now](ReconnectHold const& hold) { return hold.until <= now; });
+        _reconnectHolds.push_back({ .workspace = shown, .until = now + reconnectGrace() });
+    }
     settleRaiseRole();
     // A switch asked of a window that is gone will never be answered.
     auto const gone = client->connectionId();
@@ -1422,6 +1431,8 @@ void SessionHost::noteFocus(SessionStreamEvents const& client, proto::WindowFocu
         return;
     if (focus == proto::WindowFocus::Focused)
         _focusSerials[&client] = ++_focusCounter;
+    if (focus == proto::WindowFocus::Closing && !std::ranges::contains(_closingClients, &client))
+        _closingClients.push_back(&client);
     settleRaiseRole();
 }
 
@@ -1465,6 +1476,23 @@ WorkspaceVisibility SessionHost::visibility(uint64_t workspace) const
                                [workspace](SessionStreamEvents const* client) {
                                    return client->selectedWorkspace() == workspace;
                                })
+               ? WorkspaceVisibility::Shown
+               : WorkspaceVisibility::Hidden;
+}
+
+std::chrono::milliseconds SessionHost::reconnectGrace() noexcept
+{
+    return client::BackoffSchedule {}.ceiling;
+}
+
+WorkspaceVisibility SessionHost::visibilityForAttach(uint64_t workspace) const
+{
+    if (visibility(workspace) == WorkspaceVisibility::Shown)
+        return WorkspaceVisibility::Shown;
+    auto const now = _clocks.steady.now();
+    return std::ranges::any_of(
+               _reconnectHolds,
+               [&](ReconnectHold const& hold) { return hold.workspace == workspace && now < hold.until; })
                ? WorkspaceVisibility::Shown
                : WorkspaceVisibility::Hidden;
 }

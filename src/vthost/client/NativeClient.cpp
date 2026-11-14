@@ -766,6 +766,11 @@ void NativeClient::replySwitch(proto::SwitchReply reply)
 
 void NativeClient::detach()
 {
+    // The window is done with its workspace: a daemon that knows says so to the next attach, which may then
+    // take it. Sent before the connection ends, which flushes what is queued; one that does not know reads it
+    // as an unfocus, and takes the end for a drop.
+    if (!_detached)
+        std::ignore = reportFocus(proto::WindowFocus::Closing);
     _detached = true;
     // Retires the parked read so run() leaves its pump and ends the connection in order, with
     // close_notify over TLS. Closing here instead reads as truncation on the daemon's side.

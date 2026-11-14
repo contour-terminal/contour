@@ -474,6 +474,65 @@ TEST_CASE("a workspace is Shown while some connection selects it, and Hidden oth
     h.host.noteClientDetached(&first);
 }
 
+TEST_CASE("a workspace whose window's connection dropped stays shown to an attach for the reconnect grace",
+          "[vthost][host][visibility]")
+{
+    using vthost::WorkspaceVisibility;
+    auto clock = core::platform::ManualClock {};
+    auto wall = core::platform::ManualWallClock {};
+    core::net::testing::ScriptedBackend source;
+    core::net::EventLoop loop { source };
+    SessionHost host { loop,
+                       [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                           return std::make_unique<vtpty::MockPty>(size);
+                       },
+                       vtbackend::Settings {},
+                       core::defaultEnvironment(),
+                       vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                   .clocks = vtbackend::TerminalClocks {
+                                                       .steady = clock,
+                                                       .wall = wall,
+                                                       .localTime = &vtbackend::fixedOffsetLocalTime<> } } };
+    REQUIRE(host.createTab() != nullptr);
+    auto const workspace = host.workspaceId().value;
+
+    auto window = SelectingClient {};
+    window.selected = workspace;
+    host.noteClientAttached(&window);
+    host.noteClientDetached(&window);
+
+    // Nobody shows it, but its window is reconnecting: a new window must not take it.
+    CHECK(host.visibility(workspace) == WorkspaceVisibility::Hidden);
+    CHECK(host.visibilityForAttach(workspace) == WorkspaceVisibility::Shown);
+    clock.advance(SessionHost::reconnectGrace() - std::chrono::milliseconds { 1 });
+    CHECK(host.visibilityForAttach(workspace) == WorkspaceVisibility::Shown);
+    clock.advance(std::chrono::milliseconds { 1 });
+    CHECK(host.visibilityForAttach(workspace) == WorkspaceVisibility::Hidden);
+}
+
+TEST_CASE("a workspace whose window said it closes is offered to the very next attach",
+          "[vthost][host][visibility]")
+{
+    using vthost::WorkspaceVisibility;
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId().value;
+
+    auto closing = SelectingClient {};
+    closing.selected = workspace;
+    h.host.noteClientAttached(&closing);
+    h.host.noteFocus(closing, vthost::proto::WindowFocus::Closing);
+    h.host.noteClientDetached(&closing);
+    CHECK(h.host.visibilityForAttach(workspace) == WorkspaceVisibility::Hidden);
+
+    // A drop with no word before it is a window reconnecting.
+    auto dropped = SelectingClient {};
+    dropped.selected = workspace;
+    h.host.noteClientAttached(&dropped);
+    h.host.noteClientDetached(&dropped);
+    CHECK(h.host.visibilityForAttach(workspace) == WorkspaceVisibility::Shown);
+}
+
 TEST_CASE("the last selection is remembered, and only an attached client's counts",
           "[vthost][host][selection]")
 {

@@ -2387,7 +2387,7 @@ TEST_CASE("the workspace select, focus, role and switch PDUs round-trip", "[vtho
         encodePdu(with, 1, DecodedPdu { SelectWorkspace { .workspace = 3, .directoryFromSession = 1 } });
         CHECK(without.size() < with.size());
     }
-    for (auto const focus: { WindowFocus::Unfocused, WindowFocus::Focused })
+    for (auto const focus: { WindowFocus::Unfocused, WindowFocus::Focused, WindowFocus::Closing })
     {
         auto const report = ReportFocus { .focus = focus };
         CHECK(roundTrip(DecodedPdu { report }) == DecodedPdu { report });
