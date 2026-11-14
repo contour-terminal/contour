@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vthost/Logging.hpp>
 #include <vthost/handover/HandoverMemory.hpp>
 
 #ifndef _WIN32
@@ -21,6 +22,7 @@
     #include <span>
     #include <string>
     #include <string_view>
+    #include <system_error>
     #include <utility>
 
     #include <fcntl.h>
@@ -94,7 +96,7 @@ namespace
     int createMemFd()
     {
     #if defined(__linux__) || defined(__FreeBSD__)
-        return ::memfd_create("contour-handover", MFD_CLOEXEC);
+        return ::memfd_create("contour-handover", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     #else
         errno = ENOSYS;
         return -1;
@@ -128,6 +130,18 @@ namespace
             return fd;
         }
         return -1;
+    }
+
+    /// Seals a written memfd against writes and size changes: whoever holds it next (a new image, the PTY
+    /// keeper) reads what was written and nothing else.
+    /// @return Nothing once the seals are on, or where the platform has none; else why they could not be put.
+    [[nodiscard]] std::expected<void, std::error_code> sealWritten([[maybe_unused]] int fd)
+    {
+    #if defined(F_ADD_SEALS) && defined(F_SEAL_WRITE)
+        if (::fcntl(fd, F_ADD_SEALS, F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW) != 0)
+            return std::unexpected { std::error_code { errno, std::generic_category() } };
+    #endif
+        return {};
     }
 
     /// Writes @p image through the descriptor, sizing the object to it first.
@@ -221,6 +235,13 @@ namespace
             }();
             if (!written)
                 return std::unexpected { written.error() };
+            // Best effort: the seals guard against a writer that is not there; an image without them is
+            // whole.
+            if (_kind.object == HandoverMemoryObject::MemFd)
+                if (auto const sealed = sealWritten(owner.get()); !sealed)
+                    errorLog()(
+                        "the handover memory object could not be sealed ({}); it is handed on unsealed",
+                        sealed.error().message());
             return vtpty::CrossingHandle::of(owner.release());
         }
 

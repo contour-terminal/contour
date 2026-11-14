@@ -223,6 +223,9 @@ core_cpp_module(NAME base DIR . KIND STATIC PLATFORMS any)
 core_cpp_module(NAME log KIND STATIC DEPS base PLATFORMS any)
 core_cpp_module(NAME cli KIND STATIC DEPS base log PLATFORMS any)
 
+# A tolerant field codec: varint streams and the structs read and written over them.
+core_cpp_module(NAME codec KIND STATIC DEPS base PLATFORMS any)
+
 # No WHEN: core::testing needs no test framework and consumers use it with CORE_CPP_TESTING off.
 # Only core::testing_main needs Catch2, and CORE_CPP_CATCH2_MAIN gates that one target; it links
 # log to apply the LOG filter.

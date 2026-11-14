@@ -25,6 +25,8 @@ inline constexpr int PromptColumns = 2;
 inline constexpr int EchoWrapColumns = 60;
 /// The byte (^D) that ends the echo child.
 inline constexpr char QuitByte = '\x04';
+/// The byte (^F) that makes a mixed child (runMixedChild) start its flood; the typing pane never sends it.
+inline constexpr char FloodRequestByte = '\x06';
 
 /// What a flood child prints before it ends, followed by the number of bytes it wrote: how the measuring
 /// side learns the flood is over, and how much of it there was.

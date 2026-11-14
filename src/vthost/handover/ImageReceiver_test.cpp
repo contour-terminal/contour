@@ -17,6 +17,7 @@
     #include <thread>
     #include <tuple>
 
+    #include <fcntl.h>
     #include <unistd.h>
 
     #include <vthost/handover/HandoverCodec.hpp>
@@ -150,4 +151,69 @@ TEST_CASE("an image written to memory is taken over", "[vthost][handover]")
     CHECK(read == 1);
     CHECK(told == TakeoverOutcome::TakenOver);
 }
+
+namespace
+{
+/// Takes over @p token behind a keeper in a child, the descriptors the old image left beside the keeper's
+/// channel and @p named.
+/// @return Whether it started afresh with the channel alone kept open, @p named and the leftover closed.
+[[nodiscard]] bool startsAfreshKeepingTheChannelAlone(std::string const& token, int named)
+{
+    auto const memory = makeNativeHandoverMemory();
+    auto leftover = std::array<int, 2> {}; // what the old image left: a program's PTY, say
+    REQUIRE(::pipe(leftover.data()) == 0);
+    auto channel = std::array<int, 2> {}; // the keeper's channel, kept across
+    REQUIRE(::pipe(channel.data()) == 0);
+    auto outcome = std::array<int, 2> {};
+    REQUIRE(::pipe(outcome.data()) == 0);
+    auto const receiver = makeNativeImageReceiver(*memory, { channel[1] }, Leftovers::Closed);
+
+    // In a child: the takeover closes descriptors of the process it runs in.
+    auto const child = ::fork();
+    REQUIRE(child >= 0);
+    if (child == 0)
+    {
+        if (::dup2(outcome[1], STDOUT_FILENO) == -1)
+            ::_exit(2);
+        auto const taken = receiver->takeOver(token);
+        auto const isOpen = [](int fd) {
+            return ::fcntl(fd, F_GETFD) != -1;
+        };
+        auto const told = !taken && taken.error() == TakeoverFailure::StartAfresh && isOpen(channel[1])
+                                  && !isOpen(leftover[0]) && (named < 0 || !isOpen(named))
+                              ? TakeoverOutcome::TakenOver
+                              : TakeoverOutcome::Failed;
+        ::_exit(::write(STDOUT_FILENO, &told, 1) == 1 ? 0 : 3);
+    }
+    for (auto const fd: { leftover[0], leftover[1], channel[0], channel[1], outcome[1] })
+        ::close(fd);
+
+    auto const status = waitFor(child, std::chrono::steady_clock::now() + ChildDeadline);
+    auto told = TakeoverOutcome::Failed;
+    auto const read = ::read(outcome[0], &told, 1);
+    ::close(outcome[0]);
+    if (!status)
+        FAIL("the child taking the image over did not end in time");
+    return WIFEXITED(*status) && WEXITSTATUS(*status) == 0 && read == 1 && told == TakeoverOutcome::TakenOver;
+}
+} // namespace
+
+TEST_CASE("behind a keeper, an image that cannot be read leaves nothing open but what is kept",
+          "[vthost][handover][keeper]")
+{
+    // Named by the token, but no memory object: a pipe, whose image cannot be read.
+    auto unreadable = std::array<int, 2> {};
+    REQUIRE(::pipe(unreadable.data()) == 0);
+    auto const token = handoverToken(vtpty::CrossingHandle { unreadable[0] });
+    CHECK(startsAfreshKeepingTheChannelAlone(token, unreadable[0]));
+    ::close(unreadable[0]);
+    ::close(unreadable[1]);
+}
+
+TEST_CASE("behind a keeper, a token that names no descriptor leaves nothing open but what is kept",
+          "[vthost][handover][keeper]")
+{
+    CHECK(startsAfreshKeepingTheChannelAlone("x", -1));
+}
+
 #endif

@@ -4,6 +4,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #ifndef _WIN32
+    #include <sys/resource.h>
+
     #include <algorithm>
     #include <array>
     #include <atomic>
@@ -64,7 +66,9 @@ TEST_CASE("ReadSelector.size_accounting")
 {
     // Guards the _size bookkeeping that underflowed to 0 in the GUI-tab-close crash: wantRead must
     // grow the count and cancelRead must shrink it back, including all the way down to empty.
-    auto selector = ReadSelector {};
+    auto const made = ReadSelector::create();
+    REQUIRE(made);
+    auto& selector = **made;
     auto a = PipeFds {};
     auto b = PipeFds {};
 
@@ -86,7 +90,9 @@ TEST_CASE("ReadSelector.size_accounting")
 TEST_CASE("ReadSelector.wait_one_returns_ready_fd")
 {
     // A readable fd is returned by waitOne(); this is the happy path the read loop relies on.
-    auto selector = ReadSelector {};
+    auto const made = ReadSelector::create();
+    REQUIRE(made);
+    auto& selector = **made;
     auto a = PipeFds {};
     selector.wantRead(a.reader);
     a.makeReadable();
@@ -103,7 +109,9 @@ TEST_CASE("ReadSelector.cancel_during_wait_wakes_via_wakeup")
     // wakes the selector. The waiter must unblock (woken by the independent eventfd/break-pipe, not by
     // any registered fd becoming readable), the size accounting must end correct, and -- crucially --
     // the process must not abort.
-    auto selector = ReadSelector {};
+    auto const made = ReadSelector::create();
+    REQUIRE(made);
+    auto& selector = **made;
     auto a = PipeFds {};
     auto b = PipeFds {};
     selector.wantRead(a.reader);
@@ -142,7 +150,9 @@ TEST_CASE("ReadSelector.is_wanted_tracks_registration")
     // registration so a concurrent cancelRead()/close() is detected and the caller does not ::read() a
     // fd that is no longer registered (and may have been closed/recycled). The old stale-handle guard it
     // replaced could never observe this.
-    auto selector = ReadSelector {};
+    auto const made = ReadSelector::create();
+    REQUIRE(made);
+    auto& selector = **made;
     auto a = PipeFds {};
     auto b = PipeFds {};
 
@@ -162,7 +172,9 @@ TEST_CASE("ReadSelector.wait_on_empty_blocks_until_timeout")
     // must BLOCK on the wakeup channel until the timeout instead of returning instantly: an instant
     // nullopt makes the caller's read loop busy-spin a CPU core on session teardown. A wakeup() must still
     // return it early so a concurrent close() is not delayed by the full timeout.
-    auto selector = ReadSelector {};
+    auto const made = ReadSelector::create();
+    REQUIRE(made);
+    auto& selector = **made;
     REQUIRE(selector.size() == 0);
 
     // Empty selector, short timeout: waitOne() blocks for ~the timeout, then returns nullopt.
@@ -197,7 +209,9 @@ TEST_CASE("PosixReadSelector.concurrent_cancel_during_wait_is_race_free")
     for (auto const _: std::views::iota(0, 200))
     {
         std::ignore = _;
-        auto selector = crispy::PosixReadSelector {};
+        auto const made = crispy::PosixReadSelector::create();
+        REQUIRE(made);
+        auto& selector = **made;
         auto a = PipeFds {};
         auto b = PipeFds {};
         selector.wantRead(a.reader);
@@ -261,7 +275,33 @@ TEST_CASE("PosixReadSelector.break_pipe_is_close_on_exec")
 {
     // A daemon's live upgrade execs itself: a descriptor that is not close-on-exec leaks into the new image,
     // two per session per upgrade.
-    checkOpensOnlyCloseOnExecDescriptors([] { return std::make_unique<crispy::PosixReadSelector>(); });
+    checkOpensOnlyCloseOnExecDescriptors([] { return crispy::PosixReadSelector::create(); });
+}
+
+TEST_CASE("ReadSelector.create_makes_a_working_selector")
+{
+    auto selector = ReadSelector::create();
+    REQUIRE(selector.has_value());
+    auto pipe = PipeFds {};
+    (*selector)->wantRead(pipe.reader);
+    REQUIRE(::write(pipe.writer, "x", 1) == 1);
+    CHECK((*selector)->waitOne(std::chrono::milliseconds { 1000 }) == pipe.reader);
+}
+
+TEST_CASE("ReadSelector.create_reports_running_out_of_descriptors")
+{
+    auto original = rlimit {};
+    REQUIRE(::getrlimit(RLIMIT_NOFILE, &original) == 0);
+    auto const lowestFree = ::dup(STDIN_FILENO);
+    REQUIRE(lowestFree >= 0);
+    ::close(lowestFree);
+    auto exhausted = original;
+    exhausted.rlim_cur = static_cast<rlim_t>(lowestFree);
+    REQUIRE(::setrlimit(RLIMIT_NOFILE, &exhausted) == 0);
+    auto const selector = ReadSelector::create();
+    ::setrlimit(RLIMIT_NOFILE, &original); // before any assertion can unwind past it
+    REQUIRE_FALSE(selector.has_value());
+    CHECK(selector.error() == std::errc::too_many_files_open);
 }
 
 #endif // !_WIN32

@@ -55,21 +55,38 @@ namespace
     class ExecReceiver final: public ImageReceiver
     {
       public:
-        explicit ExecReceiver(HandoverMemory& memory) noexcept: _memory { memory } {}
+        ExecReceiver(HandoverMemory& memory, std::vector<int> alsoKeep, Leftovers leftovers) noexcept:
+            _memory { memory }, _alsoKeep { std::move(alsoKeep) }, _leftovers { leftovers }
+        {
+        }
 
         [[nodiscard]] std::expected<std::optional<HandoverImage>, TakeoverFailure> takeOver(
             std::string_view token) override
         {
             if (token.empty())
                 return std::nullopt;
-            // A token that names no descriptor names nothing to inherit: nothing is closed.
+            // A token that names no descriptor names nothing to inherit: behind no keeper, nothing is closed.
             auto const fd = parseHandoverDescriptor(token);
             if (!fd)
             {
+                // Behind a keeper nothing the old image left is needed: the keeper hands it all over.
+                if (_leftovers == Leftovers::Closed)
+                    closeDescriptorsExcept(descriptorsToKeep(HandoverImage {}, _alsoKeep));
                 errorLog()("--handover={} names no descriptor; starting afresh", token);
                 return std::unexpected(TakeoverFailure::StartAfresh);
             }
             auto image = readHandover(_memory, *fd);
+            if (!image && _leftovers == Leftovers::Closed)
+            {
+                // Behind a keeper, which holds every listener and program and hands them over again: nothing
+                // the old image left is needed, and its listeners would be found taken.
+                closeDescriptorsExcept(descriptorsToKeep(HandoverImage {}, _alsoKeep));
+                errorLog()(
+                    "cannot read the image the previous daemon handed over (error {}); recovering from "
+                    "the keeper",
+                    std::to_underlying(image.error()));
+                return std::unexpected(TakeoverFailure::StartAfresh);
+            }
             if (!image)
             {
                 // Inherited, but no longer known by name: the listeners the daemon binds anew would find
@@ -84,22 +101,26 @@ namespace
                 return std::unexpected(TakeoverFailure::StartAfresh);
             }
             // Whatever the image does not name was leaked across the exec.
-            closeDescriptorsExcept(descriptorsToKeep(*image));
+            closeDescriptorsExcept(descriptorsToKeep(*image, _alsoKeep));
             return std::optional { *std::move(image) };
         }
 
       private:
         HandoverMemory& _memory;
+        std::vector<int> _alsoKeep;
+        Leftovers _leftovers;
     };
 #endif
 } // namespace
 
-std::unique_ptr<ImageReceiver> makeNativeImageReceiver(HandoverMemory& memory)
+std::unique_ptr<ImageReceiver> makeNativeImageReceiver(HandoverMemory& memory,
+                                                       [[maybe_unused]] std::vector<int> alsoKeep,
+                                                       [[maybe_unused]] Leftovers leftovers)
 {
 #ifdef _WIN32
     return std::make_unique<SuccessorReceiver>(memory);
 #else
-    return std::make_unique<ExecReceiver>(memory);
+    return std::make_unique<ExecReceiver>(memory, std::move(alsoKeep), leftovers);
 #endif
 }
 

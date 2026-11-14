@@ -109,13 +109,21 @@ std::expected<void, StoreFailure> SessionSnapshotStore::discard() const
     return clear().and_then([this] { return confirmRestored(); });
 }
 
-LoadResult SessionSnapshotStore::loadFile(std::filesystem::path const& file, RestoreSource source) const
+LoadResult SessionSnapshotStore::loadFile(std::filesystem::path const& file,
+                                          RestoreSource source,
+                                          DamagedSnapshot damaged) const
 {
     auto result = LoadResult { .source = source };
     if (!_fileSystem.exists(file))
         return result;
 
     auto const setAside = [&](std::string detail) {
+        if (damaged == DamagedSnapshot::LeftInPlace)
+        {
+            result.verdict = LoadVerdict::Unreadable;
+            result.detail = std::move(detail);
+            return result;
+        }
         auto const aside = std::filesystem::path { file.string() + ".corrupt" };
         removeBestEffort(_fileSystem, aside);
         if (!_fileSystem.rename(file, aside))
@@ -166,14 +174,28 @@ LoadResult SessionSnapshotStore::loadFile(std::filesystem::path const& file, Res
 
 LoadResult SessionSnapshotStore::load() const
 {
-    auto pending = loadFile(sibling(".restored"), RestoreSource::PendingRestore);
+    auto pending = loadFile(sibling(".restored"), RestoreSource::PendingRestore, DamagedSnapshot::SetAside);
     if (pending.verdict == LoadVerdict::Absent)
-        return loadFile(_path, RestoreSource::Snapshot);
+        return loadFile(_path, RestoreSource::Snapshot, DamagedSnapshot::SetAside);
     if (pending.verdict != LoadVerdict::SetAside)
         return pending;
     // The retry copy is damaged, which loses nothing if the file the daemon has been writing since is not.
-    auto current = loadFile(_path, RestoreSource::Snapshot);
+    auto current = loadFile(_path, RestoreSource::Snapshot, DamagedSnapshot::SetAside);
     return current.verdict == LoadVerdict::Absent ? pending : current;
+}
+
+LoadResult SessionSnapshotStore::peek() const
+{
+    // The newer of the two: what a crashed daemon left is the workspace it last wrote, and a `.restored` copy
+    // beside it is older than that, kept for a restore's retry (load()), not for what was on screen.
+    auto pending =
+        loadFile(sibling(".restored"), RestoreSource::PendingRestore, DamagedSnapshot::LeftInPlace);
+    auto current = loadFile(_path, RestoreSource::Snapshot, DamagedSnapshot::LeftInPlace);
+    if (pending.verdict != LoadVerdict::Restorable)
+        return current;
+    if (current.verdict != LoadVerdict::Restorable)
+        return pending;
+    return current.snapshot->takenAt >= pending.snapshot->takenAt ? std::move(current) : std::move(pending);
 }
 
 std::expected<void, StoreFailure> SessionSnapshotStore::beginRestore(RestoreSource source) const

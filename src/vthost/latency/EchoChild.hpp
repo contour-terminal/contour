@@ -24,4 +24,12 @@ namespace vthost::latency
 /// @return EXIT_SUCCESS, or EXIT_FAILURE for an unknown workload or a terminal that refused raw mode.
 [[nodiscard]] int runFloodChild(std::string_view workload, std::chrono::seconds duration);
 
+/// Puts the terminal into raw mode and behaves as the echo child (runEchoChild) until it reads
+/// FloodRequestByte, which turns it into a flood child (runFloodChild) for @p workload and @p duration.
+/// One command that serves as both panes of a mixed run: the pane that is typed at, and the one that floods.
+/// @param workload The name of a vtbackend::test::Workloads row.
+/// @param duration How long the flood lasts, once requested.
+/// @return EXIT_SUCCESS, or EXIT_FAILURE for an unknown workload or a terminal that refused raw mode.
+[[nodiscard]] int runMixedChild(std::string_view workload, std::chrono::seconds duration);
+
 } // namespace vthost::latency

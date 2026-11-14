@@ -7,13 +7,41 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <iosfwd>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace vthost::latency
 {
+
+/// What the keystrokes of a headless run compete with.
+enum class KeystrokeLoad : uint8_t
+{
+    Idle = 0,    ///< Nothing: the terminal has nothing else to do.
+    FloodedPane, ///< A second pane of the same daemon floods MixedFloodWorkload meanwhile.
+};
+
+/// Whether a headless run opens tabs while it runs.
+enum class TabLoad : uint8_t
+{
+    None = 0,    ///< No tab is opened.
+    EverySecond, ///< No keys: a pane floods MixedFloodWorkload, a tab is opened every second meanwhile, and
+                 ///< the run reports each tab's time from its request to its prompt.
+};
+
+/// Who parents the daemon a headless run measures, and its shells.
+enum class DaemonKeeping : uint8_t
+{
+    Plain = 0, ///< The daemon runs on its own, the parent of every shell.
+    Keeper,    ///< A PTY keeper parents the daemon and every shell, as `contour daemon` does.
+};
+
+/// The Workloads row the flooded pane of a KeystrokeLoad::FloodedPane run writes.
+inline constexpr std::string_view MixedFloodWorkload = "ascii";
 
 /// How `bench-latency headless` runs.
 struct HeadlessOptions
@@ -22,9 +50,22 @@ struct HeadlessOptions
     std::size_t keys = 50; ///< Measured keys per launch (ten more are typed first and dropped).
     /// The Workloads row to flood the terminal with instead of typing keys; empty to type keys.
     std::string workload;
-    std::chrono::seconds floodDuration { 3 };    ///< How long a flood lasts.
+    /// With KeystrokeLoad::FloodedPane, keys are typed into one pane while a second one floods, and the run
+    /// reports the daemon's keystroke latency and the flood's MiB/s; it excludes @ref workload.
+    KeystrokeLoad keystrokeLoad = KeystrokeLoad::Idle;
+    std::chrono::seconds floodDuration { 3 }; ///< How long a flood lasts.
+    TabLoad tabs = TabLoad::None;             ///< Whether tabs are opened during a flood; excludes the rest.
+    DaemonKeeping keeping = DaemonKeeping::Plain; ///< Whether the daemon runs behind a PTY keeper.
+    /// The executable whose `echo-child` and `serve` verbs the legs run; the running one if absent.
+    std::optional<std::filesystem::path> executable;
     std::optional<std::filesystem::path> record; ///< Where to write the TSV record.
 };
+
+/// @param options How the benchmark runs.
+/// @param socketPath The socket the daemon serves on.
+/// @return The arguments of the `serve` verb the benchmark starts its daemon with.
+[[nodiscard]] std::vector<std::string> daemonServeArguments(HeadlessOptions const& options,
+                                                            std::filesystem::path const& socketPath);
 
 /// Runs the benchmark and prints its table.
 /// @param options How it runs.

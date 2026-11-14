@@ -13,7 +13,8 @@ std::expected<void, std::string> DaemonStartFailures::fail(std::string reason)
     switch (_continuity)
     {
         case vthost::StartContinuity::Fresh: return std::unexpected { std::move(reason) };
-        case vthost::StartContinuity::HandedOver: break;
+        case vthost::StartContinuity::HandedOver:
+        case vthost::StartContinuity::Recovered: break;
     }
     _kept.push_back(std::move(reason));
     return {};
@@ -25,10 +26,11 @@ std::expected<config::Config, std::string> loadDaemonConfig(std::string_view con
     auto loaded = config::tryLoadConfigNamed(configPath);
     if (loaded)
         return loaded;
-    if (auto refused = failures.fail(std::format(
-            "Contour's configuration could not be loaded after the upgrade ({}); the daemon runs on its "
-            "built-in configuration until the file loads again",
-            loaded.error()));
+    if (auto refused =
+            failures.fail(std::format("Contour's configuration could not be loaded when the daemon took over "
+                                      "its running sessions ({}); the daemon runs on its "
+                                      "built-in configuration until the file loads again",
+                                      loaded.error()));
         !refused)
         return std::unexpected { std::move(refused.error()) };
     auto fallback = config::Config {};

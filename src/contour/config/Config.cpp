@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <concepts>
 #include <cstdlib>
 #include <expected>
@@ -39,6 +40,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <optional>
 #include <ranges>
@@ -3225,6 +3227,53 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     }
 
     loadFromEntry(child, "restore", where.restore);
+
+    if (auto const keeper = child["keeper"]; keeper && keeper.IsMap())
+    {
+        loadGuarded(keeper, "restart_hung", where.keeper.restartHung);
+        loadKeeperRestartPolicy(keeper, where.keeper.restartPolicy);
+    }
+}
+
+void YAMLConfigReader::loadKeeperRestartPolicy(YAML::Node const& keeper,
+                                               vthost::keeper::RestartPolicyConfig& where) const
+{
+    // Each key a whole number, at least 1; a value that is not keeps the default, and says so.
+    auto const atLeastOne = [&](std::string const& key) -> optional<int64_t> {
+        auto const node = keeper[key];
+        if (!node)
+            return nullopt;
+        auto const count = node.IsScalar() ? core::toInteger<10, int64_t>(node.Scalar()) : nullopt;
+        if (!count || *count < 1)
+        {
+            errorLog()("{} must be a whole number of at least 1, not '{}'; keeping the default.",
+                       keyPathTo(keeper, key),
+                       YAML::Dump(node));
+            return nullopt;
+        }
+        return count;
+    };
+    using Seconds = std::chrono::milliseconds vthost::keeper::RestartPolicyConfig::*;
+    static auto constexpr Durations = std::to_array<std::pair<std::string_view, Seconds>>({
+        { "give_up_window", &vthost::keeper::RestartPolicyConfig::giveUpWindow },
+        { "backoff_start", &vthost::keeper::RestartPolicyConfig::backoffStart },
+        { "backoff_cap", &vthost::keeper::RestartPolicyConfig::backoffCap },
+        { "startup_timeout", &vthost::keeper::RestartPolicyConfig::restartStartupBound },
+        { "stop_timeout", &vthost::keeper::RestartPolicyConfig::daemonExitBound },
+    });
+    for (auto const& [key, member]: Durations)
+        if (auto const seconds = atLeastOne(std::string { key }))
+            where.*member = std::chrono::seconds { *seconds };
+    if (auto const crashes = atLeastOne("give_up_crashes"))
+        where.giveUpCrashes = static_cast<int>(std::min<int64_t>(*crashes, std::numeric_limits<int>::max()));
+    if (where.backoffCap < where.backoffStart)
+    {
+        errorLog()("{} is below {}; using {} s for both.",
+                   keyPathTo(keeper, "backoff_cap"),
+                   keyPathTo(keeper, "backoff_start"),
+                   std::chrono::duration_cast<std::chrono::seconds>(where.backoffStart).count());
+        where.backoffCap = where.backoffStart;
+    }
 }
 
 void YAMLConfigReader::loadCellPixelSize(YAML::Node const& node,

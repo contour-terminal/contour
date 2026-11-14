@@ -14,7 +14,7 @@
 
 // The handover image reuses the terminal state's tolerant, id-keyed field scheme (vtbackend/state/
 // StateFields.hpp): the types it carries from other modules are listed here, as overloads of
-// visitStateFields() found through the visitor's namespace, and the enumerations among them cross by the
+// visitForeignFields() found through the visitor's namespace, and the enumerations among them cross by the
 // stable tables below -- appended to, never reordered.
 namespace vtbackend::detail
 {
@@ -36,6 +36,7 @@ struct StateEnumWire<vthost::handover::SessionDevice>
     static constexpr auto Values = std::array {
         vthost::handover::SessionDevice::ChildOnPty,
         vthost::handover::SessionDevice::PtyOnly,
+        vthost::handover::SessionDevice::KeeperChild,
     };
 };
 
@@ -162,14 +163,14 @@ namespace
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtcontrol::Uuid>
-static void visitStateFields(Visitor& visitor, T& uuid)
+static void visitForeignFields(Visitor& visitor, T& uuid)
 {
     visitor(1, uuid.bytes);
 }
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtcontrol::ObjectRef>
-static void visitStateFields(Visitor& visitor, T& ref)
+static void visitForeignFields(Visitor& visitor, T& ref)
 {
     visitor(1, ref.kind);
     visitor(2, ref.uuid);
@@ -177,7 +178,7 @@ static void visitStateFields(Visitor& visitor, T& ref)
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vthost::CarriedDelivery>
-static void visitStateFields(Visitor& visitor, T& delivery)
+static void visitForeignFields(Visitor& visitor, T& delivery)
 {
     visitor(1, delivery.kind);
     visitor(2, delivery.bytes);
@@ -186,7 +187,7 @@ static void visitStateFields(Visitor& visitor, T& delivery)
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vthost::proto::WireFrozenMode>
-static void visitStateFields(Visitor& visitor, T& mode)
+static void visitForeignFields(Visitor& visitor, T& mode)
 {
     visitor(1, mode.mode);
     visitor(2, mode.frozenAs);
@@ -194,7 +195,7 @@ static void visitStateFields(Visitor& visitor, T& mode)
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vthost::proto::WireSessionSettings>
-static void visitStateFields(Visitor& visitor, T& wire)
+static void visitForeignFields(Visitor& visitor, T& wire)
 {
     visitor(1, wire.historyLineCount);
     visitor(2, wire.terminalId);
@@ -208,14 +209,14 @@ static void visitStateFields(Visitor& visitor, T& wire)
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtpty::CrossingHandle>
-static void visitStateFields(Visitor& visitor, T& handle)
+static void visitForeignFields(Visitor& visitor, T& handle)
 {
     visitor(1, handle.value);
 }
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtpty::InheritedConPty>
-static void visitStateFields(Visitor& visitor, T& conpty)
+static void visitForeignFields(Visitor& visitor, T& conpty)
 {
     visitor(1, conpty.outputReader);
     visitor(2, conpty.inputWriter);
@@ -226,7 +227,7 @@ static void visitStateFields(Visitor& visitor, T& conpty)
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtpty::InheritedPty>
-static void visitStateFields(Visitor& visitor, T& pty)
+static void visitForeignFields(Visitor& visitor, T& pty)
 {
     visitor(1, pty.masterFd);
     visitor(2, pty.stdoutFastPipe);
@@ -237,7 +238,7 @@ static void visitStateFields(Visitor& visitor, T& pty)
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtpty::AdoptedChild>
-static void visitStateFields(Visitor& visitor, T& child)
+static void visitForeignFields(Visitor& visitor, T& child)
 {
     visitor(1, child.pid);
     visitor(2, child.executable);
@@ -257,7 +258,7 @@ static void visitStateFields(Visitor& visitor, T& child)
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtworkspace::ModelIdState>
-static void visitStateFields(Visitor& visitor, T& ids)
+static void visitForeignFields(Visitor& visitor, T& ids)
 {
     visitor(1, ids.nextWorkspace);
     visitor(2, ids.nextTab);
@@ -266,7 +267,7 @@ static void visitStateFields(Visitor& visitor, T& ids)
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtworkspace::PaneTreeState>
-static void visitStateFields(Visitor& visitor, T& root)
+static void visitForeignFields(Visitor& visitor, T& root)
 {
     if constexpr (std::is_same_v<Visitor, FieldDecoder>)
     {
@@ -293,7 +294,7 @@ static void visitStateFields(Visitor& visitor, T& root)
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtworkspace::TabViewState>
-static void visitStateFields(Visitor& visitor, T& view)
+static void visitForeignFields(Visitor& visitor, T& view)
 {
     visitor(1, view.activePane);
     visitor(2, view.zoom);
@@ -304,7 +305,7 @@ static void visitStateFields(Visitor& visitor, T& view)
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtworkspace::TabState>
-static void visitStateFields(Visitor& visitor, T& tab)
+static void visitForeignFields(Visitor& visitor, T& tab)
 {
     visitor(1, tab.id);
     visitor(2, tab.root);
@@ -313,7 +314,7 @@ static void visitStateFields(Visitor& visitor, T& tab)
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtworkspace::WorkspaceState>
-static void visitStateFields(Visitor& visitor, T& workspace)
+static void visitForeignFields(Visitor& visitor, T& workspace)
 {
     visitor(1, workspace.id);
     visitor(2, workspace.tabs);
@@ -323,7 +324,7 @@ static void visitStateFields(Visitor& visitor, T& workspace)
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtworkspace::WorkspaceTreeState>
-static void visitStateFields(Visitor& visitor, T& tree)
+static void visitForeignFields(Visitor& visitor, T& tree)
 {
     visitor(1, tree.workspaces);
 }

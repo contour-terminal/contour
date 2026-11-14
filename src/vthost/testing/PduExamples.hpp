@@ -156,7 +156,8 @@ namespace vthost::testing
                                                       .lastFailureDetail = "did not settle" },
               .relocation = uint8_t { 1 },
               .workspaces = 2,
-              .tlsFingerprint = "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU" } } },
+              .tlsFingerprint = "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU",
+              .keeperProcessId = 4200 } } },
         { proto::PduType::StopDaemon, proto::DecodedPdu { proto::StopDaemon { .reason = 1 } } },
         { proto::PduType::EditTab,
           proto::DecodedPdu {

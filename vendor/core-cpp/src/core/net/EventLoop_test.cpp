@@ -1417,6 +1417,94 @@ TEST_CASE("spawn at scale unlinks nested flows per completion", "[EventLoop][spa
 namespace
 {
 
+/// What a flow below a `blockOn` root saw of its own end.
+struct UnwindTrace
+{
+    int cancelled = 0; ///< Times the park threw @c OperationCancelled into the flow.
+    int unwound = 0;   ///< Times the flow's locals were destroyed, normally or by unwinding.
+};
+
+/// The leaf of a `blockOn` root: posts a callback that throws, then parks in ITS OWN frame on a
+/// deadline nothing reaches. The throw escapes the next turn with the root still waiting on this
+/// frame, so the park names a frame `cancelPending(root)` cannot find.
+/// @param loop The loop to post to and park on.
+/// @param trace Where the leaf records how it ended.
+Task<void> postThrowThenPark(EventLoop* loop, UnwindTrace* trace)
+{
+    struct Unwound
+    {
+        explicit Unwound(int* counter) noexcept: count(counter) {}
+        int* count;
+        Unwound(Unwound const&) = delete;
+        Unwound(Unwound&&) = delete;
+        Unwound& operator=(Unwound const&) = delete;
+        Unwound& operator=(Unwound&&) = delete;
+        ~Unwound() { ++*count; }
+    };
+    auto const unwound = Unwound { &trace->unwound };
+    loop->post([] { throw std::runtime_error { "a posted callback that fails" }; });
+    try
+    {
+        co_await loop->delay(std::chrono::hours { 1 });
+    }
+    catch (OperationCancelled const&)
+    {
+        ++trace->cancelled;
+        throw;
+    }
+}
+
+/// A `blockOn` root that parks nowhere itself: it waits on the leaf, which parks.
+/// @param loop The loop the leaf posts to and parks on.
+/// @param trace Where the leaf records how it ended.
+Task<void> awaitParkedLeaf(EventLoop* loop, UnwindTrace* trace)
+{
+    co_await postThrowThenPark(loop, trace);
+}
+
+} // namespace
+
+TEST_CASE("blockOn keeps a chain parked below its root alive when a turn throws, and cancels it",
+          "[EventLoop][blockOn]")
+{
+    // An exception out of a turn leaves `blockOn` with its root unfinished. The root itself is in
+    // no container -- it is suspended on its sub-task -- so `cancelPending(root)` misses, and the
+    // park that does exist names the LEAF's frame. Destroying the root as the exception left freed
+    // that frame with the park still naming it, and the next drain, or `~EventLoop`'s, resumed
+    // freed storage: a heap-use-after-free under ASan, a SIGSEGV without it.
+    //
+    // The chain is handed to the loop instead, cancelled: its frames live until a drain unwinds
+    // them, and the loop frees the root once that has happened.
+    auto trace = UnwindTrace {};
+    auto clock = ManualClock {};
+
+    SECTION("a later turn unwinds it")
+    {
+        auto loop = core::net::testing::TestLoop { clock };
+        CHECK_THROWS_AS(loop.blockOn(awaitParkedLeaf(&loop, &trace)), std::runtime_error);
+        // Alive: the throw did not free the leaf. Destroying the root would have run this.
+        CHECK(trace.unwound == 0);
+
+        std::ignore = loop.runUntilIdle();
+        CHECK(trace.cancelled == 1);
+        CHECK(trace.unwound == 1);
+    }
+
+    SECTION("the loop's teardown unwinds it")
+    {
+        {
+            auto loop = core::net::testing::TestLoop { clock };
+            CHECK_THROWS_AS(loop.blockOn(awaitParkedLeaf(&loop, &trace)), std::runtime_error);
+            CHECK(trace.unwound == 0);
+        }
+        CHECK(trace.cancelled == 1);
+        CHECK(trace.unwound == 1);
+    }
+}
+
+namespace
+{
+
 /// Hands the awaiting flow to the back of the ready queue, the way a flow yields.
 struct YieldOnce
 {

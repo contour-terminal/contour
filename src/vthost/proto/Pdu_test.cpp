@@ -2952,6 +2952,36 @@ TEST_CASE("DaemonStatusReply carries the workspace count, and a body from before
           == legacy);
 }
 
+TEST_CASE("DaemonStatusReply places the keeper behind a fingerprint, empty without a TCP listener",
+          "[vthost][proto]")
+{
+    auto const kept = DaemonStatusReply { .releaseVersion = "0.9.0",
+                                          .upgrade = DaemonUpgradeRecord { .generation = 1 },
+                                          .relocation = uint8_t { 0 },
+                                          .workspaces = 2,
+                                          .keeperProcessId = 4200 };
+    SECTION("without a listener, the keeper still round-trips and the fingerprint reads as none")
+    {
+        CHECK(roundTrip(DecodedPdu { kept }) == DecodedPdu { kept });
+    }
+    SECTION("with a listener, both round-trip")
+    {
+        auto withListener = kept;
+        withListener.tlsFingerprint = "SHA256:abc";
+        CHECK(roundTrip(DecodedPdu { withListener }) == DecodedPdu { withListener });
+    }
+    SECTION("a daemon from before the keeper ends its body after the fingerprint, one varint short")
+    {
+        auto withListener = kept;
+        withListener.tlsFingerprint = "SHA256:abc";
+        auto legacy = withListener;
+        legacy.keeperProcessId = std::nullopt;
+        CHECK(decodeAs<DaemonStatusReply>(
+                  encodeWithoutTrailingField(DecodedPdu { withListener }, /*bytesToDrop=*/2))
+              == legacy);
+    }
+}
+
 TEST_CASE("DaemonStatusReply carries the relocation request, and a body from before it reads as none",
           "[vthost][proto][upgrade]")
 {

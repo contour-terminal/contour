@@ -533,13 +533,27 @@ class HostedSession
     /// @return Where the session's emulation settings came from.
     [[nodiscard]] SettingsOrigin settingsOrigin() const noexcept { return _settingsOrigin; }
 
+    /// @return The emulation settings the session's terminal runs under, as a client states them: kept apart
+    ///         from the terminal, so that reading them locks nothing (a structure capture runs while a pump
+    ///         may hold the terminal). Loop thread.
+    [[nodiscard]] proto::WireSessionSettings const& statedSettings() const noexcept
+    {
+        return _statedSettings;
+    }
+
+    /// Records the settings the terminal runs under now, after the host changed them. Loop thread.
+    /// @param settings The terminal's settings.
+    void restateSettings(vtbackend::Settings const& settings)
+    {
+        _statedSettings = toWireSessionSettings(settings);
+    }
+
     /// @return The child process behind the session's PTY; nullptr for a PTY that is no process (a test's
     ///         MockPty).
-    [[nodiscard]] vtpty::Process const* process() const noexcept;
+    [[nodiscard]] vtpty::ChildProcess const* process() const noexcept;
 
-    /// @return The child process behind the session's PTY, to give it up; nullptr for a PTY that is no
-    ///         process.
-    [[nodiscard]] vtpty::Process* process() noexcept;
+    /// @return The child process behind the session's PTY; nullptr for a PTY that is no process.
+    [[nodiscard]] vtpty::ChildProcess* process() noexcept;
 
     /// @return The device the session runs on, as its terminal reads it: whatever wraps the PTY (a process, a
     ///         tap) forwards what a handover asks of it (vtpty::Pty::handover(), isClosed()).
@@ -733,6 +747,18 @@ class HostedSession
 
     /// Asks the child, once the PTY closed, how it ended. Pump thread.
     [[nodiscard]] SessionEnd observeEnd() const;
+
+  public:
+    /// @return Whether the session's end waits for its program's exit status to be announced
+    ///         (vtpty::StatusArrival::Announced) rather than having observed it: a program someone else
+    ///         reaps, and a close the host did not ask for.
+    [[nodiscard]] bool awaitsAnnouncedStatus() const;
+
+    /// @return How the session ended as far as is known now: for one whose status is announced, from that
+    ///         status (Exited while none came); otherwise what its pump observed (endCause()).
+    [[nodiscard]] SessionEnd currentEnd() const;
+
+  private:
     /// @return Whether terminate() asked the pump to end.
     [[nodiscard]] bool terminateRequested() const noexcept
     {
@@ -773,8 +799,9 @@ class HostedSession
     DeliveryOutcome deliverPending(PendingScope scope);
 
     vtworkspace::SessionId _id;
-    std::string _profileName;       ///< @see profileName
-    SettingsOrigin _settingsOrigin; ///< @see settingsOrigin
+    std::string _profileName;                   ///< @see profileName
+    SettingsOrigin _settingsOrigin;             ///< @see settingsOrigin
+    proto::WireSessionSettings _statedSettings; ///< @see statedSettings
     /// The session's status-line extensions; null without any. Declared before _terminal, which it outlives:
     /// ~Terminal revokes the sink their workers publish through before they are destroyed.
     std::unique_ptr<ISessionExtensions> _extensions;
@@ -898,6 +925,17 @@ inline void startIn(SessionSpawnRequest& request, std::filesystem::path const& d
 /// (a shell without prompt marks). Measured on the loop's injected clock.
 inline constexpr auto InitialInputFallback = std::chrono::seconds { 2 };
 
+/// How long a session whose terminal hung up waits for its program's exit status where someone else reaps the
+/// program (vtpty::StatusArrival::Announced: a PTY keeper's child) before it ends as Exited without it.
+inline constexpr auto DefaultAnnouncedStatusPatience = std::chrono::seconds { 5 };
+
+/// How a wait for an announced exit status ended.
+enum class StatusWait : uint8_t
+{
+    Answered = 0, ///< The status came, or is known never to come.
+    Expired,      ///< The patience ran out first.
+};
+
 /// The shortest gap between two kitty animation frames a hosted session advances. Every advanced frame is a
 /// whole image on the wire to every client, so the daemon plays no faster than this; a frame due sooner is
 /// skipped, not queued -- the next tick lands on the frame its time shows, however far behind it is: whole
@@ -932,6 +970,39 @@ struct InputWatermarks
     std::size_t high = std::size_t { 1024 } * 1024; ///< Where a connection's reads pause.
     std::size_t low = std::size_t { 256 } * 1024;   ///< Where they resume.
 };
+
+/// Hears of every change to what the host's structure holds -- the model's, through vtworkspace::ModelEvents,
+/// and the host's own beside it -- before any subscriber does: what keeps a copy of the structure that must
+/// never lag what a client was told (@see SessionHost::attachStructureObserver()). Loop thread.
+class StructureEvents: public vtworkspace::ModelEvents
+{
+  public:
+    /// A session was installed; no client knows it yet. @param session The session.
+    virtual void sessionCreated(vtworkspace::SessionId session) { (void) session; }
+    /// A session was erased. @param session The session.
+    virtual void sessionClosed(vtworkspace::SessionId session) { (void) session; }
+    /// The settings sessions run under changed (a reload).
+    virtual void settingsChanged() {}
+    /// A session's color preference, or the host's default, changed. @param session The session.
+    virtual void colorPreferenceChanged(vtworkspace::SessionId session) { (void) session; }
+    /// A session's interrupted command was recorded or cleared. @param session The session.
+    virtual void interruptionChanged(vtworkspace::SessionId session) { (void) session; }
+};
+
+/// Builds the device of a session a handover image names as SessionDevice::KeeperChild: the PTY it crossed
+/// on, with the keeper's child bound to it.
+/// @param session The session, as the image names it.
+/// @param pty Its adopted PTY.
+/// @return The device; null to leave the session unadopted.
+using KeeperChildAdopter = std::function<std::unique_ptr<vtpty::Pty>(handover::HandoverSession const& session,
+                                                                     std::unique_ptr<vtpty::Pty> pty)>;
+
+/// Seeds a session adopted without its terminal state (a recovery, which has no checkpoint of it), before
+/// its pump starts: nothing else writes to the terminal yet.
+/// @param session The session, as the image names it.
+/// @param terminal Its fresh terminal.
+using RecoveredSeeder =
+    std::function<void(handover::HandoverSession const& session, vtbackend::Terminal& terminal)>;
 
 /// How a SessionHost is set up beyond its collaborators. Fixed at construction: two
 /// differently-configured hosts are two different hosts, not one in two states.
@@ -997,6 +1068,9 @@ struct SessionHostConfig
     /// session id it adopted -- vtworkspace::firstUnusedSessionId() of the restored tree -- so that no new
     /// session is named as an old one.
     uint64_t firstSessionId = 1;
+    /// How long a session whose program someone else reaps waits for its exit status, once its terminal hung
+    /// up, before it ends without it (@see DefaultAnnouncedStatusPatience).
+    std::chrono::milliseconds announcedStatusPatience = DefaultAnnouncedStatusPatience;
     /// A snapshot to bring back. Wins over @ref startupLayout when it realizes at least one pane; the
     /// startup layout is realized only when it realizes none (or none is given).
     std::optional<WorkspaceRestore> restore {};
@@ -1007,6 +1081,12 @@ struct SessionHostConfig
     /// @ref restore and @ref startupLayout, neither of which is realized, and over @ref firstSessionId.
     /// Nothing in it is refused as a whole: whatever can be adopted is (@see SessionHost::handoverOutcome()).
     std::optional<handover::HandoverImage> handover {};
+    /// Builds the device of each session @ref handover names as a keeper's child; null serves such a
+    /// session's PTY with no child, as one whose child is no longer this process's.
+    KeeperChildAdopter adoptChild {};
+    /// Seeds each session @ref handover brings back without its terminal state, before its pump starts; null
+    /// for none, which leaves such a terminal fresh.
+    RecoveredSeeder seedRecovered {};
     /// Where the UUIDs of workspaces, tabs and panes come from. Tests pass a sequential one.
     std::shared_ptr<vtcontrol::UuidSource> uuids = vtcontrol::systemUuidSource();
     /// How long after its connection dropped a window is taken to still show its workspace, so that an
@@ -1102,6 +1182,15 @@ class SessionHost final: public vtworkspace::ModelEvents
 
     /// @return The authoritative session/layout model.
     [[nodiscard]] vtworkspace::SessionModel& model() noexcept { return _model; }
+
+    /// @return The authoritative session/layout model, to read.
+    [[nodiscard]] vtworkspace::SessionModel const& model() const noexcept { return _model; }
+
+    /// @return The id the host mints its next session with.
+    [[nodiscard]] vtworkspace::SessionId nextSessionId() const noexcept
+    {
+        return vtworkspace::SessionId { _nextSessionId };
+    }
 
     /// @return The normalized factory settings every session gets unless a
     ///         @ref SessionSpawnRequest overrides them. Callers layering a client's stated
@@ -1608,6 +1697,12 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Registers @p observer for every completed model change. Not owned.
     void subscribe(vtworkspace::ModelEvents* observer);
 
+    /// Sets the one observer that hears of every structure change before any subscriber does
+    /// (StructureEvents): what keeps the structure a crash recovers from, which needs the host it observes
+    /// (cyclic wiring, this one call). Not owned; null detaches it, which it does before it goes.
+    /// @param observer The observer; null for none.
+    void attachStructureObserver(StructureEvents* observer) noexcept { _structureObserver = observer; }
+
     /// Removes @p observer. Idempotent.
     void unsubscribe(vtworkspace::ModelEvents* observer);
 
@@ -1643,6 +1738,15 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param session The session that ended.
     /// @param cause Why.
     void endSession(vtworkspace::SessionId session, SessionEnd cause);
+
+    /// Ends @p session, whose pump ended: at once, or for a program whose status is announced, once it is
+    /// (vtpty::ChildProcess::whenStatusKnown()) or the patience ran out. Loop thread.
+    void settleEnd(vtworkspace::SessionId session);
+
+    /// Ends @p session as its status says, if it still runs and still waits. Loop thread.
+    /// @param session The session.
+    /// @param wait Whether the status came, or the patience ran out (logged).
+    void finishEnd(vtworkspace::SessionId session, StatusWait wait);
 
     /// A client closed @p session's pane: endSession() with SessionEnd::Requested.
     /// @param session The session to end.
@@ -1996,8 +2100,21 @@ class SessionHost final: public vtworkspace::ModelEvents
     template <typename Method, typename... Args>
     void fanOut(Method method, Args... args)
     {
+        // The structure observer first: what it keeps must never lag what a subscriber hears.
+        if (_structureObserver)
+            (_structureObserver->*method)(args...);
         for (auto* observer: _subscribers)
             (observer->*method)(args...);
+    }
+
+    /// Tells the structure observer of a change of the host's own (StructureEvents), if one is attached.
+    /// @param method A StructureEvents member function pointer.
+    /// @param args The event arguments.
+    template <typename Method, typename... Args>
+    void tellStructure(Method method, Args... args)
+    {
+        if (_structureObserver)
+            (_structureObserver->*method)(args...);
     }
 
     /// The same, for the session STREAM observers — the other subscriber list.
@@ -2133,7 +2250,10 @@ class SessionHost final: public vtworkspace::ModelEvents
     core::net::EventLoop& _loop;
     std::shared_ptr<HostGate> _gate;
     PtyFactory _ptyFactory;
-    ProfilePtyFactory _profilePtys; ///< @see SessionHostConfig::profilePtys
+    ProfilePtyFactory _profilePtys;                ///< @see SessionHostConfig::profilePtys
+    KeeperChildAdopter _adoptChild;                ///< @see SessionHostConfig::adoptChild
+    RecoveredSeeder _seedRecovered;                ///< @see SessionHostConfig::seedRecovered
+    StructureEvents* _structureObserver = nullptr; ///< @see attachStructureObserver
     vtbackend::Settings _settings;
     core::Environment const& _environment;
     vtbackend::HostIdentity _identity; ///< Handed to every session this host spawns.
@@ -2313,6 +2433,16 @@ class SessionHost final: public vtworkspace::ModelEvents
     std::vector<int64_t> _orphans;
     /// Reaps _orphans as they exit; armed only while one is left. @see armOrphanReap
     std::optional<core::net::DeadlineTimer> _orphanReap;
+    std::chrono::milliseconds _announcedStatusPatience; ///< @see SessionHostConfig::announcedStatusPatience
+    /// A session whose end waits for its program's announced status. @see settleEnd
+    struct EndWait
+    {
+        SessionHost* host = nullptr;
+        vtworkspace::SessionId session {};
+        std::optional<core::net::DeadlineTimer> patience; ///< Ends it without the status when it fires.
+    };
+    /// The sessions whose end waits, by session id. Loop thread.
+    std::unordered_map<uint64_t, std::unique_ptr<EndWait>> _endWaits;
     std::vector<vtworkspace::ModelEvents*> _subscribers;
     std::vector<SessionStreamEvents*> _streamSubscribers;
     /// The handshaken native Attach connections. @see connectedClients

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -61,7 +62,13 @@ class SystemCommandCapture final: public CommandCapture
     /// @param shell    Path of the shell to run commands with, UTF-8.
     /// @param shutdown A stop request kills every run in flight and makes later runs return Cancelled
     ///                 at once. Pass a default-constructed token for a policy of never stopping.
-    SystemCommandCapture(std::string shell, core::async::StopToken shutdown);
+    /// @param descriptorLimit The soft descriptor limit each command runs under, set by its shell before the
+    ///                 command (`ulimit -S -n`), never in this process; nullopt for this process's own. What
+    ///                 a daemon behind a PTY keeper, whose own limit the keeper raised, gives its commands
+    ///                 back. POSIX only.
+    SystemCommandCapture(std::string shell,
+                         core::async::StopToken shutdown,
+                         std::optional<std::uint64_t> descriptorLimit = std::nullopt);
 
     /// @param env The environment to resolve the shell from.
     /// @return The shell this platform's `popen` uses: `/bin/sh` on Unix; `%COMSPEC%`, else `cmd.exe`, on
@@ -76,6 +83,9 @@ class SystemCommandCapture final: public CommandCapture
   private:
     std::string _shell;
     core::async::StopToken _shutdown;
+#ifndef _WIN32
+    std::optional<std::uint64_t> _descriptorLimit; ///< Only a POSIX shell sets one.
+#endif
 };
 
 #ifdef _WIN32

@@ -10,8 +10,11 @@
 #include <cerrno>
 #include <cstdint>
 #include <expected>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <system_error>
+#include <vector>
 
 #ifdef __APPLE__
     #include <util.h>
@@ -51,6 +54,15 @@ void configureTerminal(int fd) noexcept;
         return InputEcho::Hidden;
     return InputEcho::Raw;
 }
+
+/// This process's `environ`, the one place it is declared: POSIX requires no header to declare it, and each
+/// platform differs (UnixUtils.cpp says how). Async-signal-safe, so a forked child may set it before an exec.
+/// @return The variable itself, to read or to assign.
+[[nodiscard]] char**& processEnvironment() noexcept;
+
+/// @return The entries of this process's environment, `NAME=value` each, viewing `environ`: valid until the
+///         environment next changes; none when it has been cleared.
+[[nodiscard]] std::vector<std::string_view> environmentEntries();
 
 /// Marks @p fd close-on-exec -- a descriptor flag, set with F_SETFD -- so that no process this one spawns
 /// inherits it.
@@ -260,6 +272,17 @@ inline void saveDup2(int a, int b) noexcept
 }
 // }}}
 
+/// The name of a process, as a terminal's foreground process group names its leader (tcgetpgrp()), which
+/// needs no parenthood of it. Linux and macOS only.
+/// @param pid The process.
+/// @return The name, as the operating system shortens it; none where it cannot be told.
+[[nodiscard]] std::optional<std::string> processNameOf(pid_t pid);
+
+/// The working directory of a process. Linux and macOS only.
+/// @param pid The process.
+/// @return Its working directory; none where it cannot be told.
+[[nodiscard]] std::optional<std::string> workingDirectoryOf(pid_t pid);
+
 } // namespace vtpty::util
 
 namespace vtpty
@@ -269,7 +292,12 @@ struct UnixPipe
 {
     std::array<int, 2> pfd;
 
-    explicit UnixPipe(unsigned flags = 0);
+    /// @return A pipe that holds no descriptor yet, for one opened later (open()).
+    [[nodiscard]] static UnixPipe none() noexcept { return UnixPipe { NoPipe {} }; }
+
+    /// @param flags O_CLOEXEC and the like.
+    /// @return A new pipe; or why none could be made (the process is out of descriptors).
+    [[nodiscard]] static std::expected<UnixPipe, std::error_code> open(unsigned flags = 0);
     UnixPipe(UnixPipe&&) noexcept;
     UnixPipe& operator=(UnixPipe&&) noexcept;
     UnixPipe(UnixPipe const&) = delete;
@@ -285,6 +313,12 @@ struct UnixPipe
     void closeWriter() noexcept;
 
     void close();
+
+  private:
+    struct NoPipe
+    {
+    };
+    explicit UnixPipe(NoPipe /*none*/) noexcept: pfd { -1, -1 } {}
 };
 
 // {{{ UnixPipe

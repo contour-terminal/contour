@@ -42,6 +42,9 @@ class FakeImageLeases final: public ImageLeases
     /// What every hold() fails with, when set.
     std::optional<StagingError> holdError;
 
+    /// Has a prune claim @p leaseFile as far as tryHold() is concerned: it takes no lease on it.
+    void markBusy(std::filesystem::path const& leaseFile) { _busy.insert(leaseFile.lexically_normal()); }
+
     [[nodiscard]] std::expected<std::unique_ptr<ImageLease>, StagingError> hold(
         std::filesystem::path const& leaseFile) override
     {
@@ -49,6 +52,16 @@ class FakeImageLeases final: public ImageLeases
             beforeHold(leaseFile);
         if (holdError)
             return std::unexpected(*holdError);
+        return record(leaseFile);
+    }
+
+    /// As hold(), with holdError and every busy lease file answered by none.
+    [[nodiscard]] std::unique_ptr<ImageLease> tryHold(std::filesystem::path const& leaseFile) override
+    {
+        if (beforeHold)
+            beforeHold(leaseFile);
+        if (holdError || _busy.contains(leaseFile.lexically_normal()))
+            return nullptr;
         return record(leaseFile);
     }
 
@@ -141,6 +154,7 @@ class FakeImageLeases final: public ImageLeases
 
     Held _held;
     Held _inherited;
+    std::set<std::filesystem::path> _busy; ///< @see markBusy()
     int _nextDescriptor = FirstDescriptor;
 };
 

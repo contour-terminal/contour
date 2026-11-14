@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/client/ReleaseDrift.hpp>
 
-#include <algorithm>
 #include <array>
-#include <charconv>
 #include <compare>
-#include <ranges>
 
 namespace vthost::client
 {
@@ -55,47 +52,19 @@ namespace
     }
 } // namespace
 
-std::optional<std::vector<std::uint32_t>> parseReleaseNumbers(std::string_view release)
-{
-    auto numbers = std::vector<std::uint32_t> {};
-    while (!release.empty() && release.front() >= '0' && release.front() <= '9')
-    {
-        auto value = std::uint32_t {};
-        auto const [end, error] = std::from_chars(release.data(), release.data() + release.size(), value);
-        if (error != std::errc {})
-            return std::nullopt;
-        numbers.push_back(value);
-        release.remove_prefix(static_cast<size_t>(end - release.data()));
-        if (release.size() >= 2 && release.front() == '.' && release[1] >= '0' && release[1] <= '9')
-            release.remove_prefix(1);
-        else
-            break;
-    }
-    if (numbers.empty())
-        return std::nullopt;
-    return numbers;
-}
-
 DriftKind compareReleases(std::string_view client, std::string_view daemon)
 {
     if (daemon.empty())
         return DriftKind::DaemonUnknown;
     if (client == daemon)
         return DriftKind::None;
-    auto const clientNumbers = parseReleaseNumbers(client);
-    auto const daemonNumbers = parseReleaseNumbers(daemon);
-    if (!clientNumbers || !daemonNumbers)
+    auto const order = compareReleaseNumbers(daemon, client);
+    if (!order)
         return DriftKind::Differs;
-    auto const width = std::max(clientNumbers->size(), daemonNumbers->size());
-    for (auto const index: std::views::iota(size_t { 0 }, width))
-    {
-        auto const c = index < clientNumbers->size() ? (*clientNumbers)[index] : std::uint32_t { 0 };
-        auto const d = index < daemonNumbers->size() ? (*daemonNumbers)[index] : std::uint32_t { 0 };
-        if (d < c)
-            return DriftKind::DaemonOlder;
-        if (d > c)
-            return DriftKind::DaemonNewer;
-    }
+    if (std::is_lt(*order))
+        return DriftKind::DaemonOlder;
+    if (std::is_gt(*order))
+        return DriftKind::DaemonNewer;
     return DriftKind::Differs;
 }
 

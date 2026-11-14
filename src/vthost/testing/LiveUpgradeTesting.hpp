@@ -147,8 +147,8 @@ struct UpgradeBench
     [[nodiscard]] handover::LiveUpgrade orchestrator(handover::LiveUpgradeConfig config,
                                                      handover::ImageHandoff& handoff)
     {
-        return handover::LiveUpgrade { live->loop, live->host, store,       leases,           handoff,
-                                       probe,      hooks,      listeners(), std::move(config) };
+        return handover::LiveUpgrade { live->loop, live->host, store,   leases,      handoff,
+                                       probe,      hooks,      *keeper, listeners(), std::move(config) };
     }
 
     /// @return The orchestrator, over this daemon, with the configuration config() and handing over with @p
@@ -224,6 +224,9 @@ struct UpgradeBench
     DaemonImageStore store { appImageStoreConfig("/state/bin", "0.9.1"), files, leases, links };
     FakeReadinessProbe probe;
     RecordingHooks hooks;
+    handover::NoUpgradeKeeper noKeeper;
+    /// The PTY keeper the daemon runs behind, as the orchestrator takes it: none, unless a test names one.
+    handover::UpgradeKeeper* keeper = &noKeeper;
     std::filesystem::path target;
     std::string imageId;
     core::testing::ScopedTempDir socketDir { "contour-upgrade" };

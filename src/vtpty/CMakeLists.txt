@@ -40,7 +40,9 @@ set(vtpty_SOURCES
 )
 
 set(vtpty_HEADERS
+    AdoptedChild.hpp
     ChannelPty.hpp
+    ChildProcess.hpp
     ChunkedWrite.hpp
     CommandCapture.hpp
     CommandLine.hpp
@@ -56,6 +58,7 @@ set(vtpty_HEADERS
     MockViewPty.hpp
     OwnedFd.hpp
     PageSize.hpp
+    PreparedSpawn.hpp
     PlacementBreaker.hpp
     Process.hpp
     ProcessPlacement.hpp
@@ -161,6 +164,7 @@ if(VTPTY_TESTING)
     add_executable(vtpty_test
         test_main.cpp
         ChannelPty_test.cpp
+        ChildProcess_test.cpp
         ChunkedWrite_test.cpp
         CommandCapture_test.cpp
         CommandLine_test.cpp

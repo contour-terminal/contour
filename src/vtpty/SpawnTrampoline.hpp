@@ -6,6 +6,7 @@
 #ifndef _WIN32
     #include <vtpty/ExecutablePath.hpp>
     #include <vtpty/OwnedFd.hpp>
+    #include <vtpty/PreparedSpawn.hpp>
     #include <vtpty/ProcessPlacement.hpp>
 
     #include <sys/types.h>
@@ -58,6 +59,23 @@ enum class TrampolineEnvironment : std::uint8_t
     /// process's environment, which a caller off the thread that changes it must not.
     Program,
 };
+
+/// Prepares a spawn of the trampoline that starts @p spec's program, without starting it: the trampoline's
+/// argv, its descriptor table (the spec socket's child end and @p fds, each on its slot) and the spec,
+/// framed.
+/// @param spec What to start; its inheritedSlots are filled from @p fds.
+/// @param fds The descriptors to pass along, each at most once per slot; copied, they stay open here.
+/// @return The prepared spawn, without gate or settle signal; or invalid_argument for a spec that lacks a
+///         descriptor its launch cannot do without, or why the spec socket could not be made.
+[[nodiscard]] std::expected<PreparedSpawn, std::error_code> prepareTrampoline(
+    SpawnSpec spec, std::span<InheritedFd const> fds);
+
+/// Starts @p prepared in this process: posix_spawn() of this process's own executable as the trampoline,
+/// under this process's environment (TrampolineEnvironment::Inherited). Its descriptor table is closed here.
+/// The spec is the caller's to write next (writeSpawnSpec()).
+/// @param prepared What to start.
+/// @return The trampoline's pid; or why it could not be spawned.
+[[nodiscard]] std::expected<pid_t, std::error_code> launchTrampoline(PreparedSpawn& prepared);
 
 /// Spawns this process's own executable as a trampoline that starts @p spec's program.
 ///

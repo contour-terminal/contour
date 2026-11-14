@@ -1736,6 +1736,78 @@ the pid started is still the daemon, that `APPIMAGE` in its `/proc/<pid>/environ
 directory is listed by `ls -l /proc/<pid>/fd`, and that deleting the original AppImage file leaves
 the daemon serving.
 
+### The keeper
+
+On POSIX, `contour daemon` does not serve: it becomes the **PTY keeper** (`vthost_keeper`,
+`keeper::runKeeperProcess()`), the parent of the daemon and of every shell, so that a daemon that crashes
+or hangs can be replaced without ending a hosted program. `--stdio`, `--background` (whose detached
+`contour daemon` becomes the keeper) and `--handover` do not. Windows has no keeper yet.
+
+```
+contour daemon …                            the keeper: single-threaded, reads no terminal output
+├── contour daemon keeper-serve --keeper-channel=3   the daemon, restartable
+├── shell 1                                 forked by the keeper, on the daemon's behalf
+└── shell 2 …
+```
+
+**What it links, and what it holds.** `vthost_keeper` links core-cpp, `vthost_wire`, `vthost_image` and
+`vtpty`'s process utilities, never `vtbackend`, `vtparser`, `vtworkspace` or the rest of `vthost`; a CMake
+check and a `lint` test hold that. The keeper takes the label's lock (`<socket>.keeper.lock`), starts the
+daemon with a frozen command line — what the daemon needs travels in the versioned `Launch` record over
+the channel, never as arguments — and from then on holds a duplicate of every PTY master and every
+listener the daemon deposited, the **structure** (daemon instance, the `vtworkspace` tree and id counters,
+per session its identity and settings) the daemon pushes, and each shell's exit status. It runs on one
+thread and touches the system only through ports (`KeeperPorts`: spawner, reaper by pid or pidfd — never
+`waitpid(-1)` — clock, channel, signals), so the whole state machine is tested against fakes.
+
+**The channel** is an `AF_UNIX` socket pair, descriptor 3 in the daemon, with descriptor-aware framing:
+each frame says how many descriptors ride with it, and they arrive with its first byte. Messages are
+`blob`s whose unknown trailing fields are skipped; `Hello` is never refused (both speak the lower
+version), and a message the receiver cannot read -- an unknown tag, an enum value or descriptors beyond
+its version -- is answered `Unsupported`, the link kept; a sender gates what a later version added on the
+negotiated one. On the daemon's side `keeperlink::KeeperLink`
+owns it: one writer queue, the heartbeat (every second; a keeper that hears none for 30 s kills and
+restarts the daemon, `daemon.keeper.restart_hung`), and the `Exited` reports it routes to the session's
+`KeeperChild`.
+
+**Spawning.** The daemon creates the PTY pair, the placement gate and the settle pipe exactly as
+`vtpty::Process::start()` does, encodes the spawn, and sends `Spawn` with the descriptors; the keeper only
+forks, `exec`s the spawn trampoline, and answers `Spawned{pid}`. A session therefore costs one channel
+round trip more to create, and nothing after that: **the daemon reads and writes the PTY master itself**,
+so the data path has no keeper hop and no per-byte work. A session the daemon closes is let go with `Release{grace}`
+(and a `Signal` for a program that must be ended); the keeper reaps, sends `Exited`, and keeps the exits
+that happen while no daemon runs for the next one.
+
+**Structure pushes are a table** (`keeperlink::StructurePushPolicy`): a change that mints or retires an id,
+or changes settings, is pushed synchronously, before any client hears of it; a cosmetic one (a ratio
+dragged, a title typed) is debounced by a second. An id a client holds is therefore always in the
+keeper's structure, and a crash in the debounce costs a ratio or a title, never a binding.
+
+**A crash.** The keeper classifies the daemon's end (a first start that never served is a failed start,
+not a crash: the keeper exits with its status) and asks `keeper::CrashRestartPolicy`, a pure table: restart at
+once; again within 30 s, after a backoff from 1 s doubling to 30 s; after five crashes in five minutes,
+give up, keep the shells and listeners for two minutes, try once more with the newest image, then end
+the shells, unlink the socket and exit non-zero. The new daemon gets `Launch{Recovered}`, sends `Adopt`,
+and reads the `Inventory` (listeners, structure, per session the master, pid and exit status) before
+anything else runs (`keeperlink::attachToKeeper()`). `keeperlink::imageFromInventory()` turns it into a
+`HandoverImage`, which the live-upgrade restore path adopts with `StartContinuity::Recovered`: the same
+instance and ids, every session bound to its `KeeperChild` again, its terminal sized from the master
+(`TIOCGWINSZ`) and seeded from the workspace snapshot's scrollback, and `SIGWINCH` sent to the
+foreground process group so that the program redraws even when the size did not change. Clients
+reconnect as to the same daemon and keep their pane bindings. What the dead daemon had read and not yet
+shown is lost; running terminal-state checkpoints are not part of this yet.
+
+**Stopping.** `SIGTERM`/`SIGINT` to the keeper are forwarded to the daemon, which writes its final
+snapshot and announces `Shutdown`; the keeper then ends the shells and exits, bounded. Any clean
+shutdown of the daemon (`StopDaemon`, the last session, idle) announces `Shutdown` first and so ends the
+keeper too. A daemon that loses its keeper shuts down (`ShutdownCause::KeeperLost`), and
+`PR_SET_PDEATHSIG` (Linux) or a `kqueue` watch on the keeper's exit (macOS) backs that up, so a daemon
+never outlives its keeper.
+
+**Not yet.** Under systemd a kernel OOM kill of the daemon still stops the whole unit (no
+`OOMPolicy=continue`, and the daemon does not place itself in a scope of its own), and Windows runs no
+keeper. The cost of the keeper on the data path is measured in [Latency](latency.md#the-keeper).
+
 ### Live upgrade
 
 A daemon replaces itself with a new release without ending a hosted program (`handover::LiveUpgrade`,
@@ -1770,6 +1842,20 @@ the pumps and listeners resume and the requester is told (`ExecFailedResult`); t
 The new image decodes the handover, rebuilds the sessions over the inherited descriptors and serves as the
 same daemon: the handover carries `daemonInstance` and the whole `vtworkspace` id space, so
 `NativeController::adoptReconnect` keeps every pane binding.
+
+**Behind a PTY keeper** (see [The keeper](#the-keeper)). The keeper's channel crosses the `exec` too (`LiveUpgradeConfig::alsoCrossing`), and
+the orchestrator talks to the keeper through `handover::UpgradeKeeper`. A target whose readiness report names
+no `keeperChannelVersion` predates the keeper and is refused before anything stops (`TargetCannotServeKeeper`).
+Right before the `exec` the daemon sends `Exec{executablePath}` after everything it had queued, and waits, at
+most `keeperlink::ExecFlushBound`, for the keeper's `ExecNoted`: the keeper answers after finishing any frame it
+had begun, and sends nothing more until the new image's `Hello` (or `ExecAborted`), so both directions of the
+channel stand on a frame boundary when the old image goes. No `ExecNoted` in time refuses the upgrade
+(`KeeperUnreachable`) and rolls it back; an `exec` that fails sends `ExecAborted`, and the keeper sends what it
+held back. The keeper holds the announced image (an image of the store, or an in-place install's executable)
+and makes it the image a crash restarts from only once the new image's `Hello` arrives; that `Hello` is
+answered `Launch{HandedOver}`, the exits told again, then what was held back. A new image that cannot read its
+handover closes everything the old one left and recovers from the keeper's inventory, as a restart after a
+crash does (`keeperlink::recoverFromKeeper()`).
 
 **Refusals are a table.** `handover::UpgradeRefusalRows` holds the enumerator and the sentence the user is
 told, in enumerator order (a `static_assert` holds the order, and the wire carries `refusal + 1`);

@@ -29,7 +29,7 @@
 #include <vtbackend/vt/SemanticPrompt.hpp>
 #include <vtbackend/vt/VTType.hpp>
 
-#include <core/Flags.hpp>
+#include <core/codec/Fields.hpp>
 
 #include <array>
 #include <type_traits>
@@ -57,23 +57,11 @@ concept WireEnum = std::is_enum_v<Enum> && requires { StateEnumWire<Enum>::Value
 template <typename Flag>
 struct StateFlagWire;
 
-template <typename T>
-struct FlagSetTraits: std::false_type
-{
-};
-template <typename Flag>
-struct FlagSetTraits<core::Flags<Flag>>: std::true_type
-{
-    using FlagType = Flag;
-};
-
-/// A `core::Flags` set.
-template <typename T>
-concept FlagSetType = FlagSetTraits<T>::value;
-
-/// The flag enumeration of the flag set @p Flags.
-template <FlagSetType Flags>
-using FlagOf = FlagSetTraits<Flags>::FlagType;
+using core::codec::FlagSetType;
+using core::codec::flagsFromWire;
+using core::codec::UnlistedEnumerator;
+using core::codec::wireBitsOf;
+using core::codec::wireIndexOf;
 
 // {{{ tables -- appended to, never reordered
 
@@ -877,3 +865,23 @@ struct StateFlagWire<vtbackend::StatusNotice>
 // }}}
 
 } // namespace vtbackend::detail
+
+// The state codec's tables, offered to core::codec under its own extension points: the tables stay where
+// the enumerations are described, and core::codec reads them through these.
+namespace core::codec
+{
+
+template <vtbackend::detail::WireEnum Enum>
+struct EnumWire<Enum>
+{
+    static constexpr auto const& Values = vtbackend::detail::StateEnumWire<Enum>::Values;
+};
+
+template <typename Flag>
+    requires requires { vtbackend::detail::StateFlagWire<Flag>::Values; }
+struct FlagWire<Flag>
+{
+    static constexpr auto const& Values = vtbackend::detail::StateFlagWire<Flag>::Values;
+};
+
+} // namespace core::codec

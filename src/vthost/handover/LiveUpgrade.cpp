@@ -112,6 +112,34 @@ namespace
         UpgradeState& _state;
     };
 
+    /// Calls an exec the keeper was told of off as it goes (UpgradeKeeper::abortExec()), unless the process
+    /// became the new image, which runs no destructor: whatever ends the upgrade after the announcement --
+    /// the handoff's failure, an exception -- leaves the keeper sending to the daemon again.
+    class AnnouncedExec
+    {
+      public:
+        explicit AnnouncedExec(UpgradeKeeper& keeper) noexcept: _keeper { keeper } {}
+        AnnouncedExec(AnnouncedExec const&) = delete;
+        AnnouncedExec(AnnouncedExec&&) = delete;
+        AnnouncedExec& operator=(AnnouncedExec const&) = delete;
+        AnnouncedExec& operator=(AnnouncedExec&&) = delete;
+        ~AnnouncedExec()
+        {
+            // Nothing may leave a destructor that runs as an exception unwinds.
+            try
+            {
+                _keeper.abortExec();
+            }
+            catch (std::exception const& failure)
+            {
+                errorLog()("live upgrade: calling the exec off with the keeper failed: {}", failure.what());
+            }
+        }
+
+      private:
+        UpgradeKeeper& _keeper;
+    };
+
     /// Rolls a live upgrade back as it goes, unless the process became the new image: every session resumed
     /// with what was handed to it meanwhile, every listener accepting. Whatever ends the upgrade -- a
     /// refusal, the exec's failure, an exception -- runs it, so that no way out leaves the daemon wedged.
@@ -157,6 +185,7 @@ LiveUpgrade::LiveUpgrade(core::net::EventLoop& loop,
                          ImageHandoff& handoff,
                          ReadinessProbe& probe,
                          UpgradeHooks& hooks,
+                         UpgradeKeeper& keeper,
                          std::span<ConnectionAcceptor* const> listeners,
                          LiveUpgradeConfig config):
     _loop { loop },
@@ -166,6 +195,7 @@ LiveUpgrade::LiveUpgrade(core::net::EventLoop& loop,
     _handoff { handoff },
     _probe { probe },
     _hooks { hooks },
+    _keeper { keeper },
     _listeners { listeners.begin(), listeners.end() },
     _config { std::move(config) }
 {
@@ -194,6 +224,7 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::run(UpgradeTar
     auto const report = answer.and_then([this](ReadinessReport const& target) {
         return checkReadable(target)
             .and_then([&] { return checkHostedPseudoconsoles(target, _host); })
+            .and_then([&] { return _keeper.admits(target); })
             .and_then([&]() -> std::expected<void, UpgradeRefusal> {
                 if (_config.runningConfig == RunningConfig::BuiltInDefaults)
                     return {};
@@ -232,6 +263,7 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::run(UpgradeTar
     // Only the encoded image and the handles it names go on: the decoded one, every session's terminal state
     // in it, is let go of here rather than kept through the wait for the target.
     auto [crossing, bytes] = encodedOf(*std::move(image));
+    crossing.insert(crossing.end(), _config.alsoCrossing.begin(), _config.alsoCrossing.end());
     // Refused here rather than read never: a new image that cannot read what it was handed orphans every
     // program.
     if (std::cmp_greater(bytes.size(), std::min(_config.maxImageSize, MaxHandoverImageSize)))
@@ -240,6 +272,15 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::run(UpgradeTar
         co_return std::unexpected(UpgradeRefusal::ImageTooLarge);
     }
 
+    // Last, once nothing else is left to refuse: the keeper hears which image comes next, and takes whatever
+    // is queued for it whole, so that the exec cuts no frame in half.
+    if (auto const announced = _keeper.announceExec(resolved->executable); !announced)
+    {
+        errorLog()("live upgrade refused: {}", describe(announced.error()));
+        co_return std::unexpected(announced.error());
+    }
+    // Destroyed before the rollback, so the keeper sends again before the sessions resume.
+    auto const announcedExec = AnnouncedExec { _keeper };
     auto const failure = _handoff.handOver(
         resolved->executable, argvFor(resolved->executable), std::move(crossing), std::move(bytes));
     errorLog()("live upgrade: cannot run {}: {}; serving on",

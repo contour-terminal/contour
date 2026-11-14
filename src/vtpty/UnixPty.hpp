@@ -15,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <string_view>
 
 #ifdef __APPLE__
@@ -22,6 +23,8 @@
 #elifdef __linux__
     #include <pty.h>
 #endif
+
+#include <sys/types.h>
 
 #include <fcntl.h>
 
@@ -79,6 +82,14 @@ class UnixPty final: public Pty
     /// flags.
     [[nodiscard]] InputEcho inputEcho() const noexcept override;
 
+    /// Asks the master for its foreground process group (tcgetpgrp()), under _mutex, so a concurrent close()
+    /// cannot hand it a descriptor recycled meanwhile -- another pane's terminal.
+    /// @return The group; none before start(), after close(), or when the terminal has none.
+    [[nodiscard]] std::optional<pid_t> foregroundProcessGroup() const noexcept;
+
+    /// @return The name of the program leading foregroundProcessGroup(); none where there is none.
+    [[nodiscard]] std::optional<std::string> foregroundProcessName() const override;
+
     UnixPipe& stdoutFastPipe() noexcept { return _stdoutFastPipe; }
 
     /// @name Live-upgrade hand-over (exec of the daemon keeps descriptors, not objects)
@@ -110,8 +121,10 @@ class UnixPty final: public Pty
   private:
     std::optional<std::string_view> readSome(int fd, char* target, size_t n) noexcept;
 
-    [[nodiscard]] bool started() const noexcept { return _masterFd != -1; }
-
+    /// @return Whether the master is open; takes _mutex.
+    [[nodiscard]] bool started() const noexcept;
+    /// @return Whether the master is open; with _mutex held.
+    [[nodiscard]] bool startedLocked() const noexcept { return _masterFd != -1; }
     /// handover(), for a caller that holds _mutex already.
     [[nodiscard]] std::expected<InheritedPty, AdoptError> handoverLocked() const;
 
@@ -132,6 +145,11 @@ class UnixPty final: public Pty
     /// @return What ended the wait.
     [[nodiscard]] WriteWait awaitWritable();
 
+    /// Opens the pipes close() and interruptWrites() wake a waiting write through. In start() or adopt(),
+    /// not in the constructor: a process out of descriptors fails one PTY, and never throws.
+    /// @return Nothing; or why they could not be opened.
+    [[nodiscard]] std::expected<void, std::error_code> openSignalPipes();
+
     /// Whether the master descriptor is open, published by start() and close() for isClosed().
     enum class MasterState : uint8_t
     {
@@ -142,11 +160,12 @@ class UnixPty final: public Pty
     FileDescriptor _masterFd;
     UnixPipe _stdoutFastPipe;
     /// Written once by close(), and never read: it wakes a write waiting for the application to read.
-    UnixPipe _closeSignal { O_CLOEXEC | O_NONBLOCK };
+    UnixPipe _closeSignal = UnixPipe::none();
     /// Readable from interruptWrites() until allowWrites() drains it: it wakes a write waiting for the
     /// application to read, and stops every later one from waiting.
-    UnixPipe _interruptSignal { O_CLOEXEC | O_NONBLOCK };
-    crispy::ReadSelector _readSelector;
+    UnixPipe _interruptSignal = UnixPipe::none();
+    /// Made by start() or adopt(), as it holds descriptors of its own: none before.
+    std::unique_ptr<crispy::ReadSelector> _readSelector;
     PageSize _pageSize;
     std::optional<ImageSize> _pixels;
     std::unique_ptr<Slave> _slave;

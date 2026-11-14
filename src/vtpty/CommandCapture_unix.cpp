@@ -2,6 +2,7 @@
 #include <vtpty/CommandCapture.hpp>
 #include <vtpty/CommandCaptureStop.hpp>
 #include <vtpty/OwnedFd.hpp>
+#include <vtpty/UnixUtils.hpp>
 
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -13,6 +14,7 @@
 #include <csignal>
 #include <cstddef>
 #include <expected>
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -24,14 +26,6 @@
 #include <poll.h>
 #include <spawn.h>
 #include <unistd.h>
-
-// POSIX requires no header to declare `environ`; Process_unix.cpp explains the per-platform story.
-#ifdef __APPLE__
-    #include <crt_externs.h>
-    #define environ (*_NSGetEnviron())
-#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-extern "C" char** environ;
-#endif
 
 namespace vtpty
 {
@@ -192,8 +186,12 @@ namespace
         auto const argv =
             std::array<char*, 4> { shellArg.data(), flagArg.data(), commandArg.data(), nullptr };
         auto pid = pid_t { 0 };
-        if (auto const rc =
-                posix_spawn(&pid, shell.c_str(), actions.get(), attributes.get(), argv.data(), environ);
+        if (auto const rc = posix_spawn(&pid,
+                                        shell.c_str(),
+                                        actions.get(),
+                                        attributes.get(),
+                                        argv.data(),
+                                        util::processEnvironment());
             rc != 0)
             return std::unexpected(errnoError(rc));
 
@@ -304,7 +302,12 @@ std::expected<std::string, CommandCaptureError> SystemCommandCapture::run(std::s
         return std::unexpected(CommandCaptureError { CommandCaptureError::Kind::Cancelled, {} });
     auto const deadline = Clock::now() + timeout;
 
-    auto const spawned = spawnShell(_shell, std::string { command });
+    // The limit is the shell's to set, in the child: this process's own stays as it is. On a line of its own,
+    // so that the command is parsed exactly as it would be without it -- a leading `#`, a `||` -- and runs
+    // whether or not the limit could be set.
+    auto const commandLine = _descriptorLimit ? std::format("ulimit -S -n {}\n{}", *_descriptorLimit, command)
+                                              : std::string { command };
+    auto const spawned = spawnShell(_shell, commandLine);
     if (!spawned)
         return spawnFailed(spawned.error());
 

@@ -30,6 +30,7 @@
 
 #include <vthost/handover/HandoverImage.hpp>
 #include <vthost/handover/Readiness.hpp>
+#include <vthost/keeper/Messages.hpp>
 
 using namespace vthost::handover;
 using namespace std::chrono_literals;
@@ -182,6 +183,39 @@ TEST_CASE("only a target that says it cannot adopt pseudoconsoles is refused for
     CHECK(checkAdoptsPseudoconsoles(report).has_value());
     report.pseudoconsoleAdoption = PseudoconsoleAdoption::Unable;
     CHECK(checkAdoptsPseudoconsoles(report) == std::unexpected(UpgradeRefusal::TargetCannotAdoptTerminals));
+}
+
+TEST_CASE("the keeper channel a target speaks crosses the readiness JSON",
+          "[vthost][handover][upgrade][keeper]")
+{
+    auto report = currentFormats();
+    CHECK_FALSE(encodeReadiness(report).contains("keeperChannelVersion"));
+    CHECK(decodeReadiness(encodeReadiness(report)) == report);
+    report.keeperChannelVersion = 3;
+    CHECK(encodeReadiness(report).contains(R"("keeperChannelVersion":3)"));
+    CHECK(decodeReadiness(encodeReadiness(report)) == report);
+}
+
+TEST_CASE("only a target that speaks a keeper channel serves behind a keeper",
+          "[vthost][handover][upgrade][keeper]")
+{
+    // A release that predates the keeper says nothing of it: its exec'd image refuses `daemon keeper-serve`.
+    auto const predating =
+        decodeReadiness(R"({"release":"0.8.0","handoverFormats":[2,2],"terminalStateFormats":[1,1]})");
+    REQUIRE(predating.has_value());
+    CHECK(checkServesKeeper(*predating) == std::unexpected(UpgradeRefusal::TargetCannotServeKeeper));
+    auto report = *predating;
+    report.keeperChannelVersion = 1;
+    CHECK(checkServesKeeper(report).has_value());
+}
+
+TEST_CASE("this build reports the keeper channel it speaks", "[vthost][handover][upgrade][keeper]")
+{
+#ifdef _WIN32
+    CHECK_FALSE(ownReadiness("1.2.3", std::nullopt).keeperChannelVersion.has_value());
+#else
+    CHECK(ownReadiness("1.2.3", std::nullopt).keeperChannelVersion == vthost::keeper::Hello {}.version);
+#endif
 }
 
 TEST_CASE("this build reports the formats it reads", "[vthost][handover][upgrade]")

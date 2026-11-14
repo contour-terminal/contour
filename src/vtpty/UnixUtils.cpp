@@ -7,16 +7,25 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <format>
+#include <fstream>
 #include <limits>
 #include <ranges>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <utility>
 
 #ifdef __linux__
     #include <sys/syscall.h>
+#endif
+
+#ifdef __APPLE__
+    #include <sys/param.h>
+
+    #include <libproc.h>
 #endif
 
 #include <sys/ioctl.h>
@@ -26,28 +35,39 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-using namespace std::string_literals;
+// POSIX requires no header to declare `environ`; each platform is left to differ, and all three we
+// build on do.
+//
+// macOS: a shared library cannot link against the symbol directly, so it goes through
+// _NSGetEnviron(). Linux: glibc's <unistd.h> declares it, so nothing is needed. FreeBSD: its
+// <unistd.h> does NOT declare it in the configuration this tree builds with, which is why the
+// FreeBSD job failed with "use of undeclared identifier 'environ'" -- so the declaration is
+// supplied here, as POSIX intends. `extern "C"` rather than a bare `extern`: the symbol has C
+// linkage, and declaring it with C++ linkage would name a different entity and fail to link.
+#ifdef __APPLE__
+    #include <crt_externs.h>
+    #define environ (*_NSGetEnviron())
+#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+extern "C" char** environ;
+#endif
 
 namespace vtpty
 {
 
-UnixPipe::UnixPipe(unsigned flags): pfd { -1, -1 }
+std::expected<UnixPipe, std::error_code> UnixPipe::open(unsigned flags)
 {
+    auto pipe = UnixPipe::none();
 #ifdef __linux__
-    if (pipe2(pfd.data(), static_cast<int>(flags)) < 0)
-        throw std::runtime_error { "Failed to create PTY pipe. "s + std::generic_category().message(errno) };
+    if (pipe2(pipe.pfd.data(), static_cast<int>(flags)) < 0)
+        return std::unexpected { std::error_code { errno, std::generic_category() } };
 #else
-    if (pipe(pfd.data()) < 0)
-        throw std::runtime_error { "Failed to create PTY pipe. "s + std::generic_category().message(errno) };
-    for (auto const fd: pfd)
-    {
+    if (::pipe(pipe.pfd.data()) < 0)
+        return std::unexpected { std::error_code { errno, std::generic_category() } };
+    for (auto const fd: pipe.pfd)
         if (auto const applied = util::applyCreationFlags(fd, flags); !applied)
-        {
-            close();
-            throw std::runtime_error { "Failed to configure PTY pipe. "s + applied.error().message() };
-        }
-    }
+            return std::unexpected { applied.error() };
 #endif
+    return pipe;
 }
 
 } // namespace vtpty
@@ -261,6 +281,66 @@ std::expected<void, std::error_code> loginTerminal(int slaveFd, ControllingTermi
     }
 
     return controlling;
+}
+
+std::optional<std::string> processNameOf(pid_t pid)
+{
+#if defined(__linux__) || defined(__APPLE__)
+    if (pid <= 0)
+        return std::nullopt;
+    #ifdef __linux__
+    // Streamed: /proc reports a size of zero, so a read sized by the file's length reads nothing.
+    auto in = std::ifstream { std::format("/proc/{}/comm", pid) };
+    auto name = std::string {};
+    if (!std::getline(in, name) || name.empty())
+        return std::nullopt;
+    return name;
+    #else
+    auto name = std::array<char, (2 * MAXCOMLEN) + 1> {};
+    if (proc_name(pid, name.data(), static_cast<uint32_t>(name.size())) <= 0)
+        return std::nullopt;
+    return std::string { name.data() };
+    #endif
+#else
+    std::ignore = pid;
+    return std::nullopt;
+#endif
+}
+
+std::optional<std::string> workingDirectoryOf(pid_t pid)
+{
+#ifdef __linux__
+    auto ec = std::error_code {};
+    auto const cwd = std::filesystem::read_symlink(std::format("/proc/{}/cwd", pid), ec);
+    if (ec)
+        return std::nullopt;
+    return cwd.string();
+#elifdef __APPLE__
+    auto vpi = proc_vnodepathinfo {};
+    if (proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi)) <= 0)
+        return std::nullopt;
+    return std::string { vpi.pvi_cdir.vip_path };
+#else
+    std::ignore = pid;
+    return std::nullopt;
+#endif
+}
+
+char**& processEnvironment() noexcept
+{
+    return environ;
+}
+
+std::vector<std::string_view> environmentEntries()
+{
+    auto entries = std::vector<std::string_view> {};
+    auto const* const variables = processEnvironment();
+    if (variables == nullptr) // clearenv() leaves no array at all
+        return entries;
+    for (auto const index: std::views::iota(std::size_t { 0 })
+                               | std::views::take_while([&](auto i) { return variables[i] != nullptr; }))
+        entries.emplace_back(variables[index]);
+    return entries;
 }
 
 } // namespace vtpty::util

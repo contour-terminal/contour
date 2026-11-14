@@ -54,13 +54,6 @@
     #include <spawn.h>
     #include <unistd.h>
 
-    #ifdef __APPLE__
-        #include <crt_externs.h>
-        #define environ (*_NSGetEnviron())
-    #elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-extern "C" char** environ;
-    #endif
-
 using namespace std::string_literals;
 using namespace std::chrono_literals;
 
@@ -637,7 +630,9 @@ TEST_CASE("spawnTrampoline.an unsupported version exits 121", "[vtpty][trampolin
     auto marker = std::format("{}{}", vtpty::SpawnTrampolineMarker, 99);
     auto argv = std::array<char*, 3> { name.data(), marker.data(), nullptr };
     auto pid = pid_t {};
-    REQUIRE(::posix_spawn(&pid, self->c_str(), nullptr, nullptr, argv.data(), environ) == 0);
+    REQUIRE(
+        ::posix_spawn(&pid, self->c_str(), nullptr, nullptr, argv.data(), vtpty::util::processEnvironment())
+        == 0);
     CHECK(exitedWith(waitFor(pid), static_cast<int>(vtpty::TrampolineExit::UnsupportedVersion)));
 }
 
@@ -679,7 +674,9 @@ TEST_CASE("spawnTrampoline.a refused spec is reported on the terminal slot", "[v
     auto marker = std::format("{}{}", vtpty::SpawnTrampolineMarker, refusal.version);
     auto argv = std::array<char*, 3> { name.data(), marker.data(), nullptr };
     auto pid = pid_t {};
-    REQUIRE(::posix_spawn(&pid, self->c_str(), actions->get(), nullptr, argv.data(), environ) == 0);
+    REQUIRE(::posix_spawn(
+                &pid, self->c_str(), actions->get(), nullptr, argv.data(), vtpty::util::processEnvironment())
+            == 0);
     terminal.slave.reset();
     slave.reset();
 

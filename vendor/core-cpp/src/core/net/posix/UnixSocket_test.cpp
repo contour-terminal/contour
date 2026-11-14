@@ -232,6 +232,51 @@ TEST_CASE("a live server on the path is not hijacked", "[net][unix]")
     REQUIRE(matched);
 }
 
+TEST_CASE("a closing listener removes only the socket file it bound", "[net][unix]")
+{
+    // A listener's path can be taken over while it still exists: the file unlinked and a NEW
+    // listener bound on it -- a restarted daemon, or a replacement that binds before the old one is
+    // destroyed. Removing the path by NAME on close then deleted the newcomer's socket, leaving it
+    // listening on a file nobody can reach. The close removes the path only while it still names
+    // the file this listener bound.
+    auto const tmp = TempDir {};
+    auto const socketPath = tmp.path / "run" / "default";
+
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = EventLoop { *source };
+
+    auto first = core::net::UnixListener::bind(loop, socketPath);
+    REQUIRE(first.has_value());
+
+    SECTION("its own file is removed")
+    {
+        (*first)->close();
+        CHECK_FALSE(std::filesystem::exists(socketPath));
+        CHECK((*first)->path() == socketPath);
+    }
+
+    SECTION("a newer listener's file on the same path is left alone")
+    {
+        REQUIRE(std::filesystem::remove(socketPath));
+        auto second = core::net::UnixListener::bind(loop, socketPath);
+        REQUIRE(second.has_value());
+
+        SECTION("by close()")
+        {
+            (*first)->close();
+        }
+        SECTION("by the destructor")
+        {
+            first->reset();
+        }
+        CHECK(std::filesystem::exists(socketPath));
+
+        // And it is the newer listener's file still: closing that one removes it.
+        (*second)->close();
+        CHECK_FALSE(std::filesystem::exists(socketPath));
+    }
+}
+
 TEST_CASE("a world-accessible socket directory is refused", "[net][unix]")
 {
     auto const tmp = TempDir {};

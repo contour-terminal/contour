@@ -46,7 +46,9 @@
 #include <core/async/Cancellation.hpp>
 #include <core/async/IExecutor.hpp>
 #include <core/async/ParkedWork.hpp>
+#include <core/async/StopToken.hpp>
 #include <core/async/Task.hpp>
+#include <core/async/UniqueCoroHandle.hpp>
 #include <core/net/IoBackend.hpp>
 #include <core/net/detail/CompletionHook.hpp>
 #include <core/net/detail/ParkTable.hpp>
@@ -259,13 +261,22 @@ class EventLoop: public async::IExecutor
     /// is documented rather than asserted because a flow that finishes within a turn never
     /// reaches the idle wait at all, and refusing those would forbid the ordinary use.
     ///
+    /// **An exception that escapes a TURN leaves the loop consistent.** A `post` callback, a
+    /// timer callback or an allocation may throw out of a turn while @p task is unfinished, and
+    /// that exception propagates out of this call. On the way out, @p task's flow is CANCELLED
+    /// and its frames are KEPT ALIVE: if the loop can take the root back -- it was queued or
+    /// parked itself -- it is destroyed at once; otherwise a frame below it, or one on another
+    /// executor, is still named by a park, a ready entry or a hand-off, so the loop takes over
+    /// the root and frees it only after a later drain -- a turn, or this loop's teardown -- has
+    /// unwound the chain with @c async::OperationCancelled. No queue is ever left naming a frame
+    /// that has been freed. The cancellation is this flow's alone: @p task runs under a stop
+    /// token of its own, linked to @c rootStopSource(), so @c requestStop() still reaches it.
+    ///
     /// @pre The backend is not host-driven, for @c run()'s reason.
     /// @param task The root flow to run (its frame is kept alive for the call).
     /// @return The value produced by @p task (or void).
-    /// @throws Whatever @p task's body threw, rethrown by @c async::Task::result(). An exception
-    ///         escaping a TURN — a `post` callback, an allocation — propagates too, and on that
-    ///         path @p task's frame is released rather than destroyed: it may be queued on
-    ///         another executor, and freeing it would hand that executor dead storage.
+    /// @throws Whatever @p task's body threw, rethrown by @c async::Task::result(), and whatever
+    ///         escaped a turn, as above.
     template <typename T>
     T blockOn(async::Task<T> task)
     {
@@ -273,7 +284,12 @@ class EventLoop: public async::IExecutor
                && "EventLoop::blockOn on a host-driven loop: such a loop advances only through "
                   "host pumps, so blocking on it can never complete");
         auto const onWorker = detail::WorkerIdentity::Scope { _worker };
-        task.handle().promise().setStopToken(_rootStop.get_token());
+        // The flow's own stop source, so that the exception path below can cancel THIS chain and
+        // nothing else; linked to the loop's, so `requestStop()` cancels it as it cancels the rest.
+        auto ownStop = async::StopSource {};
+        auto const linkedToLoop =
+            async::StopCallback { _rootStop.get_token(), [&ownStop]() noexcept { ownStop.request_stop(); } };
+        task.handle().promise().setStopToken(ownStop.get_token());
         // Through `queueReady` like every other queueing, rather than a `ReadyEntry` built here:
         // that function's claim to be the one place the ownership flag is decided is what the next
         // person will trust, and a second site writing the same value by hand is how the two
@@ -295,26 +311,26 @@ class EventLoop: public async::IExecutor
         // are wrong in the case the other one gets right.
         // **An exception out of a turn is an exit with the task unfinished**, and `turn()` is not
         // `noexcept`: a `TimerCallback` may throw by design, a posted `std::function` is user
-        // code, and a resumed bare handle need not be a `Task`'s. On that path the root frame is
-        // still NAMED by this loop -- a `Park` in the table, a `_byWaiter` entry keyed on its
-        // address, an entry in the ready queue -- so destroying it leaves the next turn calling
-        // `done()` on freed storage. Reachable with one `addTimer` whose callback throws under a
-        // `blockOn` whose root is parked on a `delay`: single-threaded, no pool.
+        // code, and a resumed bare handle need not be a `Task`'s. On that path the flow's frames
+        // are still NAMED -- a `Park` in the table, a `_byWaiter` entry keyed on an address, an
+        // entry in the ready queue, a hand-off on another executor -- so destroying the root
+        // leaves the next drain resuming freed storage. Reachable with one `post` whose callback
+        // throws under a `blockOn` whose root awaits a sub-task parked on a `delay`.
         //
-        // `cancelPending` is the retrieval, and it searches all three containers and DISARMS
-        // rather than releases -- so the frame stops being named and stays owned by `task`, which
-        // then destroys it normally. `core::async::syncRunWith` leaks instead, for the principle
-        // *a leak report names the coroutine that parked, and a use-after-free names nothing*;
-        // it leaks because it has nothing that can retrieve the park. **Disarm beats leak where
-        // disarming is available**, and here it is.
-        //
-        // What this cannot retrieve is a frame parked on something that is not this loop -- an
-        // `AsyncQueue`, another executor. That is C1's case and it is why the drive waits rather
-        // than giving up, above.
+        // Where the ROOT is what is named, `cancelPending` retrieves it: it searches every
+        // container and DISARMS rather than releases, so the frame stops being named and stays
+        // owned by `task`, which destroys it normally. **Disarm beats leak where disarming is
+        // available.** It is not available for a frame below the root -- the loop cannot tell
+        // which parks belong to this chain -- nor for one parked on something that is not this
+        // loop. There the chain is cancelled and the root handed to the loop, which frees it once
+        // a drain has unwound it (`strandRoot`): keeping the frames alive is what a park naming
+        // them needs, and the cancellation is what makes the drain end them.
         {
             auto const undo = detail::ScopeGuard { [&]() noexcept {
-                if (!task.done())
-                    std::ignore = cancelPending(task.handle());
+                if (task.done() || cancelPending(task.handle()))
+                    return;
+                ownStop.request_stop();
+                strandRoot(task.release());
             } };
             while (!task.done())
                 std::ignore = turn(std::nullopt, task.handle());
@@ -1155,6 +1171,14 @@ class EventLoop: public async::IExecutor
     /// the roots that finished off the loop's thread.
     void reapFinishedRoots() noexcept;
 
+    /// Takes over a `blockOn` root an exception left unfinished and already cancelled, whose chain
+    /// the loop cannot take back: a park or a hand-off still names one of its frames, so the frames
+    /// must outlive this call. Frees every stranded root that has finished since, and keeps
+    /// @p root until it finishes too -- a drain unwinds it -- or until teardown. Out of memory, it
+    /// leaks @p root rather than free a frame something may still name.
+    /// @param root The root frame, which this loop owns from now on.
+    void strandRoot(std::coroutine_handle<> root) noexcept;
+
     /// Hands a root that finished off the loop's thread to turn step 1. Safe from any thread.
     ///
     /// Wakes the backend while it holds the inbound lock: step 1 takes that lock before it reaps,
@@ -1188,6 +1212,10 @@ class EventLoop: public async::IExecutor
 
     /// Roots that have finished and wait for @c reapFinishedRoots.
     std::vector<std::list<SpawnedRoot>::iterator> _finishedRoots;
+
+    /// `blockOn` roots an exception left unfinished, cancelled, whose frames a park or a hand-off
+    /// may still name; see @c strandRoot. Freed once finished, and at teardown with @c _roots.
+    std::vector<async::detail::UniqueCoroHandle<void>> _strandedRoots;
 
     /// Whether a @c run() is what is driving the turn, which is what makes an idle turn block
     /// rather than return; see step 4. Loop thread only.

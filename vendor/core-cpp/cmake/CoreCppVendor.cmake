@@ -4,7 +4,7 @@
 # a consumer's tree, and it verifies that such a copy is still verbatim.
 #
 #   cmake -DMODE=sync -DREF=<tag or full SHA> -DDEST=<dir> [-DREPO=<url or path>]
-#         ["-DMODULES=base;log;cli;platform;async;net;testing"]
+#         ["-DMODULES=base;log;cli;codec;platform;async;net;testing"]
 #         -P <core-cpp checkout>/cmake/CoreCppVendor.cmake
 #
 #   cmake -DMODE=check -DDEST=<dir> -P <dir>/cmake/CoreCppVendor.cmake

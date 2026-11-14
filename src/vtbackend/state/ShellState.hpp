@@ -152,7 +152,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, StableIdSpan>
-    void visitStateFields(Visitor& visitor, T& span)
+    void visitForeignFields(Visitor& visitor, T& span)
     {
         visitor(1, span.first);
         visitor(2, span.last);
@@ -160,7 +160,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, ContextOutcome>
-    void visitStateFields(Visitor& visitor, T& outcome)
+    void visitForeignFields(Visitor& visitor, T& outcome)
     {
         visitor(1, outcome.exit);
         visitor(2, outcome.signal);
@@ -169,7 +169,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, WorkingDirectorySnapshot>
-    void visitStateFields(Visitor& visitor, T& snapshot)
+    void visitForeignFields(Visitor& visitor, T& snapshot)
     {
         visitor(1, snapshot.path);
         visitor(2, snapshot.locality);
@@ -177,7 +177,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, TerminalContext>
-    void visitStateFields(Visitor& visitor, T& context)
+    void visitForeignFields(Visitor& visitor, T& context)
     {
         visitor(1, context.id);
         visitor(2, context.parent);
@@ -203,14 +203,14 @@ namespace detail
 
     /// A command line crosses the wire as the raw text it was reported or recovered as.
     template <typename Visitor>
-    void visitStateFields(Visitor& visitor, CommandLineText const& text)
+    void visitForeignFields(Visitor& visitor, CommandLineText const& text)
     {
         visitor(1, text.raw());
     }
 
     template <typename Visitor>
         requires std::same_as<Visitor, FieldDecoder>
-    void visitStateFields(Visitor& visitor, CommandLineText& text)
+    void visitForeignFields(Visitor& visitor, CommandLineText& text)
     {
         auto raw = std::string {};
         visitor(1, raw);
@@ -219,7 +219,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, CommandBlockRecord>
-    void visitStateFields(Visitor& visitor, T& record)
+    void visitForeignFields(Visitor& visitor, T& record)
     {
         visitor(1, record.id);
         visitor(2, record.state);

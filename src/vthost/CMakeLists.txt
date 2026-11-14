@@ -1,3 +1,40 @@
+# The native protocol's byte level on its own: the varints and the frame, which link nothing, so a process
+# that must not depend on the rest of vthost (the PTY keeper) can speak them.
+add_library(vthost_wire STATIC
+    proto/Wire.cpp
+    proto/Wire.hpp
+)
+target_include_directories(vthost_wire PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+)
+
+# The daemon's images and where its state lives: the image store, its leases and the paths, which the PTY
+# keeper reaches too (it restarts a crashed daemon from the newest image). Nothing of the terminal engine.
+add_library(vthost_image STATIC
+    DaemonBinary.cpp
+    DaemonBinary.hpp
+    DaemonImage.cpp
+    DaemonImage.hpp
+    DaemonImageLeases_posix.cpp
+    DaemonImageLeases_win32.cpp
+    ReleaseNumbers.cpp
+    ReleaseNumbers.hpp
+    StatePath.hpp
+)
+target_include_directories(vthost_image PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+)
+target_link_libraries(vthost_image PUBLIC
+    core::base
+    core::log
+    core::platform
+    vtpty
+)
+
+add_subdirectory(keeper)
+
 add_library(vthost STATIC
     AccessFile.cpp
     AccessFile.hpp
@@ -27,12 +64,6 @@ add_library(vthost STATIC
     DaemonControlWire.hpp
     DaemonIdentity.cpp
     DaemonIdentity.hpp
-    DaemonBinary.cpp
-    DaemonBinary.hpp
-    DaemonImage.cpp
-    DaemonImage.hpp
-    DaemonImageLeases_posix.cpp
-    DaemonImageLeases_win32.cpp
     DaemonLifecycle.hpp
     RelocationRequest.hpp
     ConnectionRegistry.cpp
@@ -61,6 +92,7 @@ add_library(vthost STATIC
     WireEnum.hpp
     Daemon.cpp
     Daemon.hpp
+    KeeperSettings.hpp
     DaemonSpawn.hpp
     GracefulClose.hpp
     HistorySeed.cpp
@@ -116,12 +148,13 @@ add_library(vthost STATIC
     ShutdownFunnel.hpp
     ShutdownSignals.cpp
     ShutdownSignals.hpp
+    SocketFileListener.cpp
+    SocketFileListener.hpp
     StartContinuity.hpp
     SocketPath.hpp
     SpawnEnvironment.hpp
     SshTransport.cpp
     SshTransport.hpp
-    StatePath.hpp
     StderrTail.hpp
     StdioAttach.cpp
     StdioAttach.hpp
@@ -230,8 +263,6 @@ add_library(vthost STATIC
     proto/ReleasedVersions.hpp
     proto/Unsupported.cpp
     proto/Unsupported.hpp
-    proto/Wire.cpp
-    proto/Wire.hpp
     tmux/CommandLine.cpp
     tmux/CommandLine.hpp
     tmux/ControlModeParser.cpp
@@ -253,6 +284,9 @@ add_library(vthost STATIC
     tmux/TmuxGateway.hpp
 )
 target_link_libraries(vthost PUBLIC
+    vthost_wire
+    vthost_image
+    vthost_keeper
     vtcontrol
     core::async
     core::base
@@ -264,6 +298,28 @@ target_link_libraries(vthost PUBLIC
     vtpty
     crispy::core
 )
+# The daemon's link to its PTY keeper: an AF_UNIX channel that carries descriptors, so POSIX only.
+if(NOT WIN32)
+    target_sources(vthost PRIVATE
+        keeperlink/KeeperAttachment.cpp
+        keeperlink/KeeperAttachment.hpp
+        keeperlink/KeeperChannel.cpp
+        keeperlink/KeeperChannel.hpp
+        keeperlink/KeeperChild.cpp
+        keeperlink/KeeperChild.hpp
+        keeperlink/KeeperLink.cpp
+        keeperlink/KeeperLink.hpp
+        keeperlink/KeeperPtyFactory.cpp
+        keeperlink/KeeperPtyFactory.hpp
+        keeperlink/Recovery.cpp
+        keeperlink/Recovery.hpp
+        keeperlink/Structure.cpp
+        keeperlink/Structure.hpp
+        keeperlink/StructurePushPolicy.hpp
+        keeperlink/UpgradeKeeperLink.cpp
+        keeperlink/UpgradeKeeperLink.hpp
+    )
+endif()
 # The daemon serves, and the client dials, TLS; no header of vthost's names it.
 target_link_libraries(vthost PRIVATE core::net_tls)
 # The control API's JSON (vtcontrol/Json.hpp), read and written in .cpp files only: no header of vthost's
@@ -351,6 +407,7 @@ if(VTHOST_TESTING)
         ServiceControl_systemd_test.cpp
         Linger_test.cpp
         ServiceControl_test.cpp
+        SocketFileListener_test.cpp
         SocketPath_test.cpp
         SshTransport_test.cpp
         StatePath_test.cpp
@@ -440,6 +497,16 @@ if(VTHOST_TESTING)
         tmux/TmuxGateway_test.cpp
     )
     target_link_libraries(vthost_test vthost core::net_tls glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
+    if(NOT WIN32)
+        # A daemon behind a real PTY keeper, out of the test binary itself (`--keeper`, `--keeper-serve`).
+        add_library(vthost_keeper_harness STATIC testing/KeeperFixture.cpp testing/KeeperFixture.hpp)
+        target_link_libraries(vthost_keeper_harness PUBLIC vthost)
+        target_sources(vthost_test PRIVATE
+            KeeperCrash_test.cpp keeperlink/KeeperChild_test.cpp keeperlink/KeeperDaemon_test.cpp
+            keeperlink/KeeperLink_test.cpp
+            keeperlink/Recovery_test.cpp keeperlink/Structure_test.cpp)
+        target_link_libraries(vthost_test vthost_keeper_harness)
+    endif()
     # vthost links no WebAssembly runtime; its tests compose one, as `contour daemon` does.
     if(CONTOUR_EXTENSIONS)
         target_link_libraries(vthost_test vtextension_runtime)
@@ -493,8 +560,15 @@ if(VTHOST_BUILD_BENCH_LATENCY)
     target_link_libraries(bench-latency vthost_bench_latency core::cli)
     # `bench-latency e2e` and the display-gated runs find their executables beside the other tools.
     if(VTHOST_TESTING)
-        add_executable(bench_latency_test test_main.cpp latency/BenchSupport_test.cpp)
+        add_executable(bench_latency_test test_main.cpp latency/BenchSupport_test.cpp latency/HeadlessBench_test.cpp)
+        # The headless run spawns the echo child and the daemon from the real tool, not from the test binary.
+        add_dependencies(bench_latency_test bench-latency)
+        target_compile_definitions(bench_latency_test PRIVATE BENCH_LATENCY_EXECUTABLE="$<TARGET_FILE:bench-latency>")
         target_link_libraries(bench_latency_test vthost_bench_latency core::testing Catch2::Catch2 contour_test_trace)
+        # It shares vthost_test's main(), which runs the keeper harness when asked to.
+        if(TARGET vthost_keeper_harness)
+            target_link_libraries(bench_latency_test vthost_keeper_harness)
+        endif()
         if(NOT WIN32)
             target_compile_options(bench_latency_test PRIVATE -Wno-c2y-extensions)
         endif()

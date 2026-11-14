@@ -68,6 +68,13 @@ struct LoadResult
     std::string detail {}; ///< For a log line: what was wrong, when anything was.
 };
 
+/// What a load does with a damaged file.
+enum class DamagedSnapshot : std::uint8_t
+{
+    SetAside = 0, ///< Renames it `<file>.corrupt` (LoadVerdict::SetAside).
+    LeftInPlace,  ///< Leaves it, reporting it unreadable: a load that must change nothing.
+};
+
 /// The step of a store operation that failed.
 enum class StoreStep : std::uint8_t
 {
@@ -114,6 +121,13 @@ class SessionSnapshotStore
     /// Reads `<file>.restored` when present, else `<file>`. A damaged file is renamed `.corrupt`.
     [[nodiscard]] LoadResult load() const;
 
+    /// Reads the newer of `<file>` and `<file>.restored`, and changes nothing: a damaged file is left where
+    /// it is (LoadVerdict::Unreadable). What a daemon restarted after a crash reads, so that a crash loop can
+    /// never turn the snapshot into a `.restored`, `.failed` or `.corrupt` file. Unlike load(), which prefers
+    /// the
+    /// `.restored` copy for its retry, it wants the workspace last written.
+    [[nodiscard]] LoadResult peek() const;
+
     /// Moves `<file>` to `<file>.restored` before a restore realizes it; a no-op for a load that came
     /// from `.restored`.
     /// @param source What load() read.
@@ -133,7 +147,9 @@ class SessionSnapshotStore
     [[nodiscard]] std::filesystem::path const& path() const noexcept { return _path; }
 
   private:
-    [[nodiscard]] LoadResult loadFile(std::filesystem::path const& file, RestoreSource source) const;
+    [[nodiscard]] LoadResult loadFile(std::filesystem::path const& file,
+                                      RestoreSource source,
+                                      DamagedSnapshot damaged) const;
     [[nodiscard]] std::filesystem::path sibling(std::string_view suffix) const;
 
     core::platform::FileSystem const& _fileSystem;

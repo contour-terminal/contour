@@ -157,7 +157,13 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
     // An id another session of the image took already, or none at all, is a broken image; the program still
     // gets a session, under a fresh id and in a tab of its own.
     auto id = session.id;
-    if (id == SessionId {} || _sessions.contains(id.value))
+    if (id == SessionId {})
+    {
+        // Unnamed: a program a recovery found that the structure never named.
+        id = SessionId { _nextSessionId++ };
+        sessionLog()("handover: an unnamed session is adopted as session {}", id.value);
+    }
+    else if (_sessions.contains(id.value))
     {
         id = SessionId { _nextSessionId++ };
         errorLog()("handover: session {} is named twice in the image; adopted as session {}",
@@ -172,6 +178,17 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
         {
             sessionLog()("handover: session {}: serving its PTY, on which no child of this one runs",
                          id.value);
+            return std::move(*pty);
+        }
+        if (session.device == handover::SessionDevice::KeeperChild)
+        {
+            // Held by the keeper across the exec or the crash: bound to its keeper session again, so that its
+            // exit is heard and its close releases it.
+            if (_adoptChild)
+                return _adoptChild(session, std::move(*pty));
+            sessionLog()("handover: session {}: serving its PTY; its child is the keeper's (session {})",
+                         id.value,
+                         session.keeperSession);
             return std::move(*pty);
         }
         if (!vtpty::Process::canAdopt(session.child))
@@ -218,7 +235,14 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
         auto const _ = std::lock_guard { terminal };
         return terminal.restoreState(captured);
     });
-    if (!restored)
+    // A session brought back without its terminal state (a recovery after a crash, which has no checkpoint of
+    // it) runs on a fresh terminal by design, seeded with what else is known of it: no notice is owed.
+    if (session.terminalState.empty())
+    {
+        if (_seedRecovered)
+            _seedRecovered(session, hosted->terminal());
+    }
+    else if (!restored)
     {
         errorLog()(
             "handover: session {}: its screen could not be restored (error {}); the program runs on with "
@@ -230,7 +254,16 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
 
     // Delivered after the replies the restored terminal queued, before anything a client hands it from now.
     hosted->replayCarried(std::move(session.carried));
+    // A program that ended while no daemon held it (its keeper kept the status) is closed at once, with that
+    // status, rather than whenever its terminal's last other holder lets go of it.
+    auto const endedMeanwhile =
+        hosted->process() != nullptr ? hosted->process()->checkStatus() : std::nullopt;
     installSession(std::move(hosted));
+    if (endedMeanwhile)
+        _loop.post([gate = _gate, id, status = *endedMeanwhile] {
+            if (gate->host != nullptr)
+                gate->host->endSession(id, sessionEndOf(status));
+        });
     // What the host knows of the session beside its terminal: the preference its palette was seeded under,
     // so that a client stating the same one again does not wipe what a program set (applyColorPreference()),
     // and the command a restart stopped in it.
@@ -361,11 +394,12 @@ std::expected<HandoverImage, HandoverError> readHandover(HandoverMemory& memory,
 }
 
 #ifndef _WIN32
-std::vector<int> descriptorsToKeep(HandoverImage const& image)
+std::vector<int> descriptorsToKeep(HandoverImage const& image, std::span<int const> alsoKeep)
 {
     auto kept = std::vector<int> { 0, 1, 2 };
     for (auto const handle: handlesNamedBy(image))
         kept.push_back(handle.native());
+    kept.insert(kept.end(), alsoKeep.begin(), alsoKeep.end());
     return sortedUnique(std::move(kept), NoDescriptor);
 }
 

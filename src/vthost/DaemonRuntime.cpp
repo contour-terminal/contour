@@ -101,6 +101,7 @@ std::expected<proto::DaemonStatusReply, DaemonControlError> DaemonRuntime::statu
         .workspaces = wireCount(_host.populatedWorkspaceCount()),
         .tlsFingerprint =
             _config.tlsFingerprint.empty() ? std::nullopt : std::optional { _config.tlsFingerprint },
+        .keeperProcessId = _config.keeperProcessId,
     };
 }
 

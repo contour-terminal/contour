@@ -528,16 +528,71 @@ runs, or end its process.
 For a service-managed daemon, prefer `contour daemon-service stop`, which lets the service manager
 know it was stopped on purpose rather than restarting it.
 
-!!! warning "Shells do not survive the daemon"
-    Persistence is against the *client*, not against the daemon process. Stopping the daemon ends
-    every shell it hosts. Shutdown is abrupt by design — attached clients see the connection close
-    with no goodbye, exactly as a real `tmux kill-server` looks to them. What comes back after a
-    reboot, a crash or an upgrade are the *workspaces* — see [Surviving reboots](#surviving-reboots).
+!!! warning "Stopping the daemon ends its shells"
+    Stopping the daemon ends every shell it hosts. Shutdown is abrupt by design — attached clients
+    see the connection close with no goodbye, exactly as a real `tmux kill-server` looks to them. A
+    daemon *crash* is another matter on Linux and macOS: see
+    [Surviving a daemon crash](#surviving-a-daemon-crash). What comes back after a reboot are the
+    *workspaces* — see [Surviving reboots](#surviving-reboots).
+
+## Surviving a daemon crash
+
+On Linux and macOS, `contour daemon` runs the daemon behind a small **PTY keeper**: the process
+you started becomes the keeper, and the daemon and every shell are its children. The keeper holds each
+shell's terminal and the daemon's sockets, reads no output, and starts a new daemon when the old one
+crashes, is killed, or stops answering for 30 seconds (`daemon.keeper.restart_hung`). `contour daemon
+status` names the keeper's process id beside the daemon's.
+
+What survives a crash:
+
+- **the shells**, and every program running in them: nothing is restarted, and they never notice;
+- **their output after you reconnect**: the window reconnects to the same socket on its own (see
+  [When the connection is lost](#when-the-connection-is-lost)), and from then on shows what the
+  programs write;
+- **each pane's working directory and foreground program name**, which the new daemon reads from the
+  shell itself, so a new tab still opens where you were and a tab title still names the running program;
+- **the ids**: the new daemon is the same instance with the same session, tab and workspace ids, so
+  every window keeps its tabs and panes, and what you type into a pane still reaches the program it
+  showed before the crash.
+
+What does not: what the dead daemon had read but not yet shown is lost, and the screen of each pane
+comes back with the scrollback the last [workspace snapshot](#surviving-reboots) held rather than as it
+was; a program redraws its screen, a shell its prompt. Input typed while the daemon was down is
+dropped.
+
+A daemon that crashes again within 30 seconds is restarted after a pause that doubles up to 30 seconds.
+After five crashes within five minutes the keeper stops restarting it and keeps the shells for two
+minutes more, then tries once again; if that fails too, it ends the shells and exits with a failure, so
+that a service manager's own restart limits apply. Stopping the daemon (`contour daemon stop`,
+`SIGTERM`, `SIGINT`) ends the keeper with it, and a keeper that goes away takes its daemon along.
+
+These numbers are the defaults of `daemon.keeper`, in whole seconds but the count:
+
+```yaml
+daemon:
+  keeper:
+    give_up_crashes: 5    # this many crashes ...
+    give_up_window: 300   # ... within this many seconds give up
+    backoff_start: 1      # the first pause after a crash soon after another
+    backoff_cap: 30       # the longest pause
+    startup_timeout: 30   # a start silent that long, before serving, is killed as hung
+    stop_timeout: 60      # a stopping daemon that has not ended by then is killed
+```
+
+`contour daemon` reads them as it starts; a running keeper keeps the numbers it started with.
+
+!!! note "An out-of-memory kill under systemd still stops the unit"
+    Under the systemd user unit (`contour daemon-service install`), a kernel out-of-memory kill of the
+    daemon still stops the whole unit, keeper and shells included, as before. Keeping the shells
+    through that is planned, and needs a change to the unit and to how the daemon places itself.
+
+Windows runs the daemon without a keeper for now, and its shells end with it.
 
 ## Surviving reboots
 
 A daemon keeps a snapshot of its workspaces, so that after a reboot, a crash or an upgrade the next
-daemon brings it back. The shells themselves cannot survive their daemon; what returns is:
+daemon brings it back. The shells themselves cannot survive a reboot, nor a stopped daemon (a crashed
+one is another matter: see [Surviving a daemon crash](#surviving-a-daemon-crash)); what returns is:
 
 - every workspace, tab and split, with its ratios, the active tab and pane, and a zoomed pane;
 - tab titles and the tab colours you set;
@@ -830,8 +885,10 @@ since it exits 10 seconds after its last session and client are gone.
   `daemon.default_cell_pixel_size` until one reports. With a per-pane font zoom, or windows on
   monitors of different DPI, every pane other than the last-reporting one lays its images out for
   *that* pane's cell, so they come out larger or smaller than its own cells would make them.
-- Shells end with the daemon (see [Stopping a daemon](#stopping-a-daemon)); the workspaces come back
-  without them (see [Surviving reboots](#surviving-reboots)).
+- Shells end when the daemon is stopped (see [Stopping a daemon](#stopping-a-daemon)), and on Windows
+  when it crashes; the workspaces come back without them (see [Surviving reboots](#surviving-reboots)).
+  On Linux and macOS a crashed daemon is replaced and the shells live on (see
+  [Surviving a daemon crash](#surviving-a-daemon-crash)).
 - **ssh attach needs key or agent authentication.** Contour never answers an ssh prompt — a
   password, a key passphrase, a second factor or an unknown host key — so run `ssh USER@HOST` once
   in a terminal first (see [Remote hosts](remote-hosts.md#over-ssh)).

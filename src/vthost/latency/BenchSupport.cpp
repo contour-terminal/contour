@@ -102,6 +102,13 @@ bool BenchProcess::isRunning() const
     return _process->alive();
 }
 
+std::optional<std::int64_t> BenchProcess::processId() const
+{
+    if (auto const child = _process->handoverChild())
+        return child->pid;
+    return std::nullopt;
+}
+
 std::optional<vtpty::Process::ExitStatus> BenchProcess::waitFor(std::chrono::milliseconds timeout)
 {
     auto const deadline = std::chrono::steady_clock::now() + timeout;

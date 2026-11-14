@@ -80,6 +80,8 @@ struct DaemonStatus
     /// The `SHA256:...` fingerprint of the certificate its TCP listener presents; nullopt for a daemon
     /// without one, or from before it states this.
     std::optional<std::string> tlsFingerprint {};
+    /// The PTY keeper it runs behind, 0 for none; nullopt for a daemon from before it states one.
+    std::optional<std::uint64_t> keeperProcessId {};
 };
 
 /// @param reply A DaemonStatusReply as the wire spells it.
@@ -174,6 +176,6 @@ inline constexpr auto DefaultUpgradeTimeout = std::chrono::milliseconds { 30'000
 /// @return The port; TransportErrorKind::DaemonAbsent -- a missing socket or a refused connection -- reads
 ///         as ControlErrorCode::NotRunning.
 [[nodiscard]] std::unique_ptr<DaemonControlPort> makeDaemonControl(
-    std::shared_ptr<ITransportFactory> transport, AttachBudget timeout = DefaultControlTimeout);
+    std::shared_ptr<ITransportFactory> transport, AttachBudget const& timeout = DefaultControlTimeout);
 
 } // namespace vthost::client

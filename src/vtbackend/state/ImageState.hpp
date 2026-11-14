@@ -295,7 +295,7 @@ namespace detail
 {
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, kitty_graphics::Command>
-    void visitStateFields(Visitor& visitor, T& command)
+    void visitForeignFields(Visitor& visitor, T& command)
     {
         visitor(1, command.action);
         visitor(2, command.format);

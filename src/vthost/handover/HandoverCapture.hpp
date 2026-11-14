@@ -23,6 +23,21 @@ class SessionHost;
 namespace vthost::handover
 {
 
+/// @param host The host.
+/// @param id One of its sessions (Require).
+/// @return Session @p id as a handover image names it, without what crosses with it (its PTY, its terminal
+///         state, its carried input): its identity, profile, stated settings, color preference and
+///         interruption, and for a child its PTY keeper holds, the keeper's name for it. Locks no terminal.
+///         Loop thread.
+[[nodiscard]] HandoverSession sessionStructureOf(SessionHost const& host, vtworkspace::SessionId id);
+
+/// @param host The host.
+/// @return The host's structure: the model with its ids, the object registry, the color preference new
+///         sessions are built under, the cell size a client stated, and every session as sessionStructureOf()
+///         names it. Nothing names the run (daemonInstance, fromRelease, upgradeGeneration), a listener or a
+///         lease: the caller does. Locks no terminal. Loop thread.
+[[nodiscard]] HandoverImage hostStructureOf(SessionHost const& host);
+
 /// Asks, without stopping anything, whether a capture of @p host would be refused as things stand: what a
 /// live upgrade checks before it announces itself, so that a refusal costs no client its connection. A
 /// capture asks again, since a session may change in between. Loop thread.

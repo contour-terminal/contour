@@ -7,7 +7,7 @@ network.
 
 `vendor/core-cpp` is a verbatim copy of a tagged release of
 [core-cpp](https://github.com/contour-terminal/core-cpp), the shared C++ foundation of the Contour
-Terminal projects: its `base`, `log`, `cli`, `platform`, `async`, `net` and `testing` modules.
+Terminal projects: its `base`, `log`, `cli`, `codec`, `platform`, `async`, `net` and `testing` modules.
 `vendor/core-cpp/MANIFEST` names the tag and the commit, and pins every file by its SHA-256.
 
 - **Never edit a file under `vendor/core-cpp`.** The `core-cpp-vendored-copy` test (label `lint`)
@@ -20,7 +20,7 @@ Terminal projects: its `base`, `log`, `cli`, `platform`, `async`, `net` and `tes
   result as one change:
 
   ```sh
-  cmake -DMODE=sync -DREF=<tag> -DREPO=https://github.com/contour-terminal/core-cpp         -DDEST=vendor/core-cpp "-DMODULES=base;log;cli;platform;async;net;testing"         -P <core-cpp checkout>/cmake/CoreCppVendor.cmake
+  cmake -DMODE=sync -DREF=<tag> -DREPO=https://github.com/contour-terminal/core-cpp         -DDEST=vendor/core-cpp "-DMODULES=base;log;cli;codec;platform;async;net;testing"         -P <core-cpp checkout>/cmake/CoreCppVendor.cmake
   ```
 
 - **Verify the copy** without git or network:

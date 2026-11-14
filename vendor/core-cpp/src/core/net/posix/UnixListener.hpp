@@ -5,9 +5,11 @@
 #include <core/net/EventLoop.hpp>
 #include <core/net/IListener.hpp>
 
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <optional>
 
 namespace core::net
 {
@@ -45,6 +47,10 @@ class UnixListener final: public IListener
     /// @c NetErrorCode::AddressInUse and the existing socket is left intact; only a
     /// stale socket (a crashed server's leftover) or an absent path is reclaimed
     /// and rebound. The socket file itself is chmod'd 0600.
+    ///
+    /// The file's identity is recorded once bound, and closing the listener removes
+    /// @p path only while it still names that file: a listener bound on the same path
+    /// since -- after this one's file was unlinked -- keeps its socket.
     /// @param loop The loop whose reactor drives accept readiness (not owned).
     /// @param path The socket file path (its parent is the hardened directory).
     /// @param backlog The listen backlog.
@@ -58,22 +64,38 @@ class UnixListener final: public IListener
     /// AF_UNIX endpoints have no port; always 0.
     [[nodiscard]] std::uint16_t boundPort() const noexcept override { return 0; }
 
-    /// @return The socket file path this listener is bound to.
+    /// @return The socket file path this listener is bound to. Kept on close, whether or not
+    ///         the close removed the file.
     [[nodiscard]] std::filesystem::path const& path() const noexcept { return _path; }
 
     /// @copydoc IListener::nativeHandle
     [[nodiscard]] platform::NativeHandle nativeHandle() const noexcept override { return _fd; }
 
   protected:
-    /// Stops accepting and unlinks the socket file: @c closeWith with @c FdWakePolicy::Resume.
+    /// Stops accepting and removes the socket file if it is still this listener's: @c closeWith
+    /// with @c FdWakePolicy::Resume.
     void doClose() noexcept override;
 
   private:
-    UnixListener(EventLoop& loop, int fd, std::filesystem::path path);
+    /// Which file a path names: what tells the socket file this listener bound from one
+    /// bound on the same path since.
+    struct FileIdentity
+    {
+        std::uint64_t device = 0; ///< `st_dev`.
+        std::uint64_t inode = 0;  ///< `st_ino`.
 
-    /// Closes the listening fd and unlinks the socket file, telling the loop first
-    /// so a parked accept is resumed rather than left waiting on a descriptor the
-    /// poller can no longer report.
+        [[nodiscard]] bool operator==(FileIdentity const&) const noexcept = default;
+    };
+
+    /// @param path The path to look at; a symlink there is not followed.
+    /// @return The identity of the file @p path names, or nothing when it names none.
+    [[nodiscard]] static std::optional<FileIdentity> identityOf(std::filesystem::path const& path) noexcept;
+
+    UnixListener(EventLoop& loop, int fd, std::filesystem::path path, std::optional<FileIdentity> file);
+
+    /// Closes the listening fd and removes the socket file if @c _path still names the
+    /// file this listener bound, telling the loop first so a parked accept is resumed
+    /// rather than left waiting on a descriptor the poller can no longer report.
     /// @param policy How a parked accept observes the close. @c doClose() passes
     ///        @c Resume — this listener is alive, so acceptOne may re-read the @c _fd /
     ///        @c _closed it holds pointers to, once its lifetime token says the listener
@@ -84,6 +106,9 @@ class UnixListener final: public IListener
     EventLoop& _loop;
     int _fd;
     std::filesystem::path _path;
+    /// The socket file @c bind created, as it stood right after the bind; nothing if it could
+    /// not be read then, in which case the close removes nothing rather than guess.
+    std::optional<FileIdentity> _file;
     bool _closed = false;
     /// Expires with this listener. A parked accept is resumed by the loop a turn after `close()`,
     /// and an owner may destroy the listener in between (`listener->close(); listener.reset();`),

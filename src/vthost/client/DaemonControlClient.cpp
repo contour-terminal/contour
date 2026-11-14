@@ -424,6 +424,7 @@ std::optional<DaemonStatus> fromWire(proto::DaemonStatusReply const& reply)
             reply.relocation ? enumUpTo(*reply.relocation, RelocationRequest::Refused) : std::nullopt,
         .workspaces = reply.workspaces.transform([](uint32_t count) { return std::size_t { count }; }),
         .tlsFingerprint = reply.tlsFingerprint,
+        .keeperProcessId = reply.keeperProcessId,
     };
 }
 
@@ -464,7 +465,7 @@ std::expected<proto::UpgradeDaemonReply, ControlError> SocketDaemonControl::upgr
 }
 
 std::unique_ptr<DaemonControlPort> makeDaemonControl(std::shared_ptr<ITransportFactory> transport,
-                                                     AttachBudget timeout)
+                                                     AttachBudget const& timeout)
 {
     return std::make_unique<OwnedLoopDaemonControl>(std::move(transport), std::move(timeout));
 }

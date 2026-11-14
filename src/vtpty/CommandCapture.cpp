@@ -6,8 +6,15 @@
 namespace vtpty
 {
 
-SystemCommandCapture::SystemCommandCapture(std::string shell, core::async::StopToken shutdown):
-    _shell { std::move(shell) }, _shutdown { std::move(shutdown) }
+SystemCommandCapture::SystemCommandCapture(std::string shell,
+                                           core::async::StopToken shutdown,
+                                           [[maybe_unused]] std::optional<std::uint64_t> descriptorLimit):
+    _shell { std::move(shell) },
+    _shutdown { std::move(shutdown) }
+#ifndef _WIN32
+    ,
+    _descriptorLimit { descriptorLimit }
+#endif
 {
 }
 

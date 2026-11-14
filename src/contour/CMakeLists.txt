@@ -1606,6 +1606,22 @@ if(CONTOUR_FRONTEND_GUI)
                 set_property(TEST contour_e2e_daemon_live_upgrade
                              APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
             endif()
+
+            # A real crash: the daemon its PTY keeper keeps is SIGKILLed twice, its configuration broken in
+            # between, and the hosted program, its pane and its ids come through each restart.
+            add_test(NAME contour_e2e_daemon_crash_recovery
+                COMMAND ${_live_upgrade_launcher} sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/daemon-crash-recovery.sh
+                        $<TARGET_FILE:contour>)
+            set_tests_properties(contour_e2e_daemon_crash_recovery
+                PROPERTIES
+                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;LSAN_OPTIONS=detect_leaks=0"
+                    TIMEOUT 180
+                    RUN_SERIAL TRUE
+                    LABELS "e2e;daemon;keeper")
+            if(CONTOUR_SANITIZE STREQUAL "thread")
+                set_property(TEST contour_e2e_daemon_crash_recovery
+                             APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
+            endif()
         elseif(WIN32)
             # The same upgrade on Windows, where the daemon hands itself over to a successor process rather
             # than exec'ing in place: the daemon's pid changes and the program's does not. Windows PowerShell,
@@ -1705,6 +1721,8 @@ if(CONTOUR_TESTING)
         cli/ContourApp_test.cpp
         cli/ControlVerbs_test.cpp
         cli/DaemonStart_test.cpp
+        cli/KeeperVerb_test.cpp
+        cli/DaemonVerbOptions_test.cpp
         cli/DaemonVerbs_test.cpp
         cli/ConnectList_test.cpp
         cli/ConnectProbe_test.cpp

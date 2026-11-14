@@ -56,6 +56,7 @@ add_library(contour_cli STATIC
     TerminalPinPrompt.cpp TerminalPinPrompt.hpp
     WorkspaceListing.cpp WorkspaceListing.hpp
     DaemonStart.cpp DaemonStart.hpp
+    DaemonVerbOptions.cpp DaemonVerbOptions.hpp
     DaemonVerbs.cpp DaemonVerbs.hpp
     McpCommand.cpp McpCommand.hpp
     McpScope.cpp McpScope.hpp
@@ -66,6 +67,7 @@ add_library(contour_cli STATIC
     ClientAttach.hpp
     Hosting.hpp
     HostTransport.cpp HostTransport.hpp
+    KeeperVerb.cpp KeeperVerb.hpp
     ShellIntegration.cpp ShellIntegration.hpp
     "${_shell_integration_data}"
 )

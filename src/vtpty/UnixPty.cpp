@@ -6,6 +6,7 @@
 
 #include <crispy/BufferObject.hpp>
 
+#include <core/Assert.hpp>
 #include <core/Deferred.hpp>
 #include <core/Environment.hpp>
 #include <core/Escape.hpp>
@@ -14,12 +15,12 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <chrono>
 #include <csignal>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
-#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -59,7 +60,6 @@
 using std::make_unique;
 using std::nullopt;
 using std::optional;
-using std::runtime_error;
 using std::scoped_lock;
 using std::string_view;
 
@@ -76,7 +76,10 @@ namespace
         PtySlaveHandle slave;
     };
 
-    PtyHandles createUnixPty(PageSize const& windowSize, optional<ImageSize> pixels)
+    /// @return A new pseudo terminal; or why none could be opened (the process is out of descriptors, the
+    ///         system out of PTYs): a failure of one session's start, never of the process.
+    std::expected<PtyHandles, std::error_code> createUnixPty(PageSize const& windowSize,
+                                                             optional<ImageSize> pixels)
     {
         // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
         assert(std::cmp_less_equal(unbox(windowSize.lines), std::numeric_limits<unsigned short>::max()));
@@ -97,12 +100,12 @@ namespace
         int masterFd {};
         int slaveFd {};
         if (openpty(&masterFd, &slaveFd, nullptr, /*&term*/ nullptr, (winsize*) wsa) < 0)
-            throw runtime_error { "Failed to open PTY. "s + std::generic_category().message(errno) };
+            return std::unexpected { std::error_code { errno, std::generic_category() } };
 
         ptyLog()("PTY opened. master={}, slave={}", masterFd, slaveFd);
 
-        return { .master = PtyMasterHandle::cast_from(masterFd),
-                 .slave = PtySlaveHandle::cast_from(slaveFd) };
+        return PtyHandles { .master = PtyMasterHandle::cast_from(masterFd),
+                            .slave = PtySlaveHandle::cast_from(slaveFd) };
     }
 
 #if defined(__linux__) && defined(UTEMPTER)
@@ -134,13 +137,35 @@ void UnixPty::Slave::close()
     _slaveFd.close();
 }
 
+namespace
+{
+    /// How often waitForClosed() polls the PTY while no descriptor is left for a selector.
+    constexpr auto SelectorRetryInterval = std::chrono::milliseconds(100);
+} // namespace
+
 void UnixPty::waitForClosed()
 {
-    crispy::ReadSelector selector;
-    selector.wantRead(_masterFd);
+    // Returning means "closed" to every caller, so running out of descriptors must not end the wait: until a
+    // selector can be had, the PTY is polled instead, and a close in the meantime ends the wait as usual.
+    auto selector = crispy::ReadSelector::create();
+    while (!selector)
+    {
+        if (isClosed())
+            return;
+        std::this_thread::sleep_for(SelectorRetryInterval);
+        selector = crispy::ReadSelector::create();
+    }
+    {
+        // Under the lock close() closes the master under, so that a master closed meanwhile is not watched by
+        // its number, which may name another descriptor by now.
+        auto const _ = std::scoped_lock { _mutex };
+        if (_masterFd.isClosed())
+            return;
+        (*selector)->wantRead(_masterFd);
+    }
     while (true)
     {
-        selector.waitOne();
+        (*selector)->waitOne();
         if (isClosed())
             break;
 
@@ -172,7 +197,8 @@ int UnixPty::Slave::write(std::string_view text) noexcept
 }
 // }}}
 
-UnixPty::UnixPty(PageSize pageSize, optional<ImageSize> pixels): _pageSize { pageSize }, _pixels { pixels }
+UnixPty::UnixPty(PageSize pageSize, optional<ImageSize> pixels):
+    _stdoutFastPipe { UnixPipe::none() }, _pageSize { pageSize }, _pixels { pixels }
 {
 }
 
@@ -182,12 +208,36 @@ StartResult UnixPty::start()
     if (started())
         return {};
 
-    auto const handles = [this] {
+    // Opened here rather than as it is constructed: out of descriptors, it fails this start, not the process.
+    auto fastPipe = openSignalPipes().and_then([] { return UnixPipe::open(); });
+    if (fastPipe && !_readSelector)
+    {
+        auto selector = crispy::ReadSelector::create();
+        if (!selector)
+            fastPipe = std::unexpected { selector.error() };
+        else
+            _readSelector = *std::move(selector);
+    }
+    if (!fastPipe)
+        return std::unexpected(
+            StartFailure { .error = StartError::PtyAllocationFailed,
+                           .detail = "Failed to create PTY pipe. "s + fastPipe.error().message() });
+    _stdoutFastPipe = *std::move(fastPipe);
+    auto const [pageSize, pixels] = [this] {
         auto const _ = std::scoped_lock { _mutex };
-        return createUnixPty(_pageSize, _pixels);
+        return std::pair { _pageSize, _pixels };
     }();
-    _masterFd = crispy::FileDescriptor::fromNative(unbox<int>(handles.master));
-    _masterState.store(MasterState::Open, std::memory_order_release);
+    auto const opened = createUnixPty(pageSize, pixels);
+    if (!opened)
+        return std::unexpected(StartFailure { .error = StartError::PtyAllocationFailed,
+                                              .detail = "Failed to open PTY. "s + opened.error().message() });
+    auto const& handles = *opened;
+    {
+        // Under the lock a resize on another thread reads it under.
+        auto const _ = std::scoped_lock { _mutex };
+        _masterFd = crispy::FileDescriptor::fromNative(unbox<int>(handles.master));
+        _masterState.store(MasterState::Open, std::memory_order_release);
+    }
     _slave = make_unique<Slave>(handles.slave);
 
     // Close-on-exec, so that no process this one spawns inherits the master: our own children close every
@@ -203,8 +253,8 @@ StartResult UnixPty::start()
                            .detail = "Failed to configure PTY. "s + configured.error().message() });
     ptyLog()("stdout fastpipe: reader {}, writer {}", _stdoutFastPipe.reader(), _stdoutFastPipe.writer());
 
-    _readSelector.wantRead(_masterFd);
-    _readSelector.wantRead(_stdoutFastPipe.reader());
+    _readSelector->wantRead(_masterFd);
+    _readSelector->wantRead(_stdoutFastPipe.reader());
 
 #if defined(__linux__) && defined(UTEMPTER)
     // Held in a local: utempter wants a C string, and a temporary's would dangle the moment the
@@ -214,6 +264,16 @@ StartResult UnixPty::start()
 #endif
 
     return {};
+}
+
+std::expected<void, std::error_code> UnixPty::openSignalPipes()
+{
+    return UnixPipe::open(O_CLOEXEC | O_NONBLOCK)
+        .and_then([this](UnixPipe closeSignal) {
+            _closeSignal = std::move(closeSignal);
+            return UnixPipe::open(O_CLOEXEC | O_NONBLOCK);
+        })
+        .transform([this](UnixPipe interruptSignal) { _interruptSignal = std::move(interruptSignal); });
 }
 
 UnixPty::~UnixPty()
@@ -247,13 +307,14 @@ PtySlave& UnixPty::slave() noexcept
 
 std::expected<InheritedPty, AdoptError> UnixPty::handover() const
 {
+    // Under the lock close() closes the master under: the descriptor handed over is the one still open.
     auto const _ = std::scoped_lock { _mutex };
     return handoverLocked();
 }
 
 std::expected<InheritedPty, AdoptError> UnixPty::handoverLocked() const
 {
-    if (!started())
+    if (!startedLocked())
         return std::unexpected(AdoptError::BadDescriptor);
     auto inherited = InheritedPty {
         .masterFd = _masterFd.get(), .stdoutFastPipe = std::nullopt, .pageSize = _pageSize, .pixels = _pixels
@@ -269,9 +330,9 @@ std::expected<InheritedPty, AdoptError> UnixPty::releaseHandover()
     auto inherited = handoverLocked();
     if (!inherited)
         return inherited;
-    _readSelector.cancelRead(_masterFd);
+    _readSelector->cancelRead(_masterFd);
     if (inherited->stdoutFastPipe)
-        _readSelector.cancelRead(inherited->stdoutFastPipe->first);
+        _readSelector->cancelRead(inherited->stdoutFastPipe->first);
     std::ignore = _masterFd.release();
     _stdoutFastPipe.pfd = { -1, -1 };
     _masterState.store(MasterState::Closed, std::memory_order_release);
@@ -303,8 +364,11 @@ std::expected<std::unique_ptr<UnixPty>, AdoptError> UnixPty::adopt(InheritedPty 
         return std::unexpected(adoptable.error());
 
     auto pty = std::make_unique<UnixPty>(inherited.pageSize, inherited.pixels);
-    // The constructor made a pipe of its own; an adopted PTY has the inherited one, or none.
-    pty->_stdoutFastPipe.close();
+    auto selector = crispy::ReadSelector::create();
+    if (!selector || !pty->openSignalPipes())
+        return std::unexpected(AdoptError::OutOfDescriptors);
+    pty->_readSelector = *std::move(selector);
+    // An adopted PTY has the inherited pipe, or none.
     if (inherited.stdoutFastPipe)
         pty->_stdoutFastPipe.pfd = { inherited.stdoutFastPipe->first,
                                      isOpenDescriptor(inherited.stdoutFastPipe->second)
@@ -322,15 +386,22 @@ std::expected<std::unique_ptr<UnixPty>, AdoptError> UnixPty::adopt(InheritedPty 
         std::ignore = util::setNonBlocking(pty->_stdoutFastPipe.reader());
 
     pty->_masterState.store(MasterState::Open, std::memory_order_release);
-    pty->_readSelector.wantRead(pty->_masterFd);
+    pty->_readSelector->wantRead(pty->_masterFd);
     if (pty->_stdoutFastPipe.reader() != -1)
-        pty->_readSelector.wantRead(pty->_stdoutFastPipe.reader());
+        pty->_readSelector->wantRead(pty->_stdoutFastPipe.reader());
     return pty;
 }
 
 PtyMasterHandle UnixPty::handle() const noexcept
 {
+    auto const _ = std::scoped_lock { _mutex };
     return PtyMasterHandle::cast_from(_masterFd.get());
+}
+
+bool UnixPty::started() const noexcept
+{
+    auto const _ = std::scoped_lock { _mutex };
+    return startedLocked();
 }
 
 void UnixPty::close()
@@ -343,7 +414,8 @@ void UnixPty::close()
     }
 
     ptyLog()("PTY closing master from thread {} (file descriptor {}).", core::threadName(), _masterFd);
-    _readSelector.cancelRead(_masterFd);
+    if (_readSelector)
+        _readSelector->cancelRead(_masterFd);
     _masterFd.close();
     _masterState.store(MasterState::Closed, std::memory_order_release);
     // Wakes a write waiting for the application to read, which then finds the descriptor closed. Never
@@ -365,6 +437,23 @@ InputEcho UnixPty::inputEcho() const noexcept
     return util::inputEchoOf(tio.c_lflag);
 }
 
+std::optional<pid_t> UnixPty::foregroundProcessGroup() const noexcept
+{
+    auto const _ = std::scoped_lock { _mutex };
+    if (_masterFd.isClosed())
+        return std::nullopt;
+    auto const group = ::tcgetpgrp(_masterFd);
+    if (group <= 0)
+        return std::nullopt;
+    return group;
+}
+
+std::optional<std::string> UnixPty::foregroundProcessName() const
+{
+    // The name is read once the lock is let go: only the descriptor needs it.
+    return foregroundProcessGroup().and_then(&util::processNameOf);
+}
+
 bool UnixPty::isClosed() const noexcept
 {
     // Published by close(), rather than read under its lock: it is asked from the GUI thread, or a daemon's
@@ -374,7 +463,9 @@ bool UnixPty::isClosed() const noexcept
 
 void UnixPty::wakeupReader() noexcept
 {
-    _readSelector.wakeup();
+    // Nothing reads before start(): there is no one to wake.
+    if (_readSelector)
+        _readSelector->wakeup();
 }
 
 optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
@@ -405,7 +496,7 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
     if (rv == 0 && fd == _stdoutFastPipe.reader())
     {
         ptyInLog()("Closing stdout-fastpipe.");
-        _readSelector.cancelRead(fd);
+        _readSelector->cancelRead(fd);
         _stdoutFastPipe.closeReader();
         errno = EAGAIN;
         return nullopt;
@@ -418,6 +509,9 @@ std::optional<Pty::ReadResult> UnixPty::read(crispy::BufferObject<char>& storage
                                              std::optional<std::chrono::milliseconds> timeout,
                                              size_t size)
 {
+    // Only a started PTY is read: it has its selector by then.
+    Require(_readSelector != nullptr);
+
     // This runs on the session's read thread while close() may run concurrently on the GUI thread
     // (e.g. when a GUI tab is closed). _readSelector is internally thread-safe: wantRead/cancelRead/
     // waitOne serialize their own access to the registered-fd set, so the blocking waitOne() is safe
@@ -432,7 +526,7 @@ std::optional<Pty::ReadResult> UnixPty::read(crispy::BufferObject<char>& storage
     // a CPU core until the session is torn down.
     auto const fd = [&] {
         ZoneScopedN("pty.waitOne");
-        return _readSelector.waitOne(timeout);
+        return _readSelector->waitOne(timeout);
     }();
     if (!fd.has_value())
     {
@@ -447,7 +541,7 @@ std::optional<Pty::ReadResult> UnixPty::read(crispy::BufferObject<char>& storage
     // drainable. isWanted() reflects the current registration on both selector backends, so this
     // detects the concurrent close() that the stale `_masterFd.isClosed()` check could not.
     auto const _ = std::scoped_lock { _mutex };
-    if (!_readSelector.isWanted(*fd))
+    if (!_readSelector->isWanted(*fd))
     {
         errno = EAGAIN;
         return std::nullopt;
@@ -597,20 +691,22 @@ void UnixPty::allowWrites()
 
 PageSize UnixPty::pageSize() const noexcept
 {
+    // resizeScreen() writes it under the lock, on another thread than the one asking.
     auto const _ = std::scoped_lock { _mutex };
     return _pageSize;
 }
 
 void UnixPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
 {
-    // Under the lock close() closes the descriptor under: the session's reader thread closes the PTY the
-    // moment its program exits, which may be while the GUI thread resizes it. Read unlocked, the descriptor
-    // could be closed between the check below and the ioctl, which then failed with EBADF -- or reached
-    // a recycled descriptor -- and threw out of a Qt event handler, ending the process.
+    // Under the lock close() closes the descriptor under: a session's reader thread closes the PTY the moment
+    // its program exits, which may be while the GUI thread or the daemon's loop resizes it. Read unlocked,
+    // the descriptor could be closed between the check below and the ioctl, which then failed with EBADF --
+    // or reached a recycled descriptor, another pane's -- and threw out of a Qt event handler or the daemon's
+    // loop, ending the process.
     auto const _ = std::scoped_lock { _mutex };
     if (_masterFd.isClosed())
     {
-        // Not started yet: remember the size rather than drop it, so start() can bake it into the
+        // Not started yet, or closed: remember the size rather than drop it, so start() can bake it into the
         // winsize the child is born with. Dropping it meant the child saw ws_xpixel = 0 until an
         // asynchronous SIGWINCH corrected it -- and an application that reads TIOCGWINSZ once at
         // startup, which is what img2sixel and chafa do, never sees the correction. Once closed, there
@@ -638,8 +734,8 @@ void UnixPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
     }
 
     // Not fatal: the slave side can be gone already while close() has yet to run (EIO or ENOTTY on macOS and
-    // the BSDs), and a resize runs from a GUI event handler, out of which nothing may throw. The size is
-    // kept either way, as what the PTY is meant to have.
+    // the BSDs), and a resize runs from a GUI event handler or on the daemon's loop thread, out of which
+    // nothing may throw. The size is kept either way, as what the PTY is meant to have.
     if (ioctl(_masterFd, TIOCSWINSZ, &w) == -1)
         errorLog()("Could not resize the PTY (file descriptor {}) to {}x{}: {}",
                    _masterFd.get(),

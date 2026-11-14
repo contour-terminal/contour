@@ -98,6 +98,21 @@ using vthost::testing::shellProcess;
     return shellProcess(size, vthost::testing::CatScript, std::move(placement));
 }
 
+/// A child that a PTY keeper holds, as the daemon names it: what crosses is its PTY and its keeper session.
+class KeeperHeldProcess final: public vtpty::Process
+{
+  public:
+    using Process::Process;
+
+    /// The keeper's name for it, as KeeperChild::crossing() gives it.
+    static constexpr auto KeeperSession = uint64_t { 42 };
+
+    [[nodiscard]] vtpty::ChildCrossing crossing() const override
+    {
+        return { .kind = vtpty::CrossingKind::Keeper, .child = std::nullopt, .keeperSession = KeeperSession };
+    }
+};
+
 /// A live host whose capture names one listener and a lease, as the tests check them.
 struct CaptureHarness: vthost::testing::LiveHost
 {
@@ -173,11 +188,11 @@ TEST_CASE("capture holds every session with its pty descriptors and ids", "[vtho
         CHECK(captured.uuid == h.host.objects().uuidOf(id));
         auto const& process = *h.host.hostedSession(id)->process();
         // Read, not released: the host still owns them, and they are open.
-        auto const handedOver = process.handover();
+        auto const handedOver = h.host.hostedSession(id)->pty().handover();
         REQUIRE(handedOver.has_value());
         CHECK(captured.pty.masterFd == handedOver->masterFd);
         CHECK(vtpty::testing::isOpen(captured.pty.masterFd));
-        CHECK(captured.child.pid == process.handoverChild()->pid);
+        CHECK(captured.child.pid == process.crossing().child->pid);
         CHECK(::kill(static_cast<pid_t>(captured.child.pid), 0) == 0);
         CHECK(captured.child.executable == "/bin/sh");
         CHECK_FALSE(captured.terminalState.empty());
@@ -190,6 +205,43 @@ TEST_CASE("capture holds every session with its pty descriptors and ids", "[vtho
     REQUIRE(decoded.has_value());
     CHECK(decoded->sessions.size() == 2);
 
+    rollbackCapture(h.host);
+}
+
+TEST_CASE("a live upgrade capture names a keeper child as KeeperChild", "[vthost][handover][threading]")
+{
+    auto spawned = 0;
+    auto h = CaptureHarness { [&spawned](vtpty::PageSize size) -> std::unique_ptr<vtpty::Pty> {
+        if (spawned++ == 0)
+            return catProcess(size);
+        return std::make_unique<KeeperHeldProcess>(
+            vtpty::testing::execInfo("/bin/sh", { "-c", vthost::testing::CatScript }),
+            vtpty::createPty(size, std::nullopt),
+            /*escapeSandbox=*/false,
+            std::make_shared<vtpty::NoPlacement>());
+    } };
+    h.spawnTwo();
+    auto const ids = h.host.sessionIds();
+    REQUIRE(h.eventually(
+        [&] { return h.pageText(ids[0]).contains("ready") && h.pageText(ids[1]).contains("ready"); }));
+
+    h.settle();
+    auto const image = h.capture();
+    REQUIRE(image.has_value());
+    REQUIRE(image->sessions.size() == 2);
+    CHECK(image->sessions[0].device == SessionDevice::ChildOnPty);
+    CHECK(image->sessions[0].keeperSession == 0);
+    auto const& held = image->sessions[1];
+    CHECK(held.device == SessionDevice::KeeperChild);
+    CHECK(held.keeperSession == KeeperHeldProcess::KeeperSession);
+    CHECK(held.child.pid == vtpty::AdoptedChild {}.pid); // named, not carried
+    CHECK(vtpty::testing::isOpen(held.pty.masterFd));
+
+    // It survives the image's encoding.
+    auto const decoded = decodeHandover(encodeHandover(*image));
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->sessions[1].device == SessionDevice::KeeperChild);
+    CHECK(decoded->sessions[1].keeperSession == KeeperHeldProcess::KeeperSession);
     rollbackCapture(h.host);
 }
 

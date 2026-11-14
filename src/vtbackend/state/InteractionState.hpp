@@ -171,7 +171,7 @@ namespace detail
 {
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, SearchOptions>
-    void visitStateFields(Visitor& visitor, T& options)
+    void visitForeignFields(Visitor& visitor, T& options)
     {
         visitor(1, options.caseSensitivity);
         visitor(2, options.syntax);
@@ -180,7 +180,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, LinkLocation>
-    void visitStateFields(Visitor& visitor, T& location)
+    void visitForeignFields(Visitor& visitor, T& location)
     {
         visitor(1, location.line);
         visitor(2, location.column);
@@ -188,7 +188,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, LinkTarget>
-    void visitStateFields(Visitor& visitor, T& target)
+    void visitForeignFields(Visitor& visitor, T& target)
     {
         visitor(1, target.kind);
         visitor(2, target.target);
@@ -199,7 +199,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, HintMatch>
-    void visitStateFields(Visitor& visitor, T& match)
+    void visitForeignFields(Visitor& visitor, T& match)
     {
         visitor(1, match.label);
         visitor(2, match.matchedText);
@@ -211,7 +211,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, TerminalDirectory>
-    void visitStateFields(Visitor& visitor, T& directory)
+    void visitForeignFields(Visitor& visitor, T& directory)
     {
         visitor(1, directory.openLocally);
         visitor(2, directory.locality);

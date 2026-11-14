@@ -89,6 +89,7 @@ HostedSession::HostedSession(SessionId id,
     _id(id),
     _profileName(std::move(profileName)),
     _settingsOrigin(settingsOrigin),
+    _statedSettings(toWireSessionSettings(settings)),
     _extensions(std::move(extensions.extensions)),
     _events(std::move(identity),
             std::move(onScreenUpdated),
@@ -150,14 +151,14 @@ namespace
     }
 } // namespace
 
-vtpty::Process const* HostedSession::process() const noexcept
+vtpty::ChildProcess const* HostedSession::process() const noexcept
 {
-    return dynamic_cast<vtpty::Process const*>(untapped(&_terminal.device()));
+    return dynamic_cast<vtpty::ChildProcess const*>(untapped(&_terminal.device()));
 }
 
-vtpty::Process* HostedSession::process() noexcept
+vtpty::ChildProcess* HostedSession::process() noexcept
 {
-    return dynamic_cast<vtpty::Process*>(untapped(&_terminal.device()));
+    return dynamic_cast<vtpty::ChildProcess*>(untapped(&_terminal.device()));
 }
 
 void HostedSession::pollForegroundProcess()
@@ -280,6 +281,20 @@ void HostedSession::pumpLoop()
     announceClosed();
 }
 
+bool HostedSession::awaitsAnnouncedStatus() const
+{
+    auto const* const child = process();
+    return child != nullptr && !terminateRequested()
+           && child->statusArrival() == vtpty::StatusArrival::Announced;
+}
+
+SessionEnd HostedSession::currentEnd() const
+{
+    if (!awaitsAnnouncedStatus())
+        return endCause();
+    return sessionEndOf(process()->checkStatus());
+}
+
 SessionEnd HostedSession::observeEnd() const
 {
     // The host closing the PTY says nothing of how the program ended; and without a process there is nothing
@@ -287,6 +302,10 @@ SessionEnd HostedSession::observeEnd() const
     auto const* const child = process();
     if (child == nullptr || terminateRequested())
         return SessionEnd::Exited;
+    // Announced by whoever reaps it, perhaps well after the hangup: the host waits for it on the loop
+    // (SessionHost::settleEnd()), not here.
+    if (child->statusArrival() == vtpty::StatusArrival::Announced)
+        return sessionEndOf(child->checkStatus());
     // The PTY reports its hangup before the child is necessarily reaped: give the status a moment to land.
     constexpr auto Patience = std::chrono::milliseconds { 200 };
     constexpr auto Interval = std::chrono::milliseconds { 10 };
@@ -417,7 +436,7 @@ std::expected<void, QuiesceError> HostedSession::stopForCapture()
     // Refused before anything stops: a child that has not flushed its terminal yet would lose what is
     // written to it in between, which a capture taken now would claim to carry.
     if (auto const* const child = process();
-        child != nullptr && child->spawnProgress() == vtpty::Process::SpawnProgress::InProgress)
+        child != nullptr && child->spawnProgress() == vtpty::SpawnProgress::InProgress)
         return std::unexpected(QuiesceError::SpawnInProgress);
 
     // Restarted on a refusal below only when this call stopped it: a session quiesced already stays so.
@@ -500,6 +519,8 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _gate(std::make_shared<HostGate>(HostGate { .host = this })),
     _ptyFactory(std::move(ptyFactory)),
     _profilePtys(std::move(config.profilePtys)),
+    _adoptChild(std::move(config.adoptChild)),
+    _seedRecovered(std::move(config.seedRecovered)),
     // Normalized once, here, so _pageSize and every session that does not override it are derived
     // from settings a host can actually serve.
     _settings(hostedSessionSettings(std::move(settings))),
@@ -518,6 +539,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _defaultCellPixelSize(config.defaultCellPixelSize),
     _nextSessionId(config.firstSessionId),
     _extensions(std::move(config.extensions)),
+    _announcedStatusPatience(config.announcedStatusPatience),
     _extensionControl(vtcontrol::nullControlApi()),
     _objects(std::move(config.uuids)),
     _model(*this,
@@ -806,11 +828,8 @@ std::unique_ptr<HostedSession> SessionHost::makeHostedSession(SessionId id,
         },
         /*onClosed=*/
         [this, id] {
-            postFromPump([this, id] {
-                // The pump has ended by the time this runs, so what it saw is final.
-                if (auto const it = _sessions.find(id.value); it != _sessions.end())
-                    endSession(id, it->second->endCause());
-            });
+            // The pump has ended by the time this runs, so what it saw is final.
+            postFromPump([this, id] { settleEnd(id); });
         },
         /*onSignal=*/
         [this, id](SessionSignal signal) {
@@ -848,6 +867,7 @@ void SessionHost::installSession(std::unique_ptr<HostedSession> session)
     }
     auto const id = session->id();
     _sessions.emplace(id.value, std::move(session));
+    tellStructure(&StructureEvents::sessionCreated, id);
 }
 
 void SessionHost::realizeStartupLayout(vtworkspace::WorkspaceId workspace, vtworkspace::Layout const& layout)
@@ -1191,7 +1211,10 @@ void SessionHost::clearInterruptionOnNextCommand(SessionId session)
         });
     }();
     if (started)
+    {
         _interruptions.erase(held);
+        tellStructure(&StructureEvents::interruptionChanged, session);
+    }
 }
 
 void SessionHost::typeInitialInput(SessionId session)
@@ -1947,9 +1970,12 @@ void SessionHost::replaceProfiles(std::shared_ptr<ProfileCatalog const> profiles
         if (terminal.settings().historyLimits == limits)
             continue;
         terminal.setHistoryLimits(limits);
+        session->restateSettings(terminal.settings());
         relimited.push_back(session->id());
     }
     sessionLog()("profiles reloaded; {} running session(s) took new scrollback limits", relimited.size());
+    if (!relimited.empty())
+        tellStructure(&StructureEvents::settingsChanged);
     // Outside every lock, as a resize is announced: a lowered limit evicts history, which the mirrors
     // learn from the next delta.
     for (auto const session: relimited)
@@ -2061,7 +2087,9 @@ void SessionHost::eraseSession(uint64_t session)
     _colorPreferences.erase(session);
     // Before the terminal it ticks: no frame timer outlives its session.
     _animationTicks.erase(session);
+    _endWaits.erase(session);
     _sessions.erase(session);
+    tellStructure(&StructureEvents::sessionClosed, SessionId { session });
 }
 
 std::size_t SessionHost::inputBacklog(SessionId session) const
@@ -2185,7 +2213,8 @@ void SessionHost::adoptColorPreference(vtbackend::ColorPreference preference)
 void SessionHost::applyColorPreference(SessionId session, vtbackend::ColorPreference preference)
 {
     // The latest client's statement wins for the sessions spawned from now on.
-    _defaultColorPreference = preference;
+    if (std::exchange(_defaultColorPreference, preference) != preference)
+        tellStructure(&StructureEvents::colorPreferenceChanged, session);
     auto const hosted = _sessions.find(session.value);
     if (hosted == _sessions.end() || !_profiles)
         return;
@@ -2197,6 +2226,7 @@ void SessionHost::applyColorPreference(SessionId session, vtbackend::ColorPrefer
     if (current == preference)
         return;
     _colorPreferences.insert_or_assign(session.value, preference);
+    tellStructure(&StructureEvents::colorPreferenceChanged, session);
     auto const palette = _profiles->colorPalette(hostedSession.profileName(), preference);
     {
         auto& terminal = hostedSession.terminal();
@@ -2295,8 +2325,7 @@ bool SessionHost::isAnySessionStarting() const
     return !_initialInputs.empty()
            || std::ranges::any_of(_sessions | std::views::values, [](auto const& session) {
                   auto const* const child = session->process();
-                  return child != nullptr
-                         && child->spawnProgress() == vtpty::Process::SpawnProgress::InProgress;
+                  return child != nullptr && child->spawnProgress() == vtpty::SpawnProgress::InProgress;
               });
 }
 
@@ -2422,6 +2451,52 @@ PaneRuntime SessionHost::paneRuntime(SessionId session) const
     if (!hosted.profileName().empty())
         runtime.profile = hosted.profileName();
     return runtime;
+}
+
+void SessionHost::settleEnd(SessionId session)
+{
+    auto const it = _sessions.find(session.value);
+    if (it == _sessions.end())
+        return;
+    auto& hosted = *it->second;
+    if (!hosted.awaitsAnnouncedStatus())
+    {
+        endSession(session, hosted.endCause());
+        return;
+    }
+    // Its status comes from whoever reaps it, perhaps after the hangup by more than any moment's patience:
+    // the session ends once it came, or once the patience ran out.
+    auto wait = std::make_unique<EndWait>();
+    wait->host = this;
+    wait->session = session;
+    wait->patience.emplace(
+        _loop,
+        _loop.clock().now() + _announcedStatusPatience,
+        [](void* state) {
+            auto const& expired = *static_cast<EndWait const*>(state);
+            expired.host->finishEnd(expired.session, StatusWait::Expired);
+        },
+        wait.get());
+    _endWaits.insert_or_assign(session.value, std::move(wait));
+    hosted.process()->whenStatusKnown([gate = _gate, session] {
+        if (gate->host != nullptr)
+            gate->host->finishEnd(session, StatusWait::Answered);
+    });
+}
+
+void SessionHost::finishEnd(SessionId session, StatusWait wait)
+{
+    // Only once: the other of the two ends of the wait finds it gone.
+    if (_endWaits.erase(session.value) == 0)
+        return;
+    auto const it = _sessions.find(session.value);
+    if (it == _sessions.end())
+        return;
+    if (wait == StatusWait::Expired)
+        sessionLog()("session {}: no exit status came within {} ms of its hangup; it ended as exited",
+                     session.value,
+                     _announcedStatusPatience.count());
+    endSession(session, it->second->currentEnd());
 }
 
 void SessionHost::endSession(SessionId session, SessionEnd cause)

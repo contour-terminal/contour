@@ -94,6 +94,7 @@
 
 #include <vthost/CellPixelBounds.hpp>
 #include <vthost/ClientSizePolicy.hpp>
+#include <vthost/keeper/RestartPolicy.hpp>
 #include <vtworkspace/LayoutTree.hpp> // layout tree structs (LayoutPane, LayoutTab, Layout)
 
 namespace contour::config
@@ -830,6 +831,20 @@ struct DaemonRestoreConfig
     }; ///< `interval`: how often it is written, at least MinRestoreInterval.
 };
 
+/// `daemon.keeper`: how the PTY keeper keeps the daemon it runs behind.
+struct DaemonKeeperConfig
+{
+    /// `restart_hung`: whether the keeper restarts a daemon that stops answering its heartbeats. A Config
+    /// boundary bool (AGENT.md exception); `contour daemon` converts it to vthost::keeper::HungRestart.
+    bool restartHung = true;
+
+    /// The keeper's crash-loop numbers, each from its key (whole seconds, but `give_up_crashes`):
+    /// `give_up_crashes` and `give_up_window`, `backoff_start` and `backoff_cap`, `startup_timeout`
+    /// (RestartPolicyConfig::restartStartupBound) and `stop_timeout` (RestartPolicyConfig::daemonExitBound).
+    /// The rest keep their defaults.
+    vthost::keeper::RestartPolicyConfig restartPolicy {};
+};
+
 /// The `daemon:` section: whether and how the terminal talks to a session-hosting daemon.
 ///
 /// GLOBAL rather than per-profile: it decides where sessions live, not how one of them looks.
@@ -853,6 +868,9 @@ struct DaemonSettings
 
     /// What the daemon keeps of its workspace across a restart (`daemon.restore`).
     DaemonRestoreConfig restore {};
+
+    /// How the PTY keeper keeps the daemon (`daemon.keeper`).
+    DaemonKeeperConfig keeper {};
 };
 
 struct HorizontalMarginTag

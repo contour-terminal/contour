@@ -135,6 +135,15 @@ class SnapshotWriter
     std::jthread _thread;
 };
 
+/// What a daemon's persistence does with a `<file>.restored` it did not restore from.
+enum class PendingRestoreCopy : std::uint8_t
+{
+    Kept = 0, ///< Left to the restore that made it (SessionSnapshotStore::endRestore()).
+    /// Deleted by the first write that succeeds: a daemon restarted after a crash read it (the start that
+    /// renamed the snapshot died before it wrote one), and it is stale once a write is on disk.
+    DroppedAfterFirstWrite,
+};
+
 /// Keeps the snapshot file current as the workspace changes, as the schedule decides, and writes the last one
 /// as the daemon ends.
 ///
@@ -152,11 +161,13 @@ class WorkspacePersistence final: public vtworkspace::ModelEvents, public Sessio
     /// @param writer Where the snapshots go. Borrowed: it must outlive this.
     /// @param config The capture options and the timings.
     /// @param wallClock What a snapshot's time is read from.
+    /// @param pendingCopy What becomes of a `.restored` copy the host did not restore from.
     WorkspacePersistence(core::net::EventLoop& loop,
                          SessionHost& host,
                          SnapshotWriter& writer,
                          WorkspacePersistenceConfig config,
-                         core::platform::IWallClock const& wallClock);
+                         core::platform::IWallClock const& wallClock,
+                         PendingRestoreCopy pendingCopy);
 
     ~WorkspacePersistence() override;
 
@@ -258,6 +269,7 @@ class WorkspacePersistence final: public vtworkspace::ModelEvents, public Sessio
     SnapshotWriter& _writer;
     WorkspacePersistenceConfig _config;
     core::platform::IWallClock const& _wallClock;
+    PendingRestoreCopy _pendingCopy;
     ScheduleState _state { .snapshot = SnapshotState::Dirty };
     Phase _phase = Phase::Open;
     std::shared_ptr<Gate> _gate;
@@ -285,6 +297,7 @@ class DaemonPersistence
     /// @param wallClock What a snapshot's time is read from. Borrowed: it must outlive this.
     /// @param threading Where the snapshots are written: Background for a daemon.
     /// @param report Where a one-line diagnostic goes; thread-safe for Background.
+    /// @param pendingCopy What becomes of a `.restored` copy the host did not restore from.
     DaemonPersistence(core::net::EventLoop& loop,
                       SessionHost& host,
                       SessionSnapshotStore const& store,
@@ -292,7 +305,8 @@ class DaemonPersistence
                       WorkspacePersistenceConfig config,
                       core::platform::IWallClock const& wallClock,
                       WriterThreading threading,
-                      DiagnosticSink const& report);
+                      DiagnosticSink const& report,
+                      PendingRestoreCopy pendingCopy);
 
     /// Writes the last snapshot, as workspaceFor(@p cause) says, and blocks until it is on disk. Loop
     /// thread only; a second call does nothing.
@@ -320,6 +334,19 @@ class DaemonPersistence
                                                              WorkspacePersistenceConfig const& config,
                                                              DiagnosticSink const& report,
                                                              core::platform::WallClockRef wall);
+
+/// Reads the snapshot as prepareRestore() does, and changes nothing: no file is moved aside, set aside, or
+/// renamed, and no restore is begun. What a daemon restarted after a crash reads, only to seed the history of
+/// the sessions it recovers (keeperlink::snapshotSeederOf()).
+/// @param store The snapshot file.
+/// @param config What a restored pane may re-run.
+/// @param report Where a damaged or newer file is reported.
+/// @param wall Today's date for the divider.
+/// @return The snapshot; nullopt when there is nothing in it.
+[[nodiscard]] std::optional<WorkspaceRestore> peekRestore(SessionSnapshotStore const& store,
+                                                          WorkspacePersistenceConfig const& config,
+                                                          DiagnosticSink const& report,
+                                                          core::platform::WallClockRef wall);
 
 /// @param takenAt When a snapshot was taken.
 /// @return @p takenAt in the daemon's local time zone; in UTC where none is known.

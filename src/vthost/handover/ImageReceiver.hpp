@@ -31,6 +31,18 @@ enum class TakeoverFailure : uint8_t
     EndWithoutServing,
 };
 
+/// What a new image that cannot read the image it was handed (POSIX) does with what the old image left open.
+enum class Leftovers : uint8_t
+{
+    /// Kept open, but for the listening sockets, which its own would find taken: no program the old image
+    /// hosted is hung up on. A daemon behind no keeper, whose programs nothing else holds.
+    KeptOpen = 0,
+    /// Closed, but for the standard streams and the descriptors kept beside the image's: a daemon behind
+    /// a PTY keeper, which holds every listener and program and hands them over again, as
+    /// keeperlink::recoverFromKeeper() asks.
+    Closed,
+};
+
 /// Takes over what the previous daemon handed over in a live upgrade.
 ///
 /// An interface, so that the daemon's start picks the native one with no platform test of its own, and so
@@ -60,7 +72,11 @@ class ImageReceiver
 /// every other descriptor open, so that no program it hosted is hung up on. Windows takes `handles=M,R,C,P`
 /// and runs receiveHandover(); where that fails, the daemon ends without serving.
 /// @param memory What reads the image (makeNativeHandoverMemory()). Not owned; outlives the receiver.
+/// @param alsoKeep Descriptors kept open beside the image's on POSIX (the PTY keeper's channel); none
+///        on Windows, where nothing crosses an exec.
+/// @param leftovers What an image that cannot be read leaves open (POSIX).
 /// @return The receiver.
-[[nodiscard]] std::unique_ptr<ImageReceiver> makeNativeImageReceiver(HandoverMemory& memory);
+[[nodiscard]] std::unique_ptr<ImageReceiver> makeNativeImageReceiver(
+    HandoverMemory& memory, std::vector<int> alsoKeep = {}, Leftovers leftovers = Leftovers::KeptOpen);
 
 } // namespace vthost::handover
