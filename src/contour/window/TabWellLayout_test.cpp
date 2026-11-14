@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <ranges>
 #include <string_view>
+#include <utility>
 
 using namespace contour::window;
 using Catch::Matchers::WithinAbs;
@@ -120,11 +121,12 @@ TEST_CASE("band.allocate", "[tabwell][band]")
 {
     // The chip's steps, widest first: 300, 220, 160, 110 and its least, 90.
     auto const widthOf = [](std::string_view key) {
-        return key == "full"           ? 300.0
-               : key == "noStateText"  ? 220.0
-               : key == "daemonElided" ? 160.0
-               : key == "dotOnly"      ? 110.0
-                                       : 90.0;
+        constexpr auto Widths = std::array { std::pair { std::string_view { "full" }, 300.0 },
+                                             std::pair { std::string_view { "noStateText" }, 220.0 },
+                                             std::pair { std::string_view { "daemonElided" }, 160.0 },
+                                             std::pair { std::string_view { "dotOnly" }, 110.0 } };
+        auto const found = std::ranges::find(Widths, key, &std::pair<std::string_view, double>::first);
+        return found != Widths.end() ? found->second : 90.0;
     };
     auto const labelled = labelledTabWellMinimum(3, Metrics);
 

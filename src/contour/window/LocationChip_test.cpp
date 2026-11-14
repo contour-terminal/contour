@@ -54,7 +54,11 @@ TEST_CASE("locationChip.steps", "[LocationChip]")
 TEST_CASE("locationChip.fit", "[LocationChip]")
 {
     auto const widthOf = [](std::string_view key) {
-        return key == "full" ? 300.0 : key == "noStateText" ? 220.0 : key == "daemonElided" ? 160.0 : 110.0;
+        constexpr auto Widths = std::array { std::pair { std::string_view { "full" }, 300.0 },
+                                             std::pair { std::string_view { "noStateText" }, 220.0 },
+                                             std::pair { std::string_view { "daemonElided" }, 160.0 } };
+        auto const found = std::ranges::find(Widths, key, &std::pair<std::string_view, double>::first);
+        return found != Widths.end() ? found->second : 110.0;
     };
     CHECK(locationChipFit(widthOf, 400) == LocationChipFit::Full);
     CHECK(locationChipFit(widthOf, 300) == LocationChipFit::Full);
@@ -138,7 +142,7 @@ TEST_CASE("locationChip.translation", "[LocationChip]")
             return (*this)(sentence);
         }
     };
-    constexpr auto shouted = Shouted {};
+    auto const shouted = Shouted {};
     CHECK(locationChipAccessibleName("starfive", "billing", shouted) == "WorkspAce billing on starfive");
     CHECK(locationChipToolTip(HostChipState::Reconnecting, LocationChipFit::DotOnly, "starfive", shouted)
           == "Reconnecting to starfive · Switch workspAce or dAemon");

@@ -48,8 +48,8 @@ class MockSwitcherHost: public QObject, public window::SwitcherHost
     {
         connect(this, &MockSwitcherHost::switcherChanged, this, [this] {
             auto inputs = _chip.inputs();
-            inputs.disclosure = isWorkspaceDropdownOpen() ? window::Disclosure::Expanded
-                                                          : window::Disclosure::Collapsed;
+            inputs.disclosure =
+                isWorkspaceDropdownOpen() ? window::Disclosure::Expanded : window::Disclosure::Collapsed;
             _chip.setInputs(std::move(inputs));
         });
     }
@@ -118,7 +118,7 @@ class MockSwitcherHost: public QObject, public window::SwitcherHost
 
     QPointer<window::SwitcherController> _switcher;
     std::optional<QRectF> _anchor;
-    window::LocationChipModel _chip { window::LocationChipInputs { .workspace = "contour" } };
+    window::LocationChipModel _chip { window::LocationChipInputs { .daemon = {}, .workspace = "contour" } };
 };
 
 /// A window hosting Switcher.qml and a workspace chip, over a MockSwitcherHost: Main.qml's wiring and the

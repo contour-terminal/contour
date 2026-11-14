@@ -211,6 +211,14 @@ namespace
         return keys;
     }
 
+    /// @param disclosure Whether a row's children show.
+    /// @return The word a screen reader says for it, translated once for every control that says it.
+    QString disclosureText(Disclosure disclosure)
+    {
+        return QCoreApplication::translate(std::string(DisclosureContext).c_str(),
+                                           std::string(disclosureWord(disclosure)).c_str());
+    }
+
 } // namespace
 
 void registerSidebarQmlTypes()
@@ -232,14 +240,6 @@ void registerSidebarQmlTypes()
 QString accessibleNameOf(SidebarRow const& row)
 {
     return qs(row.title);
-}
-
-/// @param disclosure Whether a row's children show.
-/// @return The word a screen reader says for it, translated once for every control that says it.
-QString disclosureText(Disclosure disclosure)
-{
-    return QCoreApplication::translate(std::string(DisclosureContext).c_str(),
-                                       std::string(disclosureWord(disclosure)).c_str());
 }
 
 QString accessibleDescriptionOf(SidebarRow const& row)

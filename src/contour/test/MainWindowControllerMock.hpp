@@ -859,8 +859,8 @@ class MainWindowControllerMock: public QAbstractListModel
             .state = chipState(),
             .workspace = summary.currentWorkspace,
             .otherWorkspaces = summary.otherWorkspaces,
-            .disclosure = isWorkspaceDropdownOpen() ? window::Disclosure::Expanded
-                                                    : window::Disclosure::Collapsed,
+            .disclosure =
+                isWorkspaceDropdownOpen() ? window::Disclosure::Expanded : window::Disclosure::Collapsed,
             .band = band.band,
             .centre = band.centre,
             .sidebar = sidebarWidth() > 0 ? window::SidebarShown::Yes : window::SidebarShown::No,

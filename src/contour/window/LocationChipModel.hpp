@@ -30,12 +30,12 @@ struct LocationChipInputs
     DaemonHosting hosting = DaemonHosting::InProcess; ///< What serves the window's sessions.
     DaemonLocality locality = DaemonLocality::Local;  ///< Where the daemon runs.
     HostChipState state = HostChipState::Connected;   ///< What the connection looks like.
-    std::string workspace;                   ///< The workspace the window shows, as its row titles it.
-    Urgency otherWorkspaces = Urgency::Idle; ///< The most urgent roll-up of the other workspaces.
+    std::string workspace;                         ///< The workspace the window shows, as its row titles it.
+    Urgency otherWorkspaces = Urgency::Idle;       ///< The most urgent roll-up of the other workspaces.
     Disclosure disclosure = Disclosure::Collapsed; ///< Whether the switcher is open.
-    BarPresence band = BarPresence::Hidden;                ///< Whether the title band shows.
-    BarCentre centre = BarCentre::Empty;                   ///< What the band's middle holds.
-    SidebarShown sidebar = SidebarShown::No;               ///< Whether the workspace sidebar shows.
+    BarPresence band = BarPresence::Hidden;        ///< Whether the title band shows.
+    BarCentre centre = BarCentre::Empty;           ///< What the band's middle holds.
+    SidebarShown sidebar = SidebarShown::No;       ///< Whether the workspace sidebar shows.
 
     [[nodiscard]] bool operator==(LocationChipInputs const&) const = default;
 };
