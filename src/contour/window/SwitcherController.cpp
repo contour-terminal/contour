@@ -405,6 +405,7 @@ void SwitcherController::rebuild(std::optional<SwitcherRowIdentity> const& keep)
         beginResetModel();
         _rows = std::move(rows);
         endResetModel();
+        emit groupCountChanged(); // the rows updated in place above keep their groups (sameRows)
     }
     // Until the user takes the selection, it is the popup's: it follows the list as it fills.
     auto const next = [&] {
@@ -986,6 +987,12 @@ QVariant SwitcherController::data(QModelIndex const& modelIndex, int role) const
 int SwitcherController::rowCount(QModelIndex const& parent) const
 {
     return parent.isValid() ? 0 : static_cast<int>(_rows.size());
+}
+
+int SwitcherController::groupCount() const noexcept
+{
+    return static_cast<int>(
+        std::ranges::count_if(_rows, [](SwitcherRow const& row) { return !row.groupTitle.empty(); }));
 }
 
 QHash<int, QByteArray> SwitcherController::roleNames() const

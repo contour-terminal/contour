@@ -132,6 +132,13 @@ void CommandPaletteModel::rebuildRows()
     _rows = command::listPalette(
         _tree, command::PaletteQuery { .filter = filter, .level = _level, .recent = _history.recent() });
     endResetModel();
+    emit groupCountChanged();
+}
+
+int CommandPaletteModel::groupCount() const noexcept
+{
+    return static_cast<int>(std::ranges::count_if(
+        _rows, [](command::PaletteEntry const& entry) { return !entry.groupTitle.empty(); }));
 }
 
 command::Command const* CommandPaletteModel::commandById(std::string_view id) const noexcept

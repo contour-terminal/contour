@@ -51,9 +51,11 @@ Popup {
     property alias body: bodyLoader.sourceComponent
     /// The rows.
     property alias model: listView.model
-    /// The row delegate. It reports `headerHeight` (the group header above its row, 0 for none), so the pointer
-    /// over a header selects nothing.
+    /// The row delegate: a row size.paletteRow tall under its PickerGroupHeader. It reports `headerHeight` (the
+    /// group header above its row, 0 for none), so the pointer over a header selects nothing.
     property alias delegate: listView.delegate
+    /// How many of the rows open a group, drawing a header above them: the model's groupCount.
+    property int groupCount: 0
     /// The list, for the owner's delegate and selection.
     property alias list: listView
     /// The filter field.
@@ -101,7 +103,13 @@ Popup {
     y: root.hangingAt ? root.hangingAt.y : root.placement.y
     width: root.placement.width
     // Fits its content, up to the placement's height.
-    height: Math.min(root.placement.maxHeight, root.fixedHeight + listView.contentHeight)
+    height: Math.min(root.placement.maxHeight, root.fixedHeight + root.rowsHeight)
+
+    // The rows' height, from the model alone: every row is size.paletteRow tall, and a group's first row adds
+    // its header. Not the list's contentHeight, which only estimates the rows it has not laid out from the ones
+    // it has, and so changes with the list's height -- which is this popup's: a binding loop on height.
+    readonly property real rowsHeight: listView.count * chromeStyle.size.paletteRow
+                                       + root.groupCount * chromeStyle.size.paletteGroupHeader
 
     // Everything in the column but the list: the query row, the two rules, the body, the empty label and the
     // footer.

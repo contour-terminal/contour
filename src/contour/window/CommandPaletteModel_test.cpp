@@ -153,6 +153,29 @@ TEST_CASE("With no filter, the palette groups its rows behind Recently used", "[
     }
 }
 
+TEST_CASE("groupCount counts the group headers, and is notified with every rebuild", "[contour][palette]")
+{
+    auto history = command::CommandHistory { 3 };
+    history.record("SplitVertical");
+    auto const actionCommands = command::ActionCommandSource {};
+    auto model = CommandPaletteModel { history, Sources { &actionCommands }, command::ShortcutStyle::Text };
+    auto changed = QSignalSpy { &model, &CommandPaletteModel::groupCountChanged };
+
+    model.refresh({});
+    CHECK(changed.count() == 1);
+    auto const headers = static_cast<int>(headersOf(model).size());
+    REQUIRE(headers > 1);
+    CHECK(model.groupCount() == headers);
+
+    model.setFilter(QStringLiteral("split"));
+    CHECK(changed.count() == 2);
+    CHECK(model.groupCount() == static_cast<int>(headersOf(model).size()));
+
+    model.setFilter(QStringLiteral("no command is called this"));
+    REQUIRE(model.rowCount() == 0);
+    CHECK(model.groupCount() == 0);
+}
+
 TEST_CASE("A remembered command that no longer exists quietly stops appearing", "[contour][palette]")
 {
     // The self-healing property that makes the MRU safe to persist by id. The user switched to a tab,
