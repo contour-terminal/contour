@@ -158,8 +158,16 @@ bar), `window/TabWellLayout.hpp` and `window/TitleBandGeometry.hpp`. Keep the ke
   priority Blocked > Error > Working > Done > Output. OSC 7501 program status, the unseen-output dot and
   the finished-command badge share that one slot.
 - **Location chip** (`WorkspaceChip.qml`, `window/LocationChip.hpp`, `window/HostChipState.hpp`): the one band
-  chip that names the daemon and the workspace, with the daemon's state (Connected, Reconnecting,
-  Disconnected) as a dot, a glyph on the Terminal row, and words while there is room.
+  chip that names the daemon and the workspace, `daemon › workspace ▾`, with the daemon's state (Connected,
+  Reconnecting, Disconnected) as a dot, a glyph on the Terminal row, and words while there is room. A remote
+  daemon that is connected shows a dot, a local one none. Which band shows it (`locationChipPlace`) and how it
+  shortens are pure decisions in `LocationChip.hpp`: the state text goes first, then the daemon name is
+  elided, then the daemon shrinks to its dot, and last the workspace is elided to
+  `LocationChipWorkspaceFloor` (6) characters and `…` (`LocationChipFit`). `locationChipMinimumWidth()`
+  keeps the window from being narrower than that last step plus the band's other parts and one tab-well
+  minimum. With the sidebar shown the band has no chip; `WorkspaceChip.qml` in its `daemonOnly` mode heads the
+  sidebar instead. A click, Space or Return opens the switcher below it (`SwitcherOrigin::Chip`); the tooltip
+  is "Switch workspace or daemon" with the `ShowSwitcher` chord (⇧⌘R, Ctrl+Shift+R), and Escape closes the popup.
   The daemon drift chip lives in the band's trailing area, never over the cells.
 - **Notices**: `window/NoticeModel.hpp` queues `Toast` (a transient pill) and `Banner` (a band below the
   title band that pushes the content down once). Config reload errors, "Copied N lines" and restore
@@ -366,8 +374,9 @@ forks: what differs is data.
     Qt's keys onto them) and `command/SidebarMenus.hpp` (the row menus).
   - `window/SidebarToggle.hpp`: where the toggle stands, and `sidebarRecoveryOf()`: with no toggle on screen
     the pane's context menu offers **Show Sidebar**.
-  - `window/PopupAnchor.hpp`: where a dropdown hangs below its control; the workspace chip opens the switcher
-    there, listing the window's daemon's workspaces alone (`SwitcherScope::OneDaemon`).
+  - `window/PopupAnchor.hpp`: where a dropdown hangs below its control; the location chip and the
+    sidebar's daemon control open the switcher there, with `SwitcherScope::Everything`: the same rows
+    `ShowSwitcher` opens centred, and Escape closes it rather than narrowing it.
 - **Accessibility.** The tree is `Accessible.Tree`, a row a `TreeItem` named by its title; its kind, its fold
   and its status are the translated description (`accessibleDescriptionOf()`): Qt 6.11's `Accessible` has no
   expanded state to bind.

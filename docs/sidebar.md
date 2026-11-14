@@ -46,12 +46,12 @@ program has something to say, a second line with the reason.
   keyboard is on; on Windows a subtle grey fill and a rounded accent pill at the leading edge, focused or not;
   on the Terminal style inverse video. When its workspace is folded, the workspace row carries the selection
   instead, until it is unfolded.
-- **Failed.** A failed status is drawn as the red ❌ on the native rows, in the sidebar, the workspace chip and
+- **Failed.** A failed status is drawn as the red ❌ on the native rows, in the sidebar, the location chip and
   the tab strip's badge; the Terminal style keeps a single-cell red ✕, because ❌ is two cells wide.
 
 ## Urgency
 
-One order ranks every status, in the sidebar, the tab strip, the taskbar and the workspace chip, most urgent
+One order ranks every status, in the sidebar, the tab strip, the taskbar and the location chip, most urgent
 first:
 
 | Rank | Urgency | Meaning |
@@ -199,23 +199,40 @@ the jump key beside it.
 
 ## When the sidebar is hidden
 
-With the sidebar away, the title band shows a **workspace chip**: the shown workspace's name. The chip is
-marked when *another* workspace needs you, has failed, or has a result you have not seen (done-not-seen and
-up). Work that is only running, or unseen output, does not mark it: the chip is not a progress indicator.
-The tabs move into the title band behind the chip, following `tab_bar_position`.
+With the sidebar away, a window on a daemon shows one **location chip** at the leading edge of its title band:
+`local › billing ▾`, the daemon the window is on and the shown workspace. The default local daemon reads `local`,
+a named one its label (`work`), a remote one its host, and a daemon without a name `daemon`. A window with no
+daemon shows the workspace alone. The chip is marked when *another* workspace needs you, has failed, or has a
+result you have not seen (done-not-seen and up). Work that is only running, or unseen output, does not mark it:
+the chip is not a progress indicator. The tabs move into the title band behind the chip, following
+`tab_bar_position`.
 
-Clicking the chip drops this window's workspaces down below it, the ones of the daemon the window is on and
-nothing else, with the status glyph, branch and tab count the sidebar would show. The chip stays highlighted
-while the dropdown is open, and clicking it again closes it.
+The daemon's connection shows in the chip too: a remote daemon that is connected has a green dot, a local one
+shows nothing. While the link is not up, any daemon shows a dot and its state, `starfive Reconnecting…` or
+`local Disconnected`. The dot keeps its shape, so colour is never the only cue, and the state is also in the chip's
+accessible description.
+
+When the band runs short, the chip gives way in this order, so the workspace name outlasts the daemon's:
+the state text goes (the dot stays), then the daemon name is shortened in the middle, then the daemon shrinks to
+its dot, and only then is the workspace name shortened, never below 6 characters and an ellipsis. The window cannot
+be made narrower than the chip at that last step, the buttons and one tab need.
+
+Clicking the chip, or pressing Space or Return on it, opens the switcher below it: the same popup
+`ShowSwitcher` opens (`Ctrl+Shift+R`, `⇧⌘R` on macOS), with the workspaces of this window's daemon first and
+typing filtering at once. The chip's tooltip, "Switch workspace or daemon", names whatever chord is bound.
+The chip stays highlighted while the popup is open, and clicking it again closes it; Escape closes the popup.
+
+With the sidebar shown, the band has no chip. The daemon heads the sidebar instead, `local ▾` with the same dot for
+a remote daemon, and opens the same switcher below itself with the same tooltip.
 
 - Type to filter the workspaces; Return switches this window to the selected one, Shift+Return opens it in a
   new window. The row under the pointer shows a button that does the same.
 - **New Workspace** creates one on this daemon, named after what you typed, if anything.
-- **All daemons…** widens the dropdown, in place, to the whole switcher: every local daemon and saved host.
-  It shows the chord bound to `ShowSwitcher` beside it; Escape narrows it back.
+- Below this daemon's workspaces the popup lists every other local daemon and saved host, as the
+  `ShowSwitcher` popup does: the click and the chord open the same rows.
 - Right-click a workspace (or press the Menu key, or Shift+F10) for the same menu its sidebar row has:
   rename, mark seen, new tab, move, close.
-- Escape, or a click elsewhere, closes it and changes nothing.
+- Escape, or a click elsewhere, closes it and changes nothing; Escape does not narrow it first.
 
 The switcher keeps the sidebar's times running while it is open, so a working workspace's time moves on even
 with the sidebar hidden.
