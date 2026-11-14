@@ -1674,7 +1674,9 @@ bool TerminalDisplay::event(QEvent* event)
         // rather than injected, because QML constructs this item (the framework-constructed carve-out).
         //
         // A chord the terminal keeps also tells whether its keystroke may reach the input method: an Option
-        // key acting as Alt must not, where it would start a dead key instead of sending ESC and the letter.
+        // key acting as Alt must not, where it would start a dead key instead of sending ESC and the letter,
+        // and neither may a Control+Command arrow chord that macOS's input context would swallow as a text
+        // writing-direction command, which Qt then never delivers (contour-terminal/contour#2356).
         // Qt asks Qt::ImEnabled between this event and the press, so the answer is recorded for that query.
         if (event->type() == QEvent::ShortcutOverride && _session)
         {
@@ -1682,8 +1684,8 @@ bool TerminalDisplay::event(QEvent* event)
             if (shortcutOverrideClaim(*keyEvent, _session->app().menuBarPlacement())
                 == ShortcutOverrideClaim::Terminal)
             {
-                _pendingInputMethodRoute =
-                    _session->keyboardPlatform().inputMethodRouteFor(keyEvent->nativeModifiers());
+                _pendingInputMethodRoute = _session->keyboardPlatform().inputMethodRouteFor(
+                    { .modifiers = keyEvent->nativeModifiers(), .virtualKey = keyEvent->nativeVirtualKey() });
                 keyEvent->accept();
                 return true;
             }

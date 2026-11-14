@@ -163,8 +163,10 @@ TEST_CASE("the Win32 platform decodes the lock toggles the capture sampled", "[i
 
 TEST_CASE("every keystroke reaches the Win32 input method", "[input][platform][win32]")
 {
-    CHECK(win32Platform()->inputMethodRouteFor(0) == InputMethodRoute::ToInputMethod);
-    CHECK(win32Platform()->inputMethodRouteFor(MacLeftOption) == InputMethodRoute::ToInputMethod);
+    CHECK(win32Platform()->inputMethodRouteFor({ .modifiers = 0, .virtualKey = 0 })
+          == InputMethodRoute::ToInputMethod);
+    CHECK(win32Platform()->inputMethodRouteFor({ .modifiers = MacLeftOption, .virtualKey = 0 })
+          == InputMethodRoute::ToInputMethod);
 }
 
 TEST_CASE("a key lookup decides AltGr as the terminal does", "[input][platform][win32]")

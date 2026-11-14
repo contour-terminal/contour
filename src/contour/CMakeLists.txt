@@ -1166,6 +1166,7 @@ if(CONTOUR_FRONTEND_GUI)
             target_sources(contour_gui_test PRIVATE
                 platform/CocoaAppearanceSources_test.mm
                 platform/CocoaGlobalHotkey_test.mm
+                platform/CocoaKeyDelivery_test.mm
                 platform/CocoaMenuBarIntegration_test.mm
                 platform/CocoaNativeMenuPresenter_test.mm
                 platform/CocoaQuickTerminalPanel_test.mm
@@ -1180,7 +1181,7 @@ if(CONTOUR_FRONTEND_GUI)
                 OBJCXX_STANDARD_REQUIRED ON)
             set_source_files_properties(
                 platform/CocoaAppearanceSources_test.mm platform/CocoaGlobalHotkey_test.mm
-                platform/CocoaMenuBarIntegration_test.mm
+                platform/CocoaKeyDelivery_test.mm platform/CocoaMenuBarIntegration_test.mm
                 platform/CocoaNativeMenuPresenter_test.mm platform/CocoaQuickTerminalPanel_test.mm
                 platform/CocoaSecureInput_test.mm
                 platform/CocoaTaskbarProgressSink_test.mm platform/CocoaTitleBandMaterial_test.mm
