@@ -1084,9 +1084,9 @@ of the daemon is an entry of the window's directory (`NativeController::director
 for every workspace and the status stream of the panes the connection does not mirror. A launch opens one window,
 whose connection's `Default` intent selects the daemon's first workspace that no connection selects (`planAttach`, `AttachPlan.cpp`), else
 creates one; `--workspace W` states `Select{W}`. New Window starts a link of its own to the same daemon target
-with the same `Default` intent (`WindowBinding::openNewWindow`), so it too never shows a workspace another
-window shows. A tab torn off a window starts a link selecting the workspace its window displays
-(`WindowBinding::openWindowLike`), whose new window
+with the same `Default` intent (`WindowBinding::openSiblingWindow` with `SiblingShows::DaemonsChoice`), so it
+too never shows a workspace another window shows. A tab torn off a window starts a link selecting the workspace
+its window displays (`SiblingShows::SameWorkspace`), whose new window
 activates that tab once it has realized the workspace. Nothing moves: both windows show the daemon's one
 workspace, each through local sessions of its own, and closing one leaves the other as it was.
 
@@ -1243,7 +1243,8 @@ until a window selects it.
 
 A connection that drops (no `Goodbye` before its end) is a window reconnecting, so the workspace it showed still
 counts as shown to an attach for the reconnect grace (`SessionHostConfig::reconnectGrace`, by default
-`proto::ReconnectCeiling`, the longest wait of a client's reconnect backoff); `SessionHost::noteClientDetached` takes the end as
+`proto::ReconnectGrace`: the longest wait of a client's reconnect backoff, `proto::ReconnectCeiling`, plus the
+`proto::HandshakeDeadline` its last attempt may take to attach); `SessionHost::noteClientDetached` takes the end as
 `DetachKind::Dropped`. One that said `Goodbye` ends as `DetachKind::Closed` and frees its workspace at once. Only
 an attach asks (`SessionHost::shownForAttach`, read once per attach); `workspace.list` reports what is selected right now.
 

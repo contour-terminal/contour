@@ -26,6 +26,14 @@ struct WorkspaceSummary
     WorkspaceVisibility visibility = WorkspaceVisibility::Hidden;
 };
 
+/// @param workspace A workspace.
+/// @return Whether a launch brings it back: it holds a tab and no connection selects it. The one predicate
+///         planAttach() and a connection whose workspace ended (NativeSession::refreshSelection) both ask.
+[[nodiscard]] constexpr bool isLaunchable(WorkspaceSummary const& workspace) noexcept
+{
+    return workspace.tabCount > 0 && workspace.visibility == WorkspaceVisibility::Hidden;
+}
+
 /// Whether the attaching connection's hello names the directory the session it creates starts in
 /// (proto::ClientHello::workingDirectory).
 enum class WorkingDirectoryStated : uint8_t

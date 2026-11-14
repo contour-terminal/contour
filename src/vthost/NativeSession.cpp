@@ -1112,11 +1112,11 @@ void NativeSession::refreshSelection()
     }
     if (selected != nullptr && _selectedTabs == SelectedTabs::NeverHeld)
         return;
-    // The connection moves on to the one a launch would take; with none left it selects none, which
-    // its window takes as the end of what it showed. A launch that would create something finds nothing.
-    auto const plan =
-        planAttach(proto::AttachIntent { .kind = proto::AttachIntentKind::Default }, attachContext({}));
-    auto const next = plan.creation == AttachCreation::None ? plan.select : std::nullopt;
+    // The connection moves on to the first workspace a launch would bring back; with none left it selects
+    // none, which its window takes as the end of what it showed, as closing a last tab does.
+    auto const summaries = workspaceSummaries();
+    auto const launchable = std::ranges::find_if(summaries, isLaunchable);
+    auto const next = launchable != summaries.end() ? std::optional { launchable->id } : std::nullopt;
     connectionLog()("{}: workspace {} ended; selecting {}", _id, _selectedWorkspace, next.value_or(0));
     if (!next)
     {
@@ -3142,26 +3142,31 @@ void NativeSession::attachClient(uint64_t serial,
             send(0, proto::DecodedPdu { request });
 }
 
-AttachContext NativeSession::attachContext(std::filesystem::path const& workingDirectory)
+std::vector<WorkspaceSummary> NativeSession::workspaceSummaries() const
 {
     auto& model = _host.model();
-    auto context = AttachContext { .primaryWorkspace = _host.workspaceId().value,
-                                   .workspaces = {},
-                                   .workingDirectory = workingDirectory.empty() ? WorkingDirectoryStated::No
-                                                                                : WorkingDirectoryStated::Yes,
-                                   .instance = _host.instance() };
+    auto summaries = std::vector<WorkspaceSummary> {};
     // A workspace whose last session ended is gone, unless it was the only one: that one is listed as a fresh
     // daemon's empty one is, which a launch gives its first tab.
     auto const shown = _host.shownForAttach();
     for (auto const i: std::views::iota(0, model.workspaceCount()))
         if (auto const* workspace = model.workspaceAt(i); workspace != nullptr)
-            context.workspaces.push_back(WorkspaceSummary {
-                .id = workspace->id().value,
-                .tabCount = workspace->tabCount(),
-                .visibility = shown.contains(workspace->id().value) ? WorkspaceVisibility::Shown
-                                                                    : WorkspaceVisibility::Hidden });
-    std::ranges::sort(context.workspaces, {}, &WorkspaceSummary::id);
-    return context;
+            summaries.push_back(WorkspaceSummary { .id = workspace->id().value,
+                                                   .tabCount = workspace->tabCount(),
+                                                   .visibility = shown.contains(workspace->id().value)
+                                                                     ? WorkspaceVisibility::Shown
+                                                                     : WorkspaceVisibility::Hidden });
+    std::ranges::sort(summaries, {}, &WorkspaceSummary::id);
+    return summaries;
+}
+
+AttachContext NativeSession::attachContext(std::filesystem::path const& workingDirectory) const
+{
+    return AttachContext { .primaryWorkspace = _host.workspaceId().value,
+                           .workspaces = workspaceSummaries(),
+                           .workingDirectory = workingDirectory.empty() ? WorkingDirectoryStated::No
+                                                                        : WorkingDirectoryStated::Yes,
+                           .instance = _host.instance() };
 }
 
 void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,

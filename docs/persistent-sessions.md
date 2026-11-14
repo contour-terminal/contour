@@ -194,6 +194,11 @@ workspace, in the daemon's own order, and when there is none it gets a new works
 how a restart or a reattach finds your workspaces again: each launch picks up the next hidden one. A fresh daemon gets its
 first tab in the first window, as before.
 
+The same rule moves a window whose workspace ends (its last tab closes). It moves on to the first hidden workspace
+that holds a tab, as a new window would, and never to one another window shows. When every other workspace is
+shown by some window, it has nowhere to go and the window closes, as closing the last tab of a window does; the
+other windows stay as they were.
+
 A launch that names a program (`-e`, or a command after the options) runs it in the window's own process
 under `auto`; under `required` it ends before any window, since a daemon session runs the host's profile.
 

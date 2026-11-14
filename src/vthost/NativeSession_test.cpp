@@ -8180,6 +8180,33 @@ TEST_CASE("a connection whose workspace ends never moves to one another window s
     h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
 }
 
+TEST_CASE(
+    "a connection whose workspace ends while every other is shown selects none, the other window staying",
+    "[vthost][native][daemon-follow]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const* shownElsewhere = h.host.createWorkspace();
+    REQUIRE(shownElsewhere != nullptr);
+    auto const second = shownElsewhere->id().value;
+
+    // The other window shows the only workspace left: moving there would show it in two windows.
+    auto window = RememberedSelection {};
+    window.selected = second;
+    h.host.noteClientAttached(&window);
+
+    std::ignore = h.exchangeUntil(
+        { daemonFollowHello(proto::AttachIntentKind::Select, first) },
+        [](auto const& got) { return batchEndSelects(got, 0); },
+        closeLastTabOnce(&h, first, [&] { return snapshotRunCount(h.received) >= 1; }));
+
+    CHECK(h.session->selectedWorkspace() == 0); // this window closes, as closing a last tab does
+    CHECK(window.selected == second);           // the other keeps what it shows
+    CHECK(h.host.visibility(second) == vthost::WorkspaceVisibility::Shown);
+    h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
+}
+
 TEST_CASE("a Goodbye frees the workspace at once, and is refused without client-goodbye",
           "[vthost][native][goodbye]")
 {

@@ -2514,29 +2514,78 @@ TEST_CASE("a resumed connection selects the workspace it had", "[vthost][attach]
     CHECK(h.client->selectedWorkspace() == Had);
 }
 
-TEST_CASE("a client that says goodbye frees its workspace at once, with or without daemon-follow",
+namespace
+{
+
+/// How a scenario ends the client's connection.
+enum class ClientEnd : uint8_t
+{
+    Detach = 0,  ///< NativeClient::detach(): no word.
+    CloseWindow, ///< NativeClient::closeWindow(): Goodbye first.
+};
+
+/// Whether the client has frames of its own queued when it ends.
+enum class Backlog : uint8_t
+{
+    None = 0,
+    Queued,
+};
+
+/// Waits until the client holds a layout, optionally queues a burst of requests behind which its end goes,
+/// then ends the connection as @p end says.
+Task<void> endOnLayout(IntentHarness* h, ClientEnd end, Backlog backlog)
+{
+    co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+    if (backlog == Backlog::Queued)
+        for (auto const image: std::views::iota(uint32_t { 1 }, uint32_t { 400 }))
+            h->client->fetchImage(1, image);
+    if (end == ClientEnd::CloseWindow)
+        h->client->closeWindow();
+    else
+        h->client->detach();
+}
+
+/// @return Whether a daemon that shared @p capabilities with the client still shows the workspace of the
+///         connection to a new attach once the client ended it as @p end says.
+[[nodiscard]] bool workspaceHeldAfter(proto::CapabilitySet const& capabilities,
+                                      ClientEnd end,
+                                      Backlog backlog)
+{
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities = capabilities;
+    auto h = IntentHarness { std::move(services),
+                             NativeClient::HandshakeOptions {
+                                 .capabilities = capabilities,
+                                 .attachIntent = { .kind = proto::AttachIntentKind::Default } } };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    h.drive(endOnLayout(&h, end, backlog));
+    h.server.reset(); // the connection is gone
+    return h.host.shownForAttach().contains(first);
+}
+
+} // namespace
+
+TEST_CASE("a client that closes its window says goodbye and frees its workspace at once",
           "[vthost][attach][goodbye]")
 {
     auto const offered =
         proto::CapabilitySet::of({ proto::Capability::AttachIntent, proto::Capability::ClientGoodbye });
     auto const withoutGoodbye = proto::CapabilitySet::of({ proto::Capability::AttachIntent });
-    auto const run = [](proto::CapabilitySet const& capabilities) {
-        auto services = vthost::NativeSessionServices {};
-        services.handshake.capabilities = capabilities;
-        auto h = IntentHarness { std::move(services),
-                                 NativeClient::HandshakeOptions {
-                                     .capabilities = capabilities,
-                                     .attachIntent = { .kind = proto::AttachIntentKind::Default } } };
-        REQUIRE(h.host.createTab() != nullptr);
-        auto const first = h.host.workspaceId().value;
-        h.drive(detachOnLayout(&h));
-        h.server.reset(); // the connection is gone
-        return h.host.shownForAttach().contains(first);
-    };
 
     // The daemon takes the end for a drop unless the client said so, and both ends share the capability.
-    CHECK_FALSE(run(offered));
-    CHECK(run(withoutGoodbye));
+    CHECK_FALSE(workspaceHeldAfter(offered, ClientEnd::CloseWindow, Backlog::None));
+    CHECK(workspaceHeldAfter(offered, ClientEnd::Detach, Backlog::None));
+    CHECK(workspaceHeldAfter(withoutGoodbye, ClientEnd::CloseWindow, Backlog::None));
+}
+
+TEST_CASE("a Goodbye queued behind a backlog of requests still reaches the daemon before the close",
+          "[vthost][attach][goodbye]")
+{
+    auto const offered =
+        proto::CapabilitySet::of({ proto::Capability::AttachIntent, proto::Capability::ClientGoodbye });
+    CHECK_FALSE(workspaceHeldAfter(offered, ClientEnd::CloseWindow, Backlog::Queued));
+    CHECK(workspaceHeldAfter(offered, ClientEnd::Detach, Backlog::Queued));
 }
 
 TEST_CASE("a client selects a workspace at runtime, and resumes the one it selects now",
@@ -3267,7 +3316,7 @@ Task<void> daemonToEnd(Task<void> daemon, bool* ended)
         NativeClient::PermissionHandler {},
         vthost::client::LivenessPolicy { .idleBeforeProbe = 5s,
                                          .deadAfter = 15s,
-                                         .handshakeDeadline = vthost::client::DefaultHandshakeDeadline,
+                                         .handshakeDeadline = vthost::proto::HandshakeDeadline,
                                          .awakeGap = 5s,
                                          .wakeDeadline = 5s });
 }

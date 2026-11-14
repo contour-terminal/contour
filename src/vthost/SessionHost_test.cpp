@@ -541,6 +541,66 @@ TEST_CASE("a workspace whose window closed on purpose is offered to the very nex
     CHECK(h.host.shownForAttach().contains(workspace));
 }
 
+TEST_CASE("a window that dropped, resumed and then closed on purpose leaves its workspace free at once",
+          "[vthost][host][visibility]")
+{
+    using vthost::DetachKind;
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId().value;
+
+    auto window = SelectingClient {};
+    window.selected = workspace;
+    h.host.noteClientAttached(&window);
+    h.host.noteClientDetached(&window, DetachKind::Dropped);
+    REQUIRE(h.host.shownForAttach().contains(workspace)); // held for the reconnect
+
+    // It reconnects within the grace, then says goodbye: the earlier hold must not outlive that word.
+    h.host.noteClientAttached(&window);
+    h.host.noteClientDetached(&window, DetachKind::Closed);
+    CHECK_FALSE(h.host.shownForAttach().contains(workspace));
+}
+
+TEST_CASE("the reconnect hold outlasts the backoff ceiling by the time an attempt takes to attach",
+          "[vthost][host][visibility]")
+{
+    using vthost::proto::HandshakeDeadline;
+    using vthost::proto::ReconnectCeiling;
+    using vthost::proto::ReconnectGrace;
+    STATIC_CHECK(ReconnectGrace == ReconnectCeiling + HandshakeDeadline);
+
+    auto clock = core::platform::ManualClock {};
+    auto wall = core::platform::ManualWallClock {};
+    core::net::testing::ScriptedBackend source;
+    core::net::EventLoop loop { source };
+    // The default grace: nothing states one.
+    SessionHost host { loop,
+                       [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                           return std::make_unique<vtpty::MockPty>(size);
+                       },
+                       vtbackend::Settings {},
+                       core::defaultEnvironment(),
+                       vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                   .clocks = vtbackend::TerminalClocks {
+                                                       .steady = clock,
+                                                       .wall = wall,
+                                                       .localTime = &vtbackend::fixedOffsetLocalTime<> } } };
+    REQUIRE(host.createTab() != nullptr);
+    auto const workspace = host.workspaceId().value;
+    auto window = SelectingClient {};
+    window.selected = workspace;
+    host.noteClientAttached(&window);
+    host.noteClientDetached(&window, vthost::DetachKind::Dropped);
+
+    // The last retry starts a ceiling after the drop and may take a whole handshake to attach.
+    clock.advance(ReconnectCeiling + std::chrono::milliseconds { 1 });
+    CHECK(host.shownForAttach().contains(workspace));
+    clock.advance(HandshakeDeadline - std::chrono::milliseconds { 2 });
+    CHECK(host.shownForAttach().contains(workspace));
+    clock.advance(std::chrono::milliseconds { 1 });
+    CHECK_FALSE(host.shownForAttach().contains(workspace));
+}
+
 TEST_CASE("a focus report bumps that connection's focus serial", "[vthost][host][focus]")
 {
     auto h = HostHarness {};

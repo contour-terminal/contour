@@ -800,10 +800,13 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// none is left. A connection that selected none stays so.
     void refreshSelection();
 
+    /// @return The daemon's workspaces ascending by id, with their tab counts and what an attach sees of them
+    ///         (SessionHost::shownForAttach), as of now.
+    [[nodiscard]] std::vector<WorkspaceSummary> workspaceSummaries() const;
+
     /// @param workingDirectory The directory the attach states; empty when it states none.
-    /// @return What planAttach() decides from: the daemon's workspaces with their tab counts and what an
-    ///         attach sees of them, as of now.
-    [[nodiscard]] AttachContext attachContext(std::filesystem::path const& workingDirectory);
+    /// @return What planAttach() decides from: workspaceSummaries() and the host's primary workspace.
+    [[nodiscard]] AttachContext attachContext(std::filesystem::path const& workingDirectory) const;
 
     /// Validates the peer's ClientHello and answers it. An Attach connection then becomes a client
     /// (see attachClient: the census ticket, the subscriptions, and the attach snapshot, spawning the

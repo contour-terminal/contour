@@ -4416,6 +4416,22 @@ TEST_CASE("an old daemon without DaemonFollow is refused with the upgrade messag
     controller->stop();
 }
 
+TEST_CASE("an attach that fails sends no Goodbye, so the daemon takes its end for a drop",
+          "[attach][controller][goodbye]")
+{
+    auto daemon = DaemonFixture { {}, servicesWithoutDaemonFollow() };
+    std::ignore = daemon.seedSession("first");
+    auto const first = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
+    auto timeline = TestTimeline {};
+    auto const controller = makeNativeController(daemon.endpoint(), timeline);
+    REQUIRE_FALSE(controller->connectAndWait(10s).has_value()); // refused: the failure stops the supervisor
+    REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.host->connectedClients() == 0; }));
+
+    // Nothing said the window closed on purpose: the workspace it was attached to is held for a reconnect.
+    CHECK(daemon.onDaemon([&] { return daemon.host->shownForAttach().contains(first); }));
+    controller->stop();
+}
+
 namespace
 {
 

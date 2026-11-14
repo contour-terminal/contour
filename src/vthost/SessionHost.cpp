@@ -1396,12 +1396,20 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client, DetachKi
     if (!counted)
         return;
     _focusSerials.erase(client);
-    // A window that said it closes leaves its workspace free at once; a lost connection is a reconnect.
-    if (auto const shown = client->selectedWorkspace(); shown != 0 && kind == DetachKind::Dropped)
+    // A window that said it closes leaves its workspace free at once, a hold from an earlier drop of the same
+    // window included; a lost connection is a reconnect.
+    if (auto const shown = client->selectedWorkspace(); shown != 0)
     {
-        auto const now = _clocks.steady.now();
-        std::erase_if(_reconnectHolds, [now](auto const& hold) { return hold.second <= now; });
-        _reconnectHolds.insert_or_assign(shown, now + _reconnectGrace);
+        switch (kind)
+        {
+            case DetachKind::Closed: _reconnectHolds.erase(shown); break;
+            case DetachKind::Dropped: {
+                auto const now = _clocks.steady.now();
+                std::erase_if(_reconnectHolds, [now](auto const& hold) { return hold.second <= now; });
+                _reconnectHolds.insert_or_assign(shown, now + _reconnectGrace);
+                break;
+            }
+        }
     }
     settleRaiseRole();
     // A switch asked of a window that is gone will never be answered.

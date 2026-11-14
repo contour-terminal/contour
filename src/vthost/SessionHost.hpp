@@ -224,6 +224,13 @@ using SessionSignalCallback = std::function<void(SessionSignal)>;
 /// Told how a requested window switch ended, once.
 using SwitchCompletion = std::function<void(proto::SwitchReply const&)>;
 
+/// How an attached connection ended, as the host takes it.
+enum class DetachKind : uint8_t
+{
+    Dropped = 0, ///< Lost with no word: the window is reconnecting, so its workspace is held for a while.
+    Closed,      ///< Ended on purpose (the client said Goodbye): its workspace is free at once.
+};
+
 /// Observer of the hosted sessions' output streams. Every callback fires on the loop thread; any
 /// number of observers may subscribe concurrently, so no observer ever silences another by
 /// connecting or disconnecting.
@@ -1003,9 +1010,9 @@ struct SessionHostConfig
     /// Where the UUIDs of workspaces, tabs and panes come from. Tests pass a sequential one.
     std::shared_ptr<vtcontrol::UuidSource> uuids = vtcontrol::systemUuidSource();
     /// How long after its connection dropped a window is taken to still show its workspace, so that an
-    /// attach does not take it (@see SessionHost::shownForAttach). The default is the longest wait between
-    /// two reconnect attempts of a client, which the client's backoff shares.
-    std::chrono::milliseconds reconnectGrace = proto::ReconnectCeiling;
+    /// attach does not take it (@see SessionHost::shownForAttach). The default is proto::ReconnectGrace: the
+    /// longest wait between two reconnect attempts of a client plus the time one may take to attach.
+    std::chrono::milliseconds reconnectGrace = proto::ReconnectGrace;
 };
 
 /// One session of a quiesced host.

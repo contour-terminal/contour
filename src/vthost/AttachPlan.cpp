@@ -38,9 +38,7 @@ namespace
     /// its first one in the primary workspace, unless a window shows that already.
     [[nodiscard]] AttachPlan launch(AttachContext const& context)
     {
-        auto const hidden = std::ranges::find_if(context.workspaces, [](WorkspaceSummary const& workspace) {
-            return workspace.tabCount > 0 && !isShown(workspace);
-        });
+        auto const hidden = std::ranges::find_if(context.workspaces, isLaunchable);
         if (hidden != context.workspaces.end())
             // A launch that names a working directory also opens a tab in it: the workspace it brings back
             // leaves it nothing to create.

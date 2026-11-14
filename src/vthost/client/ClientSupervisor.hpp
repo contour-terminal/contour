@@ -100,6 +100,11 @@ class ClientSupervisor
     /// thread, where the client lives.
     void stop();
 
+    /// As stop(), for a window the user closed: the current client says Goodbye first
+    /// (NativeClient::closeWindow), so the daemon frees the window's workspace at once. stop() is for every
+    /// other end, a failed attach among them, which sends no word and so reads to the daemon as a drop.
+    void closeWindow();
+
     /// Cuts the reconnect backoff short: the wait under way ends at once and the next attempt starts, or,
     /// while an attempt is under way, the wait after it is skipped. Does nothing outside a reconnect. Unlike
     /// stop() it ends nothing: a system wake calls it, since the network may be back. Thread-safe.
