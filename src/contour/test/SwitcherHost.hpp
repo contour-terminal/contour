@@ -48,8 +48,8 @@ class MockSwitcherHost: public QObject, public window::SwitcherHost
     {
         connect(this, &MockSwitcherHost::switcherChanged, this, [this] {
             auto inputs = _chip.inputs();
-            inputs.disclosure = isWorkspaceDropdownOpen() ? window::ChipDisclosure::Expanded
-                                                          : window::ChipDisclosure::Collapsed;
+            inputs.disclosure = isWorkspaceDropdownOpen() ? window::Disclosure::Expanded
+                                                          : window::Disclosure::Collapsed;
             _chip.setInputs(std::move(inputs));
         });
     }

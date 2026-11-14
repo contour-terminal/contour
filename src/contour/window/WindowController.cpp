@@ -653,7 +653,7 @@ LocationChipInputs WindowController::chipInputs() const
         .state = hostChipStateOf(_manager.hostConnection(_displayed)),
         .workspace = summary.currentWorkspace,
         .otherWorkspaces = summary.otherWorkspaces,
-        .disclosure = isWorkspaceDropdownOpen() ? ChipDisclosure::Expanded : ChipDisclosure::Collapsed,
+        .disclosure = isWorkspaceDropdownOpen() ? Disclosure::Expanded : Disclosure::Collapsed,
         .band = band.band,
         .centre = band.centre,
         .sidebar = sidebarWidth() > 0 ? SidebarShown::Yes : SidebarShown::No,

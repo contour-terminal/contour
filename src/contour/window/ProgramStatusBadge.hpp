@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/window/GraphemeElide.hpp>
 #include <contour/window/StatusUrgency.hpp>
 
 #include <vtbackend/core/UntrustedText.hpp>
@@ -124,15 +125,10 @@ inline constexpr uint64_t AllRecordsSeen = std::numeric_limits<uint64_t>::max();
     return unicode::convert_to<char>(std::u32string_view { kept });
 }
 
-/// @p text cut to @p maxLength characters, its last one an ellipsis when it was cut.
+/// @p text cut to @p maxLength characters (grapheme clusters), its last one an ellipsis when it was cut.
 [[nodiscard]] inline std::string elided(std::string_view text, std::size_t maxLength)
 {
-    auto codepoints = unicode::convert_to<char32_t>(text);
-    if (codepoints.size() <= maxLength)
-        return std::string { text };
-    codepoints.resize(maxLength - 1);
-    codepoints.push_back(U'…');
-    return unicode::convert_to<char>(std::u32string_view { codepoints });
+    return elideEnd(text, maxLength, ElideUnit::Clusters);
 }
 
 /// What a badge's tooltip says, in order of preference: the first of them a record does not leave empty.

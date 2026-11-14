@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/window/AttentionJump.hpp>
 #include <contour/window/ChromeKeys.hpp>
+#include <contour/window/DisclosureWords.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SidebarModel.hpp>
@@ -9,6 +10,7 @@
 #include <core/Utils.hpp>
 
 #include <QtCore/QByteArray>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QHash>
 #include <QtCore/QStringList>
 #include <QtCore/QVariant>
@@ -232,6 +234,14 @@ QString accessibleNameOf(SidebarRow const& row)
     return qs(row.title);
 }
 
+/// @param disclosure Whether a row's children show.
+/// @return The word a screen reader says for it, translated once for every control that says it.
+QString disclosureText(Disclosure disclosure)
+{
+    return QCoreApplication::translate(std::string(DisclosureContext).c_str(),
+                                       std::string(disclosureWord(disclosure)).c_str());
+}
+
 QString accessibleDescriptionOf(SidebarRow const& row)
 {
     auto parts = QStringList { kindWord(row.key.kind) };
@@ -239,8 +249,8 @@ QString accessibleDescriptionOf(SidebarRow const& row)
     switch (row.expansion)
     {
         case RowExpansion::None: break;
-        case RowExpansion::Collapsed: parts.push_back(SidebarModel::tr("collapsed")); break;
-        case RowExpansion::Expanded: parts.push_back(SidebarModel::tr("expanded")); break;
+        case RowExpansion::Collapsed: parts.push_back(disclosureText(Disclosure::Collapsed)); break;
+        case RowExpansion::Expanded: parts.push_back(disclosureText(Disclosure::Expanded)); break;
     }
     if (row.leaves.needYou > 0)
         parts.push_back(counted(PanesNeedYou, row.leaves.needYou));

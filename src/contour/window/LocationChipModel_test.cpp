@@ -91,7 +91,7 @@ TEST_CASE("LocationChipModel: each group of readers hears only what they read", 
     SECTION("the switcher opening reaches the accessible words alone")
     {
         auto inputs = remoteDaemon();
-        inputs.disclosure = ChipDisclosure::Expanded;
+        inputs.disclosure = Disclosure::Expanded;
         model.setInputs(inputs);
         CHECK(accessibility.count() == 1);
         CHECK(surface.count() == 0);

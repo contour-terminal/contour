@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/session/HyperlinkTooltip.hpp>
+#include <contour/window/GraphemeElide.hpp>
 
 #include <vtbackend/core/FileUrl.hpp>
 #include <vtbackend/links/LinkIndex.hpp>
@@ -23,29 +24,6 @@ namespace contour::session
 
 namespace
 {
-    constexpr auto Ellipsis = std::string_view { "…" };
-
-    /// Whether @p byte continues a multi-byte UTF-8 sequence rather than starting one.
-    [[nodiscard]] constexpr bool isContinuation(char byte) noexcept
-    {
-        return (static_cast<unsigned char>(byte) & 0xC0U) == 0x80U;
-    }
-
-    /// The byte offset of every codepoint in @p text, plus a final offset of text.size().
-    ///
-    /// Built once rather than scanned twice, so head and tail are both cut on a boundary the same walk
-    /// established. Malformed input degrades gracefully: a stray continuation byte simply joins the
-    /// codepoint before it.
-    [[nodiscard]] std::vector<size_t> codepointOffsets(std::string_view text)
-    {
-        auto offsets = std::vector<size_t> {};
-        for (auto const i: std::views::iota(size_t { 0 }, text.size()))
-            if (!isContinuation(text[i]))
-                offsets.push_back(i);
-        offsets.push_back(text.size());
-        return offsets;
-    }
-
     /// How a file:// URL begins, in the lower case vtbackend::parseFileUrl reads.
     constexpr auto FileScheme = std::string_view { "file://" };
 
@@ -140,23 +118,7 @@ namespace
 
 std::string elideMiddle(std::string_view text, size_t maxLength)
 {
-    auto const offsets = codepointOffsets(text);
-    auto const length = offsets.size() - 1;
-    if (length <= maxLength)
-        return std::string { text };
-
-    // Too short to hold anything but the ellipsis itself.
-    if (maxLength <= 1)
-        return std::string { Ellipsis };
-
-    auto const keep = maxLength - 1;
-    auto const head = (keep + 1) / 2; // the head keeps the odd codepoint: scheme and host read first
-    auto const tail = keep - head;
-
-    auto out = std::string { text.substr(0, offsets[head]) };
-    out += Ellipsis;
-    out += text.substr(offsets[length - tail]);
-    return out;
+    return window::elideMiddle(text, maxLength, window::ElideUnit::Clusters);
 }
 
 std::string linkPillText(std::string_view uri, std::optional<std::string_view> localHost, size_t maxLength)

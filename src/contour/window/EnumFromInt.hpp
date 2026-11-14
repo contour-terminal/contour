@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <ranges>
 #include <type_traits>
@@ -15,14 +16,25 @@
 namespace contour::window
 {
 
+/// @param rows       A table with a row per enumerator, in order of value.
+/// @param projection Reads the enumerator a row stands for.
+/// @return Whether each row's enumerator has its position as its value, from 0: what makes a table indexable
+///         by the enum, and @c enumFromInt right.
+template <typename Row, std::size_t Count, typename Projection>
+[[nodiscard]] constexpr bool enumValuesAreDense(std::array<Row, Count> const& rows,
+                                                Projection projection) noexcept
+{
+    return std::ranges::all_of(std::views::iota(std::size_t { 0 }, Count), [&](std::size_t position) {
+        return static_cast<std::size_t>(std::invoke(projection, rows[position])) == position;
+    });
+}
+
 /// @param values Every enumerator of the enum, in order of value.
 /// @return Whether each one's value is its position, from 0: what makes @c enumFromInt right.
 template <typename Enum, std::size_t Count>
 [[nodiscard]] constexpr bool enumValuesAreDense(std::array<Enum, Count> const& values) noexcept
 {
-    return std::ranges::all_of(std::views::iota(std::size_t { 0 }, Count), [&](std::size_t position) {
-        return static_cast<std::size_t>(values[position]) == position;
-    });
+    return enumValuesAreDense(values, std::identity {});
 }
 
 /// @param values Every enumerator of the enum, in order of value (@c enumValuesAreDense).

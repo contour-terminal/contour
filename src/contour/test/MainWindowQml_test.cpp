@@ -1352,7 +1352,7 @@ TEST_CASE("Main.qml remote chrome: a window attached to a host names it in its c
                 state == contour::window::HostChipState::Connected
                     ? QStringLiteral("collapsed")
                     : QString::fromStdString(contour::window::locationChipAccessibleDescription(
-                          state, contour::window::Urgency::Idle, contour::window::ChipDisclosure::Collapsed));
+                          state, contour::window::Urgency::Idle, contour::window::Disclosure::Collapsed));
             CHECK(evaluateIn(*chip, QStringLiteral("Accessible.name")).toString()
                   == QStringLiteral("Workspace %1 on home").arg(workspace->property("text").toString()));
             CHECK(evaluateIn(*chip, QStringLiteral("Accessible.description")).toString()

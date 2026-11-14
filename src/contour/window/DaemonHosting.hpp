@@ -5,10 +5,11 @@
 /// What serves a window's sessions: this process, a daemon, or a host that is no daemon. The one answer the
 /// location chip and the switcher both ask, so neither derives it from a name or a binding of its own.
 
+#include <contour/window/EnumFromInt.hpp>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <ranges>
 #include <utility>
 
 namespace contour::window
@@ -65,18 +66,7 @@ inline constexpr std::array<DaemonHostingPolicy, DaemonHostingCount> DaemonHosti
                           .reach = SwitcherReach::AsAsked },
 };
 
-namespace detail
-{
-    [[nodiscard]] constexpr bool daemonHostingPoliciesInOrder() noexcept
-    {
-        for (auto const i: std::views::iota(std::size_t { 0 }, DaemonHostingPolicies.size()))
-            if (std::to_underlying(DaemonHostingPolicies[i].hosting) != i)
-                return false;
-        return true;
-    }
-} // namespace detail
-
-static_assert(detail::daemonHostingPoliciesInOrder(),
+static_assert(enumValuesAreDense(DaemonHostingPolicies, &DaemonHostingPolicy::hosting),
               "DaemonHostingPolicies must list the hostings in enumerator order");
 
 /// @param hosting What serves a window.

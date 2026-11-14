@@ -96,9 +96,9 @@ TEST_CASE("locationChip.accessibleName", "[LocationChip]")
 TEST_CASE("locationChip.accessibleDescription", "[LocationChip]")
 {
     constexpr auto Idle = Urgency::Idle;
-    constexpr auto Collapsed = ChipDisclosure::Collapsed;
+    constexpr auto Collapsed = Disclosure::Collapsed;
     CHECK(locationChipAccessibleDescription(HostChipState::Connected, Idle, Collapsed) == "collapsed");
-    CHECK(locationChipAccessibleDescription(HostChipState::Connected, Idle, ChipDisclosure::Expanded)
+    CHECK(locationChipAccessibleDescription(HostChipState::Connected, Idle, Disclosure::Expanded)
           == "expanded");
     CHECK(locationChipAccessibleDescription(HostChipState::Reconnecting, Idle, Collapsed)
           == "Reconnecting, collapsed");
@@ -123,16 +123,27 @@ TEST_CASE("locationChip.accessibleDescription", "[LocationChip]")
 TEST_CASE("locationChip.translation", "[LocationChip]")
 {
     // Every sentence goes through the translator, whole, with its arguments filled in afterwards.
-    auto const shouted = [](std::string_view sentence) {
-        auto text = std::string(sentence);
-        std::ranges::transform(text, text.begin(), [](char c) { return c == 'a' ? 'A' : c; });
-        return text;
+    struct Shouted
+    {
+        [[nodiscard]] std::string operator()(std::string_view sentence) const
+        {
+            auto text = std::string(sentence);
+            std::ranges::transform(text, text.begin(), [](char c) { return c == 'a' ? 'A' : c; });
+            return text;
+        }
+
+        // A sentence several controls share: the context says where it is translated, the test does not care.
+        [[nodiscard]] std::string operator()(std::string_view /*context*/, std::string_view sentence) const
+        {
+            return (*this)(sentence);
+        }
     };
+    constexpr auto shouted = Shouted {};
     CHECK(locationChipAccessibleName("starfive", "billing", shouted) == "WorkspAce billing on starfive");
     CHECK(locationChipToolTip(HostChipState::Reconnecting, LocationChipFit::DotOnly, "starfive", shouted)
           == "Reconnecting to starfive · Switch workspAce or dAemon");
     CHECK(locationChipAccessibleDescription(
-              HostChipState::Connected, Urgency::NeedsYou, ChipDisclosure::Collapsed, shouted)
+              HostChipState::Connected, Urgency::NeedsYou, Disclosure::Collapsed, shouted)
           == "Another workspAce needs you, collApsed");
     CHECK(locationChipStatusText(HostChipState::Disconnected, LocationChipFit::Full, shouted)
           == "Disconnected");

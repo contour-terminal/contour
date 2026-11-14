@@ -21,12 +21,12 @@
 namespace contour::window
 {
 
-/// @return The terminal-style glyph of every connection state (LocationChipStateRows), so QML can reserve the
+/// @return The terminal-style glyph of every connection state (HostChipLooks), so QML can reserve the
 ///         widest of them.
 [[nodiscard]] inline QStringList locationChipStateGlyphList()
 {
     auto glyphs = QStringList {};
-    for (auto const& row: LocationChipStateRows)
+    for (auto const& row: HostChipLooks)
         glyphs.push_back(toQString(row.glyph));
     return glyphs;
 }
@@ -39,7 +39,22 @@ struct QtTranslated
     /// @return Its translation, or the sentence itself where there is none.
     [[nodiscard]] std::string operator()(std::string_view sentence) const
     {
-        return QCoreApplication::translate("LocationChip", std::string(sentence).c_str()).toStdString();
+        return translated("LocationChip", sentence);
+    }
+
+    /// @param context  The context of a sentence several controls share (window/DisclosureWords.hpp).
+    /// @param sentence A source-language sentence.
+    /// @return Its translation in @p context, or the sentence itself where there is none.
+    [[nodiscard]] std::string operator()(std::string_view context, std::string_view sentence) const
+    {
+        return translated(context, sentence);
+    }
+
+  private:
+    [[nodiscard]] static std::string translated(std::string_view context, std::string_view sentence)
+    {
+        return QCoreApplication::translate(std::string(context).c_str(), std::string(sentence).c_str())
+            .toStdString();
     }
 };
 

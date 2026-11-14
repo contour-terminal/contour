@@ -7,6 +7,7 @@
 /// tests read the same rows.
 
 #include <contour/config/UiStyle.hpp>
+#include <contour/window/TranslateNoop.hpp>
 
 #include <array>
 #include <cstddef>
@@ -115,26 +116,50 @@ inline constexpr size_t HostNoticeCount = static_cast<size_t>(HostNotice::Interr
                                                                                     : HostNotice::None;
 }
 
-/// How one chip state looks.
+/// How one chip state looks and what it says.
 struct HostChipLook
 {
     HostChipState state;              ///< The state this row describes.
     config::StatusColorRole dot;      ///< The dot's status role.
     std::string_view status;          ///< The label after the host name; empty when connected.
     std::string_view accessibleState; ///< The state word assistive technology announces.
+    std::string_view tooltipFormat; ///< The chip's tooltip sentence (`%1` the daemon, `%2` the action); empty
+                                    ///< when connected, whose tooltip is the action alone.
+    std::string_view description;   ///< What a screen reader adds to the chip's name; empty when connected.
+    std::string_view glyph;         ///< The terminal-style stand-in for the dot.
 };
 
 /// The looks, indexed by @c HostChipState.
 inline constexpr std::array<HostChipLook, HostChipStateCount> HostChipLooks {
-    HostChipLook { HostChipState::Connected, config::StatusColorRole::Success, "", "connected" },
-    HostChipLook {
-        HostChipState::Reconnecting, config::StatusColorRole::Warning, "Reconnecting…", "reconnecting" },
-    HostChipLook {
-        HostChipState::Disconnected, config::StatusColorRole::Danger, "Disconnected", "disconnected" },
-    HostChipLook { HostChipState::NeedsAttention,
-                   config::StatusColorRole::Warning,
-                   "Reconnecting needs your attention",
-                   "reconnecting, needs your attention" },
+    HostChipLook { .state = HostChipState::Connected,
+                   .dot = config::StatusColorRole::Success,
+                   .status = "",
+                   .accessibleState = "connected",
+                   .tooltipFormat = "",
+                   .description = "",
+                   .glyph = "●" },
+    HostChipLook { .state = HostChipState::Reconnecting,
+                   .dot = config::StatusColorRole::Warning,
+                   .status = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting…"),
+                   .accessibleState = "reconnecting",
+                   .tooltipFormat = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting to %1 · %2"),
+                   .description = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting"),
+                   .glyph = "◑" },
+    HostChipLook { .state = HostChipState::Disconnected,
+                   .dot = config::StatusColorRole::Danger,
+                   .status = QT_TRANSLATE_NOOP("LocationChip", "Disconnected"),
+                   .accessibleState = "disconnected",
+                   .tooltipFormat = QT_TRANSLATE_NOOP("LocationChip", "Disconnected from %1 · %2"),
+                   .description = QT_TRANSLATE_NOOP("LocationChip", "Disconnected"),
+                   .glyph = "✕" },
+    HostChipLook { .state = HostChipState::NeedsAttention,
+                   .dot = config::StatusColorRole::Warning,
+                   .status = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting needs your attention"),
+                   .accessibleState = "reconnecting, needs your attention",
+                   .tooltipFormat =
+                       QT_TRANSLATE_NOOP("LocationChip", "Reconnecting to %1 needs your attention · %2"),
+                   .description = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting, needs your attention"),
+                   .glyph = "!" },
 };
 
 namespace detail
