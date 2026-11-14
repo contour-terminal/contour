@@ -21,7 +21,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -253,15 +252,30 @@ template <typename Translate = SourceText>
     return detail::workspaceTextOf(workspace, clustersOf(workspace), fit);
 }
 
-/// What a screen reader adds when another workspace has news the marker shows, indexed by @c Urgency; empty
-/// where the marker does not show.
-inline constexpr std::array<std::string_view, 6> LocationChipOtherWorkspaceRows {
-    "",                                                                // Idle
-    "",                                                                // UnseenOutput
-    "",                                                                // Working
-    QT_TRANSLATE_NOOP("LocationChip", "Another workspace is done"),    // DoneUnseen
-    QT_TRANSLATE_NOOP("LocationChip", "Another workspace has failed"), // Failed
-    QT_TRANSLATE_NOOP("LocationChip", "Another workspace needs you"),  // NeedsYou
+/// What a screen reader says when another workspace has news the marker shows: the sentence that starts the
+/// description, and the clause that follows another part of it. Two translatable sentences, not one with its
+/// first letter changed: whether a clause starts in upper or lower case is the translation's call.
+struct LocationChipOtherWorkspaceRow
+{
+    std::string_view leading; ///< Starts the description; empty where the marker does not show.
+    std::string_view
+        midList; ///< Follows another part of the description; empty where the marker does not show.
+};
+
+/// The rows, indexed by @c Urgency.
+inline constexpr std::array<LocationChipOtherWorkspaceRow, 6> LocationChipOtherWorkspaceRows {
+    LocationChipOtherWorkspaceRow { .leading = "", .midList = "" }, // Idle
+    LocationChipOtherWorkspaceRow { .leading = "", .midList = "" }, // UnseenOutput
+    LocationChipOtherWorkspaceRow { .leading = "", .midList = "" }, // Working
+    LocationChipOtherWorkspaceRow { .leading = QT_TRANSLATE_NOOP("LocationChip", "Another workspace is done"),
+                                    .midList =
+                                        QT_TRANSLATE_NOOP("LocationChip", "another workspace is done") },
+    LocationChipOtherWorkspaceRow {
+        .leading = QT_TRANSLATE_NOOP("LocationChip", "Another workspace has failed"),
+        .midList = QT_TRANSLATE_NOOP("LocationChip", "another workspace has failed") },
+    LocationChipOtherWorkspaceRow {
+        .leading = QT_TRANSLATE_NOOP("LocationChip", "Another workspace needs you"),
+        .midList = QT_TRANSLATE_NOOP("LocationChip", "another workspace needs you") },
 };
 
 static_assert(std::to_underlying(Urgency::NeedsYou) + 1 == LocationChipOtherWorkspaceRows.size(),
@@ -314,11 +328,8 @@ template <typename Translate = SourceText>
         parts.emplace_back(translate(word));
     if (chipMarkerOf(others) == ChipMarker::Shown)
     {
-        auto clause = std::string(translate(LocationChipOtherWorkspaceRows[std::to_underlying(others)]));
-        // Mid-list the clause is no sentence of its own: "Reconnecting, another workspace has failed".
-        if (!parts.empty() && !clause.empty())
-            clause.front() = static_cast<char>(std::tolower(static_cast<unsigned char>(clause.front())));
-        parts.emplace_back(std::move(clause));
+        auto const& row = LocationChipOtherWorkspaceRows[std::to_underlying(others)];
+        parts.emplace_back(translate(parts.empty() ? row.leading : row.midList));
     }
     parts.emplace_back(translate(DisclosureContext, disclosureWord(disclosure)));
     return core::joinHumanReadable(parts);

@@ -311,3 +311,37 @@ TEST_CASE("daemonHosting.policy", "[LocationChip]")
     CHECK(other.naming == ChipNaming::WorkspaceOnly);
     CHECK(other.reach == SwitcherReach::AsAsked);
 }
+
+TEST_CASE("locationChip.otherWorkspaceClauseIsTheTranslatorsToCase", "[LocationChip]")
+{
+    // A clause that follows another part of the description is its own translatable sentence: whether it
+    // starts in upper or lower case is the translation's call (a German main clause starts in upper case),
+    // never something the code changes after the fact.
+    struct German
+    {
+        [[nodiscard]] std::string operator()(std::string_view sentence) const
+        {
+            if (sentence == "Another workspace has failed" || sentence == "another workspace has failed")
+                return "Ein anderer Arbeitsbereich ist fehlgeschlagen";
+            if (sentence == "Reconnecting")
+                return "Verbindung wird hergestellt";
+            return std::string(sentence);
+        }
+
+        [[nodiscard]] std::string operator()(std::string_view /*context*/, std::string_view sentence) const
+        {
+            return (*this)(sentence);
+        }
+    };
+    CHECK(locationChipAccessibleDescription(
+              HostChipState::Reconnecting, Urgency::Failed, Disclosure::Collapsed, German {})
+          == "Verbindung wird hergestellt, Ein anderer Arbeitsbereich ist fehlgeschlagen, collapsed");
+    // Led by nothing, the clause starts the description, and says its leading form.
+    CHECK(locationChipAccessibleDescription(
+              HostChipState::Connected, Urgency::Failed, Disclosure::Collapsed, German {})
+          == "Ein anderer Arbeitsbereich ist fehlgeschlagen, collapsed");
+    // In the source language the mid-list form is lower case, as it always read.
+    CHECK(locationChipAccessibleDescription(
+              HostChipState::Disconnected, Urgency::NeedsYou, Disclosure::Collapsed)
+          == "Disconnected, another workspace needs you, collapsed");
+}
