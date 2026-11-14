@@ -456,7 +456,7 @@ void SwitcherController::updatePresentation()
                 ? QString::fromStdString(switcherDescription(*row, currentInputs, currentView, _opening.mode))
                 : QString {},
         .footerHintSets = footerHintSetsOf(switcherFooterHintSets(
-            subject, switcherEscapeCommand(keyContext(0)), _services.style, _opening.mode)),
+            subject, switcherEscapeCommand(keyContext(0)), _services.style, _opening.mode, _scope)),
     };
     if (std::exchange(_presentation, std::move(next)) != _presentation)
         emit presentationChanged();
@@ -553,7 +553,7 @@ void SwitcherController::activateInNewWindow(int row)
     if (found == nullptr)
         return;
     auto const chosen = *found;
-    if (switcherRowKindRule(chosen.kind).newWindow == OpensInNewWindow::No)
+    if (switcherRowKindRule(chosen.kind).newWindow == OpensInNewWindow::No || !offersNewWindow(_scope))
     {
         activate(row);
         return;
@@ -674,6 +674,9 @@ QVariantList SwitcherController::rowMenu(int row)
         command::SwitcherRowMenuState { .name = chosen->title,
                                         .owner = owner,
                                         .workspace = sidebarState,
+                                        .newWindow = offersNewWindow(_scope)
+                                                         ? command::SwitcherMenuNewWindow::Offered
+                                                         : command::SwitcherMenuNewWindow::Withheld,
                                         .returnMode = _opening.mode == session::SwitchMode::Open
                                                           ? command::SwitcherMenuReturn::Open
                                                           : command::SwitcherMenuReturn::Switch,

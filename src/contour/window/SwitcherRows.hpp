@@ -133,6 +133,14 @@ enum class SwitcherScope : uint8_t
     return scope != SwitcherScope::Everything;
 }
 
+/// @param scope A top level's scope.
+/// @return Whether a pick in it can open a workspace in a new window. A window without a daemon has no daemon
+///         to open one of in another window, so the Shift+Return and Open in New Window choices are not offered.
+[[nodiscard]] constexpr bool offersNewWindow(SwitcherScope scope) noexcept
+{
+    return scope != SwitcherScope::WindowOnly;
+}
+
 /// Whether looking for other local daemons is still under way.
 enum class SwitcherDiscovery : uint8_t
 {

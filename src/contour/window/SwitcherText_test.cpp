@@ -298,24 +298,24 @@ TEST_CASE("a narrow footer gives Shift+Return up first, then →, and keeps Retu
 {
     auto const style = ShortcutStyle::MacGlyphs;
     CHECK(
-        switcherFooterHintSets(SwitcherHintSubject::Daemon, SwitcherCommand::Back, style, SwitchMode::Switch)
+        switcherFooterHintSets(SwitcherHintSubject::Daemon, SwitcherCommand::Back, style, SwitchMode::Switch, SwitcherScope::Everything)
         == std::vector<std::string> { "↩ Open · ⇧↩ New Window · → Open daemon · ⎋ Back",
                                       "↩ Open · → Open daemon · ⎋ Back",
                                       "↩ Open · ⎋ Back" });
     CHECK(switcherFooterHintSets(
-              SwitcherHintSubject::Workspace, SwitcherCommand::Close, ShortcutStyle::Text, SwitchMode::Switch)
+              SwitcherHintSubject::Workspace, SwitcherCommand::Close, ShortcutStyle::Text, SwitchMode::Switch, SwitcherScope::Everything)
           == std::vector<std::string> { "Enter Switch · Shift+Enter New Window · Escape Close",
                                         "Enter Switch · Escape Close" });
     // Nothing to give up: one set.
-    CHECK(switcherFooterHintSets(SwitcherHintSubject::None, SwitcherCommand::Close, style, SwitchMode::Switch)
+    CHECK(switcherFooterHintSets(SwitcherHintSubject::None, SwitcherCommand::Close, style, SwitchMode::Switch, SwitcherScope::Everything)
           == std::vector<std::string> { "⎋ Close" });
     // The widest set is the footer's hints.
     for (auto const subject: { SwitcherHintSubject::Workspace, SwitcherHintSubject::NewDaemon })
-        CHECK(switcherFooterHintSets(subject, SwitcherCommand::Close, style, SwitchMode::Switch).front()
+        CHECK(switcherFooterHintSets(subject, SwitcherCommand::Close, style, SwitchMode::Switch, SwitcherScope::Everything).front()
               == switcherFooterHints(subject, SwitcherCommand::Close, style, SwitchMode::Switch));
     // Escape is never given up: every set ends in it.
     for (auto const& hints: switcherFooterHintSets(
-             SwitcherHintSubject::NewWorkspace, SwitcherCommand::Close, style, SwitchMode::Switch))
+             SwitcherHintSubject::NewWorkspace, SwitcherCommand::Close, style, SwitchMode::Switch, SwitcherScope::Everything))
         CHECK(hints.ends_with("⎋ Close"));
 }
 
@@ -422,4 +422,26 @@ TEST_CASE("All daemons… shows the chord bound to ShowSwitcher, and nothing whi
     auto const unbound = SwitcherInputs { .daemons = list };
     CHECK(switcherDetail(rowTitled(switcherRows(unbound, chip), "All daemons…"), unbound, Now)
           == SwitcherDetail {});
+}
+
+TEST_CASE("a window without a daemon is offered no way to open a workspace in a new window", "[switcher]")
+{
+    CHECK(offersNewWindow(SwitcherScope::Everything));
+    CHECK(offersNewWindow(SwitcherScope::OneDaemon));
+    CHECK_FALSE(offersNewWindow(SwitcherScope::WindowOnly));
+
+    // No Shift+Return hint, for any row that would have one.
+    for (auto const subject: { SwitcherHintSubject::Workspace, SwitcherHintSubject::NewWorkspace })
+        for (auto const& hints: switcherFooterHintSets(subject,
+                                                       SwitcherCommand::Close,
+                                                       ShortcutStyle::Text,
+                                                       SwitchMode::Switch,
+                                                       SwitcherScope::WindowOnly))
+            CHECK_FALSE(hints.contains("Shift+Enter"));
+    CHECK(switcherFooterHintSets(SwitcherHintSubject::Workspace,
+                                 SwitcherCommand::Close,
+                                 ShortcutStyle::Text,
+                                 SwitchMode::Switch,
+                                 SwitcherScope::WindowOnly)
+          == std::vector<std::string> { "Enter Switch · Escape Close" });
 }

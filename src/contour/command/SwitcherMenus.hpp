@@ -41,6 +41,13 @@ enum class SwitcherMenuReturn : uint8_t
     Open,       ///< Open it in a new window: a pick an Open asked for.
 };
 
+/// Whether the menu offers a workspace in a new window.
+enum class SwitcherMenuNewWindow : uint8_t
+{
+    Offered = 0, ///< Open in New Window is a choice.
+    Withheld,    ///< It is not: the window has no daemon to open a workspace of in another window.
+};
+
 /// Whether the window the switcher is over shows the workspace already.
 enum class SwitcherMenuShown : uint8_t
 {
@@ -54,6 +61,7 @@ struct SwitcherRowMenuState
     std::string name {};                                       ///< The workspace's name.
     SwitcherMenuOwner owner = SwitcherMenuOwner::WindowDaemon; ///< Whose it is.
     WorkspaceMenuState workspace {}; ///< The sidebar's view of it; read for the window's daemon only.
+    SwitcherMenuNewWindow newWindow = SwitcherMenuNewWindow::Offered; ///< Whether a new window is a choice.
     SwitcherMenuReturn returnMode = SwitcherMenuReturn::Switch; ///< What Return does.
     SwitcherMenuShown shown = SwitcherMenuShown::Elsewhere;     ///< Whether this window shows it.
 };

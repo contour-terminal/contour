@@ -168,7 +168,7 @@ std::string switcherDescription(SwitcherRow const& row,
     switch (row.kind)
     {
         case SwitcherRowKind::Workspace:
-            if (mode == session::SwitchMode::Open)
+            if (mode == session::SwitchMode::Open && offersNewWindow(view.scope))
                 return std::format("Open {} in a new window", row.title);
             if (view.level == SwitcherLevel::Top && view.origin == SwitcherOrigin::Chip
                 && listsOneDaemon(view.scope))
@@ -203,9 +203,13 @@ SwitcherHintSubject switcherHintSubject(SwitcherRow const& row) noexcept
 std::vector<std::string> switcherFooterHintSets(SwitcherHintSubject subject,
                                                 SwitcherCommand escape,
                                                 command::ShortcutStyle style,
-                                                session::SwitchMode mode)
+                                                session::SwitchMode mode,
+                                                SwitcherScope scope)
 {
     auto row = SwitcherHintRows.at(static_cast<std::size_t>(subject));
+    // A window without a daemon has none to open in a new window either.
+    if (!offersNewWindow(scope))
+        row.shiftEnterVerb = {};
     // A pick an Open asked for: Return opens a new window already, and Shift+Return does nothing more.
     if (mode == session::SwitchMode::Open && !row.openVerb.empty())
     {
@@ -262,7 +266,7 @@ std::string switcherFooterHints(SwitcherHintSubject subject,
                                 command::ShortcutStyle style,
                                 session::SwitchMode mode)
 {
-    return switcherFooterHintSets(subject, escape, style, mode).front();
+    return switcherFooterHintSets(subject, escape, style, mode, SwitcherScope::Everything).front();
 }
 
 SwitcherLabelState switcherLabelState(std::string_view label,
