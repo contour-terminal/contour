@@ -7169,18 +7169,18 @@ TEST_CASE("TerminalSessionManager: hostingOf tells in-process, daemon and attach
     CHECK(manager.hostingOf(daemon.id) == DaemonHosting::Daemon);
     CHECK(manager.hostingOf(attached.id) == DaemonHosting::OtherHost);
 
-    // A tmux window names no daemon, so its chrome is what it was before the chip: no location chip in a
-    // band that has no workspace chip, and no daemon control at the sidebar's head.
-    CHECK(attached->chip()->daemonName().isEmpty());
+    // A tmux window names its host, as its host chip always did: the label is the chip's name, with no
+    // workspace beside it. It follows the daemon's rules for where the chip shows.
+    CHECK(attached->chip()->daemonName() == "tmuxhost");
+    CHECK_FALSE(attached->chip()->workspaceShown());
+    CHECK(daemon->chip()->workspaceShown());
     CHECK(attached->chip()->inputs().hosting == DaemonHosting::OtherHost);
-    // Only a band whose centre holds the workspace chip is shown one.
     auto const placeFor = [](WindowController const& window, BarPresence band, BarCentre centre) {
         auto const& inputs = window.chip()->inputs();
         return locationChipPlace(band, centre, inputs.hosting, inputs.sidebar);
     };
-    CHECK(placeFor(*attached, BarPresence::Shown, BarCentre::Tabs) == LocationChipPlace::None);
-    CHECK(placeFor(*attached, BarPresence::Shown, BarCentre::Title) == LocationChipPlace::None);
-    CHECK(placeFor(*attached, BarPresence::Shown, BarCentre::Breadcrumb) == LocationChipPlace::None);
+    CHECK(placeFor(*attached, BarPresence::Shown, BarCentre::Tabs) == LocationChipPlace::Band);
+    CHECK(placeFor(*attached, BarPresence::Shown, BarCentre::Title) == LocationChipPlace::Band);
     CHECK(placeFor(*attached, BarPresence::Hidden, BarCentre::Tabs) == LocationChipPlace::None);
     CHECK(placeFor(*attached, BarPresence::Shown, BarCentre::ChipAndTabs) == LocationChipPlace::Band);
     CHECK(placeFor(*daemon, BarPresence::Shown, BarCentre::Tabs) == LocationChipPlace::Band);
@@ -7194,6 +7194,87 @@ TEST_CASE("TerminalSessionManager: hostingOf tells in-process, daemon and attach
 
     manager.releaseBinding(onWork);
     manager.releaseBinding(tmux);
+}
+
+TEST_CASE("TerminalSessionManager: a tmux window's chip names its host, with the dot and the state",
+          "[manager][chip]")
+{
+    using namespace contour::window;
+    using vthost::client::ConnectionState;
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto tmux = contour::session::FactoryBinding { factory, "tmuxhost" };
+    contour::test::ScopedController const attached { manager };
+    manager.bindWindow(attached.id, tmux);
+
+    auto const& chip = *attached->chip();
+    auto const textAt = [&](LocationChipFit fit, QString const& key) {
+        return chip.steps()[static_cast<qsizetype>(fit)].toMap().value(key).toString();
+    };
+    CHECK(chip.daemonName() == "tmuxhost");
+    CHECK(textAt(LocationChipFit::Full, QStringLiteral("daemon")) == "tmuxhost");
+
+    // The interrupted connection is told by the dot and the words, as the host chip told it.
+    manager.setHostConnection(tmux, ConnectionState::Reconnecting);
+    CHECK(chip.dotShown());
+    CHECK(chip.connectionState() == static_cast<int>(HostChipState::Reconnecting));
+    CHECK(textAt(LocationChipFit::Full, QStringLiteral("status")) == "Reconnecting…");
+    CHECK(chip.accessibleDescription().contains(QStringLiteral("econnecting")));
+
+    // The control never shrinks to a bare caret: the daemon-only steps keep the host's name.
+    CHECK(LocationChipModel::fitForDaemonOnly({}) == static_cast<int>(LocationChipFit::DaemonElided));
+    CHECK_FALSE(textAt(LocationChipFit::DaemonElided, QStringLiteral("daemon")).isEmpty());
+
+    manager.setHostConnection(tmux, ConnectionState::Connected);
+    CHECK_FALSE(chip.dotShown());
+    manager.releaseBinding(tmux);
+}
+
+TEST_CASE("TerminalSessionManager: the chip follows a window's binding when only the binding changes",
+          "[manager][chip]")
+{
+    using namespace contour::window;
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    // Two daemons the chip calls the same thing, so that neither the label nor the state moves on a rebind.
+    auto onWork = contour::test::DaemonNamedBinding { factory, chipLabelTarget("work"), "work", "studio" };
+    auto onOther = contour::test::DaemonNamedBinding {
+        factory,
+        { .kind = vthost::proto::SwitchDaemonKind::Host, .daemon = "ci-box", .workspace = {} },
+        "studio",
+        "studio"
+    };
+    auto tmux = contour::session::FactoryBinding { factory, "studio" };
+    contour::test::ScopedController const window { manager };
+    auto const& chip = *window->chip();
+    CHECK(chip.inputs().hosting == DaemonHosting::InProcess);
+    CHECK(chip.daemonName().isEmpty());
+
+    // In-process to a daemon.
+    manager.bindWindow(window.id, onWork);
+    CHECK(chip.inputs().hosting == DaemonHosting::Daemon);
+    CHECK(chip.daemonName() == "studio");
+
+    // To another daemon that the chip names the same: the chip's inputs still read the new binding.
+    manager.bindWindow(window.id, onOther);
+    CHECK(chip.inputs().hosting == DaemonHosting::Daemon);
+    CHECK(chip.daemonName() == "studio");
+
+    // To a host that is no daemon: what serves the window changed, and the chip's workspace segment with it.
+    auto surfaceChanges = QSignalSpy { window->chip(), &LocationChipModel::surfaceChanged };
+    manager.bindWindow(window.id, tmux);
+    CHECK(chip.inputs().hosting == DaemonHosting::OtherHost);
+    CHECK_FALSE(chip.workspaceShown());
+    CHECK(surfaceChanges.count() == 1);
+
+    // Detached: nothing names a daemon again.
+    manager.releaseBinding(tmux);
+    CHECK(chip.inputs().hosting == DaemonHosting::InProcess);
+    CHECK(chip.daemonName().isEmpty());
+    manager.releaseBinding(onWork);
+    manager.releaseBinding(onOther);
 }
 
 TEST_CASE("TerminalSessionManager: the chip opens every daemon, an in-process window its own",

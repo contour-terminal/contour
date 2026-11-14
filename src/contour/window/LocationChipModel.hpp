@@ -47,8 +47,12 @@ class LocationChipModel: public QObject
     Q_OBJECT
     /// Where the chip shows: "none", "band" or "sidebar" (locationChipPlaceName()).
     Q_PROPERTY(QString place READ place NOTIFY placeChanged)
-    /// The daemon's name as the chip shows it; empty for an in-process window.
+    /// The daemon's name as the chip shows it (the host label for a host that is no daemon); empty for an
+    /// in-process window.
     Q_PROPERTY(QString daemonName READ daemonName NOTIFY surfaceChanged)
+    /// Whether the chip names the workspace too: false for a host that is no daemon (a tmux attach), whose
+    /// chip is the host alone, with its dot and state (DaemonHostingPolicies).
+    Q_PROPERTY(bool workspaceShown READ workspaceShown NOTIFY surfaceChanged)
     /// Whether the status dot (on the Terminal row, its glyph) shows: the model's call, hidden without a
     /// daemon.
     Q_PROPERTY(bool dotShown READ dotShown NOTIFY surfaceChanged)
@@ -84,12 +88,20 @@ class LocationChipModel: public QObject
     [[nodiscard]] LocationChipInputs const& inputs() const noexcept { return _inputs; }
 
     /// @param widths What each fit step needs by its key (window::LocationChipSteps), in the same unit as
-    ///               `available`, the room the chip has.
+    ///               `available`, the room the chip has. A step with no width does not fit, and without
+    ///               `available` the chip has no room: an unmeasured chip falls to its least step.
     /// @return A window::LocationChipFit's underlying value: the first step that fits.
     [[nodiscard]] Q_INVOKABLE static int fitFor(QVariantMap const& widths);
 
+    /// fitFor() for a control that names the daemon alone: it keeps its name, so its least step is the elided
+    /// daemon (window::locationChipTakes).
+    /// @param widths As for fitFor().
+    /// @return A window::LocationChipFit's underlying value.
+    [[nodiscard]] Q_INVOKABLE static int fitForDaemonOnly(QVariantMap const& widths);
+
     [[nodiscard]] QString place() const;
     [[nodiscard]] QString daemonName() const;
+    [[nodiscard]] bool workspaceShown() const noexcept;
     [[nodiscard]] bool dotShown() const noexcept { return _dotShown; }
     [[nodiscard]] int connectionState() const noexcept;
     [[nodiscard]] QString stateGlyph() const;

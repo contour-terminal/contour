@@ -5,6 +5,7 @@
 
 #include <QtCore/QVariantMap>
 
+#include <string_view>
 #include <utility>
 
 namespace contour::window
@@ -13,10 +14,31 @@ namespace contour::window
 namespace
 {
     /// @param inputs The chip's state.
+    /// @return What serves the window as far as the chip is concerned: a host with no label to name (a tmux
+    ///         attach that has none) has no daemon to show, which is an in-process window's chip.
+    [[nodiscard]] DaemonHosting effectiveHostingOf(LocationChipInputs const& inputs) noexcept
+    {
+        return inputs.daemon.empty() ? DaemonHosting::InProcess : inputs.hosting;
+    }
+
+    /// @param inputs The chip's state.
     /// @return Where the chip shows for it.
     [[nodiscard]] LocationChipPlace placeOf(LocationChipInputs const& inputs) noexcept
     {
-        return locationChipPlace(inputs.band, inputs.centre, inputs.hosting, inputs.sidebar);
+        return locationChipPlace(inputs.band, inputs.centre, effectiveHostingOf(inputs), inputs.sidebar);
+    }
+
+    /// @param widths What QML measured: a width per step key, and `available`.
+    /// @param segments What the chip names.
+    /// @return The fit those widths allow, as its underlying value. A step QML did not measure does not fit
+    ///         and a missing `available` is no room, so an unmeasured chip falls to its least step.
+    [[nodiscard]] int fitOf(QVariantMap const& widths, ChipSegments segments)
+    {
+        auto const widthOf = [&](std::string_view key) {
+            return measuredStepWidth(widths, key);
+        };
+        auto const available = widths.value(QStringLiteral("available")).toDouble();
+        return static_cast<int>(std::to_underlying(locationChipFit(widthOf, available, segments)));
     }
 
     /// @param inputs The chip's state.
@@ -28,11 +50,12 @@ namespace
 
     /// @param a One state of the chip.
     /// @param b Another.
-    /// @return Whether they draw the same: the daemon, its dot, the connection and the workspace.
+    /// @return Whether they draw the same: the daemon and what serves it, its dot, the connection and
+    ///         the workspace.
     [[nodiscard]] bool sameSurface(LocationChipInputs const& a, LocationChipInputs const& b) noexcept
     {
-        return a.daemon == b.daemon && a.locality == b.locality && a.state == b.state
-               && a.workspace == b.workspace;
+        return a.daemon == b.daemon && a.hosting == b.hosting && a.locality == b.locality
+               && a.state == b.state && a.workspace == b.workspace;
     }
 } // namespace
 
@@ -64,16 +87,22 @@ void LocationChipModel::setInputs(LocationChipInputs inputs)
 
 int LocationChipModel::fitFor(QVariantMap const& widths)
 {
-    auto const widthOf = [&](std::string_view key) {
-        return widths.value(toQString(key)).toDouble();
-    };
-    return static_cast<int>(
-        std::to_underlying(locationChipFit(widthOf, widths.value(QStringLiteral("available")).toDouble())));
+    return fitOf(widths, ChipSegments::DaemonAndWorkspace);
+}
+
+int LocationChipModel::fitForDaemonOnly(QVariantMap const& widths)
+{
+    return fitOf(widths, ChipSegments::DaemonOnly);
 }
 
 QString LocationChipModel::place() const
 {
     return toQString(locationChipPlaceName(placeOf(_inputs)));
+}
+
+bool LocationChipModel::workspaceShown() const noexcept
+{
+    return daemonHostingPolicy(effectiveHostingOf(_inputs)).segments == ChipSegments::DaemonAndWorkspace;
 }
 
 QString LocationChipModel::daemonName() const

@@ -2319,6 +2319,59 @@ TEST_CASE("the window's minimum width does not move with the connection or a mar
     CHECK(minimumOf(BillingAsks::Permission, HostChipState::Reconnecting, unusedMinimum) == reference);
 }
 
+TEST_CASE("another workspace's marker does not move the chip's fit or the tab layout (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    // At a width where the chip is stepping down, so that a few pixels of marker would change the answer.
+    struct Layout
+    {
+        int fit = -1;
+        QVariantMap widths;
+        QVariantMap tabs;
+        bool markerShown = false;
+    };
+    auto const layoutWith = [&](BillingAsks asks, int width) {
+        auto scene = SidebarWindow { { .row = row,
+                                       .visibility = contour::config::SidebarVisibility::Hidden,
+                                       .shownWorkspace = 2,
+                                       .billing = asks,
+                                       .billingTitle = "billing-and-invoices",
+                                       .tabCount = 3 } };
+        scene.controller.setDaemon(QStringLiteral("local"));
+        QCoreApplication::processEvents();
+        auto* chip = scene.item(QStringLiteral("workspaceChip"));
+        auto* bar = scene.item(QStringLiteral("titleBar"));
+        auto* marker = scene.item(QStringLiteral("workspaceChipMarker"));
+        REQUIRE(chip != nullptr);
+        REQUIRE(bar != nullptr);
+        REQUIRE(marker != nullptr);
+        scene.window->resize(
+            std::max(width, static_cast<int>(std::ceil(scene.controller.bandMinimumWidth()))), 640);
+        QCoreApplication::processEvents();
+        QTest::qWait(30);
+        return Layout { .fit = chip->property("fit").toInt(),
+                        .widths = chip->property("fitWidths").toMap(),
+                        .tabs = bar->property("bandAllocation").toMap(),
+                        .markerShown = marker->isVisible() };
+    };
+    for (auto const width: { 1000, 800, 700, 600, 500 })
+    {
+        INFO("window width " << width);
+        auto const without = layoutWith(BillingAsks::Nothing, width);
+        auto const with = layoutWith(BillingAsks::Permission, width);
+        CHECK_FALSE(without.markerShown);
+        CHECK(with.markerShown);
+        // Every step is measured as if the marker were there, so it never re-fits the band: the allocation of
+        // the room between the chip and the tabs is the same (the marker's own pixels still sit in the chip).
+        CHECK(with.widths == without.widths);
+        CHECK(with.fit == without.fit);
+        CHECK(with.tabs == without.tabs);
+    }
+}
+
 TEST_CASE("the location chip's tooltip names the switcher and the chord bound now, or none (offscreen)",
           "[contour][gui][qml][sidebar][chip][tooltip]")
 {
@@ -2428,8 +2481,13 @@ TEST_CASE("a shown sidebar's daemon control adds the dot and the state when not 
     CHECK_FALSE(chipPart(*chip, "workspaceChipLabel")->isVisible());
     if (bracketed)
     {
-        CHECK(chip->property("fit").toInt() == 0);
-        CHECK(chipSpelling(*chip) == QStringLiteral("[◑ starfive Reconnecting… ▾]"));
+        // Every step is measured with the attention marker reserved (it never moves the fit), which on the
+        // cells of this row can cost the words their step: the dot and the name stay either way.
+        auto const fit = chip->property("fit").toInt();
+        CHECK(fit <= static_cast<int>(contour::window::LocationChipFit::NoStateText));
+        CHECK(chipSpelling(*chip)
+              == (fit == 0 ? QStringLiteral("[◑ starfive Reconnecting… ▾]")
+                           : QStringLiteral("[◑ starfive ▾]")));
     }
     CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
 }
@@ -2489,38 +2547,67 @@ TEST_CASE("a shown sidebar's daemon control is in the chrome's keyboard walk, an
     CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
 }
 
-TEST_CASE("a window attached to a host that is no daemon keeps its chrome: no daemon control (offscreen)",
+TEST_CASE("a window attached to a host that is no daemon names its host alone, as a daemon-only control "
+          "(offscreen)",
           "[contour][gui][qml][sidebar][chip]")
 {
     auto const row =
         GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
     INFO("row " << static_cast<int>(row));
-    SECTION("the sidebar shown")
+    SECTION("the sidebar shown: it heads the sidebar, with no workspace beside it")
     {
         auto scene =
             SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+        scene.controller.attachedHost = QStringLiteral("tmuxhost");
         scene.controller.setHosting(contour::window::DaemonHosting::OtherHost);
         QCoreApplication::processEvents();
-        CHECK(sidebarDaemonChipOf(scene) == nullptr);
+        auto* chip = sidebarDaemonChipOf(scene);
+        REQUIRE(chip != nullptr);
+        CHECK(chipPart(*chip, "workspaceChipDaemon")
+                  ->property("text")
+                  .toString()
+                  .startsWith(QStringLiteral("tmuxhost")));
         CHECK(scene.visibleItem(QStringLiteral("workspaceChip")) == nullptr);
-        auto* title = scene.visibleItem(QStringLiteral("sidebarTitle"));
-        if (title == nullptr)
-            title = scene.visibleItem(QStringLiteral("headerSidebarTitle"));
-        if (row != ChromeStyle::MacOS)
-        {
-            REQUIRE(title != nullptr);
-            CHECK(title->property("text").toString() == QStringLiteral("Workspaces"));
-        }
     }
-    SECTION("the tabs on top")
+    SECTION("the sidebar hidden, the tabs on top: the band's chip is the host alone")
     {
         auto scene = SidebarWindow { { .row = row,
                                        .visibility = contour::config::SidebarVisibility::Hidden,
                                        .placement = contour::config::TabPlacement::Top } };
+        scene.controller.attachedHost = QStringLiteral("tmuxhost");
         scene.controller.setHosting(contour::window::DaemonHosting::OtherHost);
         QCoreApplication::processEvents();
-        CHECK(scene.visibleItem(QStringLiteral("workspaceChip")) == nullptr);
+        auto* chip = scene.visibleItem(QStringLiteral("workspaceChip"));
+        REQUIRE(chip != nullptr);
+        CHECK(chip->property("namesDaemonOnly").toBool());
+        CHECK(chipPart(*chip, "workspaceChipDaemon")->property("text").toString()
+              == QStringLiteral("tmuxhost"));
+        CHECK_FALSE(chipPart(*chip, "workspaceChipLabel")->isVisible());
     }
+}
+
+TEST_CASE("with the sidebar hidden, a breadcrumb band holds the daemon's chip (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Hidden } };
+    scene.controller.setDaemon(QStringLiteral("local"));
+    QCoreApplication::processEvents();
+    auto const* bar = scene.item(QStringLiteral("titleBar"));
+    REQUIRE(bar != nullptr);
+    // The sidebar holds the tabs, so the band's middle is the breadcrumb; with the sidebar off screen no
+    // control heads it, so the band names the daemon.
+    if (bar->property("centre").toString() != QStringLiteral("breadcrumb"))
+        SKIP("this row's band does not show a breadcrumb here");
+    CHECK(bar->property("chipPlace").toString() == QStringLiteral("band"));
+    auto* chip = scene.visibleItem(QStringLiteral("workspaceChip"));
+    REQUIRE(chip != nullptr);
+    CHECK(chipPart(*chip, "workspaceChipDaemon")
+              ->property("text")
+              .toString()
+              .startsWith(QStringLiteral("local")));
 }
 
 TEST_CASE("in process a shown sidebar keeps its heading and carries no daemon control (offscreen)",

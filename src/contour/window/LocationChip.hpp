@@ -94,36 +94,75 @@ inline constexpr size_t LocationChipFitCount = LocationChipFits.size();
 /// never goes narrower.
 inline constexpr std::size_t LocationChipWorkspaceFloor = 6;
 
-/// One fit step: which fit it is and the key its width goes by.
+/// Which chips a fit step is one of: the daemon-only control never shrinks past its name.
+enum class ChipStepUse : uint8_t
+{
+    WithWorkspaceOnly =
+        0,         ///< A step of the chip that names the workspace too: it exists to shrink the daemon.
+    DaemonOnlyToo, ///< A step the daemon-only control takes as well, since it still names the daemon.
+};
+
+/// One fit step: which fit it is, the key its width goes by and which chips take it.
 struct LocationChipStep
 {
     LocationChipFit fit;  ///< The step.
     std::string_view key; ///< The name QML measures the step's width by.
+    ChipStepUse use;      ///< Which chips take the step.
 };
 
 /// The steps in elision order: the chip takes the first whose width fits. The single source of that order and
 /// of the width keys: @c locationChipFit and QML (through LocationChipModel::steps) both read this table, so
 /// a new step is one row here. The last row is what is left when no other fits; its width is the least the
-/// chip ever needs.
+/// chip ever needs. The daemon-only control (`local ▾`) keeps its name: DotOnly and WorkspaceElided would
+/// leave it a bare caret, so it takes neither, and its last step is DaemonElided.
 inline constexpr auto LocationChipSteps = std::array {
-    LocationChipStep { .fit = LocationChipFit::Full, .key = "full" },
-    LocationChipStep { .fit = LocationChipFit::NoStateText, .key = "noStateText" },
-    LocationChipStep { .fit = LocationChipFit::DaemonElided, .key = "daemonElided" },
-    LocationChipStep { .fit = LocationChipFit::DotOnly, .key = "dotOnly" },
-    LocationChipStep { .fit = LocationChipFit::WorkspaceElided, .key = "workspaceElided" },
+    LocationChipStep { .fit = LocationChipFit::Full, .key = "full", .use = ChipStepUse::DaemonOnlyToo },
+    LocationChipStep {
+        .fit = LocationChipFit::NoStateText, .key = "noStateText", .use = ChipStepUse::DaemonOnlyToo },
+    LocationChipStep {
+        .fit = LocationChipFit::DaemonElided, .key = "daemonElided", .use = ChipStepUse::DaemonOnlyToo },
+    LocationChipStep {
+        .fit = LocationChipFit::DotOnly, .key = "dotOnly", .use = ChipStepUse::WithWorkspaceOnly },
+    LocationChipStep { .fit = LocationChipFit::WorkspaceElided,
+                       .key = "workspaceElided",
+                       .use = ChipStepUse::WithWorkspaceOnly },
 };
 static_assert(LocationChipSteps.size() == LocationChipFitCount,
               "LocationChipSteps must have a row per LocationChipFit");
 
+/// @param step     A fit step.
+/// @param segments What the chip names.
+/// @return Whether a chip that names @p segments takes @p step.
+[[nodiscard]] constexpr bool locationChipTakes(LocationChipStep const& step, ChipSegments segments) noexcept
+{
+    return segments == ChipSegments::DaemonAndWorkspace || step.use == ChipStepUse::DaemonOnlyToo;
+}
+
+/// @param segments What the chip names.
+/// @return The last step such a chip takes: the least it ever shows, what is left when no other fits.
+[[nodiscard]] constexpr LocationChipFit locationChipLeastFit(
+    ChipSegments segments = ChipSegments::DaemonAndWorkspace) noexcept
+{
+    auto const taken = [&](LocationChipStep const& step) {
+        return locationChipTakes(step, segments);
+    };
+    auto const last = std::ranges::find_if(LocationChipSteps | std::views::reverse, taken);
+    return (*last).fit;
+}
+
 /// @param widthOf   Gives the width of a step by its key, in the units of @p available.
 /// @param available The room the chip has.
-/// @return The first step whose width fits, @c WorkspaceElided when none does.
+/// @param segments  What the chip names: the daemon-only control takes fewer steps.
+/// @return The first step the chip takes whose width fits, its least step when none does.
 template <typename WidthOf>
-[[nodiscard]] constexpr LocationChipFit locationChipFit(WidthOf const& widthOf, double available)
+[[nodiscard]] constexpr LocationChipFit locationChipFit(
+    WidthOf const& widthOf, double available, ChipSegments segments = ChipSegments::DaemonAndWorkspace)
 {
-    auto const fitting = std::ranges::find_if(
-        LocationChipSteps, [&](LocationChipStep const& step) { return widthOf(step.key) <= available; });
-    return fitting != LocationChipSteps.end() ? fitting->fit : LocationChipFit::WorkspaceElided;
+    auto const fits = [&](LocationChipStep const& step) {
+        return locationChipTakes(step, segments) && widthOf(step.key) <= available;
+    };
+    auto const fitting = std::ranges::find_if(LocationChipSteps, fits);
+    return fitting != LocationChipSteps.end() ? fitting->fit : locationChipLeastFit(segments);
 }
 
 /// The longest daemon name, in cells, the chip shows while it elides the name.
@@ -423,11 +462,10 @@ enum class SidebarShown : uint8_t
 /// @param hosting What serves the window (its row in DaemonHostingPolicies says whether the chip names a
 ///                daemon).
 /// @param sidebar Whether the workspace sidebar shows.
-/// @return Where the chip shows: a chip that names a daemon follows the band's centre, a window with no
-/// daemon
-///         (in-process or attached to a tmux host) shows the chip only in the band's workspace-chip centre.
-///         With no band, a daemon window's chip heads the sidebar when that shows, so the daemon is named
-///         somewhere.
+/// @return Where the chip shows: a chip that names a daemon (or a host) follows the band's centre, a window
+///         with none (in-process) shows the chip only in the band's workspace-chip centre. The sidebar's
+///         head holds the daemon only while the sidebar shows: with it hidden the band holds the chip, so
+///         the daemon is named somewhere. With no band, the chip heads the sidebar when that shows.
 [[nodiscard]] constexpr LocationChipPlace locationChipPlace(BarPresence band,
                                                             BarCentre centre,
                                                             DaemonHosting hosting,
@@ -438,7 +476,10 @@ enum class SidebarShown : uint8_t
         return names && sidebar == SidebarShown::Yes ? LocationChipPlace::Sidebar : LocationChipPlace::None;
     switch (centre)
     {
-        case BarCentre::Breadcrumb: return names ? LocationChipPlace::Sidebar : LocationChipPlace::None;
+        case BarCentre::Breadcrumb:
+            if (!names)
+                return LocationChipPlace::None;
+            return sidebar == SidebarShown::Yes ? LocationChipPlace::Sidebar : LocationChipPlace::Band;
         case BarCentre::ChipAndTabs: return LocationChipPlace::Band;
         case BarCentre::Empty:
         case BarCentre::Tabs:

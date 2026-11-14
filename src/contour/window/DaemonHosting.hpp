@@ -26,11 +26,18 @@ enum class DaemonHosting : uint8_t
 /// Number of @c DaemonHosting enumerators, derived from the last one.
 inline constexpr std::size_t DaemonHostingCount = std::to_underlying(DaemonHosting::OtherHost) + 1;
 
-/// Whether the location chip names a daemon.
+/// Whether the location chip names a daemon (or, for a host that is no daemon, its host).
 enum class ChipNaming : uint8_t
 {
     WorkspaceOnly = 0, ///< The chip is the workspace alone; there is no daemon to name.
     NamesDaemon,       ///< The chip names the daemon: its segment, its dot, and the sidebar's head control.
+};
+
+/// What a chip that names a daemon says beside it.
+enum class ChipSegments : uint8_t
+{
+    DaemonAndWorkspace = 0, ///< The daemon and the workspace the window shows: `local › billing ▾`.
+    DaemonOnly,             ///< The daemon alone: `tmux-host ▾`, for a host that has no workspaces to name.
 };
 
 /// How far the switcher the window opens may reach.
@@ -46,6 +53,7 @@ struct DaemonHostingPolicy
 {
     DaemonHosting hosting; ///< The hosting this row describes.
     ChipNaming naming;     ///< Whether the chip names a daemon, and so where it may show (see below).
+    ChipSegments segments; ///< What a chip that names a daemon says beside it.
     SwitcherReach reach;   ///< How far the switcher the window opens reaches.
 };
 
@@ -53,16 +61,20 @@ struct DaemonHostingPolicy
 /// what a kind of hosting entitles a window to: a chip that names a daemon follows the band's centre and may
 /// head the sidebar, one that does not shows only in the centre that holds the workspace chip; an in-process
 /// window lists its own workspaces alone, one attached to a host that is no daemon (tmux) keeps what was
-/// asked, as it always has.
+/// asked, as it always has. Such a host is named by its host label, with its connection's dot and state, and
+/// has no workspace segment: it keeps the indicator the host chip gave it before the location chip.
 inline constexpr std::array<DaemonHostingPolicy, DaemonHostingCount> DaemonHostingPolicies {
     DaemonHostingPolicy { .hosting = DaemonHosting::InProcess,
                           .naming = ChipNaming::WorkspaceOnly,
+                          .segments = ChipSegments::DaemonAndWorkspace,
                           .reach = SwitcherReach::OwnWorkspacesOnly },
     DaemonHostingPolicy { .hosting = DaemonHosting::Daemon,
                           .naming = ChipNaming::NamesDaemon,
+                          .segments = ChipSegments::DaemonAndWorkspace,
                           .reach = SwitcherReach::AsAsked },
     DaemonHostingPolicy { .hosting = DaemonHosting::OtherHost,
-                          .naming = ChipNaming::WorkspaceOnly,
+                          .naming = ChipNaming::NamesDaemon,
+                          .segments = ChipSegments::DaemonOnly,
                           .reach = SwitcherReach::AsAsked },
 };
 

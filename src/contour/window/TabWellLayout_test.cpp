@@ -163,6 +163,13 @@ TEST_CASE("band.allocate", "[tabwell][band]")
         CHECK(allocation.tabs == TabWellLayout {});
     }
 
+    SECTION("a daemon-only chip stays at its elided name where the other chip drops to its dot")
+    {
+        auto const allocation = allocateBand(widthOf, 3, Metrics, labelled + 50, ChipSegments::DaemonOnly);
+        CHECK(allocation.chip == LocationChipFit::DaemonElided);
+        CHECK(allocation.chipWidth == 160);
+    }
+
     SECTION("the yield order is the chip, then the labels, then the well")
     {
         CHECK(BandYieldOrder[0].part == BandPart::LocationChip);

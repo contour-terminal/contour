@@ -14,6 +14,7 @@
 #include <QtCore/QStringList>
 #include <QtCore/QVariant>
 
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -63,6 +64,16 @@ struct QtTranslated
 [[nodiscard]] inline double bandMinimumWidthOfParts(QVariantMap const& parts)
 {
     return bandMinimumWidthFrom([&](std::string_view key) { return parts.value(toQString(key)).toDouble(); });
+}
+
+/// @param widths The chip's step widths as QML measured them, keyed by the step's key.
+/// @param key    A step's key.
+/// @return The step's width; a step QML did not measure does not fit (infinite), so an unmeasured chip
+///         falls to its least step instead of overflowing its room.
+[[nodiscard]] inline double measuredStepWidth(QVariantMap const& widths, std::string_view key)
+{
+    auto const found = widths.constFind(toQString(key));
+    return found != widths.cend() ? found->toDouble() : std::numeric_limits<double>::infinity();
 }
 
 } // namespace contour::window

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/window/LocationChipModel.hpp>
+#include <contour/window/LocationChipQt.hpp>
 
 #include <QtCore/QVariantMap>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <utility>
 
 #include <QtTest/QSignalSpy>
@@ -143,4 +145,76 @@ TEST_CASE("LocationChipModel: fitFor takes the first step the room admits", "[Lo
     CHECK(LocationChipModel::fitFor(widths(250)) == static_cast<int>(LocationChipFit::NoStateText));
     CHECK(LocationChipModel::fitFor(widths(120)) == static_cast<int>(LocationChipFit::DotOnly));
     CHECK(LocationChipModel::fitFor(widths(10)) == static_cast<int>(LocationChipFit::WorkspaceElided));
+}
+
+TEST_CASE("LocationChipModel: an unmeasured chip falls to its least step, never to the full one",
+          "[LocationChipModel]")
+{
+    constexpr auto Least = static_cast<int>(LocationChipFit::WorkspaceElided);
+    // Nothing measured, no room: not the full step (a missing width must not read as zero).
+    CHECK(LocationChipModel::fitFor({}) == Least);
+    // Room but no widths: no step has a width, so none fits.
+    CHECK(LocationChipModel::fitFor(QVariantMap { { "available", 500 } }) == Least);
+    // Widths but no room: a missing `available` is no room.
+    CHECK(LocationChipModel::fitFor(QVariantMap { { "full", 300 }, { "workspaceElided", 80 } }) == Least);
+    // A step QML did not measure is skipped, the ones it did measure still win.
+    CHECK(LocationChipModel::fitFor(QVariantMap { { "dotOnly", 110 }, { "available", 120 } })
+          == static_cast<int>(LocationChipFit::DotOnly));
+    // The daemon-only control's least step keeps its name.
+    CHECK(LocationChipModel::fitForDaemonOnly({}) == static_cast<int>(LocationChipFit::DaemonElided));
+}
+
+TEST_CASE("measuredStepWidth: an unmeasured step does not fit, for the chip and the band allocation alike",
+          "[LocationChipModel]")
+{
+    // The one rule both LocationChipModel::fitFor and UiStyleProvider::allocateBand read widths by.
+    auto const widths = QVariantMap { { "full", 300 }, { "dotOnly", 0 } };
+    CHECK(contour::window::measuredStepWidth(widths, "full") == 300.0);
+    CHECK(contour::window::measuredStepWidth(widths, "dotOnly") == 0.0);
+    CHECK(std::isinf(contour::window::measuredStepWidth(widths, "noStateText")));
+}
+
+TEST_CASE("LocationChipModel: a narrow daemon-only row still shows a local daemon's name",
+          "[LocationChipModel]")
+{
+    auto inputs = remoteDaemon();
+    inputs.daemon = "local";
+    inputs.locality = DaemonLocality::Local;
+    auto const model = LocationChipModel { inputs };
+    auto const widths = QVariantMap { { "full", 200 },   { "noStateText", 150 },    { "daemonElided", 120 },
+                                      { "dotOnly", 40 }, { "workspaceElided", 30 }, { "available", 50 } };
+    CHECK(LocationChipModel::fitFor(widths) == static_cast<int>(LocationChipFit::DotOnly));
+    auto const fit = LocationChipModel::fitForDaemonOnly(widths);
+    CHECK(fit == static_cast<int>(LocationChipFit::DaemonElided));
+    CHECK(stepText(model, static_cast<LocationChipFit>(fit), "daemon") == "local");
+}
+
+TEST_CASE("LocationChipModel: a host that is no daemon is named, with no workspace segment",
+          "[LocationChipModel]")
+{
+    auto inputs = remoteDaemon();
+    inputs.hosting = DaemonHosting::OtherHost;
+    inputs.daemon = "tmuxhost";
+    inputs.state = HostChipState::Reconnecting;
+    inputs.centre = BarCentre::Tabs;
+    auto model = LocationChipModel { inputs };
+    CHECK_FALSE(model.workspaceShown());
+    CHECK(model.place() == "band");
+    CHECK(model.dotShown());
+    CHECK(stepText(model, LocationChipFit::Full, "daemon") == "tmuxhost");
+    CHECK(stepText(model, LocationChipFit::Full, "status") == "Reconnecting…");
+
+    // With no label to name, there is no chip.
+    inputs.daemon.clear();
+    model.setInputs(inputs);
+    CHECK(model.place() == "none");
+
+    // A rebind that moves no label or state still tells what serves the window, and where the chip shows.
+    inputs = remoteDaemon();
+    model.setInputs(inputs);
+    auto surface = QSignalSpy { &model, &LocationChipModel::surfaceChanged };
+    inputs.hosting = DaemonHosting::OtherHost;
+    model.setInputs(inputs);
+    CHECK(surface.count() == 1);
+    CHECK_FALSE(model.workspaceShown());
 }

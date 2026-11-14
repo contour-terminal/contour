@@ -9,6 +9,7 @@
 #include <contour/platform/PlatformAppearance.hpp>
 #include <contour/platform/SecureInput.hpp>
 #include <contour/window/ChromeTokenObjects.hpp>
+#include <contour/window/DaemonHosting.hpp>
 #include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/TabBarDropPolicy.hpp>
@@ -855,6 +856,16 @@ class UiStyleProvider: public QObject
                                                        int tabCount,
                                                        qreal room) const;
 
+    /// allocateBand() for a chip that names the daemon alone (a host that is no daemon): it never shrinks to
+    /// a bare caret, so its last step is the elided daemon name (window::locationChipTakes).
+    /// @param widths   What each chip fit step needs by its key, in pixels.
+    /// @param tabCount How many tabs the well lists.
+    /// @param room     The width the band has for the chip and the well together.
+    /// @return As allocateBand().
+    [[nodiscard]] Q_INVOKABLE QVariantMap allocateBandDaemonOnly(QVariantMap const& widths,
+                                                                 int tabCount,
+                                                                 qreal room) const;
+
     /// Where the command palette goes in a window of the given size (window::placePalette), from the
     /// row's palette tokens in logical pixels, @c space.s7 as the margin, snapped to whole rows of cells on
     /// the Terminal row.
@@ -1128,6 +1139,16 @@ class UiStyleProvider: public QObject
   private:
     /// @return The widths the tab well is laid out with on this row.
     [[nodiscard]] TabWellMetrics tabWellMetrics() const;
+
+    /// @param widths   What each chip fit step needs by its key, in pixels.
+    /// @param tabCount How many tabs the well lists.
+    /// @param room     The width the band has for the chip and the well together.
+    /// @param segments What the chip names.
+    /// @return What allocateBand() answers, for a chip that names @p segments.
+    [[nodiscard]] QVariantMap allocateBandFor(QVariantMap const& widths,
+                                              int tabCount,
+                                              qreal room,
+                                              ChipSegments segments) const;
 
     /// The colour that says @p role when drawn as @p use on a ground of @p tone: statusColor()'s and
     /// statusMarkOn()'s one pick of the row's source and hue.

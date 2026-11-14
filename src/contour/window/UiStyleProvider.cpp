@@ -10,6 +10,7 @@
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/LinkPillPlacement.hpp>
+#include <contour/window/LocationChipQt.hpp>
 #include <contour/window/PalettePlacement.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/PickerAccessory.hpp>
@@ -509,10 +510,23 @@ QVariantMap UiStyleProvider::tabWellLayout(qreal available, int tabCount) const
 
 QVariantMap UiStyleProvider::allocateBand(QVariantMap const& widths, int tabCount, qreal room) const
 {
+    return allocateBandFor(widths, tabCount, room, ChipSegments::DaemonAndWorkspace);
+}
+
+QVariantMap UiStyleProvider::allocateBandDaemonOnly(QVariantMap const& widths, int tabCount, qreal room) const
+{
+    return allocateBandFor(widths, tabCount, room, ChipSegments::DaemonOnly);
+}
+
+QVariantMap UiStyleProvider::allocateBandFor(QVariantMap const& widths,
+                                             int tabCount,
+                                             qreal room,
+                                             ChipSegments segments) const
+{
     auto const widthOf = [&](std::string_view key) {
-        return widths.value(toQString(key)).toDouble();
+        return measuredStepWidth(widths, key);
     };
-    auto const allocation = window::allocateBand(widthOf, tabCount, tabWellMetrics(), room);
+    auto const allocation = window::allocateBand(widthOf, tabCount, tabWellMetrics(), room, segments);
     auto map = tabWellLayoutMap(allocation.tabs);
     map.insert(QStringLiteral("fit"), static_cast<int>(std::to_underlying(allocation.chip)));
     map.insert(QStringLiteral("chipRoom"), allocation.chipRoom);

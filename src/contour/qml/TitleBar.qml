@@ -346,7 +346,9 @@ Item {
         const room = Math.max(0, root.width - root.leadingPartsWithoutChip - 2 * root.gap - root.trailingPartsWidth
                                  - chromeStyle.space.dragReserve - tabStripLoader.Layout.leftMargin
                                  - (strip ? strip.fixedWidth : 0))
-        return chromeStyle.allocateBand(chip.fitWidths, strip ? strip.tabCount : 0, room)
+        const tabCount = strip ? strip.tabCount : 0
+        return chip.namesDaemonOnly ? chromeStyle.allocateBandDaemonOnly(chip.fitWidths, tabCount, room)
+                                    : chromeStyle.allocateBand(chip.fitWidths, tabCount, room)
     }
 
     /// The room the location chip had in that allocation: what the tab well keeps for its labels is left out.

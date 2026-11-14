@@ -56,16 +56,18 @@ struct BandAllocation
 /// @param metrics   The tab well's widths.
 /// @param room      The width the band has for the chip and the well together, after its fixed parts, the
 ///                  margins and the drag reserve.
+/// @param segments  What the chip names: a daemon-only chip takes fewer steps (locationChipTakes).
 /// @return The chip's fit in what the well leaves it (the chip yields first), and the well's layout in what
 ///         the chip then leaves.
 template <typename WidthOf>
 [[nodiscard]] constexpr BandAllocation allocateBand(WidthOf const& widthOf,
                                                     int tabCount,
                                                     TabWellMetrics const& metrics,
-                                                    double room)
+                                                    double room,
+                                                    ChipSegments segments = ChipSegments::DaemonAndWorkspace)
 {
     auto const chipRoom = std::max(0.0, room - BandYieldOrder.front().wellKeeps(tabCount, metrics));
-    auto const chip = locationChipFit(widthOf, chipRoom);
+    auto const chip = locationChipFit(widthOf, chipRoom, segments);
     auto const step = std::ranges::find(LocationChipSteps, chip, &LocationChipStep::fit);
     auto const chipWidth = step != LocationChipSteps.end() ? widthOf(step->key) : 0.0;
     return BandAllocation { .chip = chip,

@@ -943,8 +943,11 @@ std::optional<SwitchTarget> TerminalSessionManager::daemonTargetOf(vtworkspace::
 
 std::string TerminalSessionManager::daemonNameOf(vtworkspace::WorkspaceId window) const
 {
-    auto const target = daemonTargetOf(window);
-    return target ? window::locationDaemonName(*target, hostLabelOf(window)) : std::string {};
+    if (auto const target = daemonTargetOf(window))
+        return window::locationDaemonName(*target, hostLabelOf(window));
+    // A host that is no daemon (a tmux attach) is named by its host label, as its host chip always did.
+    return hostingOf(window) == window::DaemonHosting::OtherHost ? std::string(hostLabelOf(window))
+                                                                 : std::string {};
 }
 
 window::DaemonHosting TerminalSessionManager::hostingOf(vtworkspace::WorkspaceId window) const
@@ -968,7 +971,8 @@ window::SwitcherOpening TerminalSessionManager::switcherOpeningFor(
                                      .pick = std::nullopt,
                                      .scope = window::switcherScopeFor(scope, hostingOf(window)),
                                      .windowWorkspaces = std::move(windowWorkspaces),
-                                     .origin = origin };
+                                     .origin = origin,
+                                     .windowHostLabel = std::string(hostLabelOf(window)) };
 }
 
 window::DaemonLocality TerminalSessionManager::daemonLocalityOf(vtworkspace::WorkspaceId window) const

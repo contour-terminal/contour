@@ -1617,7 +1617,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     /// @param window A window of this manager.
     /// @return What the location chip calls @p window's daemon (window::locationDaemonName, from
-    ///         daemonTargetOf() and hostLabelOf()); empty for a window whose sessions run in-process.
+    ///         daemonTargetOf() and hostLabelOf()); the host label for a window attached to a host that is
+    ///         no daemon (a tmux attach); empty for a window whose sessions run in-process.
     [[nodiscard]] std::string daemonNameOf(vtworkspace::WorkspaceId window) const;
 
     /// @param window A window of this manager.

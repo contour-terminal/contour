@@ -69,6 +69,29 @@ TEST_CASE("locationChip.fit", "[LocationChip]")
     CHECK(locationChipFit(widthOf, 10) == LocationChipFit::WorkspaceElided);
 }
 
+TEST_CASE("locationChip.daemonOnlyFitKeepsTheName", "[LocationChip]")
+{
+    auto const widthOf = [](std::string_view key) {
+        constexpr auto Widths = std::array { std::pair { std::string_view { "full" }, 300.0 },
+                                             std::pair { std::string_view { "noStateText" }, 220.0 },
+                                             std::pair { std::string_view { "daemonElided" }, 160.0 } };
+        auto const found = std::ranges::find(Widths, key, &std::pair<std::string_view, double>::first);
+        return found != Widths.end() ? found->second : 20.0;
+    };
+    constexpr auto DaemonOnly = ChipSegments::DaemonOnly;
+    // The same room, two answers: the chip with a workspace may drop to the dot, the daemon-only one never
+    // shows a bare caret, so it stays at its elided name however narrow the row.
+    CHECK(locationChipFit(widthOf, 100) == LocationChipFit::DotOnly);
+    CHECK(locationChipFit(widthOf, 100, DaemonOnly) == LocationChipFit::DaemonElided);
+    CHECK(locationChipFit(widthOf, 0, DaemonOnly) == LocationChipFit::DaemonElided);
+    CHECK(locationChipFit(widthOf, 400, DaemonOnly) == LocationChipFit::Full);
+    CHECK(locationChipFit(widthOf, 250, DaemonOnly) == LocationChipFit::NoStateText);
+    CHECK(locationChipLeastFit() == LocationChipFit::WorkspaceElided);
+    CHECK(locationChipLeastFit(DaemonOnly) == LocationChipFit::DaemonElided);
+    // What the least step says still names the daemon.
+    CHECK_FALSE(locationChipDaemonText("starfive-build-01", locationChipLeastFit(DaemonOnly)).empty());
+}
+
 TEST_CASE("locationChip.stepTexts", "[LocationChip]")
 {
     auto const texts =
@@ -206,11 +229,12 @@ TEST_CASE("locationChip.place", "[LocationChip]")
         Row { BarPresence::Pinned, BarCentre::Tabs, Daemon, Off, P::Band },
         Row { BarPresence::RevealOnEdge, BarCentre::Title, Daemon, Off, P::Band },
         Row { Shown, BarCentre::Breadcrumb, Daemon, On, P::Sidebar },
-        Row { Shown, BarCentre::Breadcrumb, Daemon, Off, P::Sidebar },
+        // The sidebar's head holds the daemon only while the sidebar shows; hidden, the band does.
+        Row { Shown, BarCentre::Breadcrumb, Daemon, Off, P::Band },
         // With no band the sidebar names the daemon, or nothing does.
         Row { Hidden, BarCentre::Tabs, Daemon, On, P::Sidebar },
         Row { Hidden, BarCentre::Tabs, Daemon, Off, P::None },
-        // Without a daemon (in-process, or attached to a tmux host) only the workspace-chip centre shows.
+        // Without a daemon (in-process) only the workspace-chip centre shows.
         Row { Shown, BarCentre::ChipAndTabs, None, Off, P::Band },
         Row { Shown, BarCentre::Tabs, None, Off, P::None },
         Row { Shown, BarCentre::Title, None, Off, P::None },
@@ -218,11 +242,14 @@ TEST_CASE("locationChip.place", "[LocationChip]")
         Row { Shown, BarCentre::Breadcrumb, None, On, P::None },
         Row { Hidden, BarCentre::Tabs, None, On, P::None },
         Row { Hidden, BarCentre::ChipAndTabs, None, Off, P::None },
+        // A host that is no daemon (a tmux attach) names its host, and so follows the daemon's rules.
         Row { Shown, BarCentre::ChipAndTabs, OtherHost, Off, P::Band },
-        Row { Shown, BarCentre::Tabs, OtherHost, Off, P::None },
-        Row { Shown, BarCentre::Title, OtherHost, Off, P::None },
-        Row { Shown, BarCentre::Breadcrumb, OtherHost, On, P::None },
-        Row { Hidden, BarCentre::Tabs, OtherHost, On, P::None },
+        Row { Shown, BarCentre::Tabs, OtherHost, Off, P::Band },
+        Row { Shown, BarCentre::Title, OtherHost, Off, P::Band },
+        Row { Shown, BarCentre::Breadcrumb, OtherHost, On, P::Sidebar },
+        Row { Shown, BarCentre::Breadcrumb, OtherHost, Off, P::Band },
+        Row { Hidden, BarCentre::Tabs, OtherHost, On, P::Sidebar },
+        Row { Hidden, BarCentre::Tabs, OtherHost, Off, P::None },
     };
     for (auto const& row: rows)
         CHECK(locationChipPlace(row.band, row.centre, row.hosting, row.sidebar) == row.expected);
@@ -310,9 +337,11 @@ TEST_CASE("daemonHosting.policy", "[LocationChip]")
     auto const& inProcess = daemonHostingPolicy(DaemonHosting::InProcess);
     CHECK(inProcess.naming == ChipNaming::WorkspaceOnly);
     CHECK(inProcess.reach == SwitcherReach::OwnWorkspacesOnly);
-    // A host that is no daemon names none, and keeps the scope asked, as it always has.
+    CHECK(daemon.segments == ChipSegments::DaemonAndWorkspace);
+    // A host that is no daemon is named by its host label alone, and keeps the scope asked, as it always has.
     auto const& other = daemonHostingPolicy(DaemonHosting::OtherHost);
-    CHECK(other.naming == ChipNaming::WorkspaceOnly);
+    CHECK(other.naming == ChipNaming::NamesDaemon);
+    CHECK(other.segments == ChipSegments::DaemonOnly);
     CHECK(other.reach == SwitcherReach::AsAsked);
 }
 
