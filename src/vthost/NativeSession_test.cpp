@@ -8183,7 +8183,6 @@ TEST_CASE("a connection whose workspace ends never moves to one another window s
 TEST_CASE("a Goodbye frees the workspace at once, and is refused without client-goodbye",
           "[vthost][native][goodbye]")
 {
-    using vthost::WorkspaceVisibility;
     auto const hello = [](proto::Capability capability) {
         auto hello = intentHello(proto::AttachIntentKind::Default);
         hello.capabilities = proto::CapabilitySet::of({ proto::Capability::AttachIntent, capability });
@@ -8199,9 +8198,9 @@ TEST_CASE("a Goodbye frees the workspace at once, and is refused without client-
                                         proto::Goodbye {},
                                         proto::FetchImage { .imageId = 4242 } },
                                       imageGoneArrived);
-        REQUIRE(h.host.visibility(first) == WorkspaceVisibility::Shown);
+        REQUIRE(h.host.visibility(first) == vthost::WorkspaceVisibility::Shown);
         h.session.reset();
-        CHECK(h.host.visibilityForAttach(first) == WorkspaceVisibility::Hidden);
+        CHECK_FALSE(h.host.shownForAttach().contains(first));
     }
     SECTION("not said: the end is a drop, and its workspace is held")
     {
@@ -8212,7 +8211,7 @@ TEST_CASE("a Goodbye frees the workspace at once, and is refused without client-
             { hello(proto::Capability::ClientGoodbye), proto::FetchImage { .imageId = 4242 } },
             imageGoneArrived);
         h.session.reset();
-        CHECK(h.host.visibilityForAttach(first) == WorkspaceVisibility::Shown);
+        CHECK(h.host.shownForAttach().contains(first));
     }
     SECTION("said without the capability: refused, and the end is a drop")
     {
@@ -8226,7 +8225,7 @@ TEST_CASE("a Goodbye frees the workspace at once, and is refused without client-
             return std::holds_alternative<proto::Unsupported>(frame.pdu);
         }));
         h.session.reset();
-        CHECK(h.host.visibilityForAttach(first) == WorkspaceVisibility::Shown);
+        CHECK(h.host.shownForAttach().contains(first));
     }
 }
 

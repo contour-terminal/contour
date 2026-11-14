@@ -3152,12 +3152,14 @@ AttachContext NativeSession::attachContext(std::filesystem::path const& workingD
                                    .instance = _host.instance() };
     // A workspace whose last session ended is gone, unless it was the only one: that one is listed as a fresh
     // daemon's empty one is, which a launch gives its first tab.
+    auto const shown = _host.shownForAttach();
     for (auto const i: std::views::iota(0, model.workspaceCount()))
         if (auto const* workspace = model.workspaceAt(i); workspace != nullptr)
-            context.workspaces.push_back(
-                WorkspaceSummary { .id = workspace->id().value,
-                                   .tabCount = workspace->tabCount(),
-                                   .visibility = _host.visibilityForAttach(workspace->id().value) });
+            context.workspaces.push_back(WorkspaceSummary {
+                .id = workspace->id().value,
+                .tabCount = workspace->tabCount(),
+                .visibility = shown.contains(workspace->id().value) ? WorkspaceVisibility::Shown
+                                                                    : WorkspaceVisibility::Hidden });
     std::ranges::sort(context.workspaces, {}, &WorkspaceSummary::id);
     return context;
 }

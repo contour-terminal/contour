@@ -2517,7 +2517,6 @@ TEST_CASE("a resumed connection selects the workspace it had", "[vthost][attach]
 TEST_CASE("a client that says goodbye frees its workspace at once, with or without daemon-follow",
           "[vthost][attach][goodbye]")
 {
-    using vthost::WorkspaceVisibility;
     auto const offered =
         proto::CapabilitySet::of({ proto::Capability::AttachIntent, proto::Capability::ClientGoodbye });
     auto const withoutGoodbye = proto::CapabilitySet::of({ proto::Capability::AttachIntent });
@@ -2532,12 +2531,12 @@ TEST_CASE("a client that says goodbye frees its workspace at once, with or witho
         auto const first = h.host.workspaceId().value;
         h.drive(detachOnLayout(&h));
         h.server.reset(); // the connection is gone
-        return h.host.visibilityForAttach(first);
+        return h.host.shownForAttach().contains(first);
     };
 
     // The daemon takes the end for a drop unless the client said so, and both ends share the capability.
-    CHECK(run(offered) == WorkspaceVisibility::Hidden);
-    CHECK(run(withoutGoodbye) == WorkspaceVisibility::Shown);
+    CHECK_FALSE(run(offered));
+    CHECK(run(withoutGoodbye));
 }
 
 TEST_CASE("a client selects a workspace at runtime, and resumes the one it selects now",

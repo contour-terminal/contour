@@ -1242,9 +1242,10 @@ simply stops selecting. A connection whose workspace ends picks its next one by 
 until a window selects it.
 
 A connection that drops (no `Goodbye` before its end) is a window reconnecting, so the workspace it showed still
-counts as shown to an attach for the reconnect grace; `SessionHost::noteClientDetached` takes the end as
+counts as shown to an attach for the reconnect grace (`SessionHostConfig::reconnectGrace`, by default
+`proto::ReconnectCeiling`, the longest wait of a client's reconnect backoff); `SessionHost::noteClientDetached` takes the end as
 `DetachKind::Dropped`. One that said `Goodbye` ends as `DetachKind::Closed` and frees its workspace at once. Only
-an attach asks (`SessionHost::visibilityForAttach`); `workspace.list` reports what is selected right now.
+an attach asks (`SessionHost::shownForAttach`, read once per attach); `workspace.list` reports what is selected right now.
 
 The handshake runs negotiate -> plan -> create -> `ServerHello` (whose `selectedWorkspace` names the
 selection) -> `LayoutState` per workspace -> snapshots of the selected workspace's sessions. The plan runs

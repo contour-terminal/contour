@@ -27,6 +27,7 @@
 #include <vthost/client/ConnectionState.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/proto/Pdu.hpp>
+#include <vthost/proto/ReconnectCeiling.hpp>
 
 namespace vthost::client
 {
@@ -34,8 +35,9 @@ namespace vthost::client
 /// How long to wait before each reconnect attempt.
 struct BackoffSchedule
 {
-    std::chrono::milliseconds first { 250 };    ///< The wait before the first retry.
-    std::chrono::milliseconds ceiling { 5000 }; ///< The longest wait; the doubling stops here.
+    std::chrono::milliseconds first { 250 }; ///< The wait before the first retry.
+    std::chrono::milliseconds ceiling =
+        proto::ReconnectCeiling; ///< The longest wait; the doubling stops here.
 };
 
 /// @param schedule The schedule.

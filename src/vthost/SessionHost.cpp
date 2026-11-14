@@ -30,7 +30,6 @@
 #include <vthost/RerunPolicy.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/TappingPty.hpp>
-#include <vthost/client/ClientSupervisor.hpp>
 #include <vthost/control/LoopControlBridge.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/PaneLayout.hpp>
@@ -508,6 +507,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _identity(std::move(config.identity)),
     _instance(config.instance),
     _clocks(config.clocks),
+    _reconnectGrace(config.reconnectGrace),
     _pageSize(_settings.pageSize),
     _pumping(config.pumping),
     _inputWatermarks(config.inputWatermarks),
@@ -1400,8 +1400,8 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client, DetachKi
     if (auto const shown = client->selectedWorkspace(); shown != 0 && kind == DetachKind::Dropped)
     {
         auto const now = _clocks.steady.now();
-        std::erase_if(_reconnectHolds, [now](ReconnectHold const& hold) { return hold.until <= now; });
-        _reconnectHolds.push_back({ .workspace = shown, .until = now + reconnectGrace() });
+        std::erase_if(_reconnectHolds, [now](auto const& hold) { return hold.second <= now; });
+        _reconnectHolds.insert_or_assign(shown, now + _reconnectGrace);
     }
     settleRaiseRole();
     // A switch asked of a window that is gone will never be answered.
@@ -1476,21 +1476,17 @@ WorkspaceVisibility SessionHost::visibility(uint64_t workspace) const
                : WorkspaceVisibility::Hidden;
 }
 
-std::chrono::milliseconds SessionHost::reconnectGrace() noexcept
+std::unordered_set<uint64_t> SessionHost::shownForAttach() const
 {
-    return client::BackoffSchedule {}.ceiling;
-}
-
-WorkspaceVisibility SessionHost::visibilityForAttach(uint64_t workspace) const
-{
-    if (visibility(workspace) == WorkspaceVisibility::Shown)
-        return WorkspaceVisibility::Shown;
+    auto shown = std::unordered_set<uint64_t> {};
+    for (auto const* client: _attachedClients)
+        if (auto const selected = client->selectedWorkspace(); selected != 0)
+            shown.insert(selected);
     auto const now = _clocks.steady.now();
-    return std::ranges::any_of(
-               _reconnectHolds,
-               [&](ReconnectHold const& hold) { return hold.workspace == workspace && now < hold.until; })
-               ? WorkspaceVisibility::Shown
-               : WorkspaceVisibility::Hidden;
+    for (auto const& [workspace, until]: _reconnectHolds)
+        if (now < until)
+            shown.insert(workspace);
+    return shown;
 }
 
 std::vector<ConnectionView> SessionHost::connectionViews() const
