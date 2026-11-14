@@ -55,7 +55,7 @@ namespace
     /// @return The name of the daemon @p row is on; empty when the index is out of range.
     [[nodiscard]] std::string daemonNameOf(SwitcherRow const& row, SwitcherInputs const& inputs)
     {
-        return row.daemon < inputs.daemons.size() ? switcherDaemonName(inputs.daemons[row.daemon].address)
+        return row.daemon < inputs.daemons.size() ? switcherDaemonName(inputs.daemons[row.daemon])
                                                   : std::string {};
     }
 

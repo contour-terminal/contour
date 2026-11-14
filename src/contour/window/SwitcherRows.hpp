@@ -100,6 +100,9 @@ struct SwitcherDaemon
     /// A saved host's link before its workspaces are listed; NeverConnected on a local daemon, which is
     /// running, not connected to.
     SwitcherHostLink link = SwitcherHostLink::NeverConnected;
+    /// What the window on this daemon calls it (TerminalSessionManager::hostLabelOf), which the location chip
+    /// names it by, so the popup does too; empty to name it by its address.
+    std::string hostLabel {};
 };
 
 /// Which level of the popup is shown.
@@ -403,6 +406,8 @@ struct SwitcherOpening
     std::vector<SwitcherWorkspace> windowWorkspaces {};
     /// Where it opened from: centred, or hanging below the workspace chip.
     SwitcherOrigin origin = SwitcherOrigin::Centred;
+    /// What the window calls its daemon (its host label), as the chip names it; empty for none.
+    std::string windowHostLabel {};
 };
 
 /// What a typed label for a new daemon amounts to.
@@ -451,9 +456,16 @@ enum class LabelVerdict : uint8_t
 /// @return Its listed workspaces' status, rolled up (rollUpStatus); idle when none is listed.
 [[nodiscard]] SwitcherStatus daemonStatusOf(SwitcherDaemon const& daemon);
 
-/// @param address A daemon.
-/// @return How the popup names it: its label or host name, or `this daemon` for an unnameable one.
-[[nodiscard]] std::string switcherDaemonName(session::SwitchTarget const& address);
+/// @param address   A daemon.
+/// @param hostLabel What the window on it calls it; empty for none.
+/// @return How the popup names it, as the location chip names it (locationDaemonName): the host label where
+///         there is one, else its label or host name, or `this daemon` for an unnameable one.
+[[nodiscard]] std::string switcherDaemonName(session::SwitchTarget const& address,
+                                             std::string_view hostLabel);
+
+/// @param daemon A daemon of the popup.
+/// @return switcherDaemonName() of its address and host label.
+[[nodiscard]] std::string switcherDaemonName(SwitcherDaemon const& daemon);
 
 /// What tells one row from every other across a rebuild: its kind and its target. Every row bound to a daemon
 /// names that daemon in its target (a workspace, a daemon, a New Workspace, a label action); the rows without

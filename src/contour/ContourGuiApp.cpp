@@ -4654,6 +4654,7 @@ std::expected<void, std::string> ContourGuiApp::showSwitchPick(remote::SwitchPic
             .scope = window::SwitcherScope::OneDaemon,
             .windowWorkspaces = windowWorkspacesOf(*controller, pick.window),
             .origin = window::SwitcherOrigin::Centred,
+            .windowHostLabel = std::string(_sessionManager.hostLabelOf(pick.window)),
         },
         *controller);
 }

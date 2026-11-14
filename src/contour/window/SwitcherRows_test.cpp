@@ -3,6 +3,7 @@
 // The switcher's rows as palette levels (boards 1, 2, 3 and 5 of the redesign): each rule is a case over a
 // fixture of plain data, with no window and no Qt.
 
+#include <contour/window/LocationChip.hpp>
 #include <contour/window/SwitcherRows.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -306,14 +307,43 @@ TEST_CASE("the chip's rows are the top level: the window's daemon first, named l
     CHECK(std::ranges::none_of(chip, [](SwitcherRow const& row) { return row.title == "All daemons…"; }));
 }
 
+TEST_CASE("a daemon's group title names it by the window's host label, as the chip does", "[switcher][chip]")
+{
+    auto daemons = boards();
+    daemons[1].hostLabel = "studio";
+    auto const rows = switcherRows(SwitcherInputs { .daemons = daemons },
+                                   SwitcherView { .level = SwitcherLevel::Daemon, .daemon = 1 });
+    CHECK(rows[0].groupTitle == "Workspaces on studio");
+}
+
 TEST_CASE("switcherDaemonName names the default daemon local and keeps a host's saved name", "[switcher]")
 {
     using contour::window::switcherDaemonName;
-    CHECK(switcherDaemonName(label("default")) == "local");
-    CHECK(switcherDaemonName(label("work")) == "work");
-    CHECK(switcherDaemonName(host("ci-box")) == "ci-box");
-    CHECK(switcherDaemonName(SwitchTarget { .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = {} })
-          == "this daemon");
+    CHECK(switcherDaemonName(label("default"), {}) == "local");
+    CHECK(switcherDaemonName(label("work"), {}) == "work");
+    CHECK(switcherDaemonName(host("ci-box"), {}) == "ci-box");
+    CHECK(
+        switcherDaemonName(SwitchTarget { .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = {} }, {})
+        == "this daemon");
+}
+
+TEST_CASE("switcherDaemonName names a daemon as the location chip does, by the window's host label",
+          "[switcher][chip]")
+{
+    using contour::window::SwitcherDaemon;
+    using contour::window::switcherDaemonName;
+    // A window on a daemon its host label names: the chip says the label, so the popup does too.
+    CHECK(switcherDaemonName(host("ci-box"), "studio") == "studio");
+    CHECK(switcherDaemonName(host("ci-box"), "studio")
+          == contour::window::locationDaemonName(host("ci-box"), "studio"));
+    CHECK(switcherDaemonName(SwitchTarget { .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = {} },
+                             "studio")
+          == "studio");
+    // A label target with no host label keeps its label.
+    CHECK(switcherDaemonName(label("work"), {}) == contour::window::locationDaemonName(label("work"), {}));
+    // Every place the popup names a daemon reads the daemon's own label: the group title, the status.
+    auto const daemon = SwitcherDaemon { .address = host("ci-box"), .hostLabel = "studio" };
+    CHECK(switcherDaemonName(daemon) == "studio");
 }
 
 TEST_CASE("the chip opens every daemon, and a window without a daemon its own workspaces alone", "[switcher]")

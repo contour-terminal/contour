@@ -213,7 +213,9 @@ void SwitcherController::open(SwitcherOpening opening)
                                       .tag = {},
                                       .listing = SwitcherListing::Listed,
                                       .failure = {},
-                                      .workspaces = _opening.windowWorkspaces };
+                                      .workspaces = _opening.windowWorkspaces,
+                                      .link = SwitcherHostLink::NeverConnected,
+                                      .hostLabel = _opening.windowHostLabel };
     _daemons.clear();
     setDiscovery(SwitcherDiscovery::Settled);
     if (_opening.pick)
@@ -242,6 +244,7 @@ void SwitcherController::open(SwitcherOpening opening)
         {
             found->listing = SwitcherListing::Listed;
             found->workspaces = _opening.windowWorkspaces;
+            found->hostLabel = _opening.windowHostLabel;
         }
         else if (own.kind == SwitchDaemonKind::Host)
             _daemons.push_back(std::move(ownDaemon));
@@ -420,7 +423,7 @@ void SwitcherController::updatePresentation()
     auto const currentView = view();
     auto const currentInputs = inputs();
     auto const daemonName = [&](std::size_t index) {
-        return index < _daemons.size() ? switcherDaemonName(_daemons[index].address) : std::string {};
+        return index < _daemons.size() ? switcherDaemonName(_daemons[index]) : std::string {};
     };
     auto const label =
         _level == SwitcherLevel::NewDaemon
