@@ -349,15 +349,16 @@ TEST_CASE("locationChip.otherWorkspaceClauseIsTheTranslatorsToCase", "[LocationC
 {
     // A clause that follows another part of the description is its own translatable sentence: whether it
     // starts in upper or lower case is the translation's call (a German main clause starts in upper case),
-    // never something the code changes after the fact.
-    struct German
+    // never something the code changes after the fact. The stand-in translation answers in capitals, so a
+    // case the code imposed would show.
+    struct Capitals
     {
         [[nodiscard]] std::string operator()(std::string_view sentence) const
         {
             if (sentence == "Another workspace has failed" || sentence == "another workspace has failed")
-                return "Ein anderer Arbeitsbereich ist fehlgeschlagen";
+                return "ANOTHER WORKSPACE HAS FAILED";
             if (sentence == "Reconnecting")
-                return "Verbindung wird hergestellt";
+                return "RECONNECTING";
             return std::string(sentence);
         }
 
@@ -367,12 +368,12 @@ TEST_CASE("locationChip.otherWorkspaceClauseIsTheTranslatorsToCase", "[LocationC
         }
     };
     CHECK(locationChipAccessibleDescription(
-              HostChipState::Reconnecting, Urgency::Failed, Disclosure::Collapsed, German {})
-          == "Verbindung wird hergestellt, Ein anderer Arbeitsbereich ist fehlgeschlagen, collapsed");
+              HostChipState::Reconnecting, Urgency::Failed, Disclosure::Collapsed, Capitals {})
+          == "RECONNECTING, ANOTHER WORKSPACE HAS FAILED, collapsed");
     // Led by nothing, the clause starts the description, and says its leading form.
     CHECK(locationChipAccessibleDescription(
-              HostChipState::Connected, Urgency::Failed, Disclosure::Collapsed, German {})
-          == "Ein anderer Arbeitsbereich ist fehlgeschlagen, collapsed");
+              HostChipState::Connected, Urgency::Failed, Disclosure::Collapsed, Capitals {})
+          == "ANOTHER WORKSPACE HAS FAILED, collapsed");
     // In the source language the mid-list form is lower case, as it always read.
     CHECK(locationChipAccessibleDescription(
               HostChipState::Disconnected, Urgency::NeedsYou, Disclosure::Collapsed)

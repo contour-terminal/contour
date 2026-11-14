@@ -429,17 +429,17 @@ template <typename Translate = SourceText>
 {
     auto const daemonClusters = clustersOf(daemon);
     auto const workspaceClusters = clustersOf(workspace);
-    return LocationChipSteps | std::views::transform([&](LocationChipStep const& step) {
-               return LocationChipStepText {
-                   .fit = step.fit,
-                   .key = step.key,
-                   .daemon = detail::daemonTextOf(daemon, daemonClusters, step.fit),
-                   .status = locationChipStatusText(state, step.fit, translate),
-                   .workspace = detail::workspaceTextOf(workspace, workspaceClusters, step.fit),
-                   .tooltip = locationChipToolTip(state, step.fit, daemon, translate),
-               };
-           })
-           | std::ranges::to<std::vector>();
+    return std::ranges::to<std::vector<LocationChipStepText>>(
+        LocationChipSteps | std::views::transform([&](LocationChipStep const& step) {
+            return LocationChipStepText {
+                .fit = step.fit,
+                .key = step.key,
+                .daemon = detail::daemonTextOf(daemon, daemonClusters, step.fit),
+                .status = locationChipStatusText(state, step.fit, translate),
+                .workspace = detail::workspaceTextOf(workspace, workspaceClusters, step.fit),
+                .tooltip = locationChipToolTip(state, step.fit, daemon, translate),
+            };
+        }));
 }
 
 /// Where the location chip shows.
