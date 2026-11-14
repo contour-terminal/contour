@@ -91,6 +91,17 @@ TEST_CASE("elideMiddle never splits a codepoint", "[contour][hyperlink]")
     }
 }
 
+TEST_CASE("elideMiddle never splits a grapheme cluster", "[contour][hyperlink]")
+{
+    // An emoji ZWJ sequence is five codepoints and one character: it stays whole or goes whole.
+    auto const family = std::string { "👨‍👩‍👧" };
+    auto const text = "ab" + family + "cdefgh" + family + "ij";
+    // Twelve characters in six: the head keeps three (the family with them), the tail two.
+    CHECK(elideMiddle(text, 6) == "ab" + family + "…ij");
+    // A cluster at the edge of the head is kept whole, not cut after its first codepoint.
+    CHECK(elideMiddle("a" + family + "bcdefghij", 4) == "a" + family + "…j");
+}
+
 TEST_CASE("linkPillText reads a file:// target as its path", "[contour][hyperlink]")
 {
     using contour::session::linkPillText;

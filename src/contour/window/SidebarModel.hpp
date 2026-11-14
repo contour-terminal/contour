@@ -369,8 +369,6 @@ class SidebarModel: public QAbstractListModel
     /// The marker's glyph, a TabBadgeKind's underlying value: the other workspaces' roll-up while the chip is
     /// marked, TabBadgeKind::None otherwise.
     Q_PROPERTY(int workspaceChipGlyph READ workspaceChipGlyph NOTIFY summaryChanged)
-    /// What a screen reader says of the workspace chip (workspaceChipAccessibleName()).
-    Q_PROPERTY(QString workspaceChipAccessibleName READ workspaceChipAccessibleName NOTIFY summaryChanged)
 
   public:
     /// What each row of the model says; QML reads them by the names in roleNames().
@@ -464,6 +462,8 @@ class SidebarModel: public QAbstractListModel
     }
     /// @return The row of the tab the window shows, or -1.
     [[nodiscard]] int currentIndex() const noexcept { return _currentIndex; }
+    /// @return The summary the workspace chip shows, as of the last refresh.
+    [[nodiscard]] SidebarSummary const& summary() const noexcept { return _summary; }
     /// @return The shown workspace's name.
     [[nodiscard]] QString currentWorkspaceTitle() const
     {
@@ -485,11 +485,6 @@ class SidebarModel: public QAbstractListModel
     [[nodiscard]] int workspaceChipGlyph() const noexcept
     {
         return static_cast<int>(workspaceChipMarked() ? _summary.otherWorkspacesGlyph : TabBadgeKind::None);
-    }
-    /// @return What a screen reader says of the workspace chip.
-    [[nodiscard]] QString workspaceChipAccessibleName() const
-    {
-        return QString::fromStdString(window::workspaceChipAccessibleName(_summary));
     }
     /// @return Whether anyone can see the rows, as setPresence() last said.
     [[nodiscard]] SidebarPresence presence() const noexcept { return _presence; }

@@ -454,14 +454,6 @@ std::string_view urgencyText(Urgency urgency) noexcept
     return {};
 }
 
-std::string workspaceChipAccessibleName(SidebarSummary const& summary)
-{
-    auto name = std::format("Workspace {}", summary.currentWorkspace);
-    if (chipMarkerOf(summary.otherWorkspaces) == ChipMarker::Shown)
-        name += std::format(", another workspace {}", urgencyText(summary.otherWorkspaces));
-    return name;
-}
-
 std::string hoverDetailOf(SidebarRow const& row)
 {
     auto detail = std::string {};

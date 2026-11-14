@@ -35,6 +35,7 @@ using contour::window::AllRecordsSeen;
 using contour::window::badgeFor;
 using contour::window::BadgeKind;
 using contour::window::disarmInvisibleFormatting;
+using contour::window::elided;
 using contour::window::ProgramStatusBadge;
 using vtbackend::ProgramState;
 using vtbackend::ProgramStatusRecord;
@@ -379,4 +380,17 @@ TEST_CASE("a done the user has seen stays seen when the daemon sends it again",
 
         h.loop.blockOn(drive(&h, std::move(scenario)));
     }
+}
+
+TEST_CASE("elided cuts at a character, never inside one", "[contour][window][programstatus]")
+{
+    CHECK(elided("short", 10) == "short");
+    CHECK(elided("exactly-ten", 11) == "exactly-ten");
+    CHECK(elided("a long enough text", 8) == "a long …");
+    // An emoji ZWJ sequence is five codepoints and one character: it goes whole or stays whole.
+    auto const family = std::string { "👨‍👩‍👧" };
+    CHECK(elided("a" + family + "bcd", 3) == "a" + family + "…");
+    CHECK(elided("a" + family + "bcd", 2) == "a…");
+    // A CJK character is one character, whatever its width.
+    CHECK(elided("日本語のテキスト", 4) == "日本語…");
 }

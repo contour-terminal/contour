@@ -23,8 +23,11 @@
 #include <contour/test/RecordingUserNotificationCenter.hpp>
 #include <contour/test/SecureInputFixtures.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/LocationChip.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
+#include <contour/window/SwitcherController.hpp>
+#include <contour/window/SwitcherRows.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/WindowController.hpp>
@@ -79,6 +82,7 @@
 
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
+#include <vthost/SocketPath.hpp>
 #include <vthost/client/LayoutReconstruction.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/client/ScreenMirror.hpp>
@@ -6955,3 +6959,415 @@ TEST_CASE("TerminalSessionManager: a tmux window's sidebar moves nothing into or
     manager.releaseBinding(binding);
 }
 // }}}
+
+// {{{ The location chip
+namespace
+{
+[[nodiscard]] contour::session::SwitchTarget chipLabelTarget(std::string label)
+{
+    return { .kind = vthost::proto::SwitchDaemonKind::Label, .daemon = std::move(label), .workspace = {} };
+}
+} // namespace
+
+TEST_CASE("TerminalSessionManager: daemonNameOf names the daemon the chip shows", "[manager][chip]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto onDefault =
+        contour::test::DaemonNamedBinding { factory,
+                                            chipLabelTarget(std::string(vthost::DefaultSocketLabel)) };
+    auto onWork = contour::test::DaemonNamedBinding { factory, chipLabelTarget("work"), "work" };
+    auto onHost = contour::test::DaemonNamedBinding {
+        factory,
+        { .kind = vthost::proto::SwitchDaemonKind::Host, .daemon = "studio", .workspace = {} },
+        "studio",
+        "studio"
+    };
+    contour::test::ScopedController const inProcess { manager };
+    contour::test::ScopedController const defaultWindow { manager };
+    contour::test::ScopedController const workWindow { manager };
+    contour::test::ScopedController const hostWindow { manager };
+    manager.bindWindow(defaultWindow.id, onDefault);
+    manager.bindWindow(workWindow.id, onWork);
+    manager.bindWindow(hostWindow.id, onHost);
+
+    CHECK(manager.daemonNameOf(inProcess.id).empty());
+    CHECK(manager.daemonNameOf(defaultWindow.id) == "local");
+    CHECK(manager.daemonNameOf(workWindow.id) == "work");
+    CHECK(manager.daemonNameOf(hostWindow.id) == "studio");
+
+    // The window's chip model exposes the same to QML, with the dot and the screen reader's words.
+    auto const chipOf = [](auto const& window) -> contour::window::LocationChipModel& {
+        return *window->chip();
+    };
+    CHECK(chipOf(inProcess).daemonName().isEmpty());
+    CHECK(chipOf(defaultWindow).daemonName() == "local");
+    CHECK(chipOf(workWindow).daemonName() == "work");
+    CHECK_FALSE(chipOf(defaultWindow).dotShown());
+    CHECK_FALSE(chipOf(hostWindow).dotShown());
+    CHECK(chipOf(workWindow).accessibleName().contains(QStringLiteral(" on work")));
+    CHECK_FALSE(chipOf(inProcess).accessibleName().contains(QStringLiteral(" on ")));
+    CHECK(chipOf(workWindow).accessibleDescription() == "collapsed");
+    auto const toolTipOf = [&](auto const& window) {
+        return chipOf(window).steps().front().toMap().value(QStringLiteral("tooltip")).toString();
+    };
+    CHECK(toolTipOf(workWindow) == "Switch workspace or daemon");
+    CHECK(toolTipOf(inProcess) == "Switch workspace");
+
+    manager.releaseBinding(onDefault);
+    manager.releaseBinding(onWork);
+    manager.releaseBinding(onHost);
+}
+
+TEST_CASE("TerminalSessionManager: the chip's place follows the window's band, hosting and sidebar",
+          "[manager][chip]")
+{
+    using namespace contour::window;
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto onWork = contour::test::DaemonNamedBinding { factory, chipLabelTarget("work"), "work" };
+    contour::test::ScopedController const inProcess { manager };
+    contour::test::ScopedController const daemon { manager };
+    manager.bindWindow(daemon.id, onWork);
+
+    // The window decides it from its own band, what serves it and its sidebar: nothing is asked of QML.
+    auto const placeOf = [](WindowController& window) {
+        auto const band = window.titleBand();
+        auto const sidebar = window.sidebarWidth() > 0 ? SidebarShown::Yes : SidebarShown::No;
+        auto const expected = locationChipPlaceName(
+            locationChipPlace(band.band, band.centre, window.chip()->inputs().hosting, sidebar));
+        CHECK(window.chip()->place().toStdString() == expected);
+        return window.chip()->place();
+    };
+    CHECK(daemon->chip()->inputs().hosting == DaemonHosting::Daemon);
+    CHECK(inProcess->chip()->inputs().hosting == DaemonHosting::InProcess);
+    CHECK(placeOf(*daemon) == "band");
+    CHECK(placeOf(*inProcess) == "none");
+
+    // A sidebar that appears while the tabs stay in the band moves the chip nowhere, and says nothing of it:
+    // the place is notified only when it changes.
+    auto placeChanges = QSignalSpy { daemon->chip(), &LocationChipModel::placeChanged };
+    daemon->toggleSidebar();
+    inProcess->toggleSidebar();
+    REQUIRE(daemon->sidebarWidth() > 0);
+    CHECK(daemon->chip()->inputs().sidebar == SidebarShown::Yes);
+    CHECK(placeOf(*daemon).toStdString() == "band");
+    CHECK(placeOf(*inProcess).toStdString() == "none");
+    CHECK(placeChanges.count() == 0);
+
+    manager.releaseBinding(onWork);
+}
+
+TEST_CASE("TerminalSessionManager: the chip's fit, texts and glyph come from the pure decisions",
+          "[manager][chip]")
+{
+    using contour::window::LocationChipFit;
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto onWork = contour::test::DaemonNamedBinding { factory,
+                                                      chipLabelTarget("work-build-server"),
+                                                      "work-build-server" };
+    contour::test::ScopedController const inProcess { manager };
+    contour::test::ScopedController const daemon { manager };
+    manager.bindWindow(daemon.id, onWork);
+
+    // The steps QML iterates are the table's rows, in elision order, each with what the chip says there: the
+    // window's model hands them over, built from the daemon this window is bound to.
+    auto const steps = daemon->chip()->steps();
+    REQUIRE(steps.size() == static_cast<qsizetype>(contour::window::LocationChipSteps.size()));
+    for (auto const index: std::views::iota(size_t { 0 }, contour::window::LocationChipSteps.size()))
+    {
+        auto const row = steps[static_cast<qsizetype>(index)].toMap();
+        auto const& step = contour::window::LocationChipSteps[index];
+        CHECK(row.value(QStringLiteral("fit")).toInt() == static_cast<int>(step.fit));
+        CHECK(row.value(QStringLiteral("key")).toString().toStdString() == step.key);
+    }
+    CHECK(inProcess->chip()->inputs().hosting == contour::window::DaemonHosting::InProcess);
+    CHECK(daemon->chip()->inputs().hosting == contour::window::DaemonHosting::Daemon);
+
+    auto const daemonAt = [&](LocationChipFit fit) {
+        return daemon->chip()->steps()[static_cast<qsizetype>(fit)].toMap().value(QStringLiteral("daemon"));
+    };
+    CHECK(daemonAt(LocationChipFit::Full) == "work-build-server");
+    CHECK(daemonAt(LocationChipFit::DaemonElided) == "work-…rver");
+    CHECK(daemonAt(LocationChipFit::DotOnly).toString().isEmpty());
+    CHECK(inProcess->chip()->steps().front().toMap().value(QStringLiteral("daemon")).toString().isEmpty());
+    CHECK(daemon->chip()->stateGlyph() == QStringLiteral("●"));
+
+    manager.releaseBinding(onWork);
+}
+
+TEST_CASE("TerminalSessionManager: the default daemon raises no band notice while reconnecting",
+          "[manager][chip]")
+{
+    using namespace contour::window;
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto onDefault =
+        contour::test::DaemonNamedBinding { factory,
+                                            chipLabelTarget(std::string(vthost::DefaultSocketLabel)) };
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, onDefault);
+    CHECK(hostNoticeOf(hostChipPresence(manager.chromeLabelOf(window.id)), HostChipState::Reconnecting)
+          == HostNotice::None);
+    manager.releaseBinding(onDefault);
+}
+
+TEST_CASE(
+    "TerminalSessionManager: a named local daemon pins the band while reconnecting, the default one does not",
+    "[manager][chip]")
+{
+    // The spec leaves the band's notices as they were: only the plain-launch daemon is quiet about its
+    // connection in the band (its chip says it); one the user named is pinned like a remote host.
+    using namespace contour::window;
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto onDefault =
+        contour::test::DaemonNamedBinding { factory,
+                                            chipLabelTarget(std::string(vthost::DefaultSocketLabel)) };
+    auto onWork = contour::test::DaemonNamedBinding { factory, chipLabelTarget("work"), "work" };
+    contour::test::ScopedController const defaultWindow { manager };
+    contour::test::ScopedController const workWindow { manager };
+    manager.bindWindow(defaultWindow.id, onDefault);
+    manager.bindWindow(workWindow.id, onWork);
+    auto const noticeOf = [&](auto const& window, HostChipState state) {
+        return hostNoticeOf(hostChipPresence(manager.chromeLabelOf(window.id)), state);
+    };
+    for (auto const state:
+         { HostChipState::Reconnecting, HostChipState::Disconnected, HostChipState::NeedsAttention })
+    {
+        CHECK(noticeOf(defaultWindow, state) == HostNotice::None);
+        CHECK(noticeOf(workWindow, state) == HostNotice::Interrupted);
+    }
+    CHECK(noticeOf(workWindow, HostChipState::Connected) == HostNotice::None);
+    manager.releaseBinding(onDefault);
+    manager.releaseBinding(onWork);
+}
+
+TEST_CASE("TerminalSessionManager: hostingOf tells in-process, daemon and attached windows apart",
+          "[manager][chip]")
+{
+    using namespace contour::window;
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto onWork = contour::test::DaemonNamedBinding { factory, chipLabelTarget("work"), "work" };
+    // A tmux attach: bound, with a host label, and no daemon.
+    auto tmux = contour::session::FactoryBinding { factory, "tmuxhost" };
+    contour::test::ScopedController const inProcess { manager };
+    contour::test::ScopedController const daemon { manager };
+    contour::test::ScopedController const attached { manager };
+    manager.bindWindow(daemon.id, onWork);
+    manager.bindWindow(attached.id, tmux);
+
+    CHECK(manager.hostingOf(inProcess.id) == DaemonHosting::InProcess);
+    CHECK(manager.hostingOf(daemon.id) == DaemonHosting::Daemon);
+    CHECK(manager.hostingOf(attached.id) == DaemonHosting::OtherHost);
+
+    // A tmux window names its host, as its host chip always did: the label is the chip's name, with no
+    // workspace beside it. It follows the daemon's rules for where the chip shows.
+    CHECK(attached->chip()->daemonName() == "tmuxhost");
+    CHECK_FALSE(attached->chip()->workspaceShown());
+    CHECK(daemon->chip()->workspaceShown());
+    CHECK(attached->chip()->inputs().hosting == DaemonHosting::OtherHost);
+    auto const placeFor = [](WindowController const& window, BarPresence band, BarCentre centre) {
+        auto const& inputs = window.chip()->inputs();
+        return locationChipPlace(band, centre, inputs.hosting, inputs.sidebar);
+    };
+    CHECK(placeFor(*attached, BarPresence::Shown, BarCentre::Tabs) == LocationChipPlace::Band);
+    CHECK(placeFor(*attached, BarPresence::Shown, BarCentre::Title) == LocationChipPlace::Band);
+    CHECK(placeFor(*attached, BarPresence::Hidden, BarCentre::Tabs) == LocationChipPlace::None);
+    CHECK(placeFor(*attached, BarPresence::Shown, BarCentre::ChipAndTabs) == LocationChipPlace::Band);
+    CHECK(placeFor(*daemon, BarPresence::Shown, BarCentre::Tabs) == LocationChipPlace::Band);
+    CHECK(placeFor(*inProcess, BarPresence::Shown, BarCentre::Tabs) == LocationChipPlace::None);
+    // The switcher keeps what it did for it: the scope asked for.
+    CHECK(manager
+              .switcherOpeningFor(
+                  attached.id, SwitcherPrompt::Browse, ChipSwitcherScope, SwitcherOrigin::Chip, {})
+              .scope
+          == SwitcherScope::Everything);
+
+    manager.releaseBinding(onWork);
+    manager.releaseBinding(tmux);
+}
+
+TEST_CASE("TerminalSessionManager: a tmux window's chip names its host, with the dot and the state",
+          "[manager][chip]")
+{
+    using namespace contour::window;
+    using vthost::client::ConnectionState;
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto tmux = contour::session::FactoryBinding { factory, "tmuxhost" };
+    contour::test::ScopedController const attached { manager };
+    manager.bindWindow(attached.id, tmux);
+
+    auto const& chip = *attached->chip();
+    auto const textAt = [&](LocationChipFit fit, QString const& key) {
+        return chip.steps()[static_cast<qsizetype>(fit)].toMap().value(key).toString();
+    };
+    CHECK(chip.daemonName() == "tmuxhost");
+    CHECK(textAt(LocationChipFit::Full, QStringLiteral("daemon")) == "tmuxhost");
+
+    // The interrupted connection is told by the dot and the words, as the host chip told it.
+    manager.setHostConnection(tmux, ConnectionState::Reconnecting);
+    CHECK(chip.dotShown());
+    CHECK(chip.connectionState() == static_cast<int>(HostChipState::Reconnecting));
+    CHECK(textAt(LocationChipFit::Full, QStringLiteral("status")) == "Reconnecting…");
+    CHECK(chip.accessibleDescription().contains(QStringLiteral("econnecting")));
+
+    // The control never shrinks to a bare caret: the daemon-only steps keep the host's name.
+    CHECK(LocationChipModel::fitForDaemonOnly({}) == static_cast<int>(LocationChipFit::DaemonElided));
+    CHECK_FALSE(textAt(LocationChipFit::DaemonElided, QStringLiteral("daemon")).isEmpty());
+
+    manager.setHostConnection(tmux, ConnectionState::Connected);
+    CHECK_FALSE(chip.dotShown());
+    manager.releaseBinding(tmux);
+}
+
+TEST_CASE("TerminalSessionManager: the chip follows a window's binding when only the binding changes",
+          "[manager][chip]")
+{
+    using namespace contour::window;
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    // Two daemons the chip calls the same thing, so that neither the label nor the state moves on a rebind.
+    auto onWork = contour::test::DaemonNamedBinding { factory, chipLabelTarget("work"), "work", "studio" };
+    auto onOther = contour::test::DaemonNamedBinding {
+        factory,
+        { .kind = vthost::proto::SwitchDaemonKind::Host, .daemon = "ci-box", .workspace = {} },
+        "studio",
+        "studio"
+    };
+    auto tmux = contour::session::FactoryBinding { factory, "studio" };
+    contour::test::ScopedController const window { manager };
+    auto const& chip = *window->chip();
+    CHECK(chip.inputs().hosting == DaemonHosting::InProcess);
+    CHECK(chip.daemonName().isEmpty());
+
+    // In-process to a daemon.
+    manager.bindWindow(window.id, onWork);
+    CHECK(chip.inputs().hosting == DaemonHosting::Daemon);
+    CHECK(chip.daemonName() == "studio");
+
+    // To another daemon that the chip names the same: the chip's inputs still read the new binding.
+    manager.bindWindow(window.id, onOther);
+    CHECK(chip.inputs().hosting == DaemonHosting::Daemon);
+    CHECK(chip.daemonName() == "studio");
+
+    // To a host that is no daemon: what serves the window changed, and the chip's workspace segment with it.
+    auto surfaceChanges = QSignalSpy { window->chip(), &LocationChipModel::surfaceChanged };
+    manager.bindWindow(window.id, tmux);
+    CHECK(chip.inputs().hosting == DaemonHosting::OtherHost);
+    CHECK_FALSE(chip.workspaceShown());
+    CHECK(surfaceChanges.count() == 1);
+
+    // Detached: nothing names a daemon again.
+    manager.releaseBinding(tmux);
+    CHECK(chip.inputs().hosting == DaemonHosting::InProcess);
+    CHECK(chip.daemonName().isEmpty());
+    manager.releaseBinding(onWork);
+    manager.releaseBinding(onOther);
+}
+
+TEST_CASE("TerminalSessionManager: the chip opens every daemon, an in-process window its own",
+          "[manager][chip]")
+{
+    using namespace contour::window;
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto onWork = contour::test::DaemonNamedBinding { factory, chipLabelTarget("work"), "work" };
+    contour::test::ScopedController const inProcess { manager };
+    contour::test::ScopedController const daemon { manager };
+    manager.bindWindow(daemon.id, onWork);
+
+    auto const onDaemon = manager.switcherOpeningFor(
+        daemon.id, SwitcherPrompt::Browse, ChipSwitcherScope, SwitcherOrigin::Chip, {});
+    CHECK(onDaemon.scope == SwitcherScope::Everything);
+    CHECK(onDaemon.origin == SwitcherOrigin::Chip);
+    CHECK(onDaemon.window == daemon.id);
+    CHECK(onDaemon.windowDaemon.daemon == "work");
+
+    auto const here = manager.switcherOpeningFor(
+        inProcess.id, SwitcherPrompt::Browse, ChipSwitcherScope, SwitcherOrigin::Chip, {});
+    CHECK(here.scope == SwitcherScope::WindowOnly);
+    CHECK(here.origin == SwitcherOrigin::Chip);
+    CHECK(here.windowDaemon.daemon.empty());
+
+    manager.releaseBinding(onWork);
+}
+// }}}
+
+TEST_CASE("TerminalSessionManager: the chip's model follows every source of what the chip shows",
+          "[manager][chip]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto onWork = contour::test::DaemonNamedBinding { factory, chipLabelTarget("work"), "work" };
+    auto onOther = contour::test::DaemonNamedBinding { factory, chipLabelTarget("other"), "other" };
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, onWork);
+    auto surface = QSignalSpy { window->chip(), &contour::window::LocationChipModel::surfaceChanged };
+    auto accessibility =
+        QSignalSpy { window->chip(), &contour::window::LocationChipModel::accessibilityChanged };
+
+    SECTION("the host connection")
+    {
+        manager.setHostConnection(onWork, vthost::client::ConnectionState::Reconnecting);
+        CHECK(surface.count() == 1);
+        CHECK(window->chip()->inputs().state == contour::window::HostChipState::Reconnecting);
+    }
+
+    SECTION("the host binding")
+    {
+        manager.bindWindow(window.id, onOther);
+        CHECK(surface.count() == 1);
+        CHECK(window->chip()->daemonName() == "other");
+        manager.releaseBinding(onOther);
+    }
+
+    SECTION("the switcher opening and closing reaches the accessible words only")
+    {
+        auto switcher = contour::window::SwitcherController { contour::window::SwitcherServices {} };
+        window->presentSwitcher(&switcher, QRectF { 10, 0, 80, 24 });
+        CHECK(accessibility.count() == 1);
+        CHECK(window->chip()->accessibleDescription() == "expanded");
+        window->closeSwitcher();
+        CHECK(accessibility.count() == 2);
+        CHECK(surface.count() == 0);
+    }
+
+    manager.releaseBinding(onWork);
+}
+
+TEST_CASE("TerminalSessionManager: a reconnecting remote daemon shows its dot and says so", "[manager][chip]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto onHost = contour::test::DaemonNamedBinding {
+        factory,
+        { .kind = vthost::proto::SwitchDaemonKind::Host, .daemon = "studio", .workspace = {} },
+        "studio",
+        "studio"
+    };
+    onHost.runElsewhere();
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, onHost);
+    CHECK(window->chip()->dotShown());
+
+    manager.setHostConnection(onHost, vthost::client::ConnectionState::Reconnecting);
+    CHECK(window->chip()->dotShown());
+    CHECK(window->chip()->accessibleDescription() == "Reconnecting, collapsed");
+
+    manager.releaseBinding(onHost);
+}

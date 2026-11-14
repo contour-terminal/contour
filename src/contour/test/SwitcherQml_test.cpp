@@ -22,6 +22,7 @@
 #include <QtGui/QColor>
 #include <QtGui/QFont>
 #include <QtQml/QQmlEngine>
+#include <QtQml/QQmlExpression>
 #include <QtQuick/QQuickItem>
 
 #include <catch2/catch_approx.hpp>
@@ -112,8 +113,7 @@ struct Fixture
                                                   .mode = SwitchMode::Switch,
                                                   .prompt = window::SwitcherPrompt::Browse,
                                                   .pick = std::nullopt,
-                                                  .scope = chip ? window::SwitcherScope::OneDaemon
-                                                                : window::SwitcherScope::Everything,
+                                                  .scope = window::SwitcherScope::Everything,
                                                   .windowWorkspaces = workWorkspaces(),
                                                   .origin = chip ? window::SwitcherOrigin::Chip
                                                                  : window::SwitcherOrigin::Centred },
@@ -251,6 +251,16 @@ TEST_CASE("Switcher: the selected row wears the platform's selection", "[contour
     }
 }
 
+namespace
+{
+/// What @p item announces as its description, read through the `Accessible` attached type.
+[[nodiscard]] QString accessibleDescriptionOf(QQuickItem& item)
+{
+    auto expression = QQmlExpression(qmlContext(&item), &item, QStringLiteral("Accessible.description"));
+    return expression.evaluate().toString();
+}
+} // namespace
+
 TEST_CASE("Switcher: clicking the chip while its dropdown is open closes it and leaves it closed",
           "[contour][switcher][qml]")
 {
@@ -259,7 +269,7 @@ TEST_CASE("Switcher: clicking the chip while its dropdown is open closes it and 
     QTest::mouseClick(f.scene->window, Qt::LeftButton, {}, chipCentre);
     test::waitForPopupOpened(*f.scene->popup);
     REQUIRE(f.host.dropdowns == 1);
-    CHECK(f.scene->chip->property("openDescription").toString() == "expanded");
+    CHECK(accessibleDescriptionOf(*f.scene->chip) == "expanded");
 
     QTest::mouseClick(f.scene->window, Qt::LeftButton, {}, chipCentre);
     test::waitForPopupClosed(*f.scene->popup);
@@ -267,7 +277,7 @@ TEST_CASE("Switcher: clicking the chip while its dropdown is open closes it and 
     CHECK_FALSE(f.scene->isOpen());
     CHECK(f.host.dropdowns == 1);
     CHECK_FALSE(f.host.isWorkspaceDropdownOpen());
-    CHECK(f.scene->chip->property("openDescription").toString() == "collapsed");
+    CHECK(accessibleDescriptionOf(*f.scene->chip) == "collapsed");
     CHECK(f.warnings.count(test::isQmlDiagnostic) == 0);
 }
 

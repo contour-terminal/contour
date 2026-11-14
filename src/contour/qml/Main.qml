@@ -117,7 +117,7 @@ ThemedWindow
 
     // Where the title band and the tabs go -- { band, bandEdge, centre, tabBar }, each by name -- from the
     // row's tab shape (UiStyleProvider::titleBand): who draws the frame (show_title_bar), whether the window
-    // is in full screen, the tab-bar gate, the configured edge and the host chip, whose interrupted
+    // is in full screen, the tab-bar gate, the configured edge and the connection, whose interrupted
     // connection shows the band whatever the gate says. The ints are the enumerators' underlying values:
     // WindowFrame { ClientBand, NativeFrame }, WindowMode { Windowed, FullScreen }, TabStripGate { Hidden,
     // Shown }, TabBarPosition { Top, Bottom }, HostChipState, TabPlacement { Top, Sidebar } and
@@ -320,6 +320,7 @@ ThemedWindow
                              : ((appWindow.win && appWindow.win.nativeControlsInset) || 0)
         // The header bar's part above a sidebar whose title row it draws (the ContourLinux row).
         sidebarWidth: sidebarSlot.titleInHeaderBar ? sidebarSlot.width : 0
+        besideSidebar: sidebarSlot.besideBand
         sidebarToggle: appWindow.sidebarToggle
         // The window's top corners, rounded only while the band is its top edge. The window itself is
         // transparent, so nothing is painted outside them. `|| 0` as above, for a controller without it.
@@ -455,6 +456,7 @@ ThemedWindow
             window: appWindow
             bandHeight: titleBar.implicitHeight
             titleInHeaderBar: sidebarSlot.titleInHeaderBar
+            chipPlace: appWindow.win && appWindow.win.chip ? appWindow.win.chip.place : "none"
             sidebarToggle: appWindow.sidebarToggle
             controlsInset: appWindow.bandMode === 1 ? 0 : ((appWindow.win && appWindow.win.nativeControlsInset) || 0)
         }
@@ -568,6 +570,9 @@ ThemedWindow
     // at the content's corner for want of a band. Their order is the controller's focusedToolbarIndex.
     readonly property var toolbarItems: {
         const items = titleBar.toolbarItems.slice()
+        const sidebarChip = sidebarSlot.item ? sidebarSlot.item.daemonChip : null
+        if (sidebarChip !== null && sidebarChip.visible)
+            items.unshift(sidebarChip)
         if (driftChip.visible && !driftChip.inBand)
             items.push(driftChip)
         return items

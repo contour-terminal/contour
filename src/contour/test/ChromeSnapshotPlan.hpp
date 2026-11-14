@@ -117,15 +117,17 @@ enum class SnapshotScript : uint8_t
     SidebarCollapsed,  //!< The sidebar with every workspace folded to its own row.
     SidebarTopTabs,    //!< The sidebar listing workspaces while the tabs stay in the band.
     SidebarHiddenChip, //!< The sidebar hidden: the workspace chip in the band, marked for another workspace.
-    SidebarChipDropdown, //!< The sidebar hidden, the workspace chip's dropdown open below it.
-    Switcher,            //!< The switcher's top level over `work` (board 1): its workspaces, home, ci-box.
-    SwitcherFiltered,    //!< The switcher filtered by "api" (board 2): matches on two daemons.
-    SwitcherDaemonLevel, //!< The switcher drilled into `home` (board 3), a failed command on api-docs.
-    SwitcherNewDaemon,   //!< The New Daemon prompt with "research" typed (board 4).
-    SwitcherNoMatch,     //!< The switcher filtered by "zzz": the empty state, New Workspace “zzz” kept.
-    SwitcherDiscovering, //!< The switcher while discovery runs: the local rows, the looking row.
-    SwitcherRowMenu,     //!< The switcher with the selected workspace's menu open.
-    SwitcherHover,       //!< The switcher with the pointer over another row: its fill and new-window button.
+    SidebarChipDropdown,  //!< The sidebar hidden, the workspace chip's dropdown open below it.
+    Switcher,             //!< The switcher's top level over `work` (board 1): its workspaces, home, ci-box.
+    SwitcherFiltered,     //!< The switcher filtered by "api" (board 2): matches on two daemons.
+    SwitcherDaemonLevel,  //!< The switcher drilled into `home` (board 3), a failed command on api-docs.
+    SwitcherNewDaemon,    //!< The New Daemon prompt with "research" typed (board 4).
+    SwitcherNoMatch,      //!< The switcher filtered by "zzz": the empty state, New Workspace “zzz” kept.
+    SwitcherDiscovering,  //!< The switcher while discovery runs: the local rows, the looking row.
+    SwitcherRowMenu,      //!< The switcher with the selected workspace's menu open.
+    SwitcherHover,        //!< The switcher with the pointer over another row: its fill and new-window button.
+    DaemonLocal,          //!< The default local daemon: the chip in the band names it `local`, with no dot.
+    DaemonLocalSingleTab, //!< The same with one tab: the band shows the title beside the chip.
 };
 
 /// What the workspace sidebar of a script shows.
@@ -225,10 +227,11 @@ enum class SecureDecor : uint8_t
 /// Whether the window is attached to a host, and in which state.
 enum class HostConnection : uint8_t
 {
-    Local = 0,    //!< Not attached: no host chip.
+    Local = 0,    //!< Not attached and in-process: no daemon, so no daemon segment in the chip.
     Connected,    //!< Attached, and the daemon is reachable.
     Reconnecting, //!< Attached, and the connection is being re-established.
     Disconnected, //!< Attached, and nothing is retried.
+    LocalDaemon,  //!< The default local daemon: the chip names it `local`, with no dot.
 };
 
 /// Whether the daemon a script's window talks to runs another release than the client.
@@ -2333,6 +2336,14 @@ inline constexpr auto SnapshotScripts = std::array {
                         .name = "switcher-hover",
                         .tabCount = 3,
                         .action = ScriptAction::HoverSwitcherRow },
+    SnapshotScriptRow { .script = SnapshotScript::DaemonLocal,
+                        .name = "daemon-local",
+                        .tabCount = 3,
+                        .connection = HostConnection::LocalDaemon },
+    SnapshotScriptRow { .script = SnapshotScript::DaemonLocalSingleTab,
+                        .name = "daemon-local-single-tab",
+                        .tabCount = 1,
+                        .connection = HostConnection::LocalDaemon },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),

@@ -5,14 +5,17 @@
 #include <contour/geometry/WindowGeometry.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/GuiTheme.hpp>
+#include <contour/window/BandAllocation.hpp>
 #include <contour/window/FindBarPlacement.hpp>
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/LinkPillPlacement.hpp>
+#include <contour/window/LocationChipQt.hpp>
 #include <contour/window/PalettePlacement.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/PickerAccessory.hpp>
 #include <contour/window/PopupAnchor.hpp>
+#include <contour/window/QtString.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/SecureLockPlacement.hpp>
 #include <contour/window/SidebarControls.hpp>
@@ -207,7 +210,6 @@ namespace
             .tabColor = QString::fromUtf8(tokens.tabColorGlyph),
             .chipOpen = QString::fromUtf8(tokens.chipOpenGlyph),
             .chipClose = QString::fromUtf8(tokens.chipCloseGlyph),
-            .hostDot = QString::fromUtf8(tokens.hostDotGlyph),
             .paneActions = stringsOf(tokens.paneActionGlyphs),
             .splitLines = stringsOf(tokens.splitLineGlyphs),
             .restart = QString::fromUtf8(tokens.restartGlyph),
@@ -421,11 +423,6 @@ QVariantMap UiStyleProvider::hostChipLook(int state) const
              { QStringLiteral("accessibleState"), nameOf(look.accessibleState) } };
 }
 
-bool UiStyleProvider::isHostChipShown(QString const& hostLabel) const
-{
-    return hostChipPresence(hostLabel.toStdString()) == HostChipPresence::Shown;
-}
-
 QVariantMap UiStyleProvider::titleBand(int frame,
                                        int mode,
                                        int strip,
@@ -493,19 +490,63 @@ QVariantList UiStyleProvider::headerBarItems() const
     return items;
 }
 
+namespace
+{
+    /// @param layout A tab well's layout.
+    /// @return It as the map QML reads: `{ tabWidth, wellWidth, label, scrolls }`.
+    [[nodiscard]] QVariantMap tabWellLayoutMap(TabWellLayout const& layout)
+    {
+        return { { QStringLiteral("tabWidth"), layout.tabWidth },
+                 { QStringLiteral("wellWidth"), layout.wellWidth },
+                 { QStringLiteral("label"), nameOf(tabLabelModeName(layout.label)) },
+                 { QStringLiteral("scrolls"), layout.overflow == TabWellOverflow::Scrolls } };
+    }
+} // namespace
+
 QVariantMap UiStyleProvider::tabWellLayout(qreal available, int tabCount) const
 {
-    auto const layout = layoutTabWell(available,
-                                      tabCount,
-                                      TabWellMetrics { .minTab = _metrics.minTabWidth,
-                                                       .maxTab = _metrics.maxTabWidth,
-                                                       .iconOnlyTab = (2 * _space.s5()) + _size.tabIcon(),
-                                                       .gap = wellGap(),
-                                                       .padding = wellPadding() });
-    return { { QStringLiteral("tabWidth"), layout.tabWidth },
-             { QStringLiteral("wellWidth"), layout.wellWidth },
-             { QStringLiteral("label"), nameOf(tabLabelModeName(layout.label)) },
-             { QStringLiteral("scrolls"), layout.overflow == TabWellOverflow::Scrolls } };
+    return tabWellLayoutMap(layoutTabWell(available, tabCount, tabWellMetrics()));
+}
+
+QVariantMap UiStyleProvider::allocateBand(QVariantMap const& widths, int tabCount, qreal room) const
+{
+    return allocateBandFor(widths, tabCount, room, ChipSegments::DaemonAndWorkspace);
+}
+
+QVariantMap UiStyleProvider::allocateBandDaemonOnly(QVariantMap const& widths, int tabCount, qreal room) const
+{
+    return allocateBandFor(widths, tabCount, room, ChipSegments::DaemonOnly);
+}
+
+QVariantMap UiStyleProvider::allocateBandFor(QVariantMap const& widths,
+                                             int tabCount,
+                                             qreal room,
+                                             ChipSegments segments) const
+{
+    auto const widthOf = [&](std::string_view key) {
+        return measuredStepWidth(widths, key);
+    };
+    auto const allocation = window::allocateBand(widthOf, tabCount, tabWellMetrics(), room, segments);
+    auto map = tabWellLayoutMap(allocation.tabs);
+    map.insert(QStringLiteral("fit"), static_cast<int>(std::to_underlying(allocation.chip)));
+    map.insert(QStringLiteral("chipRoom"), allocation.chipRoom);
+    map.insert(QStringLiteral("chipWidth"), allocation.chipWidth);
+    return map;
+}
+
+TabWellMetrics UiStyleProvider::tabWellMetrics() const
+{
+    return TabWellMetrics { .minTab = _metrics.minTabWidth,
+                            .maxTab = _metrics.maxTabWidth,
+                            .iconOnlyTab = (2 * _space.s5()) + _size.tabIcon(),
+                            .gap = wellGap(),
+                            .padding = wellPadding() };
+}
+
+qreal UiStyleProvider::tabWellMinimum(int tabCount) const
+{
+    // One icon-only pill: the well can always scroll to the active tab beyond it.
+    return iconOnlyTabWellMinimum(tabCount, tabWellMetrics());
 }
 
 QVariantMap UiStyleProvider::palettePlacement(qreal windowWidth, qreal windowHeight) const

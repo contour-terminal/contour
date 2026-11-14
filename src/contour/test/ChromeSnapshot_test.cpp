@@ -860,10 +860,10 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             }
             case SnapshotScript::RemoteConnected:
             case SnapshotScript::RemoteDisconnected: {
-                auto const* chip = scene.root().findChild<QQuickItem*>(QStringLiteral("hostChip"));
+                auto const* chip = scene.root().findChild<QQuickItem*>(QStringLiteral("workspaceChip"));
                 REQUIRE(chip != nullptr);
                 CHECK(chip->isVisible() == titleBar->isVisible());
-                auto const* status = chip->findChild<QObject*>(QStringLiteral("hostChipStatus"));
+                auto const* status = chip->findChild<QObject*>(QStringLiteral("workspaceChipStatus"));
                 REQUIRE(status != nullptr);
                 CHECK(status->property("text").toString().isEmpty()
                       == (variant.script == SnapshotScript::RemoteConnected));
@@ -1183,28 +1183,14 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 break;
             case SnapshotScript::SidebarChipDropdown: {
                 static_cast<void>(checkSidebarScript(scene, variant));
-                // The dropdown lists this window's daemon's workspaces, and nothing else.
+                // The dropdown is the full switcher, hanging below the chip.
                 auto const* dropdown = scene.workspaceDropdown();
                 REQUIRE(dropdown != nullptr);
                 CHECK(dropdown->property("visible").toBool());
-                // All daemons… names ShowSwitcher's chord as the picture's platform binds and spells it,
-                // whichever machine renders it.
                 auto const* switcher = scene.switcher();
                 REQUIRE(switcher != nullptr);
-                auto const& rows = switcher->rows();
-                auto const all =
-                    std::ranges::find(rows, "All daemons…", &contour::window::SwitcherRow::title);
-                REQUIRE(all != rows.end());
-                auto const index = switcher->index(static_cast<int>(std::distance(rows.begin(), all)));
-                auto const chord =
-                    switcher
-                        ->data(index,
-                               static_cast<int>(contour::window::SwitcherController::Roles::DetailTextRole))
-                        .toString();
-                CHECK(chord
-                      == (variantHost(variant) == contour::config::HostPlatform::MacOS
-                              ? QStringLiteral("⇧⌘R")
-                              : QStringLiteral("Ctrl+Shift+R")));
+                CHECK_FALSE(std::ranges::contains(
+                    switcher->rows(), "All daemons…", &contour::window::SwitcherRow::title));
                 break;
             }
             case SnapshotScript::Switcher:
@@ -1215,6 +1201,20 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             case SnapshotScript::SwitcherDiscovering:
             case SnapshotScript::SwitcherRowMenu:
             case SnapshotScript::SwitcherHover: checkSwitcherScript(scene, variant.script); break;
+            case SnapshotScript::DaemonLocal:
+            case SnapshotScript::DaemonLocalSingleTab: {
+                // The default daemon reads "local", with no dot: the chip is in the band for every row.
+                auto const* chip = scene.root().findChild<QQuickItem*>(QStringLiteral("workspaceChip"));
+                REQUIRE(chip != nullptr);
+                CHECK(chip->isVisible() == titleBar->isVisible());
+                auto const* daemon = chip->findChild<QObject*>(QStringLiteral("workspaceChipDaemon"));
+                auto const* dot = chip->findChild<QObject*>(QStringLiteral("workspaceChipDot"));
+                REQUIRE(daemon != nullptr);
+                REQUIRE(dot != nullptr);
+                CHECK(daemon->property("text").toString() == QStringLiteral("local"));
+                CHECK_FALSE(dot->property("visible").toBool());
+                break;
+            }
             case SnapshotScript::QuickTerminal: {
                 // The panel's frame, and a role that made the window a frameless tool window.
                 CHECK(scene.window().size() == ChromeSnapshotScene::quickTerminalPanelSize());

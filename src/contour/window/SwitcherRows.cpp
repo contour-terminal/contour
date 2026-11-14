@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/command/FuzzyFilter.hpp>
+#include <contour/window/LocationChip.hpp>
 #include <contour/window/SwitcherRows.hpp>
 
 #include <algorithm>
@@ -29,7 +30,7 @@ namespace
     /// @return `Workspaces on work`.
     [[nodiscard]] std::string workspacesOnTitle(SwitcherDaemon const& daemon)
     {
-        return std::format("Workspaces on {}", switcherDaemonName(daemon.address));
+        return std::format("Workspaces on {}", switcherDaemonName(daemon));
     }
 
     /// @return `New Workspace`, or `New Workspace “api”` once something is typed.
@@ -177,7 +178,7 @@ namespace
         }
 
         /// The workspaces of daemon @p index (matching, best first, while filtering), or what stands in for
-        /// them while it is listed; then its New Workspace, and All daemons… from the chip.
+        /// them while it is listed; then its New Workspace.
         void addOneDaemon(std::size_t index)
         {
             if (!hasDaemon(index))
@@ -190,7 +191,7 @@ namespace
                 // What was listed before is stale now: the row says why there is nothing.
                 auto row = plainRow(
                     SwitcherRowKind::Failure,
-                    std::format("Could not list {}: {}", switcherDaemonName(daemon.address), daemon.failure));
+                    std::format("Could not list {}: {}", switcherDaemonName(daemon), daemon.failure));
                 row.daemon = index;
                 add(std::move(row), group, title);
             }
@@ -198,7 +199,7 @@ namespace
             {
                 // Listed for the first time; a refresh keeps the workspaces it knows instead.
                 auto row = plainRow(SwitcherRowKind::Connecting,
-                                    std::format("Connecting to {}…", switcherDaemonName(daemon.address)));
+                                    std::format("Connecting to {}…", switcherDaemonName(daemon)));
                 row.daemon = index;
                 add(std::move(row), group, title);
             }
@@ -218,9 +219,6 @@ namespace
                     add(std::move(row), group, title);
             }
             add(newWorkspaceRow(index), SwitcherGroup::Actions, "Actions");
-            if (_view.level == SwitcherLevel::Top && _view.origin == SwitcherOrigin::Chip
-                && _view.scope != SwitcherScope::WindowOnly)
-                add(plainRow(SwitcherRowKind::AllDaemons, "All daemons…"), SwitcherGroup::Actions, "Actions");
         }
 
         /// @return @p workspace's row ranked by how well it matches the filter; none when it does not.
@@ -269,7 +267,7 @@ namespace
                     if (auto matched = rankedWorkspace(index, workspace))
                     {
                         matched->row.pill = SwitcherPill::Daemon;
-                        matched->row.pillText = switcherDaemonName(daemon.address);
+                        matched->row.pillText = switcherDaemonName(daemon);
                         ranked.push_back(std::move(*matched));
                     }
             }
@@ -289,7 +287,7 @@ namespace
             {
                 if (index == _inputs.windowDaemon)
                     continue;
-                auto const name = switcherDaemonName(daemon.address);
+                auto const name = switcherDaemonName(daemon);
                 auto matched = command::fuzzyMatch(_view.filter, name);
                 if (!matched)
                     continue;
@@ -395,9 +393,18 @@ SwitcherStatus daemonStatusOf(SwitcherDaemon const& daemon)
     return rollUpStatus(statuses);
 }
 
-std::string switcherDaemonName(session::SwitchTarget const& address)
+std::string switcherDaemonName(session::SwitchTarget const& address, std::string_view hostLabel)
 {
-    return address.kind == SwitchDaemonKind::Same ? std::string { "this daemon" } : address.daemon;
+    // The switcher's own rows say "this daemon" of an unnameable one the window has no label for; elsewhere
+    // it is named as the chip names it.
+    return address.kind == SwitchDaemonKind::Same && hostLabel.empty()
+               ? std::string { "this daemon" }
+               : locationDaemonName(address, hostLabel);
+}
+
+std::string switcherDaemonName(SwitcherDaemon const& daemon)
+{
+    return switcherDaemonName(daemon.address, daemon.hostLabel);
 }
 
 SwitcherRowIdentity switcherRowIdentity(SwitcherRow const& row)

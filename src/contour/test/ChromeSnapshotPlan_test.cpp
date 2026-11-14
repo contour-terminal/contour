@@ -116,8 +116,10 @@ TEST_CASE("snapshot.scriptTable", "[snapshot]")
               == (row.script == SnapshotScript::FullScreenReveal));
         CHECK((row.transparency == contour::config::TransparencyPreference::Reduced)
               == (row.script == SnapshotScript::BandSolid));
-        // A host chip needs a host to name, and a host is never local.
-        CHECK(row.hostLabel.empty() == (row.connection == HostConnection::Local));
+        // A host label names an attached host; the default daemon and an in-process window name none (the
+        // chip then reads `local`, or has no daemon segment).
+        CHECK(row.hostLabel.empty()
+              == (row.connection == HostConnection::Local || row.connection == HostConnection::LocalDaemon));
     }
     // Every row's active tab is one of its tabs.
     for (auto const& row: SnapshotScripts)
@@ -821,11 +823,16 @@ TEST_CASE("snapshot plan: the quick terminal is one Minimal tab in the panel's f
               == (other.script == SnapshotScript::QuickTerminal));
 }
 
-TEST_CASE("ChromeSnapshotPlan: the switcher's eight scripts close the table, each its own action",
+TEST_CASE("ChromeSnapshotPlan: the switcher's eight scripts precede the location chip's two, each its own "
+          "action",
           "[snapshot]")
 {
     using namespace contour::test::snapshot;
-    CHECK(SnapshotScripts.back().script == SnapshotScript::SwitcherHover);
+    CHECK(static_cast<int>(SnapshotScript::DaemonLocal)
+          == static_cast<int>(SnapshotScript::SwitcherHover) + 1);
+    CHECK(SnapshotScripts.back().script == SnapshotScript::DaemonLocalSingleTab);
+    for (auto const script: { SnapshotScript::DaemonLocal, SnapshotScript::DaemonLocalSingleTab })
+        CHECK(scriptRow(script).connection == HostConnection::LocalDaemon);
     for (auto const& [script, name, action]: std::array {
              std::tuple { SnapshotScript::Switcher, "switcher", ScriptAction::OpenSwitcher },
              std::tuple {

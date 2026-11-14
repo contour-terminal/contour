@@ -130,10 +130,7 @@ SwitcherController::~SwitcherController() = default;
 
 SwitcherInputs SwitcherController::inputs() const
 {
-    return SwitcherInputs { .daemons = _daemons,
-                            .windowDaemon = _windowDaemon,
-                            .discovery = _discovery,
-                            .showSwitcherShortcut = _showSwitcherShortcut };
+    return SwitcherInputs { .daemons = _daemons, .windowDaemon = _windowDaemon, .discovery = _discovery };
 }
 
 std::size_t SwitcherController::indexOf(session::SwitchTarget const& address) const
@@ -207,8 +204,6 @@ void SwitcherController::open(SwitcherOpening opening)
     _pendingListings.clear();
     _labelFailure.clear();
     _rowMenu = {};
-    _showSwitcherShortcut =
-        _services.showSwitcherShortcut ? _services.showSwitcherShortcut() : std::string {};
     dropStart();
 
     // The window's own daemon is not listed: its workspaces are its sidebar's.
@@ -218,7 +213,9 @@ void SwitcherController::open(SwitcherOpening opening)
                                       .tag = {},
                                       .listing = SwitcherListing::Listed,
                                       .failure = {},
-                                      .workspaces = _opening.windowWorkspaces };
+                                      .workspaces = _opening.windowWorkspaces,
+                                      .link = SwitcherHostLink::NeverConnected,
+                                      .hostLabel = _opening.windowHostLabel };
     _daemons.clear();
     setDiscovery(SwitcherDiscovery::Settled);
     if (_opening.pick)
@@ -247,6 +244,7 @@ void SwitcherController::open(SwitcherOpening opening)
         {
             found->listing = SwitcherListing::Listed;
             found->workspaces = _opening.windowWorkspaces;
+            found->hostLabel = _opening.windowHostLabel;
         }
         else if (own.kind == SwitchDaemonKind::Host)
             _daemons.push_back(std::move(ownDaemon));
@@ -256,7 +254,7 @@ void SwitcherController::open(SwitcherOpening opening)
             std::distance(_daemons.begin(),
                           std::ranges::find_if(_daemons, [&](auto const& each) { return isAt(each, own); })));
         _scopeAddress = daemonOf(own);
-        // The chip's dropdown looks for the others once it is widened.
+        // Every daemon is looked for, as the centred popup does, whichever way it was opened.
         if (_scope == SwitcherScope::Everything)
             discoverDaemons();
     }
@@ -425,7 +423,7 @@ void SwitcherController::updatePresentation()
     auto const currentView = view();
     auto const currentInputs = inputs();
     auto const daemonName = [&](std::size_t index) {
-        return index < _daemons.size() ? switcherDaemonName(_daemons[index].address) : std::string {};
+        return index < _daemons.size() ? switcherDaemonName(_daemons[index]) : std::string {};
     };
     auto const label =
         _level == SwitcherLevel::NewDaemon
@@ -536,8 +534,7 @@ void SwitcherController::activate(int row)
     {
         case SwitcherRowKind::Workspace: finishWith(chosen.target, _opening.mode); return;
         case SwitcherRowKind::Daemon:
-        case SwitcherRowKind::NewDaemon:
-        case SwitcherRowKind::AllDaemons: drillIn(chosen); return;
+        case SwitcherRowKind::NewDaemon: drillIn(chosen); return;
         case SwitcherRowKind::NewWorkspace: createWorkspace(chosen, _opening.mode); return;
         case SwitcherRowKind::LabelAction:
             submitLabel(_filter, static_cast<int>(std::to_underlying(_opening.mode)));
@@ -568,7 +565,6 @@ void SwitcherController::activateInNewWindow(int row)
             submitLabel(_filter, static_cast<int>(std::to_underlying(session::SwitchMode::Open)));
             return;
         case SwitcherRowKind::NewDaemon:
-        case SwitcherRowKind::AllDaemons:
         case SwitcherRowKind::Discovering:
         case SwitcherRowKind::Connecting:
         case SwitcherRowKind::Failure: activate(row); return;
@@ -591,12 +587,6 @@ void SwitcherController::drillIn(SwitcherRow const& row)
                 listDaemon(row.daemon);
             break;
         case SwitcherRowKind::NewDaemon: setLevel(SwitcherLevel::NewDaemon); break;
-        case SwitcherRowKind::AllDaemons:
-            _scope = SwitcherScope::Everything;
-            // The chip's dropdown did not look for the other daemons as it opened.
-            if (_discoveryFor != _openings)
-                discoverDaemons();
-            break;
         case SwitcherRowKind::Workspace:
         case SwitcherRowKind::NewWorkspace:
         case SwitcherRowKind::Discovering:
@@ -624,12 +614,9 @@ void SwitcherController::back()
     // Leaving the New Daemon level leaves its start: it is dropped as a host's listing is.
     if (_level == SwitcherLevel::NewDaemon)
         dropStart();
-    if (_level != SwitcherLevel::Top)
-        setLevel(SwitcherLevel::Top);
-    else if (_opening.origin == SwitcherOrigin::Chip && _scope == SwitcherScope::Everything)
-        _scope = SwitcherScope::OneDaemon;
-    else
+    if (_level == SwitcherLevel::Top)
         return;
+    setLevel(SwitcherLevel::Top);
     auto const restored = _returns.empty() ? Return {} : std::move(_returns.back());
     if (!_returns.empty())
         _returns.pop_back();

@@ -1254,9 +1254,12 @@ TEST_CASE("UiStyleProvider: badgeLook, hostChipLook, titleBand and tabWellLayout
           == mac.statusInk(static_cast<int>(contour::config::StatusColorRole::Warning)));
     CHECK(mac.hostChipLook(99).isEmpty());
 
-    // The chip shows for a window with a host to name (window::hostChipPresence).
-    CHECK(mac.isHostChipShown(QStringLiteral("home")));
-    CHECK_FALSE(mac.isHostChipShown({}));
+    // The tab well keeps room for one icon-only pill while the location chip takes what it can.
+    CHECK(mac.tabWellMinimum(0) == 0.0);
+    CHECK(mac.tabWellMinimum(1) > 0.0);
+    CHECK(mac.tabWellMinimum(12) == mac.tabWellMinimum(1));
+    CHECK(mac.tabWellLayout(mac.tabWellMinimum(1), 1).value("label").toString()
+          == QStringLiteral("iconOnly"));
 
     auto const macBand = mac.titleBand(0, 0, 0, 0, {}, 0, 0, 0);
     CHECK(macBand.value("band").toString() == QStringLiteral("shown"));
@@ -1429,7 +1432,6 @@ TEST_CASE("UiStyleProvider publishes the band's tokens", "[contour][uistyle]")
     CHECK(tokenOf(UiStyleProvider(chromeInputsFor(ChromeStyle::Fluent, font)), "radii", "tab").toReal()
           != 3.0);
     CHECK(mac.property("tabColorGlyph").toString().isEmpty());
-    CHECK(mac.property("hostDotGlyph").toString().isEmpty());
 
     auto const fluent = UiStyleProvider(chromeInputsFor(ChromeStyle::Fluent, font));
     CHECK(fluent.property("bandHeight").toReal() == fluent.chromeHeight());
@@ -1457,7 +1459,6 @@ TEST_CASE("UiStyleProvider publishes the band's tokens", "[contour][uistyle]")
     CHECK(terminal.property("tabColorGlyph").toString() == QStringLiteral("▌"));
     CHECK(terminal.property("chipOpenGlyph").toString() == QStringLiteral("["));
     CHECK(terminal.property("chipCloseGlyph").toString() == QStringLiteral("]"));
-    CHECK(terminal.property("hostDotGlyph").toString() == QStringLiteral("●"));
 }
 
 // {{{ Panes (Step 2)

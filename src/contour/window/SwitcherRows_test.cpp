@@ -3,6 +3,7 @@
 // The switcher's rows as palette levels (boards 1, 2, 3 and 5 of the redesign): each rule is a case over a
 // fixture of plain data, with no window and no Qt.
 
+#include <contour/window/LocationChip.hpp>
 #include <contour/window/SwitcherRows.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -283,7 +284,7 @@ TEST_CASE("the daemon level lists that daemon's workspaces and its new workspace
     }
 }
 
-TEST_CASE("a window that reaches no other daemon is not offered All daemons…", "[switcher]")
+TEST_CASE("a window that reaches no other daemon lists its own workspaces and no other daemon", "[switcher]")
 {
     auto const daemons = boards();
     auto const rows =
@@ -292,34 +293,79 @@ TEST_CASE("a window that reaches no other daemon is not offered All daemons…",
     CHECK(kindsOf(rows) == std::vector { Workspace, Workspace, Workspace, Workspace, NewWorkspace });
 }
 
-TEST_CASE("the chip scope lists the window's daemon, New Workspace and All daemons…", "[switcher]")
+TEST_CASE("the chip's rows are the top level: the window's daemon first, named local for the default label",
+          "[switcher]")
+{
+    auto daemons = boards();
+    daemons[0].address = label("default");
+    auto const chip =
+        switcherRows(SwitcherInputs { .daemons = daemons }, SwitcherView { .origin = SwitcherOrigin::Chip });
+
+    CHECK(chip[0].groupTitle == "Workspaces on local");
+    CHECK(chip[0].title == "contour");
+    CHECK(kindsOf(chip) == kindsOf(switcherRows(SwitcherInputs { .daemons = daemons }, SwitcherView {})));
+    CHECK(std::ranges::none_of(chip, [](SwitcherRow const& row) { return row.title == "All daemons…"; }));
+}
+
+TEST_CASE("a daemon's group title names it by the window's host label, as the chip does", "[switcher][chip]")
+{
+    auto daemons = boards();
+    daemons[1].hostLabel = "studio";
+    auto const rows = switcherRows(SwitcherInputs { .daemons = daemons },
+                                   SwitcherView { .level = SwitcherLevel::Daemon, .daemon = 1 });
+    CHECK(rows[0].groupTitle == "Workspaces on studio");
+}
+
+TEST_CASE("switcherDaemonName names the default daemon local and keeps a host's saved name", "[switcher]")
+{
+    using contour::window::switcherDaemonName;
+    CHECK(switcherDaemonName(label("default"), {}) == "local");
+    CHECK(switcherDaemonName(label("work"), {}) == "work");
+    CHECK(switcherDaemonName(host("ci-box"), {}) == "ci-box");
+    CHECK(
+        switcherDaemonName(SwitchTarget { .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = {} }, {})
+        == "this daemon");
+}
+
+TEST_CASE("switcherDaemonName names a daemon as the location chip does, by the window's host label",
+          "[switcher][chip]")
+{
+    using contour::window::SwitcherDaemon;
+    using contour::window::switcherDaemonName;
+    // A window on a daemon its host label names: the chip says the label, so the popup does too.
+    CHECK(switcherDaemonName(host("ci-box"), "studio") == "studio");
+    CHECK(switcherDaemonName(host("ci-box"), "studio")
+          == contour::window::locationDaemonName(host("ci-box"), "studio"));
+    CHECK(switcherDaemonName(SwitchTarget { .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = {} },
+                             "studio")
+          == "studio");
+    // A label target with no host label keeps its label.
+    CHECK(switcherDaemonName(label("work"), {}) == contour::window::locationDaemonName(label("work"), {}));
+    // Every place the popup names a daemon reads the daemon's own label: the group title, the status.
+    auto const daemon = SwitcherDaemon { .address = host("ci-box"), .hostLabel = "studio" };
+    CHECK(switcherDaemonName(daemon) == "studio");
+}
+
+TEST_CASE("the chip opens every daemon, and a window without a daemon its own workspaces alone", "[switcher]")
+{
+    using contour::window::ChipSwitcherScope;
+    using contour::window::DaemonHosting;
+    using contour::window::switcherScopeFor;
+    STATIC_CHECK(ChipSwitcherScope == SwitcherScope::Everything);
+    CHECK(switcherScopeFor(ChipSwitcherScope, DaemonHosting::Daemon) == SwitcherScope::Everything);
+    CHECK(switcherScopeFor(ChipSwitcherScope, DaemonHosting::InProcess) == SwitcherScope::WindowOnly);
+    CHECK(switcherScopeFor(SwitcherScope::OneDaemon, DaemonHosting::Daemon) == SwitcherScope::OneDaemon);
+    // A tmux-attached window is no in-process one: it keeps the scope that was asked.
+    CHECK(switcherScopeFor(ChipSwitcherScope, DaemonHosting::OtherHost) == SwitcherScope::Everything);
+}
+
+TEST_CASE("a pick's one daemon, centred, lists its workspaces and no way out to every daemon", "[switcher]")
 {
     auto const daemons = boards();
-    auto const rows =
-        switcherRows(SwitcherInputs { .daemons = daemons },
-                     SwitcherView { .origin = SwitcherOrigin::Chip, .scope = SwitcherScope::OneDaemon });
-
-    CHECK(kindsOf(rows)
-          == std::vector { Workspace, Workspace, Workspace, Workspace, NewWorkspace, AllDaemons });
-    CHECK(rows[0].groupTitle == "Workspaces on work");
-    CHECK(rows[4].groupTitle == "Actions");
-    CHECK(rows[5].title == "All daemons…");
-
-    SECTION("widened, it is the top level")
-    {
-        auto const widened = switcherRows(SwitcherInputs { .daemons = daemons },
-                                          SwitcherView { .origin = SwitcherOrigin::Chip });
-        CHECK(kindsOf(widened)
-              == kindsOf(switcherRows(SwitcherInputs { .daemons = daemons }, SwitcherView {})));
-    }
-
-    SECTION("a pick's one daemon, centred, offers no way out to every daemon")
-    {
-        auto const pick = switcherRows(SwitcherInputs { .daemons = daemons },
-                                       SwitcherView { .daemon = 1, .scope = SwitcherScope::OneDaemon });
-        CHECK(kindsOf(pick) == std::vector { Workspace, Workspace, Workspace, NewWorkspace });
-        CHECK(pick[0].groupTitle == "Workspaces on home");
-    }
+    auto const pick = switcherRows(SwitcherInputs { .daemons = daemons },
+                                   SwitcherView { .daemon = 1, .scope = SwitcherScope::OneDaemon });
+    CHECK(kindsOf(pick) == std::vector { Workspace, Workspace, Workspace, NewWorkspace });
+    CHECK(pick[0].groupTitle == "Workspaces on home");
 }
 
 TEST_CASE("the new daemon level offers one action for a label it can act on", "[switcher]")

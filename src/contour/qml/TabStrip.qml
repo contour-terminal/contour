@@ -42,6 +42,8 @@ Row {
     property real availableWidth: 0
     // The strip's parts that are not the tabs, which the title bar subtracts from the tabs' width.
     readonly property real fixedWidth: newTabLoader.width + newTabMenuLoader.width
+    /// How many tabs the well lists.
+    readonly property int tabCount: list.count
     // The "▾" the title bar pops the new-tab menu at, or null where the strip draws none.
     readonly property Item newTabMenuAnchor: newTabMenuLoader.item
     // How many tabs have their flyout or a rename open; kept by the delegates.

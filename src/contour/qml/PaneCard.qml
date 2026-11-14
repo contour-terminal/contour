@@ -157,7 +157,7 @@ Item {
     }
 
     // While the connection to the host this pane mirrors is sought again, the grid dims by the kit's pane
-    // dim and a pill says so, centred on it. The window's host chip says the same of the whole window
+    // dim and a pill says so, centred on it. The window's location chip says the same of the whole window
     // (Reconnecting…); this names the host where there is one, and nothing here contradicts it. Declared
     // before the header at its z, so a header revealed over the grid (Minimal) stays above the dim; not
     // over an ended pane, whose footer already says how it stands.
@@ -185,7 +185,7 @@ Item {
             color: reconnecting.color
         }
 
-        // Its glyph is the Working badge's, drawn still in the warning mark ink of the host chip's
+        // Its glyph is the Working badge's, drawn still in the warning mark ink of the location chip's
         // Reconnecting dot, resolved on the pill's own fill (on the Terminal row, the scheme inverted): the
         // pill is a steady state, not a progress. Nor is it a popover, so it casts a shadow only where the
         // row's shadow is soft; the Terminal row's hard offset copy would read as a second row beneath it.

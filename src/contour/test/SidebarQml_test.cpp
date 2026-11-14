@@ -17,6 +17,7 @@
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
 #include <contour/window/CloseDialogTable.hpp>
+#include <contour/window/LocationChip.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/SidebarControls.hpp>
 #include <contour/window/SidebarModel.hpp>
@@ -38,6 +39,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -145,6 +147,8 @@ struct SidebarScene
     /// The sidebar's width in logical pixels; the row's own default when unset.
     std::optional<int> width = std::nullopt;
     ClaudeTab claudeTab = ClaudeTab::OnePane; ///< Whether claude's tab is split.
+    std::string billingTitle = "billing";     ///< The first workspace's name, which the location chip shows.
+    int tabCount = 2;                         ///< How many tabs the window has.
 };
 
 /// Main.qml over a mock whose sidebar lists two workspaces: billing (a pane that asks for a permission and
@@ -153,7 +157,7 @@ struct SidebarWindow
 {
     explicit SidebarWindow(SidebarScene scene):
         ownedController { std::make_unique<MockMainController>(contour::test::MainWindowScene {
-            .tabCount = 2,
+            .tabCount = scene.tabCount,
             .rootPane = scene.paneTree == PaneTree::Leaf ? &pane : nullptr,
             .tabBarVisibility = scene.tabBar,
             .shortcutStyle =
@@ -184,7 +188,7 @@ struct SidebarWindow
         auto build = contour::test::directoryPaneOf(11, "build");
         build.status = { recordOf(vtbackend::ProgramState::Working) };
         auto& listed = controller.sidebarSource().listed;
-        auto billingWorkspace = contour::test::directoryWorkspaceOf(1, "billing", { claude, build });
+        auto billingWorkspace = contour::test::directoryWorkspaceOf(1, scene.billingTitle, { claude, build });
         billingWorkspace.git = contour::window::DirectoryGit { .branch = "feat/billing", .ahead = 2 };
         if (scene.claudeTab == ClaudeTab::Split)
             billingWorkspace.tabs.front().panes.push_back(contour::test::directoryPaneOf(12, "review"));
@@ -981,16 +985,17 @@ TEST_CASE("the chip names what the other workspaces ask (offscreen)",
     {
         BillingAsks billing;
         bool marked;
-        char const* name;
+        char const* description;
     };
     for (auto const row: drawnRows())
     {
-        for (auto const& [billing, marked, name]:
-             { Case { BillingAsks::Permission, true, "Workspace docs, another workspace needs you" },
-               Case { BillingAsks::Done, true, "Workspace docs, another workspace done" },
-               Case { BillingAsks::FailedSeen, false, "Workspace docs" } })
+        // The name is what the chip shows, whatever the others ask; what they ask is the description's.
+        for (auto const& [billing, marked, description]:
+             { Case { BillingAsks::Permission, true, "Another workspace needs you, collapsed" },
+               Case { BillingAsks::Done, true, "Another workspace is done, collapsed" },
+               Case { BillingAsks::FailedSeen, false, "collapsed" } })
         {
-            INFO("row " << static_cast<int>(row) << ", " << name);
+            INFO("row " << static_cast<int>(row) << ", " << description);
             auto scene = SidebarWindow { { .row = row,
                                            .visibility = contour::config::SidebarVisibility::Hidden,
                                            .shownWorkspace = 2,
@@ -999,7 +1004,8 @@ TEST_CASE("the chip names what the other workspaces ask (offscreen)",
             REQUIRE(chip != nullptr);
             auto const* attached = accessibleOf(*chip);
             REQUIRE(attached != nullptr);
-            CHECK(attached->property("name").toString() == QString::fromLatin1(name));
+            CHECK(attached->property("name").toString() == QStringLiteral("Workspace docs"));
+            CHECK(attached->property("description").toString() == QString::fromLatin1(description));
             auto* marker = scene.item(QStringLiteral("workspaceChipMarker"));
             REQUIRE(marker != nullptr);
             CHECK(marker->isVisible() == marked);
@@ -1998,3 +2004,667 @@ TEST_CASE("every sidebar control's tooltip names the chord its action is bound t
             CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
         }
 }
+
+// {{{ The location chip: daemon, dot, state and workspace in one control
+
+namespace
+{
+/// What the chip says, left to right, the way the Terminal row prints it: its visible parts joined by a
+/// space, the brackets hugging what they enclose (`[local › billing ▾]`).
+[[nodiscard]] QString chipSpelling(QQuickItem const& chip)
+{
+    constexpr auto Parts =
+        std::array { "workspaceChipOpen",   "workspaceChipDotGlyph",  "workspaceChipDaemon",
+                     "workspaceChipStatus", "workspaceChipSeparator", "workspaceChipLabel",
+                     "workspaceChipCaret",  "workspaceChipClose" };
+    auto spoken = QStringList {};
+    for (auto const* name: Parts)
+    {
+        auto const* part = chip.findChild<QQuickItem*>(QString::fromLatin1(name));
+        if (part != nullptr && part->isVisible() && !part->property("text").toString().isEmpty())
+            spoken << part->property("text").toString();
+    }
+    return spoken.join(QLatin1Char(' '))
+        .replace(QStringLiteral("[ "), QStringLiteral("["))
+        .replace(QStringLiteral(" ]"), QStringLiteral("]"));
+}
+
+/// The chip's child named @p name.
+[[nodiscard]] QQuickItem* chipPart(QQuickItem const& chip, char const* name)
+{
+    return chip.findChild<QQuickItem*>(QString::fromLatin1(name));
+}
+} // namespace
+
+TEST_CASE("the location chip names the daemon, a remote's dot and its state on every row (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    using contour::window::DaemonLocality;
+    using contour::window::HostChipState;
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Hidden } };
+    auto* chip = scene.item(QStringLiteral("workspaceChip"));
+    REQUIRE(chip != nullptr);
+    auto const bracketed = row == ChromeStyle::Terminal;
+
+    // The default daemon, up: its name and nothing else before the workspace.
+    scene.controller.setDaemon(QStringLiteral("local"));
+    QCoreApplication::processEvents();
+    CHECK(chipPart(*chip, "workspaceChipDaemon")->property("text").toString() == QStringLiteral("local"));
+    CHECK_FALSE(chipPart(*chip, "workspaceChipDot")->isVisible());
+    CHECK_FALSE(chipPart(*chip, "workspaceChipDotGlyph")->isVisible());
+    CHECK_FALSE(chipPart(*chip, "workspaceChipStatus")->isVisible());
+    CHECK(chipPart(*chip, "workspaceChipLabel")->property("text").toString() == QStringLiteral("billing"));
+    if (bracketed)
+        CHECK(chipSpelling(*chip) == QStringLiteral("[local › billing ▾]"));
+
+    // A remote daemon that is reconnecting: the dot (a glyph on the Terminal row), the host and the
+    // words.
+    scene.controller.setDaemon(QStringLiteral("starfive"), DaemonLocality::Remote);
+    scene.controller.setHostChipState(static_cast<int>(HostChipState::Reconnecting));
+    QCoreApplication::processEvents();
+    CHECK(chipPart(*chip, "workspaceChipDot")->isVisible() == !bracketed);
+    CHECK(chipPart(*chip, "workspaceChipDotGlyph")->isVisible() == bracketed);
+    CHECK(chipPart(*chip, "workspaceChipStatus")->property("text").toString()
+          == QStringLiteral("Reconnecting…"));
+    if (bracketed)
+        CHECK(chipSpelling(*chip) == QStringLiteral("[◑ starfive Reconnecting… › billing ▾]"));
+
+    // Each state has its own glyph, so colour is never the only cue.
+    if (bracketed)
+        for (auto const state: { HostChipState::Connected, HostChipState::Disconnected })
+        {
+            scene.controller.setHostChipState(static_cast<int>(state));
+            QCoreApplication::processEvents();
+            CHECK(chipPart(*chip, "workspaceChipDotGlyph")->property("text").toString()
+                  == QString::fromUtf8(contour::window::daemonStateGlyph(state)));
+        }
+    CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+}
+
+TEST_CASE("the location chip gives way in steps, and the workspace keeps six characters (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    using contour::window::DaemonLocality;
+    using contour::window::HostChipState;
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto scene = SidebarWindow { { .row = row,
+                                   .visibility = contour::config::SidebarVisibility::Hidden,
+                                   .billingTitle = "billing-and-invoices" } };
+    scene.controller.setDaemon(QStringLiteral("starfive-build-server-0123456789-and-more"),
+                               DaemonLocality::Remote);
+    scene.controller.setHostChipState(static_cast<int>(HostChipState::Reconnecting));
+    QCoreApplication::processEvents();
+    auto* chip = scene.item(QStringLiteral("workspaceChip"));
+    auto* well = scene.item(QStringLiteral("tabWell"));
+    auto* bar = scene.item(QStringLiteral("titleBar"));
+    REQUIRE(bar != nullptr);
+    REQUIRE(chip != nullptr);
+    REQUIRE(well != nullptr);
+    auto* const style =
+        scene.engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto minimum = 0.0;
+    REQUIRE(QMetaObject::invokeMethod(style, "tabWellMinimum", Q_RETURN_ARG(qreal, minimum), Q_ARG(int, 2)));
+
+    // The window cannot be narrower than the band's parts need (WindowController::setBandWidths): the
+    // window manager holds it there, so the steps below stop at that width.
+    auto const windowMinimum = static_cast<int>(std::ceil(scene.controller.bandMinimumWidth()));
+    REQUIRE(windowMinimum > 0);
+
+    // Narrowing the window steps the chip down in order, never skipping back.
+    auto previous = 0;
+    auto lastStepWidth = -1.0;
+    for (auto const requested: { 1400, 900, 700, 560, 480, 400, 340, 300 })
+    {
+        auto const width = std::max(requested, windowMinimum);
+        INFO("window width " << width);
+        scene.window->resize(width, 640);
+        QCoreApplication::processEvents();
+        QTest::qWait(30);
+        auto const fit = chip->property("fit").toInt();
+        INFO("fit " << fit);
+        CHECK(fit >= previous);
+        previous = fit;
+        // The workspace is whole until the last step, which keeps exactly the floor (6 characters) and `…`;
+        // and the well keeps at least its minimum, at every width the window can have.
+        auto const workspaceFits = fit < static_cast<int>(contour::window::LocationChipFit::WorkspaceElided);
+        CHECK(chipPart(*chip, "workspaceChipLabel")->property("text").toString()
+              == (workspaceFits ? QStringLiteral("billing-and-invoices") : QStringLiteral("billin…")));
+        // The chip fits the room that leaves the tabs their labels, except at its last step, which it cannot
+        // go below: there it is one width however narrow the window gets (the window's minimum keeps the room
+        // for exactly that, and one icon-only tab).
+        if (fit == static_cast<int>(contour::window::LocationChipFit::WorkspaceElided))
+        {
+            if (lastStepWidth < 0)
+                lastStepWidth = chip->width();
+            CHECK(chip->width() == lastStepWidth);
+        }
+        else
+            CHECK(chip->width() <= bar->property("chipRoom").toReal() + 0.5);
+        CHECK(well->width() >= minimum - 0.5);
+        // The state's words go first, the daemon's name next.
+        CHECK(chipPart(*chip, "workspaceChipStatus")->isVisible() == (fit == 0));
+        CHECK(chipPart(*chip, "workspaceChipDaemon")->isVisible() == (fit <= 2));
+        // The dot stays through every step.
+        CHECK((chipPart(*chip, "workspaceChipDot")->isVisible()
+               || chipPart(*chip, "workspaceChipDotGlyph")->isVisible()));
+        if (fit == 2)
+            CHECK(chipPart(*chip, "workspaceChipDaemon")->property("text").toString().size() <= 10);
+    }
+    // The narrowest window reached the end of the steps.
+    CHECK(previous >= 3);
+    CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+}
+
+TEST_CASE("the location chip yields before the tabs go icon-only (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    using contour::window::DaemonLocality;
+    using contour::window::HostChipState;
+    using contour::window::LocationChipFit;
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    // Three tabs and a long remote daemon that is reconnecting: the chip's widest case.
+    auto scene = SidebarWindow { { .row = row,
+                                   .visibility = contour::config::SidebarVisibility::Hidden,
+                                   .billingTitle = "billing-and-invoices",
+                                   .tabCount = 3 } };
+    scene.controller.setDaemon(QStringLiteral("starfive-build-server-0123456789-and-more"),
+                               DaemonLocality::Remote);
+    scene.controller.setHostChipState(static_cast<int>(HostChipState::Reconnecting));
+    QCoreApplication::processEvents();
+    auto* chip = scene.item(QStringLiteral("workspaceChip"));
+    auto* strip = scene.item(QStringLiteral("tabStrip"));
+    auto* well = scene.item(QStringLiteral("tabWell"));
+    auto* bar = scene.item(QStringLiteral("titleBar"));
+    REQUIRE(chip != nullptr);
+    REQUIRE(strip != nullptr);
+    REQUIRE(well != nullptr);
+    REQUIRE(bar != nullptr);
+    REQUIRE(strip->property("tabCount").toInt() == 3);
+    auto const pills = strip->property("pill").toBool();
+
+    // Whatever the window's width, no tab goes icon-only while the chip could still give way: each tab keeps
+    // at least its minimum (its label), and the chip sits wherever its room leaves it.
+    auto const windowMinimum = static_cast<int>(std::ceil(scene.controller.bandMinimumWidth()));
+    auto sawElidedChip = false;
+    for (auto const requested: { 1400, 1000, 800, 700 })
+    {
+        auto const width = std::max(requested, windowMinimum);
+        INFO("window width " << width);
+        scene.window->resize(width, 640);
+        QCoreApplication::processEvents();
+        QTest::qWait(30);
+        auto const fit = chip->property("fit").toInt();
+        INFO("chip fit " << fit);
+        if (pills)
+        {
+            auto const layout = strip->property("wellLayout").toMap();
+            CHECK(layout.value(QStringLiteral("label")).toString() == QStringLiteral("full"));
+            CHECK(layout.value(QStringLiteral("tabWidth")).toReal() >= scene.style("minTabWidth") - 0.5);
+        }
+        sawElidedChip = sawElidedChip || fit > static_cast<int>(LocationChipFit::Full);
+        if (requested == 700)
+        {
+            // At 700 the chip, in full, would not have left the tabs their labels: it stepped down to the
+            // step this row's room allows: the daemon's dot on the macOS and Terminal rows, the workspace's
+            // elision on the two whose chrome leaves less room.
+            auto const expected = (row == ChromeStyle::MacOS || row == ChromeStyle::Terminal)
+                                      ? LocationChipFit::DotOnly
+                                      : LocationChipFit::WorkspaceElided;
+            CHECK(fit == static_cast<int>(expected));
+        }
+        if (row == ChromeStyle::Terminal)
+        {
+            // The Terminal row counts in cells: its well is a whole number of them, three at least.
+            auto const cells = well->width() / scene.style("cellWidth");
+            CHECK(std::abs(cells - std::round(cells)) < 0.01);
+            CHECK(cells >= 3);
+        }
+        CHECK(well->width() > 0);
+    }
+    CHECK(sawElidedChip);
+    CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+}
+
+TEST_CASE("the window's minimum width keeps the tab well and the chip's last step (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    using contour::window::DaemonLocality;
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto scene = SidebarWindow { { .row = row,
+                                   .visibility = contour::config::SidebarVisibility::Hidden,
+                                   .billingTitle = "billing-and-invoices" } };
+    scene.controller.setDaemon(QStringLiteral("starfive-build-server-0123456789-and-more"),
+                               DaemonLocality::Remote);
+    scene.controller.setHostChipState(static_cast<int>(contour::window::HostChipState::Reconnecting));
+    QCoreApplication::processEvents();
+    auto* chip = scene.item(QStringLiteral("workspaceChip"));
+    auto* well = scene.item(QStringLiteral("tabWell"));
+    REQUIRE(chip != nullptr);
+    REQUIRE(well != nullptr);
+    auto* const style =
+        scene.engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto minimum = 0.0;
+    REQUIRE(QMetaObject::invokeMethod(style, "tabWellMinimum", Q_RETURN_ARG(qreal, minimum), Q_ARG(int, 2)));
+
+    auto const windowMinimum = static_cast<int>(std::ceil(scene.controller.bandMinimumWidth()));
+    scene.window->resize(windowMinimum, 640);
+    QCoreApplication::processEvents();
+    QTest::qWait(30);
+
+    // At the narrowest the window can be, the chip is at its last step and the well still has its minimum.
+    CHECK(chip->property("fit").toInt()
+          == static_cast<int>(contour::window::LocationChipFit::WorkspaceElided));
+    CHECK(well->width() >= minimum - 0.5);
+    // The workspace keeps exactly the floor and the ellipsis, while the daemon reconnects.
+    CHECK(chipPart(*chip, "workspaceChipLabel")->property("text").toString() == QStringLiteral("billin…"));
+    CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+}
+
+TEST_CASE("the window's minimum width does not move with the connection or a marker (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    using contour::window::HostChipState;
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto const minimumOf = [&](BillingAsks asks, HostChipState state, int& windowMinimum) {
+        auto scene = SidebarWindow { { .row = row,
+                                       .visibility = contour::config::SidebarVisibility::Hidden,
+                                       .shownWorkspace = 2,
+                                       .billing = asks } };
+        scene.controller.setDaemon(QStringLiteral("local"));
+        scene.controller.setHostChipState(static_cast<int>(HostChipState::Connected));
+        QCoreApplication::processEvents();
+        auto* well = scene.item(QStringLiteral("tabWell"));
+        REQUIRE(well != nullptr);
+        auto* const style =
+            scene.engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+        REQUIRE(style != nullptr);
+        auto wellMinimum = 0.0;
+        REQUIRE(QMetaObject::invokeMethod(
+            style, "tabWellMinimum", Q_RETURN_ARG(qreal, wellMinimum), Q_ARG(int, 2)));
+        auto const connected = scene.controller.bandMinimumWidth();
+        auto* marker = scene.item(QStringLiteral("workspaceChipMarker"));
+        REQUIRE(marker != nullptr);
+        CHECK(marker->isVisible() == (asks == BillingAsks::Permission));
+
+        // The window sits at its narrowest, then the link goes down: nothing may ask for more room.
+        windowMinimum = static_cast<int>(std::ceil(connected));
+        scene.window->resize(windowMinimum, 640);
+        scene.controller.setHostChipState(static_cast<int>(state));
+        QCoreApplication::processEvents();
+        QTest::qWait(30);
+        CHECK(scene.controller.bandMinimumWidth() == connected);
+        CHECK(well->width() >= wellMinimum - 0.5);
+        return connected;
+    };
+    auto unusedMinimum = 0;
+    auto const reference = minimumOf(BillingAsks::Nothing, HostChipState::Connected, unusedMinimum);
+    CHECK(reference > 0);
+    CHECK(minimumOf(BillingAsks::Nothing, HostChipState::Reconnecting, unusedMinimum) == reference);
+    CHECK(minimumOf(BillingAsks::Nothing, HostChipState::Disconnected, unusedMinimum) == reference);
+    // Another workspace asks for you: the marker shows, and the minimum is the same.
+    CHECK(minimumOf(BillingAsks::Permission, HostChipState::Connected, unusedMinimum) == reference);
+    CHECK(minimumOf(BillingAsks::Permission, HostChipState::Reconnecting, unusedMinimum) == reference);
+}
+
+TEST_CASE("another workspace's marker does not move the chip's fit or the tab layout (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    // At a width where the chip is stepping down, so that a few pixels of marker would change the answer.
+    struct Layout
+    {
+        int fit = -1;
+        QVariantMap widths;
+        QVariantMap tabs;
+        bool markerShown = false;
+    };
+    auto const layoutWith = [&](BillingAsks asks, int width) {
+        auto scene = SidebarWindow { { .row = row,
+                                       .visibility = contour::config::SidebarVisibility::Hidden,
+                                       .shownWorkspace = 2,
+                                       .billing = asks,
+                                       .billingTitle = "billing-and-invoices",
+                                       .tabCount = 3 } };
+        scene.controller.setDaemon(QStringLiteral("local"));
+        QCoreApplication::processEvents();
+        auto* chip = scene.item(QStringLiteral("workspaceChip"));
+        auto* bar = scene.item(QStringLiteral("titleBar"));
+        auto* marker = scene.item(QStringLiteral("workspaceChipMarker"));
+        REQUIRE(chip != nullptr);
+        REQUIRE(bar != nullptr);
+        REQUIRE(marker != nullptr);
+        scene.window->resize(
+            std::max(width, static_cast<int>(std::ceil(scene.controller.bandMinimumWidth()))), 640);
+        QCoreApplication::processEvents();
+        QTest::qWait(30);
+        return Layout { .fit = chip->property("fit").toInt(),
+                        .widths = chip->property("fitWidths").toMap(),
+                        .tabs = bar->property("bandAllocation").toMap(),
+                        .markerShown = marker->isVisible() };
+    };
+    for (auto const width: { 1000, 800, 700, 600, 500 })
+    {
+        INFO("window width " << width);
+        auto const without = layoutWith(BillingAsks::Nothing, width);
+        auto const with = layoutWith(BillingAsks::Permission, width);
+        CHECK_FALSE(without.markerShown);
+        CHECK(with.markerShown);
+        // Every step is measured as if the marker were there, so it never re-fits the band: the allocation of
+        // the room between the chip and the tabs is the same (the marker's own pixels still sit in the chip).
+        CHECK(with.widths == without.widths);
+        CHECK(with.fit == without.fit);
+        CHECK(with.tabs == without.tabs);
+    }
+}
+
+TEST_CASE("the location chip's tooltip names the switcher and the chord bound now, or none (offscreen)",
+          "[contour][gui][qml][sidebar][chip][tooltip]")
+{
+    constexpr auto Bound =
+        std::string_view { "  - { mods: [Primary, Alt], key: 'R', action: ShowSwitcher }\n" };
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Hidden } };
+    scene.controller.setDaemon(QStringLiteral("local"));
+    QCoreApplication::processEvents();
+    auto* chip = scene.item(QStringLiteral("workspaceChip"));
+    REQUIRE(chip != nullptr);
+
+    auto const* host = chip->findChild<QQuickItem*>(QStringLiteral("kitToolTipHost"));
+    REQUIRE(host != nullptr);
+    CHECK(host->property("text").toString().startsWith(QStringLiteral("Switch workspace or daemon")));
+    CHECK(host->property("shortcutCommand").toString() == QStringLiteral("ShowSwitcher"));
+
+    // Bound: the chord is read from the binding as the tooltip is about to show.
+    scene.controller.chords = contour::command::chordIndex(bindingsOf(row, Bound));
+    auto const chord = scene.controller.shortcutText(QStringLiteral("ShowSwitcher"));
+    REQUIRE_FALSE(chord.isEmpty());
+    auto const* tip = openToolTipOf(*scene.window, *chip);
+    CHECK(tip->property("shownShortcut").toString() == chord);
+    CHECK(tip->property("shortcutShown").toBool());
+
+    // Unbound (rule 5.5): the text alone, no stray separator and no invented chord.
+    QTest::mouseMove(scene.window, QPoint { 5, scene.window->height() - 5 });
+    QCoreApplication::processEvents();
+    scene.controller.chords = contour::command::ChordIndex {};
+    auto const* unbound = openToolTipOf(*scene.window, *chip);
+    CHECK(unbound->property("shownShortcut").toString().isEmpty());
+    CHECK_FALSE(unbound->property("shortcutShown").toBool());
+    CHECK(unbound->property("text").toString().startsWith(QStringLiteral("Switch workspace or daemon")));
+}
+// }}}
+
+// {{{ The daemon control heading the sidebar
+
+namespace
+{
+/// The daemon control a shown sidebar carries: its own title row's, or on a row whose header bar draws that
+/// row, the header bar's part above the sidebar.
+[[nodiscard]] QQuickItem* sidebarDaemonChipOf(SidebarWindow const& scene)
+{
+    if (auto* own = scene.visibleItem(QStringLiteral("sidebarDaemonChip")); own != nullptr)
+        return own;
+    return scene.visibleItem(QStringLiteral("headerSidebarDaemonChip"));
+}
+} // namespace
+
+TEST_CASE("a shown sidebar's daemon control names the daemon and the band holds no chip (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+    scene.controller.setDaemon(QStringLiteral("local"));
+    QCoreApplication::processEvents();
+
+    auto* chip = sidebarDaemonChipOf(scene);
+    REQUIRE(chip != nullptr);
+    CHECK(chipPart(*chip, "workspaceChipDaemon")
+              ->property("text")
+              .toString()
+              .startsWith(QStringLiteral("local")));
+    CHECK(chipPart(*chip, "workspaceChipCaret")->isVisible());
+    // The daemon alone: no workspace segment, and the daemon is named nowhere else.
+    CHECK_FALSE(chipPart(*chip, "workspaceChipLabel")->isVisible());
+    CHECK_FALSE(chipPart(*chip, "workspaceChipSeparator")->isVisible());
+    CHECK_FALSE(chipPart(*chip, "workspaceChipDot")->isVisible());
+    CHECK_FALSE(chipPart(*chip, "workspaceChipDotGlyph")->isVisible());
+    CHECK(scene.visibleItem(QStringLiteral("workspaceChip")) == nullptr);
+    if (row == ChromeStyle::Terminal)
+        CHECK(chipSpelling(*chip) == QStringLiteral("[local ▾]"));
+
+    // The same tooltip as the band's chip.
+    auto const* host = chip->findChild<QQuickItem*>(QStringLiteral("kitToolTipHost"));
+    REQUIRE(host != nullptr);
+    CHECK(host->property("text").toString().startsWith(QStringLiteral("Switch workspace or daemon")));
+    CHECK(host->property("shortcutCommand").toString() == QStringLiteral("ShowSwitcher"));
+    CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+}
+
+TEST_CASE("a shown sidebar's daemon control adds the dot and the state when not connected (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    using contour::window::DaemonLocality;
+    using contour::window::HostChipState;
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+    scene.controller.setDaemon(QStringLiteral("starfive"), DaemonLocality::Remote);
+    scene.controller.setHostChipState(static_cast<int>(HostChipState::Reconnecting));
+    QCoreApplication::processEvents();
+
+    auto* chip = sidebarDaemonChipOf(scene);
+    REQUIRE(chip != nullptr);
+    auto const bracketed = row == ChromeStyle::Terminal;
+    CHECK(chipPart(*chip, "workspaceChipDot")->isVisible() == !bracketed);
+    CHECK(chipPart(*chip, "workspaceChipDotGlyph")->isVisible() == bracketed);
+    // The sidebar's room is short: the state's words are the first thing to give way, the dot never does.
+    CHECK(chipPart(*chip, "workspaceChipStatus")->isVisible() == (chip->property("fit").toInt() == 0));
+    CHECK_FALSE(chipPart(*chip, "workspaceChipLabel")->isVisible());
+    if (bracketed)
+    {
+        // Every step is measured with the attention marker reserved (it never moves the fit), which on the
+        // cells of this row can cost the words their step: the dot and the name stay either way.
+        auto const fit = chip->property("fit").toInt();
+        CHECK(fit <= static_cast<int>(contour::window::LocationChipFit::NoStateText));
+        CHECK(chipSpelling(*chip)
+              == (fit == 0 ? QStringLiteral("[◑ starfive Reconnecting… ▾]")
+                           : QStringLiteral("[◑ starfive ▾]")));
+    }
+    CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+}
+
+TEST_CASE("clicking a shown sidebar's daemon control drops the switcher down below it (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+    scene.controller.setDaemon(QStringLiteral("local"));
+    QCoreApplication::processEvents();
+    auto* chip = sidebarDaemonChipOf(scene);
+    REQUIRE(chip != nullptr);
+
+    scene.click(*chip);
+    REQUIRE(scene.controller.workspaceDropdownAnchor.has_value());
+    auto const chipRect = sceneRectOf(*chip);
+    auto const& anchor = *scene.controller.workspaceDropdownAnchor;
+    CHECK(anchor.left() == Catch::Approx(chipRect.left()));
+    CHECK(anchor.top() == Catch::Approx(chipRect.top()));
+    CHECK(anchor.bottom() == Catch::Approx(chipRect.bottom()));
+    auto const* attached = accessibleOf(*chip);
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::ButtonMenu);
+}
+
+TEST_CASE("a shown sidebar's daemon control is in the chrome's keyboard walk, and Return and Space open the "
+          "switcher (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+    scene.controller.setDaemon(QStringLiteral("local"));
+    QCoreApplication::processEvents();
+    auto* chip = sidebarDaemonChipOf(scene);
+    REQUIRE(chip != nullptr);
+
+    // The walk counts it, and its first stop is the control at the window's leading end.
+    CHECK(scene.controller.reportedToolbarItems >= 1);
+    scene.controller.focusToolbarItem(0);
+    QCoreApplication::processEvents();
+    CHECK(chip->hasActiveFocus());
+    CHECK(chip->property("focusRingShown").toBool());
+
+    for (auto const key: { Qt::Key_Return, Qt::Key_Space })
+    {
+        scene.controller.workspaceDropdownAnchor.reset();
+        QTest::keyClick(scene.window, key);
+        QCoreApplication::processEvents();
+        INFO("key " << static_cast<int>(key));
+        CHECK(scene.controller.workspaceDropdownAnchor.has_value());
+    }
+    CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+}
+
+TEST_CASE("a window attached to a host that is no daemon names its host alone, as a daemon-only control "
+          "(offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    SECTION("the sidebar shown: it heads the sidebar, with no workspace beside it")
+    {
+        auto scene =
+            SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+        scene.controller.attachedHost = QStringLiteral("tmuxhost");
+        scene.controller.setHosting(contour::window::DaemonHosting::OtherHost);
+        QCoreApplication::processEvents();
+        auto* chip = sidebarDaemonChipOf(scene);
+        REQUIRE(chip != nullptr);
+        CHECK(chipPart(*chip, "workspaceChipDaemon")
+                  ->property("text")
+                  .toString()
+                  .startsWith(QStringLiteral("tmuxhost")));
+        CHECK(scene.visibleItem(QStringLiteral("workspaceChip")) == nullptr);
+    }
+    SECTION("the sidebar hidden, the tabs on top: the band's chip is the host alone")
+    {
+        auto scene = SidebarWindow { { .row = row,
+                                       .visibility = contour::config::SidebarVisibility::Hidden,
+                                       .placement = contour::config::TabPlacement::Top } };
+        scene.controller.attachedHost = QStringLiteral("tmuxhost");
+        scene.controller.setHosting(contour::window::DaemonHosting::OtherHost);
+        QCoreApplication::processEvents();
+        auto* chip = scene.visibleItem(QStringLiteral("workspaceChip"));
+        REQUIRE(chip != nullptr);
+        CHECK(chip->property("namesDaemonOnly").toBool());
+        CHECK(chipPart(*chip, "workspaceChipDaemon")->property("text").toString()
+              == QStringLiteral("tmuxhost"));
+        CHECK_FALSE(chipPart(*chip, "workspaceChipLabel")->isVisible());
+    }
+}
+
+TEST_CASE("with the sidebar hidden, a breadcrumb band holds the daemon's chip (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Hidden } };
+    scene.controller.setDaemon(QStringLiteral("local"));
+    QCoreApplication::processEvents();
+    auto const* bar = scene.item(QStringLiteral("titleBar"));
+    REQUIRE(bar != nullptr);
+    // The sidebar holds the tabs, so the band's middle is the breadcrumb; with the sidebar off screen no
+    // control heads it, so the band names the daemon.
+    if (bar->property("centre").toString() != QStringLiteral("breadcrumb"))
+        SKIP("this row's band does not show a breadcrumb here");
+    CHECK(bar->property("chipPlace").toString() == QStringLiteral("band"));
+    auto* chip = scene.visibleItem(QStringLiteral("workspaceChip"));
+    REQUIRE(chip != nullptr);
+    CHECK(chipPart(*chip, "workspaceChipDaemon")
+              ->property("text")
+              .toString()
+              .startsWith(QStringLiteral("local")));
+}
+
+TEST_CASE("in process a shown sidebar keeps its heading and carries no daemon control (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+    CHECK(sidebarDaemonChipOf(scene) == nullptr);
+    auto* title = scene.visibleItem(QStringLiteral("sidebarTitle"));
+    if (title == nullptr)
+        title = scene.visibleItem(QStringLiteral("headerSidebarTitle"));
+    // macOS leaves the row unnamed (no heading to replace); the others read "Workspaces".
+    if (row == ChromeStyle::MacOS)
+        CHECK(title == nullptr);
+    else
+    {
+        REQUIRE(title != nullptr);
+        CHECK(title->property("text").toString() == QStringLiteral("Workspaces"));
+    }
+}
+
+TEST_CASE("with no band, a shown sidebar's daemon control is the one place that names the daemon (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    auto hiddenBands = 0;
+    for (auto const row:
+         { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row,
+                                       .visibility = contour::config::SidebarVisibility::Shown,
+                                       .placement = contour::config::TabPlacement::Top,
+                                       .tabBar = contour::config::TabBarVisibility::Never } };
+        scene.controller.setDaemon(QStringLiteral("local"));
+        QCoreApplication::processEvents();
+        auto const* bar = scene.item(QStringLiteral("titleBar"));
+        REQUIRE(bar != nullptr);
+        auto const bandHidden = bar->property("presence").toString() == QStringLiteral("hidden");
+        // A row whose rules still draw a band names the daemon there; this case is the band-less ones.
+        if (!bandHidden)
+            continue;
+        ++hiddenBands;
+
+        // Whether the band is there or not, the daemon is named once, at the sidebar's head.
+        auto* chip = sidebarDaemonChipOf(scene);
+        REQUIRE(chip != nullptr);
+        CHECK(chipPart(*chip, "workspaceChipDaemon")
+                  ->property("text")
+                  .toString()
+                  .startsWith(QStringLiteral("local")));
+        CHECK(scene.visibleItem(QStringLiteral("workspaceChip")) == nullptr);
+        if (bandHidden)
+            CHECK(chip->objectName() == QStringLiteral("sidebarDaemonChip"));
+    }
+    // The scenario is real: some row draws no band here.
+    CHECK(hiddenBands > 0);
+}
+// }}}

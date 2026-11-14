@@ -15,6 +15,7 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/ChromeKeys.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/LocationChip.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/QtString.hpp>
@@ -938,6 +939,40 @@ std::optional<SwitchTarget> TerminalSessionManager::daemonTargetOf(vtworkspace::
     if (binding == nullptr)
         return std::nullopt;
     return binding->daemonTarget();
+}
+
+std::string TerminalSessionManager::daemonNameOf(vtworkspace::WorkspaceId window) const
+{
+    if (auto const target = daemonTargetOf(window))
+        return window::locationDaemonName(*target, hostLabelOf(window));
+    // A host that is no daemon (a tmux attach) is named by its host label, as its host chip always did.
+    return hostingOf(window) == window::DaemonHosting::OtherHost ? std::string(hostLabelOf(window))
+                                                                 : std::string {};
+}
+
+window::DaemonHosting TerminalSessionManager::hostingOf(vtworkspace::WorkspaceId window) const
+{
+    if (isInProcessWindow(window))
+        return window::DaemonHosting::InProcess;
+    return daemonTargetOf(window) ? window::DaemonHosting::Daemon : window::DaemonHosting::OtherHost;
+}
+
+window::SwitcherOpening TerminalSessionManager::switcherOpeningFor(
+    vtworkspace::WorkspaceId window,
+    window::SwitcherPrompt prompt,
+    window::SwitcherScope scope,
+    window::SwitcherOrigin origin,
+    std::vector<window::SwitcherWorkspace> windowWorkspaces) const
+{
+    return window::SwitcherOpening { .window = window,
+                                     .windowDaemon = daemonTargetOf(window).value_or(SwitchTarget {}),
+                                     .mode = SwitchMode::Switch,
+                                     .prompt = prompt,
+                                     .pick = std::nullopt,
+                                     .scope = window::switcherScopeFor(scope, hostingOf(window)),
+                                     .windowWorkspaces = std::move(windowWorkspaces),
+                                     .origin = origin,
+                                     .windowHostLabel = std::string(hostLabelOf(window)) };
 }
 
 window::DaemonLocality TerminalSessionManager::daemonLocalityOf(vtworkspace::WorkspaceId window) const
@@ -2155,7 +2190,7 @@ void TerminalSessionManager::showSwitcher(TerminalSession const& acting)
 void TerminalSessionManager::showWorkspaceDropdown(TerminalSession const& acting, QRectF chip)
 {
     openSwitcherOver(
-        acting, window::SwitcherPrompt::Browse, "WorkspaceChip", window::SwitcherScope::OneDaemon, chip);
+        acting, window::SwitcherPrompt::Browse, "WorkspaceChip", window::ChipSwitcherScope, chip);
 }
 
 void TerminalSessionManager::newDaemon(TerminalSession const& acting)
@@ -2210,15 +2245,11 @@ void TerminalSessionManager::openSwitcherOver(TerminalSession const& acting,
     // The window's own workspaces are its sidebar's, as of now.
     controller->sidebar().refreshNow();
     if (auto const shown = _app.openSwitcher(
-            window::SwitcherOpening { .window = window->id(),
-                                      .windowDaemon = daemon.value_or(SwitchTarget {}),
-                                      .mode = SwitchMode::Switch,
-                                      .prompt = prompt,
-                                      .pick = std::nullopt,
-                                      .scope = inProcess ? window::SwitcherScope::WindowOnly : scope,
-                                      .windowWorkspaces = _app.windowWorkspacesOf(*controller, window->id()),
-                                      .origin = control ? window::SwitcherOrigin::Chip
-                                                        : window::SwitcherOrigin::Centred },
+            switcherOpeningFor(window->id(),
+                               prompt,
+                               scope,
+                               control ? window::SwitcherOrigin::Chip : window::SwitcherOrigin::Centred,
+                               _app.windowWorkspacesOf(*controller, window->id())),
             *controller,
             control);
         !shown)

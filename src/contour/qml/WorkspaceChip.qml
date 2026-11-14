@@ -1,41 +1,158 @@
 // vim:syntax=qml
-// The workspace chip, leading the tab strip while the sidebar is hidden: it names the workspace the window
-// shows (`billing ▾`) and, as the pop-up button it reads as, drops the window's workspaces down below itself
-// (WindowController.showWorkspaceDropdown). While another workspace needs the user, or has a result they have not seen, it carries that
-// workspace's status glyph as a marker (SidebarModel.workspaceChipMarked, workspaceChipGlyph) -- a shape, so it
-// does not rest on colour alone. Rest, hover and pressed follow the toolbar buttons' kit fills; keyboard focus
-// wears the focus ring; on the Terminal row it is a run of bracketed cells, `[billing ▾ !]`.
+// The location chip, leading the band: it names the daemon the window lives in and the workspace it shows --
+// `local › billing ▾` -- and, as the pop-up button it reads as, drops the switcher down below itself
+// (WindowController.showWorkspaceDropdown). A remote daemon, or a connection that is not up, adds its status
+// dot (a glyph on the Terminal row, one per state) and, while there is room, the state's words
+// (`● starfive Reconnecting… › billing ▾`). While another workspace needs the user, or has a result they have
+// not seen, it carries that workspace's status glyph as a marker (SidebarModel.workspaceChipMarked,
+// workspaceChipGlyph) -- a shape, so it does not rest on colour alone. An in-process window names no daemon
+// and the chip is the workspace alone.
+//
+// Every decision -- the daemon's name, whether the dot shows, which fit step the room allows, what each step
+// says, the tooltip, the accessible words -- is the chip model's (WindowController.chip, window/LocationChipModel.hpp).
+// The chip measures its steps (`fitWidths`) and lays out whichever `fit` the title bar sets from the room it computes. Rest,
+// hover and pressed follow the toolbar buttons' kit fills; keyboard focus wears the focus ring; on the
+// Terminal row it is a run of bracketed cells whose widths are whole cells.
 import QtQuick
 
 Item {
     id: root
     objectName: "workspaceChip"
 
-    /// A click, a tap, the accessibility press action, or Space/Return while focused.
+    /// A click, a tap, the accessibility press action, or Space/Return while focused. The chip answers it
+    /// itself, by opening the switcher below it; a host that needs more listens to it as well.
     signal clicked()
 
     /// The window's sidebar model, which names the workspace and decides the marker.
     required property var sidebar
-    /// Whether keyboard focus is on the chip and the chrome says so: the host's to set.
-    property bool focusRingShown: false
+    /// The window's controller, which owns the chip's model (`chip`) and opens the switcher.
+    required property var controller
+    /// The room the chip has to fit itself in, in pixels. The title band's chip is fitted by the band's
+    /// allocation instead, which sets `fit` from the room it shares with the tabs.
+    property real available: 0
+    /// How much of the chip fits, a window::LocationChipFit as its underlying value: by default the first step
+    /// whose width fits `available`, never from the chip's own width (which would loop).
+    property int fit: !root.chip ? 0
+        : root.namesDaemonOnly ? root.chip.fitForDaemonOnly(Object.assign({ available: root.available }, root.fitWidths))
+        : root.chip.fitFor(Object.assign({ available: root.available }, root.fitWidths))
+    /// Whether this control is the daemon alone (`local ▾`, the control that heads the sidebar) rather than
+    /// the daemon and the workspace: the same chip, the workspace segment left out.
+    property bool daemonOnly: false
+    /// Whether the chip names the daemon alone: this control is the daemon's, or the window's host is no
+    /// daemon and has no workspace to name (the chip model's call, `chip.workspaceShown`). Such a chip keeps
+    /// its name at its least step, never a bare caret.
+    readonly property bool namesDaemonOnly: root.daemonOnly || (!!root.chip && !root.chip.workspaceShown)
+    /// Whether keyboard focus is in the chrome's toolbar: with the chip's own focus, the chip wears the ring.
+    property bool toolbarHasFocus: false
+    /// Whether keyboard focus is on the chip and the chrome says so.
+    readonly property bool focusRingShown: root.activeFocus && root.toolbarHasFocus
     /// Whether the dropdown the chip opened is open: the chip wears its pressed fill meanwhile.
-    property bool isOpen: false
-    /// The accessible description, "expanded" or "collapsed" (Qt has no expanded state for a button).
-    property string openDescription: ""
+    readonly property bool isOpen: !!root.controller && !!root.controller.isWorkspaceDropdownOpen
     // Whether the dropdown was open as the press began: that press closed it, and its release must not open
     // it again (ui-ux rule 2).
     property bool _wasOpenAtPress: false
 
-    readonly property string label: root.sidebar ? root.sidebar.currentWorkspaceTitle : ""
+    /// The chip's model: everything the chip says, and the texts at every fit step.
+    /// Null while the controller has none (a lightweight test controller), when the chip says nothing.
+    readonly property var chip: !!root.controller && !!root.controller.chip ? root.controller.chip : null
+    /// The fit steps in elision order, each { fit, key, daemon, status, workspace, tooltip }: the model's to say,
+    /// so the order and the keys have one source. A step is at the position its `fit` names.
+    readonly property var fitSteps: !!root.chip && !!root.chip.steps ? root.chip.steps : []
+    /// The step the current `fit` names; the last one for a `fit` beyond them, none without steps.
+    readonly property var step: root.fitSteps.length > 0
+        ? root.fitSteps[Math.max(0, Math.min(root.fit, root.fitSteps.length - 1))] : ({})
     readonly property bool marked: !!root.sidebar && root.sidebar.workspaceChipMarked
     readonly property bool bracketed: chromeStyle.chipOpenGlyph !== ""
     readonly property real gap: root.bracketed ? chromeStyle.cellWidth : chromeStyle.space.s3
+    /// Whether the status dot (or, bracketed, its state glyph) shows: the model's call.
+    readonly property bool dotShown: !!root.chip && root.chip.dotShown
+    // How the connection looks: the dot's ink follows the palette.
+    readonly property var look: chromeStyle.paletteRevision < 0 || !root.chip
+                                ? ({}) : chromeStyle.hostChipLook(root.chip.connectionState)
+    readonly property color dotInk: root.look.dot !== undefined ? root.look.dot : "transparent"
+    /// What the daemon segment, the state and the workspace say at the current fit.
+    readonly property string daemonText: root.step.daemon ?? ""
+    readonly property string statusText: root.step.status ?? ""
+    readonly property string workspaceText: root.step.workspace ?? ""
+    /// What each fit step needs, by the steps' keys, in pixels (whole cells on the Terminal row). Independent
+    /// of `fit`, so the title bar can choose `fit` from it.
+    readonly property var fitWidths: {
+        fontMetrics.font
+        strongMetrics.font
+        const widths = {}
+        root.fitSteps.forEach(step => { widths[step.key] = root._widthAt(step) })
+        return widths
+    }
+
+    /// What the chip needs at its last fit step, the least it gets: the title bar reserves it, so the window is
+    /// never made narrower than that. That step is the one an unmeasured chip falls to, which the model names
+    /// (the daemon-only control's is not the workspace chip's).
+    readonly property real leastWidth: {
+        fontMetrics.font
+        strongMetrics.font
+        if (!root.chip || root.fitSteps.length === 0)
+            return 0
+        const least = root.namesDaemonOnly ? root.chip.fitForDaemonOnly({}) : root.chip.fitFor({})
+        return root._widthAt(root.fitSteps[Math.min(least, root.fitSteps.length - 1)])
+    }
+
+    FontMetrics {
+        id: fontMetrics
+        font: chromeStyle.type.footnote
+    }
+
+    FontMetrics {
+        id: strongMetrics
+        font: chromeStyle.type.footnoteStrong
+    }
+
+    // A text's width: whole cells on the Terminal row.
+    function _span(metrics, text) {
+        const width = metrics.advanceWidth(text)
+        return root.bracketed ? Math.ceil(width / chromeStyle.cellWidth) * chromeStyle.cellWidth : width
+    }
+
+    // The state glyph's width on the Terminal row: the widest of them, so it does not move with the connection.
+    function _dotSpan() {
+        return Math.max(...root.chip.stateGlyphs.map(glyph => root._span(fontMetrics, glyph)))
+    }
+
+    // What the chip needs at one fit step: what stays whatever fits (the ends, the caret and the marker) and
+    // the dot, the daemon, the state and the workspace as that step says them. The dot (of a chip that names a
+    // daemon) and the marker are counted as shown, whether or not they are, so the widths -- and the band's
+    // allocation made of them -- move with neither the connection nor another workspace's news.
+    function _widthAt(step) {
+        const daemon = step.daemon
+        const status = step.status
+        const workspace = step.workspace
+        let width = root.bracketed ? root._span(fontMetrics, chromeStyle.chipOpenGlyph + chromeStyle.chipCloseGlyph)
+                                   : 2 * chromeStyle.space.s5
+        width += caret.leftPadding + root._span(strongMetrics, chromeStyle.menuGlyph)
+        width += root.gap + (root.bracketed ? chromeStyle.badgeHeight : chromeStyle.size.badge)
+        let leading = false
+        if (root.chip.daemonName !== "") {
+            width += root.bracketed ? root._dotSpan() : chromeStyle.size.hostDot
+            leading = true
+        }
+        if (daemon !== "") {
+            width += (leading ? root.gap : 0) + root._span(fontMetrics, daemon)
+            leading = true
+        }
+        if (status !== "")
+            width += root.gap + root._span(fontMetrics, status)
+        if (root.namesDaemonOnly)
+            return width
+        if (daemon !== "")
+            width += root.gap + root._span(fontMetrics, chromeStyle.breadcrumbGlyph)
+        return width + (leading ? root.gap : 0) + root._span(strongMetrics, workspace)
+    }
 
     Accessible.role: Accessible.ButtonMenu
     Accessible.focusable: root.focusRingShown
     Accessible.focused: root.focusRingShown
-    Accessible.name: root.sidebar ? root.sidebar.workspaceChipAccessibleName : ""
-    Accessible.description: root.openDescription
+    // What it shows: the workspace and its daemon, or the daemon alone where it heads the sidebar.
+    Accessible.name: !root.chip ? "" : root.namesDaemonOnly ? root.chip.daemonAccessibleName : root.chip.accessibleName
+    Accessible.description: root.chip ? root.chip.accessibleDescription : ""
     Accessible.onPressAction: root.clicked()
 
     Keys.onPressed: function(event) {
@@ -44,6 +161,9 @@ Item {
             event.accepted = true
         }
     }
+
+    onClicked: if (root.controller && root.controller.showWorkspaceDropdown)
+        root.controller.showWorkspaceDropdown(root.dropdownAnchor())
 
     implicitWidth: row.implicitWidth + (root.bracketed ? 0 : chromeStyle.space.s5 + chromeStyle.space.s5)
     implicitHeight: chromeStyle.size.hostChip
@@ -77,8 +197,10 @@ Item {
              : chromeStyle.colors.chipFill
     }
 
+    // What a click does, with the chord that does the same: the window's switcher opens centred from the key.
     KitToolTipHost {
-        text: qsTr("Switch workspace")
+        text: root.step.tooltip ?? ""
+        shortcutCommand: "ShowSwitcher"
         toolTipName: "workspaceChipToolTip"
     }
 
@@ -93,6 +215,7 @@ Item {
         spacing: 0
 
         Text {
+            objectName: "workspaceChipOpen"
             visible: root.bracketed
             anchors.verticalCenter: parent.verticalCenter
             Accessible.ignored: true
@@ -101,21 +224,88 @@ Item {
             color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.chipText
         }
 
+        // The status dot: a vector circle on the native rows, the state's glyph on the Terminal row.
+        Rectangle {
+            id: dot
+            objectName: "workspaceChipDot"
+            visible: root.dotShown && !root.bracketed
+            anchors.verticalCenter: parent.verticalCenter
+            Accessible.ignored: true
+            width: chromeStyle.size.hostDot
+            height: chromeStyle.size.hostDot
+            radius: chromeStyle.size.hostDot
+            color: root.dotInk
+        }
+
         Text {
-            objectName: "workspaceChipLabel"
+            objectName: "workspaceChipDotGlyph"
+            visible: root.dotShown && root.bracketed
             anchors.verticalCenter: parent.verticalCenter
             Accessible.ignored: true
             textFormat: Text.PlainText
-            text: root.label
+            text: root.chip ? root.chip.stateGlyph : ""
+            font: chromeStyle.type.footnote
+            color: root.dotInk
+        }
+
+        // The daemon segment, absent for an in-process window and once the room is short.
+        Text {
+            objectName: "workspaceChipDaemon"
+            visible: root.daemonText !== ""
+            anchors.verticalCenter: parent.verticalCenter
+            Accessible.ignored: true
+            leftPadding: root.dotShown ? root.gap : 0
+            textFormat: Text.PlainText
+            text: root.daemonText
+            font: chromeStyle.type.footnote
+            color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.chipText
+        }
+
+        // The state's words, while the whole chip fits.
+        Text {
+            objectName: "workspaceChipStatus"
+            visible: root.statusText !== ""
+            anchors.verticalCenter: parent.verticalCenter
+            Accessible.ignored: true
+            leftPadding: root.gap
+            textFormat: Text.PlainText
+            text: root.statusText
+            font: chromeStyle.type.footnote
+            color: root.dotInk
+        }
+
+        Text {
+            objectName: "workspaceChipSeparator"
+            visible: root.daemonText !== "" && !root.namesDaemonOnly
+            anchors.verticalCenter: parent.verticalCenter
+            Accessible.ignored: true
+            leftPadding: root.gap
+            textFormat: Text.PlainText
+            text: chromeStyle.breadcrumbGlyph
+            font: chromeStyle.type.footnote
+            color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.chipText
+        }
+
+        Text {
+            objectName: "workspaceChipLabel"
+            visible: !root.namesDaemonOnly
+            anchors.verticalCenter: parent.verticalCenter
+            Accessible.ignored: true
+            // The room after whatever leads: the dot or the daemon segment.
+            leftPadding: root.dotShown || root.daemonText !== "" ? root.gap : 0
+            textFormat: Text.PlainText
+            text: root.workspaceText
             font: chromeStyle.type.footnoteStrong
             color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.chipTextStrong
         }
 
-        // The pop-up button's caret, a small step after the name (a cell on the Terminal row).
+        // The pop-up button's caret, a step after the name, the same one that parts the chip's other segments (a
+        // cell on the Terminal row).
         Text {
+            id: caret
             objectName: "workspaceChipCaret"
             anchors.verticalCenter: parent.verticalCenter
-            leftPadding: root.bracketed ? chromeStyle.cellWidth : chromeStyle.space.s1
+            leftPadding: root.gap
             Accessible.ignored: true
             textFormat: Text.PlainText
             text: chromeStyle.menuGlyph
@@ -125,6 +315,7 @@ Item {
 
         // The marker: another workspace's status glyph, after a gap.
         Item {
+            id: markerSlot
             visible: marker.known && root.marked
             anchors.verticalCenter: parent.verticalCenter
             width: root.gap + marker.implicitWidth
@@ -142,6 +333,7 @@ Item {
         }
 
         Text {
+            objectName: "workspaceChipClose"
             visible: root.bracketed
             anchors.verticalCenter: parent.verticalCenter
             Accessible.ignored: true

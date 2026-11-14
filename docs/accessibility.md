@@ -49,10 +49,16 @@ field on the settings page carries its own label.
 ## Keyboard access to the window chrome
 
 With `defaults_edition: native2026`, **Ctrl+F6** moves keyboard focus out of the terminal and into the
-window's chrome, and on through it: the terminal, then the tab bar, then the toolbar (the host chip, the
-daemon version chip and the new-tab button), then back to the terminal. **Ctrl+Shift+F6** walks the other
+window's chrome, and on through it: the terminal, then the tab bar, then the toolbar (the daemon control that
+heads a shown sidebar or the location chip, the daemon version chip and the new-tab button), then back to the terminal. **Ctrl+Shift+F6** walks the other
 way. On macOS **Ctrl+F5** goes straight to the toolbar and Ctrl+F6 moves between the areas. An area that is
 not shown, such as a tab bar hidden by `tab_bar_visibility`, is skipped.
+
+The location chip is a menu button named for what it shows, "Workspace billing on starfive"; the daemon control
+that heads a shown sidebar is named "Daemon local". The description carries the connection state when the daemon
+is not connected, what another workspace asks while the chip's marker shows ("Another workspace needs you"),
+then whether the switcher is open or closed ("Reconnecting, collapsed"), so a screen reader hears the state even
+where the chip has no room to spell it. Space or Return opens the switcher and Escape closes it.
 
 A ring marks the item that has focus: a 3 pt outline in the accent on macOS and 2 pt on Windows and Linux,
 and a run of selection-coloured cells under `ui_style: terminal`. It appears for keyboard focus only, so

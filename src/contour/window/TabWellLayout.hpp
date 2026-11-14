@@ -47,6 +47,19 @@ struct TabWellLayout
     bool operator==(TabWellLayout const&) const = default;
 };
 
+/// @param tabCount The number of pills; at least one.
+/// @param tabWidth Every pill's width.
+/// @param metrics  The widths to lay out with.
+/// @return The width of a well holding @p tabCount pills of @p tabWidth: the padding at both ends, the
+///         pills and the gaps between them.
+[[nodiscard]] constexpr double wellWidthOf(int tabCount,
+                                           double tabWidth,
+                                           TabWellMetrics const& metrics) noexcept
+{
+    auto const n = static_cast<double>(tabCount);
+    return (2 * metrics.padding) + (n * tabWidth) + ((n - 1) * metrics.gap);
+}
+
 /// Lays out the tab well.
 /// @param available The width the band leaves the well; a negative width counts as zero.
 /// @param tabCount  The number of tabs; zero or fewer gives the default layout.
@@ -72,9 +85,27 @@ struct TabWellLayout
         layout = { .tabWidth = metrics.iconOnlyTab,
                    .label = TabLabelMode::IconOnly,
                    .overflow = TabWellOverflow::Scrolls };
-    layout.wellWidth =
-        std::min(width, (2 * metrics.padding) + (n * layout.tabWidth) + ((n - 1) * metrics.gap));
+    layout.wellWidth = std::min(width, wellWidthOf(tabCount, layout.tabWidth, metrics));
     return layout;
+}
+
+/// @param tabCount The number of tabs.
+/// @param metrics  The widths to lay out with.
+/// @return The least width at which layoutTabWell() still shows every pill with its label: the padding at
+///         both ends, @p tabCount pills of the minimum width and the gaps between them; 0 without tabs. What
+///         the location chip leaves the tab well, so the chip gives way before any pill goes icon-only.
+[[nodiscard]] constexpr double labelledTabWellMinimum(int tabCount, TabWellMetrics const& metrics) noexcept
+{
+    return tabCount <= 0 ? 0 : wellWidthOf(tabCount, metrics.minTab, metrics);
+}
+
+/// @param tabCount The number of tabs.
+/// @param metrics  The widths to lay out with.
+/// @return The least width the tab well can be given at all: one icon-only pill, the well scrolling to the
+///         active tab beyond it; 0 without tabs. What the window's minimum width keeps for the well.
+[[nodiscard]] constexpr double iconOnlyTabWellMinimum(int tabCount, TabWellMetrics const& metrics) noexcept
+{
+    return tabCount <= 0 ? 0 : wellWidthOf(1, metrics.iconOnlyTab, metrics);
 }
 
 /// The name QML reads a label mode by.

@@ -278,12 +278,6 @@ enum class ChipMarker : uint8_t
 /// @return The words; empty for Idle.
 [[nodiscard]] std::string_view urgencyText(Urgency urgency) noexcept;
 
-/// What a screen reader says of the workspace chip: the workspace it names and, while it is marked, what the
-/// other workspaces ask in the words of their roll-up (`Workspace docs, another workspace failed`).
-/// @param summary The summary the chip shows.
-/// @return The name.
-[[nodiscard]] std::string workspaceChipAccessibleName(SidebarSummary const& summary);
-
 /// The detail line of a row's hover card: what it is about, where, and how long (`claude · ~/src · 4:12`).
 /// @param row The row.
 /// @return The parts it has, joined by ` · `; empty when it has none.

@@ -8,6 +8,7 @@
 
 #include <contour/test/PopupWaits.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
+#include <contour/window/LocationChipModel.hpp>
 #include <contour/window/SwitcherController.hpp>
 #include <contour/window/SwitcherPresenter.hpp>
 
@@ -26,6 +27,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <utility>
 
 namespace contour::test
 {
@@ -38,9 +40,23 @@ class MockSwitcherHost: public QObject, public window::SwitcherHost
     Q_OBJECT
     Q_PROPERTY(QObject* switcher READ switcher NOTIFY switcherChanged)
     Q_PROPERTY(bool isWorkspaceDropdownOpen READ isWorkspaceDropdownOpen NOTIFY switcherChanged)
-    Q_PROPERTY(QString workspaceChipDescription READ workspaceChipDescription NOTIFY switcherChanged)
+    // The location chip of an in-process window: the workspace alone, no daemon segment, no dot.
+    Q_PROPERTY(contour::window::LocationChipModel* chip READ chip CONSTANT)
 
   public:
+    MockSwitcherHost()
+    {
+        connect(this, &MockSwitcherHost::switcherChanged, this, [this] {
+            auto inputs = _chip.inputs();
+            inputs.disclosure =
+                isWorkspaceDropdownOpen() ? window::Disclosure::Expanded : window::Disclosure::Collapsed;
+            _chip.setInputs(std::move(inputs));
+        });
+    }
+
+    /// @return The chip's model: an in-process window's, naming the workspace `contour`.
+    [[nodiscard]] window::LocationChipModel* chip() noexcept { return &_chip; }
+
     /// Mirrors WindowController::presentSwitcher().
     void presentSwitcher(window::SwitcherController* switcher, std::optional<QRectF> anchor) override
     {
@@ -82,10 +98,6 @@ class MockSwitcherHost: public QObject, public window::SwitcherHost
 
     [[nodiscard]] QObject* switcher() const { return _switcher.data(); }
     [[nodiscard]] bool isWorkspaceDropdownOpen() const { return _switcher && _anchor.has_value(); }
-    [[nodiscard]] QString workspaceChipDescription() const
-    {
-        return isWorkspaceDropdownOpen() ? QStringLiteral("expanded") : QStringLiteral("collapsed");
-    }
 
     std::function<void(QRectF)> onDropdown; ///< What the chip's click does; nothing when unset.
     int dropdowns = 0;                      ///< How often the chip asked for its dropdown.
@@ -106,6 +118,7 @@ class MockSwitcherHost: public QObject, public window::SwitcherHost
 
     QPointer<window::SwitcherController> _switcher;
     std::optional<QRectF> _anchor;
+    window::LocationChipModel _chip { window::LocationChipInputs { .daemon = {}, .workspace = "contour" } };
 };
 
 /// A window hosting Switcher.qml and a workspace chip, over a MockSwitcherHost: Main.qml's wiring and the
@@ -141,10 +154,8 @@ Window {
         id: chip
         x: 40; y: 8
         sidebar: ({ currentWorkspaceTitle: "contour", workspaceChipMarked: false,
-                    workspaceChipAccessibleName: "contour", workspaceChipGlyph: 0 })
-        isOpen: hostWindow.switcherHost.isWorkspaceDropdownOpen
-        openDescription: hostWindow.switcherHost.workspaceChipDescription
-        onClicked: hostWindow.switcherHost.showWorkspaceDropdown(chip.dropdownAnchor())
+                    workspaceChipGlyph: 0 })
+        controller: hostWindow.switcherHost
     }
     Switcher {
         id: popup

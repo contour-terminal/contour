@@ -71,7 +71,8 @@ struct ChromeSetup
 /// @param engine             The engine to install into. Also becomes both providers' parent, so the
 ///                           tokens live exactly as long as the engine that reads them.
 /// @param setup              The row, font and window controls to install.
-inline void installChromeStyle(QQmlEngine& engine, ChromeSetup const& setup)
+/// @return The chrome provider installed, which the engine owns.
+inline contour::window::UiStyleProvider* installChromeStyle(QQmlEngine& engine, ChromeSetup const& setup)
 {
     auto* provider = new contour::window::UiStyleProvider(
         contour::window::ChromeInputs { .row = setup.row,
@@ -99,6 +100,7 @@ inline void installChromeStyle(QQmlEngine& engine, ChromeSetup const& setup)
     // The popups' drop shadow is served as an image, exactly as ContourGuiApp serves it: without
     // this every popup logs "Invalid image provider", which the run-wide gate turns into a failure.
     engine.addImageProvider(QStringLiteral("popupshadow"), new contour::window::PopupShadowImageProvider());
+    return provider;
 }
 
 /// Builds the chrome setup that a test sees when it names no row: @p style resolved against

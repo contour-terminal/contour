@@ -689,7 +689,7 @@ namespace
                                                 .id = id };
 }
 
-/// What the workspace chip's dropdown opens with over @p window: its own daemon's workspaces alone.
+/// What the workspace chip's dropdown opens with over @p window: every daemon, its own first.
 [[nodiscard]] contour::window::SwitcherOpening chipOpening(vtworkspace::WorkspaceId window)
 {
     return contour::window::SwitcherOpening {
@@ -700,7 +700,7 @@ namespace
         .mode = contour::session::SwitchMode::Switch,
         .prompt = contour::window::SwitcherPrompt::Browse,
         .pick = std::nullopt,
-        .scope = contour::window::SwitcherScope::OneDaemon,
+        .scope = contour::window::SwitcherScope::Everything,
         .windowWorkspaces = { ownWorkspace(1, "contour") },
         .origin = contour::window::SwitcherOrigin::Chip,
     };
@@ -727,7 +727,7 @@ TEST_CASE("a window hosts the switcher: the chip's dropdown opens, shows the sid
     presenter.open(*window, chipOpening(window.id), QRectF { 10, 0, 80, 24 });
     CHECK(window->presentedSwitcher() == &switcher);
     CHECK(window->isWorkspaceDropdownOpen());
-    CHECK(window->workspaceChipDescription() == QStringLiteral("expanded"));
+    CHECK(window->chip()->accessibleDescription() == QStringLiteral("expanded"));
     CHECK(changed.count() == 1);
     // The dropdown shows the sidebar's running times, so the hidden sidebar's rows are kept live.
     CHECK(window->sidebar().presence() == SidebarPresence::Shown);
@@ -737,7 +737,7 @@ TEST_CASE("a window hosts the switcher: the chip's dropdown opens, shows the sid
         switcher.cancel();
         CHECK(window->presentedSwitcher() == nullptr);
         CHECK_FALSE(window->isWorkspaceDropdownOpen());
-        CHECK(window->workspaceChipDescription() == QStringLiteral("collapsed"));
+        CHECK(window->chip()->accessibleDescription() == QStringLiteral("collapsed"));
         CHECK(withdrawn.count() == 1);
         CHECK(window->sidebar().presence() == SidebarPresence::Hidden);
     }

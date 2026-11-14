@@ -112,10 +112,6 @@ constexpr auto OtherModifier = SwitcherKeyModifier::Other;
                   .modifier = Shift,
                   .context = on(TopEmpty, SwitcherRowKind::NewDaemon),
                   .expected = Activate },
-        KeyCase { .key = Return,
-                  .modifier = Shift,
-                  .context = on(TopEmpty, SwitcherRowKind::AllDaemons),
-                  .expected = Activate },
         // → drills in with the caret at the end, on a drill row only.
         KeyCase { .key = Right,
                   .modifier = NoModifier,
@@ -131,13 +127,9 @@ constexpr auto OtherModifier = SwitcherKeyModifier::Other;
                   .expected = DrillIn },
         KeyCase { .key = Right,
                   .modifier = NoModifier,
-                  .context = on(TopEmpty, SwitcherRowKind::AllDaemons),
-                  .expected = DrillIn },
-        KeyCase { .key = Right,
-                  .modifier = NoModifier,
                   .context = typed(TopEmpty, CaretAt::End),
                   .expected = None },
-        // ← goes back with the caret at the start, in a level or the widened chip.
+        // ← goes back with the caret at the start, in a level.
         KeyCase { .key = Left, .modifier = NoModifier, .context = inDaemonLevel(TopEmpty), .expected = Back },
         KeyCase { .key = Left,
                   .modifier = NoModifier,
@@ -151,14 +143,14 @@ constexpr auto OtherModifier = SwitcherKeyModifier::Other;
         KeyCase { .key = Left,
                   .modifier = NoModifier,
                   .context = chip(TopEmpty, SwitcherScope::Everything),
-                  .expected = Back },
-        // ⌫ goes back from an empty field in a level or the widened chip, and edits text otherwise.
+                  .expected = None },
+        // ⌫ goes back from an empty field in a level, and edits text otherwise.
         KeyCase {
             .key = Backspace, .modifier = NoModifier, .context = inDaemonLevel(TopEmpty), .expected = Back },
         KeyCase { .key = Backspace,
                   .modifier = NoModifier,
                   .context = chip(TopEmpty, SwitcherScope::Everything),
-                  .expected = Back },
+                  .expected = None },
         KeyCase { .key = Backspace,
                   .modifier = NoModifier,
                   .context = typed(inDaemonLevel(TopEmpty)),
@@ -171,7 +163,7 @@ constexpr auto OtherModifier = SwitcherKeyModifier::Other;
                   .context = inDaemonLevel(TopEmpty),
                   .expected = None },
         KeyCase { .key = Return, .modifier = OtherModifier, .context = TopEmpty, .expected = None },
-        // ⎋ clears what is typed, else goes back from a level or the widened chip, else closes.
+        // ⎋ clears what is typed, else goes back from a level, else closes.
         KeyCase {
             .key = Escape, .modifier = NoModifier, .context = typed(TopEmpty), .expected = ClearFilter },
         KeyCase { .key = Escape,
@@ -183,7 +175,7 @@ constexpr auto OtherModifier = SwitcherKeyModifier::Other;
         KeyCase { .key = Escape,
                   .modifier = NoModifier,
                   .context = chip(TopEmpty, SwitcherScope::Everything),
-                  .expected = Back },
+                  .expected = Close },
         KeyCase { .key = Escape,
                   .modifier = NoModifier,
                   .context = chip(TopEmpty, SwitcherScope::OneDaemon),

@@ -31,6 +31,8 @@
 #include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/LocationChip.hpp>
+#include <contour/window/LocationChipQt.hpp>
 #include <contour/window/PaneState.hpp>
 #include <contour/window/PromptHost.hpp>
 #include <contour/window/QtChromeKeys.hpp>
@@ -65,12 +67,14 @@
 #include <QtQml/QQmlEngine>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
 #include <mutex>
 #include <ranges>
+#include <string_view>
 #include <tuple>
 #include <utility>
 
@@ -259,6 +263,18 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     connect(this, &WindowController::tabBarShouldShowChanged, this, &WindowController::refreshTitleBand);
     connect(this, &WindowController::tabBarPositionChanged, this, &WindowController::refreshTitleBand);
     connect(this, &WindowController::hostChipStateChanged, this, &WindowController::refreshTitleBand);
+    // Everything the location chip shows follows one of these (the band's own changes reach it through
+    // refreshTitleBand).
+    for (auto const signal: { &WindowController::hostLabelChanged,
+                              &WindowController::hostChipStateChanged,
+                              &WindowController::sidebarVisibilityChanged,
+                              &WindowController::sidebarWidthChanged,
+                              &WindowController::switcherChanged,
+                              &WindowController::tabBarShouldShowChanged,
+                              &WindowController::tabBarPositionChanged,
+                              &WindowController::tabPlacementChanged,
+                              &WindowController::titleBarVisibleChanged })
+        connect(this, signal, this, &WindowController::refreshChip);
     connect(this, &WindowController::countChanged, this, &WindowController::clampChromeFocus);
     // The drag is the manager's, as QDrag::exec is process-wide; this window only says whose pane it carries.
     connect(&_manager,
@@ -286,6 +302,9 @@ void WindowController::initSidebar()
             &SidebarModel::summaryChanged,
             this,
             &WindowController::otherWorkspacesUrgencyChanged);
+    // Built with the sidebar it reads the workspace from, once everything else it reads exists.
+    _chip = std::make_unique<LocationChipModel>(chipInputs());
+    connect(_sidebar.get(), &SidebarModel::summaryChanged, this, &WindowController::refreshChip);
     refreshSidebarPresence();
 }
 
@@ -618,6 +637,35 @@ int WindowController::hostChipState() const noexcept
     return static_cast<int>(std::to_underlying(hostChipStateOf(_manager.hostConnection(_displayed))));
 }
 
+LocationChipModel* WindowController::chip() const noexcept
+{
+    return _chip.get();
+}
+
+LocationChipInputs WindowController::chipInputs() const
+{
+    auto const band = titleBand();
+    auto const& summary = _sidebar->summary();
+    return LocationChipInputs {
+        .daemon = _manager.daemonNameOf(_displayed),
+        .hosting = _manager.hostingOf(_displayed),
+        .locality = _manager.daemonLocalityOf(_displayed),
+        .state = hostChipStateOf(_manager.hostConnection(_displayed)),
+        .workspace = summary.currentWorkspace,
+        .otherWorkspaces = summary.otherWorkspaces,
+        .disclosure = isWorkspaceDropdownOpen() ? Disclosure::Expanded : Disclosure::Collapsed,
+        .band = band.band,
+        .centre = band.centre,
+        .sidebar = sidebarWidth() > 0 ? SidebarShown::Yes : SidebarShown::No,
+    };
+}
+
+void WindowController::refreshChip()
+{
+    if (_chip != nullptr)
+        _chip->setInputs(chipInputs());
+}
+
 QString WindowController::applicationVersion() const
 {
     return _manager.app().applicationVersion();
@@ -773,11 +821,6 @@ void WindowController::runWorkspaceMenuAction(uint64_t workspace, actions::Actio
     runSidebarAction(
         SidebarRowKey { .kind = SidebarRowKind::Workspace, .workspace = workspace, .tab = 0, .pane = {} },
         action);
-}
-
-QString WindowController::workspaceChipDescription() const
-{
-    return isWorkspaceDropdownOpen() ? tr("expanded") : tr("collapsed");
 }
 
 void WindowController::runMenuBarAction(actions::Action const& action) const
@@ -2768,8 +2811,10 @@ TitleBandGeometry WindowController::titleBandGeometry() const
 
 void WindowController::refreshTitleBand()
 {
-    // A chrome-row change (refreshChromeDependents) reaches the window here: the row's radius may differ.
+    // A chrome-row change (refreshChromeDependents) reaches the window here: the row's radius may differ, and
+    // the band's centre, which decides where the location chip shows.
     refreshWindowCornerRadius();
+    refreshChip();
 
     if (_osWindow == nullptr)
         return;
@@ -3171,6 +3216,18 @@ void WindowController::setChromeHeight(int height)
         return;
     _chromeHeight = height;
     emit chromeHeightChanged();
+    if (_activeDisplay != nullptr)
+        updateSizeHintsFor(*_activeDisplay, HintApplyMode::RespectWindowState);
+}
+
+void WindowController::setBandWidths(QVariantMap const& parts, int placement)
+{
+    auto const minimum = bandMinimumWidthOfParts(parts);
+    auto const bandPlacement = bandPlacementFromInt(placement).value_or(BandPlacement::FullWidth);
+    if (_bandMinimumWidth == minimum && _bandPlacement == bandPlacement)
+        return;
+    _bandMinimumWidth = minimum;
+    _bandPlacement = bandPlacement;
     if (_activeDisplay != nullptr)
         updateSizeHintsFor(*_activeDisplay, HintApplyMode::RespectWindowState);
 }
@@ -3936,7 +3993,10 @@ void WindowController::updateSizeHintsFor(session::DisplaySurface& requester, Hi
     // unscaling it here and letting it be scaled back would truncate a pixel off at fractional DPR.
     auto const gutterDevicePx = session::configuredGutterWidth(
         requester.session().config(), cellSize, scale, requester.session().gutterChrome());
-    auto const hints = geometry::sizeHintsFor(cellSize, margins, scale, chrome(), gutterDevicePx);
+    auto hints = geometry::sizeHintsFor(cellSize, margins, scale, chrome(), gutterDevicePx);
+    // The window is never narrower than the band's parts need, with the sidebar beside it where it is.
+    hints.minimum.width =
+        minimumWidthWith(hints.minimum.width, _bandMinimumWidth, chrome().width, _bandPlacement);
 
     // The character-cell resize grid (base + increment) is cleared while maximized/fullscreen. An
     // incidental refresh (RespectWindowState) must not re-arm it while the window is non-normal — that

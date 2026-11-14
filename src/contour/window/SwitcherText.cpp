@@ -55,7 +55,7 @@ namespace
     /// @return The name of the daemon @p row is on; empty when the index is out of range.
     [[nodiscard]] std::string daemonNameOf(SwitcherRow const& row, SwitcherInputs const& inputs)
     {
-        return row.daemon < inputs.daemons.size() ? switcherDaemonName(inputs.daemons[row.daemon].address)
+        return row.daemon < inputs.daemons.size() ? switcherDaemonName(inputs.daemons[row.daemon])
                                                   : std::string {};
     }
 
@@ -145,11 +145,6 @@ SwitcherDetail switcherDetail(SwitcherRow const& row,
                      .separator = {},
                      .command = {},
                      .tail = {} };
-        case SwitcherRowKind::AllDaemons:
-            return { .text = std::string { inputs.showSwitcherShortcut },
-                     .separator = {},
-                     .command = {},
-                     .tail = {} };
         case SwitcherRowKind::NewDaemon:
         case SwitcherRowKind::Discovering:
         case SwitcherRowKind::Connecting:
@@ -187,7 +182,6 @@ std::string switcherDescription(SwitcherRow const& row,
                 == LabelVerdict::Running)
                 return switcherLabelActionTitle(row.target.daemon, LabelVerdict::Running);
             return "Starts a new daemon with one workspace";
-        case SwitcherRowKind::AllDaemons: return "Show every daemon";
         case SwitcherRowKind::Discovering:
         case SwitcherRowKind::Connecting:
         case SwitcherRowKind::Failure: break;

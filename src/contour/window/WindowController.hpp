@@ -22,6 +22,7 @@
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/HeldModifierReveal.hpp>
+#include <contour/window/LocationChipModel.hpp>
 #include <contour/window/MenuRouting.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/NoticeModel.hpp>
@@ -175,9 +176,6 @@ class WindowController:
     /// Whether the switcher this window presents hangs from its workspace chip: the chip wears its open fill.
     /// A QML-facing predicate, hence a bool.
     Q_PROPERTY(bool isWorkspaceDropdownOpen READ isWorkspaceDropdownOpen NOTIFY switcherChanged)
-    /// The workspace chip's accessible description: "expanded" while its dropdown is open, else "collapsed"
-    /// (Qt has no expanded state for a button).
-    Q_PROPERTY(QString workspaceChipDescription READ workspaceChipDescription NOTIFY switcherChanged)
     Q_PROPERTY(QVariantList sidebarContextMenuModel READ sidebarContextMenuModel NOTIFY
                    sidebarContextMenuModelChanged)
     Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
@@ -263,6 +261,9 @@ class WindowController:
     Q_PROPERTY(QObject* promptHost READ promptHost CONSTANT)
     // A window::HostChipState as its underlying value: where the connection to that host stands.
     Q_PROPERTY(int hostChipState READ hostChipState NOTIFY hostChipStateChanged)
+    /// The location chip, which names the window's daemon and workspace in one control: its whole surface
+    /// (window::LocationChipModel).
+    Q_PROPERTY(contour::window::LocationChipModel* chip READ chip CONSTANT)
     Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
     // {{{ Panes
     // The panes the active tab shows: the leaves under its layout root (1 while zoomed or unsplit, 0 without
@@ -780,11 +781,11 @@ class WindowController:
     void refreshSwitching() const;
 
     /// Opens the daemon and workspace switcher over this window: what the ShowSwitcher action does, for
-    /// the host chip's click.
+    /// the location chip's click.
     Q_INVOKABLE void showSwitcher() const;
 
-    /// Opens the switcher as the workspace chip's dropdown: below the chip, listing this window's daemon's
-    /// workspaces alone (TerminalSessionManager::showWorkspaceDropdown()).
+    /// Opens the switcher below the workspace chip: every daemon's workspaces for a daemon window, the
+    /// window's own for an in-process one (TerminalSessionManager::showWorkspaceDropdown()).
     /// @param chip The chip in the window's scene coordinates.
     Q_INVOKABLE void showWorkspaceDropdown(QRectF const& chip) const;
 
@@ -810,7 +811,6 @@ class WindowController:
     [[nodiscard]] SwitcherController* presentedSwitcher() const noexcept;
     [[nodiscard]] QObject* switcherForQml() const noexcept;
     [[nodiscard]] bool isWorkspaceDropdownOpen() const noexcept;
-    [[nodiscard]] QString workspaceChipDescription() const;
 
     /// @param workspace A workspace of this window's directory, by its id.
     /// @return What its sidebar row's menu is built from: the switcher's row menu shows the same rows.
@@ -1124,6 +1124,11 @@ class WindowController:
     /// window state, safe area, a chrome refresh) calls it. GUI thread.
     void refreshTitleBand();
 
+    /// Moves the location chip's model to the window's state now (chipInputs()): what serves it, its
+    /// connection, the workspace, the switcher, and where the band and the sidebar are. The model notifies
+    /// only the readers whose inputs changed, so calling it for any of those changes is cheap.
+    void refreshChip();
+
     /// Where this window's band and tabs go now (ContourGuiApp::titleBandOf): the decision Main.qml asks
     /// UiStyleProvider::titleBand for, from the same inputs -- the frame, the mode, the tab-bar gate, its
     /// edge and the host chip's notice.
@@ -1302,6 +1307,16 @@ class WindowController:
 
     /// @return Where the tabs live, a config::TabPlacement as its underlying value.
     [[nodiscard]] int tabPlacement() const noexcept { return static_cast<int>(_tabPlacement); }
+
+    /// Tells the window how wide the title band's parts are, so the window is never made narrower than they
+    /// fit in: the band's fixed parts, the location chip at its last fit step and one tab-well minimum
+    /// (bandMinimumWidth()). It joins the window's minimum-width size hint, so the tab well cannot collapse.
+    /// The band's width is the window's, so it is the band that knows the parts; the sum is decided here.
+    /// @param parts     The band's widths in logical pixels, by the keys of window::BandWidthParts.
+    /// @param placement A window::BandPlacement's underlying value: whether the band starts at the
+    ///                  sidebar's edge, so the sidebar's width joins the minimum. A value that is none of
+    ///                  them counts as the band spanning the window.
+    Q_INVOKABLE void setBandWidths(QVariantMap const& parts, int placement);
 
     /// Sets the workspace sidebar's width, as dragging its edge does. Call it when the drag is released, not
     /// on every move: each distinct width is written to the GUI state. The width is kept within the chrome
@@ -1566,6 +1581,9 @@ class WindowController:
     /// @return A window::HostChipState as its underlying value; Connected for a local window.
     [[nodiscard]] int hostChipState() const noexcept;
 
+    /// @return The location chip's model: what every surface that shows the chip reads.
+    [[nodiscard]] LocationChipModel* chip() const noexcept;
+
     /// The manager's host connection changed what the chip shows. @see hostChipState
     void notifyHostConnectionChanged() { emit hostChipStateChanged(); }
 
@@ -1733,6 +1751,7 @@ class WindowController:
     void workspaceDirectoryChanged();
     /// @see hostChipState
     void hostChipStateChanged();
+
     /// @see requestNotification.
     void notificationRequested(QString const& title, QString const& body);
     /// @see requestBell.
@@ -2026,6 +2045,9 @@ class WindowController:
     class SidebarHost;
     /// Builds the sidebar and its host, once the window exists.
     void initSidebar();
+    /// @return The location chip's inputs as the window stands now.
+    [[nodiscard]] LocationChipInputs chipInputs() const;
+    std::unique_ptr<LocationChipModel> _chip;     ///< The location chip's surface; built with the sidebar.
     std::vector<vtworkspace::WorkspaceId> _owned; ///< Every workspace of this window; @see ownedWorkspaces
     TabAttention _attention;                      ///< This window's seen-state, by PaneKey.
     /// Shows the ssh prompts of the attaches this window started; attached to the app's router for the
@@ -2320,6 +2342,9 @@ class WindowController:
 
     // Declared title-bar chrome height in logical px (written by Main.qml's binding).
     int _chromeHeight = 0;
+    // The narrowest the title band can be, in logical px (window::bandMinimumWidth(), told by the band).
+    double _bandMinimumWidth = 0;
+    BandPlacement _bandPlacement = BandPlacement::FullWidth;
     // Whether the window was maximized before entering fullscreen (restored on toggle-out).
     bool _maximizedState = false;
     // The content scale the geometry was last derived for (settlement idempotence latch).

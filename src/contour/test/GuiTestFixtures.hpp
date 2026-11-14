@@ -246,15 +246,20 @@ class DaemonNamedBinding final: public contour::session::WindowBinding
     /// @param factory What the bound windows' sessions are made by. Borrowed.
     /// @param target The daemon the binding says it is attached to.
     /// @param chromeLabel What chromeLabel() reports.
+    /// @param hostLabel What hostLabel() reports: the remote host, empty for a local daemon.
     DaemonNamedBinding(contour::session::SessionFactory& factory,
                        contour::session::SwitchTarget target,
-                       std::string chromeLabel = {}):
-        _factory(factory), _target(std::move(target)), _chromeLabel(std::move(chromeLabel))
+                       std::string chromeLabel = {},
+                       std::string hostLabel = {}):
+        _factory(factory),
+        _target(std::move(target)),
+        _chromeLabel(std::move(chromeLabel)),
+        _hostLabel(std::move(hostLabel))
     {
     }
 
     [[nodiscard]] contour::session::SessionFactory& sessions() noexcept override { return _factory; }
-    [[nodiscard]] std::string_view hostLabel() const noexcept override { return {}; }
+    [[nodiscard]] std::string_view hostLabel() const noexcept override { return _hostLabel; }
     [[nodiscard]] std::string_view chromeLabel() const noexcept override { return _chromeLabel; }
     [[nodiscard]] std::optional<contour::session::SwitchTarget> daemonTarget() const override
     {
@@ -317,6 +322,7 @@ class DaemonNamedBinding final: public contour::session::WindowBinding
     contour::session::SessionFactory& _factory;
     contour::session::SwitchTarget _target;
     std::string _chromeLabel;
+    std::string _hostLabel;
     contour::window::DaemonLocality _locality = contour::window::DaemonLocality::Local;
 };
 

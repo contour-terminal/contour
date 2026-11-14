@@ -9,9 +9,11 @@
 #include <contour/platform/PlatformAppearance.hpp>
 #include <contour/platform/SecureInput.hpp>
 #include <contour/window/ChromeTokenObjects.hpp>
+#include <contour/window/DaemonHosting.hpp>
 #include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/TabBarDropPolicy.hpp>
+#include <contour/window/TabWellLayout.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/TitleBandSurface.hpp>
@@ -97,7 +99,6 @@ struct ChromeGlyphs
     QString tabColor;  ///< A coloured tab's leading cell; empty where the colour tints the tab.
     QString chipOpen;  ///< Opens a chip; empty where the chip is a shape.
     QString chipClose; ///< Closes a chip; empty where the chip is a shape.
-    QString hostDot;   ///< The host chip's state dot; empty where it is a vector circle.
 
     QStringList paneActions; ///< A pane header's action buttons, indexed by config::PaneHeaderAction.
     QStringList splitLines;  ///< A split's line, side by side then stacked; empty where the gap draws it.
@@ -294,7 +295,6 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QString tabColorGlyph READ tabColorGlyph CONSTANT)
     Q_PROPERTY(QString chipOpenGlyph READ chipOpenGlyph CONSTANT)
     Q_PROPERTY(QString chipCloseGlyph READ chipCloseGlyph CONSTANT)
-    Q_PROPERTY(QString hostDotGlyph READ hostDotGlyph CONSTANT)
     Q_PROPERTY(QString drillInGlyph READ drillInGlyph CONSTANT)
     Q_PROPERTY(QString breadcrumbGlyph READ breadcrumbGlyph CONSTANT)
     Q_PROPERTY(QString palettePromptGlyph READ palettePromptGlyph CONSTANT)
@@ -741,16 +741,11 @@ class UiStyleProvider: public QObject
     ///         status ink and the accessible name; empty for a kind outside the table.
     [[nodiscard]] Q_INVOKABLE QVariantMap badgeLook(int kind) const;
 
-    /// How the host chip looks in @p state.
+    /// How the location chip's connection looks in @p state.
     /// @param state A window::HostChipState as its underlying value.
     /// @return `{ dot, status, accessibleState }`: the dot's ink and the two texts; empty for a state
     ///         outside the table.
     [[nodiscard]] Q_INVOKABLE QVariantMap hostChipLook(int state) const;
-
-    /// Whether a window attached to @p hostLabel shows the host chip (window::hostChipPresence).
-    /// @param hostLabel The window's host label; empty for a local window.
-    /// @return Whether the chip shows: a QML-facing bool, the documented carve-out.
-    [[nodiscard]] Q_INVOKABLE bool isHostChipShown(QString const& hostLabel) const;
 
     /// Where the title band and the tabs go, for this row's tab shape (window::resolveTitleBand).
     ///
@@ -842,6 +837,34 @@ class UiStyleProvider: public QObject
     /// @return `{ tabWidth, wellWidth, label, scrolls }`: the widths, the label mode's name, and whether
     ///         the well scrolls (a QML-facing bool, the documented carve-out).
     [[nodiscard]] Q_INVOKABLE QVariantMap tabWellLayout(qreal available, int tabCount) const;
+
+    /// The least width the tab well can be given at all, which the window's minimum width keeps.
+    /// @param tabCount How many tabs the well lists.
+    /// @return The width of a well holding one icon-only pill (window::iconOnlyTabWellMinimum); 0 without
+    /// tabs.
+    [[nodiscard]] Q_INVOKABLE qreal tabWellMinimum(int tabCount) const;
+
+    /// Shares the band's room between the location chip and the tab well (window::allocateBand): the chip
+    /// yields first, so no tab goes icon-only before the chip is at its last step.
+    /// @param widths   What each chip fit step needs by its key (window::LocationChipSteps), in pixels.
+    /// @param tabCount How many tabs the well lists.
+    /// @param room     The width the band has for the chip and the well together.
+    /// @return `{ fit, chipRoom, chipWidth, tabWidth, wellWidth, label, scrolls }`: the chip's
+    ///         window::LocationChipFit as its underlying value, the room it had and its width, then the
+    ///         well's layout as tabWellLayout() gives it.
+    [[nodiscard]] Q_INVOKABLE QVariantMap allocateBand(QVariantMap const& widths,
+                                                       int tabCount,
+                                                       qreal room) const;
+
+    /// allocateBand() for a chip that names the daemon alone (a host that is no daemon): it never shrinks to
+    /// a bare caret, so its last step is the elided daemon name (window::locationChipTakes).
+    /// @param widths   What each chip fit step needs by its key, in pixels.
+    /// @param tabCount How many tabs the well lists.
+    /// @param room     The width the band has for the chip and the well together.
+    /// @return As allocateBand().
+    [[nodiscard]] Q_INVOKABLE QVariantMap allocateBandDaemonOnly(QVariantMap const& widths,
+                                                                 int tabCount,
+                                                                 qreal room) const;
 
     /// Where the command palette goes in a window of the given size (window::placePalette), from the
     /// row's palette tokens in logical pixels, @c space.s7 as the margin, snapped to whole rows of cells on
@@ -1058,7 +1081,6 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QString const& tabColorGlyph() const noexcept { return _glyphs.tabColor; }
     [[nodiscard]] QString const& chipOpenGlyph() const noexcept { return _glyphs.chipOpen; }
     [[nodiscard]] QString const& chipCloseGlyph() const noexcept { return _glyphs.chipClose; }
-    [[nodiscard]] QString const& hostDotGlyph() const noexcept { return _glyphs.hostDot; }
     [[nodiscard]] QString const& drillInGlyph() const noexcept { return _glyphs.drillIn; }
     [[nodiscard]] QString const& breadcrumbGlyph() const noexcept { return _glyphs.breadcrumb; }
     [[nodiscard]] QString const& palettePromptGlyph() const noexcept { return _glyphs.palettePrompt; }
@@ -1115,6 +1137,19 @@ class UiStyleProvider: public QObject
     void paletteRevisionChanged();
 
   private:
+    /// @return The widths the tab well is laid out with on this row.
+    [[nodiscard]] TabWellMetrics tabWellMetrics() const;
+
+    /// @param widths   What each chip fit step needs by its key, in pixels.
+    /// @param tabCount How many tabs the well lists.
+    /// @param room     The width the band has for the chip and the well together.
+    /// @param segments What the chip names.
+    /// @return What allocateBand() answers, for a chip that names @p segments.
+    [[nodiscard]] QVariantMap allocateBandFor(QVariantMap const& widths,
+                                              int tabCount,
+                                              qreal room,
+                                              ChipSegments segments) const;
+
     /// The colour that says @p role when drawn as @p use on a ground of @p tone: statusColor()'s and
     /// statusMarkOn()'s one pick of the row's source and hue.
     /// @param role A status role inside config::StatusColors.

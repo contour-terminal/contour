@@ -225,10 +225,15 @@ window somewhere else without closing it, and its panes are swapped in place:
   in it to show.
 - **From the switcher** (`ShowSwitcher`, `Ctrl+Shift+R`, `⇧⌘R` on macOS), a popup in the command
   palette's family, drawn over the window. See [The switcher](#the-switcher) below.
-- **By mouse**: click the host chip in the title band of a window on a daemon (Space or Return when it has
-  keyboard focus) to open the switcher, or pick **Switch To Daemon** or **Daemon & Workspace Switcher…**
+- **By mouse**: click the location chip (`local › billing ▾`) in the title band of a window on a daemon (Space or
+  Return when it has keyboard focus) to open the same switcher below it, as `ShowSwitcher` does; its tooltip
+  names that chord, and Escape closes the popup. With the sidebar shown, the daemon at the head of the sidebar
+  does the same. Or pick **Switch To Daemon** or **Daemon & Workspace Switcher…**
   from the Window submenu of the main menu (☰). **Switch To Daemon** lists the same daemons as the command
   palette's *Switch to daemon* rows.
+- **The chip's connection state.** The chip shows the daemon's connection too: a dot for a remote daemon that is
+  connected, and the dot with *Reconnecting…* or *Disconnected* while the link is not up. In a narrow band the
+  state text goes first, then the daemon name, then the workspace name, which keeps at least 6 characters.
 - **From a shell**, with [`contour switch`](control-api.md#switching-a-window), which also works from a
   pane of the window being switched. The window asks first (see below).
 

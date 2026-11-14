@@ -1053,7 +1053,7 @@ include `remote/`), so everything the GUI reads of "the host" is read per window
 - **Connection.** A link's connection events (`setHostConnection`, `connectionClosed`,
   `reconnectFailed`, the restore summary, notices) reach only the windows bound to it; the manager keeps
   that state per binding. One daemon going away leaves the other link's windows connected.
-- **Host label.** The title prefix, the host chip, the shell-integration offer and the "is this machine's
+- **Host label.** The title prefix, the location chip's daemon name, the shell-integration offer and the "is this machine's
   shell" guess read `TerminalSessionManager::hostLabelOf(window)` -- the window's binding's label, empty for
   a local window. `WindowController::hostLabel` is therefore no longer `CONSTANT`: binding a window, or
   releasing its binding, emits `hostLabelChanged`. A new OS window is authored on the daemon of the

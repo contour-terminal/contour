@@ -32,6 +32,9 @@ Rectangle {
     /// Whether the header bar above draws the title row (UiStyleProvider.sidebarTitleInHeaderBar): then the
     /// sidebar draws none of its own.
     property bool titleInHeaderBar: false
+    /// Where the location chip shows (WindowController.chip.place, Main.qml's to pass): "sidebar" puts
+    /// the daemon control at the head of the title row, where the heading would be.
+    property string chipPlace: "none"
     /// The sidebar's toggle as UiStyleProvider::sidebarToggle answers it (Main.qml): `host` "sidebar" puts it
     /// at the title row's leading end, at the spot the band holds it while the sidebar is hidden, and `label`
     /// is what it says.
@@ -52,6 +55,12 @@ Rectangle {
     /// The dividing column's width: one cell on the cell tree, a hairline elsewhere.
     readonly property real dividerWidth: chromeStyle.sidebar.dividerGlyph !== "" ? chromeStyle.cellWidth
                                                                                 : chromeStyle.borderWidth
+    /// The daemon control heading the title row, while it shows there; null otherwise. A toolbar item: the
+    /// chrome's keyboard walk visits it (Main.qml).
+    readonly property Item daemonChip: daemonChipSlot.item
+    /// Whether the daemon control heads the title row, in the heading's place: the one answer the heading's
+    /// visibility and the control's loading both follow.
+    readonly property bool daemonChipShown: root.chipPlace === "sidebar" && !!root.controller && titleRow.visible
     /// The tree (a ListView), for the tests.
     readonly property alias tree: tree
 
@@ -191,7 +200,7 @@ Rectangle {
 
         Text {
             objectName: "sidebarTitle"
-            visible: chromeStyle.sidebar.named
+            visible: chromeStyle.sidebar.named && !root.daemonChipShown
             anchors.left: toggleButton.visible ? toggleButton.right : parent.left
             anchors.leftMargin: toggleButton.visible ? chromeStyle.space.s3
                               : chromeStyle.snapToCells(root.controlsInset) + chromeStyle.space.s4
@@ -204,6 +213,26 @@ Rectangle {
             elide: Text.ElideRight
             Accessible.role: Accessible.Heading
             Accessible.name: text
+        }
+
+        // The daemon control, heading the row in the heading's place (or, on a row with no heading, right after
+        // the toggle): the band holds no chip while the sidebar shows, so the daemon is named here alone.
+        Loader {
+            id: daemonChipSlot
+            active: root.daemonChipShown
+            anchors.left: toggleButton.visible ? toggleButton.right : parent.left
+            anchors.leftMargin: toggleButton.visible ? chromeStyle.space.s3
+                              : chromeStyle.snapToCells(root.controlsInset) + chromeStyle.space.s4
+            anchors.verticalCenter: parent.verticalCenter
+            sourceComponent: WorkspaceChip {
+                objectName: "sidebarDaemonChip"
+                daemonOnly: true
+                sidebar: root.model
+                controller: root.controller
+                // The room the row has (the filter and "+" buttons stand to its right).
+                available: Math.max(0, titleButtons.x - daemonChipSlot.x - titleRow.gap)
+                toolbarHasFocus: (root.controller.focusedToolbarIndex ?? -1) >= 0
+            }
         }
 
         Row {

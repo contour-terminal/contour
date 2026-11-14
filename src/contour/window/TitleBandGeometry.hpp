@@ -8,11 +8,15 @@
 #include <contour/config/ChromeDensity.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/UiStyle.hpp>
+#include <contour/window/EnumFromInt.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <optional>
+#include <string_view>
 
 namespace contour::window
 {
@@ -104,6 +108,96 @@ struct TitleBandGeometry
     }
     auto const dpr = inputs.devicePixelRatio > 0 ? inputs.devicePixelRatio : 1.0;
     return TitleBandGeometry { .height = std::ceil(tallest * dpr) / dpr, .revealTop = revealTop };
+}
+
+/// The widths a band is made of, in logical pixels, measured by the band itself: what the window's minimum
+/// width is the sum of.
+struct BandWidths
+{
+    double leading = 0;        ///< The leading parts but the location chip: window buttons, toggle, items.
+    double trailing = 0;       ///< The trailing parts: the new-tab button, the drift chip, window buttons.
+    double chipMargins = 0;    ///< The gaps either side of the location chip; 0 where it does not show.
+    double chip = 0;           ///< The chip at its last fit step; 0 where it does not show.
+    double dragReserve = 0;    ///< The gap left to drag the window by.
+    double tabStripMargin = 0; ///< The gap before the tab strip.
+    double tabWell = 0;        ///< The tab strip at its least: its fixed parts and one tab-well minimum.
+};
+
+/// One part of a @c BandWidths: the key the band measures it by, and where it lives.
+struct BandWidthPart
+{
+    std::string_view key;       ///< The name the band reports the part by.
+    double BandWidths::* width; ///< Where the part lives.
+};
+
+/// Every part of a band's minimum width. The single source of the keys and of what is summed, so a new part
+/// is one row here.
+inline constexpr auto BandWidthParts = std::array {
+    BandWidthPart { .key = "leading", .width = &BandWidths::leading },
+    BandWidthPart { .key = "trailing", .width = &BandWidths::trailing },
+    BandWidthPart { .key = "chipMargins", .width = &BandWidths::chipMargins },
+    BandWidthPart { .key = "chip", .width = &BandWidths::chip },
+    BandWidthPart { .key = "dragReserve", .width = &BandWidths::dragReserve },
+    BandWidthPart { .key = "tabStripMargin", .width = &BandWidths::tabStripMargin },
+    BandWidthPart { .key = "tabWell", .width = &BandWidths::tabWell },
+};
+
+/// @param widths What the band is made of.
+/// @return The narrowest the band can be while keeping its fixed parts, the location chip at its last fit
+///         step (@c LocationChipFit::WorkspaceElided) and one tab-well minimum. A negative part counts as 0.
+[[nodiscard]] constexpr double bandMinimumWidth(BandWidths const& widths) noexcept
+{
+    auto total = 0.0;
+    for (auto const& part: BandWidthParts)
+        total += std::max(0.0, widths.*(part.width));
+    return total;
+}
+
+/// @param widthOf Gives a part's width by its key (a missing key answering 0), as a QML map does.
+/// @return bandMinimumWidth() of the parts @p widthOf names.
+template <typename WidthOf>
+[[nodiscard]] constexpr double bandMinimumWidthFrom(WidthOf const& widthOf)
+{
+    auto widths = BandWidths {};
+    for (auto const& part: BandWidthParts)
+        widths.*(part.width) = widthOf(part.key);
+    return bandMinimumWidth(widths);
+}
+
+/// Where the band sits against the workspace sidebar.
+enum class BandPlacement : uint8_t
+{
+    FullWidth = 0, ///< The band spans the window: the sidebar is below it, or not shown.
+    BesideSidebar, ///< The band starts at the sidebar's edge, so the window is the sidebar wider than it.
+};
+
+/// Every @c BandPlacement, the table its count and its conversion from QML's int come from.
+inline constexpr auto BandPlacements = std::array { BandPlacement::FullWidth, BandPlacement::BesideSidebar };
+static_assert(enumValuesAreDense(BandPlacements));
+
+/// Number of @c BandPlacement enumerators.
+inline constexpr std::size_t BandPlacementCount = BandPlacements.size();
+
+/// @param value A window::BandPlacement's underlying value, as QML hands it over.
+/// @return The enumerator, or nothing for a value that is none of them.
+[[nodiscard]] constexpr std::optional<BandPlacement> bandPlacementFromInt(int value) noexcept
+{
+    return enumFromInt(BandPlacements, value);
+}
+
+/// @param hintMinimum  The window's minimum width from its page and chrome, in logical pixels.
+/// @param bandMinimum  What the band needs (bandMinimumWidth()), in logical pixels.
+/// @param sidebarWidth The workspace sidebar's width, 0 while it is hidden.
+/// @param placement    Whether the band starts at the sidebar's edge.
+/// @return The window's minimum width: the hint, or the band's need rounded up to whole pixels (plus the
+///         sidebar when the band sits beside it), whichever is wider.
+[[nodiscard]] inline int minimumWidthWith(int hintMinimum,
+                                          double bandMinimum,
+                                          int sidebarWidth,
+                                          BandPlacement placement) noexcept
+{
+    auto const beside = placement == BandPlacement::BesideSidebar ? sidebarWidth : 0;
+    return std::max(hintMinimum, static_cast<int>(std::ceil(bandMinimum)) + beside);
 }
 
 } // namespace contour::window

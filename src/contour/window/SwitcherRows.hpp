@@ -10,6 +10,7 @@
 /// and naming rule is a row of a table test; the controller only renders it.
 
 #include <contour/session/WindowSwitching.hpp>
+#include <contour/window/DaemonHosting.hpp>
 #include <contour/window/SwitcherStatus.hpp>
 
 #include <algorithm>
@@ -99,6 +100,9 @@ struct SwitcherDaemon
     /// A saved host's link before its workspaces are listed; NeverConnected on a local daemon, which is
     /// running, not connected to.
     SwitcherHostLink link = SwitcherHostLink::NeverConnected;
+    /// What the window on this daemon calls it (TerminalSessionManager::hostLabelOf), which the location chip
+    /// names it by, so the popup does too; empty to name it by its address.
+    std::string hostLabel {};
 };
 
 /// Which level of the popup is shown.
@@ -119,12 +123,25 @@ enum class SwitcherOrigin : uint8_t
 /// Whether the top level lists every daemon or one daemon's workspaces.
 enum class SwitcherScope : uint8_t
 {
-    Everything = 0, ///< Every daemon, grouped; the ShowSwitcher action, or the chip's dropdown widened.
-    OneDaemon,      ///< One daemon's workspaces alone: the chip's dropdown, or the daemon a switch asked to
-                    ///< pick a workspace of.
+    Everything = 0, ///< Every daemon, grouped; the ShowSwitcher action, and the workspace chip's popup.
+    OneDaemon,      ///< One daemon's workspaces alone: the daemon a switch asked to pick a workspace of.
     WindowOnly,     ///< The window has no daemon (an in-process window): its own workspaces alone, and no
                     ///< other daemon is looked for or offered.
 };
+
+/// What the workspace chip opens: every daemon, the full switcher below the chip.
+inline constexpr auto ChipSwitcherScope = SwitcherScope::Everything;
+
+/// @param requested The scope the action asked for.
+/// @param hosting What serves the window the popup opens over.
+/// @return The scope the popup opens with: an in-process window lists its own workspaces alone, whatever was
+///         asked. A window attached to a host that is no daemon keeps what was asked, as it always has.
+[[nodiscard]] constexpr SwitcherScope switcherScopeFor(SwitcherScope requested,
+                                                       DaemonHosting hosting) noexcept
+{
+    return daemonHostingPolicy(hosting).reach == SwitcherReach::OwnWorkspacesOnly ? SwitcherScope::WindowOnly
+                                                                                  : requested;
+}
 
 /// @param scope A top level's scope.
 /// @return Whether it lists the workspaces of a single daemon (or of the window alone), not every daemon.
@@ -157,7 +174,7 @@ enum class SwitcherGroup : uint8_t
     OtherDaemons,     ///< The other daemons, local ones first, then saved hosts.
     Matches,          ///< What typing found: the matching workspaces of every listed local daemon.
     DaemonWorkspaces, ///< The workspaces of a daemon drilled into, or a pick's.
-    Actions,          ///< New Workspace, New Daemon…, All daemons….
+    Actions,          ///< New Workspace, New Daemon….
 };
 
 /// What a row of the popup is.
@@ -167,7 +184,6 @@ enum class SwitcherRowKind : uint8_t
     Daemon,        ///< Another daemon: choosing it drills into its level.
     NewWorkspace,  ///< `New Workspace`, or `New Workspace “query”`: creates one and switches to it.
     NewDaemon,     ///< `New Daemon…`: drills into the label prompt.
-    AllDaemons,    ///< `All daemons…`: widens the chip's dropdown to every daemon.
     Discovering,   ///< `Looking for other daemons…`, while discovery runs.
     Connecting,    ///< `Connecting to host…`, while a daemon drilled into is being listed.
     LabelAction,   ///< The New Daemon level's one action: start the daemon, or switch to the running one.
@@ -182,7 +198,6 @@ enum class SwitcherHintSubject : uint8_t
     Daemon,          ///< A daemon row.
     NewWorkspace,    ///< New Workspace.
     NewDaemon,       ///< New Daemon….
-    AllDaemons,      ///< All daemons….
     CreateDaemon,    ///< The New Daemon level's action for an available label.
     SwitchToRunning, ///< The New Daemon level's action for a label that runs already.
 };
@@ -271,13 +286,6 @@ inline constexpr auto SwitcherRowKindRules = std::array {
                           .role = SwitcherRowRole::Action,
                           .awaits = AwaitsAnswer::No,
                           .button = NewWindowButton::No },
-    SwitcherRowKindRule { .kind = SwitcherRowKind::AllDaemons,
-                          .drillsIn = DrillsIn::Yes,
-                          .newWindow = OpensInNewWindow::No,
-                          .hints = SwitcherHintSubject::AllDaemons,
-                          .role = SwitcherRowRole::Action,
-                          .awaits = AwaitsAnswer::No,
-                          .button = NewWindowButton::No },
     SwitcherRowKindRule { .kind = SwitcherRowKind::Discovering,
                           .drillsIn = DrillsIn::No,
                           .newWindow = OpensInNewWindow::No,
@@ -359,9 +367,6 @@ struct SwitcherInputs
     std::size_t windowDaemon =
         0; ///< The daemon the window the popup is over is on, an index into @c daemons.
     SwitcherDiscovery discovery = SwitcherDiscovery::Settled; ///< Whether other daemons are still looked for.
-    /// The chord bound to ShowSwitcher, as the platform spells it: the `All daemons…` row's detail, since
-    /// that row widens the dropdown to what the chord opens. Empty while nothing binds it.
-    std::string_view showSwitcherShortcut {};
 };
 
 /// Where in the popup the user is, and what they typed.
@@ -401,6 +406,8 @@ struct SwitcherOpening
     std::vector<SwitcherWorkspace> windowWorkspaces {};
     /// Where it opened from: centred, or hanging below the workspace chip.
     SwitcherOrigin origin = SwitcherOrigin::Centred;
+    /// What the window calls its daemon (its host label), as the chip names it; empty for none.
+    std::string windowHostLabel {};
 };
 
 /// What a typed label for a new daemon amounts to.
@@ -436,10 +443,9 @@ enum class LabelVerdict : uint8_t
 ///   "Workspaces", best first, ties by daemon then position, each with its daemon's pill; the daemons whose
 ///   name matches under "Other daemons"; then `New Workspace “query”`. A saved host's workspaces are never
 ///   matched: it is matched by its name alone.
-/// - Top, one daemon (the chip's dropdown, a pick), or the Daemon level: that daemon's workspaces (those
-///   matching, best first, when typed), kept while a listing refreshes them; a connecting row while it is
-///   listed for the first time; a failure row saying why it could not be listed; then its New Workspace, and
-///   from the chip All daemons….
+/// - Top, one daemon (a pick, or a window with no daemon), or the Daemon level: that daemon's workspaces
+///   (those matching, best first, when typed), kept while a listing refreshes them; a connecting row while it
+///   is listed for the first time; a failure row saying why it could not be listed; then its New Workspace.
 /// - NewDaemon: the one action a valid label offers, else nothing.
 /// @param inputs What the list is made of.
 /// @param view Where the user is and what they typed.
@@ -450,13 +456,20 @@ enum class LabelVerdict : uint8_t
 /// @return Its listed workspaces' status, rolled up (rollUpStatus); idle when none is listed.
 [[nodiscard]] SwitcherStatus daemonStatusOf(SwitcherDaemon const& daemon);
 
-/// @param address A daemon.
-/// @return How the popup names it: its label or host name, or `this daemon` for an unnameable one.
-[[nodiscard]] std::string switcherDaemonName(session::SwitchTarget const& address);
+/// @param address   A daemon.
+/// @param hostLabel What the window on it calls it; empty for none.
+/// @return How the popup names it, as the location chip names it (locationDaemonName): the host label where
+///         there is one, else its label or host name, or `this daemon` for an unnameable one.
+[[nodiscard]] std::string switcherDaemonName(session::SwitchTarget const& address,
+                                             std::string_view hostLabel);
+
+/// @param daemon A daemon of the popup.
+/// @return switcherDaemonName() of its address and host label.
+[[nodiscard]] std::string switcherDaemonName(SwitcherDaemon const& daemon);
 
 /// What tells one row from every other across a rebuild: its kind and its target. Every row bound to a daemon
 /// names that daemon in its target (a workspace, a daemon, a New Workspace, a label action); the rows without
-/// a target (New Daemon…, All daemons…, the looking, connecting and failure rows) are one of a kind in a
+/// a target (New Daemon…, the looking, connecting and failure rows) are one of a kind in a
 /// view, so their kind alone tells them apart. A daemon's index is not part of it: discovery reorders the
 /// daemons.
 struct SwitcherRowIdentity

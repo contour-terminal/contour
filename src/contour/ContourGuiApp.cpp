@@ -4557,13 +4557,6 @@ window::SwitcherServices ContourGuiApp::switcherServices()
             },
         .now = [] { return std::chrono::system_clock::now(); },
         .style = command::platformShortcutStyle(),
-        .showSwitcherShortcut =
-            [this] {
-                // The bindings as they are now: a ReloadConfig may have rebound it.
-                auto const index = command::shortcutIndex(_config, command::platformShortcutStyle());
-                auto const found = index.find(command::commandId(actions::ShowSwitcher {}));
-                return found != index.end() ? found->second : std::string {};
-            },
         .workspaceMenu =
             [this](vtworkspace::WorkspaceId window, uint64_t workspace) {
                 auto const* const controller = _sessionManager.controllerDisplaying(window);
@@ -4661,6 +4654,7 @@ std::expected<void, std::string> ContourGuiApp::showSwitchPick(remote::SwitchPic
             .scope = window::SwitcherScope::OneDaemon,
             .windowWorkspaces = windowWorkspacesOf(*controller, pick.window),
             .origin = window::SwitcherOrigin::Centred,
+            .windowHostLabel = std::string(_sessionManager.hostLabelOf(pick.window)),
         },
         *controller);
 }

@@ -1,5 +1,5 @@
 // vim:syntax=qml
-// The title band: the window's own bar, holding its controls, the host chip, the tabs or the active
+// The title band: the window's own bar, holding its controls, the location chip, the tabs or the active
 // session's title, a draggable region, the secure-input chip, the daemon drift chip and (under the Pill shape)
 // the new-tab button.
 //
@@ -64,7 +64,7 @@ Item {
                                     || (tabStripLoader.item !== null && tabStripLoader.item.engaged)
     /// Whether the bar's tab strip can show a tab's lock: false without a strip, or while it shows icons alone.
     readonly property bool tabsHostLock: tabStripLoader.hostsLock
-    /// Whether keyboard focus is on one of the bar's own controls, such as the "+" or the host chip, so a
+    /// Whether keyboard focus is on one of the bar's own controls, such as the "+" or the location chip, so a
     /// full-screen band a keyboard user is on does not hide under them (see Main.qml). Popups are not
     /// beneath the bar (they live in the overlay); `engaged` covers those.
     readonly property bool holdsFocus: {
@@ -80,10 +80,11 @@ Item {
     readonly property Item driftSlot: driftSlotItem
     /// The tab strip, while the middle holds the tabs; null otherwise.
     readonly property Item tabStrip: tabStripLoader.item
-    /// The band's toolbar items that are on screen, in visual order: the host chip, the drift chip, then the
-    /// new-tab button. What the toolbar's keyboard focus walks (WindowController.focusedToolbarIndex).
+    /// The band's toolbar items that are on screen, in visual order: the daemon control of a header bar's
+    /// sidebar part or the location chip, the drift chip, then the new-tab button. What the toolbar's
+    /// keyboard focus walks (WindowController.focusedToolbarIndex).
     readonly property var toolbarItems: {
-        const items = [hostChipSlot.item, workspaceChipSlot.item, driftSlotItem.chip, newTabSlot.item]
+        const items = [headerDaemonChipSlot.item, workspaceChipSlot.item, driftSlotItem.chip, newTabSlot.item]
         return items.filter((item) => item !== null && item.visible)
     }
     /// Whether the window's keyboard focus is in the toolbar: an item that also holds active focus rings.
@@ -132,6 +133,8 @@ Item {
     /// The width of the sidebar below a header bar that draws its title row ("Workspaces" and +, the
     /// ContourLinux row; chromeStyle.sidebar.titleInHeaderBar): the bar's leading part spans it. 0 for none.
     property real sidebarWidth: 0
+    /// Whether the band starts at the sidebar's edge (the look's choice), rather than spanning the window.
+    property bool besideSidebar: false
     /// The sidebar's toggle as UiStyleProvider::sidebarToggle answers it (Main.qml): `host` "band" puts it at
     /// the bar's leading end, after the window's own controls, and `label` is what it says. The band's only.
     property var sidebarToggle: ({})
@@ -295,17 +298,18 @@ Item {
 
     // What the bar's parts before and after the tabs take, from their preferred widths, which do not
     // depend on the tabs: the tabs are left the rest, less the drag reserve.
-    readonly property real leadingPartsWidth: barRow.anchors.leftMargin + leadingSlot.Layout.preferredWidth
+    // The leading parts but the location chip: what the chip's room is computed from, since the chip's width
+    // follows its fit and its fit follows its room.
+    readonly property real leadingPartsWithoutChip: barRow.anchors.leftMargin + leadingSlot.Layout.preferredWidth
                                               + leadingSeparator.Layout.preferredWidth
                                               + leadingSeparator.Layout.leftMargin + leadingSeparator.Layout.rightMargin
                                               + sidebarToggleSlot.Layout.preferredWidth
                                               + sidebarToggleSlot.Layout.rightMargin
                                               + sidebarPart.Layout.preferredWidth
+                                              + leadingItems.Layout.preferredWidth + leadingItems.Layout.rightMargin
+    readonly property real leadingPartsWidth: root.leadingPartsWithoutChip
                                               + workspaceChipSlot.Layout.preferredWidth
                                               + workspaceChipSlot.Layout.leftMargin + workspaceChipSlot.Layout.rightMargin
-                                              + leadingItems.Layout.preferredWidth + leadingItems.Layout.rightMargin
-                                              + hostChipSlot.Layout.preferredWidth
-                                              + hostChipSlot.Layout.leftMargin + hostChipSlot.Layout.rightMargin
     readonly property real trailingPartsWidth: secureChipSlot.Layout.preferredWidth + secureChipSlot.Layout.rightMargin
                                                + driftSlotItem.Layout.preferredWidth + driftSlotItem.Layout.rightMargin
                                                + newTabSlot.Layout.preferredWidth + newTabSlot.Layout.rightMargin
@@ -320,6 +324,69 @@ Item {
                                                         - newTabSlot.Layout.preferredWidth - newTabSlot.Layout.rightMargin
                                                         - trailingSlot.Layout.preferredWidth
                                                         - chromeStyle.space.dragReserve)
+
+    // Where the location chip shows: the chip model's call, which knows what serves the window, where its band
+    // and centre are and whether its sidebar is on screen. `chip` keeps a lightweight mock controller
+    // (offscreen tests) without the chip local.
+    readonly property string chipPlace: root.controller && root.controller.chip ? root.controller.chip.place : "none"
+    // Whether the daemon control stands in the header bar's sidebar part, in the heading's place: the one
+    // answer the heading's visibility and the control's loading both follow.
+    readonly property bool daemonChipInHeader: sidebarPart.shown && root.chipPlace === "sidebar" && !!root.controller
+
+    // How the band's room is shared between the location chip and the tab well (UiStyleProvider.allocateBand):
+    // the bar less every other part, the drag reserve and the strip's fixed parts is what the two share, and the
+    // chip yields first, so no tab goes icon-only before the chip is at its last step. With many tabs that
+    // leaves the chip nothing and it sits there. Built from parts that do not read the chip's fit, so the fit
+    // does not loop through it. (The window's minimum width keeps only one icon-only pill: `bandWidths.tabWell`.)
+    readonly property var bandAllocation: {
+        const strip = tabStripLoader.item
+        const chip = workspaceChipSlot.item
+        if (!chip)
+            return ({ fit: 0 })
+        const room = Math.max(0, root.width - root.leadingPartsWithoutChip - 2 * root.gap - root.trailingPartsWidth
+                                 - chromeStyle.space.dragReserve - tabStripLoader.Layout.leftMargin
+                                 - (strip ? strip.fixedWidth : 0))
+        const tabCount = strip ? strip.tabCount : 0
+        return chip.namesDaemonOnly ? chromeStyle.allocateBandDaemonOnly(chip.fitWidths, tabCount, room)
+                                    : chromeStyle.allocateBand(chip.fitWidths, tabCount, room)
+    }
+
+    /// The room the location chip had in that allocation: what the tab well keeps for its labels is left out.
+    readonly property real chipRoom: root.bandAllocation.chipRoom ?? 0
+
+    // What the band is made of, told to the controller, which sums it into the window's minimum width: the
+    // fixed parts, the chip at its last fit step and one tab-well minimum. The keys are window::BandWidthParts'.
+    readonly property var bandWidths: {
+        const strip = tabStripLoader.item
+        const chipShown = workspaceChipSlot.shown
+        return {
+            leading: root.leadingPartsWithoutChip,
+            trailing: root.trailingPartsWidth,
+            chipMargins: chipShown ? 2 * root.gap : 0,
+            chip: chipShown ? workspaceChipSlot.item.leastWidth : 0,
+            dragReserve: chromeStyle.space.dragReserve,
+            tabStripMargin: tabStripLoader.Layout.leftMargin,
+            tabWell: strip ? chromeStyle.tabWellMinimum(strip.tabCount) + strip.fixedWidth : 0
+        }
+    }
+    // `!setBandWidths` keeps a lightweight mock controller (offscreen tests) without it local.
+    // Where the band sits against the sidebar, a window::BandPlacement: beside it, the window is the sidebar's
+    // width wider than the band.
+    readonly property int bandPlacement: root.besideSidebar ? 1 : 0
+    // What was last told, so an equal answer is not sent (and converted) again.
+    property string reportedBand: ""
+    function reportBandWidths() {
+        if (!root.isBand || !root.controller || !root.controller.setBandWidths)
+            return
+        const report = JSON.stringify(root.bandWidths) + "|" + root.bandPlacement
+        if (report === root.reportedBand)
+            return
+        root.reportedBand = report
+        root.controller.setBandWidths(root.bandWidths, root.bandPlacement)
+    }
+    onBandWidthsChanged: root.reportBandWidths()
+    onBandPlacementChanged: root.reportBandWidths()
+    Component.onCompleted: root.reportBandWidths()
 
     // The room the centred title has: the bar less twice the wider of its two ends, so it stays centred
     // on the bar without running under either end.
@@ -417,6 +484,7 @@ Item {
 
             Text {
                 objectName: "headerSidebarTitle"
+                visible: !root.daemonChipInHeader
                 anchors.left: parent.left
                 anchors.right: sidebarPartRow.left
                 anchors.verticalCenter: parent.verticalCenter
@@ -427,6 +495,22 @@ Item {
                 elide: Text.ElideRight
                 Accessible.role: Accessible.Heading
                 Accessible.name: text
+            }
+
+            // The daemon control, in the heading's place while the sidebar shows: the band holds no chip then.
+            Loader {
+                id: headerDaemonChipSlot
+                active: root.daemonChipInHeader
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                sourceComponent: WorkspaceChip {
+                    objectName: "headerSidebarDaemonChip"
+                    daemonOnly: true
+                    sidebar: root.controller.sidebar
+                    controller: root.controller
+                    available: Math.max(0, sidebarPartRow.x - chromeStyle.space.s3)
+                    toolbarHasFocus: root.toolbarHasFocus
+                }
             }
 
             Row {
@@ -470,45 +554,25 @@ Item {
             }
         }
 
-        // The host a remote window is attached to. The band's only, and absent for a local window.
+        // The location chip, leading the tabs: it names the daemon and the workspace, and as the pop-up button
+        // it reads as it drops the switcher down below itself. Where it shows is the controller's call
+        // (WindowController.chip.place); the tabs-only bar of a sidebar window has none (`isBand`).
         Loader {
-            id: hostChipSlot
-            active: root.isBand
+            id: workspaceChipSlot
+            objectName: "workspaceChipSlot"
+            active: root.isBand && !!root.controller && !!root.controller.sidebar && root.chipPlace === "band"
             readonly property bool shown: item !== null && item.visible
             Layout.alignment: Qt.AlignVCenter
             Layout.preferredWidth: shown ? item.implicitWidth : 0
             Layout.leftMargin: shown ? root.gap : 0
             Layout.rightMargin: shown ? root.gap : 0
-            sourceComponent: HostChip {
-                // `?? ""` keeps a lightweight mock controller (offscreen tests) without the property local.
-                hostLabel: root.controller ? (root.controller.hostLabel ?? "") : ""
-                connection: root.controller ? (root.controller.hostChipState ?? 0) : 0
-                focusRingShown: activeFocus && root.toolbarHasFocus
-                // Opens the switcher, as the ShowSwitcher action does. The chip sits beside the drag
-                // region, not in it, so the window-drag handlers never see its press.
-                onClicked: if (root.controller && root.controller.showSwitcher) root.controller.showSwitcher()
-            }
-        }
-
-        // The workspace chip, leading the tabs while the sidebar that would name the workspace is hidden. A
-        // pop-up button: it drops this window's workspaces down below itself.
-        Loader {
-            id: workspaceChipSlot
-            active: root.isBand && root.centre === "chip+tabs" && !!root.controller && !!root.controller.sidebar
-            readonly property bool shown: item !== null && item.visible
-            Layout.alignment: Qt.AlignVCenter
-            Layout.preferredWidth: shown ? item.implicitWidth : 0
-            Layout.leftMargin: shown && !hostChipSlot.shown ? root.gap : 0
-            Layout.rightMargin: shown ? root.gap : 0
             sourceComponent: WorkspaceChip {
-                id: workspaceChip
                 sidebar: root.controller.sidebar
-                focusRingShown: activeFocus && root.toolbarHasFocus
-                isOpen: !!root.controller && !!root.controller.isWorkspaceDropdownOpen
-                openDescription: root.controller && root.controller.workspaceChipDescription
-                                 ? root.controller.workspaceChipDescription : ""
-                onClicked: if (root.controller && root.controller.showWorkspaceDropdown)
-                    root.controller.showWorkspaceDropdown(workspaceChip.dropdownAnchor())
+                controller: root.controller
+                // The step the band's allocation gives it from the chip's measured steps: its own width never
+                // feeds it.
+                fit: root.bandAllocation.fit
+                toolbarHasFocus: root.toolbarHasFocus
             }
         }
 

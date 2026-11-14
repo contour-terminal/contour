@@ -179,6 +179,48 @@ TEST_CASE("accessibility: the Linux header bar names its buttons", "[contour][gu
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("the location chip guards a controller with no chip and a fit beyond its steps",
+          "[contour][gui][qml][chip]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    // A controller that has no chip (a lightweight one): the chip says nothing and reads nothing from it.
+    auto bare = QObject {};
+    {
+        auto root = loadComponent(engine,
+                                  QStringLiteral("qrc:/qt/qml/Contour/Ui/WorkspaceChip.qml"),
+                                  QVariantMap { { "sidebar", QVariant::fromValue(nullptr) },
+                                                { "controller", QVariant::fromValue<QObject*>(&bare) } });
+        CHECK(root->property("fit").toInt() == 0);
+        CHECK(root->property("fitSteps").toList().isEmpty());
+        CHECK(root->property("daemonText").toString().isEmpty());
+        CHECK(root->property("workspaceText").toString().isEmpty());
+        CHECK(root->property("leastWidth").toReal() == 0);
+        CHECK_FALSE(root->property("dotShown").toBool());
+    }
+
+    // A fit beyond the last step falls back to the last step, never to undefined.
+    auto controller = contour::test::MockMainController { contour::test::MainWindowScene { .tabCount = 1 } };
+    auto root =
+        loadComponent(engine,
+                      QStringLiteral("qrc:/qt/qml/Contour/Ui/WorkspaceChip.qml"),
+                      QVariantMap { { "sidebar", QVariant::fromValue<QObject*>(controller.sidebarObject()) },
+                                    { "controller", QVariant::fromValue<QObject*>(&controller) },
+                                    { "fit", 99 } });
+    auto const steps = root->property("fitSteps").toList();
+    REQUIRE_FALSE(steps.isEmpty());
+    auto const last = steps.back().toMap();
+    CHECK(root->property("workspaceText").toString() == last.value(QStringLiteral("workspace")).toString());
+    CHECK(root->property("step").toMap().value(QStringLiteral("key")) == last.value(QStringLiteral("key")));
+    root->setProperty("fit", -3);
+    CHECK(root->property("step").toMap().value(QStringLiteral("key"))
+          == steps.front().toMap().value(QStringLiteral("key")));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("accessibility: every kit primitive declares a role and a name", "[contour][gui][qml][a11y]")
 {
     QQmlEngine engine;
@@ -196,6 +238,11 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
         QString name {};          ///< The name it must announce; any non-empty one when empty.
         int role = -1;            ///< The QAccessible::Role it must declare; any when -1.
     };
+    // The location chip names the workspace and the daemon it is on; the state goes in its description.
+    auto chipController = contour::test::MockMainController { contour::test::MainWindowScene {
+        .tabCount = 1,
+        .hostLabel = QStringLiteral("build-01"),
+        .hostChipState = contour::window::HostChipState::Reconnecting } };
     // The link pill names the session's link target and how to open it.
     auto linkSession = contour::test::MockSession {};
     linkSession.setLinkTarget(QStringLiteral("example.com"), QStringLiteral("Ctrl+Click to open"), true);
@@ -246,14 +293,22 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
                .swatches = 0,
                .name = QStringLiteral("Waiting for you"),
                .role = QAccessible::StaticText },
-        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/HostChip.qml"),
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/WorkspaceChip.qml"),
                .initialProperties =
-                   QVariantMap {
-                       { "hostLabel", QStringLiteral("build-01") },
-                       { "connection", static_cast<int>(contour::window::HostChipState::Reconnecting) } },
+                   QVariantMap { { "sidebar", QVariant::fromValue<QObject*>(chipController.sidebarObject()) },
+                                 { "controller", QVariant::fromValue<QObject*>(&chipController) } },
                .swatches = 0,
-               .name = QStringLiteral("Switch daemon or workspace (on build-01, reconnecting)"),
-               .role = QAccessible::Button },
+               .name = chipController.chip()->accessibleName(),
+               .role = QAccessible::ButtonMenu },
+        // The control that names the daemon alone, heading the sidebar, is named for what it shows.
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/WorkspaceChip.qml"),
+               .initialProperties =
+                   QVariantMap { { "sidebar", QVariant::fromValue<QObject*>(chipController.sidebarObject()) },
+                                 { "controller", QVariant::fromValue<QObject*>(&chipController) },
+                                 { "daemonOnly", true } },
+               .swatches = 0,
+               .name = chipController.chip()->daemonAccessibleName(),
+               .role = QAccessible::ButtonMenu },
         Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/ToolbarButton.qml"),
                .initialProperties = QVariantMap { { "glyph", QStringLiteral("+") },
                                                   { "accessibleName", QStringLiteral("New tab") } },

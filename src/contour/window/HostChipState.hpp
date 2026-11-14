@@ -2,11 +2,12 @@
 #pragma once
 
 /// @file
-/// What the host chip of a remote window says: the supervised connection's six states fold onto the chip's
-/// three, each with its dot colour and text. Pure, so the chip, its accessibility name and the tests read
-/// the same rows.
+/// What the location chip says of its daemon's connection: the supervised connection's six states fold onto
+/// the chip's four, each with its dot colour and text. Pure, so the chip, its accessibility name and the
+/// tests read the same rows.
 
 #include <contour/config/UiStyle.hpp>
+#include <contour/window/TranslateNoop.hpp>
 
 #include <array>
 #include <cstddef>
@@ -19,7 +20,7 @@
 namespace contour::window
 {
 
-/// The three states the host chip shows.
+/// The states the location chip shows of its daemon's connection.
 enum class HostChipState : uint8_t
 {
     Connected = 0, ///< The daemon is reachable.
@@ -80,14 +81,14 @@ static_assert(detail::hostChipRowsInOrder(), "HostChipRows must list the connect
     return HostChipRows[static_cast<size_t>(connection)].state;
 }
 
-/// Whether a window shows a host chip.
+/// Whether a window is on a remote host, whose connection the band must be able to report.
 enum class HostChipPresence : uint8_t
 {
     Hidden = 0, ///< A local window.
     Shown,      ///< A window onto a remote host.
 };
 
-/// Decides whether the chip shows.
+/// Decides whether the window names a remote host.
 /// @param hostLabel The window's host label; empty for a local window.
 /// @return Shown when there is a host to name.
 [[nodiscard]] constexpr HostChipPresence hostChipPresence(std::string_view hostLabel) noexcept
@@ -99,7 +100,7 @@ enum class HostChipPresence : uint8_t
 enum class HostNotice : uint8_t
 {
     None = 0,    ///< A local window, or a remote one whose connection is up.
-    Interrupted, ///< A remote window reconnecting or disconnected: its host chip must be on screen.
+    Interrupted, ///< A remote window reconnecting or disconnected: the band must be on screen to say so.
 };
 
 /// Number of @c HostNotice enumerators, derived from the last one.
@@ -115,26 +116,50 @@ inline constexpr size_t HostNoticeCount = static_cast<size_t>(HostNotice::Interr
                                                                                     : HostNotice::None;
 }
 
-/// How one chip state looks.
+/// How one chip state looks and what it says.
 struct HostChipLook
 {
     HostChipState state;              ///< The state this row describes.
     config::StatusColorRole dot;      ///< The dot's status role.
     std::string_view status;          ///< The label after the host name; empty when connected.
     std::string_view accessibleState; ///< The state word assistive technology announces.
+    std::string_view tooltipFormat; ///< The chip's tooltip sentence (`%1` the daemon, `%2` the action); empty
+                                    ///< when connected, whose tooltip is the action alone.
+    std::string_view description;   ///< What a screen reader adds to the chip's name; empty when connected.
+    std::string_view glyph;         ///< The terminal-style stand-in for the dot.
 };
 
 /// The looks, indexed by @c HostChipState.
 inline constexpr std::array<HostChipLook, HostChipStateCount> HostChipLooks {
-    HostChipLook { HostChipState::Connected, config::StatusColorRole::Success, "", "connected" },
-    HostChipLook {
-        HostChipState::Reconnecting, config::StatusColorRole::Warning, "Reconnecting…", "reconnecting" },
-    HostChipLook {
-        HostChipState::Disconnected, config::StatusColorRole::Danger, "Disconnected", "disconnected" },
-    HostChipLook { HostChipState::NeedsAttention,
-                   config::StatusColorRole::Warning,
-                   "Reconnecting needs your attention",
-                   "reconnecting, needs your attention" },
+    HostChipLook { .state = HostChipState::Connected,
+                   .dot = config::StatusColorRole::Success,
+                   .status = "",
+                   .accessibleState = "connected",
+                   .tooltipFormat = "",
+                   .description = "",
+                   .glyph = "●" },
+    HostChipLook { .state = HostChipState::Reconnecting,
+                   .dot = config::StatusColorRole::Warning,
+                   .status = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting…"),
+                   .accessibleState = "reconnecting",
+                   .tooltipFormat = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting to %1 · %2"),
+                   .description = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting"),
+                   .glyph = "◑" },
+    HostChipLook { .state = HostChipState::Disconnected,
+                   .dot = config::StatusColorRole::Danger,
+                   .status = QT_TRANSLATE_NOOP("LocationChip", "Disconnected"),
+                   .accessibleState = "disconnected",
+                   .tooltipFormat = QT_TRANSLATE_NOOP("LocationChip", "Disconnected from %1 · %2"),
+                   .description = QT_TRANSLATE_NOOP("LocationChip", "Disconnected"),
+                   .glyph = "✕" },
+    HostChipLook { .state = HostChipState::NeedsAttention,
+                   .dot = config::StatusColorRole::Warning,
+                   .status = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting needs your attention"),
+                   .accessibleState = "reconnecting, needs your attention",
+                   .tooltipFormat =
+                       QT_TRANSLATE_NOOP("LocationChip", "Reconnecting to %1 needs your attention · %2"),
+                   .description = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting, needs your attention"),
+                   .glyph = "!" },
 };
 
 namespace detail
