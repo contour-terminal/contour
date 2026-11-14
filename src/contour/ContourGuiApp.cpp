@@ -1962,6 +1962,9 @@ std::expected<void, std::string> ContourGuiApp::startLaunchLink(LaunchAttach att
                                    std::move(attach.address));
     config.controller.workingDirectory =
         attachWorkingDirectory(parameters().get<string>("contour.terminal.working-directory"));
+    // `--workspace N` of a workspace holding no tab is a request for a shell there.
+    if (workspace)
+        config.controller.emptyWorkspace = remote::NativeController::EmptyWorkspace::OpenFirstTab;
     // The launch's daemon is this client's to restart and upgrade when it is local: _restartDaemon and
     // _upgradeDaemon are set for it.
     if (attach.locality == window::DaemonLocality::Local)

@@ -29,6 +29,8 @@ namespace
     constexpr auto CreateFailedText = std::string_view { "Could not create a workspace on {}: {}." };
 
     /// Why a switch whose target did not show within its deadline failed.
+    constexpr auto SwitchSuperseded =
+        std::string_view { "a newer switch of the window, or its close, ended it" };
     constexpr auto SwitchTimedOut = std::string_view { "it did not show the workspace in time" };
 
     /// Why a switch that must land by a time (session::SwitchLandBy) was not started.
@@ -128,10 +130,16 @@ void WindowSwitcher::request(vtworkspace::WorkspaceId window,
         done(std::unexpected(std::string { "this window has no daemon behind it" }));
         return;
     }
-    if (_busy.contains(window.value))
+    // A switch waiting for a tab in an empty workspace ends for a newer one (it is for the user to end,
+    // and a window must not stay locked by it); any other switch under way refuses it.
+    if (auto const busy = _busy.find(window.value); busy != _busy.end())
     {
-        done(std::unexpected(std::string { "a switch of this window is under way" }));
-        return;
+        auto const supersede = busy->second.supersede;
+        if (!supersede || supersede(SupersedeCause::NewerRequest) == Supersession::Kept)
+        {
+            done(std::unexpected(std::string { "a switch of this window is under way" }));
+            return;
+        }
     }
     auto destination = destinationOf(*own, target, window);
     auto request = Request {
@@ -145,7 +153,7 @@ void WindowSwitcher::request(vtworkspace::WorkspaceId window,
         .address = destination.address,
         .config = std::nullopt,
     };
-    _busy.emplace(window.value, request.serial);
+    _busy.insert_or_assign(window.value, Busy { .serial = request.serial, .supersede = {} });
     if (!destination.config)
     {
         fail(request, destination.config.error());
@@ -484,11 +492,18 @@ void WindowSwitcher::land(Request request, SwitchTo const& to)
         }
         // Undone as a lost connection undoes it: the window's own workspace is selected again, and the link
         // tells the callback above, which fails the request.
-        armDeadline(window, serial, landBy, [this, window, take] {
-            if (auto* const link = linkOf(window))
+        armDeadline(window, serial, landBy, [this, window, take, landBy] {
+            auto* const link = linkOf(window);
+            if (link != nullptr && expiryOf(link->switchWait(), landBy) == Expiry::Disarmed)
+                return Expiry::Disarmed;
+            if (link != nullptr)
                 link->cancelSwitch(window, std::string { SwitchTimedOut });
             if (auto taken = take())
                 fail(*taken, std::string { SwitchTimedOut });
+            return Expiry::GaveUp;
+        });
+        onSupersede(window, serial, [this, window, take](SupersedeCause cause) {
+            return supersedeOwn(window, cause, take);
         });
         return;
     }
@@ -517,35 +532,100 @@ void WindowSwitcher::land(Request request, SwitchTo const& to)
     };
     *madeAs = _host.startSwitchLink(std::move(config)).id();
     // The link is not wanted any more: it ends, telling nothing, and its selection goes with its connection.
-    armDeadline(window, serial, landBy, [this, madeAs, take] {
+    armDeadline(window, serial, landBy, [this, madeAs, take, landBy] {
         auto const links = _host.switchableLinks();
-        if (auto const found = std::ranges::find(links, *madeAs, &DaemonLink::id); found != links.end())
+        auto const found = std::ranges::find(links, *madeAs, &DaemonLink::id);
+        if (found != links.end() && expiryOf((*found)->switchWait(), landBy) == Expiry::Disarmed)
+            return Expiry::Disarmed;
+        if (found != links.end())
             (*found)->abandon();
         if (auto taken = take())
             fail(*taken, std::string { SwitchTimedOut });
+        return Expiry::GaveUp;
     });
+    onSupersede(window, serial, [this, madeAs, take](SupersedeCause cause) {
+        return supersedeLinked(*madeAs, cause, take);
+    });
+}
+
+WindowSwitcher::Supersession WindowSwitcher::supersedeOwn(vtworkspace::WorkspaceId window,
+                                                          SupersedeCause cause,
+                                                          TakeRequest const& take)
+{
+    auto* const link = linkOf(window);
+    if (cause == SupersedeCause::NewerRequest
+        && (link == nullptr || link->switchWait() != SwitchWait::ForFirstTab))
+        return Supersession::Kept;
+    // Taken first: the link's callback then finds nothing to fail, and no notice is posted.
+    auto taken = take();
+    if (link != nullptr)
+        link->cancelSwitch(window, std::string { SwitchSuperseded });
+    if (taken)
+        cancel(*taken, std::string { SwitchSuperseded });
+    return Supersession::Ended;
+}
+
+WindowSwitcher::Supersession WindowSwitcher::supersedeLinked(DaemonLinkId madeAs,
+                                                             SupersedeCause cause,
+                                                             TakeRequest const& take)
+{
+    auto const links = _host.switchableLinks();
+    auto const found = std::ranges::find(links, madeAs, &DaemonLink::id);
+    if (cause == SupersedeCause::NewerRequest
+        && (found == links.end() || (*found)->switchWait() != SwitchWait::ForFirstTab))
+        return Supersession::Kept;
+    auto taken = take();
+    if (found != links.end())
+        (*found)->abandon();
+    if (taken)
+        cancel(*taken, std::string { SwitchSuperseded });
+    return Supersession::Ended;
+}
+
+void WindowSwitcher::onSupersede(vtworkspace::WorkspaceId window,
+                                 uint64_t serial,
+                                 std::function<Supersession(SupersedeCause)> supersede)
+{
+    if (auto const busy = _busy.find(window.value); busy != _busy.end() && busy->second.serial == serial)
+        busy->second.supersede = std::move(supersede);
+}
+
+void WindowSwitcher::windowClosed(vtworkspace::WorkspaceId window)
+{
+    // Copied: ending the switch erases its entry.
+    if (auto const busy = _busy.find(window.value); busy != _busy.end() && busy->second.supersede)
+        std::ignore = std::function { busy->second.supersede }(SupersedeCause::WindowClosed);
+}
+
+WindowSwitcher::Expiry WindowSwitcher::expiryOf(SwitchWait wait, session::SwitchLandBy landBy) noexcept
+{
+    return wait == SwitchWait::ForFirstTab && !landBy ? Expiry::Disarmed : Expiry::GaveUp;
 }
 
 void WindowSwitcher::armDeadline(vtworkspace::WorkspaceId window,
                                  uint64_t serial,
                                  session::SwitchLandBy landBy,
-                                 std::function<void()> expire)
+                                 std::function<Expiry()> expire)
 {
     auto const timeout =
         landBy ? std::clamp(std::chrono::ceil<std::chrono::milliseconds>(*landBy - _deadline.clock.now()),
                             std::chrono::milliseconds::zero(),
                             _deadline.timeout)
                : _deadline.timeout;
-    _deadline.timer(timeout, [alive = std::weak_ptr { _alive }, window, serial, expire = std::move(expire)] {
+    // Shared, so that the timer's own copy of what it fires copies a pointer, not what the switch undoes.
+    auto const undo = std::make_shared<std::function<Expiry()>>(std::move(expire));
+    _deadline.timer(timeout, [alive = std::weak_ptr { _alive }, window, serial, undo] {
         auto const self = alive.lock();
         if (!self)
             return;
         // Ended meanwhile, and maybe followed by another request of the same window.
         auto const busy = (*self)->_busy.find(window.value);
-        if (busy == (*self)->_busy.end() || busy->second != serial)
+        if (busy == (*self)->_busy.end() || busy->second.serial != serial)
             return;
-        attachLog()("switch: window {} gave up waiting for its target to show.", window.value);
-        expire();
+        // A switch waiting for a tab said so as its target's layout arrived
+        // (DaemonLink::noteSwitchTargetSettled()).
+        if ((*undo)() == Expiry::GaveUp)
+            attachLog()("switch: window {} gave up waiting for its target to show.", window.value);
     });
 }
 
@@ -597,6 +677,14 @@ void WindowSwitcher::failCreate(vtworkspace::WorkspaceId window,
     if (auto* const controller = _sessions.controllerDisplaying(window))
         controller->notices().post(window::Notice { .kind = window::NoticeKind::SwitchFailed, .text = text });
     done(std::unexpected(reason));
+}
+
+void WindowSwitcher::cancel(Request const& request, std::string const& reason)
+{
+    _busy.erase(request.window.value);
+    // Not a fault, and nobody to tell in the window: a newer switch or the window's close ended it.
+    attachLog()("switch: window {}: {}", request.window.value, reason);
+    request.done(std::unexpected(reason));
 }
 
 void WindowSwitcher::fail(Request const& request, std::string const& reason)

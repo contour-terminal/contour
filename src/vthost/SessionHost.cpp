@@ -1249,7 +1249,11 @@ Tab* SessionHost::createTab(SessionSpawnRequest const& request, std::optional<Se
         auto const [owner, tab, leaf] = _model.findSessionLeaf(*beside);
         return owner != nullptr ? owner->id() : _workspace;
     }();
+    return createTabIn(workspace, request);
+}
 
+Tab* SessionHost::createTabIn(vtworkspace::WorkspaceId workspace, SessionSpawnRequest const& request)
+{
     auto const pane = paneUuidFor(request);
     auto const tabUuid = tabUuidFor(request);
     auto const seeded = seedSession(

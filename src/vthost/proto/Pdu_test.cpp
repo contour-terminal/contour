@@ -2416,6 +2416,48 @@ TEST_CASE("Goodbye is a bodiless PDU of tag 60 that round-trips and ignores appe
     CHECK(decodeAs<Goodbye>(frameOf(PduType::Goodbye, appended.view())) == Goodbye {});
 }
 
+TEST_CASE("OpenFirstTab is a PDU of tag 61 that names a workspace, round-trips and ignores appended bytes",
+          "[vthost][pdu][launch-first-tab]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::OpenFirstTab) == 61);
+    CHECK(roundTrip(DecodedPdu { OpenFirstTab { .workspace = 7 } })
+          == DecodedPdu { OpenFirstTab { .workspace = 7 } });
+    auto appended = Writer {};
+    appended.varint(7);
+    appended.u8(7);
+    CHECK(decodeAs<OpenFirstTab>(frameOf(PduType::OpenFirstTab, appended.view()))
+          == OpenFirstTab { .workspace = 7 });
+    // A body without the workspace is malformed.
+    CHECK_FALSE(decodePdu(frameOf(PduType::OpenFirstTab, Writer {}.view())).has_value());
+}
+
+TEST_CASE("a launch's Select hello is the Select every daemon reads, whatever it offers",
+          "[vthost][pdu][attach][launch-first-tab]")
+{
+    // The capability is the only thing that tells a daemon the client can ask for a first tab: the intent
+    // byte stays Select (7), so an older daemon keeps the workspace it names, as before.
+    auto const encoded = [](ClientHello const& hello) {
+        auto stream = Writer {};
+        encodePdu(stream, 1, DecodedPdu { hello });
+        return std::vector<std::byte>(stream.view().begin(), stream.view().end());
+    };
+    auto hello = ClientHello {};
+    hello.attachIntent = { .kind = AttachIntentKind::Select, .workspace = 4 };
+    hello.capabilities = CapabilitySet::of({ Capability::AttachIntent });
+    auto offering = hello;
+    offering.capabilities.idents.push_back(std::to_underlying(Capability::LaunchFirstTab));
+
+    auto const plain = decodeAs<ClientHello>(encoded(hello));
+    auto const offered = decodeAs<ClientHello>(encoded(offering));
+    CHECK(plain.attachIntent == offered.attachIntent);
+    CHECK(offered.attachIntent.kind == AttachIntentKind::Select);
+    CHECK(offered.capabilities.contains(Capability::LaunchFirstTab));
+    CHECK_FALSE(plain.capabilities.contains(Capability::LaunchFirstTab));
+    CHECK(std::to_underlying(AttachIntentKind::Select) == 7);
+    // The two encodings differ in the capability list alone: one more ident.
+    CHECK(encoded(offering).size() == encoded(hello).size() + 1);
+}
+
 TEST_CASE("PaneSummary decodes an unknown activity, refuses a truncated body, ignores appended bytes",
           "[vthost][pdu][workspace-follow]")
 {

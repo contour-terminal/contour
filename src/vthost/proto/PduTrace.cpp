@@ -603,6 +603,11 @@ namespace
                    } },
         TraceRow { PduType::PanesReprojected, "PanesReprojected", nullptr },
         TraceRow { PduType::Goodbye, "Goodbye", nullptr },
+        TraceRow { PduType::OpenFirstTab,
+                   "OpenFirstTab",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("workspace={}", std::get<OpenFirstTab>(pdu).workspace);
+                   } },
         TraceRow { PduType::SoftFontState,
                    "SoftFontState",
                    +[](DecodedPdu const& pdu) {

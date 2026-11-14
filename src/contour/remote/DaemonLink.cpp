@@ -608,6 +608,7 @@ void DaemonLink::followLayout()
     // session. Incremental — what is already shown is left untouched.
     reconcile();
     expireRestoreSummaryAfterLayout();
+    noteSwitchTargetSettled();
     // Last: a link a switch started tells it once its connection shows the workspace, and may be handed the
     // window that asked right then. Not before the workspace holds a tab: the window would be emptied.
     if (arrivalDue() && isLive())
@@ -619,6 +620,7 @@ void DaemonLink::reportArrival(std::expected<uint64_t, std::string> landed)
 {
     if (!arrivalDue())
         return;
+    endSwitchWait(landed ? std::string_view { "a tab arrived" } : std::string_view { landed.error() });
     // Emptied first: what it is told may end or rebind this link.
     std::exchange(arrival()->landed, SwitchLanded {})(std::move(landed));
 }
@@ -750,10 +752,48 @@ void DaemonLink::cancelSwitch(vtworkspace::WorkspaceId window, std::string const
     failSwitch(reason);
 }
 
+SwitchWait DaemonLink::switchWait() const
+{
+    requireGuiThread();
+    return _switchWait;
+}
+
+std::optional<uint64_t> DaemonLink::switchTarget() const
+{
+    if (!isLive())
+        return std::nullopt;
+    if (_switch && _switch->to != 0 && _controller->selectedWorkspace() == _switch->to)
+        return _switch->to;
+    if (auto const* const switched = std::get_if<SwitchArrival>(&_role);
+        switched != nullptr && static_cast<bool>(switched->landed))
+        return arrivalWorkspace();
+    return std::nullopt;
+}
+
+void DaemonLink::noteSwitchTargetSettled()
+{
+    if (_switchWait == SwitchWait::ForFirstTab)
+        return;
+    // Decided as the layout arrives, not when the switch's deadline passes: the deadline only finds the
+    // outcome. A target whose layout is not settled yet is still the target the deadline bounds.
+    auto const target = switchTarget();
+    if (!target || _controller->settledLayout(*target) == nullptr || holdsTab(*target))
+        return;
+    _switchWait = SwitchWait::ForFirstTab;
+    attachLog()("switch: workspace {} holds no tab; waiting for one, with no deadline.", *target);
+}
+
+void DaemonLink::endSwitchWait(std::string_view how)
+{
+    if (std::exchange(_switchWait, SwitchWait::ForTarget) == SwitchWait::ForFirstTab)
+        attachLog()("switch: the wait for a tab ended: {}.", how);
+}
+
 void DaemonLink::failSwitch(std::string const& reason)
 {
     if (!_switch)
         return;
+    endSwitchWait(reason);
     auto pending = *std::exchange(_switch, std::nullopt);
     if (pending.landed)
         pending.landed(std::unexpected(reason));
@@ -818,6 +858,7 @@ std::expected<void, std::string> DaemonLink::adoptWindow(vtworkspace::WorkspaceI
 void DaemonLink::abandon()
 {
     requireGuiThread();
+    endSwitchWait("the switch was given up");
     if (auto* const switched = arrival())
         switched->landed = {};
     end();
@@ -1029,6 +1070,7 @@ void DaemonLink::switchTo(uint64_t workspace)
     controller->dropWorkspaceIfEmpty(before);
     if (_switch && (_switch->to == workspace || (_switch->to == 0 && !_switch->before.contains(workspace))))
     {
+        endSwitchWait("a tab arrived");
         auto pending = *std::exchange(_switch, std::nullopt);
         if (pending.landed)
             pending.landed(workspace);

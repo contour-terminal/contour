@@ -982,7 +982,6 @@ void NativeSession::pushLayout()
         }
     forgetRemovedWorkspaceMeta();
     syncWorkspacePositions();
-    noteModelSessions();
     if (pushed && batchesLayouts())
     {
         openLayoutBatch();
@@ -1072,7 +1071,6 @@ bool NativeSession::flushChangedLayouts()
     }
     forgetRemovedWorkspaceMeta();
     syncWorkspacePositions();
-    noteModelSessions();
     return pushed;
 }
 
@@ -1137,20 +1135,12 @@ void NativeSession::requestWorkspaceSnapshots(vtworkspace::Workspace& workspace)
 
 void NativeSession::requestArrivedSnapshots(vtworkspace::Workspace& workspace)
 {
+    // The attach's own snapshots are queued by its walk, after its first layout.
+    if (_attachSnapshots == AttachSnapshots::NotYetQueued)
+        return;
     for (auto const session: sessionsShownBy(workspace))
-        if (!_followed.contains(session.value) && _sessionsAtLastLayout.contains(session.value)
-            && !snapshotPending(session))
+        if (!_followed.contains(session.value) && !snapshotPending(session))
             requestSnapshot(session);
-}
-
-void NativeSession::noteModelSessions()
-{
-    auto& model = _host.model();
-    _sessionsAtLastLayout.clear();
-    for (auto const i: std::views::iota(0, model.workspaceCount()))
-        if (auto const* workspace = model.workspaceAt(i))
-            for (auto const session: sessionsShownBy(*workspace))
-                _sessionsAtLastLayout.insert(session.value);
 }
 
 void NativeSession::forgetUnmirroredSessions()
@@ -2547,6 +2537,14 @@ NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame con
             _detachKind = DetachKind::Closed;
         return TabVerb::Served;
     }
+    if (std::holds_alternative<proto::OpenFirstTab>(frame.pdu))
+    {
+        if (!_negotiated->shared.contains(proto::Capability::LaunchFirstTab))
+            refuse(frame);
+        else
+            openFirstTab(std::get<proto::OpenFirstTab>(frame.pdu).workspace);
+        return TabVerb::Served;
+    }
     if (auto const* reply = std::get_if<proto::SwitchReply>(&frame.pdu))
     {
         if (!_negotiated->shared.contains(proto::Capability::WorkspaceSwitch))
@@ -2556,6 +2554,20 @@ NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame con
         return TabVerb::Served;
     }
     return TabVerb::None;
+}
+
+void NativeSession::openFirstTab(uint64_t named)
+{
+    auto const workspace = vtworkspace::WorkspaceId { named };
+    auto const* const found = _host.model().workspace(workspace);
+    // Asked of the workspace as the client saw it, which the connection may have left since, or which a tab
+    // was opened in or that went: nothing then needs a first tab. Quietly, as no reader of this is owed more.
+    // Like the other tab verbs it checks no grant.
+    if (named != _selectedWorkspace || found == nullptr || found->tabCount() != 0)
+        return;
+    connectionLog()("{}: workspace {} holds no tab; opening its first", _id, workspace.value);
+    if (_host.createTabIn(workspace, attachSpawnRequest(_attachDirectory)) == nullptr)
+        errorLog()("{}: the first tab of workspace {} could not be created", _id, workspace.value);
 }
 
 NativeSession::GrantCheck NativeSession::requireGrant(vtcontrol::Permission permission,
@@ -3064,6 +3076,7 @@ void NativeSession::attachClient(uint64_t serial,
 
     // After the client area, so whatever the plan spawns spawns at the size the client displays (D7). A
     // client that cannot state an intent is a launch, as every client was before intents existed.
+    _attachDirectory = workingDirectory;
     executeAttachPlan(negotiated.shared.contains(proto::Capability::AttachIntent) ? hello.attachIntent
                                                                                   : proto::AttachIntent {},
                       workingDirectory);
@@ -3140,6 +3153,7 @@ void NativeSession::attachClient(uint64_t serial,
                 requestSnapshot(pane.session());
         });
     });
+    _attachSnapshots = AttachSnapshots::Queued;
 
     // The questions still open: asked while no client was attached, or left unanswered by one that was --
     // a dismissed prompt sends nothing. A status-line extension waits for an answer, its command calls

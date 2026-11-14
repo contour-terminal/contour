@@ -756,9 +756,19 @@ TEST_CASE("a daemon split the factory refuses ends the reconcile, leaving it for
     // Returns: the split is not realized, and the tab is as it was.
     contour::remote::applyRemoteLayout(app.manager(), win.id, ac);
     CHECK(app.manager().model().workspace(win.id)->tabAt(0)->paneCount() == 1);
-    // And no session is left awaiting a pane: the next split the user makes here binds nothing of the
-    // daemon's.
-    CHECK_FALSE(ac.canCreateSession());
+    // The split's session, which the daemon snapshots as soon as its pane is announced, stays pending for the
+    // next push to bind: it is not dropped, and not bound to a pane the factory refused.
+    //
+    // That leaves canCreateSession() true, and a createPty() without a bind hook pops _pending.front(). No
+    // such creation is reachable in a window this controller serves, which the paths that make a session
+    // were read for: a GUI new tab (TerminalSessionManager::createNewTab) and a GUI split (splitActivePane)
+    // are routed to the daemon by requestRemoteTab() and requestRemoteSplit() -- the split only declines
+    // while a layout is realized, when the bind hook is set; a restart (replaceEndedSession) is offered to
+    // local sessions only (TerminalSession::endAction); a taken-back pane after a reconnect names its
+    // session by the same hook (bindForReconnect); a command pane is refused for remote sessions
+    // (CommandPaneError::RemoteSessions); and a workspace the window creates for itself is unbound, so its
+    // factory is the local one.
+    CHECK(waitUntil([&] { return ac.canCreateSession(); }));
     ac.stop();
 }
 
@@ -6811,4 +6821,139 @@ TEST_CASE("a connection whose prompt is held says it needs attention, and says n
     controller.stop();
 }
 
+TEST_CASE("a reconnect begins an attach attempt of its own: its timeout names its phase, not the one before",
+          "[attach][controller][timeout]")
+{
+    using contour::remote::AttachPhase;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    // The first attempt got as far as a session: the daemon had answered.
+    CHECK(controller.attachPhase() == AttachPhase::AwaitingFirstSession);
 
+    // The daemon is gone and refuses every connection meanwhile: the attempt seeking it again has made no
+    // headway, whatever the one before did.
+    daemon.refuseConnections();
+
+    CHECK(waitUntil([&] { return controller.attachPhase() != AttachPhase::AwaitingFirstSession; }));
+    CHECK(waitUntil([&] { return controller.attachPhase() == AttachPhase::Connecting; }));
+}
+
+TEST_CASE("a launch of a workspace holding no tab asks for a shell there, when the daemon can open one",
+          "[attach][controller][workspace]")
+{
+    using contour::remote::NativeController;
+    auto const launch = [](uint64_t workspace) {
+        return ControllerOptions { .intent = { .kind = vthost::proto::AttachIntentKind::Select,
+                                               .workspace = workspace },
+                                   .emptyWorkspace = NativeController::EmptyWorkspace::OpenFirstTab };
+    };
+
+    SECTION("a daemon that shares the capability opens it")
+    {
+        auto daemon = DaemonFixture {};
+        std::ignore = daemon.seedSession("first");
+        auto const empty = daemon.onDaemon([&] { return daemon.host->createEmptyWorkspace().id().value; });
+        auto timeline = TestTimeline {};
+        auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline, launch(empty));
+        auto& controller = *controllerOwned;
+        auto const stopOnExit = StopOnExit { controller };
+        requireConnected(controller); // a session arrived: no "sent no session in time"
+        CHECK(waitUntil([&] { return !workspaceOf(controller, empty).tabs.empty(); }));
+        CHECK(controller.selectedWorkspace() == empty);
+        CHECK(daemon.clientFrames.count(vthost::proto::PduType::OpenFirstTab) == 1);
+        // The hello is the Select every daemon reads, whatever it shares: only the offer says more.
+        auto const hellos = daemon.clientFrames.hellos();
+        REQUIRE(hellos.size() == 1);
+        CHECK(hellos.front().attachIntent.kind == vthost::proto::AttachIntentKind::Select);
+        CHECK(hellos.front().attachIntent.workspace == empty);
+    }
+    SECTION("every connection asks again, a reconnect included")
+    {
+        auto daemon = DaemonFixture {};
+        std::ignore = daemon.seedSession("first");
+        auto const empty = daemon.onDaemon([&] { return daemon.host->createEmptyWorkspace().id().value; });
+        auto timeline = TestTimeline {};
+        auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline, launch(empty));
+        auto& controller = *controllerOwned;
+        auto const stopOnExit = StopOnExit { controller };
+        requireConnected(controller);
+        REQUIRE(waitUntil([&] { return !workspaceOf(controller, empty).tabs.empty(); }));
+        REQUIRE(daemon.clientFrames.count(vthost::proto::PduType::OpenFirstTab) == 1);
+
+        // The connection is lost with the workspace empty again, and the reconnect lands the window on
+        // another workspace, as a daemon does for one that holds no tab.
+        auto const workspace = vtworkspace::WorkspaceId { empty };
+        daemon.onDaemon([&] {
+            auto& model = daemon.host->model();
+            model.closeTab(workspace, model.workspace(workspace)->tabAt(0)->id());
+            return 0;
+        });
+        REQUIRE(waitUntil([&] { return workspaceOf(controller, empty).tabs.empty(); }));
+        daemon.dropConnections();
+        REQUIRE(waitUntil([&] { return daemon.clientFrames.hellos().size() == 2; }, 10000));
+        REQUIRE(waitUntil([&] {
+            return controller.connectionState() == vthost::client::ConnectionState::Connected
+                   && controller.settledLayouts().contains(empty);
+        }));
+        REQUIRE(controller.select(empty).has_value());
+        REQUIRE(waitUntil([&] { return controller.selectedWorkspace() == empty; }));
+        REQUIRE(daemon.clientFrames.count(vthost::proto::PduType::OpenFirstTab) == 1);
+
+        // A tab opened and closed there is a layout that arrives empty on this connection: asked again.
+        daemon.onDaemon([&] {
+            auto& model = daemon.host->model();
+            auto const* const tab = daemon.host->createTabIn(workspace, {});
+            model.closeTab(workspace, tab->id());
+            return 0;
+        });
+
+        CHECK(waitUntil([&] { return daemon.clientFrames.count(vthost::proto::PduType::OpenFirstTab) == 2; },
+                        10000));
+        CHECK(waitUntil([&] { return !workspaceOf(controller, empty).tabs.empty(); }));
+    }
+    SECTION("a daemon that predates it is not asked, and the launch waits as it did")
+    {
+        auto daemon = DaemonFixture { {}, servicesWithoutLaunchFirstTab() };
+        std::ignore = daemon.seedSession("first");
+        auto const empty = daemon.onDaemon([&] { return daemon.host->createEmptyWorkspace().id().value; });
+        auto timeline = TestTimeline {};
+        auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline, launch(empty));
+        auto& controller = *controllerOwned;
+        auto const stopOnExit = StopOnExit { controller };
+        CHECK_FALSE(controller.pollConnected(10ms).has_value());
+        REQUIRE(waitUntil([&] { return controller.settledLayouts().contains(empty); }));
+        // Nothing was sent and nothing opened: the workspace stays as the daemon has it.
+        CHECK_FALSE(waitUntil([&] { return !workspaceOf(controller, empty).tabs.empty(); }, 300));
+        CHECK(daemon.clientFrames.count(vthost::proto::PduType::OpenFirstTab) == 0);
+        // The hello of a launch is the one such a daemon always read: the Select, byte for byte.
+        auto const hellos = daemon.clientFrames.hellos();
+        REQUIRE(hellos.size() == 1);
+        CHECK(hellos.front().attachIntent
+              == vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Select,
+                                               .workspace = empty });
+        CHECK(hellos.front().capabilities.contains(vthost::proto::Capability::LaunchFirstTab));
+    }
+    SECTION("a window that merely selects it waits, whatever the daemon can do")
+    {
+        auto daemon = DaemonFixture {};
+        std::ignore = daemon.seedSession("first");
+        auto const empty = daemon.onDaemon([&] { return daemon.host->createEmptyWorkspace().id().value; });
+        auto timeline = TestTimeline {};
+        auto const controllerOwned = makeNativeController(
+            daemon.endpoint(),
+            timeline,
+            ControllerOptions {
+                .intent = { .kind = vthost::proto::AttachIntentKind::Select, .workspace = empty } });
+        auto& controller = *controllerOwned;
+        auto const stopOnExit = StopOnExit { controller };
+        CHECK_FALSE(controller.pollConnected(10ms).has_value());
+        REQUIRE(waitUntil([&] { return controller.settledLayouts().contains(empty); }));
+        CHECK_FALSE(waitUntil([&] { return !workspaceOf(controller, empty).tabs.empty(); }, 300));
+        CHECK(daemon.clientFrames.count(vthost::proto::PduType::OpenFirstTab) == 0);
+    }
+}

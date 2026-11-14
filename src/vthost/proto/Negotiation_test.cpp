@@ -161,6 +161,15 @@ TEST_CASE("capability 30 is client-goodbye", "[vthost][negotiation][goodbye]")
     CHECK(goodbye->name == "client-goodbye");
 }
 
+TEST_CASE("capability 31 is launch-first-tab", "[vthost][negotiation][launch-first-tab]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::LaunchFirstTab) == 31);
+    auto const firstTab =
+        std::ranges::find(CapabilityTable, Capability::LaunchFirstTab, &CapabilityRow::capability);
+    REQUIRE(firstTab != CapabilityTable.end());
+    CHECK(firstTab->name == "launch-first-tab");
+}
+
 TEST_CASE("the workspace switch capability keeps its ident and name",
           "[vthost][negotiation][workspace-follow]")
 {

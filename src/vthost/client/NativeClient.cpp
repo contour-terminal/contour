@@ -738,6 +738,15 @@ Delivery NativeClient::reportFocus(proto::WindowFocus focus)
     return Delivery::Sent;
 }
 
+Delivery NativeClient::requestFirstTab(uint64_t workspace)
+{
+    // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
+    if (!shares(proto::Capability::LaunchFirstTab)
+        || send(proto::DecodedPdu { proto::OpenFirstTab { .workspace = workspace } }) == 0)
+        return Delivery::Unsupported;
+    return Delivery::Sent;
+}
+
 void NativeClient::performOperation(proto::PerformOperation request)
 {
     send(proto::DecodedPdu { std::move(request) });
@@ -853,8 +862,8 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
         // Publish only a screen that is whole. A mid-run piece leaves the mirror holding part of
         // a grid, and handing that to a frontend would have it repaint a snapshot it has only
         // half received — the rows not yet delivered rendering as absent until the run finishes.
-        if (screen.snapshotInProgress)
         // Returning here skips only the first-snapshot log and _onUpdate: the delta is applied above.
+        if (screen.snapshotInProgress)
         {
             if (_onSnapshotProgress)
                 _onSnapshotProgress();
@@ -937,7 +946,6 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
         "attach: ignoring unexpected {} (serial {})", proto::toString(proto::typeOf(pdu)), frame.serial);
 }
 
-void NativeClient::handleLayout(proto::LayoutState const& layout)
 void NativeClient::noteFirstSnapshot(uint64_t session)
 {
     if (_firstSnapshot != FirstSnapshot::Awaited)
@@ -950,8 +958,8 @@ void NativeClient::noteFirstSnapshot(uint64_t session)
     _attachSessions.clear();
 }
 
+void NativeClient::handleLayout(proto::LayoutState const& layout)
 {
-    if (_onLayout && _pendingEdits.empty())
     if (_firstSnapshot == FirstSnapshot::Awaited && layout.workspace == _selectedWorkspace)
     {
         auto const collect = [this](auto const& self, proto::WirePane const& pane) -> void {
@@ -964,6 +972,7 @@ void NativeClient::noteFirstSnapshot(uint64_t session)
         for (auto const& tab: layout.tabs)
             collect(collect, tab.root);
     }
+    if (_onLayout && _pendingEdits.empty())
         _onLayout(layout);
     else if (_onLayout)
     {

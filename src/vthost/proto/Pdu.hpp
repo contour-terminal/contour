@@ -104,6 +104,7 @@ enum class PduType : uint8_t
     SetWorkspaceLabel = 58,
     CloseWorkspace = 59,
     Goodbye = 60,
+    OpenFirstTab = 61,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1827,6 +1828,19 @@ struct Goodbye
     bool operator==(Goodbye const&) const = default;
 };
 
+/// Client→server (Capability::LaunchFirstTab): the workspace this connection selects holds no tab, and the
+/// client wants a shell there: a launch that named the workspace (`contour --workspace N`). The daemon opens
+/// the workspace's first tab, in the directory the hello stated, once. It names the workspace the client saw
+/// empty: one that holds a tab by the time it reads this, or that is gone, or that the connection no longer
+/// selects, is left as it is.
+/// A client sends it only to a daemon that shares the capability: an older one never sees it, and the client
+/// waits for a tab as it always did.
+struct OpenFirstTab
+{
+    uint64_t workspace = 0; ///< The daemon workspace the client saw hold no tab.
+    bool operator==(OpenFirstTab const&) const = default;
+};
+
 /// Client→server (Capability::WorkspaceMeta): set a workspace's label, which is what the sidebar's rename
 /// does. The daemon applies it to the object registry, so every client is told through WorkspaceMeta, and
 /// every control-API subscriber through `workspace.labelChanged`. An empty label clears it; an unknown
@@ -1997,7 +2011,8 @@ using DecodedPdu = std::variant<Invalid,
                                 MoveWorkspace,
                                 SetWorkspaceLabel,
                                 CloseWorkspace,
-                                Goodbye>;
+                                Goodbye,
+                                OpenFirstTab>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

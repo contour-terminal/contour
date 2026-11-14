@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <variant>
 
@@ -127,6 +128,11 @@ class WindowSwitching
                          SwitchMode mode,
                          SwitchLandBy landBy,
                          SwitchCompletion done) = 0;
+
+    /// Told by the manager that @p window closed: a switch of it still under way ends, as cancelled. Nothing
+    /// by default.
+    /// @param window The window's workspace, as request() named it.
+    virtual void windowClosed(vtworkspace::WorkspaceId window) { std::ignore = window; }
 };
 
 } // namespace contour::session

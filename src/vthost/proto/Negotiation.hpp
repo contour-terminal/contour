@@ -127,6 +127,10 @@ enum class Capability : uint8_t
     /// workspace its window showed at once instead of holding it for the reconnect grace. Without it a
     /// client's end is a drop, which is what an older daemon takes it for.
     ClientGoodbye = 30,
+    /// The peer reads an OpenFirstTab: a client that attached to a workspace holding no tab asks the daemon
+    /// for the first one, which the daemon opens there. Without it the client waits for a tab, which is what
+    /// an older daemon makes of every attach to such a workspace.
+    LaunchFirstTab = 31,
 };
 
 /// One row of the table naming a Capability.
@@ -166,6 +170,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::DaemonFollow, .name = "daemon-follow" },
     CapabilityRow { .capability = Capability::WorkspaceMeta, .name = "workspace-meta" },
     CapabilityRow { .capability = Capability::ClientGoodbye, .name = "client-goodbye" },
+    CapabilityRow { .capability = Capability::LaunchFirstTab, .name = "launch-first-tab" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

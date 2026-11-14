@@ -90,6 +90,7 @@ namespace
             vthost::proto::Capability::DaemonFollow,
             vthost::proto::Capability::WorkspaceMeta,
             vthost::proto::Capability::ClientGoodbye,
+            vthost::proto::Capability::LaunchFirstTab,
         });
         if (switchRequests == NativeController::SwitchRequests::Answered)
             offered.idents.push_back(std::to_underlying(vthost::proto::Capability::WorkspaceSwitch));
@@ -148,6 +149,7 @@ NativeController::NativeController(Config config):
                                                                  [this] { noteTransportReturned(); })),
     _intent(config.intent),
     _resumeFallback(config.resumeFallback),
+    _emptyWorkspace(config.emptyWorkspace),
     _switchRequests(config.switchRequests),
     _profileName(std::move(config.profileName)),
     _workingDirectory(std::move(config.workingDirectory)),
@@ -271,6 +273,11 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
 {
     if (_acceptedConnections == 0)
         _timeline.mark(vthost::latency::StartupMark::Connected);
+    {
+        // Every connection is a daemon of its own to ask: a reconnect, or a daemon upgraded since.
+        auto const lock = std::lock_guard { _mutex };
+        _firstTab = FirstTab::NotAsked;
+    }
     // A reconnect resumes the workspace the supervisor's intent names: the one the lost connection selected.
     // The controller's own record only stands in where that names none.
     if (intent.kind == vthost::proto::AttachIntentKind::Resume)
@@ -520,13 +527,13 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
             case ConnectionState::Reconnecting:
             case ConnectionState::Upgrading:
                 // An upgrade is a reconnect to the same daemon: adoptReconnect() keeps every binding then.
+                // The next connection is an attempt of its own: what the lost one made headway in is not its.
+                beginAttachAttempt(lock);
                 _client = nullptr;
                 _inputConnection = 0;
                 forgetInputEchoes();
                 // Before the first session arrived the attach still waits; awaitConnected() sees it through.
                 if (_state == State::Ready)
-                // The next connection is an attempt of its own: what the lost one made headway in is not its.
-                beginAttachAttempt(lock);
                     _state = State::Reconnecting;
                 attachLog()("Lost the connection to {} ({}); {}.",
                             where,
@@ -818,6 +825,16 @@ void NativeController::onLayout(vthost::proto::LayoutState const& layout)
         auto const lock = std::lock_guard { _mutex };
         captureHandshake();
         noteAttachProgress();
+        // A launch that named a workspace holding no tab gets a shell there, from a daemon that says it can.
+        // Any other attach to one waits for a tab, which is no attach to give up on (WindowSwitcher).
+        if (layout.tabs.empty() && layout.workspace == _selected
+            && _intent.kind == vthost::proto::AttachIntentKind::Select
+            && _emptyWorkspace == EmptyWorkspace::OpenFirstTab && _firstTab == FirstTab::NotAsked
+            && _client != nullptr)
+        {
+            _firstTab = FirstTab::Asked;
+            std::ignore = _client->requestFirstTab(layout.workspace);
+        }
         // A daemon that ends its pushes settles them itself (onLayoutBatchEnd); one that does not settles
         // each frame as it comes, as before there were batches.
         batched = layoutBatchShared();

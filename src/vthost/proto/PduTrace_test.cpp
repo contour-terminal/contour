@@ -221,6 +221,17 @@ TEST_CASE("the hellos trace their ranges and capabilities", "[vthost][proto][neg
           == "refused=9 ident=200");
 }
 
+TEST_CASE("the trace names OpenFirstTab, and shows a launch hello's capability and intent legibly",
+          "[vthost][proto][launch-first-tab]")
+{
+    CHECK(toString(PduType::OpenFirstTab) == "OpenFirstTab");
+    CHECK(summarize(DecodedPdu { OpenFirstTab { .workspace = 4 } }) == "workspace=4");
+    CHECK(summarize(DecodedPdu { ClientHello {
+                        .capabilities = { .idents = { std::to_underlying(Capability::LaunchFirstTab) } },
+                        .attachIntent = { .kind = AttachIntentKind::Select, .workspace = 4 } } })
+              .contains("caps=31 "));
+}
+
 TEST_CASE("the upgrade PDUs are named and summarized", "[vthost][proto][upgrade]")
 {
     CHECK(toString(PduType::UpgradeDaemon) == "UpgradeDaemon");

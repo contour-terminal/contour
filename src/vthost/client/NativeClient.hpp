@@ -518,6 +518,14 @@ class NativeClient final
     ///         Capability::DaemonFollow.
     [[nodiscard]] Delivery reportFocus(proto::WindowFocus focus);
 
+    /// Asks the daemon to open the first tab of the workspace this connection selects, which holds none (a
+    /// launch that named it).
+    /// @param workspace The daemon workspace the client saw hold no tab: the daemon opens the tab only if it
+    ///        still does.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares
+    ///         Capability::LaunchFirstTab.
+    [[nodiscard]] Delivery requestFirstTab(uint64_t workspace);
+
     /// @return What this connection does with a bell or notification, as the daemon last stated it; Quiet
     ///         until it does.
     [[nodiscard]] proto::RaiseRole raiseRole() const noexcept { return _raiseRole; }
@@ -837,13 +845,13 @@ class NativeClient final
         Logged,
     };
     FirstSnapshot _firstSnapshot = FirstSnapshot::Awaited;
-    proto::RaiseRole _raiseRole = proto::RaiseRole::Quiet; ///< @see raiseRole()
-    HandshakeHandler _onHandshake;                         ///< @see setHandshakeHandler()
     /// Logs the first whole snapshot of the connection, once: which session it was, and whether the attach's.
     void noteFirstSnapshot(uint64_t session);
     /// The sessions the layouts of the selected workspace named before the first whole snapshot arrived: the
     /// attach's own, for the log of that snapshot. Emptied once it is logged.
     std::set<uint64_t> _attachSessions;
+    proto::RaiseRole _raiseRole = proto::RaiseRole::Quiet; ///< @see raiseRole()
+    HandshakeHandler _onHandshake;                         ///< @see setHandshakeHandler()
     std::map<uint64_t, RemoteScreen> _screens;
     /// Outstanding image fetches: request serial → (session, imageId). The reply
     /// carries no session, so the serial is what routes it to the right screen.
