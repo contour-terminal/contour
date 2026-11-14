@@ -543,19 +543,20 @@ struct DirectoryNamingProbe final: IGitStatusProbe
 
     mutable std::vector<std::filesystem::path> asked;
 };
-} // namespace
 
-TEST_CASE("a restored daemon looks every workspace's git state up again and keeps polling it",
-          "[vthost][handover][threading][git]")
+/// Hands one session over, and takes it over with git services on a fake probe.
+/// @param beforeCapture Runs on the old host once its session is quiesced, before the capture.
+/// @return The branch the successor looked up for the session's workspace, once it has: nothing, if it did
+///         not within the wait. Asserts that it polls from then on.
+[[nodiscard]] std::optional<std::string> branchLookedUpAfterTakeover(
+    std::function<void(LiveHost&)> const& beforeCapture = {})
 {
     // What git a workspace is on is looked up, not carried: the successor asks again for each one it takes
     // over, at once, rather than waiting for a window, a new directory or a finished command that may never
     // come -- and keeps asking on the poll, as a host whose workspaces were made in it does.
     auto old = oneSession();
     auto const workspace = old->host.workspaceId();
-    // The shell reports no directory (no OSC 7, whose restore would tell it anew): the process's own is the
-    // only one there is, and nothing about it changes across the upgrade.
-    auto const image = handOver(std::move(old));
+    auto const image = handOver(std::move(old), beforeCapture);
 
     auto probe = DirectoryNamingProbe {};
     auto executor = core::async::testing::ManualExecutor {};
@@ -563,13 +564,45 @@ TEST_CASE("a restored daemon looks every workspace's git state up again and keep
         image,
         SessionHostConfig { .workspaceGit = WorkspaceGitServices { .probe = probe, .executor = executor } });
 
-    REQUIRE(live->eventually([&] {
-        executor.drain();
-        return live->host.gitInfoOf(workspace).has_value();
-    }));
-    CHECK(live->host.gitInfoOf(workspace)->branch == std::filesystem::current_path().filename().string());
+    if (!live->eventually([&] {
+            executor.drain();
+            return live->host.gitInfoOf(workspace).has_value();
+        }))
+        return std::nullopt;
     CHECK(live->host.pollsWorkspaceGit());
+    return live->host.gitInfoOf(workspace)->branch;
 }
+} // namespace
+
+TEST_CASE("a restored daemon looks every workspace's git state up again and keeps polling it",
+          "[vthost][handover][threading][git]")
+{
+    // The directory the shell last reported crosses in the terminal's state, which every platform restores --
+    // unlike a process's own directory, which only some can look up (below). What sets the lookup off is the
+    // restore, which announces the directory whether one was reported or not, not the report itself: that
+    // reached the old host, which has no git services.
+    auto const branch = branchLookedUpAfterTakeover([](LiveHost& live) {
+        auto& terminal = live.host.hostedSession(live.host.sessionIds().front())->terminal();
+        terminal.writeToScreen("\033]7;file:///restored/reported-directory\033\\");
+        // What the parse posted is handled before the capture, as settle() leaves it.
+        REQUIRE(live.eventually([&] { return live.host.pumpEventsInFlight() == 0; }));
+    });
+    REQUIRE(branch.has_value());
+    CHECK(*branch == "reported-directory");
+}
+
+    #if defined(__linux__) || defined(__APPLE__)
+TEST_CASE("a restored daemon looks the git state of a directory no shell reported up again",
+          "[vthost][handover][threading][git]")
+{
+    // No OSC 7: the adopted process's own directory is the only one there is, and nothing about it changes
+    // across the upgrade. Only these platforms can look a process's directory up
+    // (Process::workingDirectory()).
+    auto const branch = branchLookedUpAfterTakeover();
+    REQUIRE(branch.has_value());
+    CHECK(*branch == std::filesystem::current_path().filename().string());
+}
+    #endif
 
 namespace
 {
