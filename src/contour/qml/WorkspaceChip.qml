@@ -75,6 +75,16 @@ Item {
         return widths
     }
 
+    /// What the chip needs at its last fit step, the least it gets: the title bar reserves it, so the window is
+    /// never made narrower than that. Counted with the state dot and the attention marker present, whether or
+    /// not they are, so the window's minimum does not move with the connection or with another workspace.
+    readonly property real leastWidth: {
+        root._revision
+        fontMetrics.font
+        strongMetrics.font
+        return root._widthAt(root.controller.chipLeastFit, true)
+    }
+
     FontMetrics {
         id: fontMetrics
         font: chromeStyle.type.footnote
@@ -91,19 +101,30 @@ Item {
         return root.bracketed ? Math.ceil(width / chromeStyle.cellWidth) * chromeStyle.cellWidth : width
     }
 
+    // The state glyph's width on the Terminal row: the current one's, or with `reserved` the widest of them.
+    function _dotSpan(reserved) {
+        if (!reserved)
+            return root._span(fontMetrics, root.controller.chipStateGlyph)
+        return Math.max(...root.controller.chipStateGlyphs.map(glyph => root._span(fontMetrics, glyph)))
+    }
+
     // What the chip needs at one fit step: what stays whatever fits (the ends, the caret and the marker) and
-    // the dot, the daemon, the state and the workspace as that step says them.
-    function _widthAt(step) {
+    // the dot, the daemon, the state and the workspace as that step says them. `reserved` counts the dot (of a
+    // chip that names a daemon) and the marker as shown, whether or not they are.
+    function _widthAt(step, reserved) {
         const daemon = root.controller.chipDaemonText(step)
         const status = root.controller.chipStatusText(step)
         const workspace = root.controller.chipWorkspaceText(root.workspaceName, step)
         let width = root.bracketed ? root._span(fontMetrics, chromeStyle.chipOpenGlyph + chromeStyle.chipCloseGlyph)
                                    : 2 * chromeStyle.space.s5
         width += caret.leftPadding + root._span(strongMetrics, chromeStyle.menuGlyph)
-        width += markerSlot.visible ? markerSlot.width : 0
+        if (reserved)
+            width += root.gap + (root.bracketed ? chromeStyle.badgeHeight : chromeStyle.size.badge)
+        else
+            width += markerSlot.visible ? markerSlot.width : 0
         let leading = false
-        if (root.dotShown) {
-            width += root.bracketed ? root._span(fontMetrics, root.controller.chipStateGlyph) : chromeStyle.size.hostDot
+        if (root.dotShown || (reserved && root.controller.chipDaemonName !== "")) {
+            width += root.bracketed ? root._dotSpan(reserved) : chromeStyle.size.hostDot
             leading = true
         }
         if (daemon !== "") {

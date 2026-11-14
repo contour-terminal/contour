@@ -271,6 +271,9 @@ class WindowController:
     Q_PROPERTY(int chipDaemonDot READ chipDaemonDot NOTIFY chipChanged)
     /// The glyph that stands for the connection's state on the Terminal row, where no dot can be drawn.
     Q_PROPERTY(QString chipStateGlyph READ chipStateGlyph NOTIFY chipChanged)
+    /// The glyph of every connection state: the title band reserves the widest, so the chip's least width
+    /// does not depend on the state.
+    Q_PROPERTY(QStringList chipStateGlyphs READ chipStateGlyphs CONSTANT)
     /// What a screen reader says of the chip.
     Q_PROPERTY(QString chipAccessibleName READ chipAccessibleName NOTIFY chipChanged)
     /// What a screen reader adds: the connection's state and whether the switcher is open.
@@ -281,6 +284,9 @@ class WindowController:
     /// The fit steps in elision order, each { fit, key }: a window::LocationChipFit's underlying value and
     /// the name chipFit() takes its width by (window::LocationChipSteps). QML measures and keys by this list.
     Q_PROPERTY(QVariantList chipFitSteps READ chipFitSteps CONSTANT)
+    /// The last fit step, a window::LocationChipFit's underlying value: the narrowest the chip gets, which
+    /// the title band reserves room for so it can never be squeezed past it.
+    Q_PROPERTY(int chipLeastFit READ chipLeastFit CONSTANT)
     Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
     // {{{ Panes
     // The panes the active tab shows: the leaves under its layout root (1 while zoomed or unsplit, 0 without
@@ -1340,6 +1346,16 @@ class WindowController:
     /// @return Where the tabs live, a config::TabPlacement as its underlying value.
     [[nodiscard]] int tabPlacement() const noexcept { return static_cast<int>(_tabPlacement); }
 
+    /// Tells the window how wide the title band's parts are, so the window is never made narrower than they
+    /// fit in: the band's fixed parts, the location chip at its last fit step and one tab-well minimum
+    /// (bandMinimumWidth()). It joins the window's minimum-width size hint, so the tab well cannot collapse.
+    /// The band's width is the window's, so it is the band that knows the parts; the sum is decided here.
+    /// @param parts     The band's widths in logical pixels, by the keys of window::BandWidthParts.
+    /// @param placement A window::BandPlacement's underlying value: whether the band starts at the
+    ///                  sidebar's edge, so the sidebar's width joins the minimum. A value that is none of
+    ///                  them counts as the band spanning the window.
+    Q_INVOKABLE void setBandWidths(QVariantMap const& parts, int placement);
+
     /// Sets the workspace sidebar's width, as dragging its edge does. Call it when the drag is released, not
     /// on every move: each distinct width is written to the GUI state. The width is kept within the chrome
     /// row's bounds, on the Terminal row snapped to whole cells, and remembered (GuiState::sidebar) as the
@@ -1612,6 +1628,9 @@ class WindowController:
     /// @return The glyph for the connection's state (daemonStateGlyph()).
     [[nodiscard]] QString chipStateGlyph() const;
 
+    /// @return The glyph of every connection state (window::LocationChipStateRows).
+    [[nodiscard]] static QStringList chipStateGlyphs();
+
     /// @return What a screen reader says of the location chip.
     [[nodiscard]] QString chipAccessibleName() const;
 
@@ -1627,6 +1646,9 @@ class WindowController:
 
     /// @return The chip's fit steps in elision order (window::LocationChipSteps), each { fit, key }.
     [[nodiscard]] static QVariantList chipFitSteps();
+
+    /// @return The chip's last fit step (window::LocationChipFit::WorkspaceElided) as its underlying value.
+    [[nodiscard]] static int chipLeastFit();
 
     /// @param band The band's presence, by the name UiStyleProvider::titleBand() gives it ("hidden",
     ///             "shown", "reveal" or "pinned").
@@ -2399,6 +2421,9 @@ class WindowController:
 
     // Declared title-bar chrome height in logical px (written by Main.qml's binding).
     int _chromeHeight = 0;
+    // The narrowest the title band can be, in logical px (window::bandMinimumWidth(), told by the band).
+    double _bandMinimumWidth = 0;
+    BandPlacement _bandPlacement = BandPlacement::FullWidth;
     // Whether the window was maximized before entering fullscreen (restored on toggle-out).
     bool _maximizedState = false;
     // The content scale the geometry was last derived for (settlement idempotence latch).

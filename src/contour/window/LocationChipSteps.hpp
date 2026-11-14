@@ -8,6 +8,7 @@
 #include <contour/window/LocationChip.hpp>
 
 #include <QtCore/QString>
+#include <QtCore/QStringList>
 #include <QtCore/QVariant>
 
 #include <utility>
@@ -26,6 +27,16 @@ namespace contour::window
                           { QStringLiteral("key"),
                             QString::fromUtf8(step.key.data(), static_cast<qsizetype>(step.key.size())) } });
     return steps;
+}
+
+/// @return The terminal-style glyph of every connection state (LocationChipStateRows), so QML can reserve the
+///         widest of them.
+[[nodiscard]] inline QStringList locationChipStateGlyphList()
+{
+    auto glyphs = QStringList {};
+    for (auto const& row: LocationChipStateRows)
+        glyphs.push_back(QString::fromUtf8(row.glyph.data(), static_cast<qsizetype>(row.glyph.size())));
+    return glyphs;
 }
 
 } // namespace contour::window

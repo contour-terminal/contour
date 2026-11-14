@@ -132,6 +132,8 @@ Item {
     /// The width of the sidebar below a header bar that draws its title row ("Workspaces" and +, the
     /// ContourLinux row; chromeStyle.sidebar.titleInHeaderBar): the bar's leading part spans it. 0 for none.
     property real sidebarWidth: 0
+    /// Whether the band starts at the sidebar's edge (the look's choice), rather than spanning the window.
+    property bool besideSidebar: false
     /// The sidebar's toggle as UiStyleProvider::sidebarToggle answers it (Main.qml): `host` "band" puts it at
     /// the bar's leading end, after the window's own controls, and `label` is what it says. The band's only.
     property var sidebarToggle: ({})
@@ -341,6 +343,33 @@ Item {
         return Math.max(0, root.width - root.leadingPartsWithoutChip - 2 * root.gap - root.trailingPartsWidth
                            - chromeStyle.space.dragReserve - tabStripLoader.Layout.leftMargin - well)
     }
+
+    // What the band is made of, told to the controller, which sums it into the window's minimum width: the
+    // fixed parts, the chip at its last fit step and one tab-well minimum. The keys are window::BandWidthParts'.
+    readonly property var bandWidths: {
+        const strip = tabStripLoader.item
+        const chipShown = workspaceChipSlot.shown
+        return {
+            leading: root.leadingPartsWithoutChip,
+            trailing: root.trailingPartsWidth,
+            chipMargins: chipShown ? 2 * root.gap : 0,
+            chip: chipShown ? workspaceChipSlot.item.leastWidth : 0,
+            dragReserve: chromeStyle.space.dragReserve,
+            tabStripMargin: tabStripLoader.Layout.leftMargin,
+            tabWell: strip ? chromeStyle.tabWellMinimum(strip.tabCount) + strip.fixedWidth : 0
+        }
+    }
+    // `!setBandWidths` keeps a lightweight mock controller (offscreen tests) without it local.
+    // Where the band sits against the sidebar, a window::BandPlacement: beside it, the window is the sidebar's
+    // width wider than the band.
+    readonly property int bandPlacement: root.besideSidebar ? 1 : 0
+    function reportBandWidths() {
+        if (root.isBand && root.controller && root.controller.setBandWidths)
+            root.controller.setBandWidths(root.bandWidths, root.bandPlacement)
+    }
+    onBandWidthsChanged: root.reportBandWidths()
+    onBandPlacementChanged: root.reportBandWidths()
+    Component.onCompleted: root.reportBandWidths()
 
     // The room the centred title has: the bar less twice the wider of its two ends, so it stays centred
     // on the bar without running under either end.

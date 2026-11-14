@@ -648,6 +648,11 @@ int WindowController::chipDaemonDot() const
     return static_cast<int>(std::to_underlying(daemonDotOf(_manager.daemonLocalityOf(_displayed), state)));
 }
 
+QStringList WindowController::chipStateGlyphs()
+{
+    return locationChipStateGlyphList();
+}
+
 QString WindowController::chipStateGlyph() const
 {
     auto const state = hostChipStateOf(_manager.hostConnection(_displayed));
@@ -702,6 +707,11 @@ int WindowController::chipFit(QVariantMap const& widths) const
 QVariantList WindowController::chipFitSteps()
 {
     return locationChipStepList();
+}
+
+int WindowController::chipLeastFit()
+{
+    return static_cast<int>(std::to_underlying(LocationChipFit::WorkspaceElided));
 }
 
 int WindowController::chipHosting() const
@@ -3276,6 +3286,19 @@ void WindowController::setChromeHeight(int height)
         updateSizeHintsFor(*_activeDisplay, HintApplyMode::RespectWindowState);
 }
 
+void WindowController::setBandWidths(QVariantMap const& parts, int placement)
+{
+    auto const minimum = bandMinimumWidthFrom(
+        [&](std::string_view key) { return parts.value(QString::fromUtf8(key)).toDouble(); });
+    auto const bandPlacement = bandPlacementFromInt(placement).value_or(BandPlacement::FullWidth);
+    if (_bandMinimumWidth == minimum && _bandPlacement == bandPlacement)
+        return;
+    _bandMinimumWidth = minimum;
+    _bandPlacement = bandPlacement;
+    if (_activeDisplay != nullptr)
+        updateSizeHintsFor(*_activeDisplay, HintApplyMode::RespectWindowState);
+}
+
 int WindowController::sidebarWidth() const
 {
     auto const metrics = _manager.app().sidebarMetrics();
@@ -4037,7 +4060,10 @@ void WindowController::updateSizeHintsFor(session::DisplaySurface& requester, Hi
     // unscaling it here and letting it be scaled back would truncate a pixel off at fractional DPR.
     auto const gutterDevicePx = session::configuredGutterWidth(
         requester.session().config(), cellSize, scale, requester.session().gutterChrome());
-    auto const hints = geometry::sizeHintsFor(cellSize, margins, scale, chrome(), gutterDevicePx);
+    auto hints = geometry::sizeHintsFor(cellSize, margins, scale, chrome(), gutterDevicePx);
+    // The window is never narrower than the band's parts need, with the sidebar beside it where it is.
+    hints.minimum.width =
+        minimumWidthWith(hints.minimum.width, _bandMinimumWidth, chrome().width, _bandPlacement);
 
     // The character-cell resize grid (base + increment) is cleared while maximized/fullscreen. An
     // incidental refresh (RespectWindowState) must not re-arm it while the window is non-normal — that

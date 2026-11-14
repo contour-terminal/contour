@@ -25,6 +25,7 @@
 #include <contour/window/TabBarDropPolicy.hpp>
 #include <contour/window/TabBarHitValue.hpp>
 #include <contour/window/TabColorScheme.hpp>
+#include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/ToastPlacement.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -144,10 +145,12 @@ class MainWindowControllerMock: public QAbstractListModel
     Q_PROPERTY(QString chipDaemonName READ chipDaemonName NOTIFY chipChanged)
     Q_PROPERTY(int chipDaemonDot READ chipDaemonDot NOTIFY chipChanged)
     Q_PROPERTY(QString chipStateGlyph READ chipStateGlyph NOTIFY chipChanged)
+    Q_PROPERTY(QStringList chipStateGlyphs READ chipStateGlyphs CONSTANT)
     Q_PROPERTY(QString chipAccessibleName READ chipAccessibleName NOTIFY chipChanged)
     Q_PROPERTY(QString chipAccessibleDescription READ chipAccessibleDescription NOTIFY chipChanged)
     Q_PROPERTY(int chipHosting READ chipHosting NOTIFY chipChanged)
     Q_PROPERTY(QVariantList chipFitSteps READ chipFitSteps CONSTANT)
+    Q_PROPERTY(int chipLeastFit READ chipLeastFit CONSTANT)
     // Mirrors WindowController's version string, which the About dialog shows.
     Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
     // Mirrors WindowController's host for ssh's login prompts, which Main.qml's AskpassDialog shows.
@@ -245,6 +248,9 @@ class MainWindowControllerMock: public QAbstractListModel
         return static_cast<int>(window::daemonDotOf(locality, chipState()));
     }
 
+    /// Mirrors WindowController::chipStateGlyphs().
+    [[nodiscard]] static QStringList chipStateGlyphs() { return window::locationChipStateGlyphList(); }
+
     /// Mirrors WindowController::chipStateGlyph().
     [[nodiscard]] QString chipStateGlyph() const
     {
@@ -304,6 +310,30 @@ class MainWindowControllerMock: public QAbstractListModel
 
     /// Mirrors WindowController::chipFitSteps().
     [[nodiscard]] static QVariantList chipFitSteps() { return window::locationChipStepList(); }
+
+    /// Mirrors WindowController::chipLeastFit().
+    [[nodiscard]] static int chipLeastFit()
+    {
+        return static_cast<int>(std::to_underlying(window::LocationChipFit::WorkspaceElided));
+    }
+
+    /// Mirrors WindowController::setBandWidths(): keeps the minimum the parts sum to and where the band sits.
+    Q_INVOKABLE void setBandWidths(QVariantMap const& parts, int placement)
+    {
+        _bandMinimumWidth = window::bandMinimumWidthFrom(
+            [&](std::string_view key) { return parts.value(QString::fromUtf8(key)).toDouble(); });
+        _bandPlacement = window::bandPlacementFromInt(placement).value_or(window::BandPlacement::FullWidth);
+    }
+
+    /// @param hintMinimum The window's minimum width from its page, as WindowController has one.
+    /// @return The minimum width the window would get (window::minimumWidthWith()), no sidebar beside it.
+    [[nodiscard]] int minimumWidthWith(int hintMinimum) const noexcept
+    {
+        return window::minimumWidthWith(hintMinimum, _bandMinimumWidth, 0, _bandPlacement);
+    }
+
+    /// @return What the last setBandWidths() summed to; 0 before any.
+    [[nodiscard]] double bandMinimumWidth() const noexcept { return _bandMinimumWidth; }
 
     /// Mirrors WindowController::chipHosting().
     [[nodiscard]] int chipHosting() const { return static_cast<int>(std::to_underlying(hosting())); }
@@ -886,6 +916,8 @@ class MainWindowControllerMock: public QAbstractListModel
     QVariantList _tabContextMenuModel {};
     QVariantList _sidebarContextMenuModel {};
     QVariantList _newTabMenuModel {};
+    double _bandMinimumWidth = 0;                                            ///< @see setBandWidths.
+    window::BandPlacement _bandPlacement = window::BandPlacement::FullWidth; ///< @see setBandWidths.
     int _hostChipState = 0; ///< @see hostChipState; 0 = HostChipState::Connected.
 
     /// @return The connection's state as the chip's pure decisions take it.

@@ -320,6 +320,7 @@ ThemedWindow
                              : ((appWindow.win && appWindow.win.nativeControlsInset) || 0)
         // The header bar's part above a sidebar whose title row it draws (the ContourLinux row).
         sidebarWidth: sidebarSlot.titleInHeaderBar ? sidebarSlot.width : 0
+        besideSidebar: sidebarSlot.besideBand
         sidebarToggle: appWindow.sidebarToggle
         // The window's top corners, rounded only while the band is its top edge. The window itself is
         // transparent, so nothing is painted outside them. `|| 0` as above, for a controller without it.

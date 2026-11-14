@@ -2108,10 +2108,16 @@ TEST_CASE("the location chip gives way in steps, and the workspace keeps six cha
     auto minimum = 0.0;
     REQUIRE(QMetaObject::invokeMethod(style, "tabWellMinimum", Q_RETURN_ARG(qreal, minimum), Q_ARG(int, 2)));
 
+    // The window cannot be narrower than the band's parts need (WindowController::setBandWidths): the
+    // window manager holds it there, so the steps below stop at that width.
+    auto const windowMinimum = static_cast<int>(std::ceil(scene.controller.bandMinimumWidth()));
+    REQUIRE(windowMinimum > 0);
+
     // Narrowing the window steps the chip down in order, never skipping back.
     auto previous = 0;
-    for (auto const width: { 1400, 900, 700, 560, 480, 400, 340, 300 })
+    for (auto const requested: { 1400, 900, 700, 560, 480, 400, 340, 300 })
     {
+        auto const width = std::max(requested, windowMinimum);
         INFO("window width " << width);
         scene.window->resize(width, 640);
         QCoreApplication::processEvents();
@@ -2121,17 +2127,12 @@ TEST_CASE("the location chip gives way in steps, and the workspace keeps six cha
         CHECK(fit >= previous);
         previous = fit;
         // The workspace is whole until the last step, which keeps exactly the floor (6 characters) and `…`;
-        // and the well keeps at least its minimum.
+        // and the well keeps at least its minimum, at every width the window can have.
         auto const workspaceFits = fit < static_cast<int>(contour::window::LocationChipFit::WorkspaceElided);
         CHECK(chipPart(*chip, "workspaceChipLabel")->property("text").toString()
               == (workspaceFits ? QStringLiteral("billing-and-invoices") : QStringLiteral("billin…")));
-        // Where the chip's room admits the chip as it stands. A bar narrower than its fixed parts (the
-        // header bar's controls) and the chip's floor has nothing left to give: the chip is already at its
-        // last step.
-        if (chip->width() <= bar->property("chipRoom").toReal() + 0.5)
-            CHECK(well->width() >= minimum - 0.5);
-        else
-            CHECK(fit == static_cast<int>(contour::window::LocationChipFit::WorkspaceElided));
+        CHECK(chip->width() <= bar->property("chipRoom").toReal() + 0.5);
+        CHECK(well->width() >= minimum - 0.5);
         // The state's words go first, the daemon's name next.
         CHECK(chipPart(*chip, "workspaceChipStatus")->isVisible() == (fit == 0));
         CHECK(chipPart(*chip, "workspaceChipDaemon")->isVisible() == (fit <= 2));
@@ -2144,6 +2145,92 @@ TEST_CASE("the location chip gives way in steps, and the workspace keeps six cha
     // The narrowest window reached the end of the steps.
     CHECK(previous >= 3);
     CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+}
+
+TEST_CASE("the window's minimum width keeps the tab well and the chip's last step (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    using contour::window::DaemonLocality;
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto scene = SidebarWindow { { .row = row,
+                                   .visibility = contour::config::SidebarVisibility::Hidden,
+                                   .billingTitle = "billing-and-invoices" } };
+    scene.controller.setDaemon(QStringLiteral("starfive-build-server-0123456789-and-more"),
+                               DaemonLocality::Remote);
+    scene.controller.setHostChipState(static_cast<int>(contour::window::HostChipState::Reconnecting));
+    QCoreApplication::processEvents();
+    auto* chip = scene.item(QStringLiteral("workspaceChip"));
+    auto* well = scene.item(QStringLiteral("tabWell"));
+    REQUIRE(chip != nullptr);
+    REQUIRE(well != nullptr);
+    auto* const style =
+        scene.engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto minimum = 0.0;
+    REQUIRE(QMetaObject::invokeMethod(style, "tabWellMinimum", Q_RETURN_ARG(qreal, minimum), Q_ARG(int, 2)));
+
+    auto const windowMinimum = static_cast<int>(std::ceil(scene.controller.bandMinimumWidth()));
+    scene.window->resize(windowMinimum, 640);
+    QCoreApplication::processEvents();
+    QTest::qWait(30);
+
+    // At the narrowest the window can be, the chip is at its last step and the well still has its minimum.
+    CHECK(chip->property("fit").toInt()
+          == static_cast<int>(contour::window::LocationChipFit::WorkspaceElided));
+    CHECK(well->width() >= minimum - 0.5);
+    // The workspace keeps exactly the floor and the ellipsis, while the daemon reconnects.
+    CHECK(chipPart(*chip, "workspaceChipLabel")->property("text").toString() == QStringLiteral("billin…"));
+    CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+}
+
+TEST_CASE("the window's minimum width does not move with the connection or a marker (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    using contour::window::HostChipState;
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    INFO("row " << static_cast<int>(row));
+    auto const minimumOf = [&](BillingAsks asks, HostChipState state, int& windowMinimum) {
+        auto scene = SidebarWindow { { .row = row,
+                                       .visibility = contour::config::SidebarVisibility::Hidden,
+                                       .shownWorkspace = 2,
+                                       .billing = asks } };
+        scene.controller.setDaemon(QStringLiteral("local"));
+        scene.controller.setHostChipState(static_cast<int>(HostChipState::Connected));
+        QCoreApplication::processEvents();
+        auto* well = scene.item(QStringLiteral("tabWell"));
+        REQUIRE(well != nullptr);
+        auto* const style =
+            scene.engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+        REQUIRE(style != nullptr);
+        auto wellMinimum = 0.0;
+        REQUIRE(QMetaObject::invokeMethod(
+            style, "tabWellMinimum", Q_RETURN_ARG(qreal, wellMinimum), Q_ARG(int, 2)));
+        auto const connected = scene.controller.bandMinimumWidth();
+        auto* marker = scene.item(QStringLiteral("workspaceChipMarker"));
+        REQUIRE(marker != nullptr);
+        CHECK(marker->isVisible() == (asks == BillingAsks::Permission));
+
+        // The window sits at its narrowest, then the link goes down: nothing may ask for more room.
+        windowMinimum = static_cast<int>(std::ceil(connected));
+        scene.window->resize(windowMinimum, 640);
+        scene.controller.setHostChipState(static_cast<int>(state));
+        QCoreApplication::processEvents();
+        QTest::qWait(30);
+        CHECK(scene.controller.bandMinimumWidth() == connected);
+        CHECK(well->width() >= wellMinimum - 0.5);
+        return connected;
+    };
+    auto unusedMinimum = 0;
+    auto const reference = minimumOf(BillingAsks::Nothing, HostChipState::Connected, unusedMinimum);
+    CHECK(reference > 0);
+    CHECK(minimumOf(BillingAsks::Nothing, HostChipState::Reconnecting, unusedMinimum) == reference);
+    CHECK(minimumOf(BillingAsks::Nothing, HostChipState::Disconnected, unusedMinimum) == reference);
+    // Another workspace asks for you: the marker shows, and the minimum is the same.
+    CHECK(minimumOf(BillingAsks::Permission, HostChipState::Connected, unusedMinimum) == reference);
+    CHECK(minimumOf(BillingAsks::Permission, HostChipState::Reconnecting, unusedMinimum) == reference);
 }
 
 TEST_CASE("the location chip's tooltip names the switcher and the chord bound now, or none (offscreen)",
