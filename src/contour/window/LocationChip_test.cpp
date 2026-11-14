@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <ranges>
 #include <string_view>
 #include <utility>
@@ -149,6 +150,25 @@ TEST_CASE("locationChip.placeNamed", "[LocationChip]")
     CHECK(locationChipPlaceNamed("hidden", "tabs", DaemonHosting::InProcess, SidebarShown::Yes) == "none");
     CHECK(locationChipPlaceNamed("nonsense", "tabs", DaemonHosting::Daemon, SidebarShown::No) == "none");
     CHECK(locationChipPlaceNamed("shown", "nonsense", DaemonHosting::Daemon, SidebarShown::No) == "none");
+}
+
+TEST_CASE("locationChip.enumsFromInts", "[LocationChip]")
+{
+    CHECK(daemonHostingFromInt(0) == DaemonHosting::InProcess);
+    CHECK(daemonHostingFromInt(1) == DaemonHosting::Daemon);
+    CHECK(daemonHostingFromInt(static_cast<int>(DaemonHostingCount)) == std::nullopt);
+    CHECK(daemonHostingFromInt(-1) == std::nullopt);
+    CHECK(sidebarShownFromInt(0) == SidebarShown::No);
+    CHECK(sidebarShownFromInt(1) == SidebarShown::Yes);
+    CHECK(sidebarShownFromInt(static_cast<int>(SidebarShownCount)) == std::nullopt);
+    CHECK(sidebarShownFromInt(-1) == std::nullopt);
+
+    // A value that is none of them places the chip nowhere, however the rest asks.
+    CHECK(locationChipPlaceFromInts("shown", "tabs", 1, 0) == "band");
+    CHECK(locationChipPlaceFromInts("shown", "tabs", 0, 0) == "none");
+    CHECK(locationChipPlaceFromInts("shown", "tabs", 2, 0) == "none");
+    CHECK(locationChipPlaceFromInts("shown", "chip+tabs", -1, 0) == "none");
+    CHECK(locationChipPlaceFromInts("shown", "tabs", 1, 7) == "none");
 }
 
 TEST_CASE("locationChip.placeName", "[LocationChip]")

@@ -8,6 +8,7 @@
 
 #include <contour/session/WindowSwitching.hpp>
 #include <contour/window/DaemonDriftChoice.hpp>
+#include <contour/window/EnumFromInt.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/SidebarTree.hpp>
 #include <contour/window/TitleBandLayout.hpp>
@@ -17,6 +18,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -304,6 +306,20 @@ enum class DaemonHosting : uint8_t
     Daemon,        ///< The sessions live in a daemon.
 };
 
+/// Every @c DaemonHosting, the table its count and its conversion from QML's int come from.
+inline constexpr auto DaemonHostings = std::array { DaemonHosting::InProcess, DaemonHosting::Daemon };
+static_assert(enumValuesAreDense(DaemonHostings));
+
+/// Number of @c DaemonHosting enumerators.
+inline constexpr size_t DaemonHostingCount = DaemonHostings.size();
+
+/// @param value A window::DaemonHosting's underlying value, as QML hands it over.
+/// @return The enumerator, or nothing for a value that is none of them.
+[[nodiscard]] constexpr std::optional<DaemonHosting> daemonHostingFromInt(int value) noexcept
+{
+    return enumFromInt(DaemonHostings, value);
+}
+
 /// Where the location chip shows.
 enum class LocationChipPlace : uint8_t
 {
@@ -318,6 +334,20 @@ enum class SidebarShown : uint8_t
     No = 0, ///< No sidebar.
     Yes,    ///< The sidebar shows.
 };
+
+/// Every @c SidebarShown, the table its count and its conversion from QML's int come from.
+inline constexpr auto SidebarShowns = std::array { SidebarShown::No, SidebarShown::Yes };
+static_assert(enumValuesAreDense(SidebarShowns));
+
+/// Number of @c SidebarShown enumerators.
+inline constexpr size_t SidebarShownCount = SidebarShowns.size();
+
+/// @param value A window::SidebarShown's underlying value, as QML hands it over.
+/// @return The enumerator, or nothing for a value that is none of them.
+[[nodiscard]] constexpr std::optional<SidebarShown> sidebarShownFromInt(int value) noexcept
+{
+    return enumFromInt(SidebarShowns, value);
+}
 
 /// @param band    Whether the title band shows.
 /// @param centre  What the band's middle holds.
@@ -383,6 +413,23 @@ enum class SidebarShown : uint8_t
     if (presence == Presences.end() || !bar)
         return locationChipPlaceName(LocationChipPlace::None);
     return locationChipPlaceName(locationChipPlace(presence->second, *bar, hosting, sidebar));
+}
+
+/// @param band    The band's presence by name.
+/// @param centre  The band centre's name.
+/// @param hosting A DaemonHosting's underlying value, as QML hands it over.
+/// @param sidebar A SidebarShown's underlying value, as QML hands it over.
+/// @return locationChipPlaceNamed(), and "none" when @p hosting or @p sidebar is no enumerator.
+[[nodiscard]] inline std::string_view locationChipPlaceFromInts(std::string_view band,
+                                                                std::string_view centre,
+                                                                int hosting,
+                                                                int sidebar) noexcept
+{
+    auto const daemonHosting = daemonHostingFromInt(hosting);
+    auto const sidebarShown = sidebarShownFromInt(sidebar);
+    if (!daemonHosting || !sidebarShown)
+        return locationChipPlaceName(LocationChipPlace::None);
+    return locationChipPlaceNamed(band, centre, *daemonHosting, *sidebarShown);
 }
 
 } // namespace contour::window

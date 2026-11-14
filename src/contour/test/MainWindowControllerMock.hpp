@@ -314,11 +314,8 @@ class MainWindowControllerMock: public QAbstractListModel
                                                         int hostingValue,
                                                         int sidebarShown) const
     {
-        return QString::fromUtf8(window::locationChipPlaceNamed(
-            band.toStdString(),
-            centre.toStdString(),
-            static_cast<window::DaemonHosting>(std::clamp(hostingValue, 0, 1)),
-            static_cast<window::SidebarShown>(std::clamp(sidebarShown, 0, 1))));
+        return QString::fromUtf8(window::locationChipPlaceFromInts(
+            band.toStdString(), centre.toStdString(), hostingValue, sidebarShown));
     }
 
     /// What the connection reports, as WindowController::notifyHostConnectionChanged() would tell it.

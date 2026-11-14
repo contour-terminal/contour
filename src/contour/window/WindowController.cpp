@@ -716,10 +716,7 @@ QString WindowController::locationChipPlace(QString const& band,
                                             int sidebarShown) const
 {
     return QString::fromUtf8(
-        locationChipPlaceNamed(band.toStdString(),
-                               centre.toStdString(),
-                               static_cast<DaemonHosting>(std::clamp(hosting, 0, 1)),
-                               static_cast<SidebarShown>(std::clamp(sidebarShown, 0, 1))));
+        locationChipPlaceFromInts(band.toStdString(), centre.toStdString(), hosting, sidebarShown));
 }
 
 QString WindowController::applicationVersion() const
