@@ -144,6 +144,9 @@ class SwitcherController: public QAbstractListModel
     Q_PROPERTY(QString labelAction READ labelAction NOTIFY labelChanged)
     /// `contour daemon --label ‹label›` for an available label; empty otherwise.
     Q_PROPERTY(QString labelCommand READ labelCommand NOTIFY labelChanged)
+    /// How many group headers the rows draw: the rows that open a group. With every row the same height, it
+    /// gives the list's height without laying the list out (PickerPopup sizes itself from it).
+    Q_PROPERTY(int groupCount READ groupCount NOTIFY groupCountChanged)
     QML_ELEMENT
     QML_UNCREATABLE("Created by the application")
 
@@ -268,6 +271,7 @@ class SwitcherController: public QAbstractListModel
     {
         return QString::fromStdString(_labelState.equivalentCommand);
     }
+    [[nodiscard]] int groupCount() const noexcept;
 
     /// @return The rows as shown now.
     [[nodiscard]] std::vector<SwitcherRow> const& rows() const noexcept { return _rows; }
@@ -287,6 +291,8 @@ class SwitcherController: public QAbstractListModel
     void discoveringChanged();
     void labelChanged();
     void busyChanged();
+    /// The rows were rebuilt, and with them their groups.
+    void groupCountChanged();
     /// Menu or Shift+F10 asked for the selected row's menu.
     /// @param row The row.
     void rowMenuRequested(int row);

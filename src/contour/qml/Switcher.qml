@@ -25,6 +25,7 @@ PickerPopup {
 
     namePrefix: "switcher"
     model: root.switcher
+    groupCount: root.switcher ? root.switcher.groupCount : 0
     ownsSelection: false
     levelTitle: root.switcher ? root.switcher.levelTitle : ""
     hintText: root.switcher ? root.switcher.hintText : ""

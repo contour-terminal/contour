@@ -776,6 +776,27 @@ TEST_CASE("Switcher: the level and discovery tell QML of their own changes", "[c
     CHECK(s.controller->fieldName() == "Switch to a workspace of home");
 }
 
+TEST_CASE("Switcher: groupCount counts the group headers, and is notified as the rows regroup",
+          "[contour][switcher]")
+{
+    auto s = Switcher {};
+    auto const headers = [&] {
+        return static_cast<int>(std::ranges::count_if(
+            s.controller->rows(), [](auto const& row) { return !row.groupTitle.empty(); }));
+    };
+    auto changed = QSignalSpy { s.controller.get(), &window::SwitcherController::groupCountChanged };
+    s.open();
+    CHECK(changed.count() >= 1);
+    REQUIRE(headers() > 1);
+    CHECK(s.controller->groupCount() == headers());
+
+    auto const before = changed.count();
+    s.select("home", SwitcherRowKind::Daemon);
+    CHECK(s.press(Qt::Key_Return)); // the daemon's level: its workspaces, then the actions
+    CHECK(changed.count() > before);
+    CHECK(s.controller->groupCount() == headers());
+}
+
 TEST_CASE("Switcher: a row's description says its git, its reason and its place", "[contour][switcher]")
 {
     auto s = Switcher {};
