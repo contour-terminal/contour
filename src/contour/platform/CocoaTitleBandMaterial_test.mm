@@ -607,8 +607,10 @@ TEST_CASE("no window, no AppKit", "[display][cocoa][titleband]")
     auto const material = contour::platform::makeTitleBandMaterial();
 
     CHECK(material->metrics(window) == NativeTitleBarMetrics {});
-    material->apply(window,
-                    { .backdrop = BandBackdrop::NativeMaterial, .growth = TitleBarGrowth::CompactToolbar });
+    // A window with no platform window yet is left alone, and that succeeds.
+    auto const applied = material->apply(
+        window, { .backdrop = BandBackdrop::NativeMaterial, .growth = TitleBarGrowth::CompactToolbar });
+    CHECK(applied.has_value());
     CHECK(window.handle() == nullptr);
 }
 
