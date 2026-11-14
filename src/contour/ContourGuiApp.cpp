@@ -35,6 +35,7 @@
 #include <contour/display/ShortcutOverride.hpp>
 #include <contour/display/TerminalAccessible.hpp>
 #include <contour/display/TerminalDisplay.hpp>
+#include <contour/input/Logging.hpp>
 #include <contour/platform/AccessibilityPreferenceSource.hpp>
 #include <contour/platform/ControlsStyleProbe.hpp>
 #include <contour/platform/FontFamilySource.hpp>
@@ -42,6 +43,7 @@
 #include <contour/platform/LauncherMenu.hpp>
 #include <contour/platform/MenuBarIntegration.hpp>
 #include <contour/platform/MultimediaEnvironment.hpp>
+#include <contour/platform/NativeKeyTrace.hpp>
 #include <contour/platform/NativeMenuPresenter.hpp>
 #include <contour/platform/Notifier.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
@@ -3508,6 +3510,14 @@ int ContourGuiApp::terminalGuiAction()
         // QML primitives without banding, and the engine takes ownership of this.
         _qmlEngine->addImageProvider(QStringLiteral("popupshadow"), new window::PopupShadowImageProvider());
     }
+
+    // Where the OS takes a key press before Qt sees it, shown only on request: no monitor without gui.input.
+    if (input::inputLog.isEnabled())
+        _nativeKeyTrace = platform::makeNativeKeyTrace([](std::string const& line) {
+            // Re-checked per line, so disabling the category after startup silences the trace.
+            if (input::inputLog.isEnabled())
+                input::inputLog()("{}", line);
+        });
 
     // The application's menu bar, where the host has one apart from its windows. It reads the focused
     // window, or the configuration alone without one, and runs its rows on that window's active session.

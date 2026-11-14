@@ -161,6 +161,7 @@ namespace platform
 {
     class IAccessibilityPreferenceSource;
     class IMenuBarIntegration;
+    class INativeKeyTrace;
     class INativeMenuPresenter;
     class IPlatformAppearance;
     class ISecureInput;
@@ -1929,6 +1930,9 @@ class ContourGuiApp:
     // Hands the menu bar's Window and Help menus to the OS, built from the same services. Declared before
     // the bar, which borrows it.
     std::unique_ptr<platform::IMenuBarIntegration> _menuBarIntegration;
+    // The native key trace; null unless the gui.input log was enabled at startup, and null off macOS, where
+    // there is none. Declared after the menu bar integration so it is removed first.
+    std::unique_ptr<platform::INativeKeyTrace> _nativeKeyTrace;
 
     /// Where the OS keeps the user's folders; PowerShell's profile is in Documents on Windows.
     std::unique_ptr<platform::IKnownFolders> _knownFolders;

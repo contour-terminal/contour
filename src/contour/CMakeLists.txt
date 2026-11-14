@@ -1744,6 +1744,7 @@ if(CONTOUR_TESTING)
         platform/PortalSettings_test.cpp
         platform/HotkeyKeys_test.cpp
         platform/NotificationOccasion_test.cpp
+        platform/KeyEquivalentMatch_test.cpp
         platform/SecureInputGate_test.cpp
         platform/SessionVisibility_test.cpp
         window/ChromeFocus_test.cpp

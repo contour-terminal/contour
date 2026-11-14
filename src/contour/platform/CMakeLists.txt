@@ -55,6 +55,8 @@ add_library(contour_platform STATIC
     PortalSettings.hpp
     PortalSettingsChannel.hpp
     PortalNotificationTransport.cpp PortalNotificationTransport.hpp
+    KeyEquivalentMatch.hpp
+    NativeKeyTrace.cpp NativeKeyTrace.hpp
     SecureInput.cpp SecureInput.hpp
     SecureInputGate.hpp
     PortalSourceFactories.cpp
@@ -129,6 +131,7 @@ if(APPLE)
         CocoaAccessibilityPreferenceSource.mm
         CocoaGlobalHotkey.mm
         CocoaMenuBarIntegration.mm
+        CocoaNativeKeyTrace.mm
         CocoaNativeMenuPresenter.mm
         CocoaPlatformAppearance.mm
         CocoaQuickTerminalPanel.mm
@@ -140,7 +143,7 @@ if(APPLE)
         CocoaWindowResizeGrid.mm)
     set_source_files_properties(
         CocoaAccessibilityPreferenceSource.mm CocoaGlobalHotkey.mm CocoaMenuBarIntegration.mm
-        CocoaNativeMenuPresenter.mm
+        CocoaNativeKeyTrace.mm CocoaNativeMenuPresenter.mm
         CocoaPlatformAppearance.mm CocoaQuickTerminalPanel.mm CocoaSecureInput.mm CocoaTaskbarProgressSink.mm
         CocoaTitleBandMaterial.mm
         CocoaUserNotificationCenter.mm
