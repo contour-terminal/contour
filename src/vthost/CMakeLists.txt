@@ -18,6 +18,7 @@ add_library(vthost_image STATIC
     DaemonImage.hpp
     DaemonImageLeases_posix.cpp
     DaemonImageLeases_win32.cpp
+    ProcessId.cpp
     ReleaseNumbers.cpp
     ReleaseNumbers.hpp
     StatePath.hpp
