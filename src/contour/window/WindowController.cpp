@@ -3362,14 +3362,14 @@ void WindowController::jumpToPane(PaneKey target)
         _pendingJump.reset();
 }
 
-void WindowController::followIntoNewWorkspace(PaneKey pane)
+void WindowController::followIntoNewWorkspace(PaneKey pane, WorkspaceDirectory const& asked)
 {
     if (_directorySource == nullptr)
         return;
     _pendingFollow = PendingFollow {
         .pane = pane,
-        .listed = std::ranges::to<std::vector>(_directorySource->directory().workspaces
-                                               | std::views::transform(&DirectoryWorkspace::id)),
+        .listed =
+            std::ranges::to<std::vector>(asked.workspaces | std::views::transform(&DirectoryWorkspace::id)),
         .giveUp = _clock.now() + session::TerminalSessionManager::RemoteMoveTimeout,
     };
 }

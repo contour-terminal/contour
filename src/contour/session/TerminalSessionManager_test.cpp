@@ -6158,11 +6158,15 @@ class RoutingFactory final: public contour::session::SessionFactory
         contour::session::RemoteMove const& move) override
     {
         tabMoves.push_back(move);
+        if (onMove)
+            onMove();
         return moveRouting;
     }
 
     /// What requestRemoteMove() answers.
     contour::session::RemoteRouting moveRouting = contour::session::RemoteRouting::Routed;
+    /// What the daemon does before requestRemoteMove() returns: its answer may settle that soon.
+    std::function<void()> onMove;
 
     std::vector<std::pair<uint64_t, std::string>> renamed;
     std::vector<std::pair<uint64_t, uint32_t>> moved;
@@ -6638,6 +6642,40 @@ TEST_CASE("TerminalSessionManager: a daemon window's sidebar moves name the daem
     CHECK_FALSE(controller.followPending());
     REQUIRE(controller.notices().toastShown());
     CHECK(controller.notices().toastText().contains(QStringLiteral("Not moved")));
+
+    manager.releaseBinding(binding);
+}
+
+TEST_CASE("TerminalSessionManager: a move into a new workspace is followed when the daemon lists it at once",
+          "[manager][workspace][sidebar]")
+{
+    using contour::window::IntoNewWorkspace;
+    using contour::window::PaneKey;
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = RoutingFactory {};
+    auto binding = DaemonDirectoryBinding { factory };
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, binding);
+    auto& controller = *window.controller;
+
+    // The request goes out at once, and on a busy machine the daemon's push listing the workspace it made
+    // settles before the window starts waiting for it: that workspace is new all the same.
+    factory.onMove = [&binding] {
+        auto moved = binding.source.directory();
+        moved.workspaces[0].tabs.pop_back();
+        auto made = contour::window::DirectoryWorkspace {};
+        made.id = 30;
+        made.tabs.emplace_back().id = 300;
+        made.tabs.back().panes.emplace_back().key = PaneKey { 1001 };
+        moved.workspaces.push_back(made);
+        binding.source.replaced = moved;
+    };
+    manager.moveSidebarNode(controller, PaneKey { 1001 }, IntoNewWorkspace {});
+    REQUIRE(controller.followPending());
+    manager.notifyWorkspaceDirectoryChanged(binding);
+    CHECK_FALSE(controller.followPending());
+    CHECK(binding.source.selected == std::vector<uint64_t> { 30 });
 
     manager.releaseBinding(binding);
 }
