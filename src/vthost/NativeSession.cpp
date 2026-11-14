@@ -3148,14 +3148,15 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
                                    .workspaces = {},
                                    .workingDirectory = workingDirectory.empty() ? WorkingDirectoryStated::No
                                                                                 : WorkingDirectoryStated::Yes,
-                                   .instance = _host.instance(),
-                                   .lastSelected = _host.lastSelectedWorkspace() };
+                                   .instance = _host.instance() };
     // A workspace whose last session ended is gone, unless it was the only one: that one is listed as a fresh
     // daemon's empty one is, which a launch gives its first tab.
     for (auto const i: std::views::iota(0, model.workspaceCount()))
         if (auto const* workspace = model.workspaceAt(i); workspace != nullptr)
             context.workspaces.push_back(
-                WorkspaceSummary { .id = workspace->id().value, .tabCount = workspace->tabCount() });
+                WorkspaceSummary { .id = workspace->id().value,
+                                   .tabCount = workspace->tabCount(),
+                                   .visibility = _host.visibility(workspace->id().value) });
     std::ranges::sort(context.workspaces, {}, &WorkspaceSummary::id);
 
     auto const plan = planAttach(intent, context);

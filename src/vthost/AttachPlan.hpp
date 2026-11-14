@@ -11,6 +11,7 @@
 #include <optional>
 #include <vector>
 
+#include <vthost/WorkspaceVisibility.hpp>
 #include <vthost/proto/Pdu.hpp>
 
 namespace vthost
@@ -21,6 +22,8 @@ struct WorkspaceSummary
 {
     uint64_t id = 0;  ///< The workspace's id.
     int tabCount = 0; ///< How many tabs it holds; zero for a workspace nothing has been created in yet.
+    /// Whether some connection selects it right now (SessionHost::visibility()).
+    WorkspaceVisibility visibility = WorkspaceVisibility::Hidden;
 };
 
 /// Whether the attaching connection's hello names the directory the session it creates starts in
@@ -36,7 +39,7 @@ struct AttachContext
 {
     /// The workspace a first session is created in when the daemon has none to show.
     uint64_t primaryWorkspace = 0;
-    /// Every workspace, ascending by id: the order a window lists them in.
+    /// Every workspace, ascending by id: the order a window lists them in, and the order "first" means.
     std::vector<WorkspaceSummary> workspaces = {};
     /// Whether the hello names a working directory; a launch that would create nothing then opens a tab in
     /// it.
@@ -44,8 +47,6 @@ struct AttachContext
     /// Which run of the daemon this is (SessionHost::instance()); 0 when none was stated. An intent whose ids
     /// are of another run names none of this one's workspaces (proto::AttachIntent::daemonInstance).
     uint64_t instance = 0;
-    /// The workspace some connection selected last (SessionHost::lastSelectedWorkspace()), if any.
-    std::optional<uint64_t> lastSelected = std::nullopt;
 };
 
 /// What attaching creates.

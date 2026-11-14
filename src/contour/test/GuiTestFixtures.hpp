@@ -276,6 +276,14 @@ class DaemonNamedBinding final: public contour::session::WindowBinding
         return {};
     }
 
+    /// Records what a new window was asked from.
+    [[nodiscard]] std::expected<void, std::string> openNewWindow(vtworkspace::WorkspaceId window,
+                                                                 QScreen* /*screen*/) override
+    {
+        openedNew.push_back(window);
+        return {};
+    }
+
     [[nodiscard]] vthost::proto::RaiseRole raiseRole() const noexcept override { return role; }
     [[nodiscard]] unsigned tabsWaitingElsewhere() const override { return waitingElsewhere; }
     [[nodiscard]] std::optional<uint64_t> daemonKey() const override { return key; }
@@ -286,6 +294,9 @@ class DaemonNamedBinding final: public contour::session::WindowBinding
     unsigned waitingElsewhere = 0;
     /// What daemonKey() reports: bindings sharing one count their daemon once.
     std::optional<uint64_t> key = std::nullopt;
+
+    /// Every openNewWindow() call: the window asked from.
+    std::vector<vtworkspace::WorkspaceId> openedNew;
 
     /// Every openWindowLike() call: the window asked from, and the tab it was to activate.
     std::vector<std::pair<vtworkspace::WorkspaceId, std::optional<vtworkspace::TabId>>> openedLike;

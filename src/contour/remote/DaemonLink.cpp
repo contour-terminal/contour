@@ -897,6 +897,25 @@ std::expected<void, std::string> DaemonLink::openWindowLike(vtworkspace::Workspa
     return {};
 }
 
+std::expected<void, std::string> DaemonLink::openNewWindow(vtworkspace::WorkspaceId window, QScreen* screen)
+{
+    requireGuiThread();
+    if (!isLive() || !_shown || _shown->local != window)
+        return std::unexpected(std::string { "this window shows no workspace of its daemon" });
+    auto config = _siblingTemplate;
+    // The daemon decides, as for a launch: a workspace no window shows, else a new one.
+    config.controller.intent =
+        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Default, .workspace = 0 };
+    config.controller.resumeFallback = NativeController::ResumeFallback::Nothing;
+    auto const* const asking = _sessions.controllerDisplaying(window);
+    config.opening =
+        WindowOpening { .activeTab = std::nullopt,
+                        .screen = screen,
+                        .askedBy = asking != nullptr ? std::optional { asking->windowId() } : std::nullopt };
+    _host.startWindowLink(std::move(config));
+    return {};
+}
+
 void DaemonLink::reconcile()
 {
     requireGuiThread();

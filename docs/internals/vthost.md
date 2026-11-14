@@ -1081,11 +1081,13 @@ and that connection selects one workspace (see [which workspace a client selects
 The window displays the selected workspace, realized into a local workspace of the window's; every other workspace
 of the daemon is an entry of the window's directory (`NativeController::directory()`), fed by the layouts pushed
 for every workspace and the status stream of the panes the connection does not mirror. A launch opens one window,
-whose connection's `Default` intent selects the daemon's most recently selected workspace, else its first;
-`--workspace W` states `Select{W}`. New Window starts a link of its own to the same daemon target, selecting the
-workspace its window displays (`WindowBinding::openWindowLike`); so does a tab torn off a window, whose new window
-activates that tab once it has realized the workspace. Nothing moves for either: both windows show the daemon's
-one workspace, each through local sessions of its own, and closing one leaves the other as it was.
+whose connection's `Default` intent selects the daemon's first workspace that no connection selects (`planAttach`, `AttachPlan.cpp`), else
+creates one; `--workspace W` states `Select{W}`. New Window starts a link of its own to the same daemon target
+with the same `Default` intent (`WindowBinding::openNewWindow`), so it too never shows a workspace another
+window shows. A tab torn off a window starts a link selecting the workspace its window displays
+(`WindowBinding::openWindowLike`), whose new window
+activates that tab once it has realized the workspace. Nothing moves: both windows show the daemon's one
+workspace, each through local sessions of its own, and closing one leaves the other as it was.
 
 A window switches workspaces in place. `DaemonLink::selectWorkspace()` sends `SelectWorkspace`; once a
 `LayoutBatchEnd` states the new selection and that workspace holds a tab, the link realizes it into a fresh local
@@ -1214,7 +1216,7 @@ that connection selects and what attaching creates:
 
 | Intent | Selects | Creates |
 | --- | --- | --- |
-| `Default` (no capability: every client before intents) | the workspace some connection selected last, else the first with a tab | the first tab, on a daemon with no tab at all; with a working directory stated, a tab in the selected workspace |
+| `Default` (no capability: every client before intents) | the first workspace with a tab that no connection selects | a new workspace when every one is shown; the first tab, on a daemon with no tab at all; with a working directory stated, a tab in the selected workspace |
 | `NewWorkspace` | a new workspace of its own | that workspace |
 | `Select` | the named workspace, if it exists; else as `Default` | nothing |
 | `Resume` | the named workspace, if it survived holding a tab; else as `Default` | as `Default` when it did not survive |

@@ -249,6 +249,10 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     [[nodiscard]] std::expected<void, std::string> openWindowLike(vtworkspace::WorkspaceId window,
                                                                   std::optional<vtworkspace::TabId> activeTab,
                                                                   QScreen* screen) override;
+    /// Starts a link of its own to this link's daemon that attaches as a launch does (the first workspace
+    /// no window shows, else a new one) and opens a window for it.
+    [[nodiscard]] std::expected<void, std::string> openNewWindow(vtworkspace::WorkspaceId window,
+                                                                 QScreen* screen) override;
 
     /// @return The daemon as a window switch names it (DaemonLinkConfig::address).
     [[nodiscard]] DaemonAddress const& address() const noexcept { return _siblingTemplate.address; }

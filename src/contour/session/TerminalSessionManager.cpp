@@ -960,7 +960,15 @@ RemoteRouting TerminalSessionManager::requestRemoteWindow(TerminalSession const&
     auto* const binding = window != nullptr ? mutableBindingOf(window->id()) : nullptr;
     if (binding == nullptr || !binding->daemonTarget())
         return RemoteRouting::Local;
-    return openDaemonWindowLike(*binding, window->id(), std::nullopt, screen, "New Window");
+    // Not a window like this one: a new window shows a workspace no window shows
+    // (WindowBinding::openNewWindow).
+    auto const opened = binding->openNewWindow(window->id(), screen);
+    if (opened)
+        return RemoteRouting::Routed;
+    managerLog()("New Window: {}", opened.error());
+    if (auto* const controller = controllerDisplaying(window->id()))
+        controller->notices().post(window::windowLinkFailedNotice(opened.error()));
+    return RemoteRouting::Refused;
 }
 
 RemoteRouting TerminalSessionManager::openDaemonWindowLike(WindowBinding& binding,

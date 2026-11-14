@@ -1599,9 +1599,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         for a session no window holds.
     [[nodiscard]] std::string_view hostLabelOf(TerminalSession const& session) const noexcept;
 
-    /// New Window from @p acting's window: on a daemon, a window of a connection of its own opens, selecting
-    /// the workspace @p acting's window displays (WindowBinding::openWindowLike), instead of a local window
-    /// opening.
+    /// New Window from @p acting's window: on a daemon, a window of a connection of its own opens, showing
+    /// the daemon's first workspace no window shows, else a new one (WindowBinding::openNewWindow), instead
+    /// of a local window opening.
     /// @param acting The session the new window is asked from.
     /// @param screen Where the window opens; null for the default placement.
     /// @return Routed when the daemon's binding took the request; Local for a local window, which then opens

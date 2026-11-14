@@ -138,6 +138,18 @@ class WindowBinding
     {
         return std::unexpected(std::string { "this window has no daemon to open another window on" });
     }
+
+    /// Opens a new window on the daemon behind the binding, as a second launch of the executable does: it
+    /// shows the daemon's first workspace that no window shows, else a new workspace with one tab -- never
+    /// the one @p window displays, or any another window shows. GUI thread.
+    /// @param window The window bound here that asks.
+    /// @param screen Where the window opens; null for the default placement.
+    /// @return Nothing once the window's connection is under way; why not, for a binding with no daemon.
+    [[nodiscard]] virtual std::expected<void, std::string> openNewWindow(vtworkspace::WorkspaceId /*window*/,
+                                                                         QScreen* /*screen*/)
+    {
+        return std::unexpected(std::string { "this window has no daemon to open another window on" });
+    }
 };
 
 } // namespace contour::session

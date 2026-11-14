@@ -5404,7 +5404,7 @@ class RememberedSelection final: public vthost::SessionStreamEvents
 
 } // namespace
 
-TEST_CASE("a lone client selects the most recently selected workspace", "[vthost][native][attach-intent]")
+TEST_CASE("a lone client selects the first workspace no window shows", "[vthost][native][attach-intent]")
 {
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
@@ -5430,13 +5430,22 @@ TEST_CASE("a lone client selects the most recently selected workspace", "[vthost
     {
         attachesTo(first);
     }
-    SECTION("a window selected the second: it is the default, though that window is gone")
+    SECTION("a window selected the second and is gone: the first is still the default")
     {
         auto earlier = RememberedSelection {};
         h.host.noteClientAttached(&earlier);
         h.host.noteSelected(earlier, second->id().value);
         h.host.noteClientDetached(&earlier);
+        attachesTo(first);
+    }
+    SECTION("a window shows the first: the default is the second, which no window shows")
+    {
+        auto earlier = RememberedSelection {};
+        h.host.noteClientAttached(&earlier);
+        earlier.selected = first;
+        h.host.noteSelected(earlier, first);
         attachesTo(second->id().value);
+        h.host.noteClientDetached(&earlier);
     }
 }
 
@@ -5597,9 +5606,15 @@ TEST_CASE("a workspace created elsewhere is laid out to every connection and mir
 
     REQUIRE(bothSeeIt(fromOne));
     REQUIRE(bothSeeIt(fromTwo));
-    CHECK(layoutWorkspaces(fromOne) == std::set<uint64_t> { first, laterWorkspace });
+    // The first connection shows the first workspace, so the second, launching too, got one of its own.
+    auto const* twoHello = serverHelloOf(fromTwo);
+    REQUIRE(twoHello != nullptr);
+    auto const secondOwn = twoHello->selectedWorkspace;
+    CHECK(secondOwn != first);
+    CHECK(secondOwn != laterWorkspace);
+    CHECK(layoutWorkspaces(fromOne) == std::set<uint64_t> { first, secondOwn, laterWorkspace });
     CHECK(snapshotSessions(fromOne) == sessionsOf(h.host, first));
-    CHECK(snapshotSessions(fromTwo) == sessionsOf(h.host, first));
+    CHECK(snapshotSessions(fromTwo) == sessionsOf(h.host, secondOwn));
 }
 
 TEST_CASE("the host counts an Attach connection as a client beside the census",

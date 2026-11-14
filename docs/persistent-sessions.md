@@ -187,9 +187,11 @@ contour --daemon-mode required     # this launch only: fail rather than fall bac
 
 ### What a launch opens
 
-A launch opens one window, which selects the workspace the daemon had selected last, or its first one when
-none was. It does not copy what another window shows: a second machine attaching to a daemon gets the same
-choice, and can select any other workspace from its window. A fresh daemon gets its
+A launch opens one window. So does New Window (a second launch of `contour`, `NewTerminal` on `Cmd+N`
+or `Ctrl+Shift+N`). A new window never shows a workspace another window shows, on this computer or any
+other client attached to the daemon: it takes the daemon's first [hidden](#shown-and-hidden-workspaces)
+workspace, in the daemon's own order, and when there is none it gets a new workspace with one tab. That is
+how a restart or a reattach finds your workspaces again: each launch picks up the next hidden one. A fresh daemon gets its
 first tab in the first window, as before.
 
 A launch that names a program (`-e`, or a command after the options) runs it in the window's own process
