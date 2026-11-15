@@ -34,6 +34,7 @@
 #include <utility>
 #include <vector>
 
+#include <testing/ExactBuffer.hpp>
 #include <vtcontrol/Catalog.hpp>
 #include <vtcontrol/Json.hpp>
 #include <vtcontrol/Wit.hpp>
@@ -1146,5 +1147,23 @@ TEST_CASE("--daemon picks the daemon and --name names what a creating verb makes
         INFO(run.err.str());
         CHECK(run.err.str().contains(
             core::pathToUtf8(vthost::muxSocketPath(vthost::daemonNameFromOption("work"), {}, run.env))));
+    }
+}
+
+TEST_CASE("a reply is decoded without a byte past its end", "[contour][cli][control]")
+{
+    struct Row
+    {
+        std::string_view reply;
+        std::string_view printed;
+    };
+    for (auto const& row: { Row { .reply = R"({"tab":"tab:1","pane":"pane:2"})", .printed = "pane:2\n" },
+                            Row { .reply = R"({"tab":"tab:1","pane":"pane:2")",
+                                  .printed = "{\"tab\":\"tab:1\",\"pane\":\"pane:2\"\n" } })
+    {
+        CAPTURE(row.reply);
+        auto out = std::ostringstream {};
+        verbNamed("split").printHuman(contour::testing::ExactBuffer { row.reply }.view(), out);
+        CHECK(out.str() == row.printed);
     }
 }

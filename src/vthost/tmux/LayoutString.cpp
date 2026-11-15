@@ -280,9 +280,11 @@ namespace
         bool validate_trailing_whitespace = true; // NOLINT(readability-identifier-naming)
     };
 
-    /// Keys tmux adds later are skipped, and a missing one is left for toLayout() to reject.
-    constexpr auto JsonLayoutOptions =
-        JsonLayoutOpts { { .error_on_unknown_keys = false, .error_on_missing_keys = false } };
+    /// Keys tmux adds later are skipped, and a missing one is left for toLayout() to reject. The text is a
+    /// view with nothing after it, so the reader must not look for a terminating NUL.
+    constexpr auto JsonLayoutOptions = JsonLayoutOpts {
+        { .null_terminated = false, .error_on_unknown_keys = false, .error_on_missing_keys = false }
+    };
 
     /// @param node A node read from JSON, tiled or floating.
     /// @return The number of nodes in its subtree, itself included.

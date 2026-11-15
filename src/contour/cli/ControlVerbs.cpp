@@ -41,9 +41,11 @@ namespace
 
     /// The reply of a daemon of another release may carry keys this one does not know; reading it for
     /// people must not fail on them, unlike reading a request.
-    inline constexpr auto ReplyOptions = glz::opts { .error_on_unknown_keys = false,
-                                                     .skip_null_members = true,
-                                                     .error_on_missing_keys = false };
+    inline constexpr auto ReplyOptions =
+        glz::opts { .null_terminated = false, // See vtcontrol::ViewReadOptions.
+                    .error_on_unknown_keys = false,
+                    .skip_null_members = true,
+                    .error_on_missing_keys = false };
 
     /// @param text A reply's JSON.
     /// @return The reply as @p T, or nothing when it does not read as one.

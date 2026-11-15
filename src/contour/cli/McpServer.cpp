@@ -38,8 +38,10 @@ namespace
     constexpr auto PaneRequired =
         std::string_view { "pane is required: name a shell pane, or use pane_split to get one" };
 
-    constexpr auto LenientOptions =
-        glz::opts { .error_on_unknown_keys = false, .error_on_missing_keys = false };
+    /// Reads a view, so it looks for no NUL after it (see vtcontrol::ViewReadOptions).
+    constexpr auto LenientOptions = glz::opts { .null_terminated = false,
+                                                .error_on_unknown_keys = false,
+                                                .error_on_missing_keys = false };
 
     template <typename T>
     std::optional<T> readLenient(std::string_view text)
@@ -213,7 +215,7 @@ std::optional<std::string> McpServer::handleLine(std::string_view line)
         return errorReply("null", InvalidRequest, "batch requests are not supported");
 
     auto document = glz::generic {};
-    if (glz::read_json(document, line))
+    if (glz::read<vtcontrol::ViewReadOptions>(document, line))
         return errorReply("null", ParseError, "parse error");
     auto const envelope =
         document.get_if<glz::generic::object_t>() != nullptr ? readLenient<Envelope>(line) : std::nullopt;

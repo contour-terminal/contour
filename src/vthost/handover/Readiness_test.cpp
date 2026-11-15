@@ -28,6 +28,7 @@
 #include <utility>
 #include <vector>
 
+#include <testing/ExactBuffer.hpp>
 #include <vthost/handover/HandoverImage.hpp>
 #include <vthost/handover/Readiness.hpp>
 #include <vthost/keeper/Messages.hpp>
@@ -147,6 +148,20 @@ TEST_CASE("a readiness report is one line of strict JSON", "[vthost][handover][u
     CHECK(encodeReadiness(report)
           == R"({"release":"0.9.0-\"dev\"","handoverFormats":[1,3],"terminalStateFormats":[2,4]})");
     CHECK(decodeReadiness(encodeReadiness(report)) == report);
+}
+
+TEST_CASE("a readiness report is read without a byte past its end", "[vthost][handover][upgrade]")
+{
+    auto const report =
+        ReadinessReport { .release = "0.9.0", .handoverFormats = { 1, 3 }, .terminalStateFormats = { 2, 4 } };
+    auto const whole = encodeReadiness(report);
+    for (auto const length: { whole.size(), whole.size() - 1, whole.size() - 2 })
+    {
+        CAPTURE(length);
+        auto const buffer = contour::testing::ExactBuffer { std::string_view { whole }.substr(0, length) };
+        auto const decoded = decodeReadiness(buffer.view());
+        CHECK(decoded.has_value() == (length == whole.size()));
+    }
 }
 
 TEST_CASE("pseudoconsole adoption crosses the readiness JSON", "[vthost][handover][upgrade]")

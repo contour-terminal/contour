@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 
+#include <testing/ExactBuffer.hpp>
 #include <vtcontrol/ControlError.hpp>
 #include <vtcontrol/Json.hpp>
 #include <vtcontrol/testing/JsonProbe.hpp>
@@ -36,6 +40,44 @@ TEST_CASE("decodeJson is strict about keys and types, lenient about absence", "[
           == "a\xEF\xBF\xBD"
              "b");
     CHECK(vtcontrol::encodeJson(Probe { .name = "\x1b[0m" }).contains(R"(\u001b)"));
+}
+
+TEST_CASE("decodeJson reads no byte past the view it is given", "[vtcontrol][json]")
+{
+    struct Row
+    {
+        std::string_view text;
+        std::optional<uint32_t> count; ///< Empty: refused.
+    };
+    for (auto const& row: { Row { .text = R"({"name":"b","count":9})", .count = 9 },
+                            Row { .text = R"({"name":"b","count":9)", .count = std::nullopt },
+                            Row { .text = R"({"name":"b)", .count = std::nullopt },
+                            Row { .text = R"({"count": 1)", .count = std::nullopt },
+                            Row { .text = "[1, 2", .count = std::nullopt } })
+    {
+        CAPTURE(row.text);
+        auto const probe = vtcontrol::decodeJson<Probe>(contour::testing::ExactBuffer { row.text }.view());
+        auto const count = probe ? std::optional { probe->count } : std::nullopt;
+        CHECK(count == row.count);
+    }
+}
+
+TEST_CASE("a generic document cut off after a complete value is refused", "[vtcontrol][json]")
+{
+    // The CLI reads untrusted lines and settings into glz::generic with ViewReadOptions and relies on this.
+    // glaze 9's glz::generic_u64 does accept these (it reports no error at the end of the view), so a bump of
+    // glaze, or a switch to another generic type, must keep this test green.
+    for (auto const text: { std::string_view { R"({"jsonrpc":"2.0","id":1)" },
+                            std::string_view { R"({"a": 1)" },
+                            std::string_view { "[1, 2" },
+                            std::string_view { "{\"a\": {\"b\": 1}\n" } })
+    {
+        CAPTURE(text);
+        auto document = glz::generic {};
+        auto const error =
+            glz::read<vtcontrol::ViewReadOptions>(document, contour::testing::ExactBuffer { text }.view());
+        CHECK(error.ec != glz::error_code::none);
+    }
 }
 
 TEST_CASE("an error code round-trips through JSON by its spelling", "[vtcontrol][json]")
