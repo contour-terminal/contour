@@ -327,6 +327,13 @@ if(CONTOUR_TESTING)
         contour_add_lint_gate(check_wasm_runtime_containment check-wasm-runtime-containment.py)
         contour_add_lint_gate(check_wasm_runtime_containment_selftest check-wasm-runtime-containment.py --self-test)
 
+        # The agent orchestrator's core, view and guest driver also build as a wasm32-wasip1 guest with
+        # -fno-exceptions -fno-rtti and no OS access: no throw/try/catch, no throwing accessor, no run-time
+        # format, no host-only header, no RTTI, no direct clock, randomness or environment read. Test code is
+        # exempt; the self-test holds every rule to an offending and a clean sample.
+        contour_add_lint_gate(check_guest_portability check-guest-portability.py)
+        contour_add_lint_gate(check_guest_portability_selftest check-guest-portability.py --self-test)
+
         # No platform test below the keyboard normalizer: the router, the default-binding table and the
         # session's key path are platform-neutral, so a platform macro or BuildKeyboardPlatformKind there
         # fails this gate. The self-test keeps the scanner itself honest.
