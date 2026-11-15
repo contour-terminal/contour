@@ -103,6 +103,7 @@ if(VTEXTENSION_TESTING)
         Instance_test.cpp
         Isolation_test.cpp
         Manifest_test.cpp
+        ParseBudget_test.cpp
         Runner_test.cpp
         SessionExtensions_test.cpp
         StatusLineAdapter_test.cpp
