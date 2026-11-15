@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# R11: how git behaves in a worktree an agent controls. The orchestrator runs git in such a worktree to
+# How git behaves in a worktree an agent controls. The orchestrator runs git in such a worktree to
 # decide whether it may remove it; this measures whether those cleanup commands can be made to run a
 # program the agent configured, and what each candidate command prints in the states cleanup must tell
 # apart. Everything happens in a fresh `mktemp -d` directory; no real repository is touched.
@@ -66,11 +66,11 @@ readonly -a HEAD_REACHABLE=(git for-each-ref --count=1 --contains HEAD refs/head
 # The proposed argv of `git-operation-state` (section (b) shows why).
 readonly -a OPERATION_STATE=(git -c status.displayCommentPrefix=false -c color.status=false status --long)
 
-# The argv of `git-index-flags` and of `git-common-dir` (the check the owner's R11 decision added).
+# The argv of `git-index-flags` and of `git-common-dir` (the check cleanup runs before any other git command).
 readonly -a INDEX_FLAGS=(git ls-files -v --stage)
 readonly -a COMMON_DIR=(git rev-parse --path-format=absolute --git-common-dir)
 
-# The cleanup commands' own environment (owner's R11 decision). It follows COMMAND_ENV, so its
+# The cleanup commands' own environment (as adopted). It follows COMMAND_ENV, so its
 # GIT_CONFIG_COUNT replaces the global one and it carries every pair that count names.
 readonly -a CLEANUP_ENV=(
     GIT_CONFIG_COUNT=3
@@ -263,7 +263,7 @@ show_output() { # show_output [always] — prints OUT and ERR of the last run, i
 }
 
 # ====================================================================================================
-echo "R11 — git in an agent-controlled worktree"
+echo "Git in an agent-controlled worktree"
 echo "git: $(git --version | sed 's/^git version //')"
 echo "GIT_ATTR_SOURCE=$EMPTY_TREE (the empty tree) when \"on\"; every run carries the manifest's"
 echo "command-env (core.fsmonitor=false, core.hooksPath=/dev/null via GIT_CONFIG_COUNT)."
@@ -456,7 +456,7 @@ for where in core.hooksPath common-hooks-dir; do
 done
 
 echo
-echo "-- The adopted cleanup environment, every cleanup command (owner's R11 decision) --"
+echo "-- The adopted cleanup environment, every cleanup command (as adopted) --"
 echo "  Each cleanup command's own environment replaces the global GIT_CONFIG_COUNT with the whole set:"
 echo "  core.fsmonitor=false, core.hooksPath=/dev/null, core.attributesFile=/dev/null; plus GIT_ATTR_SOURCE"
 echo "  and GIT_OPTIONAL_LOCKS=0. common-dir = ${COMMON_DIR[*]}; index-flags = ${INDEX_FLAGS[*]}."

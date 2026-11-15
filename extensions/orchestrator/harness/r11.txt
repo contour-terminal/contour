@@ -1,4 +1,4 @@
-R11 — git in an agent-controlled worktree
+Git in an agent-controlled worktree
 git: 2.56.0
 GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904 (the empty tree) when "on"; every run carries the manifest's
 command-env (core.fsmonitor=false, core.hooksPath=/dev/null via GIT_CONFIG_COUNT).
@@ -99,7 +99,7 @@ tracked file made stat-dirty, then the one command. Columns: exit code, filter r
   hooks in common-hooks-dir  remove@wt    bare: exit=0 hooks=post-index-change env: exit=0 hooks=none
   hooks in common-hooks-dir  remove@repo  bare: exit=0 hooks=post-index-change env: exit=0 hooks=none
 
--- The adopted cleanup environment, every cleanup command (owner's R11 decision) --
+-- The adopted cleanup environment, every cleanup command (as adopted) --
   Each cleanup command's own environment replaces the global GIT_CONFIG_COUNT with the whole set:
   core.fsmonitor=false, core.hooksPath=/dev/null, core.attributesFile=/dev/null; plus GIT_ATTR_SOURCE
   and GIT_OPTIONAL_LOCKS=0. common-dir = git rev-parse --path-format=absolute --git-common-dir; index-flags = git ls-files -v --stage.

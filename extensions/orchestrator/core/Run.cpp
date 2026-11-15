@@ -476,7 +476,7 @@ namespace
     }
 
     /// A gitlink: `git status --ignore-submodules=none` enters the submodule's repository, whose own
-    /// config and info/attributes the agent wrote and which can name a filter (measured, R11).
+    /// config and info/attributes the agent wrote and which can name a filter (measured: harness/r11.sh).
     [[nodiscard]] constexpr bool isSubmodule(IndexLine const& entry) noexcept
     {
         return entry.mode == "160000";

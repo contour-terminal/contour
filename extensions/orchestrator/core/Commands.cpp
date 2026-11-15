@@ -113,8 +113,8 @@ namespace
 
     /// The cleanup commands' git configuration: the forced pairs again, because a command's own
     /// GIT_CONFIG_COUNT replaces the global one, plus no attributes file, so neither `core.attributesFile`
-    /// nor the user's `$XDG_CONFIG_HOME/git/attributes` can select a filter (measured, R11). It must not
-    /// reach `git worktree add` or `gh pr checkout`, where the user's attributes may select LFS.
+    /// nor the user's `$XDG_CONFIG_HOME/git/attributes` can select a filter (measured: harness/r11.sh). It
+    /// must not reach `git worktree add` or `gh pr checkout`, where the user's attributes may select LFS.
     constexpr auto CleanupConfiguration =
         concatenated(std::array { EnvironmentVariable { .name = "GIT_CONFIG_COUNT", .value = "3" } },
                      ForcedConfiguration,
@@ -206,14 +206,14 @@ namespace
     };
     /// The repository directory git actually uses from inside the worktree, resolved. A worktree whose
     /// `commondir` link was redirected names another directory here, whose configuration and
-    /// `info/attributes` git would then read (measured, R11). It reads no attributes and no index.
+    /// `info/attributes` git would then read (measured: harness/r11.sh). It reads no attributes and no index.
     constexpr auto GitCommonDirArgv =
         std::array { "git"sv, "rev-parse"sv, "--path-format=absolute"sv, "--git-common-dir"sv };
     /// Each index entry with its tag and mode in front. The tag is lowercase for a file marked
     /// assume-unchanged and `S` for one marked skip-worktree: `git status` does not see a change to such a
     /// file, and the unforced remove deletes it. Mode 160000 is a submodule, whose own repository
-    /// `git status` would enter. It reads no attributes (measured, R11), so it runs before anything that
-    /// does.
+    /// `git status` would enter. It reads no attributes (measured: harness/r11.sh), so it runs before
+    /// anything that does.
     constexpr auto GitIndexFlagsArgv = std::array { "git"sv, "ls-files"sv, "-v"sv, "--stage"sv };
     /// The long status names a rebase, merge, cherry-pick, revert or bisect in progress on a line of its own;
     /// without the comment prefix and colour those lines start in column 0, and it exits 0 in every state.

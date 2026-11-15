@@ -1870,8 +1870,8 @@ TEST_CASE("tampered worktree", "[orchestrator][engine]")
     SECTION("a submodule in the index")
     {
         // The agent committed a nested repository as a gitlink; its own config and info/attributes name a
-        // clean filter. `git status --ignore-submodules=none` would run it (measured, R11), so the index
-        // check runs first and nothing that reads attributes follows.
+        // clean filter. `git status --ignore-submodules=none` would run it (measured: harness/r11.sh), so the
+        // index check runs first and nothing that reads attributes follows.
         constexpr auto WithSubmodule = "H 100644 78981922613b2afb6025042ff6bd878ac1994e85 0\ta.txt\n"
                                        "H 160000 63343ca2825356cbfa4a67b36f8969e87218a37e 0\tsub\n"sv;
         auto harness = booted();

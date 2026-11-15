@@ -1731,7 +1731,7 @@ TEST_CASE("commonDirIsMain", "[orchestrator][run]")
         Expect main;
     };
     // Compared as gitFileIsIntact compares: exact, one optional line end. git prints the resolved path, as
-    // `git worktree list` does for the main checkout (measured, R11).
+    // `git worktree list` does for the main checkout (measured: harness/r11.sh).
     constexpr auto Rows = std::array {
         Row { .name = "exact", .output = "/r/contour/.git", .main = Expect::Yes },
         Row { .name = "line end", .output = "/r/contour/.git\n", .main = Expect::Yes },
