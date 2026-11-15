@@ -28,11 +28,23 @@ add_library(orchestrator_core STATIC
     core/ArgumentKinds.hpp
     core/Commands.cpp
     core/Commands.hpp
+    core/GitHub.cpp
+    core/GitHub.hpp
+    core/GitHubJson.hpp
+    core/Json.hpp
+    core/JsonPrefix.cpp
+    core/JsonPrefix.hpp
+    core/Model.cpp
+    core/Model.hpp
+    core/Provider.cpp
+    core/Provider.hpp
     core/Sanitize.cpp
     core/Sanitize.hpp
     core/Utf8.hpp
 )
 target_compile_features(orchestrator_core PUBLIC cxx_std_23)
+# PRIVATE: glaze stays in the .cpp files, and no header of the core may pull it in (scripts/include-budget.txt).
+target_link_libraries(orchestrator_core PRIVATE glaze::glaze)
 # The include root is the directory above this project, so that sources spell <orchestrator/core/X.hpp>
 # (<core/...> is core-cpp's). An extracted checkout must therefore live in a directory named `orchestrator`.
 target_include_directories(orchestrator_core PUBLIC
@@ -46,6 +58,9 @@ if(ORCHESTRATOR_TESTING)
         core/ArgumentKinds_test.cpp
         core/Commands_test.cpp
         core/Fixtures.hpp
+        core/GitHub_test.cpp
+        core/JsonPrefix_test.cpp
+        core/Provider_test.cpp
         core/Sanitize_test.cpp
         core/Utf8_test.cpp
     )
