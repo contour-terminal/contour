@@ -47,3 +47,11 @@ charset = unset
 
 [src/vtbackend/screen/ScreenTestFixtures.hpp]
 charset = unset
+
+# `git … -z` output the orchestrator's parsers are tested against: NUL-separated records, replayed byte for
+# byte. The NULs make the checker read them as binary, and the last record ends in a NUL, not a newline;
+# both are the format, not a typo.
+[extensions/orchestrator/core/testdata/git/*.porcelain-z]
+charset = unset
+end_of_line = unset
+insert_final_newline = unset

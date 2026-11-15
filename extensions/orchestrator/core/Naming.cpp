@@ -61,7 +61,7 @@ std::expected<RunId, NamingError> runId(ItemRef const& item, Stamp const& stamp)
 
 std::string branchName(RunId const& runId)
 {
-    return std::format("agent/{}", runId.text());
+    return std::format("{}{}", BranchPrefix, runId.text());
 }
 
 std::string worktreePath(std::string_view root, std::string_view repo, RunId const& runId)

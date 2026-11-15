@@ -124,6 +124,9 @@ class RunId
     std::string _text;
 };
 
+/// What every run's branch starts with.
+inline constexpr std::string_view BranchPrefix = "agent/";
+
 /// A run's branch: `agent/<runId>`, always a Ref.
 /// @param runId The run's id.
 /// @return The branch name, such as "agent/pr-2334-20261113-150847".
