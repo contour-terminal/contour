@@ -281,6 +281,8 @@ enum class Fault : uint8_t
     MalformedRoot,            ///< A root pointer with an empty step, or a `*` that is not a whole step.
     MalformedEnvironmentName, ///< An environment name other than `[A-Za-z_][A-Za-z0-9_]*`.
     TabCharacter,             ///< A tab in a line: words are separated by single spaces only.
+    SurroundingBlank,         ///< A line that begins or ends with a blank, which is never trimmed.
+    ControlCharacter,         ///< A control character other than a tab, or a CR not right before the LF.
     UnsupportedLine,          ///< An `inbox` line: the kind is reserved, and no version supports it yet.
 };
 
@@ -526,16 +528,28 @@ struct ManifestLine
     return checkReferences(line, state);
 }
 
-/// The line-grammar half of manifest version 2, independent of the tables it is checked against: blank and
-/// '#' lines are skipped, every other line is checked in order, and a name must be declared before use.
+/// The line-grammar half of manifest version 2, independent of the tables it is checked against: a carriage
+/// return right before a line feed belongs to the line end; lines of nothing but blanks and '#' lines are
+/// skipped; every other line neither begins nor ends with a blank, holds no control character but a tab
+/// (which checkLine() refuses on its own), is checked in order, and a name must be declared before use.
 [[nodiscard]] Fault checkManifest(std::string_view text)
 {
     auto state = ManifestState {};
     for (auto const rawLine: std::views::split(text, '\n'))
     {
-        auto const line = std::string_view(rawLine.begin(), rawLine.end());
-        if (line.empty() || line.starts_with('#'))
+        auto line = std::string_view(rawLine.begin(), rawLine.end());
+        if (line.ends_with('\r'))
+            line.remove_suffix(1);
+        if (line.find_first_not_of(' ') == std::string_view::npos || line.starts_with('#'))
             continue;
+        if (line.starts_with(' ') || line.ends_with(' '))
+            return Fault::SurroundingBlank;
+        // A tab is refused by checkLine(), which names it more precisely.
+        if (std::ranges::any_of(line, [](char c) {
+                auto const byte = static_cast<unsigned char>(c);
+                return c != '\t' && (byte < 0x20 || byte == 0x7F);
+            }))
+            return Fault::ControlCharacter;
         if (auto const fault = checkLine(line, state); fault != Fault::None)
             return fault;
     }
@@ -555,6 +569,7 @@ constexpr auto CorpusRows = std::array {
     CorpusRow { .file = "valid/command-env-for.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/command-env.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/command.manifest", .expected = Fault::None },
+    CorpusRow { .file = "valid/crlf.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/orchestrator.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/pane-env.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/pane.manifest", .expected = Fault::None },
@@ -571,6 +586,7 @@ constexpr auto CorpusRows = std::array {
     CorpusRow { .file = "invalid/empty-name.manifest", .expected = Fault::EmptyValue },
     CorpusRow { .file = "invalid/environment-name.manifest", .expected = Fault::MalformedEnvironmentName },
     CorpusRow { .file = "invalid/forward-reference.manifest", .expected = Fault::UndeclaredRoot },
+    CorpusRow { .file = "invalid/indented-line.manifest", .expected = Fault::SurroundingBlank },
     CorpusRow { .file = "invalid/inbox-reserved.manifest", .expected = Fault::UnsupportedLine },
     CorpusRow { .file = "invalid/env-for-undeclared-command.manifest", .expected = Fault::UndeclaredTarget },
     CorpusRow { .file = "invalid/path-of-undeclared-root.manifest", .expected = Fault::UndeclaredRoot },
@@ -582,7 +598,9 @@ constexpr auto CorpusRows = std::array {
     CorpusRow { .file = "invalid/root-out-of-place.manifest", .expected = Fault::MissingRoot },
     CorpusRow { .file = "invalid/root-partial-wildcard.manifest", .expected = Fault::MalformedRoot },
     CorpusRow { .file = "invalid/root-unknown-flag.manifest", .expected = Fault::UnknownRootFlag },
+    CorpusRow { .file = "invalid/stray-cr.manifest", .expected = Fault::ControlCharacter },
     CorpusRow { .file = "invalid/tab-in-line.manifest", .expected = Fault::TabCharacter },
+    CorpusRow { .file = "invalid/trailing-blank.manifest", .expected = Fault::SurroundingBlank },
     CorpusRow { .file = "invalid/undeclared-placeholder.manifest", .expected = Fault::UndeclaredPlaceholder },
     CorpusRow { .file = "invalid/unknown-kind.manifest", .expected = Fault::UnknownKind },
     CorpusRow { .file = "invalid/unknown-line.manifest", .expected = Fault::UnknownLine },
