@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <orchestrator/core/Sanitize.hpp>
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -56,10 +55,12 @@ namespace
         // A malformed byte decodes as U+FFFD of length 1; a U+FFFD spelled out in the input takes three.
         if (decoded.codepoint == ReplacementCharacter && decoded.length == 1)
             return Disposition::Drop;
-        auto const* const found = std::ranges::find_if(CodepointClasses, [&](CodepointClass const& range) {
-            return range.first <= decoded.codepoint && decoded.codepoint <= range.last;
-        });
-        return found != CodepointClasses.end() ? found->disposition : Disposition::Keep;
+        // A loop rather than std::ranges::find_if: a std::array's iterator is a pointer in libstdc++ and a
+        // class in libc++ (the guest's), and no one spelling of the found iterator suits both.
+        for (auto const& range: CodepointClasses)
+            if (range.first <= decoded.codepoint && decoded.codepoint <= range.last)
+                return range.disposition;
+        return Disposition::Keep;
     }
 
     /// Whether BoundedLine::append took the code point or cut the line.

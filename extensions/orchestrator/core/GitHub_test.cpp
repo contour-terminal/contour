@@ -250,6 +250,29 @@ TEST_CASE("GitHub.changeRequests.recorded", "[github]")
     CHECK(std::ranges::contains(listed->items[4].failingChecks, "Check clang-tidy"sv));
 }
 
+TEST_CASE("GitHub.changeRequests.largest", "[github]")
+{
+    // prs-100.json is prs-open.json scaled by harness/scale-fixture.py to the 100 entries `gh-prs` asks for:
+    // the largest reply the command prints, and the one harness/ParseHarness.cpp is timed on under the
+    // interpreter. It fits the host's 1 MiB per-stream cap, so it parses whole, at the list limit.
+    auto const reply = readFixture(FixtureRoot::Testdata, "github/prs-100.json");
+    CHECK(reply.size() <= std::size_t { 1024 } * 1024);
+    auto const listed = github::changeRequests(reply, OutputExtent::Whole);
+    REQUIRE(listed.has_value());
+    CHECK(listed->skipped == 0);
+    CHECK(listed->completeness == ListCompleteness::AtLimit);
+    REQUIRE(listed->items.size() == 100);
+    for (auto const index: std::views::iota(std::size_t { 0 }, listed->items.size()))
+    {
+        auto const& expected = RecordedPullRequests[index % RecordedPullRequests.size()];
+        auto const& actual = listed->items[index];
+        CAPTURE(index);
+        CHECK(actual.number == 100000 + index);
+        CHECK(actual.ci == expected.ci);
+        CHECK(actual.failingChecks.size() == expected.failingChecks);
+    }
+}
+
 TEST_CASE("GitHub.changeRequests.empty", "[github]")
 {
     auto const listed = github::changeRequests(readFixture(FixtureRoot::Testdata, "github/prs-empty.json"),
