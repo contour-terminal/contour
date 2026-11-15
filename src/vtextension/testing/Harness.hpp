@@ -143,7 +143,7 @@ class RunningGuest
     explicit RunningGuest(std::vector<std::byte> module, ExtensionLimits limits = {}):
         _backend { wasm::makeDefaultBackend() }, _limits { limits }
     {
-        auto engine = Engine::create(*_backend, limits);
+        auto engine = Engine::create(*_backend, vtextension::World::StatusLine, limits);
         REQUIRE(engine.has_value());
         _engine = std::move(*engine);
         auto compiled = CompiledExtension::load(*_engine, std::move(module));

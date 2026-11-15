@@ -46,7 +46,7 @@ namespace
 [[nodiscard]] std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> loadModule(
     wasm::IWasmBackend& backend, std::vector<std::byte> module)
 {
-    auto const engine = Engine::create(backend, ExtensionLimits {});
+    auto const engine = Engine::create(backend, vtextension::World::StatusLine, ExtensionLimits {});
     REQUIRE(engine.has_value());
     return CompiledExtension::load(**engine, std::move(module));
 }
@@ -58,7 +58,7 @@ namespace
                                                       ExtensionLimits limits = {})
 {
     auto const backend = wasm::makeDefaultBackend();
-    auto const engine = Engine::create(*backend, limits);
+    auto const engine = Engine::create(*backend, vtextension::World::StatusLine, limits);
     REQUIRE(engine.has_value());
     auto const compiled = CompiledExtension::load(**engine, std::move(module));
     if (!compiled)
@@ -138,7 +138,7 @@ TEST_CASE("Instance.memoryCap.atInstantiation", "[vtextension]")
     auto limits = ExtensionLimits {};
     limits.memoryBytes = std::size_t { 32 } * 1024;
     auto const backend = wasm::makeDefaultBackend();
-    auto const engine = Engine::create(*backend, limits);
+    auto const engine = Engine::create(*backend, vtextension::World::StatusLine, limits);
     REQUIRE(engine.has_value());
     auto const compiled = CompiledExtension::load(**engine, toModule(vtextension::testing::MinimalModule));
     REQUIRE(compiled.has_value());
@@ -253,7 +253,7 @@ TEST_CASE("Instance.deadlineSpentBeforeCommand", "[vtextension]")
     // When the call's deadline is spent by the time the guest asks for a command, the command does
     // not run, and the call fails as overrun.
     auto const backend = wasm::makeDefaultBackend();
-    auto const engine = Engine::create(*backend, ExtensionLimits {});
+    auto const engine = Engine::create(*backend, vtextension::World::StatusLine, ExtensionLimits {});
     REQUIRE(engine.has_value());
     auto const compiled = CompiledExtension::load(**engine, toModule(vtextension::testing::MaliciousModule));
     REQUIRE(compiled.has_value());
@@ -311,7 +311,7 @@ TEST_CASE("Instance.expiredBetweenCalls", "[vtextension]")
 
     auto limits = ExtensionLimits {};
     limits.callDeadline = std::chrono::milliseconds { 20 };
-    auto const engine = Engine::create(backend, limits);
+    auto const engine = Engine::create(backend, vtextension::World::StatusLine, limits);
     REQUIRE(engine.has_value());
     auto const compiled = CompiledExtension::load(**engine, toModule(vtextension::testing::MinimalModule));
     REQUIRE(compiled.has_value());
@@ -370,7 +370,7 @@ TEST_CASE("Instance.growthRefusedInHostCallAllocation", "[vtextension]")
         };
 
         auto const limits = ExtensionLimits {};
-        auto const engine = Engine::create(backend, limits);
+        auto const engine = Engine::create(backend, vtextension::World::StatusLine, limits);
         REQUIRE(engine.has_value());
         auto const compiled =
             CompiledExtension::load(**engine, toModule(vtextension::testing::MinimalModule));

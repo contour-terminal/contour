@@ -415,7 +415,7 @@ TEST_CASE("a control import the guest calls wrongly traps", "[vtextension][contr
 TEST_CASE("a module importing the control interface instantiates", "[vtextension][control]")
 {
     auto const backend = wasm::makeDefaultBackend();
-    auto const engine = Engine::create(*backend, ExtensionLimits {});
+    auto const engine = Engine::create(*backend, vtextension::World::StatusLine, ExtensionLimits {});
     REQUIRE(engine.has_value());
     auto const compiled =
         CompiledExtension::load(**engine, toModule(vtextension::testing::ControlImportingModule));
@@ -459,7 +459,7 @@ TEST_CASE("an instance's deadline expiring during a control call faults it, writ
     auto backend = vtextension::testing::FakeWasmBackend {};
     constexpr auto ResultAddress = uint32_t { 1024 };
     // Its index in the table every runtime is created with: after the statusline world's functions.
-    auto const table = vtextension::detail::hostFunctions();
+    auto const table = vtextension::detail::hostFunctions(vtextension::World::StatusLine);
     auto const daemonInfo =
         static_cast<std::size_t>(std::ranges::find_if(table,
                                                       [](wasm::HostFunction const& function) {
@@ -478,7 +478,7 @@ TEST_CASE("an instance's deadline expiring during a control call faults it, writ
 
     auto limits = ExtensionLimits {};
     limits.callDeadline = 20ms;
-    auto const engine = Engine::create(backend, limits);
+    auto const engine = Engine::create(backend, vtextension::World::StatusLine, limits);
     REQUIRE(engine.has_value());
     auto const compiled = CompiledExtension::load(
         **engine,

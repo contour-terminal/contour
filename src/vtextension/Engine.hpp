@@ -13,6 +13,7 @@
 #include <vtextension/DeadlineGuard.hpp>
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/ExtensionLimits.hpp>
+#include <vtextension/World.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension
@@ -21,11 +22,11 @@ namespace vtextension
 /// The process's handle on a WebAssembly runtime, and the watchdog that enforces per-call deadlines on
 /// the instances created from it.
 ///
-/// The runtime is created from the backend the engine is given, with the statusline world's host
-/// functions (so that every module it loads links against them) and with the engine's memory and stack
-/// limits. The backend brings its engine up with the first runtime alive and down with the last; the
-/// watchdog thread lives exactly as long as its Engine, so a process with no extensions pays for
-/// neither.
+/// The runtime is created from the backend the engine is given, with the host functions of the engine's
+/// world (so that every module it loads links against them) and with the engine's memory and stack
+/// limits. An engine serves one world: a module of the other world does not load on it. The backend brings
+/// its engine up with the first runtime alive and down with the last; the watchdog thread lives exactly as
+/// long as its Engine, so a process with no extensions pays for neither.
 ///
 /// The watchdog measures real time on purpose: it bounds a real interpreter running on a real
 /// thread, which no injected clock could advance.
@@ -38,15 +39,18 @@ class Engine: public std::enable_shared_from_this<Engine>, public IDeadlineWatch
   public:
     /// Creates a runtime on @p backend and starts the watchdog thread.
     /// @param backend What the runtime is created from; must outlive the engine.
+    /// @param world The world the engine serves: its host functions are the runtime's, and only its modules
+    ///        load on the engine (CompiledExtension::load()).
     /// @param limits The limits every instance created on this engine is held to.
     /// @return The engine, or ExtensionError::RuntimeUnavailable if the runtime could not be created or
     ///         the watchdog thread could not be started.
     [[nodiscard]] static std::expected<std::shared_ptr<Engine>, ExtensionError> create(
-        wasm::IWasmBackend& backend, ExtensionLimits limits);
+        wasm::IWasmBackend& backend, World world, ExtensionLimits limits);
 
     /// Use create(); public only so that std::make_shared can reach it.
     Engine(PrivateTag,
            wasm::IWasmBackend& backend,
+           World world,
            ExtensionLimits limits,
            std::shared_ptr<wasm::IWasmRuntime> runtime);
 
@@ -57,6 +61,9 @@ class Engine: public std::enable_shared_from_this<Engine>, public IDeadlineWatch
     Engine(Engine&&) = delete;
     Engine& operator=(Engine const&) = delete;
     Engine& operator=(Engine&&) = delete;
+
+    /// @return The world this engine serves.
+    [[nodiscard]] World world() const noexcept { return _world; }
 
     /// @return The limits this engine was created with.
     [[nodiscard]] ExtensionLimits const& limits() const noexcept { return _limits; }
@@ -105,6 +112,7 @@ class Engine: public std::enable_shared_from_this<Engine>, public IDeadlineWatch
     void watchdogLoop();
 
     wasm::IWasmBackend& _backend;
+    World _world;
     ExtensionLimits _limits;
     std::shared_ptr<wasm::IWasmRuntime> _runtime; ///< Released after the watchdog has stopped.
     std::mutex _mutex;

@@ -13,17 +13,18 @@ namespace vtextension
 {
 
 std::expected<std::shared_ptr<Engine>, ExtensionError> Engine::create(wasm::IWasmBackend& backend,
+                                                                      World world,
                                                                       ExtensionLimits limits)
 {
     auto runtime = backend.createRuntime(
         wasm::RuntimeLimits { .memoryBytes = limits.memoryBytes, .stackBytes = limits.stackBytes },
-        detail::hostFunctions());
+        detail::hostFunctions(world));
     if (!runtime)
         return std::unexpected(ExtensionError::RuntimeUnavailable);
 
     try
     {
-        return std::make_shared<Engine>(PrivateTag {}, backend, limits, std::move(*runtime));
+        return std::make_shared<Engine>(PrivateTag {}, backend, world, limits, std::move(*runtime));
     }
     catch (std::system_error const&)
     {
@@ -35,9 +36,11 @@ std::expected<std::shared_ptr<Engine>, ExtensionError> Engine::create(wasm::IWas
 
 Engine::Engine(PrivateTag /*unused*/,
                wasm::IWasmBackend& backend,
+               World world,
                ExtensionLimits limits,
                std::shared_ptr<wasm::IWasmRuntime> runtime):
     _backend { backend },
+    _world { world },
     _limits { limits },
     _runtime { std::move(runtime) },
     _watchdog { [this] { watchdogLoop(); } }

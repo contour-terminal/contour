@@ -24,14 +24,12 @@
 #include <vtextension/Event.hpp>
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/ExtensionLimits.hpp>
+#include <vtextension/GuestCall.hpp>
 #include <vtextension/IHostServices.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension
 {
-
-/// An extension's configuration: its settings as name and value pairs, in the user's order.
-using ConfigMap = std::vector<std::pair<std::string, std::string>>;
 
 /// One running extension: an instance of a CompiledExtension, sandboxed, speaking the statusline
 /// world through typed calls.
@@ -119,88 +117,47 @@ class Instance final: private wasm::IHostContext
     [[nodiscard]] std::expected<std::string, ExtensionError> render(vtpty::PageSize size);
 
     /// @return The error that made the instance unusable; `std::nullopt` while it is usable.
-    [[nodiscard]] std::optional<ExtensionError> fault() const noexcept { return _fault; }
+    [[nodiscard]] std::optional<ExtensionError> fault() const noexcept { return _guest.fault(); }
 
   private:
-    class GuestMemory;
     struct HostCalls;
     friend struct HostCalls;
 
     /// An optional function export: one the guest may lack.
     using OptionalFunction = std::optional<wasm::ExportFunction>;
 
-    /// The guest's exports, looked up once.
+    /// The guest's exports, looked up once; `cabi_realloc` is the GuestCall's.
     struct Exports
     {
         wasm::ExportFunction load;
         wasm::ExportFunction update;
         wasm::ExportFunction render;
-        wasm::ExportFunction realloc;
         OptionalFunction postLoad;
         OptionalFunction postUpdate;
         OptionalFunction postRender;
     };
 
-    /// Whether a host call is running in this instance, which no other host call may enter.
-    enum class HostCallState : uint8_t
-    {
-        Idle,
-        InProgress,
-    };
-
-    /// Runs the host function at @p functionIndex of the table every runtime is created with
-    /// (detail::hostFunctions()): the world's, or a control verb's. Called by the runtime, synchronously,
-    /// from inside a call into the guest.
+    /// Runs the host function at @p functionIndex of the table every status-line runtime is created with
+    /// (detail::statuslineHostFunctions()): the world's, or a control verb's. Called by the runtime,
+    /// synchronously, from inside a call into the guest.
     /// @return Nothing on success; otherwise the error that faults the call, which makes the guest trap.
     [[nodiscard]] std::expected<void, ExtensionError> callHost(
         std::size_t functionIndex, std::span<uint32_t const> arguments) noexcept override;
 
-    /// Instantiates the module and looks its exports up. Called once, by create().
+    /// Instantiates the module, looks its exports up, and runs `_initialize`. Called once, by create().
     [[nodiscard]] std::expected<void, ExtensionError> instantiate();
-
-    /// Runs @p body under a deadline of @p timeout, and records any failure as the instance's fault,
-    /// an exception escaping @p body included (as `Trapped`). The deadline is disarmed however the
-    /// body ends.
-    template <typename Body>
-    [[nodiscard]] auto guarded(std::chrono::milliseconds timeout, Body const& body) -> decltype(body());
-
-    /// @return What names this instance, and its deadline's state, to the watchdog.
-    [[nodiscard]] WatchToken watchToken() noexcept;
-
-    /// @return Whether the watchdog found a deadline of this instance passed.
-    [[nodiscard]] bool isDeadlineExpired() const noexcept;
-
-    /// Calls an export with @p argv as its parameters and, on return, its results.
-    [[nodiscard]] std::expected<void, ExtensionError> callExport(wasm::ExportFunction function,
-                                                                 std::span<uint32_t> argv);
 
     /// Calls an export's post-return function, if the guest has one, with the export's results.
     [[nodiscard]] std::expected<void, ExtensionError> callPostReturn(OptionalFunction function,
                                                                      uint32_t result);
 
-    /// @return Why the call that just failed in the guest failed, given what the runtime reported.
-    [[nodiscard]] ExtensionError guestFailure(wasm::CallFailure failure) const noexcept;
-
-    /// Records an error a host function hit: the call it faults fails with it.
-    /// @return The error, for the runtime.
-    [[nodiscard]] std::unexpected<ExtensionError> failHostCall(ExtensionError error) noexcept;
-
     std::shared_ptr<CompiledExtension const> _compiled;
     std::shared_ptr<Engine> _engine;
     IHostServices& _services;
-    core::platform::IClock& _clock;
     ExtensionLimits _limits;
     vtcontrol::ControlGrants _declaredControl; ///< The control permissions the manifest declares.
-    /// Written by the watchdog, from its own thread, before it interrupts the instance. Once Expired it
-    /// stays so: the instance is faulted for good by then.
-    std::atomic<DeadlineState> _deadlineState = DeadlineState::Running;
-    std::unique_ptr<wasm::IWasmInstance> _instance; ///< Null only until instantiate() succeeded.
+    detail::GuestCall _guest;                  ///< The instance, its deadline and its faults.
     Exports _exports;
-    std::unique_ptr<GuestMemory> _memory;
-    std::optional<ExtensionError> _fault;
-    std::optional<ExtensionError> _hostCallError; ///< What a host function failed with, this call.
-    HostCallState _hostCall = HostCallState::Idle;
-    core::platform::SteadyTimePoint _deadline; ///< When the current call's deadline expires, by _clock.
 };
 
 } // namespace vtextension

@@ -12,6 +12,7 @@
 #include <vtextension/CompiledExtension.hpp>
 #include <vtextension/ControlImports.hpp>
 #include <vtextension/DaemonImports.hpp>
+#include <vtextension/DaemonInstance.hpp>
 #include <vtextension/DaemonWorld.hpp>
 #include <vtextension/DeadlineGuard.hpp>
 #include <vtextension/Engine.hpp>
@@ -25,8 +26,10 @@
 #include <vtextension/ExtensionLimits.hpp>
 #include <vtextension/ExtensionScheduler.hpp>
 #include <vtextension/ExtensionWorkerPool.hpp>
+#include <vtextension/GuestCall.hpp>
 #include <vtextension/HostBindings.hpp>
 #include <vtextension/HostState.hpp>
+#include <vtextension/IDaemonHostServices.hpp>
 #include <vtextension/IHostServices.hpp>
 #include <vtextension/Instance.hpp>
 #include <vtextension/Manifest.hpp>
@@ -37,6 +40,7 @@
 #include <vtextension/StatuslineWorld.hpp>
 #include <vtextension/Surface.hpp>
 #include <vtextension/Utf8.hpp>
+#include <vtextension/World.hpp>
 #include <vtextension/wasm/DefaultBackend.hpp>
 #include <vtextension/wasm/WasiAllowList.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>

@@ -82,6 +82,7 @@
     #include <vtextension/Placement.hpp>
     #include <vtextension/SessionExtensions.hpp>
     #include <vtextension/StatusLineAdapter.hpp>
+    #include <vtextension/World.hpp>
     #include <vtextension/wasm/DefaultBackend.hpp>
     #include <vtextension/wasm/WasmRuntime.hpp>
 #endif
@@ -1579,7 +1580,7 @@ class ExtensionRig
     NoCommands _commands;
     /// What the engines are created from and the lanes prepared with; outlives both.
     std::unique_ptr<vtextension::wasm::IWasmBackend> _backend = vtextension::wasm::makeDefaultBackend();
-    vtextension::EngineProvider _engines { *_backend, rigLimits() };
+    vtextension::EngineProvider _engines { *_backend, vtextension::World::StatusLine, rigLimits() };
     /// Last: destroyed first, running each runner's last job before what those jobs reach goes.
     vtextension::ExtensionWorkerPool _pool {
         *_backend, vtextension::extensionWorkerCount(std::thread::hardware_concurrency())

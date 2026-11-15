@@ -11,6 +11,7 @@ set(vtextension_SOURCES
     CompiledExtension.cpp
     ControlImports.cpp
     DaemonImports.cpp
+    DaemonInstance.cpp
     Engine.cpp
     EventQueue.cpp
     ExtensionComposition.cpp
@@ -18,6 +19,8 @@ set(vtextension_SOURCES
     ExtensionGrantStore.cpp
     ExtensionHost.cpp
     ExtensionWorkerPool.cpp
+    GuestCall.cpp
+    HostBindings.cpp
     HostState.cpp
     Instance.cpp
     Manifest.cpp
@@ -39,6 +42,7 @@ set(vtextension_HEADERS
     ControlCodec.hpp
     ControlImports.hpp
     DaemonImports.hpp
+    DaemonInstance.hpp
     DaemonWorld.hpp
     DeadlineGuard.hpp
     Engine.hpp
@@ -52,8 +56,10 @@ set(vtextension_HEADERS
     ExtensionLimits.hpp
     ExtensionScheduler.hpp
     ExtensionWorkerPool.hpp
+    GuestCall.hpp
     HostBindings.hpp
     HostState.hpp
+    IDaemonHostServices.hpp
     IHostServices.hpp
     Instance.hpp
     Manifest.hpp
@@ -65,6 +71,7 @@ set(vtextension_HEADERS
     StatuslineWorld.hpp
     Surface.hpp
     Utf8.hpp
+    World.hpp
     wasm/DefaultBackend.hpp
     wasm/WasiAllowList.hpp
     wasm/WasmBinary.hpp
@@ -98,6 +105,7 @@ if(VTEXTENSION_TESTING)
         CommandPolicy_test.cpp
         ControlCodec_test.cpp
         ControlImports_test.cpp
+        DaemonInstance_test.cpp
         DaemonWorld_test.cpp
         DeadlineGuard_test.cpp
         Engine_test.cpp
@@ -118,7 +126,9 @@ if(VTEXTENSION_TESTING)
         StatusLineAdapter_test.cpp
         Surface_test.cpp
         Wit_test.cpp
+        WorldCheck_test.cpp
         wasm/WasmBinary_test.cpp
+        testing/FakeDaemonHostServices.hpp
         testing/FakeGuestMemory.hpp
         testing/FakeWasmBackend.hpp
         testing/Harness.hpp

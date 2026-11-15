@@ -111,7 +111,7 @@ TEST_CASE("ParseBudget: the orchestrator parses its largest gh reply", "[.measur
     // The engine the extension host creates, with the host's limits: memory and stack caps included.
     auto const limits = ExtensionLimits {};
     auto const backend = vtextension::wasm::makeDefaultBackend();
-    auto engine = vtextension::Engine::create(*backend, limits);
+    auto engine = vtextension::Engine::create(*backend, vtextension::World::StatusLine, limits);
     REQUIRE(engine.has_value());
     auto const guard = backend->enterThread();
     REQUIRE(guard.has_value());

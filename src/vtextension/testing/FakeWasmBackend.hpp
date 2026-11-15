@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include <vtextension/DaemonImports.hpp>
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 
@@ -151,7 +152,7 @@ struct FakeExportShape
     std::size_t results;    ///< How many i32 results it returns.
 };
 
-/// The world's required exports.
+/// The status-line world's required exports.
 inline constexpr auto FakeRequiredExports = std::array {
     FakeExportShape { .name = "load", .parameters = 2, .results = 1 },
     FakeExportShape { .name = "update", .parameters = 5, .results = 1 },
@@ -159,13 +160,21 @@ inline constexpr auto FakeRequiredExports = std::array {
     FakeExportShape { .name = "cabi_realloc", .parameters = 4, .results = 1 },
 };
 
+/// The daemon world's required exports.
+inline constexpr auto FakeDaemonRequiredExports = std::array {
+    FakeExportShape { .name = "load", .parameters = 7, .results = 0 },
+    FakeExportShape { .name = "update", .parameters = 1, .results = 0 },
+    FakeExportShape { .name = "cabi_realloc", .parameters = 4, .results = 1 },
+};
+
 /// The backend whose runtimes the fakes come from; declared here so that a module can tell it of the
 /// instances it creates.
 class FakeWasmBackend;
 
-/// A fake module: whatever bytes it was loaded from, it describes a world guest. It imports every host
-/// function its runtime was created with, all satisfied, and exports a one-page `memory` and the
-/// world's required functions.
+/// A fake module: whatever bytes it was loaded from, it describes a guest of its runtime's world. It
+/// imports every host function its runtime was created with, all satisfied, and exports a one-page
+/// `memory` and the world's required functions: the daemon world's if the runtime's host functions are
+/// the daemon world's, the status line's otherwise.
 class FakeWasmModule final: public wasm::IWasmModule, public std::enable_shared_from_this<FakeWasmModule>
 {
   public:
@@ -332,7 +341,9 @@ inline FakeWasmModule::FakeWasmModule(std::shared_ptr<wasm::IWasmRuntime> runtim
         });
     _exports.push_back(wasm::ExportDescription {
         .name = "memory", .kind = wasm::ExternKind::Memory, .signature = {}, .initialPages = 1 });
-    for (auto const& shape: FakeRequiredExports)
+    auto const isDaemon = !hostFunctions.empty() && hostFunctions.front().module == DaemonImportModule;
+    for (auto const& shape: isDaemon ? std::span<FakeExportShape const> { FakeDaemonRequiredExports }
+                                     : std::span<FakeExportShape const> { FakeRequiredExports })
         _exports.push_back(wasm::ExportDescription {
             .name = std::string { shape.name },
             .kind = wasm::ExternKind::Function,

@@ -52,7 +52,7 @@ constexpr auto Eventually = std::chrono::seconds { 2 };
 [[nodiscard]] std::shared_ptr<Engine> createEngine(vtextension::wasm::IWasmBackend& backend,
                                                    ExtensionLimits limits = {})
 {
-    auto engine = Engine::create(backend, limits);
+    auto engine = Engine::create(backend, vtextension::World::StatusLine, limits);
     REQUIRE(engine.has_value());
     return std::move(*engine);
 }
