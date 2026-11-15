@@ -143,9 +143,13 @@ TEST_CASE("RunRefs: the run a word names", "[orchestrator][proto]")
           .action = End,
           .expected = found("pr-18-20261115-100000") },
         { .name = "prefix, ambiguous",
-          .word = "pr-18",
+          .word = "pr",
           .action = End,
           .expected = refused(Ambiguous, { "pr-1847-20261115-174348", "pr-18-20261115-100000" }) },
+        { .name = "item spelling, its own item only",
+          .word = "pr-18",
+          .action = End,
+          .expected = found("pr-18-20261115-100000") },
         { .name = "prefix, none takeable",
           .word = "issue",
           .action = End,
@@ -194,6 +198,64 @@ TEST_CASE("RunRefs: the run a word names", "[orchestrator][proto]")
     }
 }
 
+TEST_CASE("RunRefs: a word names whole items and whole id segments", "[orchestrator][proto]")
+{
+    using enum RunAction;
+    using enum RunRefProblem;
+    struct SegmentRow
+    {
+        std::string_view name;
+        std::vector<Run> runs;
+        std::string_view word;
+        Expected expected;
+    };
+    auto const cases = std::vector<SegmentRow> {
+        { .name = "pr-18 finished, pr-1847 running: not #1847",
+          .runs = { makeRun("pr-1847-20261115-174348", ChangeRequestRef { .number = 1847 }, Running {}),
+                    makeRun("pr-18-20261115-100000",
+                            ChangeRequestRef { .number = 18 },
+                            finished(Fate::Removed)) },
+          .word = "pr-18",
+          .expected = refused(NotApplicable, { "pr-18-20261115-100000" }) },
+        { .name = "no pr-18 run",
+          .runs = { makeRun("pr-1847-20261115-174348", ChangeRequestRef { .number = 1847 }, Running {}) },
+          .word = "pr-18",
+          .expected = refused(Unknown, {}) },
+        { .name = "issue-1 vs issue-1847",
+          .runs = { makeRun("issue-1847-20261115-110000", IssueRef { .number = 1847 }, Done {}) },
+          .word = "issue-1",
+          .expected = refused(Unknown, {}) },
+        { .name = "abc-1 vs abc-12",
+          .runs = { makeRun("abc-12-20261115-120000", JiraRef { .key = "ABC-12" }, Done {}) },
+          .word = "abc-1",
+          .expected = refused(Unknown, {}) },
+        { .name = "an id prefix inside a segment",
+          .runs = { makeRun("pr-1847-20261115-174348", ChangeRequestRef { .number = 1847 }, Running {}) },
+          .word = "pr-1847-2026",
+          .expected = refused(Unknown, {}) },
+        { .name = "an id prefix of whole segments",
+          .runs = { makeRun("pr-1847-20261115-174348", ChangeRequestRef { .number = 1847 }, Running {}) },
+          .word = "pr-1847-20261115",
+          .expected = found("pr-1847-20261115-174348") },
+    };
+    for (auto const& row: cases)
+    {
+        CAPTURE(row.name, row.word);
+        auto const resolved = resolveRun(row.word, End, std::span<std::string const> {}, row.runs);
+        if (!row.expected.id.empty())
+        {
+            REQUIRE(resolved.has_value());
+            CHECK(*resolved == row.expected.id);
+            continue;
+        }
+        REQUIRE_FALSE(resolved.has_value());
+        CHECK(resolved.error().problem == row.expected.problem);
+        auto const candidates =
+            std::vector<std::string>(row.expected.candidates.begin(), row.expected.candidates.end());
+        CHECK(resolved.error().candidates == candidates);
+    }
+}
+
 TEST_CASE("RunRefs: no rows before the first `runs`", "[orchestrator][proto]")
 {
     auto const runs = fixtureRuns();
@@ -222,7 +284,11 @@ TEST_CASE("RunRefs: what the user reads", "[orchestrator][proto]")
         { .word = "6",
           .action = RunAction::End,
           .error = { .problem = RunRefProblem::NoSuchRow, .candidates = {} },
-          .text = "no row 6 in the last `runs`" },
+          .text = "no row 6 in the last `runs`; for item 6, type #6" },
+        { .word = "1847",
+          .action = RunAction::End,
+          .error = { .problem = RunRefProblem::NoSuchRow, .candidates = {} },
+          .text = "no row 1847 in the last `runs`; for item 1847, type #1847" },
         { .word = "5",
           .action = RunAction::End,
           .error = { .problem = RunRefProblem::RowGone, .candidates = { "pr-9-20261101-000000" } },

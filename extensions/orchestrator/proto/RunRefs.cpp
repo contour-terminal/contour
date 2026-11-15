@@ -20,6 +20,7 @@
 
 #include <orchestrator/core/Finished.hpp>
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Overloaded.hpp>
 
 using namespace std::string_view_literals;
@@ -151,6 +152,15 @@ namespace
         return lower;
     }
 
+    [[nodiscard]] std::string uppered(std::string_view text)
+    {
+        auto upper = std::string(text);
+        std::ranges::transform(upper, upper.begin(), [](char c) {
+            return c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c;
+        });
+        return upper;
+    }
+
     /// Whether @p item is what @p lower (the word, in lower case) spells.
     [[nodiscard]] bool itemMatches(ItemRef const& item, std::string_view lower)
     {
@@ -167,6 +177,21 @@ namespace
                               [&](JiraRef const& ref) { return lowered(ref.key) == lower; },
                           },
                           item);
+    }
+
+    /// Whether @p lower (the word, in lower case) spells an item: `#1847`, `pr-1847`, `issue#12` or a Jira
+    /// key. Such a word names that item only, never a longer number that starts with it.
+    [[nodiscard]] bool spellsItem(std::string_view lower)
+    {
+        return itemSpelling(lower).has_value() || isJiraKey(uppered(lower));
+    }
+
+    /// Whether @p lower (the word, in lower case) is the start of @p id up to one of its `-`: `pr-18` names
+    /// no part of `pr-1847-…`.
+    [[nodiscard]] constexpr bool startsSegments(std::string_view id, std::string_view lower) noexcept
+    {
+        return id.starts_with(lower)
+               && (lower.size() == id.size() || lower.ends_with('-') || id[lower.size()] == '-');
     }
 
     [[nodiscard]] std::vector<std::string> idsOf(std::span<Run const* const> runs)
@@ -219,9 +244,10 @@ std::expected<std::string, RunRefError> resolveRun(std::string_view word,
     }
 
     auto const lower = lowered(word);
+    auto const item = spellsItem(lower);
     auto matches = std::vector<Run const*> {};
     for (auto const& run: runs)
-        if (run.id.starts_with(lower) || itemMatches(run.item, lower))
+        if (item ? itemMatches(run.item, lower) : startsSegments(run.id, lower))
             matches.push_back(&run);
     if (matches.empty())
         return std::unexpected { RunRefError { .problem = RunRefProblem::Unknown, .candidates = {} } };
@@ -251,7 +277,8 @@ std::string refusalText(std::string_view word,
             return std::format("no run matches {}: name it by its row in `runs`, its id or the start of it, "
                                "or its item (#1847)",
                                word);
-        case RunRefProblem::NoSuchRow: return std::format("no row {} in the last `runs`", word);
+        case RunRefProblem::NoSuchRow:
+            return std::format("no row {0} in the last `runs`; for item {0}, type #{0}", word);
         case RunRefProblem::RowGone:
             return std::format("row {} was {}, which is no longer listed: type `runs` again",
                                word,

@@ -49,9 +49,10 @@ struct RunRefError
 
 /// The run a word names, for an action.
 ///
-/// The word is, in this order: a run's exact id; a row number of the last `runs`; or, case-insensitively, a
-/// prefix of run ids and an item's spelling (`#1847`, `pr-1847`, `PR#1847`, `issue#12`, a Jira key), whose
-/// matches the action may take must be exactly one.
+/// The word is, in this order: a run's exact id; a row number of the last `runs`; or, case-insensitively, an
+/// item's spelling (`#1847`, `pr-1847`, `PR#1847`, `issue#12`, a Jira key), which names that item's runs
+/// only, or else a prefix of run ids that ends where a `-` separates two of the id's parts. The matches the
+/// action may take must be exactly one.
 /// @param word What the user typed.
 /// @param action What is to be done with the run.
 /// @param rows The run ids the last `runs` printed, row 1 first.
