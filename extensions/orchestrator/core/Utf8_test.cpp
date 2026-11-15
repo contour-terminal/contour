@@ -64,6 +64,36 @@ constexpr auto EncodeRows = std::array {
                 .decoded = U'\uFFFD' },
 };
 
+struct CodepointsRow
+{
+    std::string_view name;
+    std::string_view bytes;
+    std::u32string_view codepoints;
+};
+
+constexpr auto CodepointsRows = std::array {
+    CodepointsRow { .name = "empty", .bytes = "", .codepoints = U"" },
+    CodepointsRow { .name = "ASCII", .bytes = "ab", .codepoints = U"ab" },
+    CodepointsRow { .name = "every length",
+                    .bytes = "a\xC3\xBC\xE2\x80\xA6\xF0\x9F\x98\x80",
+                    .codepoints = U"a\u00FC\u2026\U0001F600" },
+    CodepointsRow { .name = "invalid byte", .bytes = "a\xFFz", .codepoints = U"a\uFFFDz" },
+    CodepointsRow { .name = "truncated at the end", .bytes = "a\xC3", .codepoints = U"a\uFFFD" },
+    CodepointsRow { .name = "truncated before ASCII", .bytes = "\xE2\x80z", .codepoints = U"\uFFFD\uFFFDz" },
+};
+
+/// The code points Codepoints yields for @p bytes.
+constexpr auto collect(std::string_view bytes)
+{
+    auto codepoints = std::u32string {};
+    for (auto const decoded: orchestrator::Codepoints { bytes })
+        codepoints.push_back(decoded.codepoint);
+    return codepoints;
+}
+
+// Codepoints walks in constant expressions too.
+static_assert(collect("a\xE2\x80\xA6") == U"a\u2026");
+
 // The decoder is usable in constant expressions.
 static_assert(orchestrator::decodeUtf8("\xE2\x80\xA6").codepoint == U'…');
 static_assert(orchestrator::decodeUtf8("\x80").length == 1);
@@ -98,6 +128,15 @@ TEST_CASE("Utf8", "[orchestrator][utf8]")
             auto encoded = std::string { "x" };
             orchestrator::appendUtf8(encoded, row.codepoint);
             CHECK(encoded == std::string { "x" } + std::string { row.bytes });
+        }
+    }
+
+    SECTION("Codepoints")
+    {
+        for (auto const& row: CodepointsRows)
+        {
+            CAPTURE(row.name, row.bytes, row.codepoints.size());
+            CHECK(collect(row.bytes) == row.codepoints);
         }
     }
 

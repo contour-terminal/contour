@@ -23,14 +23,16 @@ option(ORCHESTRATOR_TESTING "Enables building of unittests for the agent orchest
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Dependencies.cmake)
 
-# The sans-IO core. Header-only for now, so INTERFACE; it becomes STATIC with its first translation unit.
-add_library(orchestrator_core INTERFACE
+# The sans-IO core.
+add_library(orchestrator_core STATIC
+    core/Sanitize.cpp
+    core/Sanitize.hpp
     core/Utf8.hpp
 )
-target_compile_features(orchestrator_core INTERFACE cxx_std_23)
+target_compile_features(orchestrator_core PUBLIC cxx_std_23)
 # The include root is the directory above this project, so that sources spell <orchestrator/core/X.hpp>
 # (<core/...> is core-cpp's). An extracted checkout must therefore live in a directory named `orchestrator`.
-target_include_directories(orchestrator_core INTERFACE
+target_include_directories(orchestrator_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
 )
 
@@ -38,6 +40,7 @@ if(ORCHESTRATOR_TESTING)
     enable_testing()
     add_executable(orchestrator_test
         core/test_main.cpp
+        core/Sanitize_test.cpp
         core/Utf8_test.cpp
     )
     target_link_libraries(orchestrator_test PRIVATE orchestrator_core core::testing Catch2::Catch2)

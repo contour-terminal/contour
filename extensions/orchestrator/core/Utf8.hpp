@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -128,5 +129,56 @@ constexpr void appendUtf8(std::string& out, char32_t codepoint)
         return;
     }
 }
+
+/// The code points of a UTF-8 text, for a range-based for: each step yields decodeUtf8() of what is left
+/// and advances by its length, so a malformed byte yields one ReplacementCharacter and decoding resumes
+/// on the next byte. An empty text yields nothing.
+class Codepoints
+{
+  public:
+    /// A position in the text; it equals std::default_sentinel once the text is used up.
+    class Cursor
+    {
+      public:
+        /// @param rest The text from this position on.
+        constexpr explicit Cursor(std::string_view rest) noexcept:
+            _rest { rest }, _current { decodeUtf8(rest) }
+        {
+        }
+
+        /// @return The code point at this position and the bytes it occupies.
+        [[nodiscard]] constexpr Decoded operator*() const noexcept { return _current; }
+
+        /// Advances past the current code point.
+        constexpr Cursor& operator++() noexcept
+        {
+            _rest.remove_prefix(_current.length);
+            _current = decodeUtf8(_rest);
+            return *this;
+        }
+
+        /// @return Whether the text is used up.
+        [[nodiscard]] constexpr bool operator==(std::default_sentinel_t /*end*/) const noexcept
+        {
+            return _rest.empty();
+        }
+
+      private:
+        std::string_view _rest;
+        Decoded _current;
+    };
+
+    /// @param text The UTF-8 text to walk; it must outlive the walk.
+    constexpr explicit Codepoints(std::string_view text) noexcept: _text { text } {}
+
+    /// @return A cursor on the first code point.
+    [[nodiscard]] constexpr Cursor begin() const noexcept { return Cursor { _text }; }
+
+    /// @return The end of the text.
+    [[nodiscard]] constexpr std::default_sentinel_t end() const noexcept { return std::default_sentinel; }
+
+  private:
+    std::string_view _text;
+};
 
 } // namespace orchestrator
