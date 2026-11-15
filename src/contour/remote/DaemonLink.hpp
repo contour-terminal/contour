@@ -342,7 +342,8 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     /// controller is given up (@see abandonConnect()), and with it the attach-window binder.
     /// @param budget How long the attach may take since the link was built.
     /// @return Nothing while it is still going; else nothing once attached, or why not.
-    [[nodiscard]] std::optional<std::expected<void, std::string>> pollAttached(vthost::AttachBudget budget);
+    [[nodiscard]] std::optional<std::expected<void, std::string>> pollAttached(
+        vthost::AttachBudget const& budget);
 
     /// Shows the drift badge when the daemon runs another release than this client, and wires its actions to
     /// the host's upgrade and restart, for a local daemon. Follows the daemon through an upgrade: the badge

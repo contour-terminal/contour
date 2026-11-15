@@ -470,12 +470,12 @@ void DaemonLink::connectController()
     _controller->startConnecting();
 }
 
-std::optional<std::expected<void, std::string>> DaemonLink::pollAttached(vthost::AttachBudget budget)
+std::optional<std::expected<void, std::string>> DaemonLink::pollAttached(vthost::AttachBudget const& budget)
 {
     requireGuiThread();
     if (_controller == nullptr)
         return std::unexpected(std::string { "the attach was given up" });
-    auto polled = _controller->pollConnected(std::move(budget));
+    auto polled = _controller->pollConnected(budget);
     if (!polled)
         return std::nullopt;
     if (!*polled)

@@ -61,6 +61,6 @@ namespace contour::cli
 /// @param timeout How long the check may take.
 /// @return Daemon control over @p transport, for checkHostReachable().
 [[nodiscard]] std::unique_ptr<vthost::client::DaemonControlPort> makeHostControl(
-    std::shared_ptr<vthost::ITransportFactory> transport, vthost::AttachBudget timeout);
+    std::shared_ptr<vthost::ITransportFactory> transport, vthost::AttachBudget const& timeout);
 
 } // namespace contour::cli
