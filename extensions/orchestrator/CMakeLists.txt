@@ -28,6 +28,9 @@ add_library(orchestrator_core STATIC
     core/ArgumentKinds.hpp
     core/Commands.cpp
     core/Commands.hpp
+    core/Config.cpp
+    core/Config.hpp
+    core/ConfigJson.hpp
     core/GitHub.cpp
     core/GitHub.hpp
     core/GitHubJson.hpp
@@ -57,6 +60,7 @@ if(ORCHESTRATOR_TESTING)
         core/test_main.cpp
         core/ArgumentKinds_test.cpp
         core/Commands_test.cpp
+        core/Config_test.cpp
         core/Fixtures.hpp
         core/GitHub_test.cpp
         core/JsonPrefix_test.cpp

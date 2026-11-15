@@ -1,0 +1,192 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <chrono>
+#include <cstdint>
+#include <expected>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include <orchestrator/core/Model.hpp>
+
+namespace orchestrator
+{
+
+/// The kind of item a task works on.
+enum class AppliesTo : uint8_t
+{
+    PullRequest, ///< A change request; spelled `pr`.
+    Issue,       ///< An issue; spelled `issue`.
+};
+
+/// One row of the `tasks` table: what the dashboard offers to start on an item. A new task is a new row.
+struct TaskDef
+{
+    std::string id;    ///< Unique among the tasks; an ArgumentKind::Name.
+    char key = '\0';   ///< The dashboard key that starts it; unique, and none of the dashboard's own.
+    std::string label; ///< What the dashboard calls it.
+    AppliesTo appliesTo = AppliesTo::PullRequest; ///< The kind of item it works on.
+    std::string model;  ///< The model it runs with by default; one of Config::models().
+    std::string prompt; ///< The prompt, with `{url}` standing for the item's URL.
+};
+
+/// What the host resolved once (`~/` expanded, symlinks resolved) and passes in host-info; the core never
+/// expands a path.
+struct HostInfo
+{
+    std::string home;                   ///< The user's home directory.
+    std::string worktreeRoot;           ///< `worktree_root`, resolved.
+    std::vector<std::string> repoPaths; ///< Each `repos[].path`, resolved, in the configuration's order.
+    int32_t utcOffsetMinutes = 0;       ///< The local time's offset from UTC.
+};
+
+/// One configured repository.
+struct Repo
+{
+    std::string name;                      ///< Unique among the repositories; an ArgumentKind::Name.
+    std::string path;                      ///< Its resolved directory, from HostInfo::repoPaths.
+    Forge forge = Forge::GitHub;           ///< The forge it lives on.
+    std::string remote;                    ///< The git remote that points at the forge; `origin` by default.
+    std::optional<std::string> base;       ///< The base branch; absent: the forge's default branch.
+    std::vector<std::string> issueQueries; ///< The forge searches that list the issues offered for work.
+};
+
+/// What is wrong with a configuration value. Each problem has one message (see describe()).
+enum class ConfigProblem : uint8_t
+{
+    NotJson,            ///< The configuration is not one complete JSON document.
+    UnknownKey,         ///< A key the configuration does not have, such as a misspelt one.
+    WrongType,          ///< A value of the wrong JSON type, such as a number where a string belongs.
+    Missing,            ///< A required key is absent.
+    Empty,              ///< A value that must not be empty is.
+    CountMismatch,      ///< The host resolved a different number of repository paths than are configured.
+    NotAbsolutePath,    ///< A resolved directory is not an absolute, normalised path.
+    EqualRoots,         ///< A repository's directory equals another root.
+    InsideWorktreeRoot, ///< A repository lies inside `worktree_root`.
+    Duplicate,          ///< The value is already used by another row.
+    UnnamedDirectory,   ///< A repository without `name` whose directory's name is not an ArgumentKind::Name.
+    DuplicateDirectoryName, ///< A repository without `name` whose directory's name another repository has.
+    NotAName,               ///< Not an ArgumentKind::Name.
+    NotARef,                ///< Not an ArgumentKind::Ref.
+    NotText,                ///< Not an ArgumentKind::Text: too long, or holding a NUL.
+    LeadingDash,            ///< Starts with '-', which would read as an option.
+    BracketedModel,         ///< A model with a bracketed variant, such as `opus[1m]`.
+    UnlistedModel,          ///< A task's model is not one of `models`.
+    UnknownForge,           ///< Not a forge any provider stands for.
+    UnsupportedSource,      ///< An issue source other than `forge`.
+    UnknownItemKind,        ///< An `applies_to` other than `pr` or `issue`.
+    Zero,                   ///< A limit of 0.
+    NotADuration,           ///< Not a duration such as `90s`, `2m`, `1h`, `30d` or `0`.
+    TooShort,               ///< A duration below its minimum.
+    NotOneKey,              ///< A task key that is not one printable character.
+    ReservedKey,            ///< A task key the dashboard uses itself.
+    MissingUrl,             ///< A prompt without `{url}`.
+};
+
+/// Why a configuration was refused.
+struct ConfigError
+{
+    std::string key; ///< Where, such as `repos[0].remote`; empty when the document as a whole is at fault.
+    ConfigProblem problem; ///< What is wrong there.
+};
+
+/// @param problem A configuration problem.
+/// @return What it means, as one sentence the user reads after the key.
+[[nodiscard]] std::string describe(ConfigProblem problem);
+
+/// @param error A refused configuration.
+/// @return The message the user reads: the key, then the problem's description.
+[[nodiscard]] std::string message(ConfigError const& error);
+
+/// The most agents running at once, unless `max_agents` says otherwise.
+inline constexpr uint32_t DefaultMaxAgents = 4;
+/// The most agents running at once in one repository, unless `max_agents_per_repo` says otherwise.
+inline constexpr uint32_t DefaultMaxAgentsPerRepo = 2;
+/// How often the forges are polled, unless `poll_every` says otherwise.
+inline constexpr auto DefaultPollEvery = std::chrono::milliseconds { std::chrono::minutes { 2 } };
+/// The shortest `poll_every` accepted.
+inline constexpr auto MinPollEvery = std::chrono::milliseconds { std::chrono::seconds { 30 } };
+/// How long an agent runs before its status board is posted, unless `status_board_after` says otherwise;
+/// 0 disables the board.
+inline constexpr auto DefaultStatusBoardAfter = std::chrono::milliseconds { std::chrono::minutes { 15 } };
+/// How long a finished run is kept, unless `finished_retention` says otherwise.
+inline constexpr auto DefaultFinishedRetention = std::chrono::milliseconds { std::chrono::days { 30 } };
+
+/// The orchestrator's configuration, validated in full: a Config that exists is a usable one, and it never
+/// changes.
+class Config
+{
+  public:
+    /// Reads and validates the configuration.
+    /// @param json The `config` subtree, as the host converted it to JSON.
+    /// @param host What the host resolved: the paths, one per repository, and the worktree root.
+    /// @return The configuration, or the first problem found and where.
+    [[nodiscard]] static std::expected<Config, ConfigError> parse(std::string_view json,
+                                                                  HostInfo const& host);
+
+    /// @return The resolved directory under which every agent's worktree lies.
+    [[nodiscard]] std::string const& worktreeRoot() const noexcept { return _worktreeRoot; }
+    /// @return The models a run may choose, in the configured order.
+    [[nodiscard]] std::span<std::string const> models() const noexcept { return _models; }
+    /// @return The most agents running at once.
+    [[nodiscard]] uint32_t maxAgents() const noexcept { return _maxAgents; }
+    /// @return The most agents running at once in one repository.
+    [[nodiscard]] uint32_t maxAgentsPerRepo() const noexcept { return _maxAgentsPerRepo; }
+    /// @return How often the forges are polled.
+    [[nodiscard]] std::chrono::milliseconds pollEvery() const noexcept { return _pollEvery; }
+    /// @return How long an agent runs before its status board is posted; 0: never.
+    [[nodiscard]] std::chrono::milliseconds statusBoardAfter() const noexcept { return _statusBoardAfter; }
+    /// @return How long a finished run is kept.
+    [[nodiscard]] std::chrono::milliseconds finishedRetention() const noexcept { return _finishedRetention; }
+    /// @return The repositories, in the configured order.
+    [[nodiscard]] std::span<Repo const> repos() const noexcept { return _repos; }
+    /// @return The tasks, in the configured order.
+    [[nodiscard]] std::span<TaskDef const> tasks() const noexcept { return _tasks; }
+
+    /// @param name A repository name.
+    /// @return The repository of that name, or nullptr.
+    [[nodiscard]] Repo const* findRepo(std::string_view name) const noexcept;
+    /// @param id A task id.
+    /// @return The task of that id, or nullptr.
+    [[nodiscard]] TaskDef const* findTask(std::string_view id) const noexcept;
+    /// @param item A kind of item.
+    /// @return The first task in the table that applies to @p item, or nullptr: what Enter offers.
+    [[nodiscard]] TaskDef const* firstTaskFor(AppliesTo item) const noexcept;
+
+  private:
+    /// Everything a Config holds, in one aggregate, so that parse() builds it field by field.
+    struct Values
+    {
+        std::string worktreeRoot = {};
+        std::vector<std::string> models = {};
+        uint32_t maxAgents = DefaultMaxAgents;
+        uint32_t maxAgentsPerRepo = DefaultMaxAgentsPerRepo;
+        std::chrono::milliseconds pollEvery = DefaultPollEvery;
+        std::chrono::milliseconds statusBoardAfter = DefaultStatusBoardAfter;
+        std::chrono::milliseconds finishedRetention = DefaultFinishedRetention;
+        std::vector<Repo> repos = {};
+        std::vector<TaskDef> tasks = {};
+    };
+
+    explicit Config(Values values) noexcept;
+
+    std::string _worktreeRoot;
+    std::vector<std::string> _models;
+    uint32_t _maxAgents;
+    uint32_t _maxAgentsPerRepo;
+    std::chrono::milliseconds _pollEvery;
+    std::chrono::milliseconds _statusBoardAfter;
+    std::chrono::milliseconds _finishedRetention;
+    std::vector<Repo> _repos;
+    std::vector<TaskDef> _tasks;
+};
+
+/// Reads a duration: a number of 1 to 9 digits followed by one unit, `s`, `m`, `h` or `d`; or a bare `0`.
+/// @param text Such as "90s", "2m", "1h", "30d" or "0".
+/// @return The duration, or nothing if @p text is not one.
+[[nodiscard]] std::optional<std::chrono::milliseconds> parseDuration(std::string_view text) noexcept;
+
+} // namespace orchestrator
