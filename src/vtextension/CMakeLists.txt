@@ -10,6 +10,7 @@ set(vtextension_SOURCES
     CommandPolicy.cpp
     CompiledExtension.cpp
     ControlImports.cpp
+    DaemonImports.cpp
     Engine.cpp
     EventQueue.cpp
     ExtensionComposition.cpp
@@ -37,6 +38,8 @@ set(vtextension_HEADERS
     CompiledExtension.hpp
     ControlCodec.hpp
     ControlImports.hpp
+    DaemonImports.hpp
+    DaemonWorld.hpp
     DeadlineGuard.hpp
     Engine.hpp
     Event.hpp
@@ -95,6 +98,7 @@ if(VTEXTENSION_TESTING)
         CommandPolicy_test.cpp
         ControlCodec_test.cpp
         ControlImports_test.cpp
+        DaemonWorld_test.cpp
         DeadlineGuard_test.cpp
         Engine_test.cpp
         EventQueue_test.cpp
@@ -129,6 +133,7 @@ if(VTEXTENSION_TESTING)
     )
     # The WIT package is the normative spec of the extension ABI; the tests read it from the source tree.
     target_compile_definitions(vtextension_test PRIVATE VTEXTENSION_WIT_DIR="${PROJECT_SOURCE_DIR}/wit/statusline")
+    target_compile_definitions(vtextension_test PRIVATE VTEXTENSION_DAEMON_WIT_DIR="${PROJECT_SOURCE_DIR}/wit/daemon")
     # Manifest version 2 is checked against the conformance corpus the orchestrator extension tests against too.
     target_compile_definitions(vtextension_test PRIVATE
         VTEXTENSION_MANIFEST_CORPUS_DIR="${PROJECT_SOURCE_DIR}/extensions/orchestrator/contract/manifest-v2")

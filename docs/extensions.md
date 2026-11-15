@@ -331,7 +331,36 @@ command's environment is judged as the command gets it, `command-env-for` laid o
 A conformance corpus of valid and invalid version-2 manifests, which Contour's parser is tested
 against, lives in [`extensions/orchestrator/contract/manifest-v2`][corpus].
 
+### The daemon world
+
+An extension with `placement daemon` implements `terminal-extensions:daemon`, at
+[`wit/daemon/`][daemon-wit], instead of the status-line world. It runs in `contour daemon` with no
+window attached, and its README is the contract's other half.
+
+- `load(config-json, info)`: once, first, with the extension's configuration as JSON, and the roots its
+  manifest declares, resolved, with the home directory and the UTC offset.
+- `update(hint)`: once per hint, `wake`, `procs`, `panes`, `tabs` or `actions`, each coalesced into one
+  pending slot. A hint carries nothing; the extension asks for the current state.
+
+Its 24 imports live under the module `terminal-extensions:daemon/host@0.1.0`. All of them return at once
+but `store-set` and `store-remove`, which return once the store is synced; the call's deadline is paused
+across them, and a callback may make at most 64 of them or spend 2 s in them.
+
+- `log`, `wake(after-ms)`, `now()`: logging, one pending wake-up, and the clocks;
+- `proc-start`, `procs`, `proc-take`, `proc-release`: declared commands, run directly, their results
+  kept until released and read in 64 KiB pages;
+- `store-get`, `store-set`, `store-remove`, `store-keys`: a durable store of values up to 64 KiB;
+- `pane-open`, `pane-close`, `panes`: panes the extension owns;
+- `tab-open`, `tab-close`, `tab-reveal`, `tabs`, `tab-read`, `tab-write`: tabs it serves;
+- `actions-take`, `summary-set`, `pane-reveal`: its command-palette actions and its summary;
+- `file-read`: regular files inside a root declared readable.
+
+An import Contour does not serve yet answers `not-supported-yet`, which an extension treats as a
+capability it lacks, not a fault. Today that is every pane, tab, action and file import but
+`summary-set`.
+
 [wit]: https://github.com/contour-terminal/contour/tree/master/wit/statusline
+[daemon-wit]: https://github.com/contour-terminal/contour/tree/master/wit/daemon
 [bundled]: https://github.com/contour-terminal/contour/tree/master/extensions/bundled
 [manifest]: https://github.com/contour-terminal/contour/tree/master/extensions/manifest
 [corpus]: https://github.com/contour-terminal/contour/tree/master/extensions/orchestrator/contract/manifest-v2

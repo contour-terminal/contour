@@ -11,6 +11,8 @@
 #include <vtextension/CommandPolicy.hpp>
 #include <vtextension/CompiledExtension.hpp>
 #include <vtextension/ControlImports.hpp>
+#include <vtextension/DaemonImports.hpp>
+#include <vtextension/DaemonWorld.hpp>
 #include <vtextension/DeadlineGuard.hpp>
 #include <vtextension/Engine.hpp>
 #include <vtextension/Event.hpp>
