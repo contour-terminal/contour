@@ -18,6 +18,7 @@
 #include <orchestrator/proto/Environment.hpp>
 #include <orchestrator/proto/Host.hpp>
 #include <orchestrator/proto/Panes.hpp>
+#include <orchestrator/proto/RunChanges.hpp>
 
 using namespace std::string_view_literals;
 
@@ -139,7 +140,12 @@ DriverHealth Driver::drain()
             case NextStep::Idle: return DriverHealth::Healthy;
             case NextStep::Feed: {
                 auto const input = _queue.take();
-                if (auto const health = carryOut(_engine.step(input)); health != DriverHealth::Healthy)
+                // Every change of a run is said as it happens, so that what an action did needs no `runs`.
+                auto const before = snapshotRuns(_engine.runs());
+                auto const effects = _engine.step(input);
+                for (auto const& line: changeLines(before, snapshotRuns(_engine.runs())))
+                    std::println("{}", line);
+                if (auto const health = carryOut(effects); health != DriverHealth::Healthy)
                     return health;
                 _queue.carriedOut(input);
                 break;

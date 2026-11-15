@@ -11,6 +11,7 @@
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/proto/Driver.hpp>
+#include <orchestrator/proto/RunRefs.hpp>
 
 namespace orchestrator::proto
 {
@@ -67,6 +68,9 @@ class Prompt
     [[nodiscard]] static std::span<Verb const> verbs() noexcept;
 
     [[nodiscard]] Continue feed(Input input);
+    /// Resolves the run @p word names for @p action, says what will happen, and feeds the action; or says why
+    /// no run was named, and feeds nothing.
+    [[nodiscard]] Continue act(RunAction action, std::string_view word);
     [[nodiscard]] Continue list(Words words);
     [[nodiscard]] Continue dispatch(Words words);
     [[nodiscard]] Continue runs(Words words);
@@ -77,8 +81,9 @@ class Prompt
     [[nodiscard]] Continue quit(Words words);
 
     Driver& _driver;
-    std::vector<ListRow> _rows; ///< What the last `list` printed.
-    std::string _buffer;        ///< Input read past the last complete line.
+    std::vector<ListRow> _rows;        ///< What the last `list` printed.
+    std::vector<std::string> _runRows; ///< The run ids the last `runs` printed, row 1 first.
+    std::string _buffer;               ///< Input read past the last complete line.
 };
 
 } // namespace orchestrator::proto

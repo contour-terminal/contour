@@ -71,10 +71,10 @@ std::span<Prompt::Verb const> Prompt::verbs() noexcept
                .minWords = 3,
                .usage = "dispatch <n> <task-id> [model] [note…]",
                .handler = &Prompt::dispatch },
-        Verb { .name = "end", .minWords = 2, .usage = "end <run>", .handler = &Prompt::end },
+        Verb { .name = "end", .minWords = 2, .usage = "end <row|run>", .handler = &Prompt::end },
         Verb { .name = "runs", .minWords = 1, .usage = "runs", .handler = &Prompt::runs },
-        Verb { .name = "retry", .minWords = 2, .usage = "retry <run>", .handler = &Prompt::retry },
-        Verb { .name = "dismiss", .minWords = 2, .usage = "dismiss <run>", .handler = &Prompt::dismiss },
+        Verb { .name = "retry", .minWords = 2, .usage = "retry <row|run>", .handler = &Prompt::retry },
+        Verb { .name = "dismiss", .minWords = 2, .usage = "dismiss <row|run>", .handler = &Prompt::dismiss },
         Verb { .name = "refresh", .minWords = 1, .usage = "refresh", .handler = &Prompt::refresh },
         Verb { .name = "quit", .minWords = 1, .usage = "quit", .handler = &Prompt::quit },
     };
@@ -202,19 +202,19 @@ Continue Prompt::dispatch(Words words)
 
 Continue Prompt::runs(Words /*words*/)
 {
+    _runRows.clear();
     auto const& engine = _driver.engine();
     if (engine.runs().empty())
     {
         std::println("no runs");
         return Continue::Yes;
     }
-    // The core's own run lines: the summary's detail after its first line, the short text.
-    auto const summary = summarize(Counts {}, engine.runs());
-    auto const firstLineEnd = summary.detail.find('\n');
-    std::println("{}",
-                 firstLineEnd == std::string::npos
-                     ? ""sv
-                     : std::string_view { summary.detail }.substr(firstLineEnd + 1));
+    // The core's own run lines, numbered for `end`, `retry` and `dismiss`.
+    for (auto const& run: engine.runs())
+    {
+        _runRows.push_back(run.id);
+        std::println("{:3}  {}", _runRows.size(), runLine(run));
+    }
     for (auto const& run: engine.runs())
     {
         // OwnRecordsOnly never tells a run whose tab it did not record that the tab is gone.
@@ -231,19 +231,39 @@ Continue Prompt::runs(Words /*words*/)
     return Continue::Yes;
 }
 
+Continue Prompt::act(RunAction action, std::string_view word)
+{
+    auto const runs = _driver.engine().runs();
+    auto run = resolveRun(word, action, _runRows, runs);
+    if (!run)
+    {
+        std::println("{}", refusalText(word, action, run.error(), runs));
+        return Continue::Yes;
+    }
+    std::println("{}", confirmationText(action, *run));
+    auto const monoMs = monotonicNowMs();
+    switch (action)
+    {
+        case RunAction::End: return feed(EndRun { .run = std::move(*run), .monoMs = monoMs });
+        case RunAction::Retry: return feed(RetryRemovalOf { .run = std::move(*run), .monoMs = monoMs });
+        case RunAction::Dismiss: return feed(DismissRun { .run = std::move(*run), .monoMs = monoMs });
+    }
+    return Continue::Yes;
+}
+
 Continue Prompt::end(Words words)
 {
-    return feed(EndRun { .run = std::string(words[0]), .monoMs = monotonicNowMs() });
+    return act(RunAction::End, words[0]);
 }
 
 Continue Prompt::retry(Words words)
 {
-    return feed(RetryRemovalOf { .run = std::string(words[0]), .monoMs = monotonicNowMs() });
+    return act(RunAction::Retry, words[0]);
 }
 
 Continue Prompt::dismiss(Words words)
 {
-    return feed(DismissRun { .run = std::string(words[0]), .monoMs = monotonicNowMs() });
+    return act(RunAction::Dismiss, words[0]);
 }
 
 Continue Prompt::refresh(Words /*words*/)

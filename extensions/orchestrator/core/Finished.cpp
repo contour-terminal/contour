@@ -100,33 +100,6 @@ namespace
         return text;
     }
 
-    /// Where a run stands, in words.
-    [[nodiscard]] std::string describeState(Run const& run)
-    {
-        return std::visit(Overloaded {
-                              [](Preparing const& state) {
-                                  return std::format("preparing: {}", nameOf(PrepareStepNames, state.step));
-                              },
-                              [](Running const&) { return std::string { "running" }; },
-                              [](Blocked const&) { return std::string { "blocked" }; },
-                              [](Done const&) { return std::string { "done" }; },
-                              [&run](Ending const& state) {
-                                  if (state.resumedFrom)
-                                      return describeFinished(run, *state.resumedFrom, ", checking again"sv);
-                                  return std::format("ending: {}", nameOf(EndStepNames, state.step));
-                              },
-                              [&run](Finished const& state) { return describeFinished(run, state, ""sv); },
-                          },
-                          run.state);
-    }
-
-    /// One run's line of the detail: sanitised, one line, at most MaxSummaryLineChars characters.
-    [[nodiscard]] std::string describeRun(Run const& run)
-    {
-        return displayText(std::format("{} · {} · {} · {}", run.id, run.repo, run.model, describeState(run)),
-                           MaxSummaryLineChars);
-    }
-
     [[nodiscard]] std::string shortTextOf(Counts const& counts)
     {
         auto text = std::format("⬢ agents {}/{}", counts.active, counts.max);
@@ -138,6 +111,31 @@ namespace
         return text;
     }
 } // namespace
+
+std::string runStateText(Run const& run)
+{
+    return std::visit(Overloaded {
+                          [](Preparing const& state) {
+                              return std::format("preparing: {}", nameOf(PrepareStepNames, state.step));
+                          },
+                          [](Running const&) { return std::string { "running" }; },
+                          [](Blocked const&) { return std::string { "blocked" }; },
+                          [](Done const&) { return std::string { "done" }; },
+                          [&run](Ending const& state) {
+                              if (state.resumedFrom)
+                                  return describeFinished(run, *state.resumedFrom, ", checking again"sv);
+                              return std::format("ending: {}", nameOf(EndStepNames, state.step));
+                          },
+                          [&run](Finished const& state) { return describeFinished(run, state, ""sv); },
+                      },
+                      run.state);
+}
+
+std::string runLine(Run const& run)
+{
+    return displayText(std::format("{} · {} · {} · {}", run.id, run.repo, run.model, runStateText(run)),
+                       MaxSummaryLineChars);
+}
 
 bool isPurgeable(Run const& run, uint64_t nowWallMs, std::chrono::milliseconds retention) noexcept
 {
@@ -174,7 +172,7 @@ Summary summarize(Counts counts, std::span<Run const> runs)
     summary.detail = summary.shortText;
     for (auto const index: std::views::iota(std::size_t { 0 }, runs.size()))
     {
-        auto const line = describeRun(runs[index]);
+        auto const line = runLine(runs[index]);
         auto const isLast = index + 1 == runs.size();
         auto const budget = MaxSummaryDetailBytes - (isLast ? 0 : MaxTrailerBytes);
         if (summary.detail.size() + 1 + line.size() > budget)

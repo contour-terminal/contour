@@ -84,6 +84,10 @@ add_library(orchestrator_proto_logic STATIC
     proto/Panes.cpp
     proto/Panes.hpp
     proto/PanesJson.hpp
+    proto/RunChanges.cpp
+    proto/RunChanges.hpp
+    proto/RunRefs.cpp
+    proto/RunRefs.hpp
     proto/StepQueue.cpp
     proto/StepQueue.hpp
     proto/StoreKeys.cpp
@@ -137,6 +141,8 @@ if(ORCHESTRATOR_TESTING)
         core/Utf8_test.cpp
         proto/Environment_test.cpp
         proto/Panes_test.cpp
+        proto/RunChanges_test.cpp
+        proto/RunRefs_test.cpp
         proto/StepQueue_test.cpp
         proto/StoreKeys_test.cpp
     )
