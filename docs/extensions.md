@@ -281,9 +281,60 @@ manifest::declare_manifest!(
 A module without a manifest loads and runs; every command it tries fails. The manifest's full grammar,
 and the rules for the values filled into a command, are in the [world's README][wit].
 
+#### Version 2
+
+`version = 2` is the manifest of an extension that runs in the daemon. Every line is judged under the
+manifest's version: a version-1 manifest that uses one of the lines below is refused. In version 2,
+`version` comes before every line but `name`, and a name is declared before any line uses it: a root
+before the commands, panes, `read` and `path:` arguments bound to it, an `arg` before its placeholder, a
+command or pane before its environment; every name is declared once per kind. Words are separated by
+single spaces (a tab is refused) and are never unquoted, so a quote in a command line is refused
+rather than read as part of a word with a space; a brace appears only as a whole-word `{name}` naming a
+declared `arg`, and a command's program is never a placeholder. An environment name is
+`[A-Za-z_][A-Za-z0-9_]*`.
+
+An extension sets only the environment Contour lists (`SettableEnvironment.hpp`), each variable to a value of
+its listed shape; a manifest that sets anything else is refused when it is read. A variable reaches a program
+the user granted, and one that makes it run something else -- `LD_PRELOAD`, `PATH`, `NODE_OPTIONS`, a git
+configuration that names a program -- would grant everything. The list:
+
+| Variable | Value |
+| --- | --- |
+| `GIT_TERMINAL_PROMPT`, `GIT_OPTIONAL_LOCKS` | `0` |
+| `GIT_ALLOW_PROTOCOL` | a colon-separated list of `https`, `ssh`, `git`, `file` (never `ext`) |
+| `GIT_CONFIG_COUNT` | a decimal number |
+| `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>` | a key below, and a value it allows |
+| `GIT_ATTR_SOURCE` | a full object name, 40 or 64 lower-case hex digits |
+| `LC_ALL` | `C`, `C.UTF-8` or `POSIX` |
+
+The git configuration keys: `push.default` (`nothing`, `current`, `upstream`, `simple`, `matching`),
+`push.autoSetupRemote` (`true`, `false`), and three that only turn something off -- `core.fsmonitor` (`false`),
+`core.hooksPath` and `core.attributesFile` (`/dev/null`). Any other key -- `core.sshCommand`, `core.pager`,
+`credential.helper`, a `*.command`, `alias.*`, `include.*`, `filter.*`, `diff.external` -- is refused. A
+command's environment is judged as the command gets it, `command-env-for` laid over `command-env`.
+
+| Line | Example | Means |
+| --- | --- | --- |
+| `placement <status-line\|daemon>` | `placement daemon` | Where the extension runs; `status-line` without it. |
+| `root <label> [create] = config:<pointer>` | `root worktrees create = config:worktree_root` | Directories from the extension's configuration: slash-separated keys, none empty, a whole-key `*` for every element of a list. `create` lets the host create the one directory if it is missing; it is refused on a pointer with `*`. |
+| `read <root>` | `read worktrees` | The extension may read files under that root. |
+| `arg <name> = <kind>` | `arg path = path:worktrees` | A typed placeholder: `number`, `uuid`, `name`, `ref`, `text`, or `path:<root>` (an absolute, normalised path inside that root). |
+| `command <name> <short\|long> @<root> = argv…` | `command git-status short @worktrees = git status --porcelain` | A command, its timeout class (30 s or 10 min), and the root its working directory lies inside. It never runs through a shell. |
+| `command-env <KEY> = value` | `command-env GIT_TERMINAL_PROMPT = 0` | Environment for every command. |
+| `command-env-for <command> <KEY> = value` | `command-env-for git-status LC_ALL = C` | Environment for one command, applied after `command-env`. |
+| `pane <name> @<root> = argv…` | `pane agent @worktrees = claude --model {model}` | A program the extension may open in a tab. |
+| `pane-env <pane> <KEY> = value` | `pane-env agent GIT_CONFIG_COUNT = 1` | Environment for one pane. |
+| `inbox <name> = text` | `inbox note = A reviewer left a comment.` | Reserved: refused until a version of the manifest supports it. |
+| `serve <scheme>` | `serve orchestrator` | The extension serves `<scheme>://` tabs. |
+| `action <id> = title` | `action open = Open Agents` | A row in the command palette. |
+
+A conformance corpus of valid and invalid version-2 manifests, which Contour's parser is tested
+against, lives in [`extensions/orchestrator/contract/manifest-v2`][corpus].
+
 [wit]: https://github.com/contour-terminal/contour/tree/master/wit/statusline
 [bundled]: https://github.com/contour-terminal/contour/tree/master/extensions/bundled
 [manifest]: https://github.com/contour-terminal/contour/tree/master/extensions/manifest
+[corpus]: https://github.com/contour-terminal/contour/tree/master/extensions/orchestrator/contract/manifest-v2
 
 ## Performance
 

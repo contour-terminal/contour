@@ -22,11 +22,13 @@ set(vtextension_SOURCES
     Manifest.cpp
     Runner.cpp
     SessionExtensions.cpp
+    SettableEnvironment.cpp
     StatusLineAdapter.cpp
     Surface.cpp
 )
 
 set(vtextension_HEADERS
+    ArgumentKind.hpp
     AtomicSharedPtr.hpp
     BundledExtensions.hpp
     CanonicalAbi.hpp
@@ -54,6 +56,7 @@ set(vtextension_HEADERS
     Manifest.hpp
     Placement.hpp
     Runner.hpp
+    SettableEnvironment.hpp
     SessionExtensions.hpp
     StatusLineAdapter.hpp
     StatuslineWorld.hpp
@@ -84,6 +87,7 @@ if(VTEXTENSION_TESTING)
 
     add_executable(vtextension_test
         test_main.cpp
+        ArgumentKind_test.cpp
         Bundled_test.cpp
         BundledExtensions_test.cpp
         CanonicalAbi_test.cpp
@@ -106,6 +110,7 @@ if(VTEXTENSION_TESTING)
         ParseBudget_test.cpp
         Runner_test.cpp
         SessionExtensions_test.cpp
+        SettableEnvironment_test.cpp
         StatusLineAdapter_test.cpp
         Surface_test.cpp
         Wit_test.cpp
@@ -124,6 +129,9 @@ if(VTEXTENSION_TESTING)
     )
     # The WIT package is the normative spec of the extension ABI; the tests read it from the source tree.
     target_compile_definitions(vtextension_test PRIVATE VTEXTENSION_WIT_DIR="${PROJECT_SOURCE_DIR}/wit/statusline")
+    # Manifest version 2 is checked against the conformance corpus the orchestrator extension tests against too.
+    target_compile_definitions(vtextension_test PRIVATE
+        VTEXTENSION_MANIFEST_CORPUS_DIR="${PROJECT_SOURCE_DIR}/extensions/orchestrator/contract/manifest-v2")
     if(CONTOUR_WASM_GUESTS)
         # The test cases that run a Rust guest exist only when the guests can be built.
         foreach(_guest IN ITEMS echo hostile sleeper spawner)

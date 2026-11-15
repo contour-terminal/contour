@@ -3,6 +3,7 @@
 // Compiled without glaze on the include path (see vtextension_public_headers_test in CMakeLists.txt): every
 // header of vtextension but the private ControlCodec.hpp, each of which another module may include, so
 // none of them may reach glaze.
+#include <vtextension/ArgumentKind.hpp>
 #include <vtextension/AtomicSharedPtr.hpp>
 #include <vtextension/BundledExtensions.hpp>
 #include <vtextension/CanonicalAbi.hpp>
