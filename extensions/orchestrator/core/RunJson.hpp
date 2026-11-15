@@ -58,7 +58,6 @@ struct JsonRun
     std::optional<JsonFinished> finished;
     std::optional<std::string> lastStatus;
     std::optional<JsonFailure> failure;
-    uint32_t boardPosts = 0;
     uint64_t startedWallMs = 0;
     uint32_t attempt = 0;
 };

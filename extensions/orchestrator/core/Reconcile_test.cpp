@@ -189,10 +189,8 @@ constexpr auto StrayPane = "p-stray"sv;
         .state = std::move(state),
         .lastStatus = lastStatus,
         .failure = std::nullopt,
-        .boardPosts = 0,
         .startedWallMs = 1,
         .runningSinceMs = 0,
-        .boardPostedMs = 0,
         .changedMonoMs = 0,
     };
     if (usesPane)

@@ -14,6 +14,13 @@
 namespace orchestrator
 {
 
+/// Whether the host creates a root's directory when it is missing.
+enum class RootCreation : uint8_t
+{
+    Existing,        ///< The directory must exist; the host never creates it.
+    CreateIfMissing, ///< The host creates the one directory before the first command bound to it runs.
+};
+
 /// One variable of a fixed environment.
 struct EnvironmentVariable
 {
@@ -117,9 +124,13 @@ inline constexpr std::string_view AgentPaneTemplate = "agent";
     std::span<std::string_view const> argv, std::span<Argument const> arguments);
 
 /// The manifest lines the tables declare: every root, read, arg, command-env, command, command-env-for,
-/// pane, pane-env, inbox, serve and action line, in that order and each kind in table order. The manifest
-/// is these lines after its fixed `name`, `version` and `placement` lines.
+/// pane, pane-env, serve and action line, in that order and each kind in table order. The manifest is these
+/// lines after its fixed `name`, `version` and `placement` lines.
 /// @return One string per line, without line ends.
 [[nodiscard]] std::vector<std::string> manifestLines();
+
+/// The whole manifest: its `name`, `version` and `placement` lines, then manifestLines().
+/// @return The manifest's text, each line ended by `\n`.
+[[nodiscard]] std::string manifestText();
 
 } // namespace orchestrator

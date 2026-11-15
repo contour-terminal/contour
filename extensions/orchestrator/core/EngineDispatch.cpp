@@ -132,11 +132,9 @@ std::expected<Run, DispatchRefusal> Engine::prepare(Dispatch const& request) con
                      .state = Preparing { PrepareStep::Fetch },
                      .lastStatus = std::nullopt,
                      .failure = std::nullopt,
-                     .boardPosts = 0,
                      .startedWallMs = request.wallMs,
                      .attempt = 0,
                      .runningSinceMs = 0,
-                     .boardPostedMs = 0,
                      .changedMonoMs = 0 };
     if (!isStorable(run))
         return std::unexpected { DispatchRefusal::BadPrompt };

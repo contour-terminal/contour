@@ -215,7 +215,6 @@ std::vector<Effect> Engine::step(Input const& input)
             },
             [&](DismissRun const& dismiss) { feed(dismiss.run, Dismiss {}, out); },
             [&](MarkRunSeen const& seen) { feed(seen.run, MarkSeen {}, out); },
-            [&](RequestBoard const& request) { requestBoard(request.run, out); },
             [&](RefreshNow const&) {
                 if (!_config)
                     return;
@@ -231,7 +230,8 @@ std::vector<Effect> Engine::step(Input const& input)
     {
         if (_pollOutstanding == 0 && _monoMs >= _nextPollMs)
             startPoll(out);
-        serviceBoards(std::holds_alternative<Wake>(input) ? BoardReads::Issue : BoardReads::Skip, out);
+        if (std::holds_alternative<Wake>(input))
+            readBoards(out);
     }
     endStep(out, revision);
     return out;
@@ -328,9 +328,6 @@ void Engine::loadStore(std::span<StoredEntry const> stored)
         }
         // Monotonic times start again with this instance: a board is due counting from now.
         run->runningSinceMs = _monoMs;
-        run->boardPostedMs = _monoMs;
-        if (run->boardPosts > 0)
-            _boards[run->id].read = BoardRead::Awaiting;
         _runs.push_back(std::move(*run));
     }
     auto const outside = std::ranges::stable_partition(
@@ -504,8 +501,8 @@ void Engine::forget(std::string_view runId)
         return;
     if (std::cmp_less(run - _runs.begin(), _insideCount))
         --_insideCount;
-    if (auto const board = _boards.find(runId); board != _boards.end())
-        _boards.erase(board);
+    if (auto const found = _boardsFound.find(runId); found != _boardsFound.end())
+        _boardsFound.erase(found);
     _runs.erase(run);
 }
 
@@ -707,8 +704,9 @@ std::optional<uint64_t> Engine::nextWake() const
     auto const inside = std::span(_runs).first(_insideCount);
     if (std::ranges::any_of(inside, isUnfinished))
         consider(later(_monoMs, static_cast<uint64_t>(ReconcileEvery.count())));
+    // A board past its threshold is read on the wakes the unfinished run asks for anyway.
     for (auto const& run: inside)
-        if (auto const due = boardDueAt(run))
+        if (auto const due = boardDueAt(run); due && *due > _monoMs)
             consider(*due);
     for (auto const& call: _inFlight)
         consider(call.deadlineMs);

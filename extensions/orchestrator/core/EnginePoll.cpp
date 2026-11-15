@@ -28,12 +28,10 @@ namespace orchestrator
 namespace
 {
     using engine::detail::BoardTagSuffix;
-    using engine::detail::elapsed;
     using engine::detail::judge;
     using engine::detail::Judgement;
     using engine::detail::later;
     using engine::detail::PollTagPrefix;
-    using engine::detail::StatusBoardMessage;
     using engine::detail::Verdict;
 
     constexpr auto AuthTag = "poll/auth"sv;
@@ -122,12 +120,6 @@ namespace
             lines.push_back(line(
                 std::format("{}: {} left out {} entries it could not read", repo, label, listed.skipped)));
         return lines;
-    }
-
-    [[nodiscard]] bool isAgentState(Run const& run) noexcept
-    {
-        return std::holds_alternative<Running>(run.state) || std::holds_alternative<Blocked>(run.state)
-               || std::holds_alternative<Done>(run.state);
     }
 } // namespace
 
@@ -466,80 +458,28 @@ void Engine::resumeCheckoutWaits(std::vector<Effect>& out)
 
 std::optional<uint64_t> Engine::boardDueAt(Run const& run) const
 {
-    // A blocked or done agent makes no tool calls: a board posted then would wait unread.
+    // A blocked or done agent makes no tool calls: it writes no board.
     auto const after = static_cast<uint64_t>(_config->statusBoardAfter().count());
-    if (after == 0 || !std::holds_alternative<Running>(run.state) || !run.pane)
+    if (after == 0 || !std::holds_alternative<Running>(run.state) || !run.pane
+        || _boardsFound.contains(run.id))
         return std::nullopt;
-    auto const board = _boards.find(run.id);
-    auto const read = board != _boards.end() ? board->second.read : BoardRead::NotRequested;
-    auto due = uint64_t { 0 };
-    if (run.boardPosts == 0)
-        due = later(run.runningSinceMs, after);
-    else if (run.boardPosts < BoardMaxPosts && read != BoardRead::Found)
-        due = later(run.boardPostedMs, static_cast<uint64_t>(BoardRepostEvery.count()));
-    else
-        return std::nullopt;
-    if (board == _boards.end())
-        return due;
-    // A full hourly budget: due once its oldest post leaves the window.
-    auto const window = static_cast<uint64_t>(BoardPostWindow.count());
-    auto inWindow = board->second.postTimes
-                    | std::views::filter([&](uint64_t posted) { return elapsed(_monoMs, posted) < window; });
-    if (std::cmp_greater_equal(std::ranges::distance(inWindow), BoardMaxPosts))
-        due = std::max(due, later(std::ranges::min(inWindow), window));
-    return due;
+    return later(run.runningSinceMs, after);
 }
 
-void Engine::serviceBoards(BoardReads reads, std::vector<Effect>& out)
+void Engine::readBoards(std::vector<Effect>& out)
 {
-    for (auto& run: std::span(_runs).first(_insideCount))
-    {
-        if (!isAgentState(run) || !run.pane)
-            continue;
-        auto& track = _boards[run.id];
-        if (reads == BoardReads::Issue && track.read == BoardRead::Awaiting)
+    for (auto const& run: std::span(_runs).first(_insideCount))
+        if (auto const due = boardDueAt(run); due && _monoMs >= *due)
             out.emplace_back(ReadFile { .tag = std::format("{}{}", run.id, BoardTagSuffix),
                                         .path = std::format("{}/STATUS.md", run.worktree) });
-        if (auto const due = boardDueAt(run); due && _monoMs >= *due)
-            postBoard(run, track, BoardPost::Automatic, out);
-    }
-}
-
-void Engine::postBoard(Run& run, BoardTrack& track, BoardPost kind, std::vector<Effect>& out)
-{
-    auto const window = static_cast<uint64_t>(BoardPostWindow.count());
-    std::erase_if(track.postTimes, [&](uint64_t posted) { return elapsed(_monoMs, posted) >= window; });
-    if (track.postTimes.size() >= BoardMaxPosts || !run.pane)
-        return;
-    track.postTimes.push_back(_monoMs);
-    track.read = BoardRead::Awaiting;
-    run.boardPostedMs = _monoMs;
-    if (kind == BoardPost::Automatic)
-    {
-        ++run.boardPosts;
-        // Stored first: a restart must not post the board once more than the budget allows.
-        out.emplace_back(StoreSet { .key = runKey(run.id), .value = toJson(run) });
-    }
-    out.emplace_back(PostInbox { .pane = *run.pane, .message = StatusBoardMessage });
-    ++_revision;
-}
-
-void Engine::requestBoard(std::string_view runId, std::vector<Effect>& out)
-{
-    auto* const run = findRun(runId);
-    if (run == nullptr || !isTracked(*run) || !isAgentState(*run))
-        return;
-    postBoard(*run, _boards[run->id], BoardPost::Requested, out);
 }
 
 void Engine::onBoardRead(std::string_view runId, FileRead const& read)
 {
-    auto const board = _boards.find(runId);
-    if (board == _boards.end() || !read.content)
+    if (!read.content || findRun(runId) == nullptr)
         return;
-    if (board->second.read != BoardRead::Found)
+    if (_boardsFound.emplace(runId).second)
         ++_revision;
-    board->second.read = BoardRead::Found;
 }
 
 // }}}

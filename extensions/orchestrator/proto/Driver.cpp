@@ -192,10 +192,6 @@ DriverHealth Driver::carryOut(std::vector<Effect> const& effects)
                     if (!_setup.store.remove(remove.key))
                         health = DriverHealth::StoreFailed;
                 },
-                [&](PostInbox const& post) {
-                    std::println(
-                        "inbox {} for pane {}: not delivered by the prototype", post.message, post.pane);
-                },
                 [&](PublishSummary const& summary) {
                     if (summary.shortText != _publishedShort)
                         std::println("{}", summary.shortText);

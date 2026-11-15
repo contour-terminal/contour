@@ -129,10 +129,8 @@ enum class Kind : uint8_t
         .state = std::move(state),
         .lastStatus = std::nullopt,
         .failure = std::nullopt,
-        .boardPosts = 0,
         .startedWallMs = NowMs - (40 * MsPerDay),
         .runningSinceMs = 0,
-        .boardPostedMs = 0,
     };
 }
 

@@ -1101,7 +1101,6 @@ std::string toJson(Run const& run)
     if (run.failure)
         json.failure = JsonFailure { .step = std::string(spell(PrepareStepNames, run.failure->step)),
                                      .why = run.failure->why };
-    json.boardPosts = run.boardPosts;
     json.startedWallMs = run.startedWallMs;
     json.attempt = run.attempt;
 
@@ -1118,9 +1117,6 @@ std::optional<Run> runFromJson(std::string_view text)
         return std::nullopt;
     auto& json = *read;
     if (json.v != RunSchema)
-        return std::nullopt;
-
-    if (json.boardPosts > UINT8_MAX)
         return std::nullopt;
 
     auto item = itemOf(json);
@@ -1152,11 +1148,9 @@ std::optional<Run> runFromJson(std::string_view text)
         .failure = json.failure
                        ? std::optional { RunFailure { .step = *failureStep, .why = json.failure->why } }
                        : std::nullopt,
-        .boardPosts = static_cast<uint8_t>(json.boardPosts),
         .startedWallMs = json.startedWallMs,
         .attempt = json.attempt,
         .runningSinceMs = 0,
-        .boardPostedMs = 0,
         .changedMonoMs = 0,
     };
     if (!isStorable(run))

@@ -40,27 +40,21 @@ namespace
     {
         Root root;
         std::string_view pointer; ///< Where in the extension's configuration the directories come from.
+        RootCreation creation;    ///< Whether the host creates a missing directory.
     };
 
+    /// The worktree root is created on demand, so a fresh configuration works from its first dispatch; the
+    /// repositories are the user's own and must exist.
     constexpr auto RootTable = std::array {
-        RootDecl { .root = Root::Worktrees, .pointer = "config:worktree_root" },
-        RootDecl { .root = Root::Repos, .pointer = "config:repos/*/path" },
+        RootDecl { .root = Root::Worktrees,
+                   .pointer = "config:worktree_root",
+                   .creation = RootCreation::CreateIfMissing },
+        RootDecl {
+            .root = Root::Repos, .pointer = "config:repos/*/path", .creation = RootCreation::Existing },
     };
 
     /// Only the worktrees are readable: nothing under the user's repositories is.
     constexpr auto ReadableRoots = std::array { Root::Worktrees };
-
-    /// A message the extension may post to an agent by name. The texts are factual rather than imperative,
-    /// because imperative text injected into an agent's context can trip its prompt-injection defences.
-    struct InboxDecl
-    {
-        std::string_view name;
-        std::string_view text;
-    };
-
-    constexpr auto InboxTable = std::array {
-        InboxDecl { .name = "status-board", .text = "A status board has been requested for this run." },
-    };
 
     /// The scheme of the tabs the extension serves.
     constexpr auto ServedScheme = "orchestrator"sv;
@@ -438,7 +432,11 @@ std::vector<std::string> manifestLines()
 {
     auto lines = std::vector<std::string> {};
     for (auto const& decl: RootTable)
-        lines.push_back(concat({ "root ", manifestLabel(decl.root), " = ", decl.pointer }));
+        lines.push_back(concat({ "root ",
+                                 manifestLabel(decl.root),
+                                 decl.creation == RootCreation::CreateIfMissing ? " create" : "",
+                                 " = ",
+                                 decl.pointer }));
     for (auto const root: ReadableRoots)
         lines.push_back(concat({ "read ", manifestLabel(root) }));
     for (auto const& decl: ArgumentTable)
@@ -464,12 +462,18 @@ std::vector<std::string> manifestLines()
     for (auto const& decl: PaneTable)
         for (auto const& variable: decl.environment)
             lines.push_back(concat({ "pane-env ", decl.name, " ", variable.name, " = ", variable.value }));
-    for (auto const& decl: InboxTable)
-        lines.push_back(concat({ "inbox ", decl.name, " = ", decl.text }));
     lines.push_back(concat({ "serve ", ServedScheme }));
     for (auto const& decl: ActionTable)
         lines.push_back(concat({ "action ", decl.id, " = ", decl.title }));
     return lines;
+}
+
+std::string manifestText()
+{
+    auto text = std::string("name = orchestrator\nversion = 2\nplacement daemon\n");
+    for (auto const& line: manifestLines())
+        (text += line) += '\n';
+    return text;
 }
 
 } // namespace orchestrator

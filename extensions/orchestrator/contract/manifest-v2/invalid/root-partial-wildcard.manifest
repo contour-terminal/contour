@@ -1,0 +1,4 @@
+# A * is a whole step of a root pointer, never part of one.
+name = globby
+version = 2
+root repos = config:repos*/path

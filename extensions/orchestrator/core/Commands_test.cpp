@@ -262,20 +262,26 @@ constexpr auto SubstituteRows = std::array {
 enum class Fault : uint8_t
 {
     None,
-    UnknownLine,           ///< An unknown keyword, or a known one in the wrong shape.
-    MissingHeader,         ///< No `name` or no `version` line, or a line before `version`.
-    EmptyValue,            ///< A line that takes a value, given none.
-    VersionMismatch,       ///< A version other than 1 or 2, or a version-2 line in a version-1 manifest.
-    QuotedWord,            ///< An argv word holding a quote: an attempt at a word with a space.
-    BadPlaceholder,        ///< A brace that is not part of a whole-word `{name}`.
-    UndeclaredPlaceholder, ///< A `{name}` without an `arg name` line.
-    MissingRoot,           ///< A command or pane bound to no `@root`.
-    UndeclaredRoot,        ///< `@root`, `read root` or `path:root` naming no `root` line.
-    UndeclaredTarget,      ///< `command-env-for` or `pane-env` naming no such command or pane.
-    UnknownKind,           ///< An `arg` of no known kind.
-    EmptyArgv,             ///< A command or pane without a word to run.
-    PlaceholderProgram,    ///< A command or pane whose program is a placeholder.
-    Duplicate,             ///< The same thing declared twice.
+    UnknownLine,              ///< An unknown keyword, or a known one in the wrong shape.
+    MissingHeader,            ///< No `name` or no `version` line, or a line before `version`.
+    EmptyValue,               ///< A line that takes a value, given none.
+    VersionMismatch,          ///< A version other than 1 or 2, or a version-2 line in a version-1 manifest.
+    QuotedWord,               ///< An argv word holding a quote: an attempt at a word with a space.
+    BadPlaceholder,           ///< A brace that is not part of a whole-word `{name}`.
+    UndeclaredPlaceholder,    ///< A `{name}` without an `arg name` line.
+    MissingRoot,              ///< A command or pane bound to no `@root`.
+    UndeclaredRoot,           ///< `@root`, `read root` or `path:root` naming no `root` line.
+    UndeclaredTarget,         ///< `command-env-for` or `pane-env` naming no such command or pane.
+    UnknownKind,              ///< An `arg` of no known kind.
+    EmptyArgv,                ///< A command or pane without a word to run.
+    PlaceholderProgram,       ///< A command or pane whose program is a placeholder.
+    Duplicate,                ///< The same thing declared twice.
+    UnknownRootFlag,          ///< A word other than `create` between a root's label and its `=`.
+    CreateOverList,           ///< `create` on a root whose pointer walks a list.
+    MalformedRoot,            ///< A root pointer with an empty step, or a `*` that is not a whole step.
+    MalformedEnvironmentName, ///< An environment name other than `[A-Za-z_][A-Za-z0-9_]*`.
+    TabCharacter,             ///< A tab in a line: words are separated by single spaces only.
+    UnsupportedLine,          ///< An `inbox` line: the kind is reserved, and no version supports it yet.
 };
 
 enum class Valued : uint8_t
@@ -345,6 +351,17 @@ constexpr auto LineKinds = std::array {
 
 constexpr auto PlainKinds = std::array { "number"sv, "uuid"sv, "name"sv, "ref"sv, "text"sv };
 
+/// The one word a `root` line may carry after its label: the host creates the directory if it is missing.
+constexpr auto RootCreateWord = "create"sv;
+
+[[nodiscard]] std::vector<std::string_view> wordsOfPath(std::string_view text)
+{
+    auto steps = std::vector<std::string_view> {};
+    for (auto const step: std::views::split(text, '/'))
+        steps.emplace_back(step.begin(), step.end());
+    return steps;
+}
+
 [[nodiscard]] std::vector<std::string_view> wordsOf(std::string_view text)
 {
     auto words = std::vector<std::string_view> {};
@@ -390,12 +407,31 @@ struct ManifestState
     }
 };
 
+/// Whether @p name is an environment name: `[A-Za-z_][A-Za-z0-9_]*`.
+[[nodiscard]] bool isEnvironmentName(std::string_view name)
+{
+    auto const isWordChar = [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+    };
+    return !name.empty() && (name.front() < '0' || name.front() > '9')
+           && std::ranges::all_of(name, isWordChar);
+}
+
+/// Whether @p pointer, after `config:`, is slash-separated non-empty steps, each `*` or holding no `*`.
+[[nodiscard]] bool isRootPointer(std::string_view pointer)
+{
+    return !pointer.empty() && std::ranges::all_of(wordsOfPath(pointer), [](std::string_view step) {
+        return !step.empty() && (step == "*" || !step.contains('*'));
+    });
+}
+
 /// One line split at its ` = `.
 struct ManifestLine
 {
     LineKind const* kind;
     std::vector<std::string_view> head;
     std::string_view value;
+    RootCreation creation; ///< Whether a `root` line said `create`.
 };
 
 /// Checks what a line refers to: roots, arguments, commands, panes and kinds.
@@ -407,8 +443,14 @@ struct ManifestLine
         return Fault::UndeclaredRoot;
     if (keyword == "read" && !state.isDeclared("root", head[1]))
         return Fault::UndeclaredRoot;
-    if (keyword == "root" && !line.value.starts_with("config:"))
-        return Fault::UnknownLine;
+    if (keyword == "root" && (!line.value.starts_with("config:") || !isRootPointer(line.value.substr(7))))
+        return Fault::MalformedRoot;
+    if ((keyword == "command-env" || keyword == "command-env-for" || keyword == "pane-env")
+        && !isEnvironmentName(head.back()))
+        return Fault::MalformedEnvironmentName;
+    // Only one directory can be created: a pointer that walks a list names any number of them.
+    if (keyword == "root" && line.creation == RootCreation::CreateIfMissing && line.value.contains('*'))
+        return Fault::CreateOverList;
     if (keyword == "command" && head[2] != "short" && head[2] != "long")
         return Fault::UnknownLine;
     if (keyword == "arg" && line.value.starts_with("path:"))
@@ -426,18 +468,31 @@ struct ManifestLine
 /// Checks a line's shape and records what it declares.
 [[nodiscard]] Fault checkLine(std::string_view text, ManifestState& state)
 {
+    if (text.contains('\t'))
+        return Fault::TabCharacter;
     // A line ending in " =" has an empty value.
     auto const equals = text.ends_with(" =") && !text.contains(" = ") ? text.size() - 2 : text.find(" = ");
     auto head = wordsOf(text.substr(0, equals));
     if (head.empty() || head.front().empty())
         return Fault::UnknownLine;
-    auto const* const kind = std::ranges::find(LineKinds, head.front(), &LineKind::keyword);
+    // An array's iterator is not a pointer everywhere (MSVC), so the lookup yields one explicitly.
+    auto const found = std::ranges::find(LineKinds, head.front(), &LineKind::keyword);
+    auto const* const kind = found == LineKinds.end() ? nullptr : &*found;
+    auto creation = RootCreation::Existing;
+    if (kind != nullptr && kind->keyword == "root" && head.size() == kind->headWords + 1)
+    {
+        if (head.back() != RootCreateWord)
+            return Fault::UnknownRootFlag;
+        head.pop_back();
+        creation = RootCreation::CreateIfMissing;
+    }
     auto const line = ManifestLine {
         .kind = kind,
         .head = std::move(head),
         .value = equals == std::string_view::npos ? ""sv : text.substr(std::min(equals + 3, text.size())),
+        .creation = creation,
     };
-    if (line.kind == LineKinds.end())
+    if (line.kind == nullptr)
         return Fault::UnknownLine;
     auto const keyword = line.kind->keyword;
     auto const rootAt = line.kind->rootAt;
@@ -450,6 +505,9 @@ struct ManifestLine
         return Fault::MissingHeader;
     if (state.version != 0 && line.kind->since > state.version)
         return Fault::VersionMismatch;
+    // The kind is reserved: the grammar names it so that no version reads it as an unknown line.
+    if (keyword == "inbox")
+        return Fault::UnsupportedLine;
     auto key = std::string(keyword);
     for (auto const word: std::span(line.head).subspan(1, line.kind->keyWords - 1))
         key += ' ' + std::string(word);
@@ -497,12 +555,12 @@ constexpr auto CorpusRows = std::array {
     CorpusRow { .file = "valid/command-env-for.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/command-env.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/command.manifest", .expected = Fault::None },
-    CorpusRow { .file = "valid/inbox.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/orchestrator.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/pane-env.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/pane.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/placement.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/read.manifest", .expected = Fault::None },
+    CorpusRow { .file = "valid/root-create.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/root.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/serve.manifest", .expected = Fault::None },
     CorpusRow { .file = "invalid/brace-inside-word.manifest", .expected = Fault::BadPlaceholder },
@@ -511,15 +569,24 @@ constexpr auto CorpusRows = std::array {
     CorpusRow { .file = "invalid/empty-argv.manifest", .expected = Fault::EmptyArgv },
     CorpusRow { .file = "invalid/empty-head.manifest", .expected = Fault::UnknownLine },
     CorpusRow { .file = "invalid/empty-name.manifest", .expected = Fault::EmptyValue },
+    CorpusRow { .file = "invalid/environment-name.manifest", .expected = Fault::MalformedEnvironmentName },
+    CorpusRow { .file = "invalid/forward-reference.manifest", .expected = Fault::UndeclaredRoot },
+    CorpusRow { .file = "invalid/inbox-reserved.manifest", .expected = Fault::UnsupportedLine },
     CorpusRow { .file = "invalid/env-for-undeclared-command.manifest", .expected = Fault::UndeclaredTarget },
     CorpusRow { .file = "invalid/path-of-undeclared-root.manifest", .expected = Fault::UndeclaredRoot },
     CorpusRow { .file = "invalid/placeholder-program.manifest", .expected = Fault::PlaceholderProgram },
     CorpusRow { .file = "invalid/quoted-word.manifest", .expected = Fault::QuotedWord },
     CorpusRow { .file = "invalid/read-undeclared-root.manifest", .expected = Fault::UndeclaredRoot },
+    CorpusRow { .file = "invalid/root-create-over-list.manifest", .expected = Fault::CreateOverList },
+    CorpusRow { .file = "invalid/root-empty-step.manifest", .expected = Fault::MalformedRoot },
     CorpusRow { .file = "invalid/root-out-of-place.manifest", .expected = Fault::MissingRoot },
+    CorpusRow { .file = "invalid/root-partial-wildcard.manifest", .expected = Fault::MalformedRoot },
+    CorpusRow { .file = "invalid/root-unknown-flag.manifest", .expected = Fault::UnknownRootFlag },
+    CorpusRow { .file = "invalid/tab-in-line.manifest", .expected = Fault::TabCharacter },
     CorpusRow { .file = "invalid/undeclared-placeholder.manifest", .expected = Fault::UndeclaredPlaceholder },
     CorpusRow { .file = "invalid/unknown-kind.manifest", .expected = Fault::UnknownKind },
     CorpusRow { .file = "invalid/unknown-line.manifest", .expected = Fault::UnknownLine },
+    CorpusRow { .file = "invalid/version-not-first.manifest", .expected = Fault::MissingHeader },
     CorpusRow { .file = "invalid/version-1-with-v2-line.manifest", .expected = Fault::VersionMismatch },
 };
 
@@ -785,6 +852,7 @@ TEST_CASE("manifestLines spells the declared tables", "[orchestrator][commands][
         "command-env-for git-operation-state LC_ALL = C"sv,
         "command git-worktree-remove long @worktrees = git worktree remove {path}"sv,
         "arg path = path:worktrees"sv,
+        "root worktrees create = config:worktree_root"sv,
         "root repos = config:repos/*/path"sv,
     };
     auto const lines = manifestLines();
@@ -822,9 +890,23 @@ TEST_CASE("the manifest-v2 corpus", "[orchestrator][commands][manifest][corpus]"
     }
     SECTION("the declared tables reproduce the golden manifest")
     {
-        auto text = std::string("name = orchestrator\nversion = 2\nplacement daemon\n");
-        for (auto const& line: manifestLines())
-            text += line + '\n';
-        CHECK(text == readFixture(FixtureRoot::Contract, "manifest-v2/valid/orchestrator.manifest"));
+        CHECK(manifestText()
+              == readFixture(FixtureRoot::Contract, "manifest-v2/valid/orchestrator.manifest"));
+    }
+}
+
+TEST_CASE("manifestText declares the worktree root as created on demand and posts nothing",
+          "[orchestrator][commands][manifest]")
+{
+    auto const text = manifestText();
+    CHECK(text.starts_with("name = orchestrator\nversion = 2\nplacement daemon\n"));
+    CHECK(text.ends_with('\n'));
+    CHECK(text.contains("\nroot worktrees create = config:worktree_root\n"));
+    CHECK(text.contains("\nroot repos = config:repos/*/path\n"));
+    for (auto const line: std::views::split(text, '\n'))
+    {
+        auto const view = std::string_view(line.begin(), line.end());
+        CAPTURE(view);
+        CHECK_FALSE(view.starts_with("inbox "));
     }
 }

@@ -1,7 +1,7 @@
 name = orchestrator
 version = 2
 placement daemon
-root worktrees = config:worktree_root
+root worktrees create = config:worktree_root
 root repos = config:repos/*/path
 read worktrees
 arg number = number
@@ -107,7 +107,6 @@ pane-env agent GIT_CONFIG_KEY_0 = push.default
 pane-env agent GIT_CONFIG_VALUE_0 = upstream
 pane-env agent GIT_CONFIG_KEY_1 = push.autoSetupRemote
 pane-env agent GIT_CONFIG_VALUE_1 = true
-inbox status-board = A status board has been requested for this run.
 serve orchestrator
 action open = Open Agents
 action refresh = Agents: Refresh now

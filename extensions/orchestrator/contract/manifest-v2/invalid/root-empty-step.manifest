@@ -1,0 +1,4 @@
+# A root pointer has no empty step.
+name = gappy
+version = 2
+root repos = config:repos//path

@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -28,12 +29,6 @@ namespace orchestrator
 
 /// The most commands the engine has the host run at once; the rest wait in a queue.
 inline constexpr std::size_t MaxInFlight = 4;
-/// How long after a status board was requested it is requested again, until it exists.
-inline constexpr auto BoardRepostEvery = std::chrono::milliseconds { std::chrono::minutes { 5 } };
-/// The most status boards requested for a run, the first included; also the most requested in one hour.
-inline constexpr uint8_t BoardMaxPosts = 3;
-/// The window BoardMaxPosts counts the requests of.
-inline constexpr auto BoardPostWindow = std::chrono::milliseconds { std::chrono::hours { 1 } };
 /// The longest the engine sleeps while a run is unfinished, so that a lost hint is made up for.
 inline constexpr auto ReconcileEvery = std::chrono::milliseconds { std::chrono::seconds { 30 } };
 /// How long past its timeout class a command's reply may be late before the engine abandons the call.
@@ -109,7 +104,7 @@ struct StartContext
 
 // {{{ inputs
 
-/// Time passed: the engine polls, posts status boards, and asks for its next wake.
+/// Time passed: the engine polls, reads status boards, and asks for its next wake.
 struct Wake
 {
     uint64_t monoMs = 0; ///< Now, in monotonic milliseconds.
@@ -198,13 +193,6 @@ struct MarkRunSeen
     uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
 };
 
-/// The user asked for a fresh status board.
-struct RequestBoard
-{
-    std::string run;     ///< The run's id.
-    uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
-};
-
 /// The user asked for the lists to be read again now.
 struct RefreshNow
 {
@@ -223,7 +211,6 @@ using Input = std::variant<Wake,
                            EndRun,
                            DismissRun,
                            MarkRunSeen,
-                           RequestBoard,
                            RefreshNow>;
 
 // }}}
@@ -266,13 +253,6 @@ struct StoreSet
 struct StoreRemove
 {
     std::string key; ///< The key.
-};
-
-/// Post a declared inbox message to an agent's tab.
-struct PostInbox
-{
-    std::string pane;         ///< The tab.
-    std::string_view message; ///< The declared message's name.
 };
 
 /// Publish the extension's summary.
@@ -323,7 +303,6 @@ using Effect = std::variant<RunCommand,
                             ClosePane,
                             StoreSet,
                             StoreRemove,
-                            PostInbox,
                             PublishSummary,
                             WakeAt,
                             Redraw,
@@ -453,36 +432,6 @@ class Engine
         Failed, ///< One failed: the next poll waits longer.
     };
 
-    /// Where a run's status board stands.
-    enum class BoardRead : uint8_t
-    {
-        NotRequested, ///< No board was asked for.
-        Awaiting,     ///< Asked for; STATUS.md is read on each wake until it exists.
-        Found,        ///< STATUS.md exists.
-    };
-
-    /// Whether a step reads the status boards awaited.
-    enum class BoardReads : uint8_t
-    {
-        Skip,  ///< Not on this input.
-        Issue, ///< On a wake.
-    };
-
-    /// Who asked for a status board.
-    enum class BoardPost : uint8_t
-    {
-        Automatic, ///< The engine, at `status_board_after` and every BoardRepostEvery after; counts toward
-                   ///< Run::boardPosts.
-        Requested, ///< The user.
-    };
-
-    /// A run's status board, which only this instance tracks.
-    struct BoardTrack
-    {
-        BoardRead read = BoardRead::NotRequested; ///< Whether the board exists.
-        std::vector<uint64_t> postTimes;          ///< When boards were asked for, in monotonic ms.
-    };
-
     /// What the polls learnt about one repository.
     struct RepoState
     {
@@ -551,10 +500,8 @@ class Engine
     void checkHooks(std::vector<Effect>& out);
     void recheckFinished(std::vector<Effect>& out);
     void resumeCheckoutWaits(std::vector<Effect>& out);
-    void serviceBoards(BoardReads reads, std::vector<Effect>& out);
-    void postBoard(Run& run, BoardTrack& track, BoardPost kind, std::vector<Effect>& out);
+    void readBoards(std::vector<Effect>& out);
     [[nodiscard]] std::optional<uint64_t> boardDueAt(Run const& run) const;
-    void requestBoard(std::string_view runId, std::vector<Effect>& out);
     void onBoardRead(std::string_view runId, FileRead const& read);
     void refreshOrphans();
     [[nodiscard]] RepoState* findRepoState(std::string_view name) noexcept;
@@ -567,8 +514,8 @@ class Engine
     std::size_t _insideCount = 0; ///< The runs the engine works on: those of this configuration, and the ones
                                   ///< outside it the user ended.
     std::vector<RepoState> _repos;
-    std::vector<PaneFact> _panes; ///< As last listed.
-    std::map<std::string, BoardTrack, std::less<>> _boards;
+    std::vector<PaneFact> _panes;                    ///< As last listed.
+    std::set<std::string, std::less<>> _boardsFound; ///< The runs whose STATUS.md this instance has read.
     std::vector<InFlightCall> _inFlight;
     std::vector<InFlightCall> _paneOpenings; ///< The tabs asked for and not yet answered for, by run id.
     std::deque<Queued> _queue;

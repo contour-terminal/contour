@@ -69,9 +69,6 @@ struct Judgement
     return interval;
 }
 
-/// The name of the inbox message that asks an agent for its status board.
-inline constexpr std::string_view StatusBoardMessage = "status-board";
-
 /// The suffix of the tag a status board is read with.
 inline constexpr std::string_view BoardTagSuffix = "/board";
 

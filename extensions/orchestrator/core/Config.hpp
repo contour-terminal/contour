@@ -109,7 +109,7 @@ inline constexpr uint32_t DefaultMaxAgentsPerRepo = 2;
 inline constexpr auto DefaultPollEvery = std::chrono::milliseconds { std::chrono::minutes { 2 } };
 /// The shortest `poll_every` accepted.
 inline constexpr auto MinPollEvery = std::chrono::milliseconds { std::chrono::seconds { 30 } };
-/// How long an agent runs before its status board is posted, unless `status_board_after` says otherwise;
+/// How long an agent runs before its status board is looked for, unless `status_board_after` says otherwise;
 /// 0 disables the board.
 inline constexpr auto DefaultStatusBoardAfter = std::chrono::milliseconds { std::chrono::minutes { 15 } };
 /// How long a finished run is kept, unless `finished_retention` says otherwise.
@@ -137,7 +137,7 @@ class Config
     [[nodiscard]] uint32_t maxAgentsPerRepo() const noexcept { return _maxAgentsPerRepo; }
     /// @return How often the forges are polled.
     [[nodiscard]] std::chrono::milliseconds pollEvery() const noexcept { return _pollEvery; }
-    /// @return How long an agent runs before its status board is posted; 0: never.
+    /// @return How long an agent runs before its status board is looked for; 0: never.
     [[nodiscard]] std::chrono::milliseconds statusBoardAfter() const noexcept { return _statusBoardAfter; }
     /// @return How long a finished run is kept.
     [[nodiscard]] std::chrono::milliseconds finishedRetention() const noexcept { return _finishedRetention; }

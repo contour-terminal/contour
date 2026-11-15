@@ -131,11 +131,9 @@ enum class Item : uint8_t
         .state = std::move(state),
         .lastStatus = std::nullopt,
         .failure = std::nullopt,
-        .boardPosts = 0,
         .startedWallMs = StartedMs,
         .attempt = 3,
         .runningSinceMs = 0,
-        .boardPostedMs = 0,
         .changedMonoMs = 0,
     };
 }
@@ -1870,7 +1868,6 @@ void checkSame(Run const& actual, Run const& expected)
     CHECK(actual.state == expected.state);
     CHECK(actual.lastStatus == expected.lastStatus);
     CHECK(actual.failure == expected.failure);
-    CHECK(actual.boardPosts == expected.boardPosts);
     CHECK(actual.startedWallMs == expected.startedWallMs);
     CHECK(actual.attempt == expected.attempt);
 }
@@ -1918,10 +1915,8 @@ TEST_CASE("runFromJson reads what toJson writes", "[orchestrator][run]")
                 {
                     run.lastStatus = AgentStatus::Blocked;
                     run.pane = "pane-7";
-                    run.boardPosts = 3;
                 }
                 run.runningSinceMs = 77;
-                run.boardPostedMs = 78;
                 run.changedMonoMs = 79;
                 auto const json = orchestrator::toJson(run);
                 CAPTURE(json);
@@ -1930,7 +1925,6 @@ TEST_CASE("runFromJson reads what toJson writes", "[orchestrator][run]")
                 checkSame(*read, run);
                 // The monotonic fields mean nothing to another process.
                 CHECK(read->runningSinceMs == 0);
-                CHECK(read->boardPostedMs == 0);
                 CHECK(read->changedMonoMs == 0);
                 CHECK_FALSE(json.contains("runningSinceMs"));
                 CHECK(orchestrator::toJson(*read) == json);
@@ -1959,9 +1953,10 @@ TEST_CASE("runFromJson refuses what toJson never writes", "[orchestrator][run]")
         { "an array", "[]" },
         { "cut off", good.substr(0, good.size() / 2) },
         { "trailing garbage", good + "x" },
-        { "version 1", replaced(R"("v":2)", R"("v":1)") },
-        { "no version", replaced(R"("v":2,)", "") },
-        { "an unknown key", replaced(R"("v":2,)", R"("v":2,"colour":"red",)") },
+        { "version 2", replaced(R"("v":3)", R"("v":2)") },
+        { "no version", replaced(R"("v":3,)", "") },
+        { "an unknown key", replaced(R"("v":3,)", R"("v":3,"colour":"red",)") },
+        { "a board count, which version 3 dropped", replaced(R"("v":3,)", R"("v":3,"boardPosts":0,)") },
         { "an unknown state", replaced(R"("state":"preparing")", R"("state":"flying")") },
         { "an unknown step", replaced(R"("step":"fetch")", R"("step":"nap")") },
         { "an end step while preparing", replaced(R"("step":"fetch")", R"("step":"verify")") },
@@ -1974,7 +1969,6 @@ TEST_CASE("runFromJson refuses what toJson never writes", "[orchestrator][run]")
         { "a worktree that is no path", replaced("/home/u/worktrees/contour/", "home/u/worktrees/contour/") },
         { "a branch that is no ref", replaced("agent/pr-2334", "agent/../pr-2334") },
         { "a model that is no name", replaced(R"("model":"opus")", R"("model":"-opus")") },
-        { "too many board posts", replaced(R"("boardPosts":0)", R"("boardPosts":256)") },
     };
     for (auto const& row: rows)
     {
@@ -2038,7 +2032,6 @@ TEST_CASE("every state a step leaves behind is stored and read back as it was", 
         REQUIRE(read.has_value());
         auto expected = run;
         expected.runningSinceMs = 0;
-        expected.boardPostedMs = 0;
         checkSame(*read, expected);
         CHECK(orchestrator::toJson(*read) == json);
     };
@@ -2111,7 +2104,6 @@ namespace
     auto const entry = repeated("\xf0\x9f\x98\x80", orchestrator::MaxEntryChars);
     run.failure = RunFailure { .step = PrepareStep::OpenPane, .why = entry };
     run.lastStatus = AgentStatus::Error;
-    run.boardPosts = UINT8_MAX;
     run.startedWallMs = UINT64_MAX;
     auto const entries = std::vector<std::string>(orchestrator::MaxStatusEntries + 1, entry);
     if (auto* const finished = std::get_if<Finished>(&run.state))

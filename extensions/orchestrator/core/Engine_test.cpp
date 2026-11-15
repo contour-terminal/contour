@@ -639,7 +639,6 @@ template <typename State>
                  .state = std::move(state),
                  .lastStatus = std::nullopt,
                  .failure = std::nullopt,
-                 .boardPosts = 0,
                  .startedWallMs = DispatchWallMs,
                  .attempt = 7 };
 }
@@ -1632,37 +1631,45 @@ TEST_CASE("a run waiting for the main checkout settles only on a definitive answ
 // }}}
 // {{{ 14. status boards
 
-TEST_CASE("the status board is requested at the threshold and re-posted", "[orchestrator][engine]")
+TEST_CASE("past the threshold, a running agent's wakes read its status board until it exists",
+          "[orchestrator][engine]")
 {
     auto harness = booted();
     harness.runToRunning(prDispatch());
     harness.list({ paneOf(PrId) });
-    CHECK(countOf<PostInbox>(harness.wake(14 * Minute)) == 0);
-    auto const first = harness.wake(Minute + 1);
-    REQUIRE(countOf<PostInbox>(first) == 1);
-    CHECK(all<PostInbox>(first).front().message == "status-board");
-    CHECK(all<PostInbox>(first).front().pane == "p1");
-    CHECK(countOf<StoreSet>(first) == 1);
-    CHECK(countOf<ReadFile>(first) == 0);
+    auto const opened = harness.run(PrId)->runningSinceMs;
+    // The first read is a wake of its own: the engine asks to be woken at the threshold.
+    CHECK(harness.wakeAt() <= opened + (15 * Minute));
+    CHECK_FALSE(harness.hasRead("/STATUS.md"));
+    harness.wake(14 * Minute);
+    CHECK_FALSE(harness.hasRead("/STATUS.md"));
 
-    auto posts = std::size_t { 1 };
-    for ([[maybe_unused]] auto const wake: std::views::iota(0, 30))
+    for ([[maybe_unused]] auto const wake: std::views::iota(0, 5))
     {
-        auto const effects = harness.wake(Minute);
-        CHECK(countOf<ReadFile>(effects) == 1);
-        while (harness.hasRead("/STATUS.md"))
-            harness.read("/STATUS.md", std::unexpected { FileReadError::DirectoryMissing });
-        posts += countOf<PostInbox>(effects);
+        harness.wake(Minute);
+        CHECK(harness.hasRead("/STATUS.md"));
+        // Only a wake reads: an answer, a listing or a refresh does not.
+        harness.read("/STATUS.md", std::unexpected { FileReadError::DirectoryMissing });
+        CHECK_FALSE(harness.hasRead("/STATUS.md"));
+        harness.list({ paneOf(PrId) });
+        CHECK_FALSE(harness.hasRead("/STATUS.md"));
+        harness.feed(RefreshNow { .monoMs = harness.now() });
+        CHECK_FALSE(harness.hasRead("/STATUS.md"));
+        harness.boot();
     }
-    CHECK(posts == BoardMaxPosts);
 
     // A board that exists stops the reads.
     harness.wake(Minute);
     harness.read("/STATUS.md", "# Status\n"s);
-    CHECK(countOf<ReadFile>(harness.wake(Minute)) == 0);
+    for ([[maybe_unused]] auto const wake: std::views::iota(0, 5))
+    {
+        harness.wake(Minute);
+        CHECK_FALSE(harness.hasRead("/STATUS.md"));
+    }
 }
 
-TEST_CASE("no status board while blocked, on request within budget, none with 0", "[orchestrator][engine]")
+TEST_CASE("no status board is read while blocked or done, nor with a threshold of 0",
+          "[orchestrator][engine]")
 {
     SECTION("blocked or done")
     {
@@ -1672,30 +1679,20 @@ TEST_CASE("no status board while blocked, on request within budget, none with 0"
             auto harness = booted();
             harness.runToRunning(prDispatch());
             harness.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, status) });
-            CHECK(countOf<PostInbox>(harness.wake(20 * Minute)) == 0);
+            harness.wake(20 * Minute);
+            CHECK_FALSE(harness.hasRead("/STATUS.md"));
         }
-    }
-    SECTION("requested")
-    {
-        auto harness = booted();
-        harness.runToRunning(prDispatch());
-        harness.list({ paneOf(PrId) });
-        auto posts = std::size_t { 0 };
-        for ([[maybe_unused]] auto const request: std::views::iota(0, 5))
-            posts += countOf<PostInbox>(harness.feed(RequestBoard { .run = std::string(PrId) }));
-        CHECK(posts == BoardMaxPosts);
-        harness.wake(61 * Minute);
-        CHECK(countOf<PostInbox>(harness.feed(RequestBoard { .run = std::string(PrId) })) == 1);
     }
     SECTION("disabled")
     {
         auto harness = booted({ .limits = R"("status_board_after": "0",)" });
         harness.runToRunning(prDispatch());
         harness.list({ paneOf(PrId) });
-        auto posts = std::size_t { 0 };
         for ([[maybe_unused]] auto const wake: std::views::iota(0, 40))
-            posts += countOf<PostInbox>(harness.wake(Minute));
-        CHECK(posts == 0);
+        {
+            harness.wake(Minute);
+            CHECK_FALSE(harness.hasRead("/STATUS.md"));
+        }
     }
 }
 
@@ -2154,7 +2151,7 @@ TEST_CASE("unreadable store entries are kept and reported", "[orchestrator][engi
     auto good = storedRun(Running {});
     good.pane = "p1";
     auto oldVersion = toJson(good);
-    oldVersion.replace(oldVersion.find(R"("v":2)"), 5, R"("v":1)");
+    oldVersion.replace(oldVersion.find(R"("v":3)"), 5, R"("v":2)");
     auto context = contextFor({});
     context.stored = { StoredEntry { .key = "run/garbage", .value = "garbage" },
                        StoredEntry { .key = "run/old", .value = oldVersion },
@@ -2178,43 +2175,14 @@ TEST_CASE("after a reboot the board threshold counts from the start", "[orchestr
     context.panes = { paneOf(PrId) };
     auto harness = Harness { std::move(context) };
     harness.boot();
-    CHECK(countOf<PostInbox>(harness.wake(14 * Minute)) == 0);
-    CHECK(countOf<PostInbox>(harness.wake(Minute)) == 1);
+    harness.wake(14 * Minute);
+    CHECK_FALSE(harness.hasRead("/STATUS.md"));
+    harness.wake(Minute);
+    CHECK(harness.hasRead("/STATUS.md"));
 }
 
 // }}}
 // {{{ timing, deadlines and the driver contract
-
-TEST_CASE("a full hourly board budget waits for its oldest post instead of waking at once",
-          "[orchestrator][engine]")
-{
-    auto harness = booted();
-    harness.runToRunning(prDispatch());
-    harness.list({ paneOf(PrId) });
-    auto const opened = harness.run(PrId)->runningSinceMs;
-    auto const at = [&](uint64_t minute) {
-        return harness.feed(
-            Wake { .monoMs = opened + (minute * Minute), .wallMs = DispatchWallMs + (minute * Minute) });
-    };
-    CHECK(countOf<PostInbox>(at(15)) == 1);
-    CHECK(countOf<PostInbox>(at(20)) == 1);
-    auto const requested =
-        harness.feed(RequestBoard { .run = std::string(PrId), .monoMs = opened + (21 * Minute) });
-    CHECK(countOf<PostInbox>(requested) == 1);
-    // The repost is due at 26 minutes, but the hour holds three posts already: it waits until 75.
-    auto posts = std::size_t { 0 };
-    for (auto const minute: std::views::iota(uint64_t { 26 }, uint64_t { 75 }))
-    {
-        auto const effects = at(minute);
-        posts += countOf<PostInbox>(effects);
-        CHECK(countOf<ReadFile>(effects) <= 1);
-        harness.boot();
-        CHECK(harness.wakeAt() >= harness.now() + static_cast<uint64_t>(ReconcileEvery.count()));
-    }
-    CHECK(posts == 0);
-    CHECK(countOf<PostInbox>(at(75)) == 1);
-    CHECK(harness.run(PrId)->boardPosts == BoardMaxPosts);
-}
 
 TEST_CASE("a tab opened after a listing was asked for is not ended by that listing", "[orchestrator][engine]")
 {
