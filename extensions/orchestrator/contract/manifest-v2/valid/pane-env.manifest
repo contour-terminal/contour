@@ -1,0 +1,8 @@
+# A fixed environment for one declared pane.
+name = panes
+version = 2
+root worktrees = config:worktree_root
+pane shell @worktrees = sh
+pane-env shell GIT_CONFIG_COUNT = 1
+pane-env shell GIT_CONFIG_KEY_0 = push.default
+pane-env shell GIT_CONFIG_VALUE_0 = upstream

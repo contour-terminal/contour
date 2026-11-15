@@ -1,0 +1,5 @@
+# A root takes its directories from the extension's configuration; * walks a list.
+name = rooted
+version = 2
+root worktrees = config:worktree_root
+root repos = config:repos/*/path

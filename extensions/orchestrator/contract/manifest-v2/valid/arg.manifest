@@ -1,0 +1,10 @@
+# Every argument kind, the path one bound to a declared root.
+name = typed
+version = 2
+root worktrees = config:worktree_root
+arg number = number
+arg session = uuid
+arg remote = name
+arg branch = ref
+arg path = path:worktrees
+arg prompt = text

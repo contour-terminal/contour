@@ -25,6 +25,9 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Dependencies.cmake)
 
 # The sans-IO core.
 add_library(orchestrator_core STATIC
+    core/ArgumentKinds.hpp
+    core/Commands.cpp
+    core/Commands.hpp
     core/Sanitize.cpp
     core/Sanitize.hpp
     core/Utf8.hpp
@@ -40,10 +43,19 @@ if(ORCHESTRATOR_TESTING)
     enable_testing()
     add_executable(orchestrator_test
         core/test_main.cpp
+        core/ArgumentKinds_test.cpp
+        core/Commands_test.cpp
+        core/Fixtures.hpp
         core/Sanitize_test.cpp
         core/Utf8_test.cpp
     )
     target_link_libraries(orchestrator_test PRIVATE orchestrator_core core::testing Catch2::Catch2)
+    # Fixtures are read from the source tree: the manifest corpus Contour's host runs too, and the recorded
+    # output of the tools the extension runs.
+    target_compile_definitions(orchestrator_test PRIVATE
+        ORCHESTRATOR_CONTRACT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/contract"
+        ORCHESTRATOR_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/core/testdata"
+    )
     add_test(NAME orchestrator_test COMMAND orchestrator_test)
     set_tests_properties(orchestrator_test PROPERTIES LABELS daemon)
 

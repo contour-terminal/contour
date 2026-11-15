@@ -1,0 +1,7 @@
+# A command: timeout class, bound root, and an argv whose placeholders are whole declared words.
+name = commander
+version = 2
+root repos = config:repos/*/path
+arg remote = name
+command git-fetch long @repos = git fetch --quiet {remote}
+command gh-auth short @repos = gh auth status

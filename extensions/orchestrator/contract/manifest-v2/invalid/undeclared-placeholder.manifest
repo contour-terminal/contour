@@ -1,0 +1,5 @@
+# Every placeholder must be a declared argument.
+name = untyped
+version = 2
+root repos = config:repos/*/path
+command git-fetch long @repos = git fetch --quiet {remote}

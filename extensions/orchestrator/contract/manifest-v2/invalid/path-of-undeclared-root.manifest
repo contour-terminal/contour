@@ -1,0 +1,5 @@
+# A path argument names a declared root.
+name = lost
+version = 2
+root repos = config:repos/*/path
+arg path = path:worktrees

@@ -1,0 +1,5 @@
+# A command must name a program to run.
+name = idle
+version = 2
+root repos = config:repos/*/path
+command nothing short @repos =

@@ -1,0 +1,4 @@
+# A line needs a keyword before its value.
+name = headless
+version = 2
+ = x

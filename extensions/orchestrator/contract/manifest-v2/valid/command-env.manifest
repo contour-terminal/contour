@@ -1,0 +1,6 @@
+# A fixed environment for every command; the value may hold ':' and '/'.
+name = environment
+version = 2
+command-env GIT_TERMINAL_PROMPT = 0
+command-env GIT_ALLOW_PROTOCOL = https:ssh:git:file
+command-env GIT_CONFIG_VALUE_1 = /dev/null

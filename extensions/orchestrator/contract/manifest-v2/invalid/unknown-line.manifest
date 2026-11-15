@@ -1,0 +1,4 @@
+# An unknown keyword is an error, never ignored.
+name = stranger
+version = 2
+execute anything = sh -c x

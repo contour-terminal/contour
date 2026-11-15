@@ -1,0 +1,6 @@
+# A brace is only allowed as a whole-word {name}.
+name = splicer
+version = 2
+root repos = config:repos/*/path
+arg remote = name
+command git-fetch long @repos = git fetch --quiet origin/{remote}

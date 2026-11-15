@@ -1,0 +1,6 @@
+# A command name is declared once.
+name = twice
+version = 2
+root repos = config:repos/*/path
+command gh-auth short @repos = gh auth status
+command gh-auth long @repos = gh auth status

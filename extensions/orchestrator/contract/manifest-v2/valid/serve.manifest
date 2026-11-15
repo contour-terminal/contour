@@ -1,0 +1,4 @@
+# The extension serves tabs of one scheme.
+name = server
+version = 2
+serve orchestrator
