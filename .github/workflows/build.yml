@@ -144,7 +144,7 @@ jobs:
     # `*.h` is not dead weight: src/vtrasterizer/shared_defines.h keeps that extension because it
     # is shared with GLSL, and it is still a file we format.
     - name: "Clang-format"
-      run: find ./src/ \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" \) -print0 | xargs -0 "clang-format-$LLVM_VERSION" --Werror --dry-run
+      run: find ./src/ ./extensions/orchestrator/ \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" \) -print0 | xargs -0 "clang-format-$LLVM_VERSION" --Werror --dry-run
     - name: "Check includes"
       run: ./scripts/check-includes.sh
     # vendor/core-cpp is a verbatim copy of a core-cpp release (vendor/README.md). The same check

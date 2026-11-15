@@ -5,7 +5,7 @@ Contour is multithreaded: a fork() made while another thread holds a libc lock t
 also takes can deadlock the child or the parent (#2181 was exactly that, in setlocale() on macOS).
 Every first-party spawn is therefore a posix_spawn of the running executable in trampoline mode
 (src/vtpty/SpawnTrampoline_unix.cpp); only that single-threaded trampoline may fork. This gate fails on
-a call to fork(, vfork( or forkpty( in src/**/*.{cpp,hpp}, ignoring comments and string literals, and
+a call to fork(, vfork( or forkpty( in src/**/*.{cpp,hpp} and extensions/orchestrator/**/*.{cpp,hpp}, ignoring comments and string literals, and
 prints every offender as file:line. Test code (*_test.cpp and any src/*/test/ directory) is exempt, and
 so are the files in ALLOWED below, each with its reason. `--self-test` checks the scanner against inline
 fixtures and needs no tree. Python rather than shell, so that ctest runs it on every platform.
@@ -16,10 +16,12 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SOURCE_ROOT = Path("src")
+# The first-party trees: Contour itself, and the agent orchestrator beside it.
+SOURCE_ROOTS = (Path("src"), Path("extensions/orchestrator"))
 
 # Files that may fork, repository-relative, with the reason.
 ALLOWED: dict[str, str] = {
@@ -89,22 +91,23 @@ def is_exempt(relative: Path) -> bool:
     return relative.as_posix() in ALLOWED
 
 
-def checked_files() -> list[Path]:
-    """The source files the gate covers, sorted, repository-relative."""
+def checked_files(repo_root: Path = REPO_ROOT) -> list[Path]:
+    """The source files the gate covers in the tree at `repo_root`, sorted, repository-relative."""
     found = [
-        path.relative_to(REPO_ROOT)
+        path.relative_to(repo_root)
+        for root in SOURCE_ROOTS
         for pattern in ("*.cpp", "*.hpp")
-        for path in (REPO_ROOT / SOURCE_ROOT).rglob(pattern)
+        for path in (repo_root / root).rglob(pattern)
         if path.is_file()
     ]
     return sorted(path for path in found if not is_exempt(path))
 
 
-def scan() -> list[str]:
-    """Every violation, as `file:line: message`."""
+def scan(repo_root: Path = REPO_ROOT) -> list[str]:
+    """Every violation in the tree at `repo_root`, as `file:line: message`."""
     violations: list[str] = []
-    for relative in checked_files():
-        text = (REPO_ROOT / relative).read_text(encoding="utf-8", errors="replace")
+    for relative in checked_files(repo_root):
+        text = (repo_root / relative).read_text(encoding="utf-8", errors="replace")
         violations.extend(f"{relative.as_posix()}:{number}: {MESSAGE}" for number in violating_lines(text))
     return violations
 
@@ -136,9 +139,20 @@ def self_test() -> int:
         ("ordinary source", "src/vtpty/Process_unix.cpp", False),
     ]
     failures += [description for description, path, expected in exempt if is_exempt(Path(path)) != expected]
+    # Every scan root is walked: a fixture tree with one offender under each must report both.
+    roots = [
+        ("src is scanned", "src/a/Spawn.cpp"),
+        ("extensions/orchestrator is scanned", "extensions/orchestrator/core/Spawn.cpp"),
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        for _, path in roots:
+            (Path(tmp) / path).parent.mkdir(parents=True, exist_ok=True)
+            (Path(tmp) / path).write_text("auto p = fork();\n")
+        reported = scan(Path(tmp))
+    failures += [description for description, path in roots if not any(v.startswith(f"{path}:1:") for v in reported)]
     for description in failures:
         print(f"check-no-threaded-fork self-test: FAILED: {description}", file=sys.stderr)
-    total = len(cases) + len(exempt)
+    total = len(cases) + len(exempt) + len(roots)
     if failures:
         print(f"check-no-threaded-fork self-test: {len(failures)} of {total} cases failed.", file=sys.stderr)
         return 1
