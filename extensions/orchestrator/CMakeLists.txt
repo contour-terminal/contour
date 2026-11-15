@@ -76,6 +76,45 @@ target_include_directories(orchestrator_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
 )
 
+# The prototype driver's pure half: the pane listing, the order of its work, the store's file names and the
+# environment its children get. Portable, so the tests cover it everywhere.
+add_library(orchestrator_proto_logic STATIC
+    proto/Environment.cpp
+    proto/Environment.hpp
+    proto/Panes.cpp
+    proto/Panes.hpp
+    proto/PanesJson.hpp
+    proto/StepQueue.cpp
+    proto/StepQueue.hpp
+    proto/StoreKeys.cpp
+    proto/StoreKeys.hpp
+)
+target_link_libraries(orchestrator_proto_logic PUBLIC orchestrator_core PRIVATE glaze::glaze)
+
+# The prototype driver: the engine against git, gh and `contour api`, so the workflow can be tried before the
+# extension host exists. POSIX only (posix_spawn, poll), outside the default build, and never installed.
+if(UNIX)
+    add_executable(orchestrator_proto EXCLUDE_FROM_ALL
+        proto/Control.cpp
+        proto/Control.hpp
+        proto/Driver.cpp
+        proto/Driver.hpp
+        proto/Host.cpp
+        proto/Host.hpp
+        proto/HostJson.hpp
+        proto/Main.cpp
+        proto/Prompt.cpp
+        proto/Prompt.hpp
+        proto/Signals.cpp
+        proto/Signals.hpp
+        proto/Spawn.cpp
+        proto/Spawn.hpp
+        proto/Store.cpp
+        proto/Store.hpp
+    )
+    target_link_libraries(orchestrator_proto PRIVATE orchestrator_proto_logic orchestrator_core glaze::glaze)
+endif()
+
 if(ORCHESTRATOR_TESTING)
     enable_testing()
     add_executable(orchestrator_test
@@ -96,8 +135,12 @@ if(ORCHESTRATOR_TESTING)
         core/Run_test.cpp
         core/Sanitize_test.cpp
         core/Utf8_test.cpp
+        proto/Environment_test.cpp
+        proto/Panes_test.cpp
+        proto/StepQueue_test.cpp
+        proto/StoreKeys_test.cpp
     )
-    target_link_libraries(orchestrator_test PRIVATE orchestrator_core core::testing Catch2::Catch2)
+    target_link_libraries(orchestrator_test PRIVATE orchestrator_core orchestrator_proto_logic core::testing Catch2::Catch2)
     # Fixtures are read from the source tree: the manifest corpus Contour's host runs too, and the recorded
     # output of the tools the extension runs.
     target_compile_definitions(orchestrator_test PRIVATE
