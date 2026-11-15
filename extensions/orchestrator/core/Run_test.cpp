@@ -325,6 +325,14 @@ struct TransitionRow
     };
 }
 
+/// A kept entry being checked again, at @p step.
+[[nodiscard]] Ending resumedAt(EndStep step)
+{
+    auto ending = endingAt(step);
+    ending.resumedFrom = kept(Ended::Completed, Seen::Opened);
+    return ending;
+}
+
 [[nodiscard]] Finished removed(Ended ended)
 {
     return Finished {
@@ -572,6 +580,12 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
           .to = "Finished(completed, kept, new: the main checkout is not known; nothing was run there)",
           .effects = "persist",
           .checkout = Checkout::Unknown },
+        { .from = "verify of a kept entry, main checkout unknown",
+          .state = resumedAt(EndStep::Verify),
+          .input = GitFileRead { .content = IntactGitFile },
+          .to = "Finished(completed, kept, opened: M a.txt)",
+          .effects = "persist",
+          .checkout = Checkout::Unknown },
         { .from = "verify, directory missing",
           .state = endingAt(EndStep::Verify),
           .input = gitFileError(FileReadError::DirectoryMissing),
@@ -656,6 +670,12 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
           .state = endingAt(EndStep::CommonDir),
           .input = CommandOk { MainCommonDir },
           .to = "Finished(completed, kept, new: the main checkout is not known; nothing was run there)",
+          .effects = "persist",
+          .checkout = Checkout::Unknown },
+        { .from = "common-dir of a kept entry, main checkout unknown",
+          .state = resumedAt(EndStep::CommonDir),
+          .input = CommandOk { MainCommonDir },
+          .to = "Finished(completed, kept, opened: M a.txt)",
           .effects = "persist",
           .checkout = Checkout::Unknown },
         // Ending(IndexFlags): `git ls-files -v --stage`, before anything that reads attributes.

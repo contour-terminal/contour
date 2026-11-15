@@ -421,7 +421,9 @@ void Engine::recheckFinished(std::vector<Effect>& out)
             continue;
         if (isPurgeable(run, _wallMs, _config->finishedRetention()))
             purge.push_back(run.id);
-        else if (finished->fate == Fate::Kept)
+        // Until its main checkout is known (the first worktree listing), a check could only replace the
+        // kept run's reason with "not known": it waits for a poll that knows it.
+        else if (finished->fate == Fate::Kept && contextFor(run).mainCheckout)
             retry.push_back(run.id);
     }
     for (auto const& id: purge)

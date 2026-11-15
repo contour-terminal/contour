@@ -269,6 +269,16 @@ namespace
         return finish(run, context, ending.cause, Fate::Kept, { sanitized(entry) }, ending.resumedFrom);
     }
 
+    /// A check that could not run because the main checkout is not known yet. A kept entry checked again
+    /// stays exactly as recorded, its reason included: "not known" is no finding about the worktree.
+    [[nodiscard]] Effects keepUnchecked(Run& run, StepContext const& context, Ending& ending)
+    {
+        if (!ending.resumedFrom)
+            return keep(run, context, ending, UnknownMainCheckout);
+        run.state = std::move(*ending.resumedFrom);
+        return { Persist {} };
+    }
+
     /// How a run whose worktree turned out to be gone ended: a carried failure, the end of a run already
     /// finished, or a run that asked for the removal itself, stays what it was.
     [[nodiscard]] Ended goneEnded(Run const& run, Ending const& ending) noexcept
@@ -431,7 +441,7 @@ namespace
                                     spell(FileReadReasons, read.content.error())));
         }
         if (!context.mainCheckout)
-            return keep(run, context, ending, UnknownMainCheckout);
+            return keepUnchecked(run, context, ending);
         if (!gitFileIsIntact(*read.content, *context.mainCheckout, run.worktree))
             return keep(run, context, ending, AlteredGitFile);
         // The `.git` file is not the only link: git follows the `commondir` file beside the worktree's
@@ -544,7 +554,7 @@ namespace
         {
             case EndStep::CommonDir:
                 if (!context.mainCheckout)
-                    return keep(run, context, ending, UnknownMainCheckout);
+                    return keepUnchecked(run, context, ending);
                 if (!commonDirIsMain(output, *context.mainCheckout))
                     return keep(run, context, ending, RedirectedCommonDir);
                 return enterCommand(

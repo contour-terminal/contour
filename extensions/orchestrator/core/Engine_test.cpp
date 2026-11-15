@@ -1153,10 +1153,11 @@ TEST_CASE("guest restart mid-dispatch", "[orchestrator][engine]")
               .state = ending(EndStep::Verify),
               .known = Known::Neither,
               .next = ".git" },
+        // Kept: the start knows no main checkout yet, and checks it again only once a listing names it.
         Row { .name = "common-dir, finished",
               .state = ending(EndStep::CommonDir),
               .known = Known::Finished,
-              .next = ".git" },
+              .next = "" },
         Row { .name = "index-flags, finished",
               .state = ending(EndStep::IndexFlags),
               .known = Known::Finished,
@@ -1298,14 +1299,11 @@ TEST_CASE("nothing deletes from a worktree while a tab of its run is listed", "[
     context.panes = { paneOf(PrId, "p9") };
     auto harness = Harness { std::move(context) };
     CHECK(harness.commandsIssued("git-worktree-remove") == 0);
-    // Kept, and already being checked again by the start's poll.
-    REQUIRE(harness.run(PrId) != nullptr);
-    auto const* const ending = std::get_if<Ending>(&harness.run(PrId)->state);
-    REQUIRE(ending != nullptr);
-    REQUIRE(ending->resumedFrom);
-    CHECK(ending->resumedFrom->fate == Fate::Kept);
-    CHECK(ending->resumedFrom->entries
-          == std::vector { "git worktree remove failed: a tab of the run is still open"s });
+    // Kept, until a poll that knows the main checkout checks it again.
+    auto const kept = finishedOf(harness.run(PrId));
+    REQUIRE(kept);
+    CHECK(kept->fate == Fate::Kept);
+    CHECK(kept->entries == std::vector { "git worktree remove failed: a tab of the run is still open"s });
 }
 
 TEST_CASE("a listing of the driver's own records never ends a close it did not record",
@@ -1437,6 +1435,51 @@ TEST_CASE("finished entries are new until seen and purged after the retention", 
     CHECK(harness.run(PrId) == nullptr);
     CHECK(std::ranges::contains(all<StoreRemove>(purged), runKey(PrId), &StoreRemove::key));
     CHECK(harness.run(keptId) != nullptr);
+}
+
+TEST_CASE("a kept run survives a restart with its reason", "[orchestrator][engine]")
+{
+    // The start knows no main checkout until the first worktree listing answers: a re-check issued before
+    // then could only replace the recorded reason with a transient one.
+    struct Row
+    {
+        std::string_view name;
+        Ended ended;
+        std::string_view entry;
+    };
+    static constexpr auto Rows = std::array {
+        Row { .name = "a modified file", .ended = Ended::Completed, .entry = " M a.txt" },
+        Row { .name = "ended by you, an altered .git file",
+              .ended = Ended::EndedByYou,
+              .entry = ".git file was changed; nothing was run there" },
+    };
+    for (auto const& row: Rows)
+    {
+        CAPTURE(row.name);
+        auto const kept = storedRun(Finished { .ended = row.ended,
+                                               .fate = Fate::Kept,
+                                               .entries = { std::string(row.entry) },
+                                               .seen = Seen::Opened,
+                                               .endedWallMs = DispatchWallMs });
+        auto context = contextFor({});
+        context.stored = { entryOf(kept) };
+        auto harness = Harness { std::move(context) };
+        // Whatever the start asked of the worktree is answered before the listing.
+        if (harness.hasRead("/.git"))
+            harness.read("/.git", intactGitFile(ContourPath, PrId));
+        CHECK(harness.run(PrId)->state == kept.state);
+        harness.boot();
+        CHECK(harness.run(PrId)->state == kept.state);
+        // Once the main checkout is known, the next poll checks it again, keeping what it recorded.
+        harness.wake(10 * Minute);
+        harness.boot();
+        harness.read("/.git", intactGitFile(ContourPath, PrId));
+        CHECK(harness.pending("git-common-dir"));
+        auto const* const ending = std::get_if<Ending>(&harness.run(PrId)->state);
+        REQUIRE(ending != nullptr);
+        REQUIRE(ending->resumedFrom);
+        CHECK(ending->resumedFrom->entries == std::vector { std::string(row.entry) });
+    }
 }
 
 // }}}
