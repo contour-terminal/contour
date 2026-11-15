@@ -170,21 +170,34 @@ namespace
         return trim(line.substr(equals + 1));
     }
 
-    /// The lines that are neither blank nor a comment, trimmed.
-    [[nodiscard]] auto contentLines(std::string_view text)
+    /// How a line reaches the parse: trimmed, as version 1 reads it, or as written, as version 2 does.
+    enum class LineBlanks : uint8_t
     {
-        return std::views::split(text, '\n') | std::views::transform([](auto part) {
-                   return trim(std::string_view(part.begin(), part.end()));
+        Trimmed, ///< Blanks around the line are dropped.
+        Kept,    ///< Only the carriage return of a CRLF line end is dropped; the line is judged as written.
+    };
+
+    /// The lines that are neither blank (nothing but blanks) nor a comment, without their line end.
+    [[nodiscard]] auto contentLines(std::string_view text, LineBlanks blanks)
+    {
+        return std::views::split(text, '\n') | std::views::transform([blanks](auto part) {
+                   auto line = std::string_view(part.begin(), part.end());
+                   if (blanks == LineBlanks::Trimmed)
+                       return trim(line);
+                   if (line.ends_with('\r'))
+                       line.remove_suffix(1);
+                   return line;
                })
-               | std::views::filter(
-                   [](std::string_view line) { return !line.empty() && !line.starts_with('#'); });
+               | std::views::filter([](std::string_view line) {
+                     return line.find_first_not_of(' ') != std::string_view::npos && !line.starts_with('#');
+                 });
     }
 
     /// Reads the one version line, wherever it stands.
     [[nodiscard]] std::expected<uint32_t, ManifestFault> readVersion(std::string_view text)
     {
         auto value = std::optional<std::string_view> {};
-        for (auto const line: contentLines(text))
+        for (auto const line: contentLines(text, LineBlanks::Trimmed))
         {
             auto const found = versionValue(line);
             if (!found)
@@ -678,10 +691,16 @@ std::expected<Manifest, ManifestFault> parseManifestText(std::string_view text)
     if (!version)
         return std::unexpected(version.error());
     auto state = ParseState { .version = *version };
-    for (auto const line: contentLines(*version == 1 ? std::string_view(blanked) : text))
+    // Version 2 takes every line as written: words are separated by single spaces, and a value is never
+    // trimmed.
+    auto lines =
+        *version == 1 ? contentLines(blanked, LineBlanks::Trimmed) : contentLines(text, LineBlanks::Kept);
+    for (auto const line: lines)
     {
         if (line.contains('\t'))
             return std::unexpected(ManifestFault::TabCharacter);
+        if (line.starts_with(' ') || line.ends_with(' '))
+            return std::unexpected(ManifestFault::SurroundingBlank);
         if (versionValue(line))
         {
             state.versionLine = VersionLine::Read;

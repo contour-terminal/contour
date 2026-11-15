@@ -287,8 +287,10 @@ and the rules for the values filled into a command, are in the [world's README][
 manifest's version: a version-1 manifest that uses one of the lines below is refused. In version 2,
 `version` comes before every line but `name`, and a name is declared before any line uses it: a root
 before the commands, panes, `read` and `path:` arguments bound to it, an `arg` before its placeholder, a
-command or pane before its environment; every name is declared once per kind. Words are separated by
-single spaces (a tab is refused) and are never unquoted, so a quote in a command line is refused
+command or pane before its environment; every name is declared once per kind. A line is read as written:
+a carriage return right before the line feed belongs to the line end, a line of nothing but blanks is
+skipped, and any other line that begins or ends with a blank is refused rather than trimmed. Words are
+separated by single spaces (a tab is refused) and are never unquoted, so a quote in a command line is refused
 rather than read as part of a word with a space; a brace appears only as a whole-word `{name}` naming a
 declared `arg`, and a command's program is never a placeholder. An environment name is
 `[A-Za-z_][A-Za-z0-9_]*`.

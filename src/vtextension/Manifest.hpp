@@ -186,6 +186,7 @@ enum class ManifestFault : uint8_t
     VersionNotFirst,          ///< In version 2, a line other than `name` before the `version` line.
     MalformedEnvironmentName, ///< An environment name other than `[A-Za-z_][A-Za-z0-9_]*`.
     TabCharacter,             ///< A tab in a version-2 line: words are separated by single spaces only.
+    SurroundingBlank,         ///< A version-2 line that begins or ends with a blank, which is never trimmed.
     UnsupportedLine,          ///< An `inbox` line: the kind is reserved, and no version supports it yet.
     ForbiddenEnvironment, ///< An environment variable an extension may not set, or a value it may not take.
     ForbiddenGitConfig,   ///< A git configuration key an extension may not set, or a value it may not take.
@@ -245,6 +246,8 @@ inline constexpr auto ManifestFaultTexts = std::array {
     ManifestFaultText { .fault = ManifestFault::MalformedEnvironmentName,
                         .text = "an environment name other than letters, digits and underscores" },
     ManifestFaultText { .fault = ManifestFault::TabCharacter, .text = "a tab in a version-2 line" },
+    ManifestFaultText { .fault = ManifestFault::SurroundingBlank,
+                        .text = "a version-2 line that begins or ends with a blank" },
     ManifestFaultText { .fault = ManifestFault::UnsupportedLine,
                         .text = "the inbox line is reserved and not supported yet" },
     ManifestFaultText { .fault = ManifestFault::ForbiddenEnvironment,

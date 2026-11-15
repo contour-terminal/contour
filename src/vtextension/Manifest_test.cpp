@@ -523,6 +523,9 @@ constexpr auto InvalidRows = std::array {
     InvalidRow { .file = "root-empty-step", .fault = ManifestFault::MalformedRoot },
     InvalidRow { .file = "root-partial-wildcard", .fault = ManifestFault::MalformedRoot },
     InvalidRow { .file = "tab-in-line", .fault = ManifestFault::TabCharacter },
+    InvalidRow { .file = "indented-line", .fault = ManifestFault::SurroundingBlank },
+    InvalidRow { .file = "trailing-blank", .fault = ManifestFault::SurroundingBlank },
+    InvalidRow { .file = "stray-cr", .fault = ManifestFault::NotUtf8 },
     InvalidRow { .file = "inbox-reserved", .fault = ManifestFault::UnsupportedLine },
 };
 
@@ -573,6 +576,22 @@ TEST_CASE("Manifest v2: every corpus file under invalid/ is refused with its fau
     for (auto const& row: InvalidRows)
         rows.emplace(row.file);
     CHECK(corpusFiles("invalid") == rows);
+}
+
+TEST_CASE("Manifest v2: blanks around a line are refused, never trimmed", "[vtextension][manifest]")
+{
+    // A line of nothing but blanks is a blank line; a CR before the LF is the line end.
+    auto const accepted = parseManifestText("name = spaced\r\n   \nversion = 2\r\n#  a comment \n"sv);
+    REQUIRE(accepted.has_value());
+    CHECK(accepted->name == "spaced");
+    // A comment starts in the first column, like every other line.
+    CHECK(faultOf("name = x\nversion = 2\n # indented\n"sv) == ManifestFault::SurroundingBlank);
+    CHECK(faultOf("name = x\nversion = 2 \n"sv) == ManifestFault::SurroundingBlank);
+    CHECK(faultOf("name = x \nversion = 2\n"sv) == ManifestFault::SurroundingBlank);
+    // A CR anywhere but right before the LF is still a stray control character.
+    CHECK(faultOf("name = x\nversion = 2\r \n"sv) == ManifestFault::NotUtf8);
+    // Version 1 keeps trimming.
+    CHECK(parseManifestText("  name = x \nversion = 1 \n"sv).has_value());
 }
 
 TEST_CASE("Manifest v2: the orchestrator's manifest", "[vtextension][manifest][corpus]")
