@@ -577,7 +577,11 @@ TEST_CASE("Process.theShellStartsWithNoSignalBlocked", "[process]")
     auto previous = sigset_t {};
     REQUIRE(pthread_sigmask(SIG_BLOCK, &blocked, &previous) == 0);
 
-    auto process = running("/bin/sh", { "-c", "grep SigBlk /proc/$$/status" });
+    // `exec`, and /proc/self: the mask grep reads is then the one the spawned process received. Reading the
+    // shell's own status from a forked grep raced the shell: dash blocks every signal around a fork, and in
+    // ubuntu:26.04 7 of 300 such reads saw fffffffe7ffbfeff (0 of 300 with exec) -- the likely cause of this
+    // case's failure on master's Packaging for Ubuntu 26.04 job (run 43696779853).
+    auto process = running("/bin/sh", { "-c", "exec grep SigBlk /proc/self/status" });
     auto const started = process.start();
     REQUIRE(pthread_sigmask(SIG_SETMASK, &previous, nullptr) == 0);
     REQUIRE(started.has_value());
