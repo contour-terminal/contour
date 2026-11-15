@@ -28,12 +28,13 @@ enum class PrepareStep : uint8_t
 /// The steps that end a run, in order. Nothing touches the worktree while the agent's tab may still run.
 enum class EndStep : uint8_t
 {
-    ClosePane,      ///< Waiting for the agent's tab to be gone: the user ended the run, or opening it failed.
-    Verify,         ///< Reading the worktree's `.git` file.
-    Reachable,      ///< `git-head-reachable`: some ref contains HEAD.
-    OperationState, ///< `git-operation-state`: no operation is left half done.
-    IndexFlags,     ///< `git-index-flags`: no file is marked so that `git status` cannot see its change.
-    Status,         ///< `git-status`: nothing is modified or untracked.
+    ClosePane,  ///< Waiting for the agent's tab to be gone: the user ended the run, or opening it failed.
+    Verify,     ///< Reading the worktree's `.git` file.
+    CommonDir,  ///< `git-common-dir`: git uses the main checkout's `.git`, not a redirected one.
+    IndexFlags, ///< `git-index-flags`: no submodule, and no file marked so `git status` misses its change.
+    Reachable,  ///< `git-head-reachable`: some ref contains HEAD.
+    OperationState,   ///< `git-operation-state`: no operation is left half done.
+    Status,           ///< `git-status`: nothing is modified or untracked.
     CleanStatusBoard, ///< `git-clean`: the status board, the one untracked file the extension writes.
     Remove,           ///< `git-worktree-remove`, never forced.
 };
@@ -395,6 +396,13 @@ enum class BeginError : uint8_t
 [[nodiscard]] bool gitFileIsIntact(std::string_view content,
                                    std::string_view mainCheckout,
                                    std::string_view worktree) noexcept;
+
+/// Whether git, run inside a worktree, uses its repository's own directory: a redirected `commondir` link
+/// would make it read another directory's configuration and attributes.
+/// @param output What `git rev-parse --path-format=absolute --git-common-dir` printed there.
+/// @param mainCheckout The repository's main checkout.
+/// @return Whether @p output is `<mainCheckout>/.git`, optionally followed by one line end, and nothing else.
+[[nodiscard]] bool commonDirIsMain(std::string_view output, std::string_view mainCheckout) noexcept;
 
 /// Whether a run fits the store: every field holds what its kind accepts, and the free text is bounded so
 /// that toJson() stays within MaxStoredRunBytes however it escapes. The prompt is Text with no control

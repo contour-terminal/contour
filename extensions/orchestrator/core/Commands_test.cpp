@@ -3,14 +3,17 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <ranges>
 #include <set>
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -36,8 +39,8 @@ constexpr auto ForceExempt = std::pair { "git-clean"sv, "-f"sv };
 /// The commands that run git inside an agent-controlled worktree, and so read attributes from the empty tree
 /// and take no optional lock.
 constexpr auto CleanupCommands = std::array {
-    "git-status"sv,      "git-head-reachable"sv, "git-operation-state"sv,
-    "git-index-flags"sv, "git-clean"sv,          "git-worktree-remove"sv,
+    "git-common-dir"sv,  "git-status"sv, "git-head-reachable"sv,  "git-operation-state"sv,
+    "git-index-flags"sv, "git-clean"sv,  "git-worktree-remove"sv,
 };
 
 /// The environment every cleanup command, and only a cleanup command, carries.
@@ -113,6 +116,62 @@ constexpr auto SpellingRows = std::array {
     if (found == environment.end())
         return std::nullopt;
     return found->value;
+}
+
+/// The environment @p decl runs with: commandEnvironment(), then its own, a later variable replacing an
+/// earlier one of the same name, as the host applies them.
+[[nodiscard]] std::map<std::string_view, std::string_view> effectiveEnvironment(CommandDecl const& decl)
+{
+    auto environment = std::map<std::string_view, std::string_view> {};
+    for (auto const layer: std::array { commandEnvironment(), decl.environment })
+        for (auto const& variable: layer)
+            environment.insert_or_assign(variable.name, variable.value);
+    return environment;
+}
+
+/// Which commands a forced git configuration pair must reach.
+enum class Reach : uint8_t
+{
+    Every,   ///< Every declared command.
+    Cleanup, ///< The cleanup commands, and no other.
+};
+
+struct ForcedPair
+{
+    std::string_view key;
+    std::string_view value;
+    Reach reach;
+};
+
+constexpr auto ForcedPairs = std::array {
+    ForcedPair { .key = "core.fsmonitor", .value = "false", .reach = Reach::Every },
+    ForcedPair { .key = "core.hooksPath", .value = "/dev/null", .reach = Reach::Every },
+    ForcedPair { .key = "core.attributesFile", .value = "/dev/null", .reach = Reach::Cleanup },
+};
+
+/// The git configuration @p environment forces: GIT_CONFIG_KEY_n and GIT_CONFIG_VALUE_n for every n below
+/// GIT_CONFIG_COUNT; std::nullopt when the count is no number or a pair it counts is missing.
+[[nodiscard]] std::optional<std::vector<EnvironmentVariable>> forcedConfiguration(
+    std::map<std::string_view, std::string_view> const& environment)
+{
+    auto const countText = environment.find("GIT_CONFIG_COUNT");
+    if (countText == environment.end())
+        return std::vector<EnvironmentVariable> {};
+    auto count = std::size_t { 0 };
+    auto const text = countText->second;
+    auto const [end, error] = std::from_chars(text.data(), text.data() + text.size(), count);
+    if (error != std::errc {} || end != text.data() + text.size())
+        return std::nullopt;
+    auto pairs = std::vector<EnvironmentVariable> {};
+    for (auto const index: std::views::iota(std::size_t { 0 }, count))
+    {
+        auto const key = environment.find("GIT_CONFIG_KEY_" + std::to_string(index));
+        auto const value = environment.find("GIT_CONFIG_VALUE_" + std::to_string(index));
+        if (key == environment.end() || value == environment.end())
+            return std::nullopt;
+        pairs.push_back(EnvironmentVariable { .name = key->second, .value = value->second });
+    }
+    return pairs;
 }
 
 // {{{ substitute rows
@@ -519,12 +578,50 @@ TEST_CASE("GIT_ATTR_SOURCE and GIT_OPTIONAL_LOCKS are on cleanup commands only",
             CAPTURE(decl.name, name);
             CHECK(hasEnv(decl, name) == std::ranges::contains(CleanupCommands, decl.name));
         }
+    // Every cleanup command carries git-status's environment, so none can miss a variable another has.
+    auto const* const status = findCommand("git-status");
+    REQUIRE(status != nullptr);
     for (auto const name: CleanupCommands)
     {
         CAPTURE(name);
         auto const* const decl = findCommand(name);
         REQUIRE(decl != nullptr);
         CHECK(envValue(decl->environment, "GIT_OPTIONAL_LOCKS") == "0");
+        for (auto const& variable: status->environment)
+        {
+            CAPTURE(variable.name);
+            CHECK(envValue(decl->environment, variable.name) == variable.value);
+        }
+    }
+}
+
+TEST_CASE("every command keeps the forced git configuration, and only cleanup drops the attributes file",
+          "[orchestrator][commands][env-for-cleanup-only]")
+{
+    for (auto const& decl: commands())
+    {
+        CAPTURE(decl.name);
+        auto const environment = effectiveEnvironment(decl);
+        auto const pairs = forcedConfiguration(environment);
+        REQUIRE(pairs.has_value());
+        auto const cleanup = std::ranges::contains(CleanupCommands, decl.name);
+        auto expected = std::size_t { 0 };
+        for (auto const& row: ForcedPairs)
+        {
+            CAPTURE(row.key);
+            auto const reaches = row.reach == Reach::Every || cleanup;
+            auto const forced = std::ranges::any_of(*pairs, [&](EnvironmentVariable const& pair) {
+                return pair.name == row.key && pair.value == row.value;
+            });
+            CHECK(forced == reaches);
+            if (reaches)
+                ++expected;
+        }
+        // No other key is forced, and no stray pair lies beyond the count.
+        CHECK(pairs->size() == expected);
+        auto const gitConfig = std::ranges::count_if(
+            environment, [](auto const& variable) { return variable.first.starts_with("GIT_CONFIG_"); });
+        CHECK(static_cast<std::size_t>(gitConfig) == (2 * pairs->size()) + 1);
     }
 }
 
@@ -539,8 +636,11 @@ TEST_CASE("the cleanup checks ask git for no more than they read", "[orchestrato
         "git"sv,  "for-each-ref"sv, "--count=1"sv, "--contains"sv,
         "HEAD"sv, "refs/heads"sv,   "refs/tags"sv, "refs/remotes"sv,
     };
-    static constexpr auto IndexFlags = std::array { "git"sv, "ls-files"sv, "-v"sv };
+    static constexpr auto IndexFlags = std::array { "git"sv, "ls-files"sv, "-v"sv, "--stage"sv };
+    static constexpr auto CommonDir =
+        std::array { "git"sv, "rev-parse"sv, "--path-format=absolute"sv, "--git-common-dir"sv };
     static constexpr auto Rows = std::array {
+        Row { .command = "git-common-dir", .argv = CommonDir },
         Row { .command = "git-head-reachable", .argv = Reachable },
         Row { .command = "git-index-flags", .argv = IndexFlags },
     };
@@ -595,13 +695,14 @@ TEST_CASE("an issue branch never tracks the default branch", "[orchestrator][com
 
 TEST_CASE("git configuration is set only where it is declared", "[orchestrator][commands]")
 {
-    // A command's own environment never sets GIT_CONFIG_*: it would replace commandEnvironment()'s, and with
-    // it the switched-off core.fsmonitor and core.hooksPath.
+    // A command's own environment sets GIT_CONFIG_* only as a whole set: its count replaces
+    // commandEnvironment()'s, so it carries every pair it counts.
     for (auto const& decl: commands())
     {
         CAPTURE(decl.name);
-        CHECK(std::ranges::none_of(
-            decl.environment, [](auto const& variable) { return variable.name.starts_with("GIT_CONFIG_"); }));
+        auto const own = std::ranges::count_if(
+            decl.environment, [](auto const& variable) { return variable.name.starts_with("GIT_CONFIG_"); });
+        CHECK((own == 0 || hasEnv(decl, "GIT_CONFIG_COUNT")));
     }
     // The pane's GIT_CONFIG_* variables are exactly its declared pairs, counted by GIT_CONFIG_COUNT.
     static constexpr auto PanePairs = std::array {
@@ -675,7 +776,12 @@ TEST_CASE("manifestLines spells the declared tables", "[orchestrator][commands][
         "command-env-for git-status GIT_ATTR_SOURCE = 4b825dc642cb6eb9a060e54bf8d69288fbee4904"sv,
         "command-env-for git-status GIT_OPTIONAL_LOCKS = 0"sv,
         "command git-head-reachable short @worktrees = git for-each-ref --count=1 --contains HEAD refs/heads refs/tags refs/remotes"sv,
-        "command git-index-flags short @worktrees = git ls-files -v"sv,
+        "command git-index-flags short @worktrees = git ls-files -v --stage"sv,
+        "command git-common-dir short @worktrees = git rev-parse --path-format=absolute --git-common-dir"sv,
+        "command-env-for git-common-dir GIT_CONFIG_COUNT = 3"sv,
+        "command-env-for git-status GIT_CONFIG_KEY_2 = core.attributesFile"sv,
+        "command-env-for git-worktree-remove GIT_CONFIG_VALUE_1 = /dev/null"sv,
+        "command-env GIT_CONFIG_COUNT = 2"sv,
         "command-env-for git-operation-state LC_ALL = C"sv,
         "command git-worktree-remove long @worktrees = git worktree remove {path}"sv,
         "arg path = path:worktrees"sv,

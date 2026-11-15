@@ -149,6 +149,14 @@ namespace
                      .name = "verify"sv,
                      .label = "reading .git"sv,
                      .awaits = Awaits::GitFile },
+        EndStepRow { .step = EndStep::CommonDir,
+                     .name = "common-dir"sv,
+                     .label = "the common-directory check"sv,
+                     .awaits = Awaits::Command },
+        EndStepRow { .step = EndStep::IndexFlags,
+                     .name = "index-flags"sv,
+                     .label = "the index check"sv,
+                     .awaits = Awaits::Command },
         EndStepRow { .step = EndStep::Reachable,
                      .name = "reachable"sv,
                      .label = "the reachability check"sv,
@@ -156,10 +164,6 @@ namespace
         EndStepRow { .step = EndStep::OperationState,
                      .name = "operation-state"sv,
                      .label = "the operation-state check"sv,
-                     .awaits = Awaits::Command },
-        EndStepRow { .step = EndStep::IndexFlags,
-                     .name = "index-flags"sv,
-                     .label = "the index-flags check"sv,
                      .awaits = Awaits::Command },
         EndStepRow {
             .step = EndStep::Status, .name = "status"sv, .label = "git status"sv, .awaits = Awaits::Command },
@@ -197,9 +201,15 @@ namespace
     constexpr auto CwdMissingWhy = "its directory is gone"sv;
     constexpr auto AlteredGitFile = ".git file was changed; nothing was run there"sv;
     constexpr auto UnknownMainCheckout = "the main checkout is not known; nothing was run there"sv;
+    constexpr auto RedirectedCommonDir =
+        "git uses another directory than the main checkout's .git; nothing more was run there"sv;
     constexpr auto Unreachable = "HEAD is not contained in any ref"sv;
     constexpr auto UnrecognisedStatus = "unrecognised git status"sv;
     constexpr auto PaneIdRefused = "the tab's id is not a name"sv;
+    constexpr auto HoldsSubmodule =
+        "a submodule is in the index: git status would run git in its own repository, and git worktree "
+        "remove refuses it"sv;
+    constexpr auto UnrecognisedIndex = "unrecognised git ls-files output"sv;
     constexpr auto HiddenChanges =
         "a file is marked assume-unchanged or skip-worktree, so git status cannot see its changes"sv;
     constexpr auto NoProvider = "no provider stands for the repository's forge"sv;
@@ -424,8 +434,11 @@ namespace
             return keep(run, context, ending, UnknownMainCheckout);
         if (!gitFileIsIntact(*read.content, *context.mainCheckout, run.worktree))
             return keep(run, context, ending, AlteredGitFile);
+        // The `.git` file is not the only link: git follows the `commondir` file beside the worktree's
+        // directory, which the file check cannot read. Before anything else runs there, git says where it
+        // leads.
         return enterCommand(
-            run, context, nextStep(std::move(ending), EndStep::Reachable), "git-head-reachable", {});
+            run, context, nextStep(std::move(ending), EndStep::CommonDir), "git-common-dir", {});
     }
 
     [[nodiscard]] std::vector<std::string_view> nonEmptyLines(std::string_view text)
@@ -437,12 +450,66 @@ namespace
         return lines;
     }
 
-    /// Whether a `git ls-files -v` line names a file whose changes `git status` does not see: its tag is
-    /// lowercase for a file marked assume-unchanged, and `S` for one marked skip-worktree.
-    [[nodiscard]] constexpr bool hidesChanges(std::string_view line) noexcept
+    /// One line of `git ls-files -v --stage`: `<tag> <mode> <object> <stage>\t<path>`.
+    struct IndexLine
     {
-        auto const tag = line.front();
-        return (tag >= 'a' && tag <= 'z') || tag == 'S';
+        char tag;              ///< Lowercase for assume-unchanged, `S` for skip-worktree.
+        std::string_view mode; ///< Such as `100644`; `160000` for a gitlink.
+    };
+
+    /// @return @p line's tag and mode; std::nullopt for a line of another shape.
+    [[nodiscard]] constexpr std::optional<IndexLine> indexLine(std::string_view line) noexcept
+    {
+        if (line.size() < 3 || line[1] != ' ' || !line.contains('\t'))
+            return std::nullopt;
+        auto const rest = line.substr(2);
+        auto const space = rest.find(' ');
+        if (space == std::string_view::npos || space == 0)
+            return std::nullopt;
+        return IndexLine { .tag = line.front(), .mode = rest.substr(0, space) };
+    }
+
+    /// A file whose changes `git status` does not see, which the unforced remove would delete.
+    [[nodiscard]] constexpr bool hidesChanges(IndexLine const& entry) noexcept
+    {
+        return (entry.tag >= 'a' && entry.tag <= 'z') || entry.tag == 'S';
+    }
+
+    /// A gitlink: `git status --ignore-submodules=none` enters the submodule's repository, whose own
+    /// config and info/attributes the agent wrote and which can name a filter (measured, R11).
+    [[nodiscard]] constexpr bool isSubmodule(IndexLine const& entry) noexcept
+    {
+        return entry.mode == "160000";
+    }
+
+    /// What in the index keeps a worktree, checked in order on every line.
+    struct IndexRule
+    {
+        bool (*matches)(IndexLine const&) noexcept;
+        std::string_view why;
+    };
+
+    constexpr auto IndexRules = std::array {
+        IndexRule { .matches = isSubmodule, .why = HoldsSubmodule },
+        IndexRule { .matches = hidesChanges, .why = HiddenChanges },
+    };
+
+    /// @return Why the index keeps the worktree; std::nullopt when nothing in it does.
+    [[nodiscard]] std::optional<std::string_view> indexKeeps(std::string_view output)
+    {
+        auto const lines = nonEmptyLines(output);
+        auto entries = std::vector<IndexLine> {};
+        for (auto const line: lines)
+        {
+            auto const entry = indexLine(line);
+            if (!entry)
+                return UnrecognisedIndex;
+            entries.push_back(*entry);
+        }
+        for (auto const& rule: IndexRules)
+            if (std::ranges::any_of(entries, rule.matches))
+                return rule.why;
+        return std::nullopt;
     }
 
     [[nodiscard]] Effects statusRead(Run& run,
@@ -475,6 +542,18 @@ namespace
     {
         switch (ending.step)
         {
+            case EndStep::CommonDir:
+                if (!context.mainCheckout)
+                    return keep(run, context, ending, UnknownMainCheckout);
+                if (!commonDirIsMain(output, *context.mainCheckout))
+                    return keep(run, context, ending, RedirectedCommonDir);
+                return enterCommand(
+                    run, context, nextStep(std::move(ending), EndStep::IndexFlags), "git-index-flags", {});
+            case EndStep::IndexFlags:
+                if (auto const why = indexKeeps(output))
+                    return keep(run, context, ending, *why);
+                return enterCommand(
+                    run, context, nextStep(std::move(ending), EndStep::Reachable), "git-head-reachable", {});
             case EndStep::Reachable:
                 if (nonEmptyLines(output).empty())
                     return keep(run, context, ending, Unreachable);
@@ -491,13 +570,8 @@ namespace
                     return keep(
                         run, context, ending, std::format("{} in progress", operationName(**operation)));
                 return enterCommand(
-                    run, context, nextStep(std::move(ending), EndStep::IndexFlags), "git-index-flags", {});
-            }
-            case EndStep::IndexFlags:
-                if (std::ranges::any_of(nonEmptyLines(output), hidesChanges))
-                    return keep(run, context, ending, HiddenChanges);
-                return enterCommand(
                     run, context, nextStep(std::move(ending), EndStep::Status), "git-status", {});
+            }
             case EndStep::Status: return statusRead(run, std::move(ending), output, context);
             case EndStep::CleanStatusBoard:
                 return enterCommand(run,
@@ -703,6 +777,14 @@ RunState stateFor(AgentStatus status) noexcept
         case AgentStatus::Done: return Done {};
     }
     return Running {};
+}
+
+bool commonDirIsMain(std::string_view output, std::string_view mainCheckout) noexcept
+{
+    if (mainCheckout.empty() || !output.starts_with(mainCheckout))
+        return false;
+    auto const rest = output.substr(mainCheckout.size());
+    return rest == "/.git" || rest == "/.git\n";
 }
 
 bool gitFileIsIntact(std::string_view content,

@@ -36,8 +36,9 @@ struct CommandDecl
     Timeout timeout;                        ///< How long it may run.
     Root root;                              ///< The root its working directory must lie in.
     std::span<std::string_view const> argv; ///< Its words; a whole-word `{name}` is an argument.
-    std::span<EnvironmentVariable const>
-        environment; ///< Added for this command only, after commandEnvironment().
+    /// Added for this command only, after commandEnvironment(): a variable both name takes this value, so
+    /// a GIT_CONFIG_COUNT here replaces the global one and must come with every pair it counts.
+    std::span<EnvironmentVariable const> environment;
 };
 
 /// A program the extension may put in a tab.

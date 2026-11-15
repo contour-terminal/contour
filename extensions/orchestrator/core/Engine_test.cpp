@@ -147,6 +147,15 @@ struct Settings
     return std::format("gitdir: {}/.git/worktrees/{}\n", main, id);
 }
 
+/// What `git ls-files -v --stage` prints for an index with one ordinary file.
+constexpr auto CleanIndex = "H 100644 78981922613b2afb6025042ff6bd878ac1994e85 0\tf\n"sv;
+
+/// What `git rev-parse --path-format=absolute --git-common-dir` prints in a worktree of @p main.
+[[nodiscard]] std::string commonDirOf(std::string_view main)
+{
+    return std::format("{}/.git\n", main);
+}
+
 [[nodiscard]] Dispatch prDispatch(uint64_t number = 2375, std::string_view repo = "contour")
 {
     return Dispatch { .repo = std::string(repo),
@@ -309,6 +318,15 @@ class Harness
         auto const found = pending(command);
         CAPTURE(command);
         REQUIRE(found);
+        // An answer other than the main checkout's .git keeps the worktree: nothing more may run there until
+        // its .git file is read intact again.
+        if (command == "git-common-dir"
+            && (outcome.exitCode != 0 || outcome.extent != OutputExtent::Whole
+                || !commonDirIsMain(outcome.stdoutText, mainOf(found->cwd))))
+            _tainted.insert(found->cwd);
+        // A submodule in the index keeps it too: git status would enter the submodule's own repository.
+        if (command == "git-index-flags" && outcome.stdoutText.contains(" 160000 "))
+            _tainted.insert(found->cwd);
         return feed(ProcessFinished { .tag = found->tag, .outcome = std::move(outcome) });
     }
 
@@ -376,9 +394,10 @@ class Harness
     {
         list({});
         read("/.git", intactGitFile(main, id));
+        finish("git-common-dir", ok(commonDirOf(main)));
+        finish("git-index-flags", ok(CleanIndex));
         finish("git-head-reachable", ok("refs/heads/agent/x\n"));
         finish("git-operation-state", ok(CleanLongStatus));
-        finish("git-index-flags", ok("H f\n"));
         finish("git-status", ok());
         finish("git-worktree-remove", ok());
     }
@@ -885,9 +904,10 @@ TEST_CASE("a clean ending removes the worktree and frees the slot", "[orchestrat
     harness.list({});
     CHECK(harness.hasRead(std::format("{}/.git", PrId)));
     harness.read("/.git", intactGitFile(ContourPath, PrId));
+    harness.finish("git-common-dir", ok(commonDirOf(ContourPath)));
+    harness.finish("git-index-flags", ok(CleanIndex));
     harness.finish("git-head-reachable", ok("refs/heads/agent/x\n"));
     harness.finish("git-operation-state", ok(CleanLongStatus));
-    harness.finish("git-index-flags", ok("H f\n"));
     harness.finish("git-status", ok());
     auto const removed = harness.finish("git-worktree-remove", ok());
     auto const finished = finishedOf(harness.run(PrId));
@@ -930,9 +950,10 @@ TEST_CASE("a modified worktree is kept, then removed once clean", "[orchestrator
         harness.list({ paneOf(PrId) });
         harness.list({});
         harness.read("/.git", intactGitFile(ContourPath, PrId));
+        harness.finish("git-common-dir", ok(commonDirOf(ContourPath)));
+        harness.finish("git-index-flags", ok(CleanIndex));
         harness.finish("git-head-reachable", ok("refs/heads/agent/x\n"));
         harness.finish("git-operation-state", ok(CleanLongStatus));
-        harness.finish("git-index-flags", ok("H f\n"));
         harness.finish("git-status", ok(" M f\n"));
         auto const kept = finishedOf(harness.run(PrId));
         REQUIRE(kept);
@@ -944,9 +965,10 @@ TEST_CASE("a modified worktree is kept, then removed once clean", "[orchestrator
         else
             harness.wake(2 * Minute);
         harness.read("/.git", intactGitFile(ContourPath, PrId));
+        harness.finish("git-common-dir", ok(commonDirOf(ContourPath)));
+        harness.finish("git-index-flags", ok(CleanIndex));
         harness.finish("git-head-reachable", ok("refs/heads/agent/x\n"));
         harness.finish("git-operation-state", ok(CleanLongStatus));
-        harness.finish("git-index-flags", ok("H f\n"));
         harness.finish("git-status", ok());
         harness.finish("git-worktree-remove", ok());
         auto const removed = finishedOf(harness.run(PrId));
@@ -1131,10 +1153,14 @@ TEST_CASE("guest restart mid-dispatch", "[orchestrator][engine]")
               .state = ending(EndStep::Verify),
               .known = Known::Neither,
               .next = ".git" },
+        Row { .name = "common-dir, finished",
+              .state = ending(EndStep::CommonDir),
+              .known = Known::Finished,
+              .next = ".git" },
         Row { .name = "index-flags, finished",
               .state = ending(EndStep::IndexFlags),
               .known = Known::Finished,
-              .next = "git-status" },
+              .next = "git-head-reachable" },
         Row { .name = "index-flags, lost",
               .state = ending(EndStep::IndexFlags),
               .known = Known::Neither,
@@ -1244,9 +1270,10 @@ TEST_CASE("a stale reply to an earlier attempt is ignored", "[orchestrator][engi
     CHECK(harness.commandsIssued("git-worktree-remove") == 0);
     harness.boot();
     harness.read("/.git", intactGitFile(ContourPath, PrId));
+    harness.finish("git-common-dir", ok(commonDirOf(ContourPath)));
+    harness.finish("git-index-flags", ok(CleanIndex));
     harness.finish("git-head-reachable", ok("refs/heads/agent/x\n"));
     harness.finish("git-operation-state", ok(CleanLongStatus));
-    harness.finish("git-index-flags", ok("H f\n"));
     auto const status = harness.pending("git-status");
     REQUIRE(status);
     auto const replayed = harness.feed(ProcessFinished { .tag = *callTag(stale), .outcome = ok() });
@@ -1335,6 +1362,8 @@ TEST_CASE("an unreachable HEAD or an operation in progress keeps the worktree", 
         harness.list({ paneOf(PrId) });
         harness.list({});
         harness.read("/.git", intactGitFile(ContourPath, PrId));
+        harness.finish("git-common-dir", ok(commonDirOf(ContourPath)));
+        harness.finish("git-index-flags", ok(CleanIndex));
         harness.finish("git-head-reachable", ok(row.reachable));
         if (!row.operation.empty())
             harness.finish("git-operation-state", ok(row.operation));
@@ -1399,6 +1428,8 @@ TEST_CASE("finished entries are new until seen and purged after the retention", 
     harness.list({ paneOf(keptId, "p2") });
     harness.list({});
     harness.read("/.git", intactGitFile(ContourPath, keptId));
+    harness.finish("git-common-dir", ok(commonDirOf(ContourPath)));
+    harness.finish("git-index-flags", ok(CleanIndex));
     harness.finish("git-head-reachable", ok(""));
     REQUIRE(finishedOf(harness.run(keptId))->fate == Fate::Kept);
 
@@ -1776,7 +1807,102 @@ TEST_CASE("tampered worktree", "[orchestrator][engine]")
         // Repaired: the checks run again.
         harness.feed(RetryRemovalOf { .run = std::string(PrId) });
         harness.read("/.git", intactGitFile(ContourPath, PrId));
-        CHECK(harness.pending("git-head-reachable"));
+        CHECK(harness.pending("git-common-dir"));
+    }
+    SECTION("a redirected common directory")
+    {
+        // The agent pointed `<main>/.git/worktrees/<id>/commondir` at a directory whose config defines a
+        // clean filter and whose info/attributes names it. The .git file is untouched, so it reads intact;
+        // git's own answer is the only thing that shows the redirect, and nothing that reads attributes may
+        // run after it (the harness checks every command's cwd).
+        struct Row
+        {
+            std::string_view name;
+            ProcessOutcome answer;
+            std::string_view entry;
+        };
+        auto const rows = std::array {
+            Row {
+                .name = "redirected",
+                .answer = ok("/tmp/evil.git\n"),
+                .entry =
+                    "git uses another directory than the main checkout's .git; nothing more was run there" },
+            Row { .name = "failed",
+                  .answer = failed(128, "fatal: not a git repository"),
+                  .entry = "the common-directory check failed: fatal: not a git repository" },
+            Row { .name = "truncated",
+                  .answer = truncated(commonDirOf(ContourPath)),
+                  .entry = "the common-directory check failed: its output was cut at the host's limit" },
+        };
+        for (auto const& row: rows)
+        {
+            CAPTURE(row.name);
+            auto harness = booted();
+            harness.runToRunning(prDispatch());
+            harness.list({ paneOf(PrId) });
+            harness.list({});
+            harness.read("/.git", intactGitFile(ContourPath, PrId));
+            harness.finish("git-common-dir", row.answer);
+            auto const kept = finishedOf(harness.run(PrId));
+            REQUIRE(kept);
+            CHECK(kept->fate == Fate::Kept);
+            CHECK(kept->entries == std::vector<std::string> { std::string(row.entry) });
+            // Polls re-check it: still redirected, nothing more runs there.
+            for ([[maybe_unused]] auto const poll: std::views::iota(0, 3))
+            {
+                harness.wake(2 * Minute);
+                harness.boot();
+                harness.read("/.git", intactGitFile(ContourPath, PrId));
+                harness.finish("git-common-dir", row.answer);
+            }
+            for (auto const command: { "git-head-reachable"sv,
+                                       "git-operation-state"sv,
+                                       "git-index-flags"sv,
+                                       "git-status"sv,
+                                       "git-clean"sv,
+                                       "git-worktree-remove"sv })
+            {
+                CAPTURE(command);
+                CHECK(harness.commandsIssued(command) == 0);
+            }
+            CHECK(finishedOf(harness.run(PrId))->fate == Fate::Kept);
+        }
+    }
+    SECTION("a submodule in the index")
+    {
+        // The agent committed a nested repository as a gitlink; its own config and info/attributes name a
+        // clean filter. `git status --ignore-submodules=none` would run it (measured, R11), so the index
+        // check runs first and nothing that reads attributes follows.
+        constexpr auto WithSubmodule = "H 100644 78981922613b2afb6025042ff6bd878ac1994e85 0\ta.txt\n"
+                                       "H 160000 63343ca2825356cbfa4a67b36f8969e87218a37e 0\tsub\n"sv;
+        auto harness = booted();
+        harness.runToRunning(prDispatch());
+        harness.list({ paneOf(PrId) });
+        harness.list({});
+        for ([[maybe_unused]] auto const check: std::views::iota(0, 3))
+        {
+            harness.read("/.git", intactGitFile(ContourPath, PrId));
+            harness.finish("git-common-dir", ok(commonDirOf(ContourPath)));
+            harness.finish("git-index-flags", ok(WithSubmodule));
+            auto const kept = finishedOf(harness.run(PrId));
+            REQUIRE(kept);
+            CHECK(kept->fate == Fate::Kept);
+            CHECK(kept->entries
+                  == std::vector<std::string> {
+                      "a submodule is in the index: git status would run git in its own "
+                      "repository, and git worktree remove refuses it" });
+            harness.wake(2 * Minute);
+            harness.boot();
+        }
+        for (auto const command: { "git-head-reachable"sv,
+                                   "git-operation-state"sv,
+                                   "git-status"sv,
+                                   "git-clean"sv,
+                                   "git-worktree-remove"sv })
+        {
+            CAPTURE(command);
+            CHECK(harness.commandsIssued(command) == 0);
+        }
     }
     SECTION("an unknown main checkout")
     {
@@ -1790,6 +1916,7 @@ TEST_CASE("tampered worktree", "[orchestrator][engine]")
         auto const finished = finishedOf(harness.run(PrId));
         REQUIRE(finished);
         CHECK(finished->fate == Fate::Kept);
+        CHECK(harness.commandsIssued("git-common-dir") == 0);
         CHECK(harness.commandsIssued("git-head-reachable") == 0);
     }
 }
@@ -2131,9 +2258,10 @@ TEST_CASE("a run ended outside the configuration completes after a restart", "[o
         CHECK(second.hasRead("/.git"));
         second.boot();
         second.read("/.git", intactGitFile(ContourPath, PrId));
+        second.finish("git-common-dir", ok(commonDirOf(ContourPath)));
+        second.finish("git-index-flags", ok(CleanIndex));
         second.finish("git-head-reachable", ok("refs/heads/agent/x\n"));
         second.finish("git-operation-state", ok(CleanLongStatus));
-        second.finish("git-index-flags", ok("H f\n"));
         second.finish("git-status", ok());
         second.finish("git-worktree-remove", ok());
         auto const finished = finishedOf(second.run(PrId));

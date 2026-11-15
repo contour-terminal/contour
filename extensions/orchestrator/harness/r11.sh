@@ -66,6 +66,20 @@ readonly -a HEAD_REACHABLE=(git for-each-ref --count=1 --contains HEAD refs/head
 # The proposed argv of `git-operation-state` (section (b) shows why).
 readonly -a OPERATION_STATE=(git -c status.displayCommentPrefix=false -c color.status=false status --long)
 
+# The argv of `git-index-flags` and of `git-common-dir` (the check the owner's R11 decision added).
+readonly -a INDEX_FLAGS=(git ls-files -v --stage)
+readonly -a COMMON_DIR=(git rev-parse --path-format=absolute --git-common-dir)
+
+# The cleanup commands' own environment (owner's R11 decision). It follows COMMAND_ENV, so its
+# GIT_CONFIG_COUNT replaces the global one and it carries every pair that count names.
+readonly -a CLEANUP_ENV=(
+    GIT_CONFIG_COUNT=3
+    GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false
+    GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null
+    GIT_CONFIG_KEY_2=core.attributesFile GIT_CONFIG_VALUE_2=/dev/null
+    GIT_OPTIONAL_LOCKS=0
+)
+
 # How the core reads that output: a line beginning in column 0 with one of these prefixes names the
 # operation in progress; no such line means none.
 readonly -a STATE_LINES=(
@@ -218,6 +232,8 @@ run_bare() {
 # The cleanup commands (spec §6.3), by name. `remove@wt` runs in the worktree, `remove@repo` in the
 # repository.
 readonly -a CLEANUP=(status reachable opstate clean remove@wt remove@repo)
+# Every cleanup command the core runs, in its order, with the in-repository remove for comparison.
+readonly -a ADOPTED_CLEANUP=(common-dir reachable opstate index-flags status clean remove@wt remove@repo)
 cleanup() { # cleanup <name> <off|on>
     case "$1" in
         status) run "$2" "$WT" "${GIT_STATUS[@]}" ;;
@@ -227,6 +243,8 @@ cleanup() { # cleanup <name> <off|on>
             [[ -e "$WT/STATUS.md" ]] || printf 'status\n' >"$WT/STATUS.md"
             run "$2" "$WT" git clean -f -- STATUS.md
             ;;
+        index-flags) run "$2" "$WT" "${INDEX_FLAGS[@]}" ;;
+        common-dir) run "$2" "$WT" "${COMMON_DIR[@]}" ;;
         remove@wt) run "$2" "$WT" git worktree remove "$WT" ;;
         remove@repo) run "$2" "$REPO" git worktree remove "$WT" ;;
         *) return 1 ;;
@@ -434,6 +452,118 @@ for where in core.hooksPath common-hooks-dir; do
             cells+=("exit=$RC hooks=$hooks")
         done
         printf '  hooks in %-17s %-12s bare: %-26s env: %s\n' "$where" "$cmd" "${cells[0]}" "${cells[1]}"
+    done
+done
+
+echo
+echo "-- The adopted cleanup environment, every cleanup command (owner's R11 decision) --"
+echo "  Each cleanup command's own environment replaces the global GIT_CONFIG_COUNT with the whole set:"
+echo "  core.fsmonitor=false, core.hooksPath=/dev/null, core.attributesFile=/dev/null; plus GIT_ATTR_SOURCE"
+echo "  and GIT_OPTIONAL_LOCKS=0. common-dir = ${COMMON_DIR[*]}; index-flags = ${INDEX_FLAGS[*]}."
+echo "  Expected to run: the main repository's own info/attributes (the documented residual), and the"
+echo "  redirected common dir (closed by the common-dir check, which runs first and reads no attributes)."
+for fcase in "${FILTER_CASES[@]}"; do
+    for cmd in "${ADOPTED_CLEANUP[@]}"; do
+        setup_filter_case "$fcase"
+        EXTRA_ENV+=("${CLEANUP_ENV[@]}")
+        cleanup "$cmd" on
+        printf '  %-44s %-12s exit=%s ran=%s\n' "$fcase" "$cmd" "$RC" "$(filter_ran)"
+    done
+done
+echo "  The global keys survive the override (hooks and fsmonitor in the repository config):"
+for where in core.hooksPath common-hooks-dir; do
+    for cmd in "${ADOPTED_CLEANUP[@]}"; do
+        new_case
+        if [[ "$where" == core.hooksPath ]]; then
+            make_hooks "$CASE_DIR/hooks"
+            git -C "$REPO" config core.hooksPath "$CASE_DIR/hooks"
+        else
+            make_hooks "$REPO/.git/hooks"
+        fi
+        git -C "$REPO" config core.fsmonitor "$BIN/fsmonitor-hook"
+        touch_tracked
+        rm -f "$MARKER" "$SCRATCH/fsmonitor-marker"
+        EXTRA_ENV=("${CLEANUP_ENV[@]}")
+        cleanup "$cmd" on
+        hooks="none"
+        [[ -e "$MARKER" ]] && hooks="$(sort -u "$MARKER" | paste -sd, -)"
+        fsmonitor=no
+        [[ -e "$SCRATCH/fsmonitor-marker" ]] && fsmonitor=yes
+        printf '  hooks in %-17s %-12s exit=%s hooks=%s fsmonitor ran=%s\n' "$where" "$cmd" "$RC" "$hooks" "$fsmonitor"
+    done
+done
+
+echo
+echo "-- The common-dir check: git's answer against <main checkout>/.git (adopted env, cwd = worktree) --"
+echo "  <main checkout> is the first entry of git worktree list --porcelain, run in the repository, as the"
+echo "  core reads it; the comparison is exact, one line end allowed."
+for rcase in intact commondir-absolute commondir-relative repository-via-symlink; do
+    new_case
+    cwd="$WT"
+    case "$rcase" in
+        commondir-absolute)
+            cp -a "$REPO/.git" "$CASE_DIR/evil.git"
+            printf '%s\n' "$CASE_DIR/evil.git" >"$REPO/.git/worktrees/wt/commondir"
+            ;;
+        commondir-relative)
+            cp -a "$REPO/.git" "$CASE_DIR/evil.git"
+            printf '../../../../evil.git\n' >"$REPO/.git/worktrees/wt/commondir"
+            ;;
+        repository-via-symlink)
+            ln -s "$REPO" "$CASE_DIR/link"
+            git -C "$CASE_DIR/link" worktree add -q -b agent/z "$WT_ROOT/via-link"
+            cwd="$WT_ROOT/via-link"
+            ;;
+        *) ;;
+    esac
+    main="$(git -C "$REPO" worktree list --porcelain | sed -n '1s/^worktree //p')"
+    gitfile="$(sed 's/^gitdir: //' "$cwd/.git")"
+    [[ "$gitfile" == "$main/.git/worktrees/$(basename "$cwd")" ]] && intact=yes || intact=no
+    EXTRA_ENV=("${CLEANUP_ENV[@]}")
+    run on "$cwd" "${COMMON_DIR[@]}"
+    # Exactly as the core compares: the path, optionally followed by one line end.
+    raw="$(cat "$SCRATCH/out" && printf x)"
+    raw="${raw%x}"
+    [[ "$raw" == "$main/.git" || "$raw" == "$main/.git"$'\n' ]] && equal=yes || equal=no
+    printf '  %-24s .git file intact=%-3s exit=%s output=%-22s equals <main>/.git=%s\n' \
+        "$rcase" "$intact" "$RC" "$OUT" "$equal"
+done
+
+echo
+echo "-- A nested repository whose own config defines filter f and whose info/attributes names it --"
+echo "  (adopted env). gitlink = committed as a submodule (mode 160000); untracked = never added;"
+echo "  uncached = committed, then git rm --cached. clean = just checked out; stat-dirty = its file"
+echo "  touched; modified = its file changed. index = what the index check (${INDEX_FLAGS[*]}) shows."
+for ncase in gitlink untracked uncached; do
+    for nstate in clean stat-dirty modified; do
+        cells=()
+        index=""
+        for cmd in "${ADOPTED_CLEANUP[@]}"; do
+            new_case
+            git init -q -b main "$WT/sub"
+            printf 's\n' >"$WT/sub/s.txt"
+            commit_all "$WT/sub" sub
+            if [[ "$ncase" != untracked ]]; then
+                git -C "$WT" add sub 2>/dev/null
+                git -C "$WT" commit -q -m gitlink
+            fi
+            [[ "$ncase" == uncached ]] && git -C "$WT" rm -q --cached sub
+            git -C "$WT/sub" config filter.f.clean "$BIN/filter-cat $MARKER"
+            mkdir -p "$WT/sub/.git/info"
+            printf '* filter=f\n' >"$WT/sub/.git/info/attributes"
+            case "$nstate" in
+                stat-dirty) touch -d @1000000000 "$WT/sub/s.txt" ;;
+                modified) printf 't\n' >>"$WT/sub/s.txt" ;;
+                *) ;;
+            esac
+            rm -f "$MARKER"
+            EXTRA_ENV=("${CLEANUP_ENV[@]}")
+            cleanup "$cmd" on
+            cells+=("$cmd:exit=$RC,ran=$(filter_ran)")
+            [[ "$cmd" == index-flags ]] && index="$(grep -c ' 160000 ' <<<"$OUT" || true) gitlink"
+        done
+        printf '  %-9s %-10s index=%s\n' "$ncase" "$nstate" "$index"
+        printf '      %s\n' "${cells[@]}"
     done
 done
 

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <expected>
 #include <initializer_list>
 #include <optional>
@@ -80,35 +81,63 @@ namespace
     // }}}
     // {{{ environments
 
-    constexpr auto CommandEnvironmentTable = std::array {
-        EnvironmentVariable { .name = "GIT_TERMINAL_PROMPT", .value = "0" },
-        EnvironmentVariable { .name = "GIT_ALLOW_PROTOCOL", .value = "https:ssh:git:file" },
-        EnvironmentVariable { .name = "GIT_CONFIG_COUNT", .value = "2" },
+    /// The environment tables joined in order: @p parts' variables one after another.
+    template <std::size_t... Sizes>
+    [[nodiscard]] constexpr auto concatenated(std::array<EnvironmentVariable, Sizes> const&... parts)
+    {
+        auto result = std::array<EnvironmentVariable, (Sizes + ...)> {};
+        auto next = result.begin();
+        ((next = std::ranges::copy(parts, next).out), ...);
+        return result;
+    }
+
+    /// The configuration every declared command forces: no fsmonitor program and no hooks. A
+    /// GIT_CONFIG_COUNT that counts these pairs must come with them.
+    constexpr auto ForcedConfiguration = std::array {
         EnvironmentVariable { .name = "GIT_CONFIG_KEY_0", .value = "core.fsmonitor" },
         EnvironmentVariable { .name = "GIT_CONFIG_VALUE_0", .value = "false" },
         EnvironmentVariable { .name = "GIT_CONFIG_KEY_1", .value = "core.hooksPath" },
         EnvironmentVariable { .name = "GIT_CONFIG_VALUE_1", .value = "/dev/null" },
     };
 
+    constexpr auto CommandEnvironmentTable = concatenated(
+        std::array {
+            EnvironmentVariable { .name = "GIT_TERMINAL_PROMPT", .value = "0" },
+            EnvironmentVariable { .name = "GIT_ALLOW_PROTOCOL", .value = "https:ssh:git:file" },
+            EnvironmentVariable { .name = "GIT_CONFIG_COUNT", .value = "2" },
+        },
+        ForcedConfiguration);
+
     /// The empty tree's object id: attributes read from it name no filter.
     constexpr auto EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"sv;
+
+    /// The cleanup commands' git configuration: the forced pairs again, because a command's own
+    /// GIT_CONFIG_COUNT replaces the global one, plus no attributes file, so neither `core.attributesFile`
+    /// nor the user's `$XDG_CONFIG_HOME/git/attributes` can select a filter (measured, R11). It must not
+    /// reach `git worktree add` or `gh pr checkout`, where the user's attributes may select LFS.
+    constexpr auto CleanupConfiguration =
+        concatenated(std::array { EnvironmentVariable { .name = "GIT_CONFIG_COUNT", .value = "3" } },
+                     ForcedConfiguration,
+                     std::array {
+                         EnvironmentVariable { .name = "GIT_CONFIG_KEY_2", .value = "core.attributesFile" },
+                         EnvironmentVariable { .name = "GIT_CONFIG_VALUE_2", .value = "/dev/null" },
+                     });
 
     /// For the commands that run git inside an agent-controlled worktree: attributes come from the empty
     /// tree, so a .gitattributes the agent wrote cannot make git run a clean filter it names. It must not
     /// reach `git worktree add` or `gh pr checkout`, where it would skip smudge filters and break LFS
     /// checkouts. No optional lock either: a kept worktree is checked again on every poll, and a status that
     /// refreshed the index would take `index.lock` while the user works in that worktree.
-    constexpr auto CleanupEnvironment = std::array {
-        EnvironmentVariable { .name = "GIT_ATTR_SOURCE", .value = EmptyTree },
-        EnvironmentVariable { .name = "GIT_OPTIONAL_LOCKS", .value = "0" },
-    };
+    constexpr auto CleanupEnvironment =
+        concatenated(CleanupConfiguration,
+                     std::array {
+                         EnvironmentVariable { .name = "GIT_ATTR_SOURCE", .value = EmptyTree },
+                         EnvironmentVariable { .name = "GIT_OPTIONAL_LOCKS", .value = "0" },
+                     });
 
     /// The cleanup environment, plus the C locale: the caller reads git's untranslated lines.
-    constexpr auto OperationStateEnvironment = std::array {
-        EnvironmentVariable { .name = "LC_ALL", .value = "C" },
-        EnvironmentVariable { .name = "GIT_ATTR_SOURCE", .value = EmptyTree },
-        EnvironmentVariable { .name = "GIT_OPTIONAL_LOCKS", .value = "0" },
-    };
+    constexpr auto OperationStateEnvironment = concatenated(
+        std::array { EnvironmentVariable { .name = "LC_ALL", .value = "C" } }, CleanupEnvironment);
 
     /// An issue's branch gets no upstream when it is created (`--no-track`), so it never tracks the default
     /// branch; the agent's first push sets the upstream to the branch of the same name.
@@ -166,10 +195,17 @@ namespace
         "git"sv,  "for-each-ref"sv, "--count=1"sv, "--contains"sv,
         "HEAD"sv, "refs/heads"sv,   "refs/tags"sv, "refs/remotes"sv,
     };
-    /// Each index entry with its tag in front: lowercase for a file marked assume-unchanged, `S` for one
-    /// marked skip-worktree. `git status` does not see a change to such a file, and the unforced remove
-    /// deletes it.
-    constexpr auto GitIndexFlagsArgv = std::array { "git"sv, "ls-files"sv, "-v"sv };
+    /// The repository directory git actually uses from inside the worktree, resolved. A worktree whose
+    /// `commondir` link was redirected names another directory here, whose configuration and
+    /// `info/attributes` git would then read (measured, R11). It reads no attributes and no index.
+    constexpr auto GitCommonDirArgv =
+        std::array { "git"sv, "rev-parse"sv, "--path-format=absolute"sv, "--git-common-dir"sv };
+    /// Each index entry with its tag and mode in front. The tag is lowercase for a file marked
+    /// assume-unchanged and `S` for one marked skip-worktree: `git status` does not see a change to such a
+    /// file, and the unforced remove deletes it. Mode 160000 is a submodule, whose own repository
+    /// `git status` would enter. It reads no attributes (measured, R11), so it runs before anything that
+    /// does.
+    constexpr auto GitIndexFlagsArgv = std::array { "git"sv, "ls-files"sv, "-v"sv, "--stage"sv };
     /// The long status names a rebase, merge, cherry-pick, revert or bisect in progress on a line of its own;
     /// without the comment prefix and colour those lines start in column 0, and it exits 0 in every state.
     constexpr auto GitOperationStateArgv = std::array {
@@ -228,6 +264,11 @@ namespace
                       .root = Root::Worktrees,
                       .argv = GhPrCheckoutArgv,
                       .environment = {} },
+        CommandDecl { .name = "git-common-dir",
+                      .timeout = Timeout::Short,
+                      .root = Root::Worktrees,
+                      .argv = GitCommonDirArgv,
+                      .environment = CleanupEnvironment },
         CommandDecl { .name = "git-status",
                       .timeout = Timeout::Short,
                       .root = Root::Worktrees,

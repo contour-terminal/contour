@@ -73,7 +73,18 @@ using orchestrator::StepContext;
 // {{{ the run every row starts from
 
 constexpr auto MainCheckout = "/home/u/projects/contour"sv;
+/// What `git rev-parse --path-format=absolute --git-common-dir` prints in an intact worktree of MainCheckout.
+constexpr auto MainCommonDir = "/home/u/projects/contour/.git\n"sv;
 constexpr auto IntactGitFile = "gitdir: /home/u/projects/contour/.git/worktrees/pr-2334-20261113-150847\n"sv;
+constexpr auto HiddenKept =
+    "Finished(completed, kept, new: a file is marked assume-unchanged or skip-worktree, so git "
+    "status cannot see its changes)"sv;
+constexpr auto SubmoduleKept =
+    "Finished(completed, kept, new: a submodule is in the index: git status would run git in "
+    "its own repository, and git worktree remove refuses it)"sv;
+constexpr auto RedirectedKept =
+    "Finished(completed, kept, new: git uses another directory than the main checkout's "
+    ".git; nothing more was run there)"sv;
 constexpr auto AlteredGitFile = "gitdir: /tmp/elsewhere/.git/worktrees/pr-2334-20261113-150847\n"sv;
 constexpr auto StartedMs = uint64_t { 1'794'578'927'000 };
 constexpr auto NowMs = uint64_t { 1'794'580'000'000 };
@@ -165,9 +176,10 @@ constexpr auto PrepareSteps = std::array {
 constexpr auto EndSteps = std::array {
     Spelling { EndStep::ClosePane, "close-pane"sv },
     Spelling { EndStep::Verify, "verify"sv },
+    Spelling { EndStep::CommonDir, "common-dir"sv },
+    Spelling { EndStep::IndexFlags, "index-flags"sv },
     Spelling { EndStep::Reachable, "reachable"sv },
     Spelling { EndStep::OperationState, "operation-state"sv },
-    Spelling { EndStep::IndexFlags, "index-flags"sv },
     Spelling { EndStep::Status, "status"sv },
     Spelling { EndStep::CleanStatusBoard, "clean-status-board"sv },
     Spelling { EndStep::Remove, "remove"sv },
@@ -542,13 +554,13 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
         { .from = "verify, intact",
           .state = endingAt(EndStep::Verify),
           .input = GitFileRead { .content = IntactGitFile },
-          .to = "Ending(reachable, completed)",
-          .effects = "persist, run git-head-reachable" },
+          .to = "Ending(common-dir, completed)",
+          .effects = "persist, run git-common-dir" },
         { .from = "verify, intact without a line end",
           .state = endingAt(EndStep::Verify),
           .input = GitFileRead { .content = IntactGitFile.substr(0, IntactGitFile.size() - 1) },
-          .to = "Ending(reachable, completed)",
-          .effects = "persist, run git-head-reachable" },
+          .to = "Ending(common-dir, completed)",
+          .effects = "persist, run git-common-dir" },
         { .from = "verify, altered",
           .state = endingAt(EndStep::Verify),
           .input = GitFileRead { .content = AlteredGitFile },
@@ -599,6 +611,114 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
           .input = Lost {},
           .to = "Ending(verify, completed)",
           .effects = VerifyEffects },
+        // Ending(CommonDir): git's own answer, after the .git file and before any other git command.
+        { .from = "common-dir, the main checkout's .git",
+          .state = endingAt(EndStep::CommonDir),
+          .input = CommandOk { MainCommonDir },
+          .to = "Ending(index-flags, completed)",
+          .effects = "persist, run git-index-flags" },
+        { .from = "common-dir, the main checkout's .git without a line end",
+          .state = endingAt(EndStep::CommonDir),
+          .input = CommandOk { "/home/u/projects/contour/.git" },
+          .to = "Ending(index-flags, completed)",
+          .effects = "persist, run git-index-flags" },
+        { .from = "common-dir, redirected elsewhere",
+          .state = endingAt(EndStep::CommonDir),
+          .input = CommandOk { "/tmp/evil.git\n" },
+          .to = RedirectedKept,
+          .effects = "persist" },
+        { .from = "common-dir, redirected to another repository's .git",
+          .state = endingAt(EndStep::CommonDir),
+          .input = CommandOk { "/home/u/projects/other/.git\n" },
+          .to = RedirectedKept,
+          .effects = "persist" },
+        { .from = "common-dir, redirected below the main checkout",
+          .state = endingAt(EndStep::CommonDir),
+          .input = CommandOk { "/home/u/projects/contour/.git/x\n" },
+          .to = RedirectedKept,
+          .effects = "persist" },
+        { .from = "common-dir, a sibling sharing the main checkout's prefix",
+          .state = endingAt(EndStep::CommonDir),
+          .input = CommandOk { "/home/u/projects/contour-evil/.git\n" },
+          .to = RedirectedKept,
+          .effects = "persist" },
+        { .from = "common-dir, no output",
+          .state = endingAt(EndStep::CommonDir),
+          .input = CommandOk { "" },
+          .to = RedirectedKept,
+          .effects = "persist" },
+        { .from = "common-dir, a second line",
+          .state = endingAt(EndStep::CommonDir),
+          .input = CommandOk { "/home/u/projects/contour/.git\n\n" },
+          .to = RedirectedKept,
+          .effects = "persist" },
+        { .from = "common-dir, main checkout unknown",
+          .state = endingAt(EndStep::CommonDir),
+          .input = CommandOk { MainCommonDir },
+          .to = "Finished(completed, kept, new: the main checkout is not known; nothing was run there)",
+          .effects = "persist",
+          .checkout = Checkout::Unknown },
+        // Ending(IndexFlags): `git ls-files -v --stage`, before anything that reads attributes.
+        { .from = "index-flags, none set",
+          .state = endingAt(EndStep::IndexFlags),
+          .input = CommandOk { "H 100644 78981922613b2afb6025042ff6bd878ac1994e85 0\ta.txt\nH 100755 "
+                               "78981922613b2afb6025042ff6bd878ac1994e85 0\tdir/b.sh\n" },
+          .to = "Ending(reachable, completed)",
+          .effects = "persist, run git-head-reachable" },
+        { .from = "index-flags, an empty index",
+          .state = endingAt(EndStep::IndexFlags),
+          .input = CommandOk { "" },
+          .to = "Ending(reachable, completed)",
+          .effects = "persist, run git-head-reachable" },
+        { .from = "index-flags, a symbolic link",
+          .state = endingAt(EndStep::IndexFlags),
+          .input = CommandOk { "H 120000 78981922613b2afb6025042ff6bd878ac1994e85 0\tlink\n" },
+          .to = "Ending(reachable, completed)",
+          .effects = "persist, run git-head-reachable" },
+        { .from = "index-flags, an unmerged entry",
+          .state = endingAt(EndStep::IndexFlags),
+          .input = CommandOk { "M 100644 78981922613b2afb6025042ff6bd878ac1994e85 2\ta.txt\n" },
+          .to = "Ending(reachable, completed)",
+          .effects = "persist, run git-head-reachable" },
+        { .from = "index-flags, a file marked assume-unchanged",
+          .state = endingAt(EndStep::IndexFlags),
+          .input = CommandOk { "H 100644 78981922613b2afb6025042ff6bd878ac1994e85 0\ta.txt\nh 100644 "
+                               "78981922613b2afb6025042ff6bd878ac1994e85 0\tb.txt\n" },
+          .to = HiddenKept,
+          .effects = "persist" },
+        { .from = "index-flags, a file marked skip-worktree",
+          .state = endingAt(EndStep::IndexFlags),
+          .input = CommandOk { "S 100644 78981922613b2afb6025042ff6bd878ac1994e85 0\tb.txt\nH 100644 "
+                               "78981922613b2afb6025042ff6bd878ac1994e85 0\tc.txt\n" },
+          .to = HiddenKept,
+          .effects = "persist" },
+        { .from = "index-flags, a file marked both",
+          .state = endingAt(EndStep::IndexFlags),
+          .input = CommandOk { "s 100644 78981922613b2afb6025042ff6bd878ac1994e85 0\tb.txt\n" },
+          .to = HiddenKept,
+          .effects = "persist" },
+        { .from = "index-flags, a submodule",
+          .state = endingAt(EndStep::IndexFlags),
+          .input = CommandOk { "H 100644 78981922613b2afb6025042ff6bd878ac1994e85 0\ta.txt\nH 160000 "
+                               "78981922613b2afb6025042ff6bd878ac1994e85 0\tsub\n" },
+          .to = SubmoduleKept,
+          .effects = "persist" },
+        { .from = "index-flags, a submodule and a hidden file",
+          .state = endingAt(EndStep::IndexFlags),
+          .input = CommandOk { "h 100644 78981922613b2afb6025042ff6bd878ac1994e85 0\ta.txt\nH 160000 "
+                               "78981922613b2afb6025042ff6bd878ac1994e85 0\tsub\n" },
+          .to = SubmoduleKept,
+          .effects = "persist" },
+        { .from = "index-flags, the old format without --stage",
+          .state = endingAt(EndStep::IndexFlags),
+          .input = CommandOk { "H a.txt\n" },
+          .to = "Finished(completed, kept, new: unrecognised git ls-files output)",
+          .effects = "persist" },
+        { .from = "index-flags, a line without a mode",
+          .state = endingAt(EndStep::IndexFlags),
+          .input = CommandOk { "H  x 0\ta.txt\n" },
+          .to = "Finished(completed, kept, new: unrecognised git ls-files output)",
+          .effects = "persist" },
         // Ending(Reachable)
         { .from = "reachable, HEAD in no ref",
           .state = endingAt(EndStep::Reachable),
@@ -641,37 +761,8 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
         { .from = "operation-state, none",
           .state = endingAt(EndStep::OperationState),
           .input = CommandOk { CleanLongStatus },
-          .to = "Ending(index-flags, completed)",
-          .effects = "persist, run git-index-flags" },
-        // Ending(IndexFlags)
-        { .from = "index-flags, none set",
-          .state = endingAt(EndStep::IndexFlags),
-          .input = CommandOk { "H a.txt\nH dir/b.txt\n" },
           .to = "Ending(status, completed)",
           .effects = "persist, run git-status" },
-        { .from = "index-flags, an empty index",
-          .state = endingAt(EndStep::IndexFlags),
-          .input = CommandOk { "" },
-          .to = "Ending(status, completed)",
-          .effects = "persist, run git-status" },
-        { .from = "index-flags, a file marked assume-unchanged",
-          .state = endingAt(EndStep::IndexFlags),
-          .input = CommandOk { "H a.txt\nh b.txt\n" },
-          .to = "Finished(completed, kept, new: a file is marked assume-unchanged or skip-worktree, so git "
-                "status cannot see its changes)",
-          .effects = "persist" },
-        { .from = "index-flags, a file marked skip-worktree",
-          .state = endingAt(EndStep::IndexFlags),
-          .input = CommandOk { "S b.txt\nH c.txt\n" },
-          .to = "Finished(completed, kept, new: a file is marked assume-unchanged or skip-worktree, so git "
-                "status cannot see its changes)",
-          .effects = "persist" },
-        { .from = "index-flags, a file marked both",
-          .state = endingAt(EndStep::IndexFlags),
-          .input = CommandOk { "s b.txt\n" },
-          .to = "Finished(completed, kept, new: a file is marked assume-unchanged or skip-worktree, so git "
-                "status cannot see its changes)",
-          .effects = "persist" },
         // Ending(Status)
         { .from = "status, clean",
           .state = endingAt(EndStep::Status),
@@ -876,12 +967,15 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
         std::string_view kept;
     };
     constexpr auto CommandSteps = std::array {
+        CommandStep { .step = EndStep::CommonDir,
+                      .kept =
+                          "Finished(completed, kept, new: the common-directory check failed: timed out)" },
         CommandStep { .step = EndStep::Reachable,
                       .kept = "Finished(completed, kept, new: the reachability check failed: timed out)" },
         CommandStep { .step = EndStep::OperationState,
                       .kept = "Finished(completed, kept, new: the operation-state check failed: timed out)" },
         CommandStep { .step = EndStep::IndexFlags,
-                      .kept = "Finished(completed, kept, new: the index-flags check failed: timed out)" },
+                      .kept = "Finished(completed, kept, new: the index check failed: timed out)" },
         CommandStep { .step = EndStep::Status,
                       .kept = "Finished(completed, kept, new: git status failed: timed out)" },
         CommandStep { .step = EndStep::CleanStatusBoard,
@@ -1019,12 +1113,15 @@ TEST_CASE("a run that never reported is its own ended value", "[orchestrator][ru
     CHECK_FALSE(run.pane.has_value());
     CHECK_FALSE(run.lastStatus.has_value());
     CHECK(describe(orchestrator::advance(run, GitFileRead { .content = IntactGitFile }, context))
+          == "persist, run git-common-dir");
+    CHECK(describe(orchestrator::advance(run, CommandOk { MainCommonDir }, context))
+          == "persist, run git-index-flags");
+    CHECK(describe(orchestrator::advance(
+              run, CommandOk { "H 100644 78981922613b2afb6025042ff6bd878ac1994e85 0\ta.txt\n" }, context))
           == "persist, run git-head-reachable");
     CHECK(describe(orchestrator::advance(run, CommandOk { "c\trefs/heads/agent/x\n" }, context))
           == "persist, run git-operation-state");
     CHECK(describe(orchestrator::advance(run, CommandOk { CleanLongStatus }, context))
-          == "persist, run git-index-flags");
-    CHECK(describe(orchestrator::advance(run, CommandOk { "H a.txt\n" }, context))
           == "persist, run git-status");
     CHECK(describe(orchestrator::advance(run, CommandOk { "" }, context))
           == "persist, run git-worktree-remove path");
@@ -1068,9 +1165,11 @@ TEST_CASE("a kept run re-checked on a poll stays seen", "[orchestrator][run]")
     CHECK_FALSE(orchestrator::countsAsActive(run));
     CHECK(orchestrator::isUnfinished(run));
     (void) orchestrator::advance(run, GitFileRead { .content = IntactGitFile }, context);
+    (void) orchestrator::advance(run, CommandOk { MainCommonDir }, context);
+    (void) orchestrator::advance(
+        run, CommandOk { "H 100644 78981922613b2afb6025042ff6bd878ac1994e85 0\ta.txt\n" }, context);
     (void) orchestrator::advance(run, CommandOk { "c\trefs/heads/x\n" }, context);
     (void) orchestrator::advance(run, CommandOk { CleanLongStatus }, context);
-    (void) orchestrator::advance(run, CommandOk { "H a.txt\n" }, context);
     (void) orchestrator::advance(run, CommandOk { "?? new.txt\n" }, context);
     CHECK(describe(run.state) == "Finished(completed, kept, opened: ?? new.txt)");
     auto const* finished = std::get_if<Finished>(&run.state);
@@ -1226,7 +1325,8 @@ struct AwaitingState
     }
     states.push_back({ "checkout", Preparing { PrepareStep::Checkout }, Item::Pr, commandResults });
     states.push_back({ "verify", endingAt(EndStep::Verify), Item::Pr, fileResults });
-    for (auto const step: { EndStep::Reachable,
+    for (auto const step: { EndStep::CommonDir,
+                            EndStep::Reachable,
                             EndStep::OperationState,
                             EndStep::IndexFlags,
                             EndStep::Status,
@@ -1355,6 +1455,7 @@ TEST_CASE("every declared command passes its declaration", "[orchestrator][run]"
     CHECK(names
           == std::vector<std::string_view> { "gh-pr-checkout",
                                              "git-clean",
+                                             "git-common-dir",
                                              "git-fetch",
                                              "git-head-reachable",
                                              "git-index-flags",
@@ -1499,6 +1600,7 @@ TEST_CASE("stepTag, countsAsActive and isUnfinished per state", "[orchestrator][
         // An Ending run neither blocks its item nor holds a slot, but still has steps to take.
         { endingAt(EndStep::ClosePane), "", Expect::No, Expect::Yes },
         { endingAt(EndStep::Verify), "pr-2334-20261113-150847/verify", Expect::No, Expect::Yes },
+        { endingAt(EndStep::CommonDir), "pr-2334-20261113-150847/common-dir", Expect::No, Expect::Yes },
         { endingAt(EndStep::Reachable), "pr-2334-20261113-150847/reachable", Expect::No, Expect::Yes },
         { endingAt(EndStep::OperationState),
           "pr-2334-20261113-150847/operation-state",
@@ -1620,6 +1722,38 @@ TEST_CASE("gitFileIsIntact", "[orchestrator][run]")
         orchestrator::gitFileIsIntact("gitdir: /r/contour/.git/worktrees/\n", "/r/contour", "/w/contour/"));
 }
 
+TEST_CASE("commonDirIsMain", "[orchestrator][run]")
+{
+    struct Row
+    {
+        std::string_view name;
+        std::string_view output;
+        Expect main;
+    };
+    // Compared as gitFileIsIntact compares: exact, one optional line end. git prints the resolved path, as
+    // `git worktree list` does for the main checkout (measured, R11).
+    constexpr auto Rows = std::array {
+        Row { .name = "exact", .output = "/r/contour/.git", .main = Expect::Yes },
+        Row { .name = "line end", .output = "/r/contour/.git\n", .main = Expect::Yes },
+        Row { .name = "two line ends", .output = "/r/contour/.git\n\n", .main = Expect::No },
+        Row { .name = "carriage return", .output = "/r/contour/.git\r\n", .main = Expect::No },
+        Row { .name = "redirected", .output = "/tmp/evil.git\n", .main = Expect::No },
+        Row {
+            .name = "a sibling sharing the prefix", .output = "/r/contour-evil/.git\n", .main = Expect::No },
+        Row { .name = "below the .git", .output = "/r/contour/.git/worktrees/x\n", .main = Expect::No },
+        Row { .name = "a trailing slash", .output = "/r/contour/.git/\n", .main = Expect::No },
+        Row { .name = "relative", .output = "../../.git\n", .main = Expect::No },
+        Row { .name = "the checkout itself", .output = "/r/contour\n", .main = Expect::No },
+        Row { .name = "empty", .output = "", .main = Expect::No },
+    };
+    for (auto const& row: Rows)
+    {
+        CAPTURE(row.name);
+        CHECK(orchestrator::commonDirIsMain(row.output, "/r/contour") == (row.main == Expect::Yes));
+    }
+    CHECK_FALSE(orchestrator::commonDirIsMain("/.git\n", ""));
+}
+
 // }}}
 // {{{ storage
 
@@ -1677,6 +1811,7 @@ TEST_CASE("runFromJson reads what toJson writes", "[orchestrator][run]")
         Done {},
         endingAt(EndStep::ClosePane, Ended::EndedByYou),
         endingAt(EndStep::Verify),
+        endingAt(EndStep::CommonDir),
         endingAt(EndStep::Reachable, Ended::PreparationFailed),
         endingAt(EndStep::OperationState, Ended::NeverReported),
         endingAt(EndStep::IndexFlags),
