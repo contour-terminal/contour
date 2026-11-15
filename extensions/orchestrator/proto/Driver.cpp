@@ -84,6 +84,8 @@ std::expected<Driver, DriverHealth> Driver::start(DriverSetup setup)
         if (auto run = runFromJson(entry.value))
             runs.push_back(std::move(*run));
     auto const owned = ownedPanes(runs);
+    // What the start changes is said like any later change: the runs as stored are the first look.
+    auto const storedLook = snapshotRuns(runs);
 
     // The listing's request time is the start's own time, read before the listing is asked for.
     auto const monoMs = monotonicNowMs();
@@ -118,6 +120,8 @@ std::expected<Driver, DriverHealth> Driver::start(DriverSetup setup)
                                                 .panes = std::move(panes),
                                                 .paneListing = PaneListing::OwnRecordsOnly });
     auto driver = Driver { std::move(started.engine), std::move(setup) };
+    for (auto const& line: driver._report.lines(storedLook, snapshotRuns(driver._engine.runs())))
+        std::println("{}", line);
     if (auto const health = driver.carryOut(started.effects); health != DriverHealth::Healthy)
         return std::unexpected { health };
     if (auto const health = driver.drain(); health != DriverHealth::Healthy)
@@ -141,9 +145,11 @@ DriverHealth Driver::drain()
             case NextStep::Feed: {
                 auto const input = _queue.take();
                 // Every change of a run is said as it happens, so that what an action did needs no `runs`.
+                if (auto const* const retry = std::get_if<RetryRemovalOf>(&input))
+                    _report.requested(retry->run);
                 auto const before = snapshotRuns(_engine.runs());
                 auto const effects = _engine.step(input);
-                for (auto const& line: changeLines(before, snapshotRuns(_engine.runs())))
+                for (auto const& line: _report.lines(before, snapshotRuns(_engine.runs())))
                     std::println("{}", line);
                 if (auto const health = carryOut(effects); health != DriverHealth::Healthy)
                     return health;

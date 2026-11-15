@@ -15,6 +15,7 @@
 #include <orchestrator/core/Config.hpp>
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/proto/Control.hpp>
+#include <orchestrator/proto/RunChanges.hpp>
 #include <orchestrator/proto/Spawn.hpp>
 #include <orchestrator/proto/StepQueue.hpp>
 #include <orchestrator/proto/Store.hpp>
@@ -104,6 +105,7 @@ class Driver
     StepQueue _queue; ///< The inputs the effects produced, in order, and the listing a Wake asks for.
     std::optional<uint64_t> _wakeAtMs;
     std::string _publishedShort;
+    ChangeReport _report; ///< Says each run's changes, a kept worktree's re-check by its outcome only.
 };
 
 } // namespace orchestrator::proto
