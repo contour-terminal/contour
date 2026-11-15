@@ -24,6 +24,7 @@
 #include <orchestrator/core/ConfigJson.hpp>
 #include <orchestrator/core/Json.hpp>
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/Prompt.hpp>
 #include <orchestrator/core/Provider.hpp>
 
 using namespace std::string_view_literals;
@@ -244,8 +245,6 @@ namespace
 
     /// The remote a repository uses unless it names another.
     constexpr auto DefaultRemote = "origin"sv;
-    /// What a prompt writes where the item's URL goes.
-    constexpr auto UrlPlaceholder = "{url}"sv;
     /// The models a run may choose unless `models` names others.
     constexpr auto DefaultModels = std::array { "opus"sv, "sonnet"sv, "haiku"sv };
 

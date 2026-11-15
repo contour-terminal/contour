@@ -39,6 +39,10 @@ add_library(orchestrator_core STATIC
     core/JsonPrefix.hpp
     core/Model.cpp
     core/Model.hpp
+    core/Naming.cpp
+    core/Naming.hpp
+    core/Prompt.cpp
+    core/Prompt.hpp
     core/Provider.cpp
     core/Provider.hpp
     core/Sanitize.cpp
@@ -64,6 +68,8 @@ if(ORCHESTRATOR_TESTING)
         core/Fixtures.hpp
         core/GitHub_test.cpp
         core/JsonPrefix_test.cpp
+        core/Naming_test.cpp
+        core/Prompt_test.cpp
         core/Provider_test.cpp
         core/Sanitize_test.cpp
         core/Utf8_test.cpp
