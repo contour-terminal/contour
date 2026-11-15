@@ -322,9 +322,21 @@ void Engine::onPollResult(std::string_view tag, ProcessOutcome const& outcome, s
     {
         // Not part of the poll's outcome: a failing git does not slow the forge down.
         if (ok)
+        {
             state->worktrees = worktreeEntries(outcome.stdoutText);
+            state->worktreeListFailures = 0;
+        }
         else
+        {
             lines = failureLines(repo->name, repo->path, "the worktree list"sv, judgement);
+            ++state->worktreeListFailures;
+        }
+        // An answer that names no main checkout, a directory that is gone, or a listing that keeps failing
+        // is definitive: a run waiting for the main checkout stops waiting. Any other failure is not, yet.
+        if (ok || judgement.verdict == Verdict::CwdMissing
+            || state->worktreeListFailures >= MaxWorktreeListFailures)
+            state->unknownCheckout = CheckoutUnknown::Unavailable;
+        resumeCheckoutWaits(out);
         return;
     }
 
@@ -423,7 +435,7 @@ void Engine::recheckFinished(std::vector<Effect>& out)
             purge.push_back(run.id);
         // Until its main checkout is known (the first worktree listing), a check could only replace the
         // kept run's reason with "not known": it waits for a poll that knows it.
-        else if (finished->fate == Fate::Kept && contextFor(run).mainCheckout)
+        else if (finished->fate == Fate::Kept && !unknownCheckout(run))
             retry.push_back(run.id);
     }
     for (auto const& id: purge)
@@ -435,6 +447,18 @@ void Engine::recheckFinished(std::vector<Effect>& out)
     // A kept worktree cleaned up by hand is removed on the next poll.
     for (auto const& id: retry)
         feed(id, RetryRemoval {}, out);
+}
+
+void Engine::resumeCheckoutWaits(std::vector<Effect>& out)
+{
+    auto ids = std::vector<std::string> {};
+    for (auto const& run: std::span(_runs).first(_insideCount))
+        if (auto const* const ending = std::get_if<Ending>(&run.state);
+            ending != nullptr && ending->step == EndStep::MainCheckout)
+            ids.push_back(run.id);
+    // A run whose main checkout is still not known stays as it is.
+    for (auto const& id: ids)
+        feed(id, CheckoutListed {}, out);
 }
 
 // }}}

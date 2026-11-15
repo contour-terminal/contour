@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -71,6 +72,29 @@ struct RunRefError
                                       RunAction action,
                                       RunRefError const& error,
                                       std::span<Run const> runs);
+
+/// What the engine knows of a run's main checkout, which a kept worktree's checks compare it against.
+enum class CheckoutKnowledge : uint8_t
+{
+    Pending,     ///< Not yet: its repository's worktree listing has not answered.
+    Unavailable, ///< Not at all: the repository is configured at another path, or its listing fails.
+    Known,       ///< Known.
+};
+
+/// What the engine's answer says.
+/// @param unknown Engine::unknownCheckout() of a run.
+/// @return Known for std::nullopt, else Pending or Unavailable.
+[[nodiscard]] CheckoutKnowledge checkoutKnowledge(std::optional<CheckoutUnknown> unknown) noexcept;
+
+/// Why an action resolveRun() accepted is not done now: a kept worktree checked again before its main
+/// checkout is known could find nothing, and would only leave its entry as it was.
+/// @param action The action.
+/// @param run The run it takes.
+/// @param checkout Whether the run's main checkout is known.
+/// @return One line; std::nullopt when the action is done.
+[[nodiscard]] std::optional<std::string> deferralText(RunAction action,
+                                                      Run const& run,
+                                                      CheckoutKnowledge checkout);
 
 /// What an accepted action will do, said before it is done.
 /// @param action The action.

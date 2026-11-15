@@ -46,8 +46,11 @@ namespace
     // kept run's entry ("the reachability check"), where these name it on its own ("reachable").
     constexpr auto PrepareStepNames = std::array { "fetch"sv, "worktree"sv, "checkout"sv, "pane"sv };
     constexpr auto EndStepNames = std::array {
-        "closing tab"sv, "verify"sv, "common dir"sv,   "index"sv,  "reachable"sv,
-        "operation"sv,   "status"sv, "status board"sv, "remove"sv,
+        "closing tab"sv,  "waiting for the main checkout"sv,
+        "verify"sv,       "common dir"sv,
+        "index"sv,        "reachable"sv,
+        "operation"sv,    "status"sv,
+        "status board"sv, "remove"sv,
     };
     constexpr auto EndedNames = std::array {
         "completed"sv, "ended by you"sv, "preparation failed"sv, "never reported"sv, "worktree gone"sv,

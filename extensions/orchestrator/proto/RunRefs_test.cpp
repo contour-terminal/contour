@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <expected>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -269,6 +270,61 @@ TEST_CASE("RunRefs: the confirmation of each action", "[orchestrator][proto]")
     };
     for (auto const& row: Cases)
         CHECK(confirmationText(row.action, "pr-1847-20261115-174348") == row.text);
+}
+
+TEST_CASE("RunRefs: a retry is refused while the main checkout is not known", "[orchestrator][proto]")
+{
+    struct Row
+    {
+        std::string_view name;
+        RunAction action;
+        CheckoutKnowledge checkout;
+        std::optional<std::string_view> text;
+    };
+    static constexpr auto Rows = std::array {
+        Row { .name = "retry, not known yet",
+              .action = RunAction::Retry,
+              .checkout = CheckoutKnowledge::Pending,
+              .text = "not checked: the main checkout of contour is not known yet; try again after the next "
+                      "listing"sv },
+        Row { .name = "retry, not to be known",
+              .action = RunAction::Retry,
+              .checkout = CheckoutKnowledge::Unavailable,
+              .text =
+                  "not checked: the main checkout of contour cannot be found: the repository is configured "
+                  "at another path than /home/u/projects/contour, or git cannot list its worktrees; fix the "
+                  "configuration or the repository, then retry"sv },
+        Row { .name = "retry, known",
+              .action = RunAction::Retry,
+              .checkout = CheckoutKnowledge::Known,
+              .text = std::nullopt },
+        // Ending waits for the checkout instead: its tab is closed now, its checks run once it is known.
+        Row { .name = "end, not known",
+              .action = RunAction::End,
+              .checkout = CheckoutKnowledge::Pending,
+              .text = std::nullopt },
+        Row { .name = "dismiss, not known",
+              .action = RunAction::Dismiss,
+              .checkout = CheckoutKnowledge::Pending,
+              .text = std::nullopt },
+    };
+    auto run = makeRun("issue-1847-20261115-110000", IssueRef { .number = 1847 }, finished(Fate::Kept));
+    run.repoPath = "/home/u/projects/contour";
+    for (auto const& row: Rows)
+    {
+        CAPTURE(row.name);
+        auto const text = deferralText(row.action, run, row.checkout);
+        CHECK(text.has_value() == row.text.has_value());
+        if (text && row.text)
+            CHECK(*text == *row.text);
+    }
+}
+
+TEST_CASE("RunRefs: what the engine knows of the main checkout", "[orchestrator][proto]")
+{
+    CHECK(checkoutKnowledge(std::nullopt) == CheckoutKnowledge::Known);
+    CHECK(checkoutKnowledge(CheckoutUnknown::Pending) == CheckoutKnowledge::Pending);
+    CHECK(checkoutKnowledge(CheckoutUnknown::Unavailable) == CheckoutKnowledge::Unavailable);
 }
 
 TEST_CASE("RunRefs: which runs each action takes", "[orchestrator][proto]")

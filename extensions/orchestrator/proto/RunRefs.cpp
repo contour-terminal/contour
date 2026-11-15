@@ -274,6 +274,40 @@ std::string refusalText(std::string_view word,
     return std::format("{}: not understood", word);
 }
 
+CheckoutKnowledge checkoutKnowledge(std::optional<CheckoutUnknown> unknown) noexcept
+{
+    if (!unknown)
+        return CheckoutKnowledge::Known;
+    switch (*unknown)
+    {
+        case CheckoutUnknown::Pending: return CheckoutKnowledge::Pending;
+        case CheckoutUnknown::Unavailable: return CheckoutKnowledge::Unavailable;
+    }
+    return CheckoutKnowledge::Unavailable;
+}
+
+std::optional<std::string> deferralText(RunAction action, Run const& run, CheckoutKnowledge checkout)
+{
+    if (action != RunAction::Retry)
+        return std::nullopt;
+    switch (checkout)
+    {
+        case CheckoutKnowledge::Known: return std::nullopt;
+        case CheckoutKnowledge::Pending:
+            return std::format(
+                "not checked: the main checkout of {} is not known yet; try again after the next listing",
+                run.repo);
+        case CheckoutKnowledge::Unavailable:
+            return std::format(
+                "not checked: the main checkout of {} cannot be found: the repository is "
+                "configured at another path than {}, or git cannot list its worktrees; fix the "
+                "configuration or the repository, then retry",
+                run.repo,
+                run.repoPath);
+    }
+    return std::nullopt;
+}
+
 std::string confirmationText(RunAction action, std::string_view runId)
 {
     auto const& row = rowOf(action);

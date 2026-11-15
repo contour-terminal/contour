@@ -127,9 +127,10 @@ namespace
     /// What an ending step awaits. Only a host call has a tag.
     enum class Awaits : uint8_t
     {
-        PaneGone, ///< The agent's tab to be gone: no host call.
-        GitFile,  ///< The `.git` file read.
-        Command,  ///< A declared command's result.
+        PaneGone,     ///< The agent's tab to be gone: no host call.
+        MainCheckout, ///< The repository's main checkout to be known: no host call.
+        GitFile,      ///< The `.git` file read.
+        Command,      ///< A declared command's result.
     };
 
     struct EndStepRow
@@ -145,6 +146,10 @@ namespace
                      .name = "close-pane"sv,
                      .label = "closing the agent's tab"sv,
                      .awaits = Awaits::PaneGone },
+        EndStepRow { .step = EndStep::MainCheckout,
+                     .name = "main-checkout"sv,
+                     .label = "waiting for the main checkout"sv,
+                     .awaits = Awaits::MainCheckout },
         EndStepRow { .step = EndStep::Verify,
                      .name = "verify"sv,
                      .label = "reading .git"sv,
@@ -269,16 +274,6 @@ namespace
         return finish(run, context, ending.cause, Fate::Kept, { sanitized(entry) }, ending.resumedFrom);
     }
 
-    /// A check that could not run because the main checkout is not known yet. A kept entry checked again
-    /// stays exactly as recorded, its reason included: "not known" is no finding about the worktree.
-    [[nodiscard]] Effects keepUnchecked(Run& run, StepContext const& context, Ending& ending)
-    {
-        if (!ending.resumedFrom)
-            return keep(run, context, ending, UnknownMainCheckout);
-        run.state = std::move(*ending.resumedFrom);
-        return { Persist {} };
-    }
-
     /// How a run whose worktree turned out to be gone ended: a carried failure, the end of a run already
     /// finished, or a run that asked for the removal itself, stays what it was.
     [[nodiscard]] Ended goneEnded(Run const& run, Ending const& ending) noexcept
@@ -297,12 +292,35 @@ namespace
         return ending;
     }
 
-    /// @p ending back at the first removal check, keeping what it carries.
-    [[nodiscard]] Effects toVerify(Run& run, Ending ending)
+    /// Whether a check that needs the main checkout must wait for it: it is not known yet.
+    [[nodiscard]] constexpr bool awaitsCheckout(StepContext const& context) noexcept
     {
-        ending.step = EndStep::Verify;
+        return !context.mainCheckout && context.unknownCheckout == CheckoutUnknown::Pending;
+    }
+
+    /// @p ending back at the first removal check, keeping what it carries. The first checks compare the
+    /// worktree against the main checkout: while it is not known yet, the run waits for it instead.
+    [[nodiscard]] Effects toVerify(Run& run, Ending ending, StepContext const& context)
+    {
+        auto const waits = awaitsCheckout(context);
+        ending.step = waits ? EndStep::MainCheckout : EndStep::Verify;
         run.state = std::move(ending);
+        if (waits)
+            return { Persist {} };
         return { Persist {}, ReadGitFile {} };
+    }
+
+    /// A check that needs the main checkout, which is not known. While it may still become known, the run
+    /// waits for it and starts its checks again. Once it is known that it will not, a kept entry checked
+    /// again stays exactly as recorded, its reason included: "not known" is no finding about the worktree.
+    [[nodiscard]] Effects withoutCheckout(Run& run, StepContext const& context, Ending& ending)
+    {
+        if (awaitsCheckout(context))
+            return toVerify(run, std::move(ending), context);
+        if (!ending.resumedFrom)
+            return keep(run, context, ending, UnknownMainCheckout);
+        run.state = std::move(*ending.resumedFrom);
+        return { Persist {} };
     }
 
     /// A run that starts its removal checks.
@@ -346,7 +364,7 @@ namespace
         return enterCommand(run, context, std::move(next), provider->*role, std::move(arguments));
     }
 
-    [[nodiscard]] Effects openPane(Run& run)
+    [[nodiscard]] Effects openPane(Run& run, StepContext const& context)
     {
         run.state = Preparing { PrepareStep::OpenPane };
         auto const arguments = std::array {
@@ -358,7 +376,7 @@ namespace
         if (auto const why = refusal(AgentPaneTemplate, arguments))
         {
             run.failure = RunFailure { .step = PrepareStep::OpenPane, .why = sanitized(*why) };
-            return toVerify(run, endingFor(Ended::PreparationFailed));
+            return toVerify(run, endingFor(Ended::PreparationFailed), context);
         }
         return { Persist {}, OpenAgentPane {} };
     }
@@ -394,8 +412,8 @@ namespace
                         &Provider::checkout,
                         { { .name = "number", .value = std::format("{}", changeRequest->number) },
                           { .name = "branch", .value = run.branch } });
-                return openPane(run);
-            case PrepareStep::Checkout: return openPane(run);
+                return openPane(run, context);
+            case PrepareStep::Checkout: return openPane(run, context);
             case PrepareStep::OpenPane: return {};
         }
         return {};
@@ -413,7 +431,7 @@ namespace
             case PrepareStep::Fetch:
                 return finish(run, context, Ended::PreparationFailed, Fate::Removed, {}, std::nullopt);
             case PrepareStep::WorktreeAdd:
-            case PrepareStep::Checkout: return toVerify(run, endingFor(Ended::PreparationFailed));
+            case PrepareStep::Checkout: return toVerify(run, endingFor(Ended::PreparationFailed), context);
             case PrepareStep::OpenPane:
                 // The tab may exist although its opening failed or was lost: nothing touches the worktree
                 // until no tab tagged with the run is left.
@@ -441,7 +459,7 @@ namespace
                                     spell(FileReadReasons, read.content.error())));
         }
         if (!context.mainCheckout)
-            return keepUnchecked(run, context, ending);
+            return withoutCheckout(run, context, ending);
         if (!gitFileIsIntact(*read.content, *context.mainCheckout, run.worktree))
             return keep(run, context, ending, AlteredGitFile);
         // The `.git` file is not the only link: git follows the `commondir` file beside the worktree's
@@ -554,7 +572,7 @@ namespace
         {
             case EndStep::CommonDir:
                 if (!context.mainCheckout)
-                    return keepUnchecked(run, context, ending);
+                    return withoutCheckout(run, context, ending);
                 if (!commonDirIsMain(output, *context.mainCheckout))
                     return keep(run, context, ending, RedirectedCommonDir);
                 return enterCommand(
@@ -592,6 +610,7 @@ namespace
             case EndStep::Remove:
                 return finish(run, context, ending.cause, Fate::Removed, {}, ending.resumedFrom);
             case EndStep::ClosePane:
+            case EndStep::MainCheckout:
             case EndStep::Verify: return {};
         }
         return {};
@@ -666,7 +685,8 @@ std::vector<RunEffect> advance(Run& run, RunInput const& input, StepContext cons
         },
         [&](AgentState auto const&, PaneGone const&) {
             run.pane.reset();
-            return toVerify(run, endingFor(run.lastStatus ? Ended::Completed : Ended::NeverReported));
+            return toVerify(
+                run, endingFor(run.lastStatus ? Ended::Completed : Ended::NeverReported), context);
         },
         [&](AgentState auto const&, EndByUser const&) -> Effects {
             // Nothing touches the worktree until the tab is gone.
@@ -680,13 +700,19 @@ std::vector<RunEffect> advance(Run& run, RunInput const& input, StepContext cons
             if (ending.step != EndStep::ClosePane)
                 return {};
             run.pane.reset();
-            return toVerify(run, std::move(ending));
+            return toVerify(run, std::move(ending), context);
         },
         [&](Ending ending, Lost const&) -> Effects {
             // A close lost in a restart is asked for again; the run still waits for the tab to be gone.
             if (endStep(ending.step).awaits == Awaits::PaneGone)
                 return { Persist {}, CloseAgentPane {} };
-            return toVerify(run, std::move(ending));
+            return toVerify(run, std::move(ending), context);
+        },
+        [&](Ending ending, CheckoutListed const&) -> Effects {
+            // Still not known: the run waits on, unchanged.
+            if (ending.step != EndStep::MainCheckout || awaitsCheckout(context))
+                return {};
+            return toVerify(run, std::move(ending), context);
         },
         [&](Ending ending, GitFileRead const& read) -> Effects {
             if (ending.step != EndStep::Verify)
@@ -720,7 +746,7 @@ std::vector<RunEffect> advance(Run& run, RunInput const& input, StepContext cons
             if (finished.fate != Fate::Kept)
                 return {};
             auto const ended = finished.ended;
-            return toVerify(run, endingFor(ended, std::move(finished)));
+            return toVerify(run, endingFor(ended, std::move(finished)), context);
         },
         [&](Finished& finished, MarkSeen const&) -> Effects {
             if (finished.seen == Seen::Opened)
@@ -749,7 +775,7 @@ std::optional<std::string> stepTag(Run const& run)
     if (auto const* const ending = std::get_if<Ending>(&run.state))
     {
         auto const& step = endStep(ending->step);
-        if (step.awaits != Awaits::PaneGone)
+        if (step.awaits == Awaits::GitFile || step.awaits == Awaits::Command)
             return std::format("{}/{}", run.id, step.name);
     }
     return std::nullopt;

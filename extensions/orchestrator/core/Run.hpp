@@ -28,11 +28,13 @@ enum class PrepareStep : uint8_t
 /// The steps that end a run, in order. Nothing touches the worktree while the agent's tab may still run.
 enum class EndStep : uint8_t
 {
-    ClosePane,  ///< Waiting for the agent's tab to be gone: the user ended the run, or opening it failed.
-    Verify,     ///< Reading the worktree's `.git` file.
-    CommonDir,  ///< `git-common-dir`: git uses the main checkout's `.git`, not a redirected one.
-    IndexFlags, ///< `git-index-flags`: no submodule, and no file marked so `git status` misses its change.
-    Reachable,  ///< `git-head-reachable`: some ref contains HEAD.
+    ClosePane,    ///< Waiting for the agent's tab to be gone: the user ended the run, or opening it failed.
+    MainCheckout, ///< Waiting for the repository's main checkout to be known, which the first checks compare
+                  ///< the worktree against: no host call.
+    Verify,       ///< Reading the worktree's `.git` file.
+    CommonDir,    ///< `git-common-dir`: git uses the main checkout's `.git`, not a redirected one.
+    IndexFlags,   ///< `git-index-flags`: no submodule, and no file marked so `git status` misses its change.
+    Reachable,    ///< `git-head-reachable`: some ref contains HEAD.
     OperationState,   ///< `git-operation-state`: no operation is left half done.
     Status,           ///< `git-status`: nothing is modified or untracked.
     CleanStatusBoard, ///< `git-clean`: the status board, the one untracked file the extension writes.
@@ -247,6 +249,11 @@ struct RetryRemoval
 {
 };
 
+/// The repository's worktree listing answered: a run waiting for its main checkout looks again.
+struct CheckoutListed
+{
+};
+
 /// The user dismissed a finished run.
 struct Dismiss
 {
@@ -269,6 +276,7 @@ using RunInput = std::variant<CommandOk,
                               PaneGone,
                               EndByUser,
                               RetryRemoval,
+                              CheckoutListed,
                               Dismiss,
                               MarkSeen>;
 
@@ -310,13 +318,23 @@ struct Forget
 /// step before any call it awaits is made.
 using RunEffect = std::variant<RunDeclared, ReadGitFile, OpenAgentPane, CloseAgentPane, Persist, Forget>;
 
+/// Why a repository's main checkout is not known.
+enum class CheckoutUnknown : uint8_t
+{
+    Unavailable, ///< For good: its listing named none, its directory is gone, or the listing failed too
+                 ///< often. A check that needs it keeps the worktree without running anything there.
+    Pending,     ///< Not yet: its listing has not answered. A check that needs it waits for CheckoutListed.
+};
+
 /// What a step may know about the world beyond the run.
 struct StepContext
 {
     std::optional<std::string_view>
-        mainCheckout;    ///< The repository's main checkout, resolved; nullopt if unknown.
-    uint64_t wallMs = 0; ///< Now, in wall-clock milliseconds.
-    uint64_t monoMs = 0; ///< Now, in monotonic milliseconds: what a change is stamped with.
+        mainCheckout; ///< The repository's main checkout, resolved; nullopt if unknown.
+    CheckoutUnknown unknownCheckout =
+        CheckoutUnknown::Unavailable; ///< Why mainCheckout is nullopt; not read while it is known.
+    uint64_t wallMs = 0;              ///< Now, in wall-clock milliseconds.
+    uint64_t monoMs = 0;              ///< Now, in monotonic milliseconds: what a change is stamped with.
 };
 
 /// The most characters an entry or a reason keeps, once sanitised.

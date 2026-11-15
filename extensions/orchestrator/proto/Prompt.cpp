@@ -240,6 +240,14 @@ Continue Prompt::act(RunAction action, std::string_view word)
         std::println("{}", refusalText(word, action, run.error(), runs));
         return Continue::Yes;
     }
+    // resolveRun() returns the id of one of these runs.
+    auto const& taken = *std::ranges::find(runs, *run, &Run::id);
+    auto const checkout = checkoutKnowledge(_driver.engine().unknownCheckout(taken));
+    if (auto const why = deferralText(action, taken, checkout))
+    {
+        std::println("{}", *why);
+        return Continue::Yes;
+    }
     std::println("{}", confirmationText(action, *run));
     auto const monoMs = monotonicNowMs();
     switch (action)

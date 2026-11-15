@@ -29,6 +29,8 @@ namespace
 using orchestrator::AgentStatus;
 using orchestrator::Blocked;
 using orchestrator::ChangeRequestRef;
+using orchestrator::CheckoutListed;
+using orchestrator::CheckoutUnknown;
 using orchestrator::CloseAgentPane;
 using orchestrator::CommandFailed;
 using orchestrator::CommandOk;
@@ -175,6 +177,7 @@ constexpr auto PrepareSteps = std::array {
 
 constexpr auto EndSteps = std::array {
     Spelling { EndStep::ClosePane, "close-pane"sv },
+    Spelling { EndStep::MainCheckout, "main-checkout"sv },
     Spelling { EndStep::Verify, "verify"sv },
     Spelling { EndStep::CommonDir, "common-dir"sv },
     Spelling { EndStep::IndexFlags, "index-flags"sv },
@@ -292,7 +295,8 @@ enum class Expect : uint8_t
 enum class Checkout : uint8_t
 {
     Known,
-    Unknown,
+    Unknown, ///< For good: CheckoutUnknown::Unavailable.
+    Pending, ///< Not yet: CheckoutUnknown::Pending.
 };
 
 struct TransitionRow
@@ -493,6 +497,43 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
           .to = "Ending(verify, completed)",
           .effects = VerifyEffects,
           .lastStatus = AgentStatus::Working },
+        // The checks compare the worktree against the main checkout: before it is known, nothing is read.
+        { .from = "running, pane gone, main checkout not known yet",
+          .state = Running {},
+          .input = PaneGone {},
+          .to = "Ending(main-checkout, completed)",
+          .effects = "persist",
+          .lastStatus = AgentStatus::Working,
+          .checkout = Checkout::Pending },
+        // Ending(MainCheckout): waiting for a listing to name the main checkout.
+        { .from = "main-checkout, listed",
+          .state = endingAt(EndStep::MainCheckout),
+          .input = CheckoutListed {},
+          .to = "Ending(verify, completed)",
+          .effects = VerifyEffects },
+        { .from = "main-checkout, listed, none to be known",
+          .state = endingAt(EndStep::MainCheckout),
+          .input = CheckoutListed {},
+          .to = "Ending(verify, completed)",
+          .effects = VerifyEffects,
+          .checkout = Checkout::Unknown },
+        { .from = "main-checkout, still not known",
+          .state = endingAt(EndStep::MainCheckout),
+          .input = CheckoutListed {},
+          .effects = "",
+          .checkout = Checkout::Pending },
+        { .from = "main-checkout, a stray file read",
+          .state = endingAt(EndStep::MainCheckout),
+          .input = GitFileRead { .content = IntactGitFile },
+          .effects = "" },
+        { .from = "main-checkout, a stray command result",
+          .state = endingAt(EndStep::MainCheckout),
+          .input = CommandOk { MainCommonDir },
+          .effects = "" },
+        { .from = "verify, listed while not ending",
+          .state = endingAt(EndStep::Verify),
+          .input = CheckoutListed {},
+          .effects = "" },
         { .from = "blocked, pane gone after a report",
           .state = Blocked {},
           .input = PaneGone {},
@@ -580,6 +621,12 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
           .to = "Finished(completed, kept, new: the main checkout is not known; nothing was run there)",
           .effects = "persist",
           .checkout = Checkout::Unknown },
+        { .from = "verify, main checkout not known yet",
+          .state = endingAt(EndStep::Verify),
+          .input = GitFileRead { .content = IntactGitFile },
+          .to = "Ending(main-checkout, completed)",
+          .effects = "persist",
+          .checkout = Checkout::Pending },
         { .from = "verify of a kept entry, main checkout unknown",
           .state = resumedAt(EndStep::Verify),
           .input = GitFileRead { .content = IntactGitFile },
@@ -672,6 +719,12 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
           .to = "Finished(completed, kept, new: the main checkout is not known; nothing was run there)",
           .effects = "persist",
           .checkout = Checkout::Unknown },
+        { .from = "common-dir, main checkout not known yet",
+          .state = endingAt(EndStep::CommonDir),
+          .input = CommandOk { MainCommonDir },
+          .to = "Ending(main-checkout, completed)",
+          .effects = "persist",
+          .checkout = Checkout::Pending },
         { .from = "common-dir of a kept entry, main checkout unknown",
           .state = resumedAt(EndStep::CommonDir),
           .input = CommandOk { MainCommonDir },
@@ -838,6 +891,12 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
           .input = RetryRemoval {},
           .to = "Ending(verify, completed, resumed)",
           .effects = VerifyEffects },
+        { .from = "kept, retried before the main checkout is known",
+          .state = kept(Ended::Completed),
+          .input = RetryRemoval {},
+          .to = "Ending(main-checkout, completed, resumed)",
+          .effects = "persist",
+          .checkout = Checkout::Pending },
         { .from = "kept after a failed preparation, retried",
           .state = kept(Ended::PreparationFailed),
           .input = RetryRemoval {},
@@ -1056,8 +1115,10 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
 [[nodiscard]] StepContext contextFor(TransitionRow const& row)
 {
     auto context = knownContext();
-    if (row.checkout == Checkout::Unknown)
+    if (row.checkout != Checkout::Known)
         context.mainCheckout = std::nullopt;
+    context.unknownCheckout =
+        row.checkout == Checkout::Pending ? CheckoutUnknown::Pending : CheckoutUnknown::Unavailable;
     return context;
 }
 
@@ -1619,6 +1680,7 @@ TEST_CASE("stepTag, countsAsActive and isUnfinished per state", "[orchestrator][
         { Done {}, "", Expect::Yes, Expect::Yes },
         // An Ending run neither blocks its item nor holds a slot, but still has steps to take.
         { endingAt(EndStep::ClosePane), "", Expect::No, Expect::Yes },
+        { endingAt(EndStep::MainCheckout), "", Expect::No, Expect::Yes },
         { endingAt(EndStep::Verify), "pr-2334-20261113-150847/verify", Expect::No, Expect::Yes },
         { endingAt(EndStep::CommonDir), "pr-2334-20261113-150847/common-dir", Expect::No, Expect::Yes },
         { endingAt(EndStep::Reachable), "pr-2334-20261113-150847/reachable", Expect::No, Expect::Yes },
@@ -1830,6 +1892,7 @@ TEST_CASE("runFromJson reads what toJson writes", "[orchestrator][run]")
         Blocked {},
         Done {},
         endingAt(EndStep::ClosePane, Ended::EndedByYou),
+        endingAt(EndStep::MainCheckout),
         endingAt(EndStep::Verify),
         endingAt(EndStep::CommonDir),
         endingAt(EndStep::Reachable, Ended::PreparationFailed),

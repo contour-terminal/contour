@@ -46,6 +46,12 @@ inline constexpr auto LongTimeout = std::chrono::milliseconds { std::chrono::min
 inline constexpr auto PaneOpenTimeout = std::chrono::milliseconds { std::chrono::seconds { 30 } };
 /// The longest a failing poll's interval grows to.
 inline constexpr auto MaxPollBackoff = std::chrono::milliseconds { std::chrono::minutes { 30 } };
+/// The worktree listings of a repository that fail in a row before its main checkout counts as not to be
+/// known: a run waiting for it then keeps its worktree unchecked rather than wait on. Each failure costs one
+/// poll interval, and that interval backs off up to MaxPollBackoff while the forge fails too, so three bound
+/// the wait before an honest "not known" to about an hour at worst: one failure could be a passing hiccup,
+/// and many more would leave a run hanging in its ending for hours.
+inline constexpr uint32_t MaxWorktreeListFailures = 3;
 
 /// Whether a process started.
 enum class StartResult : uint8_t
@@ -387,6 +393,12 @@ class Engine
     /// @param repo A repository's name.
     /// @return Its main checkout, as its worktree listing names it; std::nullopt until it was listed.
     [[nodiscard]] std::optional<std::string_view> mainCheckoutOf(std::string_view repo) const noexcept;
+    /// Why a run's removal checks could not compare its worktree against its repository's main checkout now.
+    /// @param run A run.
+    /// @return std::nullopt when it is known: its repository was listed, or the run's own directory stands
+    /// for
+    ///         it; else whether it may still become known.
+    [[nodiscard]] std::optional<CheckoutUnknown> unknownCheckout(Run const& run) const noexcept;
     /// @return Whether Claude Code's status hooks are installed.
     [[nodiscard]] HooksState hooks() const noexcept { return _hooks; }
 
@@ -481,6 +493,9 @@ class Engine
         std::optional<std::string> defaultBranch;      ///< The forge's default branch, once read.
         std::vector<WorktreeEntry> worktrees;          ///< Its worktrees, as last listed.
         std::vector<WorktreeEntry> orphans;            ///< Those no run accounts for.
+        CheckoutUnknown unknownCheckout =
+            CheckoutUnknown::Pending;      ///< Why @ref worktrees names no main checkout, if they do not.
+        uint32_t worktreeListFailures = 0; ///< The worktree listings in a row that failed.
     };
 
     Engine(std::optional<Config> config, HostInfo host, uint64_t monoMs, uint64_t wallMs);
@@ -535,6 +550,7 @@ class Engine
     void onListAnswered(std::vector<Effect>& out);
     void checkHooks(std::vector<Effect>& out);
     void recheckFinished(std::vector<Effect>& out);
+    void resumeCheckoutWaits(std::vector<Effect>& out);
     void serviceBoards(BoardReads reads, std::vector<Effect>& out);
     void postBoard(Run& run, BoardTrack& track, BoardPost kind, std::vector<Effect>& out);
     [[nodiscard]] std::optional<uint64_t> boardDueAt(Run const& run) const;

@@ -1153,11 +1153,12 @@ TEST_CASE("guest restart mid-dispatch", "[orchestrator][engine]")
               .state = ending(EndStep::Verify),
               .known = Known::Neither,
               .next = ".git" },
-        // Kept: the start knows no main checkout yet, and checks it again only once a listing names it.
+        // The start knows no main checkout yet: the run waits for a listing to name it, then checks again
+        // from the .git file on.
         Row { .name = "common-dir, finished",
               .state = ending(EndStep::CommonDir),
               .known = Known::Finished,
-              .next = "" },
+              .next = ".git" },
         Row { .name = "index-flags, finished",
               .state = ending(EndStep::IndexFlags),
               .known = Known::Finished,
@@ -1217,8 +1218,20 @@ TEST_CASE("guest restart mid-dispatch", "[orchestrator][engine]")
         auto const expectNext = [&](std::vector<std::string> const& effects) {
             if (row.next.empty())
                 CHECK(effects.empty());
-            else
+            else if (row.next != ".git")
                 CHECK(effects == std::vector { std::string(row.next) });
+            else
+            {
+                // The checks start from the .git file, which is compared against the main checkout: they wait
+                // for the listing that names it.
+                CHECK(effects.empty());
+                auto const* const waiting = std::get_if<Ending>(&harness.run(PrId)->state);
+                REQUIRE(waiting != nullptr);
+                CHECK(waiting->step == EndStep::MainCheckout);
+                harness.boot();
+                CHECK(harness.hasRead("/.git"));
+                CHECK(std::get<Ending>(harness.run(PrId)->state).step == EndStep::Verify);
+            }
         };
         if (row.known == Known::InFlight)
         {
@@ -1267,7 +1280,8 @@ TEST_CASE("a stale reply to an earlier attempt is ignored", "[orchestrator][engi
     // The earlier attempt's empty status would mean "remove".
     context.finished = { FinishedResult { .tag = *callTag(stale), .outcome = ok() } };
     auto harness = Harness { std::move(context) };
-    CHECK(harness.hasRead("/.git"));
+    // The lost status starts the checks again, once a listing names the main checkout.
+    CHECK_FALSE(harness.hasRead("/.git"));
     CHECK(harness.commandsIssued("git-worktree-remove") == 0);
     harness.boot();
     harness.read("/.git", intactGitFile(ContourPath, PrId));
@@ -1299,11 +1313,28 @@ TEST_CASE("nothing deletes from a worktree while a tab of its run is listed", "[
     context.panes = { paneOf(PrId, "p9") };
     auto harness = Harness { std::move(context) };
     CHECK(harness.commandsIssued("git-worktree-remove") == 0);
-    // Kept, until a poll that knows the main checkout checks it again.
+    auto const keptReason = std::vector { "git worktree remove failed: a tab of the run is still open"s };
     auto const kept = finishedOf(harness.run(PrId));
     REQUIRE(kept);
     CHECK(kept->fate == Fate::Kept);
-    CHECK(kept->entries == std::vector { "git worktree remove failed: a tab of the run is still open"s });
+    CHECK(kept->entries == keptReason);
+    // A poll that knows the main checkout checks it again, the tab still listed: every check passes, and the
+    // removal is withheld again.
+    harness.boot();
+    harness.wake(10 * Minute);
+    harness.boot();
+    harness.read("/.git", intactGitFile(ContourPath, PrId));
+    harness.finish("git-common-dir", ok(commonDirOf(ContourPath)));
+    harness.finish("git-index-flags", ok(CleanIndex));
+    harness.finish("git-head-reachable", ok("refs/heads/agent/x\n"));
+    harness.finish("git-operation-state", ok(CleanLongStatus));
+    harness.finish("git-status", ok());
+    CHECK(harness.commandsIssued("git-status") == 1);
+    CHECK(harness.commandsIssued("git-worktree-remove") == 0);
+    auto const again = finishedOf(harness.run(PrId));
+    REQUIRE(again);
+    CHECK(again->fate == Fate::Kept);
+    CHECK(again->entries == keptReason);
 }
 
 TEST_CASE("a listing of the driver's own records never ends a close it did not record",
@@ -1479,6 +1510,122 @@ TEST_CASE("a kept run survives a restart with its reason", "[orchestrator][engin
         REQUIRE(ending != nullptr);
         REQUIRE(ending->resumedFrom);
         CHECK(ending->resumedFrom->entries == std::vector { std::string(row.entry) });
+    }
+}
+
+TEST_CASE("a run whose tab vanished while the prototype was down waits for the checkout, then runs the full "
+          "checks",
+          "[orchestrator][engine]")
+{
+    struct Row
+    {
+        std::string_view name;
+        std::string_view operation; ///< What `git-operation-state` prints.
+        Fate fate;
+        std::vector<std::string> entries;
+    };
+    auto const rows = std::array {
+        Row { .name = "a rebase in progress",
+              .operation = "rebase in progress; onto <hash>\nYou are currently rebasing branch 'agent/x' on "
+                           "'<hash>'.\n",
+              .fate = Fate::Kept,
+              .entries = { "rebase in progress" } },
+        Row { .name = "nothing left", .operation = CleanLongStatus, .fate = Fate::Removed, .entries = {} },
+    };
+    for (auto const& row: rows)
+    {
+        CAPTURE(row.name);
+        auto stored = storedRun(Running {});
+        stored.pane = "p1";
+        stored.lastStatus = AgentStatus::Working;
+        auto context = contextFor({});
+        context.stored = { entryOf(stored) };
+        context.paneListing = PaneListing::Tagged;
+        auto harness = Harness { std::move(context) };
+        // The tab is gone, but nothing is decided about the worktree before a listing names the main
+        // checkout.
+        CHECK_FALSE(harness.hasRead("/.git"));
+        CHECK(harness.run(PrId)->state
+              == RunState { Ending { .step = EndStep::MainCheckout,
+                                     .cause = Ended::Completed,
+                                     .resumedFrom = std::nullopt,
+                                     .removal = Removal::NotIssued } });
+        harness.boot();
+        harness.read("/.git", intactGitFile(ContourPath, PrId));
+        harness.finish("git-common-dir", ok(commonDirOf(ContourPath)));
+        harness.finish("git-index-flags", ok(CleanIndex));
+        harness.finish("git-head-reachable", ok("refs/heads/agent/x\n"));
+        harness.finish("git-operation-state", ok(row.operation));
+        if (row.fate == Fate::Removed)
+        {
+            harness.finish("git-status", ok());
+            harness.finish("git-worktree-remove", ok());
+        }
+        auto const finished = finishedOf(harness.run(PrId));
+        REQUIRE(finished);
+        CHECK(finished->ended == Ended::Completed);
+        CHECK(finished->fate == row.fate);
+        CHECK(finished->entries == row.entries);
+    }
+}
+
+TEST_CASE("a run waiting for the main checkout settles only on a definitive answer", "[orchestrator][engine]")
+{
+    /// How the repository's worktree listing answers, every time it is asked.
+    enum class Listing : uint8_t
+    {
+        NoMainCheckout, ///< It answers, naming no main checkout: a bare repository.
+        DirectoryGone,  ///< The repository's directory is gone.
+        Fails,          ///< It fails.
+    };
+    struct Row
+    {
+        std::string_view name;
+        Listing listing;
+        uint32_t answers; ///< How many of its answers settle the run.
+    };
+    static constexpr auto Rows = std::array {
+        Row { .name = "no main checkout listed", .listing = Listing::NoMainCheckout, .answers = 1 },
+        Row { .name = "the repository's directory is gone", .listing = Listing::DirectoryGone, .answers = 1 },
+        Row { .name = "the listing keeps failing",
+              .listing = Listing::Fails,
+              .answers = MaxWorktreeListFailures },
+    };
+    for (auto const& row: Rows)
+    {
+        CAPTURE(row.name);
+        auto stored = storedRun(Running {});
+        stored.pane = "p1";
+        stored.lastStatus = AgentStatus::Working;
+        auto context = contextFor({});
+        context.stored = { entryOf(stored) };
+        context.paneListing = PaneListing::Tagged;
+        auto harness = Harness { std::move(context) };
+        auto const outcome = [&] {
+            switch (row.listing)
+            {
+                case Listing::NoMainCheckout: return ok(std::format("worktree {}\0bare\0\0"sv, ContourPath));
+                case Listing::DirectoryGone: return cwdMissing();
+                case Listing::Fails: return failed(128, "fatal: not a git repository");
+            }
+            return ok();
+        }();
+        for (auto const answer: std::views::iota(uint32_t { 1 }, row.answers + 1))
+        {
+            CAPTURE(answer);
+            CHECK_FALSE(harness.hasRead("/.git"));
+            REQUIRE(holds<Ending>(harness.run(PrId)));
+            if (answer > 1)
+                harness.wake(31 * Minute);
+            harness.finish("git-worktree-list", outcome);
+            harness.boot();
+        }
+        harness.read("/.git", intactGitFile(ContourPath, PrId));
+        auto const finished = finishedOf(harness.run(PrId));
+        REQUIRE(finished);
+        CHECK(finished->fate == Fate::Kept);
+        CHECK(finished->entries == std::vector { "the main checkout is not known; nothing was run there"s });
+        CHECK(harness.commandsIssued("git-common-dir") == 0);
     }
 }
 
@@ -1954,10 +2101,11 @@ TEST_CASE("tampered worktree", "[orchestrator][engine]")
                                                       .resumedFrom = std::nullopt,
                                                       .removal = Removal::NotIssued })) };
         auto harness = Harness { std::move(context) };
-        harness.read("/.git", intactGitFile(ContourPath, PrId));
-        auto const finished = finishedOf(harness.run(PrId));
-        REQUIRE(finished);
-        CHECK(finished->fate == Fate::Kept);
+        // Nothing is read or run there until a listing names the main checkout: the run waits for it.
+        CHECK_FALSE(harness.hasRead("/.git"));
+        auto const* const waiting = std::get_if<Ending>(&harness.run(PrId)->state);
+        REQUIRE(waiting != nullptr);
+        CHECK(waiting->step == EndStep::MainCheckout);
         CHECK(harness.commandsIssued("git-common-dir") == 0);
         CHECK(harness.commandsIssued("git-head-reachable") == 0);
     }
@@ -2218,10 +2366,16 @@ TEST_CASE("start resolves only the calls the stored runs awaited", "[orchestrato
     stored.lastStatus = AgentStatus::Working;
     auto context = contextFor({});
     context.stored = { entryOf(stored) };
-    // The tab is gone: reconciling starts the removal checks, which must not be told they were lost.
+    // The tab is gone: reconciling starts the removal checks, which must not be told they were lost. They
+    // wait for the listing that names the main checkout, then read the .git file once.
     auto harness = Harness { std::move(context) };
-    CHECK(countOf<ReadFile>(harness.last()) == 1);
+    CHECK(countOf<ReadFile>(harness.last()) == 0);
     REQUIRE(holds<Ending>(harness.run(PrId)));
+    CHECK(harness.run(PrId)->attempt == stored.attempt);
+    harness.boot();
+    CHECK(harness.hasRead("/.git"));
+    REQUIRE(holds<Ending>(harness.run(PrId)));
+    CHECK(std::get<Ending>(harness.run(PrId)->state).step == EndStep::Verify);
     CHECK(harness.run(PrId)->attempt == stored.attempt + 1);
 }
 
@@ -2234,6 +2388,63 @@ TEST_CASE("an ending run neither blocks its item nor holds a slot", "[orchestrat
     auto again = prDispatch();
     again.wallMs += 5'000;
     CHECK(countOf<DispatchRefused>(harness.feed(again)) == 0);
+}
+
+TEST_CASE("the engine knows a run's main checkout once a listing names it", "[orchestrator][engine]")
+{
+    /// Where the stored run's repository stands.
+    enum class Repo : uint8_t
+    {
+        Configured,   ///< Configured, at the run's directory.
+        Moved,        ///< Configured, at another directory.
+        Unconfigured, ///< No longer configured: the run's own directory stands for its main checkout.
+    };
+    /// Whether the worktree listings answered.
+    enum class Listed : uint8_t
+    {
+        No,
+        Yes,
+    };
+    struct Row
+    {
+        std::string_view name;
+        Repo repo;
+        Listed listed;
+        std::optional<CheckoutUnknown> unknown; ///< std::nullopt: known.
+    };
+    static constexpr auto Rows = std::array {
+        Row { .name = "configured, not listed yet",
+              .repo = Repo::Configured,
+              .listed = Listed::No,
+              .unknown = CheckoutUnknown::Pending },
+        Row { .name = "configured, listed",
+              .repo = Repo::Configured,
+              .listed = Listed::Yes,
+              .unknown = std::nullopt },
+        Row { .name = "moved, listed",
+              .repo = Repo::Moved,
+              .listed = Listed::Yes,
+              .unknown = CheckoutUnknown::Unavailable },
+        Row { .name = "no longer configured",
+              .repo = Repo::Unconfigured,
+              .listed = Listed::No,
+              .unknown = std::nullopt },
+    };
+    for (auto const& row: Rows)
+    {
+        CAPTURE(row.name);
+        auto stored = storedRun(Done {});
+        if (row.repo == Repo::Moved)
+            stored.repoPath = std::string(OtherPath);
+        if (row.repo == Repo::Unconfigured)
+            stored.repo = "gone";
+        auto context = contextFor({});
+        context.stored = { entryOf(stored) };
+        auto harness = Harness { std::move(context) };
+        if (row.listed == Listed::Yes)
+            harness.boot();
+        CHECK(harness.engine().unknownCheckout(stored) == row.unknown);
+    }
 }
 
 TEST_CASE("a run of a repository no longer configured can still be ended", "[orchestrator][engine]")

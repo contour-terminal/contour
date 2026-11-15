@@ -122,7 +122,9 @@ Engine::Engine(std::optional<Config> config, HostInfo host, uint64_t monoMs, uin
                         .unclaimed = {},
                         .defaultBranch = std::nullopt,
                         .worktrees = {},
-                        .orphans = {} });
+                        .orphans = {},
+                        .unknownCheckout = CheckoutUnknown::Pending,
+                        .worktreeListFailures = 0 });
 }
 
 Engine::Started Engine::start(StartContext context)
@@ -145,6 +147,9 @@ Engine::Started Engine::start(StartContext context)
                 awaited.push_back(std::move(*tag));
         engine.reconcileWith(context.panes, engine._monoMs, context.paneListing, out);
         engine.resolveStaleWork(awaited, context, out);
+        // A run stored waiting for a main checkout that needs no listing, such as one of a repository no
+        // longer configured, goes on now.
+        engine.resumeCheckoutWaits(out);
         engine.checkHooks(out);
         engine.startPoll(out);
     }
@@ -292,7 +297,20 @@ StepContext Engine::contextFor(Run const& run) const noexcept
         main = mainCheckout(state->worktrees);
     else if (repo == nullptr)
         main = std::string_view { run.repoPath };
-    return StepContext { .mainCheckout = main, .wallMs = _wallMs, .monoMs = _monoMs };
+    auto const unknown = state != nullptr && repo != nullptr && repo->path == run.repoPath
+                             ? state->unknownCheckout
+                             : CheckoutUnknown::Unavailable;
+    return StepContext {
+        .mainCheckout = main, .unknownCheckout = unknown, .wallMs = _wallMs, .monoMs = _monoMs
+    };
+}
+
+std::optional<CheckoutUnknown> Engine::unknownCheckout(Run const& run) const noexcept
+{
+    auto const context = contextFor(run);
+    if (context.mainCheckout)
+        return std::nullopt;
+    return context.unknownCheckout;
 }
 
 void Engine::loadStore(std::span<StoredEntry const> stored)
