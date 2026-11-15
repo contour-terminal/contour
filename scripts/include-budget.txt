@@ -42,3 +42,4 @@ src/vthost/SessionHost.hpp !src/vtcontrol/ControlApi.hpp
 src/contour/input/KeyboardPlatform.hpp !src/contour/config/Config.hpp
 extensions/orchestrator/core/GitHub.hpp !<glaze/glaze.hpp>
 extensions/orchestrator/core/Config.hpp !<glaze/glaze.hpp>
+extensions/orchestrator/core/Run.hpp !<glaze/glaze.hpp>

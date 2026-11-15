@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
+
+/// A run as Run.cpp stores it; nothing else includes this header. Glaze reflects only types with linkage,
+/// so these cannot sit in Run.cpp's anonymous namespace. The keys are the members' names; a member that
+/// only some states have is optional, every other one must be present.
+namespace orchestrator::run::detail
+{
+
+/// A preparation failure.
+struct JsonFailure
+{
+    std::string step;
+    std::string why;
+};
+
+/// A finished run's outcome: its own, or that of the kept run an ending checks again.
+struct JsonFinished
+{
+    std::string ended;
+    std::string fate;
+    std::vector<std::string> entries;
+    std::string seen;
+    uint64_t endedWallMs = 0;
+};
+
+/// The stored run. Enumerations are stored by name, so that a reordered enumeration cannot change what a
+/// stored run means.
+struct JsonRun
+{
+    uint32_t v = 0;
+    std::string id;
+    std::string repo;
+    std::string repoPath;
+    std::string forge;
+    std::string remote;
+    std::string base;
+    std::string itemKind;
+    std::optional<uint64_t> itemNumber;
+    std::optional<std::string> itemKey;
+    std::string url;
+    std::string task;
+    std::string model;
+    std::string prompt;
+    std::string session;
+    std::string branch;
+    std::string worktree;
+    std::optional<std::string> pane;
+    std::string state;
+    std::optional<std::string> step;
+    std::optional<std::string> cause;
+    std::optional<std::string> removal;
+    std::optional<JsonFinished> finished;
+    std::optional<std::string> lastStatus;
+    std::optional<JsonFailure> failure;
+    uint32_t boardPosts = 0;
+    uint64_t startedWallMs = 0;
+};
+
+} // namespace orchestrator::run::detail
