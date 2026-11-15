@@ -25,6 +25,7 @@
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/OperationState.hpp>
+#include <orchestrator/core/Overloaded.hpp>
 #include <orchestrator/core/Provider.hpp>
 #include <orchestrator/core/RunJson.hpp>
 #include <orchestrator/core/Sanitize.hpp>
@@ -36,14 +37,6 @@ namespace orchestrator
 
 namespace
 {
-    /// Combines lambdas into one overload set for std::visit. core::base has one too, but the core links
-    /// nothing of core-cpp yet; this one goes when it may.
-    template <typename... Ts>
-    struct Overloaded: Ts...
-    {
-        using Ts::operator()...;
-    };
-
     template <typename T, typename... Ts>
     concept OneOf = (std::same_as<std::remove_cvref_t<T>, Ts> || ...);
 

@@ -31,6 +31,8 @@ add_library(orchestrator_core STATIC
     core/Config.cpp
     core/Config.hpp
     core/ConfigJson.hpp
+    core/Finished.cpp
+    core/Finished.hpp
     core/GitHub.cpp
     core/GitHub.hpp
     core/GitHubJson.hpp
@@ -43,6 +45,7 @@ add_library(orchestrator_core STATIC
     core/Naming.hpp
     core/OperationState.cpp
     core/OperationState.hpp
+    core/Overloaded.hpp
     core/Prompt.cpp
     core/Prompt.hpp
     core/Provider.cpp
@@ -71,6 +74,7 @@ if(ORCHESTRATOR_TESTING)
         core/Commands_test.cpp
         core/Config_test.cpp
         core/Fixtures.hpp
+        core/Finished_test.cpp
         core/GitHub_test.cpp
         core/JsonPrefix_test.cpp
         core/Naming_test.cpp
