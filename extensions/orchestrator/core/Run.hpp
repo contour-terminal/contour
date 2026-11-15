@@ -177,8 +177,10 @@ struct Run
     std::optional<RunFailure> failure;     ///< The preparation step that failed, if one did.
     uint8_t boardPosts = 0;                ///< How many status boards were requested.
     uint64_t startedWallMs = 0;            ///< When it was dispatched, in wall-clock milliseconds.
-    uint64_t runningSinceMs = 0;           ///< When its tab opened; monotonic, never persisted.
-    uint64_t boardPostedMs = 0; ///< When a status board was last requested; monotonic, never persisted.
+    uint32_t attempt = 0; ///< How many host calls were issued for it; each call's tag carries the count, so
+                          ///< that a late reply to an earlier call is told apart from the awaited one.
+    uint64_t runningSinceMs = 0; ///< When its tab opened; monotonic, never persisted.
+    uint64_t boardPostedMs = 0;  ///< When a status board was last requested; monotonic, never persisted.
     uint64_t changedMonoMs = 0; ///< When beginRun() or advance() last changed it; monotonic, never persisted.
 };
 

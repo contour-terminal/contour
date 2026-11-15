@@ -985,6 +985,7 @@ std::string toJson(Run const& run)
                                      .why = run.failure->why };
     json.boardPosts = run.boardPosts;
     json.startedWallMs = run.startedWallMs;
+    json.attempt = run.attempt;
 
     auto text = std::string {};
     if (glz::write_json(json, text))
@@ -1035,6 +1036,7 @@ std::optional<Run> runFromJson(std::string_view text)
                        : std::nullopt,
         .boardPosts = static_cast<uint8_t>(json.boardPosts),
         .startedWallMs = json.startedWallMs,
+        .attempt = json.attempt,
         .runningSinceMs = 0,
         .boardPostedMs = 0,
         .changedMonoMs = 0,

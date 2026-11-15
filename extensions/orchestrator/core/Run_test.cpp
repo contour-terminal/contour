@@ -120,6 +120,7 @@ enum class Item : uint8_t
         .failure = std::nullopt,
         .boardPosts = 0,
         .startedWallMs = StartedMs,
+        .attempt = 3,
         .runningSinceMs = 0,
         .boardPostedMs = 0,
         .changedMonoMs = 0,
@@ -1655,6 +1656,7 @@ void checkSame(Run const& actual, Run const& expected)
     CHECK(actual.failure == expected.failure);
     CHECK(actual.boardPosts == expected.boardPosts);
     CHECK(actual.startedWallMs == expected.startedWallMs);
+    CHECK(actual.attempt == expected.attempt);
 }
 
 } // namespace

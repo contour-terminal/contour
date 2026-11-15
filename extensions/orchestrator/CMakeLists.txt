@@ -31,11 +31,19 @@ add_library(orchestrator_core STATIC
     core/Config.cpp
     core/Config.hpp
     core/ConfigJson.hpp
+    core/Engine.cpp
+    core/Engine.hpp
+    core/EngineDetail.hpp
+    core/EngineDispatch.cpp
+    core/EnginePoll.cpp
     core/Finished.cpp
     core/Finished.hpp
     core/GitHub.cpp
     core/GitHub.hpp
     core/GitHubJson.hpp
+    core/Hooks.cpp
+    core/Hooks.hpp
+    core/HooksJson.hpp
     core/Json.hpp
     core/JsonPrefix.cpp
     core/JsonPrefix.hpp
@@ -75,6 +83,7 @@ if(ORCHESTRATOR_TESTING)
         core/ArgumentKinds_test.cpp
         core/Commands_test.cpp
         core/Config_test.cpp
+        core/Engine_test.cpp
         core/Fixtures.hpp
         core/Finished_test.cpp
         core/GitHub_test.cpp

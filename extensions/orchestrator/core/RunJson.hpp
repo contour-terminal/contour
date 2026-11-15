@@ -60,6 +60,7 @@ struct JsonRun
     std::optional<JsonFailure> failure;
     uint32_t boardPosts = 0;
     uint64_t startedWallMs = 0;
+    uint32_t attempt = 0;
 };
 
 } // namespace orchestrator::run::detail
