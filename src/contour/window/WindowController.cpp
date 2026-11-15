@@ -2607,6 +2607,11 @@ bool WindowController::isMultimediaReady() const noexcept
 }
 // }}}
 
+display::TerminalDisplay* WindowController::activeDisplay() const noexcept
+{
+    return _activeDisplay.data();
+}
+
 void WindowController::focusDisplay(display::TerminalDisplay* display)
 {
     // No per-display state bridging: the window services (titleBarVisible & friends) are controller-owned

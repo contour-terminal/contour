@@ -1272,7 +1272,7 @@ class WindowController:
     // }}}
 
     /// This window's currently focused display (for window services + status-line targeting).
-    [[nodiscard]] display::TerminalDisplay* activeDisplay() const noexcept { return _activeDisplay; }
+    [[nodiscard]] display::TerminalDisplay* activeDisplay() const noexcept;
 
     // {{{ Window-geometry authority
     // The controller is the ONLY component that mutates QWindow geometry (WM size hints, window show
@@ -2347,7 +2347,12 @@ class WindowController:
     /// What a click on the tray message last shown does, besides bringing the window forward.
     std::function<void()> _trayMessageClicked;
 
-    display::TerminalDisplay* _activeDisplay = nullptr;
+    // This window's focused display. A QPointer, like _osWindow below: closeWindow() unregisters the
+    // controller before the QML engine destroys the window's displays, so the manager's detachDisplay()
+    // fan-out (onDisplayDetached()) no longer reaches it — yet the band still reports its widths into the
+    // controller while it awaits its deferred delete. onDisplayDetached() clears it earlier, from inside
+    // ~TerminalDisplay, while the controller is still registered.
+    QPointer<display::TerminalDisplay> _activeDisplay;
     // The OS window (QQuickWindow) this controller adapts, adopted from the first display that focuses in.
     // Lets the manager route a focus/close to the controller that owns a given display's window. A QPointer:
     // the QML engine destroys the window before the controller, and a daemon link released after that (the
