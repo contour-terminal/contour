@@ -140,7 +140,8 @@ if(ORCHESTRATOR_TESTING)
         proto/StepQueue_test.cpp
         proto/StoreKeys_test.cpp
     )
-    target_link_libraries(orchestrator_test PRIVATE orchestrator_core orchestrator_proto_logic core::testing Catch2::Catch2)
+    # glaze: GitHub_test reads the projected fixtures generically, to check them against the declared filter.
+    target_link_libraries(orchestrator_test PRIVATE orchestrator_core orchestrator_proto_logic core::testing Catch2::Catch2 glaze::glaze)
     # Fixtures are read from the source tree: the manifest corpus Contour's host runs too, and the recorded
     # output of the tools the extension runs.
     target_compile_definitions(orchestrator_test PRIVATE

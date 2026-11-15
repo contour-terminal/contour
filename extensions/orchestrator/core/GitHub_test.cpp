@@ -16,6 +16,8 @@
 #include <variant>
 #include <vector>
 
+#include <glaze/glaze.hpp>
+#include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Fixtures.hpp>
 #include <orchestrator/core/GitHub.hpp>
 #include <orchestrator/core/Model.hpp>
@@ -105,7 +107,8 @@ constexpr auto ReviewRows = std::array {
     ReviewRow { .decision = "SOMETHING_NEW", .expected = ReviewState::Required },
 };
 
-/// What prs-open.json, recorded from `gh` 2.97.0 against contour-terminal/contour, holds per pull request.
+/// What prs-open.json, recorded from `gh` 2.97.0 against contour-terminal/contour and projected by the
+/// `gh-prs` filter (testdata/github/README.md), holds per pull request.
 struct RecordedPullRequest
 {
     uint64_t number;
@@ -154,17 +157,13 @@ constexpr auto RecordedPullRequests = std::array {
 
 constexpr auto RecordedIssueNumbers = std::array<uint64_t, 5> { 2356, 2338, 2253, 2163, 2162 };
 
-/// @return A `gh pr list` reply of @p count well-formed pull requests.
+/// @return A `gh-prs` reply of @p count well-formed pull requests, in the command's positional projection.
 std::string generatedPullRequests(std::size_t count)
 {
     auto text = std::string { "[" };
     for (auto const index: std::views::iota(std::size_t { 0 }, count))
-        text +=
-            std::format(R"({}{{"number":{},"title":"t","url":"u","headRefName":"h","baseRefName":"master",)"
-                        R"("isDraft":false,"isCrossRepository":false,"reviewDecision":"",)"
-                        R"("statusCheckRollup":[],"closingIssuesReferences":[]}})",
-                        index == 0 ? "" : ",",
-                        index + 1);
+        text += std::format(
+            R"({}[{},"t","u","h","master",false,false,"",[],[]])", index == 0 ? "" : ",", index + 1);
     return text + "]";
 }
 
@@ -175,6 +174,27 @@ std::string generatedIssues(std::size_t count)
     for (auto const index: std::views::iota(std::size_t { 0 }, count))
         text += std::format(R"({}{{"number":{},"title":"t","url":"u"}})", index == 0 ? "" : ",", index + 1);
     return text + "]";
+}
+
+/// @return How many members the array projection that follows @p marker in @p filter builds; 0 if
+///         @p marker is not followed by one. A jq filter of the `gh-prs` kind holds no string literal.
+std::size_t projectedArity(std::string_view filter, std::string_view marker)
+{
+    auto const at = filter.find(marker);
+    if (at == std::string_view::npos || !filter.substr(at + marker.size()).starts_with('['))
+        return 0;
+    auto depth = 0;
+    auto commas = std::size_t { 0 };
+    for (auto const c: filter.substr(at + marker.size()))
+    {
+        if (c == '[')
+            ++depth;
+        else if (c == ']' && --depth == 0)
+            break;
+        else if (c == ',' && depth == 1)
+            ++commas;
+    }
+    return commas + 1;
 }
 
 /// @return The number of each change request, in order.
@@ -273,6 +293,37 @@ TEST_CASE("GitHub.changeRequests.largest", "[github]")
     }
 }
 
+TEST_CASE("GitHub.changeRequests.fixtures_have_the_filters_shape", "[github]")
+{
+    // The projected fixtures were made with the declared filter (testdata/github/README.md); a filter that
+    // changes without them changes the arity of a row, a closing issue or a check.
+    auto const* const command = findCommand("gh-prs");
+    REQUIRE(command != nullptr);
+    auto const filter = command->argv.back();
+    auto const rowArity = projectedArity(filter, "[.[]|");
+    auto const issueArity = projectedArity(filter, "[.closingIssuesReferences[]|");
+    auto const checkArity = projectedArity(filter, "[.statusCheckRollup[]|");
+    CHECK(rowArity == 10);
+    CHECK(issueArity == 2);
+    CHECK(checkArity == 6);
+    for (auto const name: { "prs-open.json"sv, "prs-mixed-checks.json"sv, "prs-100.json"sv })
+    {
+        CAPTURE(name);
+        auto rows = std::vector<std::vector<glz::generic>> {};
+        REQUIRE_FALSE(
+            glz::read_json(rows, readFixture(FixtureRoot::Testdata, "github/" + std::string(name))));
+        REQUIRE_FALSE(rows.empty());
+        for (auto const& row: rows)
+        {
+            REQUIRE(row.size() == rowArity);
+            for (auto const& issue: row[8].get_array())
+                CHECK(issue.get_array().size() == issueArity);
+            for (auto const& check: row[9].get_array())
+                CHECK(check.get_array().size() == checkArity);
+        }
+    }
+}
+
 TEST_CASE("GitHub.changeRequests.empty", "[github]")
 {
     auto const listed = github::changeRequests(readFixture(FixtureRoot::Testdata, "github/prs-empty.json"),
@@ -347,15 +398,6 @@ TEST_CASE("GitHub.refused_output", "[github]")
         Row { .label = "a cut-off reply",
               .text = std::string_view { recorded }.substr(0, recorded.size() / 2),
               .expected = ParseError::NotJson },
-        Row { .label = "a number above uint64",
-              .text = R"([{"number":18446744073709551616,"title":"t","url":"u","baseRefName":"master"}])",
-              .expected = ParseError::WrongShape },
-        Row { .label = "a negative number",
-              .text = R"([{"number":-1,"title":"t","url":"u","baseRefName":"master"}])",
-              .expected = ParseError::WrongShape },
-        Row { .label = "a number as a string",
-              .text = R"([{"number":"7","title":"t","url":"u","baseRefName":"master"}])",
-              .expected = ParseError::WrongShape },
     };
     for (auto const& row: rows)
     {
@@ -367,11 +409,65 @@ TEST_CASE("GitHub.refused_output", "[github]")
         REQUIRE_FALSE(issues.has_value());
         CHECK(issues.error() == row.expected);
     }
+
+    // Valid JSON of the wrong shape: a pull request is a positional row, an issue an object.
+    struct ShapeRow
+    {
+        std::string_view label;
+        std::string_view pullRequests;
+        std::string_view issues;
+    };
+    auto const shapeRows = std::array {
+        ShapeRow { .label = "a number above uint64",
+                   .pullRequests = R"([[18446744073709551616,"t","u","h","master",false,false,"",[],[]]])",
+                   .issues = R"([{"number":18446744073709551616,"title":"t","url":"u"}])" },
+        ShapeRow { .label = "a negative number",
+                   .pullRequests = R"([[-1,"t","u","h","master",false,false,"",[],[]]])",
+                   .issues = R"([{"number":-1,"title":"t","url":"u"}])" },
+        ShapeRow { .label = "a number as a string",
+                   .pullRequests = R"([["7","t","u","h","master",false,false,"",[],[]]])",
+                   .issues = R"([{"number":"7","title":"t","url":"u"}])" },
+        ShapeRow { .label = "the object gh prints without the projection",
+                   .pullRequests = R"([{"number":7,"title":"t","url":"u","baseRefName":"master"}])",
+                   .issues = R"([7])" },
+        ShapeRow { .label = "a null where a check takes none",
+                   .pullRequests =
+                       R"([[7,"t","u","h","master",false,false,"",[],[[null,null,null,null,null,null]]]])",
+                   .issues = R"([null])" },
+    };
+    for (auto const& row: shapeRows)
+    {
+        CAPTURE(row.label);
+        auto const prs = github::changeRequests(row.pullRequests, OutputExtent::Whole);
+        REQUIRE_FALSE(prs.has_value());
+        CHECK(prs.error() == ParseError::WrongShape);
+        auto const issues = github::issues(row.issues, OutputExtent::Whole);
+        REQUIRE_FALSE(issues.has_value());
+        CHECK(issues.error() == ParseError::WrongShape);
+    }
+}
+
+TEST_CASE("GitHub.changeRequests.short_row", "[github]")
+{
+    // As an absent key did in gh's objects, a member a row ends before keeps its default: no checks, no
+    // closed issues, not a draft. A row without its base is left out, the base being no Ref.
+    auto const listed = github::changeRequests(
+        R"([[7,"t","https://github.com/o/r/pull/7","h","master"],[8,"t"]])", OutputExtent::Whole);
+    REQUIRE(listed.has_value());
+    CHECK(listed->skipped == 1);
+    REQUIRE(listed->items.size() == 1);
+    auto const& pr = listed->items.front();
+    CHECK(pr.number == 7);
+    CHECK(pr.readiness == Readiness::Ready);
+    CHECK(pr.ci == CiState::None);
+    CHECK(pr.closesIssues.empty());
 }
 
 TEST_CASE("GitHub.cut_output", "[github]")
 {
     auto const recorded = readFixture(FixtureRoot::Testdata, "github/prs-open.json");
+    auto const lastRow = recorded.rfind(std::format("[{},", RecordedPullRequests.back().number));
+    REQUIRE(lastRow != std::string::npos);
     auto const many = generatedPullRequests(ListLimit);
     enum class Outcome : uint8_t
     {
@@ -391,7 +487,7 @@ TEST_CASE("GitHub.cut_output", "[github]")
               .outcome = Outcome::Refused,
               .items = 0 },
         Row { .label = "cut in the last entry",
-              .text = std::string_view { recorded }.substr(0, recorded.rfind(R"({"baseRefName")")),
+              .text = std::string_view { recorded }.substr(0, lastRow),
               .outcome = Outcome::Prefix,
               .items = RecordedPullRequests.size() - 1 },
         Row { .label = "cut after the whole array",
@@ -492,7 +588,7 @@ TEST_CASE("GitHub.reads_no_byte_past_the_reply", "[github]")
               .items = 0,
               .expected = ParseError::NotJson },
         Row { .label = "cut off inside a number",
-              .text = R"([{"number":12)",
+              .text = R"([[12)",
               .items = 0,
               .expected = ParseError::NotJson },
         Row { .label = "a whole reply",
@@ -526,35 +622,35 @@ TEST_CASE("GitHub.closes_only_issues_of_its_own_repository", "[github]")
     struct Row
     {
         std::string_view label;
-        std::string_view reference; // One closingIssuesReferences entry.
+        std::string_view reference; // One closingIssuesReferences entry, projected.
         std::vector<uint64_t> closes;
         std::vector<uint64_t> unclaimed; // Of this repository's issues 5 and 6.
     };
     auto const rows = std::array {
         Row { .label = "this repository",
-              .reference = R"({"number":5,"url":"https://github.com/o/r/issues/5"})",
+              .reference = R"([5,"https://github.com/o/r/issues/5"])",
               .closes = { 5 },
               .unclaimed = { 6 } },
         Row { .label = "another repository",
-              .reference = R"({"number":5,"url":"https://github.com/other/repo/issues/5"})",
+              .reference = R"([5,"https://github.com/other/repo/issues/5"])",
               .closes = {},
               .unclaimed = { 5, 6 } },
         Row { .label = "a repository whose name extends this one's",
-              .reference = R"({"number":5,"url":"https://github.com/o/r2/issues/5"})",
+              .reference = R"([5,"https://github.com/o/r2/issues/5"])",
               .closes = {},
               .unclaimed = { 5, 6 } },
         Row { .label = "another host",
-              .reference = R"({"number":5,"url":"https://example.com/o/r/issues/5"})",
+              .reference = R"([5,"https://example.com/o/r/issues/5"])",
               .closes = {},
               .unclaimed = { 5, 6 } },
-        Row { .label = "no url", .reference = R"({"number":5})", .closes = {}, .unclaimed = { 5, 6 } },
+        Row { .label = "no url", .reference = R"([5,null])", .closes = {}, .unclaimed = { 5, 6 } },
     };
     for (auto const& row: rows)
     {
         CAPTURE(row.label);
-        auto const text = std::format(R"([{{"number":1,"title":"t","url":"https://github.com/o/r/pull/1",)"
-                                      R"("baseRefName":"master","closingIssuesReferences":[{}]}}])",
-                                      row.reference);
+        auto const text =
+            std::format(R"([[1,"t","https://github.com/o/r/pull/1","h","master",false,false,"",[{}],[]]])",
+                        row.reference);
         auto const listed = github::changeRequests(text, OutputExtent::Whole);
         REQUIRE(listed.has_value());
         REQUIRE(listed->items.size() == 1);

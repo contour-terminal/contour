@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -22,25 +23,45 @@
 
 using namespace std::string_view_literals;
 
-/// The keys of a `statusCheckRollup` entry: `__typename` is no member name.
+// The `gh-prs` rows are positional (the command's `--jq` filter, Commands.cpp): each table lists the members
+// in the order the filter prints them. Glaze finds a table by the spelling `value`, as the standard library
+// finds `value_type`.
+
+/// A `statusCheckRollup` entry: `[__typename, name, context, status, conclusion, state]`.
 template <>
 struct glz::meta<orchestrator::github::detail::JsonCheck>
 {
     using T = orchestrator::github::detail::JsonCheck;
-    // Glaze finds the table by this spelling, as the standard library finds `value_type`.
     // NOLINTNEXTLINE(readability-identifier-naming)
-    static constexpr auto value = glz::object("__typename",
-                                              &T::typeName,
-                                              "name",
-                                              &T::name,
-                                              "status",
-                                              &T::status,
-                                              "conclusion",
-                                              &T::conclusion,
-                                              "context",
-                                              &T::context,
-                                              "state",
-                                              &T::state);
+    static constexpr auto value =
+        glz::array(&T::typeName, &T::name, &T::context, &T::status, &T::conclusion, &T::state);
+};
+
+/// A `closingIssuesReferences` entry: `[number, url]`.
+template <>
+struct glz::meta<orchestrator::github::detail::JsonIssueReference>
+{
+    using T = orchestrator::github::detail::JsonIssueReference;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr auto value = glz::array(&T::number, &T::url);
+};
+
+/// A pull request.
+template <>
+struct glz::meta<orchestrator::github::detail::JsonPullRequest>
+{
+    using T = orchestrator::github::detail::JsonPullRequest;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr auto value = glz::array(&T::number,
+                                             &T::title,
+                                             &T::url,
+                                             &T::headRefName,
+                                             &T::baseRefName,
+                                             &T::isDraft,
+                                             &T::isCrossRepository,
+                                             &T::reviewDecision,
+                                             &T::closingIssuesReferences,
+                                             &T::statusCheckRollup);
 };
 
 namespace orchestrator::github
@@ -120,14 +141,21 @@ namespace
         return 2;
     }
 
+    /// @return @p text; empty for a key the projection printed as `null`.
+    std::string_view textOf(std::optional<std::string> const& text) noexcept
+    {
+        return text ? std::string_view { *text } : std::string_view {};
+    }
+
     /// @return @p json as a Check whose views point into it.
     Check checkOf(JsonCheck const& json) noexcept
     {
+        auto const name = textOf(json.name);
         return Check { .typeName = json.typeName,
-                       .status = json.status,
-                       .conclusion = json.conclusion,
-                       .state = json.state,
-                       .name = json.name.empty() ? std::string_view { json.context } : json.name };
+                       .status = textOf(json.status),
+                       .conclusion = textOf(json.conclusion),
+                       .state = textOf(json.state),
+                       .name = name.empty() ? textOf(json.context) : name };
     }
 
     /// @return Whether the forge listed as many entries as were asked for, so that there may be more.
@@ -200,7 +228,7 @@ namespace
         auto closesIssues = std::vector<uint64_t> {};
         closesIssues.reserve(json.closingIssuesReferences.size());
         for (auto const& reference: json.closingIssuesReferences)
-            if (!repository.empty() && repositoryOf(reference.url) == repository)
+            if (!repository.empty() && reference.url && repositoryOf(*reference.url) == repository)
                 closesIssues.push_back(reference.number);
 
         return ChangeRequest {

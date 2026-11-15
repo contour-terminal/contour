@@ -155,6 +155,11 @@ namespace
     constexpr auto GhAuthArgv = std::array { "gh"sv, "auth"sv, "status"sv };
     constexpr auto GhDefaultBranchArgv =
         std::array { "gh"sv, "repo"sv, "view"sv, "--json"sv, "defaultBranchRef"sv };
+    /// The reply is projected at the source into positional rows (GitHub.cpp reads them): `gh` prints a
+    /// check run's URLs, times and workflow too, which made 100 pull requests about 820 KiB and their parse
+    /// overrun the guest's 50 ms deadline (measured: harness/ParseHarness.cpp). The filter is one word: no
+    /// space, no brace and no quote, as the manifest grammar asks. A key an entry lacks is projected as
+    /// `null`.
     constexpr auto GhPrsArgv = std::array {
         "gh"sv,
         "pr"sv,
@@ -168,6 +173,10 @@ namespace
         "--json"sv,
         "number,title,url,headRefName,baseRefName,isDraft,isCrossRepository,reviewDecision,statusCheckRollup,"
         "closingIssuesReferences"sv,
+        "--jq"sv,
+        "[.[]|[.number,.title,.url,.headRefName,.baseRefName,.isDraft,.isCrossRepository,.reviewDecision,"
+        "[.closingIssuesReferences[]|[.number,.url]],"
+        "[.statusCheckRollup[]|[.__typename,.name,.context,.status,.conclusion,.state]]]]"sv,
     };
     constexpr auto GhIssuesArgv = std::array {
         "gh"sv,       "issue"sv,   "list"sv,   "--state"sv,          "open"sv, "--limit"sv, "100"sv,

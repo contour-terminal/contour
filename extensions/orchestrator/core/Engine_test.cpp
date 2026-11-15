@@ -1585,7 +1585,7 @@ TEST_CASE("a cut list is incomplete and no failure", "[orchestrator][engine]")
     };
     auto const rows = std::array {
         Row { .name = "cut in the last entry: the entries before it",
-              .output = std::string_view { fixture }.substr(0, fixture.rfind(R"({"baseRefName")")),
+              .output = std::string_view { fixture }.substr(0, fixture.rfind("[1847,")), // the last row
               .listed = 4,
               .expected =
                   "the pull request list is incomplete: its output was cut at the host's limit after 4" },
@@ -1618,14 +1618,13 @@ TEST_CASE("a list at the limit or with skipped entries is shown with a notice", 
 {
     auto many = std::string("[");
     for (auto const number: std::views::iota(1, 101))
-        many += std::format(
-            R"({}{{"number":{},"title":"t","url":"https://github.com/o/r/pull/{}","headRefName":"h","baseRefName":"master","isDraft":false,"isCrossRepository":false,"reviewDecision":"","statusCheckRollup":[],"closingIssuesReferences":[]}})",
-            number == 1 ? "" : ",",
-            number,
-            number);
+        many +=
+            std::format(R"({}[{},"t","https://github.com/o/r/pull/{}","h","master",false,false,"",[],[]])",
+                        number == 1 ? "" : ",",
+                        number,
+                        number);
     many += "]";
-    auto const skipped =
-        R"([{"number":1,"title":"t","url":"https://github.com/o/r/pull/1","headRefName":"h","baseRefName":"..bad","isDraft":false,"isCrossRepository":false,"reviewDecision":"","statusCheckRollup":[],"closingIssuesReferences":[]}])"s;
+    auto const skipped = R"([[1,"t","https://github.com/o/r/pull/1","h","..bad",false,false,"",[],[]]])"s;
     struct Row
     {
         std::string_view name;
