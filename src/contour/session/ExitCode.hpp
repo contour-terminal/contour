@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <format>
 #include <optional>
 #include <string>
 #include <variant>
@@ -60,6 +61,29 @@ using SessionExitStatus = std::optional<std::variant<vtpty::Process::ExitStatus
 #else
     return mapProcess(std::get<vtpty::Process::ExitStatus>(*status));
 #endif
+}
+
+/// Says how the session's program ended, for a run that ends early to name why.
+/// @param status The session's recorded exit status (Process or SSH), or nullopt.
+/// @return E.g. "its session's program exited with status 1", or "no session ended".
+[[nodiscard]] inline std::string describeSessionExit(SessionExitStatus const& status)
+{
+    if (!status.has_value())
+        return "no session ended";
+    return std::visit(
+        [](auto const& exitStatus) {
+            return std::visit(
+                [](auto const& ended) -> std::string {
+                    if constexpr (requires { ended.exitCode; })
+                        return std::format("its session's program exited with status {}", ended.exitCode);
+                    else if constexpr (requires { ended.signum; })
+                        return std::format("its session's program was killed by signal {}", ended.signum);
+                    else // An SSH session's remote program, whose signal is named, not numbered.
+                        return std::format("its session's program was killed by signal {}", ended.signal);
+                },
+                exitStatus);
+        },
+        *status);
 }
 
 /// Reads how the program behind @p device ended.
