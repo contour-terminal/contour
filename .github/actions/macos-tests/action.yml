@@ -19,14 +19,43 @@ runs:
       # Registering a new test target must not require editing this file.
       #
       # A hang fails one test, not the step: the preset gives every test 10 minutes, the GUI suite's
-      # four runs their own 20 (each takes 8-10 here), vthost_test its own 5, and ctest shows a
+      # four runs their own 20 (each takes 8-10 here), vthost_test its own 10, and ctest shows a
       # timed-out test's output. The trace names each Catch2 case on stderr as it starts, so that
       # output ends with the case that hung.
+      #
+      # The trace names the case, not where it is stuck: ctest's kill leaves no stack. A watchdog samples
+      # every vthost_test process -- the suite, and the keepers and daemons it runs as itself -- still
+      # alive 450 s after it was first seen, before ctest's 600 s kill, and the samples are printed when
+      # the step fails. (vthost_test hung here once, in a handover case nothing could reproduce.)
       shell: bash
       env:
         CMAKE_PRESET: ${{ inputs.preset }}
         CONTOUR_TEST_TRACE: "1"
-      run: ctest --preset "$CMAKE_PRESET" -j "$(sysctl -n hw.ncpu)"
+      run: |
+        samples="$RUNNER_TEMP/hang-samples"
+        mkdir -p "$samples"
+        (
+          while sleep 30; do
+            for pid in $(pgrep -x vthost_test); do
+              [ -e "$samples/$pid.since" ] || date +%s > "$samples/$pid.since"
+              if [ ! -e "$samples/$pid.txt" ] && [ $(( $(date +%s) - $(cat "$samples/$pid.since") )) -ge 450 ]; then
+                sample "$pid" 5 -file "$samples/$pid.txt" > /dev/null 2>&1 || true
+              fi
+            done
+          done
+        ) &
+        watchdog=$!
+        status=0
+        ctest --preset "$CMAKE_PRESET" -j "$(sysctl -n hw.ncpu)" || status=$?
+        kill "$watchdog" 2> /dev/null || true
+        if [ "$status" -ne 0 ]; then
+          for sampled in "$samples"/*.txt; do
+            [ -e "$sampled" ] || continue
+            echo "== $sampled"
+            cat "$sampled"
+          done
+        fi
+        exit "$status"
     - name: "verify the tmux oracles actually ran"
       # @see the identical assertion on the Linux matrix for why a green suite is not enough:
       # a Catch2 SKIP exits 0, so "no tmux, nothing ran" is indistinguishable from success.
