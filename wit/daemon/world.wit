@@ -57,7 +57,8 @@ interface host {
         not-owned,
         /// An argument is not what the manifest declares, or not what the call accepts.
         bad-argument,
-        /// A limit of the host is reached: processes in flight, bytes kept, store size.
+        /// A limit of the host is reached: processes in flight, bytes kept, store size, the per-callback
+        /// durable budget (see `store-set`), a summary's length.
         limit,
         /// The pane, tab or process no longer exists.
         gone,
@@ -245,9 +246,15 @@ interface host {
     /// Writes a value to the extension's store; it is durable when the call returns. The key is as for
     /// `store-get`, else `bad-argument`; the value is at most 64 KiB, and the store holds at most 1024 keys:
     /// a larger value, or a new key past the last, is `limit`.
+    ///
+    /// `store-set` and `store-remove` are durable calls: the call's deadline is paused across them, and one
+    /// callback (`load`, or one `update`) may make at most 64 of them and spend at most 2 s in them. Past
+    /// that budget, the next durable call of the callback answers `limit` and writes nothing. That `limit`
+    /// means "try again in a later callback", which starts with a fresh budget, not "the store is full".
     store-set: func(key: string, value: list<u8>) -> result<_, host-error>;
     /// Removes a value from the extension's store; it is durable when the call returns, and a key that holds
-    /// none is removed already. The key is as for `store-get`, else `bad-argument`.
+    /// none is removed already. The key is as for `store-get`, else `bad-argument`. Past the callback's
+    /// durable budget (see `store-set`) it is `limit`, and nothing is removed.
     store-remove: func(key: string) -> result<_, host-error>;
     /// Lists the store's keys that start with a prefix, sorted. Any prefix is accepted; one no key of the
     /// grammar of `store-get` can start with lists nothing.
@@ -272,7 +279,11 @@ interface host {
     tab-write: func(tab: string, bytes: list<u8>) -> result<_, host-error>;
     /// Takes the actions the user invoked since the last call.
     actions-take: func() -> result<list<action>, host-error>;
-    /// Sets the extension's summary: a short line for a status line, and its detail.
+    /// Sets the extension's summary: a short line for a status line, and its detail. The short line is at
+    /// most 120 characters (code points) and the detail at most 16 KiB; past either the call is `limit` and
+    /// the previous summary stays. The host shows both neutralised: every control, bidirectional,
+    /// zero-width or otherwise disguising character as its code point (`<U+001B>`); the detail's line
+    /// breaks (`\n`) are kept.
     summary-set: func(short: string, detail: string) -> result<_, host-error>;
     /// Shows a pane the extension owns in the origin's window.
     pane-reveal: func(pane: string, origin: origin) -> result<_, host-error>;

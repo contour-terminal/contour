@@ -32,7 +32,9 @@ daemon upgrade), running processes and open panes are kept, and the new instance
 - **Every call has a deadline.** A call that exceeds it is stopped and counts as a fault, as does a
   trap; repeated faults disable the extension. The durable calls return once the store is synced, and
   the deadline is paused across them; instead, they are bounded by a durable budget per callback: 64
-  such calls or 2 s of them, whichever comes first.
+  such calls or 2 s of them, whichever comes first. Past it, the next `store-set` or `store-remove` of
+  that callback answers `limit` and writes nothing. That `limit` means "try again in a later callback",
+  which starts with a fresh budget, not "the store is full".
 - **Time comes from `now`.** The module reads no clock of its own: `monotonic-ms` measures intervals,
   `wall-ms` dates things. `wake` asks for one `wake` hint, replacing an earlier request; the host may
   deliver it later than asked, never earlier.

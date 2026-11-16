@@ -12,8 +12,10 @@
 #include <vtextension/CommandPolicy.hpp>
 #include <vtextension/CompiledExtension.hpp>
 #include <vtextension/ControlImports.hpp>
+#include <vtextension/DaemonExtensionRunner.hpp>
 #include <vtextension/DaemonImports.hpp>
 #include <vtextension/DaemonInstance.hpp>
+#include <vtextension/DaemonLimits.hpp>
 #include <vtextension/DaemonWorld.hpp>
 #include <vtextension/DeadlineGuard.hpp>
 #include <vtextension/DeclaredProcesses.hpp>
@@ -26,6 +28,7 @@
 #include <vtextension/ExtensionGrantStore.hpp>
 #include <vtextension/ExtensionHost.hpp>
 #include <vtextension/ExtensionLimits.hpp>
+#include <vtextension/ExtensionPresence.hpp>
 #include <vtextension/ExtensionScheduler.hpp>
 #include <vtextension/ExtensionStore.hpp>
 #include <vtextension/ExtensionWorkerPool.hpp>

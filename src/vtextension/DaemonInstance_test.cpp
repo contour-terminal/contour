@@ -44,37 +44,11 @@
 using namespace std::string_view_literals;
 using namespace vtextension;
 using vtextension::testing::FakeDaemonHostServices;
+using vtextension::testing::FakeInstanceMemory;
 using vtextension::testing::FakeWasmBackend;
 
 namespace
 {
-
-/// A fake instance's linear memory as the codec reads it, for a test to lift what the host lowered.
-class LinearMemory final: public abi::IGuestMemory
-{
-  public:
-    explicit LinearMemory(vtextension::testing::FakeWasmInstance& instance) noexcept: _instance { instance }
-    {
-    }
-
-    [[nodiscard]] abi::Result<std::span<std::byte>> view(abi::Address address, uint32_t size) override
-    {
-        auto const bytes = _instance.memory(address, size);
-        if (!bytes)
-            return std::unexpected(ExtensionError::Trapped);
-        return *bytes;
-    }
-
-    [[nodiscard]] abi::Result<abi::Address> allocate(uint32_t /*size*/, uint32_t /*alignment*/) override
-    {
-        return std::unexpected(ExtensionError::Trapped);
-    }
-
-    [[nodiscard]] abi::Result<void> chargeLift(uint64_t /*bytes*/) override { return {}; }
-
-  private:
-    vtextension::testing::FakeWasmInstance& _instance;
-};
 
 /// A guest on the fake backend, loaded on a daemon engine: its `cabi_realloc` is a bump allocator from
 /// 1024, and its `update` runs what the test sets.
@@ -200,7 +174,7 @@ TEST_CASE("DaemonInstance: load hands the guest its configuration and the host's
     auto info = std::optional<DaemonHostInfo> {};
     guest.backend.guest.exports["load"] =
         [&](std::span<uint32_t> argv) -> std::expected<void, wasm::CallFailure> {
-        auto memory = LinearMemory { guest.guest() };
+        auto memory = FakeInstanceMemory { guest.guest() };
         auto reader = abi::FlatReader(argv.first(7));
         auto const config = abi::Codec<std::string>::liftFlat(memory, reader);
         auto const host = abi::Codec<DaemonHostInfo>::liftFlat(memory, reader);
@@ -254,7 +228,7 @@ TEST_CASE("DaemonInstance: an import not served yet answers not-supported-yet an
         };
         REQUIRE((*instance)->update(DaemonHint::Wake).has_value());
         CHECK(answered.has_value());
-        auto memory = LinearMemory { guest.guest() };
+        auto memory = FakeInstanceMemory { guest.guest() };
         CHECK(row.holdsNotSupportedYet(memory, ResultAddress));
         CHECK_FALSE((*instance)->fault().has_value());
     }

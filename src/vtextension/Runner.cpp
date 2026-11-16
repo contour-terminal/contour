@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtextension/Runner.hpp>
 
+#include <vtbackend/screen/LocalTime.hpp>
 #include <vtbackend/screen/StatusLineCommandCache.hpp>
 
 #include <core/Assert.hpp>
@@ -34,17 +35,6 @@ namespace vtextension
 
 namespace
 {
-
-    /// How far local civil time is ahead of UTC at an instant, as @p localTime reads it.
-    /// @param localTime The time zone.
-    /// @param when The instant; its offset may differ from another instant's, across daylight saving.
-    /// @return The offset, to the minute; negative west of Greenwich.
-    [[nodiscard]] std::chrono::minutes utcOffsetAt(vtbackend::LocalTimeConverter localTime,
-                                                   std::chrono::system_clock::time_point when) noexcept
-    {
-        auto const utc = std::chrono::floor<std::chrono::seconds>(when).time_since_epoch();
-        return std::chrono::round<std::chrono::minutes>(localTime(when).time_since_epoch() - utc);
-    }
 
     using core::platform::SteadyDuration;
     using core::platform::SteadyTimePoint;
@@ -314,7 +304,7 @@ class Runner::Core final: public IHostServices, public std::enable_shared_from_t
         auto snapshot = _hostState;
         auto const now = _services.wallClock.now();
         snapshot.now = std::chrono::floor<std::chrono::milliseconds>(now);
-        snapshot.utcOffset = utcOffsetAt(_services.localTime, now);
+        snapshot.utcOffset = vtbackend::utcOffsetAt(_services.localTime, now);
         return snapshot;
     }
 

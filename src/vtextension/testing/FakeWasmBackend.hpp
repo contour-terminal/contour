@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include <vtextension/CanonicalAbi.hpp>
 #include <vtextension/DaemonImports.hpp>
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
@@ -142,6 +143,32 @@ class FakeWasmInstance final: public wasm::IWasmInstance
     FakeGuest _guest;
     std::vector<std::string> _names; ///< The function exports; an ExportFunction indexes it.
     std::atomic<Interruption> _interruption = Interruption::None;
+};
+
+/// A fake instance's linear memory as the codec reads it: for a test to lift what the host lowered, and what
+/// a scripted guest passes the host. It allocates nothing and charges no lift budget.
+class FakeInstanceMemory final: public abi::IGuestMemory
+{
+  public:
+    explicit FakeInstanceMemory(FakeWasmInstance& instance) noexcept: _instance { instance } {}
+
+    [[nodiscard]] abi::Result<std::span<std::byte>> view(abi::Address address, uint32_t size) override
+    {
+        auto const bytes = _instance.memory(address, size);
+        if (!bytes)
+            return std::unexpected(ExtensionError::Trapped);
+        return *bytes;
+    }
+
+    [[nodiscard]] abi::Result<abi::Address> allocate(uint32_t /*size*/, uint32_t /*alignment*/) override
+    {
+        return std::unexpected(ExtensionError::Trapped);
+    }
+
+    [[nodiscard]] abi::Result<void> chargeLift(uint64_t /*bytes*/) override { return {}; }
+
+  private:
+    FakeWasmInstance& _instance;
 };
 
 /// The function exports a fake module describes: those the world requires, with their core signatures.

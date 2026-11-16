@@ -346,7 +346,9 @@ window attached, and its README is the contract's other half.
 
 Its 24 imports live under the module `terminal-extensions:daemon/host@0.1.0`. All of them return at once
 but `store-set` and `store-remove`, which return once the store is synced; the call's deadline is paused
-across them, and a callback may make at most 64 of them or spend 2 s in them.
+across them, and a callback may make at most 64 of them or spend 2 s in them. Past that budget, the next
+`store-set` or `store-remove` of the callback answers `limit` and writes nothing: `limit` here means "try
+again in a later callback", which starts with a fresh budget, not "the store is full".
 
 - `log`, `wake(after-ms)`, `now()`: logging, one pending wake-up, and the clocks;
 - `proc-start`, `procs`, `proc-take`, `proc-release`: declared commands, run directly, their results

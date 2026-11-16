@@ -11,6 +11,7 @@ set(vtextension_SOURCES
     CommandPolicy.cpp
     CompiledExtension.cpp
     ControlImports.cpp
+    DaemonExtensionRunner.cpp
     DaemonImports.cpp
     DaemonInstance.cpp
     DeclaredProcesses.cpp
@@ -48,8 +49,10 @@ set(vtextension_HEADERS
     CompiledExtension.hpp
     ControlCodec.hpp
     ControlImports.hpp
+    DaemonExtensionRunner.hpp
     DaemonImports.hpp
     DaemonInstance.hpp
+    DaemonLimits.hpp
     DaemonWorld.hpp
     DeadlineGuard.hpp
     DeclaredProcesses.hpp
@@ -62,6 +65,7 @@ set(vtextension_HEADERS
     ExtensionGrantStore.hpp
     ExtensionHost.hpp
     ExtensionLimits.hpp
+    ExtensionPresence.hpp
     ExtensionScheduler.hpp
     ExtensionStore.hpp
     ExtensionWorkerPool.hpp
@@ -119,6 +123,7 @@ if(VTEXTENSION_TESTING)
         CommandPolicy_test.cpp
         ControlCodec_test.cpp
         ControlImports_test.cpp
+        DaemonExtensionRunner_test.cpp
         DaemonInstance_test.cpp
         DaemonWorld_test.cpp
         DeadlineGuard_test.cpp
@@ -145,6 +150,7 @@ if(VTEXTENSION_TESTING)
         Wit_test.cpp
         WorldCheck_test.cpp
         wasm/WasmBinary_test.cpp
+        testing/DaemonRunnerHarness.hpp
         testing/FailingFileSystem.hpp
         testing/FakeDaemonHostServices.hpp
         testing/FakeFileLocker.hpp
