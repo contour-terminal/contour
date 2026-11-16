@@ -4180,7 +4180,10 @@ TEST_CASE("the Terminal row keeps the active tab and the + in view when its tabs
 {
     // A tab is a whole number of cells, a cell rarely a whole number of pixels, so where the last tab ends
     // has a different fraction for every tab count -- and Flickable settles a fractional scroll onto a whole
-    // pixel, either way. Over a run of counts some land on each side, whatever the platform's font.
+    // pixel, either way. Over a run of counts some land on each side, whatever the platform's font. Where the
+    // tabs start to overflow depends on the font's cell width too, so a count whose tabs still fit is passed
+    // over; most counts of the run overflow on every platform.
+    auto overflowed = 0;
     for (auto const tabCount: std::views::iota(12, 24))
     {
         INFO("tabs: " << tabCount);
@@ -4196,11 +4199,16 @@ TEST_CASE("the Terminal row keeps the active tab and the + in view when its tabs
         auto const* active = tabs.back();
         REQUIRE(active != nullptr);
         auto const contentX = list.property("contentX").toReal();
-        CHECK(contentX > 0);
+        if (list.property("contentWidth").toReal() > list.width())
+        {
+            ++overflowed;
+            CHECK(contentX > 0);
+        }
         CHECK(active->x() >= contentX);
         CHECK(active->x() + active->width() <= contentX + list.width());
         CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
+    CHECK(overflowed >= 6);
 
     constexpr auto TabCount = 20;
     QQmlEngine engine;

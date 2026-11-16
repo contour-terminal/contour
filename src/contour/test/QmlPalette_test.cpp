@@ -1760,9 +1760,11 @@ TEST_CASE("link pill: a header slot too narrow for the pill sends it to the grid
     auto& slot = PaneTreeHost::partOf(card, "paneHeaderLinkSlot");
     auto* pill = card.findChild<QQuickItem*>(QStringLiteral("linkPill"));
     REQUIRE(pill != nullptr);
-    // A hint wider than the slot: the pill could show none of the target there.
-    auto const hint =
-        QStringLiteral("Ctrl+Click to open this link in the browser, as the follow binding says");
+    // A hint wider than the slot, whatever the platform's fonts measure it at: the pill could show none of
+    // the target there.
+    auto const hint = QStringLiteral(
+        "Ctrl+Click to open this link in the browser, as the follow binding says, and as it says for every "
+        "link that the pane shows");
     panes.leftSession.setLinkTarget(longLinkTarget(), hint, true);
     REQUIRE(QTest::qWaitFor([&] {
         return pill->property("livePlacement").toMap().value(QStringLiteral("anchor")).toString()

@@ -232,7 +232,9 @@ struct Fixture
     {
         auto const* main = cfg.findProfile("main");
         REQUIRE(main != nullptr);
-        REQUIRE(store->write(config::profileFile(name), config::emitProfileYaml(*main)).has_value());
+        auto const written = store->write(config::profileFile(name), config::emitProfileYaml(*main));
+        INFO("write: " << (written ? std::string {} : written.error()));
+        REQUIRE(written.has_value());
         reload();
         controller->editProfile(QString::fromStdString(name));
         REQUIRE(controller->editingReadOnly() == false);

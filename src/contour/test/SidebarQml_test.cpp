@@ -2029,7 +2029,16 @@ TEST_CASE("at the narrowest sidebar the footer keeps its counts whole, in fewer 
             INFO("counts width " << counts->width() << ", implicit "
                                  << counts->property("implicitWidth").toReal() << ", x " << counts->x());
             CHECK(!counts->property("truncated").toBool());
-            CHECK(chord->isVisible() == chordShown);
+            // The wide sidebar shows the chord. The narrowest drops it where the counts would not keep their
+            // room beside it -- with the default fonts of every platform CI measures; with narrower ones it
+            // may still fit, and then it stands clear of the counts, which keep their full wording.
+            if (chordShown)
+                CHECK(chord->isVisible());
+            else if (chord->isVisible())
+            {
+                CHECK(text == QStringLiteral("1 needs you · 1 working"));
+                CHECK(counts->x() + counts->property("implicitWidth").toReal() <= chord->x() + 0.5);
+            }
         }
     }
 }
@@ -2548,8 +2557,9 @@ TEST_CASE("the location chip yields before the tabs go icon-only (offscreen)",
                                    .visibility = contour::config::SidebarVisibility::Hidden,
                                    .billingTitle = "billing-and-invoices",
                                    .tabCount = 3 } };
-    scene.controller.setDaemon(QStringLiteral("starfive-build-server-0123456789-and-more"),
-                               DaemonLocality::Remote);
+    scene.controller.setDaemon(
+        QStringLiteral("starfive-build-server-0123456789-and-more-of-its-very-long-name"),
+        DaemonLocality::Remote);
     scene.controller.setHostChipState(static_cast<int>(HostChipState::Reconnecting));
     QCoreApplication::processEvents();
     auto* chip = scene.item(QStringLiteral("workspaceChip"));
@@ -2583,16 +2593,22 @@ TEST_CASE("the location chip yields before the tabs go icon-only (offscreen)",
             CHECK(layout.value(QStringLiteral("tabWidth")).toReal() >= scene.style("minTabWidth") - 0.5);
         }
         sawElidedChip = sawElidedChip || fit > static_cast<int>(LocationChipFit::Full);
-        if (requested == 700)
-        {
-            // At 700 the chip, in full, would not have left the tabs their labels: it stepped down to the
-            // step this row's room allows: the daemon's dot on the macOS and Terminal rows, the workspace's
-            // elision on the two whose chrome leaves less room.
-            auto const expected = (row == ChromeStyle::MacOS || row == ChromeStyle::Terminal)
-                                      ? LocationChipFit::DotOnly
-                                      : LocationChipFit::WorkspaceElided;
-            CHECK(fit == static_cast<int>(expected));
-        }
+
+        // The chip takes the first step, in elision order, that fits the room the band left it -- the last
+        // step when none does. Read against the chip's own measured widths, so it holds whatever widths the
+        // platform's fonts give the text.
+        auto const widths = chip->property("fitWidths").toMap();
+        auto const room = bar->property("chipRoom").toReal();
+        auto const widthOf = [&](LocationChipFit step) {
+            auto const key = contour::window::LocationChipSteps.at(static_cast<size_t>(step)).key;
+            return widths.value(QString::fromUtf8(key.data(), static_cast<qsizetype>(key.size()))).toReal();
+        };
+        auto const taken = static_cast<LocationChipFit>(fit);
+        INFO("chip room " << room << ", step width " << widthOf(taken));
+        if (taken != contour::window::LocationChipFits.back())
+            CHECK(widthOf(taken) <= room + 0.5);
+        if (taken != LocationChipFit::Full)
+            CHECK(widthOf(static_cast<LocationChipFit>(fit - 1)) > room - 0.5);
         if (row == ChromeStyle::Terminal)
         {
             // The Terminal row counts in cells: its well is a whole number of them, three at least.
