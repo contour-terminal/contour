@@ -16,5 +16,7 @@ if(LIBTERMINAL_TESTING)
         add_executable(regis-plot2d regis-plot2d.cpp)
         add_executable(regis-animation regis-animation.cpp)
         add_executable(regis-plot3d regis-plot3d.cpp)
+
+        add_executable(donut-animation donut-animation.cpp)
     endif()
 endif()
