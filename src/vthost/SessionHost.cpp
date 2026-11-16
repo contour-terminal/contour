@@ -540,6 +540,8 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _defaultCellPixelSize(config.defaultCellPixelSize),
     _nextSessionId(config.firstSessionId),
     _extensions(std::move(config.extensions)),
+    // Once the loop and the gate exist: the factory may post to the loop already.
+    _daemonWorld(makeDaemonWorld(config.daemonWorld)),
     _announcedStatusPatience(config.announcedStatusPatience),
     _extensionControl(vtcontrol::nullControlApi()),
     _objects(std::move(config.uuids)),
@@ -608,7 +610,7 @@ SessionHost::~SessionHost()
     // Close every PTY first so all pump threads unblock and join promptly.
     for (auto& [id, session]: _sessions)
         session->terminate(TerminationReason::Teardown);
-    if (_extensions)
+    if (_extensions || _daemonWorld)
     {
         // The drain below turns the loop: from inside a turn -- or beside one on another thread -- it would
         // re-enter it, or race it.
@@ -616,7 +618,10 @@ SessionHost::~SessionHost()
         // Every runner is destroyed with its session, and posts its last job to its lane; a build in flight
         // still holds the engine. Only then are the threads stopped, and what they posted dropped.
         _sessions.clear();
-        _extensions->stop();
+        if (_extensions)
+            _extensions->stop();
+        if (_daemonWorld)
+            _daemonWorld->stop();
         std::ignore = _loop.runOnce(std::chrono::milliseconds { 0 });
     }
     _gate->host = nullptr;
@@ -2620,6 +2625,20 @@ std::vector<proto::PermissionRequest> SessionHost::rehomePermissionRequests(Sess
 
 // ---------------------------------------------------------------------------
 // Status-line extensions
+
+std::shared_ptr<IDaemonWorldHosting> SessionHost::makeDaemonWorld(DaemonWorldFactory const& factory)
+{
+    if (!factory)
+        return nullptr;
+    auto post = OwnerPost { [&loop = _loop, gate = _gate](std::function<void()> job) {
+        loop.post([gate, job = std::move(job)] {
+            if (gate->host != nullptr)
+                job();
+        });
+    } };
+    // Nothing on the host follows the requests or the summaries yet: they are read where they are shown.
+    return factory(DaemonWorldEvents {}, std::move(post));
+}
 
 HostedSessionExtensions SessionHost::makeSessionExtensions(SessionId session)
 {

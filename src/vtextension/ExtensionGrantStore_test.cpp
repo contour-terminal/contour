@@ -236,6 +236,14 @@ TEST_CASE("ExtensionGrants: a daemon keeps its answers in a file of its own", "[
         CHECK(named.starts_with("extension-grants.daemon.work."));
         CHECK(named != daemonExtensionGrantsFileName(daemonOf("work")));
     }
+
+    SECTION("the daemon-scoped extensions' file, qualified alike")
+    {
+        auto const scoped = std::string_view { "extension-grants.daemon-scoped.txt" };
+        CHECK(daemonExtensionGrantsFileName(daemonOf(TestDefaultName), scoped) == scoped);
+        CHECK(daemonExtensionGrantsFileName(daemonOf("work"), scoped)
+              == "extension-grants.daemon-scoped.work.txt");
+    }
 }
 
 TEST_CASE("ExtensionGrantStore: a GUI's denial survives a daemon's record", "[vtextension][extensions]")

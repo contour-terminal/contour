@@ -190,6 +190,10 @@ struct DaemonConfig
     /// daemon's event loop: runDaemon() makes them once that exists, and its session host destroys them
     /// before it goes. `contour daemon` sets it from the profile, which `src/vthost` cannot reach.
     std::function<std::shared_ptr<IExtensionHosting>()> extensions {};
+    /// Makes the daemon-scoped extensions that run beside the sessions; empty for none, which constructs
+    /// nothing of them. Called once, by the session host, once the daemon's loop exists. `contour daemon`
+    /// sets it from `daemon.extensions`, which `src/vthost` cannot reach.
+    DaemonWorldFactory daemonWorld {};
     /// The release this daemon states in every ServerHello and status reply; empty when unknown.
     std::string releaseVersion {};
     /// The image this daemon runs from, as its status reply states it.

@@ -1737,6 +1737,7 @@ int runDaemon(DaemonConfig const& config,
             .identity = thisHostIdentity(),
             .workspaceGit = WorkspaceGitServices { .probe = *gitProbe, .executor = gitExecutor },
             .extensions = config.extensions ? config.extensions() : nullptr,
+            .daemonWorld = config.daemonWorld,
             .profiles = config.profiles,
             .profilePtys = config.profiles
                                ? makeProfilePtyFactory(config.shell, config.socketPath, shellDevices)

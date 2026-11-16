@@ -1051,6 +1051,10 @@ struct SessionHostConfig
     /// wakes nothing of them (A2). Shared only so that a test can keep a handle on a fake: the host destroys
     /// its share after its sessions, and nobody else is to hold one past the host. @see IExtensionHosting
     std::shared_ptr<IExtensionHosting> extensions {};
+    /// Makes the daemon-scoped extensions that run beside the sessions; empty for none, which constructs
+    /// nothing of them. Called once, as the host is constructed; the host stops them before it drains its
+    /// loop as it goes. @see IDaemonWorldHosting
+    DaemonWorldFactory daemonWorld {};
     /// The host's profiles, in which every spawn resolves its shell (SessionSpawnRequest::profileName, or the
     /// default profile for none) and passes it to the PTY factory as a whole shell; null for none, which
     /// keeps the factory settings and the PTY factory's own shell for every session.
@@ -2190,6 +2194,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return SizeChange::Applied when `_pageSize` moved, SizeChange::Unchanged otherwise.
     [[nodiscard]] SizeChange resolveAuthoritativeArea();
 
+    /// Makes the daemon-scoped extensions, their jobs run on the loop while the host lives.
+    /// @param factory What makes them; empty for none.
+    /// @return The extensions; null for none.
+    [[nodiscard]] std::shared_ptr<IDaemonWorldHosting> makeDaemonWorld(DaemonWorldFactory const& factory);
+
     /// The session hooks a new session's status-line extensions reach the host through, every one of which
     /// does nothing once the session is gone.
     /// @param session The session about to be spawned.
@@ -2422,6 +2431,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// The extensions every session runs; null for none. Declared before _sessions, so that it is destroyed
     /// after every session's extensions: its runtime joins the threads their runners lived on.
     std::shared_ptr<IExtensionHosting> _extensions;
+    /// The daemon-scoped extensions; null for none. Made by SessionHostConfig::daemonWorld in the
+    /// constructor, stopped by the destructor before it drains the loop. @see makeDaemonWorld
+    std::shared_ptr<IDaemonWorldHosting> _daemonWorld;
     std::unordered_map<uint64_t, std::unique_ptr<HostedSession>> _sessions;
     /// @see pumpEventsInFlight()
     std::atomic<std::size_t> _pumpEventsInFlight { 0 };

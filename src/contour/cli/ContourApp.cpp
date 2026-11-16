@@ -28,8 +28,10 @@
 #include <vtparser/Parser.hpp>
 
 #include <vtpty/CommandCapture.hpp>
+#include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/ExecutablePath.hpp>
 #include <vtpty/Process.hpp>
+#include <vtpty/ProcessRunner.hpp>
 #include <vtpty/ProgramLookup.hpp>
 
 #include <crispy/StackTrace.hpp>
@@ -46,6 +48,7 @@
 #include <core/net/SshAgentEndpoint.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/NativeFileSystem.hpp>
+#include <core/platform/UserPaths.hpp>
 
 #include <algorithm>
 #include <array>
@@ -63,6 +66,7 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -78,11 +82,14 @@
     #include <contour/config/ExtensionDeclarations.hpp>
 
     #include <vtextension/BundledExtensions.hpp>
+    #include <vtextension/DaemonExtensionRuntime.hpp>
     #include <vtextension/ExtensionGrantStore.hpp>
     #include <vtextension/ExtensionWorkerPool.hpp>
+    #include <vtextension/FileLocker.hpp>
     #include <vtextension/wasm/DefaultBackend.hpp>
     #include <vtextension/wasm/WasmRuntime.hpp>
     #include <vthost/DaemonExtensions.hpp>
+    #include <vthost/DaemonWorldExtensions.hpp>
 #endif
 #include <vthost/AccessFile.hpp>
 #include <vthost/AuthorizedKeys.hpp>
@@ -1062,6 +1069,42 @@ namespace
     }
 
 #ifdef CONTOUR_EXTENSIONS
+    /// A ThreadedProcessRunner made on the first start(): a daemon whose extensions never run a command
+    /// starts no thread for them.
+    class OnFirstStartProcessRunner final: public vtpty::IProcessRunner
+    {
+      public:
+        [[nodiscard]] std::expected<vtpty::ProcessToken, vtpty::ProcessStartError> start(
+            vtpty::ProcessSpec spec, vtpty::CompletionHandler done) override
+        {
+            auto const lock = std::scoped_lock { _mutex };
+            if (!_runner)
+            {
+                auto made = vtpty::ThreadedProcessRunner::create(core::platform::defaultSteadyClock(), {});
+                if (!made)
+                {
+                    errorLog()(
+                        "daemon.extensions: no process runner can be started; the command is refused.");
+                    return std::unexpected(vtpty::ProcessStartError::SpawnFailed);
+                }
+                _runner = std::move(*made);
+            }
+            return _runner->start(std::move(spec), std::move(done));
+        }
+
+        void cancel(vtpty::ProcessToken token) override
+        {
+            auto const lock = std::scoped_lock { _mutex };
+            if (_runner)
+                _runner->cancel(token);
+        }
+
+      private:
+        std::mutex _mutex;
+        std::unique_ptr<vtpty::ThreadedProcessRunner>
+            _runner; ///< Null until the first start; guarded by _mutex.
+    };
+
     /// What a daemon's status-line extensions borrow. Made before the daemon runs, so that it outlives the
     /// extensions the daemon's session host owns.
     struct DaemonExtensionResources
@@ -1082,6 +1125,9 @@ namespace
         vtpty::SystemCommandCapture capture;
         core::platform::SystemWallClock wallClock;
         vtbackend::LocalTimeConverter localTime { &vtbackend::systemLocalTime };
+        /// What the daemon-scoped extensions' declared processes run on.
+        OnFirstStartProcessRunner processRunner;
+        vtextension::NativeFileLocker locker;
     };
 
     /// @param resolved The daemon's profile, resolved.
@@ -1124,6 +1170,76 @@ namespace
                             .environment = core::defaultEnvironment(),
                             .fileSystem = core::platform::NativeFileSystem::instance() },
                     .commandShutdown = services.commandShutdown }) };
+        };
+    }
+    /// @return This process's environment, `NAME=value` each: what the daemon-scoped extensions' commands
+    ///         inherit, less what ChildEnvironment withholds.
+    [[nodiscard]] std::vector<std::string> inheritedEnvironment()
+    {
+    #ifdef _WIN32
+        return {}; // No declared process runs on Windows: the runner answers Unsupported.
+    #else
+        return vthost::keeper::processEnvironmentEntries();
+    #endif
+    }
+
+    /// @param extensions The daemon's `daemon.extensions`.
+    /// @param configFile The configuration the daemon was started with, beside which its grants are kept.
+    /// @param daemon The socket the daemon serves, which names its grants file and its stores.
+    /// @param executableDirectory Where the running executable is, beside which bundled extensions may be.
+    /// @param env The environment the state directory and the home directory are read from.
+    /// @param services What the extensions borrow.
+    /// @return What makes the daemon-scoped extensions; empty when none is declared.
+    [[nodiscard]] vthost::DaemonWorldFactory daemonWorldOf(
+        std::span<config::DaemonExtensionConfig const> extensions,
+        std::filesystem::path const& configFile,
+        vtextension::DaemonIdentity const& daemon,
+        std::filesystem::path const& executableDirectory,
+        core::Environment const& env,
+        DaemonExtensionResources& services)
+    {
+        if (extensions.empty())
+            return {};
+
+        auto const stateDirectory = vthost::daemonStateDirectory(env);
+        auto config = vtextension::DaemonExtensionRuntimeConfig {
+            .declarations = {},
+            // The daemon's own side file, apart from its status-line extensions' file.
+            .grantsFile =
+                configFile.parent_path()
+                / vtextension::daemonExtensionGrantsFileName(daemon, vtextension::DaemonScopedGrantsFileName),
+            .home = core::platform::homeDirectory(env)
+                        .transform([](std::filesystem::path const& home) { return core::pathToUtf8(home); })
+                        .value_or(std::string {}),
+            .inheritedEnvironment = inheritedEnvironment(),
+            .bundledDirectories =
+                vtextension::bundledExtensionDirectories(vtextension::nativeBundledExtensionPlatform(),
+                                                         core::defaultEnvironment(),
+                                                         executableDirectory),
+        };
+        for (auto const& extension: extensions)
+        {
+            // Named exactly as the daemon's snapshot is, so that two daemons sharing a state directory never
+            // share a store; a daemon or extension name no file can be named for leaves it without one.
+            auto store = vthost::daemonExtensionStoreDirectory(
+                stateDirectory, daemon.name, daemon.socketPath, daemon.nameSocketPath, extension.name);
+            config.declarations.push_back(
+                config::daemonExtensionDeclarationOf(extension, store.value_or(std::filesystem::path {})));
+        }
+        return [&services, config = std::move(config)](vthost::DaemonWorldEvents events,
+                                                       vthost::OwnerPost const& /*post*/) {
+            return std::shared_ptr<vthost::IDaemonWorldHosting> {
+                std::make_shared<vthost::DaemonWorldExtensions>(
+                    config,
+                    vthost::DaemonWorldServices { .backend = *services.backend,
+                                                  .runner = services.processRunner,
+                                                  .directories = vtpty::nativeDirectoryOpener(),
+                                                  .fileSystem = core::platform::NativeFileSystem::instance(),
+                                                  .locker = services.locker,
+                                                  .wallClock = services.wallClock,
+                                                  .localTime = services.localTime },
+                    std::move(events))
+            };
         };
     }
 #endif
@@ -1553,6 +1669,8 @@ int ContourApp::serveDaemon(DaemonVerbOptions const& options,
     // Read before the configuration moves into the catalog. Not reloaded: a running daemon keeps the file
     // and the schedule it started with.
     auto const daemonName = vthost::daemonNameFromOption(options.name).name;
+    // Read once: an edit of daemon.extensions takes effect at the next daemon start.
+    auto const daemonExtensions = hostConfig->daemon.value().extensions;
     if (auto snapshotPath = snapshotPathOf(processEnvironment(), daemonName, config.socketPath))
         config.persistence =
             workspacePersistenceOf(hostConfig->daemon.value().restore, *std::move(snapshotPath));
@@ -1566,9 +1684,13 @@ int ContourApp::serveDaemon(DaemonVerbOptions const& options,
         core::platform::NativeFileSystem::instance(),
         resolved.configFile,
         [configPath = options.config,
-         daemonProfile]() -> std::expected<std::shared_ptr<vthost::ProfileCatalog const>, std::string> {
+         daemonProfile,
+         daemonExtensions]() -> std::expected<std::shared_ptr<vthost::ProfileCatalog const>, std::string> {
             return config::tryLoadConfigNamed(configPath)
                 .and_then([&](config::Config loaded) {
+                    if (loaded.daemon.value().extensions != daemonExtensions)
+                        errorLog()(
+                            "daemon.extensions changed; the change takes effect at the next daemon start.");
                     // The daemon's own profile must survive the edit, as it had to for the daemon to start.
                     return config::resolvedSessionConfigFor(loaded, daemonProfile)
                         .transform([&](auto const&) {
@@ -1593,17 +1715,23 @@ int ContourApp::serveDaemon(DaemonVerbOptions const& options,
     // shells are; they run in the daemon, where each session's terminal is.
     auto extensionServices = DaemonExtensionResources { childDescriptorLimitOf(keeper) };
     auto const& fileSystem = core::platform::NativeFileSystem::instance();
-    config.extensions = daemonExtensionsOf(
-        resolved,
+    auto const daemonIdentity =
         vtextension::DaemonIdentity { .name = daemonName,
                                       .defaultName = vthost::DefaultDaemonName,
                                       .socketPath = fileSystem.weaklyCanonical(config.socketPath),
                                       .nameSocketPath =
-                                          fileSystem.weaklyCanonical(vthost::namedSocketPath(daemonName)) },
+                                          fileSystem.weaklyCanonical(vthost::namedSocketPath(daemonName)) };
+    auto const executableDirectory =
         std::filesystem::absolute(
             core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {}))
-            .parent_path(),
-        extensionServices);
+            .parent_path();
+    config.extensions = daemonExtensionsOf(resolved, daemonIdentity, executableDirectory, extensionServices);
+    config.daemonWorld = daemonWorldOf(daemonExtensions,
+                                       resolved.configFile,
+                                       daemonIdentity,
+                                       executableDirectory,
+                                       processEnvironment(),
+                                       extensionServices);
 #endif
 
     if (auto label = options.tmuxCompatSocket; !label.empty())

@@ -337,12 +337,14 @@ target_include_directories(vthost PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
-# The status-line extensions of the hosted sessions. Without them nothing of vtextension is linked, and
+# The status-line extensions of the hosted sessions, and the daemon's own. Without them nothing of vtextension is linked, and
 # vthost's own types keep one layout in both builds (@see ExtensionHosting.hpp).
 if(CONTOUR_EXTENSIONS)
     target_sources(vthost PRIVATE
         DaemonExtensions.cpp
         DaemonExtensions.hpp
+        DaemonWorldExtensions.cpp
+        DaemonWorldExtensions.hpp
         client/DaemonGrantReplies.cpp
         client/DaemonGrantReplies.hpp
     )
@@ -388,6 +390,7 @@ if(VTHOST_TESTING)
         CommandRunner_test.cpp
         WorkspaceGit_test.cpp
         DaemonControl_test.cpp
+        DaemonWorldHosting_test.cpp
         DaemonRuntime_test.cpp
         ConnectionRegistry_test.cpp
         DaemonUpgradeHooks_test.cpp
@@ -437,6 +440,7 @@ if(VTHOST_TESTING)
         testing/ControlHarness.hpp
         testing/FakeCommandRunner.hpp
         testing/FakeDaemonControl.hpp
+        testing/FakeDaemonWorldHosting.hpp
         testing/FakeExtensionHosting.hpp
         testing/FakeHandoverMemory.hpp
         testing/FakeImageLeases.hpp

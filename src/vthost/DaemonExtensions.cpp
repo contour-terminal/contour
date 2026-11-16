@@ -38,15 +38,6 @@ namespace
         OwnerPost _post;
     };
 
-    /// What an extension logs, in the daemon's log. Called on the extension's lane.
-    void logExtensionMessage(std::string_view name, vtextension::LogLevel level, std::string_view message)
-    {
-        // Asked first, so that a chatty guest costs nothing while nobody reads the category.
-        if (!extensionLog.isEnabled())
-            return;
-        extensionLog()("{}", vtextension::extensionLogLine(name, level, message));
-    }
-
     /// One hosted session's extensions: vtextension's per-pane bundle, built on the runtime's build thread.
     class DaemonSessionExtensions final: public ISessionExtensions
     {
@@ -92,6 +83,14 @@ namespace
         vtextension::SessionExtensions _extensions;
     };
 } // namespace
+
+void logExtensionMessage(std::string_view name, vtextension::LogLevel level, std::string_view message)
+{
+    // Asked first, so that a chatty guest costs nothing while nobody reads the category.
+    if (!extensionLog.isEnabled())
+        return;
+    extensionLog()("{}", vtextension::extensionLogLine(name, level, message));
+}
 
 proto::PermissionRequest permissionRequestOf(std::string_view hostId, vtextension::Manifest const& manifest)
 {

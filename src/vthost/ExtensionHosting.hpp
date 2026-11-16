@@ -2,7 +2,9 @@
 #pragma once
 
 /// @file
-/// The seam through which a `SessionHost` runs status-line extensions in the sessions it hosts.
+/// The seams through which a `SessionHost` runs extensions: status-line extensions in the sessions it hosts
+/// (IExtensionHosting), and the daemon-scoped extensions that run beside them, with no session or window
+/// (IDaemonWorldHosting).
 ///
 /// vthost names its own interface rather than vtextension's types, and this header includes nothing of
 /// vtextension, for two reasons. A build without extensions links no vtextension, and every class here must
@@ -10,8 +12,9 @@
 /// `SessionHost` (an ODR split the GUI's sessions already met once). And a test can stand a fake in for the
 /// whole runtime, to drive what a host does with a frame without running WebAssembly.
 ///
-/// The production implementation is `DaemonExtensions` (vthost/DaemonExtensions.hpp), built only with
-/// extensions; `contour daemon` makes it from the profile. Without one, a host constructs, polls and wakes
+/// The production implementations are `DaemonExtensions` (vthost/DaemonExtensions.hpp) and
+/// `DaemonWorldExtensions` (vthost/DaemonWorldExtensions.hpp), built only with extensions; `contour daemon`
+/// makes them from its configuration. Without one, a host constructs, polls and wakes
 /// nothing of extensions at all.
 
 #include <vtbackend/screen/StatusLineExtensions.hpp>
@@ -116,5 +119,44 @@ class IExtensionHosting
     /// it, nothing of this posts any more, and no session is created. Idempotent.
     virtual void stop() noexcept = 0;
 };
+
+/// What the daemon-scoped extensions tell their host. Each may be called on any thread, and must be cheap.
+struct DaemonWorldEvents
+{
+    /// The set of extensions waiting for the user's consent changed.
+    std::function<void()> requestsChanged;
+    /// An extension published a new summary of itself.
+    std::function<void()> summaryChanged;
+};
+
+/// A daemon's daemon-scoped extensions: the ones that run beside its sessions, with no session or window.
+/// Loop thread only, unless a member says otherwise.
+class IDaemonWorldHosting
+{
+  public:
+    IDaemonWorldHosting() = default;
+    IDaemonWorldHosting(IDaemonWorldHosting const&) = delete;
+    IDaemonWorldHosting(IDaemonWorldHosting&&) = delete;
+    IDaemonWorldHosting& operator=(IDaemonWorldHosting const&) = delete;
+    IDaemonWorldHosting& operator=(IDaemonWorldHosting&&) = delete;
+    virtual ~IDaemonWorldHosting() = default;
+
+    /// Starts an extension that waits until something asks for it; one the user has not granted waits for
+    /// the user's consent instead.
+    /// @param name What the configuration calls it.
+    virtual void startOnDemand(std::string_view name) = 0;
+
+    /// Stops every extension for good, for a host about to go: joins the thread they run on, then cancels
+    /// the processes in flight. Called by the host before it drains its loop of what they posted; after it,
+    /// nothing of this posts any more. Idempotent.
+    virtual void stop() noexcept = 0;
+};
+
+/// Makes a daemon's daemon-scoped extensions, once its loop exists.
+/// @param events What the host hears from them.
+/// @param post Where they hand jobs to the loop.
+/// @return The extensions.
+using DaemonWorldFactory =
+    std::function<std::shared_ptr<IDaemonWorldHosting>(DaemonWorldEvents events, OwnerPost post)>;
 
 } // namespace vthost
