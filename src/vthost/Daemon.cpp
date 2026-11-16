@@ -1253,12 +1253,14 @@ namespace
     /// @param runtime The daemon (not owned; outlives every connection).
     /// @param control The daemon's control API (not owned; outlives every connection).
     /// @param config The daemon's configuration: with profiles, the handshake offers ProfileByName too.
+    /// @param consent The consent key a window proves; none for a daemon that keeps none.
     /// @param acceptedTokens The tokens a client may present, with their grants; empty for the unix endpoint,
     ///        whose socket permissions are the gate.
     /// @return The services.
     [[nodiscard]] NativeSessionServices daemonNativeServices(DaemonRuntime& runtime,
                                                              vtcontrol::ControlApi& control,
                                                              DaemonConfig const& config,
+                                                             std::optional<ConsentGate> const& consent,
                                                              std::vector<AcceptedToken> acceptedTokens = {})
     {
         auto capabilities = proto::CapabilitySet::of({ proto::Capability::ExtensionPermissions,
@@ -1292,6 +1294,9 @@ namespace
         // Only a daemon with profiles resolves a name; one without keeps honouring a client's settings.
         if (config.profiles)
             capabilities.idents.push_back(std::to_underlying(proto::Capability::ProfileByName));
+        // Only a daemon holding a consent key asks windows a daemon extension's question: one that proves it.
+        if (consent)
+            capabilities.idents.push_back(std::to_underlying(proto::Capability::DaemonExtensionConsent));
         // Only a daemon that keeps its workspace brings it back after a restart.
         if (!config.persistence.snapshotPath.empty())
             capabilities.idents.push_back(std::to_underlying(proto::Capability::WorkspaceRestore));
@@ -1300,10 +1305,48 @@ namespace
             capabilities.idents.push_back(std::to_underlying(proto::Capability::LiveUpgrade));
         return NativeSessionServices {
             .handshake = { .acceptedTokens = std::move(acceptedTokens),
+                           .consent = consent,
                            .capabilities = std::move(capabilities) },
             .daemon = runtime,
             .control = control,
         };
+    }
+
+    /// Makes this run's consent key where DaemonConfig::consentKeys says, once the daemon holds its socket.
+    /// @param config The daemon's configuration.
+    /// @param instance The run its hellos name (DaemonLineage::instance), which the key file is named by.
+    /// @param listener The control socket, bound or adopted; none makes no key.
+    /// @return The key and the hold on its file, which the run keeps for as long as it serves; nullopt,
+    ///         logged, when no key could be kept.
+    template <typename Listener>
+    [[nodiscard]] std::optional<HeldConsentKey> consentKeyOf(DaemonConfig const& config,
+                                                             uint64_t instance,
+                                                             Listener const& listener)
+    {
+        // Only a daemon that holds its socket: one that lost the bind serves nobody.
+        if (!config.consentKeys || !listener)
+            return std::nullopt;
+        auto const& keys = *config.consentKeys;
+        auto key = createDaemonConsentKey(keys.files, keys.random, keys.directory, keys.socket, instance);
+        if (!key)
+        {
+            errorLog()("{}; no window can grant the daemon's extensions", key.error());
+            return std::nullopt;
+        }
+        return std::move(*key);
+    }
+
+    /// @param config The daemon's configuration.
+    /// @param key consentKeyOf()'s.
+    /// @return The gate a window's proof is checked at; nullopt for no key.
+    [[nodiscard]] std::optional<ConsentGate> consentGateOf(DaemonConfig const& config,
+                                                           std::optional<HeldConsentKey> const& key)
+    {
+        if (!key || !config.consentKeys)
+            return std::nullopt;
+        return ConsentGate { .key = key->key,
+                             .socket = core::pathToUtf8(config.consentKeys->socket),
+                             .random = config.consentKeys->random };
     }
 
     /// @param config The daemon's configuration.
@@ -1711,6 +1754,12 @@ int runDaemon(DaemonConfig const& config,
     auto recovery = recoveredSnapshotOf(continuity, store, config.persistence, wallClock);
     // The same run of the daemon goes on across a live upgrade, one upgrade further, and across a crash.
     auto const lineage = lineageOf(config, image, continuity);
+    // The consent key, made only now that this process holds the socket, in a file of the run its hellos
+    // name: a start that never serves -- a --background parent, a second daemon that lost the bind -- never
+    // replaces the key of the daemon that does.
+    // Its file is held for the whole run, so that no clean-up of another run at this socket removes it.
+    auto const consentKey = consentKeyOf(config, lineage.instance, listener);
+    auto const consentGate = consentGateOf(config, consentKey);
 
     // The workspaces' git state: looked up by a `git` this daemon starts on a thread of its own, so a slow
     // repository stalls the sidebar's branch and nothing else. Declared before the host, so the host goes
@@ -1865,7 +1914,8 @@ int runDaemon(DaemonConfig const& config,
             "native",
             nativePath,
             [&] {
-                return makeNativeHandler(loop, host, daemonNativeServices(runtime, controlService, config));
+                return makeNativeHandler(
+                    loop, host, daemonNativeServices(runtime, controlService, config, consentGate));
             });
         !served)
         return served.error();
@@ -1911,7 +1961,8 @@ int runDaemon(DaemonConfig const& config,
             loop,
             host,
             tls,
-            daemonNativeServices(runtime, controlService, config, acceptedTokensOf(*config.nativeTcp)),
+            daemonNativeServices(
+                runtime, controlService, config, consentGate, acceptedTokensOf(*config.nativeTcp)),
             *config.nativeTcp);
         auto listened = std::optional<std::unique_ptr<core::net::IListener>> {};
         if (handler)

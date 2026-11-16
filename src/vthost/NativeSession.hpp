@@ -71,6 +71,7 @@
 #include <vthost/AuthorizedKeys.hpp>
 #include <vthost/ClientCensus.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
+#include <vthost/DaemonConsentKey.hpp>
 #include <vthost/DaemonControl.hpp>
 #include <vthost/FlushPolicy.hpp>
 #include <vthost/KeyAuth.hpp>
@@ -97,6 +98,15 @@ struct KeyAuthPolicy
 // PreAuthTimeout, how long a connection has by default to authenticate, lives in KeyAuth.hpp, where a client
 // that waits on it can name it too.
 
+/// What gates the daemon extensions' questions: the daemon's consent key, which a window proves it read over
+/// a fresh nonce before it is asked one (proto::ConsentProof).
+struct ConsentGate
+{
+    ConsentKey key;     ///< The key this run made once it held its socket.
+    std::string socket; ///< The daemon's socket, canonical, which a proof is bound to.
+    std::reference_wrapper<core::IRandom> random; ///< Where each connection's nonce comes from: a CSPRNG.
+};
+
 /// What the daemon side of the handshake admits: the token, versions and capabilities it requires
 /// and offers.
 struct HandshakePolicy
@@ -114,6 +124,9 @@ struct HandshakePolicy
     /// stranger, but one that says nothing would hold its connection -- and the relay of a stdio attach in
     /// front of it -- for ever. The handlers turn it into @ref authDeadline as they accept.
     std::chrono::milliseconds helloTimeout = PreAuthTimeout;
+    /// The consent key, for a daemon that offers proto::Capability::DaemonExtensionConsent; empty for none,
+    /// whose every connection is asked no daemon extension's question.
+    std::optional<ConsentGate> consent = std::nullopt;
     /// The instant, on the event loop's clock, by which a hello must have been accepted; the connection is
     /// closed at it otherwise. Empty for a session constructed without a handler. Per connection, as it runs
     /// from the accept: set by the handler that knows when that was, from @ref helloTimeout.
@@ -121,32 +134,34 @@ struct HandshakePolicy
     /// The protocol versions this endpoint speaks; the highest one shared with the client is agreed.
     proto::VersionRange versions = proto::SupportedVersions;
     /// The optional features this endpoint offers on top of the agreed version.
-    proto::CapabilitySet capabilities = proto::CapabilitySet::of({ proto::Capability::ExtensionPermissions,
-                                                                   proto::Capability::InitialClientArea,
-                                                                   proto::Capability::AttachIntent,
-                                                                   proto::Capability::TabEdits,
-                                                                   proto::Capability::Heartbeat,
-                                                                   proto::Capability::ProgramStatus,
-                                                                   proto::Capability::ProgramStatusTiming,
-                                                                   proto::Capability::InputKinds,
-                                                                   proto::Capability::ControlPermissions,
-                                                                   proto::Capability::InputEcho,
-                                                                   proto::Capability::TabMerge,
-                                                                   proto::Capability::MoveNode,
-                                                                   proto::Capability::LayoutBatch,
-                                                                   proto::Capability::TabEditAcks,
-                                                                   proto::Capability::ColorPreference,
-                                                                   proto::Capability::ClipboardTargets,
-                                                                   proto::Capability::SoftFonts,
-                                                                   proto::Capability::WorkspaceSwitch,
-                                                                   proto::Capability::DaemonFollow,
-                                                                   proto::Capability::WorkspaceMeta,
-                                                                   proto::Capability::ClientGoodbye,
-                                                                   proto::Capability::LaunchFirstTab,
-                                                                   proto::Capability::WorkspaceColor,
-                                                                   // compat(0.9.0): Names may stay; the
-                                                                   // legacy branches taken without it go.
-                                                                   proto::Capability::Names });
+    proto::CapabilitySet capabilities =
+        proto::CapabilitySet::of({ proto::Capability::ExtensionPermissions,
+                                   proto::Capability::InitialClientArea,
+                                   proto::Capability::AttachIntent,
+                                   proto::Capability::TabEdits,
+                                   proto::Capability::Heartbeat,
+                                   proto::Capability::ProgramStatus,
+                                   proto::Capability::ProgramStatusTiming,
+                                   proto::Capability::InputKinds,
+                                   proto::Capability::ControlPermissions,
+                                   proto::Capability::InputEcho,
+                                   proto::Capability::TabMerge,
+                                   proto::Capability::MoveNode,
+                                   proto::Capability::LayoutBatch,
+                                   proto::Capability::TabEditAcks,
+                                   proto::Capability::ColorPreference,
+                                   proto::Capability::ClipboardTargets,
+                                   proto::Capability::SoftFonts,
+                                   proto::Capability::WorkspaceSwitch,
+                                   proto::Capability::DaemonFollow,
+                                   proto::Capability::WorkspaceMeta,
+                                   proto::Capability::ClientGoodbye,
+                                   proto::Capability::LaunchFirstTab,
+                                   proto::Capability::WorkspaceColor,
+                                   // compat(0.9.0): Names may stay; the
+                                   // legacy branches taken without it go.
+                                   proto::Capability::Names,
+                                   proto::Capability::DaemonExtensionConsent });
 };
 
 /// When a connection sends a session's program-status set.
@@ -318,6 +333,15 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// a client attaching later is asked from SessionHost::pendingPermissionRequests() instead.
     void sessionPermissionRequested(vtworkspace::SessionId session,
                                     proto::PermissionRequest const& request) override;
+
+    /// Asks this client's user in a window, if it shares proto::Capability::DaemonExtensionConsent, and keeps
+    /// the ConsentTicket its reply is recorded with. One already sent is sent again only for
+    /// ConsentOffer::Again.
+    [[nodiscard]] ConsentDelivery daemonExtensionRequested(proto::ExtensionPermissionRequest const& request,
+                                                           ConsentOffer offer) override;
+
+    /// Closes the question in this client's window, if it was sent it, and drops its ticket.
+    void daemonExtensionSettled(proto::ExtensionPermissionSettled const& settled) override;
 
     /// Adapts the host's model-change fan-out into a "layout changed" callback naming the workspace or the
     /// tab the change is in: every structural change re-pushes the whole LayoutState of a workspace. It is a
@@ -1299,6 +1323,25 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
                && _negotiated->shared.contains(proto::Capability::ExtensionPermissions);
     }
 
+    /// Tells whether this client is asked daemon-scoped extensions' questions: both ends offered
+    /// proto::Capability::DaemonExtensionConsent, which only the GUI does, and the client proved it read the
+    /// daemon's consent key. A reply from any other is ignored.
+    /// @return true once the proof held.
+    [[nodiscard]] bool asksDaemonConsent() const noexcept
+    {
+        return _negotiated.has_value()
+               && _negotiated->shared.contains(proto::Capability::DaemonExtensionConsent)
+               && _consentStanding == ConsentStanding::Proven;
+    }
+
+    /// Takes the client's proof that it read the daemon's consent key; a right one has it asked the pending
+    /// questions, a wrong one leaves it never asked.
+    void acceptConsentProof(proto::ConsentProof const& proof);
+
+    /// Records the client's reply to a daemon-scoped extension's question, if it can answer and was sent it.
+    /// @param reply What it answered.
+    void answerDaemonExtension(proto::ExtensionPermissionReply const& reply);
+
     /// Tells whether this client is asked @p request: it is asked permission questions, and, for one that
     /// asks for control permissions, both ends offered proto::Capability::ControlPermissions -- a client
     /// that would prompt without them is not asked, and the question waits for another.
@@ -1476,6 +1519,19 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// run(), while it waits for spawnedFlowsEnded(): what the last SpawnedFlowClaim given back resumes.
     std::coroutine_handle<> _spawnedFlowsWaiter;
     bool _closed = false;
+    /// The daemon-scoped extensions' questions this client was sent and has not answered, each the key its
+    /// reply is recorded with.
+    std::vector<ConsentTicket> _consentTickets;
+    /// Whether the client proved it read the daemon's consent key.
+    enum class ConsentStanding : uint8_t
+    {
+        Unproven = 0, ///< Not yet: its hello's nonce waits for a proof, if it was sent one.
+        Proven,       ///< It did: it is asked the daemon extensions' questions.
+        Refused,      ///< Its proof was wrong: it is never asked.
+    };
+    ConsentStanding _consentStanding = ConsentStanding::Unproven;
+    /// The nonce its ServerHello carried, which its proof must be over; none when it was sent none.
+    std::optional<ConsentNonce> _consentNonce;
     /// The session this connection's input backed up in, past the high-water mark: the connection is read
     /// no further until it drains. @see awaitInputRoom
     std::optional<vtworkspace::SessionId> _inputBackedUp;

@@ -443,3 +443,23 @@ TEST_CASE("the ProgramStatus trace counts records and never shows their text",
         .records = { WireProgramStatusRecord { .id = "x", .title = "secret", .message = "secret" } } } });
     CHECK(summary == "session=2 records=1");
 }
+
+TEST_CASE("the trace counts a daemon extension's question, never transcribes it",
+          "[vthost][pdu][trace][consent]")
+{
+    CHECK(toString(PduType::ExtensionPermissionRequest) == "ExtensionPermissionRequest");
+    CHECK(toString(PduType::ExtensionPermissionReply) == "ExtensionPermissionReply");
+    CHECK(toString(PduType::ExtensionPermissionSettled) == "ExtensionPermissionSettled");
+    CHECK(summarize(DecodedPdu { ExtensionPermissionRequest {
+              .name = "orchestrator",
+              .grantDigest = "9a1b",
+              .title = "secret-title",
+              .lines = { WireConsentLine { .text = "secret-command", .weight = 1 } } } })
+          == "name=orchestrator digest=9a1b lines=1");
+    CHECK(summarize(DecodedPdu {
+              ExtensionPermissionReply { .name = "orchestrator", .grantDigest = "9a1b", .grantState = 2 } })
+          == "name=orchestrator digest=9a1b grant=2");
+    CHECK(
+        summarize(DecodedPdu { ExtensionPermissionSettled { .name = "orchestrator", .grantDigest = "9a1b" } })
+        == "name=orchestrator digest=9a1b");
+}

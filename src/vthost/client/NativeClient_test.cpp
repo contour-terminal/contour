@@ -4144,3 +4144,76 @@ TEST_CASE("run() ends when the connection does, though a signature is still bein
     auto const outcome = againstKeyDaemon(*keys, 0, keys, attachWithHangingKey);
     CHECK(outcome.mirrored); // run() returned, and the signature was abandoned
 }
+
+namespace
+{
+/// A daemon that, between the client's hello and its answer, is replaced by another run with another key, and
+/// records the consent proof the client sends.
+Task<void> replacedDaemon(core::net::EventLoop* loop,
+                          core::net::ISocket* socket,
+                          std::function<void()> replace,
+                          vthost::ConsentNonce nonce,
+                          std::optional<proto::ConsentProof>* proof)
+{
+    auto writer = core::net::WriteQueue { *loop, socket, std::size_t { 1 } * 1024 * 1024 };
+    co_await vthost::pumpPdus(socket, [&](proto::DecodedFrame const& frame) {
+        if (std::holds_alternative<proto::ClientHello>(frame.pdu))
+        {
+            replace();
+            auto hello =
+                acceptingHello(proto::CapabilitySet::of({ proto::Capability::DaemonExtensionConsent }));
+            hello.daemonInstance = 9;
+            hello.consentNonce = nonce;
+            enqueuePdu(writer, frame.serial, proto::DecodedPdu { hello });
+            return true;
+        }
+        if (auto const* sent = std::get_if<proto::ConsentProof>(&frame.pdu))
+        {
+            *proof = *sent;
+            return false;
+        }
+        return true;
+    });
+}
+} // namespace
+
+TEST_CASE("a window proves the key of the run the hello names, read as the hello arrives",
+          "[vthost][attach][consent]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* serverSock = pair.first.get();
+    auto oldKey = vthost::ConsentKey {};
+    oldKey.fill(std::byte { 1 });
+    auto newKey = vthost::ConsentKey {};
+    newKey.fill(std::byte { 2 });
+    auto current = oldKey;
+    auto proved = std::vector<uint64_t> {};
+    auto handshake = NativeClient::HandshakeOptions {};
+    handshake.capabilities = proto::CapabilitySet::of({ proto::Capability::DaemonExtensionConsent });
+    handshake.consentProver = [&](uint64_t instance, vthost::ConsentNonce const& nonce) {
+        proved.push_back(instance);
+        return std::optional { vthost::consentProofOf(
+            current, vthost::ConsentContext { .daemonInstance = instance, .socket = "/s" }, nonce) };
+    };
+    auto client = NativeClient { loop,
+                                 std::move(pair.second),
+                                 std::move(handshake),
+                                 vtbackend::CommandBlockStoreLimits {},
+                                 NativeClient::UpdateHandler {},
+                                 NativeClient::ImageHandler {},
+                                 NativeClient::SessionEventHandler {},
+                                 NativeClient::LayoutHandler {} };
+    auto nonce = vthost::ConsentNonce {};
+    nonce.fill(std::byte { 0x5A });
+    auto proof = std::optional<proto::ConsentProof> {};
+    loop.blockOn(core::net::testing::anyOf(
+        client.run(), replacedDaemon(&loop, serverSock, [&] { current = newKey; }, nonce, &proof)));
+
+    REQUIRE(proof.has_value());
+    CHECK(proved == std::vector<uint64_t> { 9 });
+    CHECK(proof->mac
+          == vthost::consentProofOf(
+              newKey, vthost::ConsentContext { .daemonInstance = 9, .socket = "/s" }, nonce));
+}

@@ -1711,6 +1711,18 @@ int ContourApp::serveDaemon(DaemonVerbOptions const& options,
     config.placement = vtpty::makeDefaultProcessPlacement();
     config.startupLayout = resolved.startupLayout;
 #ifdef CONTOUR_EXTENSIONS
+    // Where this run keeps its consent key, once it holds the socket -- a directory no pane's environment
+    // names. Only a daemon that declares an extension has a grant to ask for: one without makes no key,
+    // offers no window the question, and has nothing to log when its state directory is unwritable.
+    if (!daemonExtensions.empty())
+        config.consentKeys = vthost::DaemonConsentKeys {
+            .directory =
+                vthost::daemonConsentKeyDirectory(vthost::daemonStateDirectory(processEnvironment())),
+            .socket = core::platform::NativeFileSystem::instance().weaklyCanonical(config.socketPath),
+            .files = vthost::nativeConsentKeyFiles(),
+            .random = core::systemRandom(),
+        };
+
     // The extensions' modules and configuration are resolved here, on the daemon's side, as its sessions'
     // shells are; they run in the daemon, where each session's terminal is.
     auto extensionServices = DaemonExtensionResources { childDescriptorLimitOf(keeper) };

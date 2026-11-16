@@ -139,6 +139,10 @@ enum class Capability : uint8_t
     /// in WorkspaceMeta's colour field, in full and as a delta on each change. Without it a client does not
     /// send the PDU, and the daemon states no colour to it, so an older client's metadata is what it was.
     WorkspaceColor = 33,
+    /// The peer reads the daemon-scoped extensions' consent PDUs (ExtensionPermissionRequest, -Reply,
+    /// -Settled): a client that can ask its user in a window offers it. A client without it is never asked,
+    /// and a reply from it is ignored -- only a window may grant a daemon extension.
+    DaemonExtensionConsent = 34,
 };
 
 /// One row of the table naming a Capability.
@@ -181,6 +185,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::LaunchFirstTab, .name = "launch-first-tab" },
     CapabilityRow { .capability = Capability::Names, .name = "names" },
     CapabilityRow { .capability = Capability::WorkspaceColor, .name = "workspace-color" },
+    CapabilityRow { .capability = Capability::DaemonExtensionConsent, .name = "daemon-extension-consent" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

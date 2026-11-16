@@ -35,8 +35,10 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
+#include <vthost/DaemonConsentKey.hpp>
 #include <vthost/PduPump.hpp>
 #include <vthost/PermissionWire.hpp>
 #include <vthost/RestoredCounts.hpp>
@@ -333,6 +335,12 @@ class NativeClient final
     /// Told that a piece of a snapshot still being received arrived: the daemon is delivering, however long
     /// the whole takes. A frontend waiting for its first session counts that as headway, not as silence.
     using SnapshotProgressHandler = std::function<void()>;
+    /// What the daemon tells a window about a daemon-scoped extension's grant (Capability::
+    /// DaemonExtensionConsent): a question to show, or that one shown was answered elsewhere.
+    using DaemonConsentEvent =
+        std::variant<proto::ExtensionPermissionRequest, proto::ExtensionPermissionSettled>;
+    /// Handler invoked for each DaemonConsentEvent; answered with answerDaemonExtension().
+    using DaemonConsentHandler = std::function<void(DaemonConsentEvent const&)>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
     using HandshakeHandler = std::function<void()>;
 
@@ -378,6 +386,10 @@ class NativeClient final
         /// first, and is sent with the proof; a client with a token sends it at once, as a daemon that asks
         /// for no key sends no challenge to wait for.
         std::shared_ptr<IClientKeySource> keySource = {};
+        /// Proves the daemon's consent key for the run its hello names, as the hello arrives -- a daemon
+        /// replaced since the connect is proved with its own key -- and so has this client asked the daemon
+        /// extensions' questions. None for a client that is no window, or a daemon on another machine.
+        ConsentProver consentProver = {};
     };
 
     /// @param loop The event loop everything runs on.
@@ -409,6 +421,8 @@ class NativeClient final
     /// @param onWorkspaceMeta Told what the daemon states of each workspace besides its layout
     ///        (Capability::WorkspaceMeta).
     /// @param onSnapshotProgress Told of each piece of a snapshot that is not yet whole.
+    /// @param onDaemonConsent Told of the daemon-scoped extensions' questions; none for a client that asks no
+    ///        user in a window, which must then not offer Capability::DaemonExtensionConsent either.
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -427,7 +441,8 @@ class NativeClient final
                  PaneSummaryHandler onPaneSummary = {},
                  RaiseRoleHandler onRaiseRole = {},
                  WorkspaceMetaHandler onWorkspaceMeta = {},
-                 SnapshotProgressHandler onSnapshotProgress = {});
+                 SnapshotProgressHandler onSnapshotProgress = {},
+                 DaemonConsentHandler onDaemonConsent = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -618,6 +633,13 @@ class NativeClient final
     /// @param digest PermissionRequest::digest.
     /// @param answer The user's answer; Pending for a dismissed prompt, which records nothing.
     void answerPermission(std::string hostId, std::string digest, GrantState answer);
+
+    /// Answers a daemon-scoped extension's ExtensionPermissionRequest: sent only to a daemon sharing
+    /// Capability::DaemonExtensionConsent, which records it only if it asked this connection.
+    /// @param name ExtensionPermissionRequest::name.
+    /// @param grantDigest ExtensionPermissionRequest::grantDigest.
+    /// @param answer Granted or Denied.
+    void answerDaemonExtension(std::string name, std::string grantDigest, GrantState answer);
 
     /// Answers a SwitchRequest the daemon asked: sent only to a daemon sharing Capability::WorkspaceSwitch,
     /// which is the only one that asks.
@@ -844,6 +866,7 @@ class NativeClient final
     RaiseRoleHandler _onRaiseRole;
     WorkspaceMetaHandler _onWorkspaceMeta;
     SnapshotProgressHandler _onSnapshotProgress;
+    DaemonConsentHandler _onDaemonConsent;
     /// When run() began: what the elapsed times of the attach log count from.
     core::platform::SteadyTimePoint _attachStartedAt {};
     /// Whether the first whole snapshot has been logged, once per connection.

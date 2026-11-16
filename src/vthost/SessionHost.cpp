@@ -2636,8 +2636,99 @@ std::shared_ptr<IDaemonWorldHosting> SessionHost::makeDaemonWorld(DaemonWorldFac
                 job();
         });
     } };
-    // Nothing on the host follows the requests or the summaries yet: they are read where they are shown.
-    return factory(DaemonWorldEvents {}, std::move(post));
+    // A question that opens is sent to the windows that can answer it; the summaries are read where they are
+    // shown.
+    auto events = DaemonWorldEvents {
+        .requestsChanged =
+            [&loop = _loop, gate = _gate] {
+                loop.post([gate] {
+                    if (gate->host != nullptr)
+                        gate->host->offerDaemonExtensionRequests();
+                });
+            },
+        .summaryChanged = {},
+    };
+    return factory(std::move(events), std::move(post));
+}
+
+namespace
+{
+    /// @return @p request as the wire carries it.
+    [[nodiscard]] proto::ExtensionPermissionRequest wireRequestOf(DaemonExtensionRequest const& request)
+    {
+        auto wire = proto::ExtensionPermissionRequest {
+            .name = request.name, .grantDigest = request.grantDigest, .title = request.title, .lines = {}
+        };
+        for (auto const& [text, weight]: request.lines)
+            wire.lines.push_back(proto::WireConsentLine { .text = text, .weight = weight });
+        return wire;
+    }
+} // namespace
+
+std::vector<proto::ExtensionPermissionRequest> SessionHost::pendingDaemonExtensionRequests() const
+{
+    auto requests = std::vector<proto::ExtensionPermissionRequest> {};
+    if (!_daemonWorld)
+        return requests;
+    for (auto const& request: _daemonWorld->pendingRequests())
+        requests.push_back(wireRequestOf(request));
+    return requests;
+}
+
+void SessionHost::offerDaemonExtensionRequests()
+{
+    for (auto const& request: pendingDaemonExtensionRequests())
+        for (auto* observer: _streamSubscribers)
+            std::ignore = observer->daemonExtensionRequested(request, ConsentOffer::IfNotSent);
+}
+
+void SessionHost::answerDaemonExtension(ConsentTicket ticket, GrantState answer)
+{
+    if (!_daemonWorld || answer == GrantState::Pending)
+        return;
+    auto const pending = _daemonWorld->pendingRequests();
+    auto const asked = std::ranges::any_of(pending, [&](DaemonExtensionRequest const& request) {
+        return request.name == ticket.name() && request.grantDigest == ticket.grantDigest();
+    });
+    if (!asked)
+    {
+        sessionLog()("ignoring an answer to daemon extension {}, which waits for none", ticket.name());
+        return;
+    }
+    sessionLog()("daemon extension {}: the user answered {}", ticket.name(), std::to_underlying(answer));
+    _daemonWorld->answer(ticket.name(), ticket.grantDigest(), answer);
+    auto const settled =
+        proto::ExtensionPermissionSettled { .name = ticket.name(), .grantDigest = ticket.grantDigest() };
+    for (auto* observer: _streamSubscribers)
+        observer->daemonExtensionSettled(settled);
+}
+
+std::vector<DaemonExtensionListing> SessionHost::list() const
+{
+    return _daemonWorld ? _daemonWorld->list() : std::vector<DaemonExtensionListing> {};
+}
+
+AskResult SessionHost::ask(std::string_view name)
+{
+    auto result = AskResult {};
+    for (auto const& request: pendingDaemonExtensionRequests())
+    {
+        if (request.name != name)
+            continue;
+        result.outcome = AskOutcome::Asked;
+        for (auto* observer: _streamSubscribers)
+            if (observer->daemonExtensionRequested(request, ConsentOffer::Again) == ConsentDelivery::Sent)
+                ++result.windows;
+    }
+    return result;
+}
+
+void SessionHost::revoke(std::string_view name)
+{
+    if (!_daemonWorld)
+        return;
+    _daemonWorld->revoke(name);
+    offerDaemonExtensionRequests();
 }
 
 HostedSessionExtensions SessionHost::makeSessionExtensions(SessionId session)

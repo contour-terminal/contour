@@ -358,6 +358,22 @@ namespace
     {
         return std::to_underlying(PduType::OpenFirstTab);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(ExtensionPermissionRequest const&) noexcept
+    {
+        return std::to_underlying(PduType::ExtensionPermissionRequest);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(ExtensionPermissionReply const&) noexcept
+    {
+        return std::to_underlying(PduType::ExtensionPermissionReply);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(ExtensionPermissionSettled const&) noexcept
+    {
+        return std::to_underlying(PduType::ExtensionPermissionSettled);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(ConsentProof const&) noexcept
+    {
+        return std::to_underlying(PduType::ConsentProof);
+    }
     [[nodiscard]] constexpr uint64_t tagOf(CloseWorkspace const&) noexcept
     {
         return std::to_underlying(PduType::CloseWorkspace);
@@ -547,6 +563,10 @@ namespace
         fields.varint(pdu.daemonInstance);
         fields.varint(pdu.restoredWorkspaces);
         fields.varint(pdu.restoredTabs);
+        // A presence byte always, so that a field a later version appends after it stays unambiguous.
+        fields.u8(pdu.consentNonce ? 1 : 0);
+        if (pdu.consentNonce)
+            fields.bytes(*pdu.consentNonce);
         out.blob(fields.view());
     }
 
@@ -1062,6 +1082,37 @@ namespace
     void encodeBody(Writer& out, OpenFirstTab const& pdu)
     {
         out.varint(pdu.workspace);
+    }
+
+    void encodeBody(Writer& out, ExtensionPermissionRequest const& pdu)
+    {
+        out.string(pdu.name);
+        out.string(pdu.grantDigest);
+        out.string(pdu.title);
+        out.varint(pdu.lines.size());
+        for (auto const& line: pdu.lines)
+        {
+            out.string(line.text);
+            out.u8(line.weight);
+        }
+    }
+
+    void encodeBody(Writer& out, ExtensionPermissionReply const& pdu)
+    {
+        out.string(pdu.name);
+        out.string(pdu.grantDigest);
+        out.u8(pdu.grantState);
+    }
+
+    void encodeBody(Writer& out, ExtensionPermissionSettled const& pdu)
+    {
+        out.string(pdu.name);
+        out.string(pdu.grantDigest);
+    }
+
+    void encodeBody(Writer& out, ConsentProof const& pdu)
+    {
+        out.bytes(pdu.mac);
     }
 
     void encodeSoftGlyph(Writer& out, WireSoftGlyph const& glyph)
@@ -1656,6 +1707,20 @@ namespace
             return std::unexpected(error);
         if (inner.remaining() != 0 && !assign(inner.varint(), pdu.restoredTabs, error))
             return std::unexpected(error);
+        if (inner.remaining() != 0)
+        {
+            auto present = uint8_t {};
+            if (!assign(inner.u8(), present, error))
+                return std::unexpected(error);
+            if (present != 0)
+            {
+                auto const nonce = inner.bytes(std::tuple_size_v<std::array<std::byte, 32>>);
+                if (!nonce)
+                    return std::unexpected(nonce.error());
+                auto& held = pdu.consentNonce.emplace();
+                std::ranges::copy(*nonce, held.begin());
+            }
+        }
         return pdu;
     }
 
@@ -2406,6 +2471,56 @@ namespace
         return pdu;
     }
 
+    DecodeResult decodeExtensionPermissionRequest(Reader& in)
+    {
+        auto pdu = ExtensionPermissionRequest {};
+        auto error = DecodeError {};
+        if (!assign(in.string(), pdu.name, error) || !assign(in.string(), pdu.grantDigest, error)
+            || !assign(in.string(), pdu.title, error))
+            return std::unexpected(error);
+        auto const decodeLine = [](Reader& reader) -> std::expected<WireConsentLine, DecodeError> {
+            auto line = WireConsentLine {};
+            auto lineError = DecodeError {};
+            if (!assign(reader.string(), line.text, lineError)
+                || !assign(reader.u8(), line.weight, lineError))
+                return std::unexpected(lineError);
+            return line;
+        };
+        if (auto const decoded = decodeVector(in, pdu.lines, decodeLine); !decoded)
+            return std::unexpected(decoded.error());
+        return pdu;
+    }
+
+    DecodeResult decodeExtensionPermissionReply(Reader& in)
+    {
+        auto pdu = ExtensionPermissionReply {};
+        auto error = DecodeError {};
+        // The answer byte is carried, not judged, as a PermissionReply's is.
+        if (!assign(in.string(), pdu.name, error) || !assign(in.string(), pdu.grantDigest, error)
+            || !assign(in.u8(), pdu.grantState, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeExtensionPermissionSettled(Reader& in)
+    {
+        auto pdu = ExtensionPermissionSettled {};
+        auto error = DecodeError {};
+        if (!assign(in.string(), pdu.name, error) || !assign(in.string(), pdu.grantDigest, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeConsentProof(Reader& in)
+    {
+        auto pdu = ConsentProof {};
+        auto const mac = in.bytes(pdu.mac.size());
+        if (!mac)
+            return std::unexpected(mac.error());
+        std::ranges::copy(*mac, pdu.mac.begin());
+        return pdu;
+    }
+
     DecodeResult decodeSelectWorkspace(Reader& in)
     {
         auto pdu = SelectWorkspace {};
@@ -2915,6 +3030,10 @@ namespace
         DecodeRow { PduType::Goodbye, decodeGoodbye },
         DecodeRow { PduType::OpenFirstTab, decodeOpenFirstTab },
         DecodeRow { PduType::SetWorkspaceColor, decodeSetWorkspaceColor },
+        DecodeRow { PduType::ExtensionPermissionRequest, decodeExtensionPermissionRequest },
+        DecodeRow { PduType::ExtensionPermissionReply, decodeExtensionPermissionReply },
+        DecodeRow { PduType::ExtensionPermissionSettled, decodeExtensionPermissionSettled },
+        DecodeRow { PduType::ConsentProof, decodeConsentProof },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

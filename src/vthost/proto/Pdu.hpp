@@ -106,6 +106,10 @@ enum class PduType : uint8_t
     Goodbye = 60,
     OpenFirstTab = 61,
     SetWorkspaceColor = 62,
+    ExtensionPermissionRequest = 63,
+    ExtensionPermissionReply = 64,
+    ExtensionPermissionSettled = 65,
+    ConsentProof = 66,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -407,6 +411,10 @@ struct ServerHello
     uint32_t restoredWorkspaces = 0;
     /// The tabs of those workspaces; zero as @ref restoredWorkspaces is.
     uint32_t restoredTabs = 0;
+    /// What a client sharing Capability::DaemonExtensionConsent proves the daemon's consent key over
+    /// (ConsentProof): fresh per connection. Absent where the capability is not shared, and from a daemon
+    /// that predates it.
+    std::optional<std::array<std::byte, 32>> consentNonce = std::nullopt;
     bool operator==(ServerHello const&) const = default;
 };
 
@@ -1411,6 +1419,56 @@ struct PermissionReply
     bool operator==(PermissionReply const&) const = default;
 };
 
+/// Client→server (Capability::DaemonExtensionConsent): HMAC-SHA256 of the daemon's consent key over the
+/// ServerHello's consentNonce. Until a connection proves the key, the daemon asks it no daemon extension's
+/// question and takes no answer from it; a wrong proof is final for the connection.
+struct ConsentProof
+{
+    std::array<std::byte, 32> mac = {}; ///< The proof (vthost::consentProofOf()).
+    bool operator==(ConsentProof const&) const = default;
+};
+
+/// One line of a daemon extension's question, as the daemon rendered it.
+struct WireConsentLine
+{
+    std::string text = {}; ///< Plain text, guest text neutralized by the daemon.
+    uint8_t weight = 0;    ///< vtcontrol::ConsentWeight as the wire spells it: 1 when it can run commands.
+    bool operator==(WireConsentLine const&) const = default;
+};
+
+/// Server→client (Capability::DaemonExtensionConsent): a daemon-scoped extension waits for its user's grant.
+/// Carries the question the daemon rendered, so a window and `contour extension list` show the same text.
+/// Sent to every client sharing the capability, and again to each one attaching while it waits; answered by
+/// an ExtensionPermissionReply, closed by an ExtensionPermissionSettled.
+struct ExtensionPermissionRequest
+{
+    std::string name = {};                   ///< What the daemon's configuration calls the extension.
+    std::string grantDigest = {};            ///< What an answer is recorded for: its manifest and roots.
+    std::string title = {};                  ///< The question's title.
+    std::vector<WireConsentLine> lines = {}; ///< Its lines, in order.
+    bool operator==(ExtensionPermissionRequest const&) const = default;
+};
+
+/// Client→server (Capability::DaemonExtensionConsent): the user's answer to an ExtensionPermissionRequest
+/// this connection was sent. Any other is ignored.
+struct ExtensionPermissionReply
+{
+    std::string name = {};        ///< ExtensionPermissionRequest::name.
+    std::string grantDigest = {}; ///< ExtensionPermissionRequest::grantDigest.
+    /// vthost::GrantState as the wire spells it, read through vthost::grantStateOf().
+    uint8_t grantState = 0;
+    bool operator==(ExtensionPermissionReply const&) const = default;
+};
+
+/// Server→client (Capability::DaemonExtensionConsent): an ExtensionPermissionRequest this connection was sent
+/// was answered elsewhere; a window showing it closes it.
+struct ExtensionPermissionSettled
+{
+    std::string name = {};        ///< ExtensionPermissionRequest::name.
+    std::string grantDigest = {}; ///< ExtensionPermissionRequest::grantDigest.
+    bool operator==(ExtensionPermissionSettled const&) const = default;
+};
+
 /// Either direction, after the handshake: the frame with serial @ref refusedSerial carried a PDU tag this
 /// peer does not know, or knows but cannot serve (a Control connection's attach-only request, a daemon
 /// control request on an endpoint with no daemon behind it). Its receiver stops sending that tag for the rest
@@ -2040,7 +2098,11 @@ using DecodedPdu = std::variant<Invalid,
                                 CloseWorkspace,
                                 Goodbye,
                                 OpenFirstTab,
-                                SetWorkspaceColor>;
+                                SetWorkspaceColor,
+                                ExtensionPermissionRequest,
+                                ExtensionPermissionReply,
+                                ExtensionPermissionSettled,
+                                ConsentProof>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

@@ -63,6 +63,9 @@ add_library(vthost STATIC
     DaemonControl.cpp
     DaemonControl.hpp
     DaemonControlWire.hpp
+    DaemonConsentKey.cpp
+    DaemonConsentKey_posix.cpp
+    DaemonConsentKey_win32.cpp
     DaemonIdentity.cpp
     DaemonIdentity.hpp
     DaemonLifecycle.hpp
@@ -360,6 +363,7 @@ if(VTHOST_TESTING)
         AttachPlan_test.cpp
         ViewRouting_test.cpp
         AuthorizedKeys_test.cpp
+        DaemonConsentKey_test.cpp
         DaemonIdentity_test.cpp
         KnownDaemons_test.cpp
         ByteStream_test.cpp
@@ -390,6 +394,7 @@ if(VTHOST_TESTING)
         CommandRunner_test.cpp
         WorkspaceGit_test.cpp
         DaemonControl_test.cpp
+        DaemonConsent_test.cpp
         DaemonWorldHosting_test.cpp
         DaemonRuntime_test.cpp
         ConnectionRegistry_test.cpp

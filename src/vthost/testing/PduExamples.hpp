@@ -261,6 +261,20 @@ namespace vthost::testing
         { proto::PduType::CloseWorkspace, proto::DecodedPdu { proto::CloseWorkspace { .workspace = 3 } } },
         { proto::PduType::Goodbye, proto::DecodedPdu { proto::Goodbye {} } },
         { proto::PduType::OpenFirstTab, proto::DecodedPdu { proto::OpenFirstTab { .workspace = 4 } } },
+        { proto::PduType::ExtensionPermissionRequest,
+          proto::DecodedPdu { proto::ExtensionPermissionRequest {
+              .name = "orchestrator",
+              .grantDigest = "9a1b",
+              .title = "secret-title",
+              .lines = { proto::WireConsentLine { .text = "secret-command", .weight = 1 } } } } },
+        { proto::PduType::ExtensionPermissionReply,
+          proto::DecodedPdu { proto::ExtensionPermissionReply {
+              .name = "orchestrator", .grantDigest = "9a1b", .grantState = 1 } } },
+        { proto::PduType::ConsentProof,
+          proto::DecodedPdu { proto::ConsentProof { .mac = { std::byte { 0x5e }, std::byte { 0xc4 } } } } },
+        { proto::PduType::ExtensionPermissionSettled,
+          proto::DecodedPdu {
+              proto::ExtensionPermissionSettled { .name = "orchestrator", .grantDigest = "9a1b" } } },
         { proto::PduType::SetWorkspaceName,
           proto::DecodedPdu { proto::SetWorkspaceName { .workspace = 3, .name = "secret-label" } } },
         { proto::PduType::SetWorkspaceColor,

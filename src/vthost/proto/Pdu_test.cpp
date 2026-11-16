@@ -966,9 +966,9 @@ TEST_CASE("ServerHello carries the daemon's release version, defaulting to empty
 {
     auto const hello = ServerHello { .releaseVersion = "0.8.1" };
     CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).releaseVersion == "0.8.1");
-    // The release string (length byte and five characters), and the followed-workspace count, the instance
-    // and the two restored counts behind it.
-    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, /*bytesToDrop=*/10);
+    // The release string (length byte and five characters), and the followed-workspace count, the instance,
+    // the two restored counts and the consent nonce's presence byte behind it.
+    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, /*bytesToDrop=*/11);
     CHECK(decodeAs<ServerHello>(legacy).releaseVersion.empty());
 }
 
@@ -1081,10 +1081,10 @@ TEST_CASE("the frame helpers build what they say", "[vthost][proto][negotiation]
                                          .machineId = "m",
                                          .hostname = "zeta",
                                          .releaseVersion = "r" };
-        // "r", "zeta" and their lengths, the followed-workspace count, the instance and the two restored
-        // counts
-        auto const frame = encodeWithoutTrailingField(hello, 11);
-        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 11);
+        // "r", "zeta" and their lengths, the followed-workspace count, the instance, the two restored
+        // counts and the consent nonce's presence byte
+        auto const frame = encodeWithoutTrailingField(hello, 12);
+        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 12);
         auto expected = hello;
         expected.hostname.clear();
         expected.releaseVersion.clear();
@@ -2204,9 +2204,9 @@ TEST_CASE("ServerHello carries the selected workspace; a refusal carries none", 
     CHECK(
         std::get<ServerHello>(roundTrip(DecodedPdu { ServerHello { .agreedVersion = 0 } })).selectedWorkspace
         == 0);
-    // A daemon from before the field: the workspace, the instance and the restored counts after it are
-    // missing.
-    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, 4);
+    // A daemon from before the field: the workspace, the instance, the restored counts and the consent
+    // nonce's presence byte after it are missing.
+    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, 5);
     CHECK(decodeAs<ServerHello>(legacy).selectedWorkspace == 0);
 }
 
@@ -2216,7 +2216,7 @@ TEST_CASE("ServerHello carries the daemon's instance; an older daemon's reads as
         ServerHello { .agreedVersion = 4, .selectedWorkspace = 1, .daemonInstance = 0xC0FFEE'0000'0001 };
     CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).daemonInstance == 0xC0FFEE'0000'0001);
     // A daemon from before the field: the selected workspace ends the blob.
-    auto const legacy = encodeWithoutTrailingField(DecodedPdu { ServerHello { .agreedVersion = 4 } }, 3);
+    auto const legacy = encodeWithoutTrailingField(DecodedPdu { ServerHello { .agreedVersion = 4 } }, 4);
     auto const decoded = decodeAs<ServerHello>(legacy);
     CHECK(decoded.daemonInstance == 0);
     CHECK(decoded.agreedVersion == 4);
@@ -2231,8 +2231,8 @@ TEST_CASE("ServerHello carries what a restore brought back; an older daemon's re
     CHECK(decoded.restoredWorkspaces == 2);
     CHECK(decoded.restoredTabs == 7);
     CHECK(decoded.daemonInstance == 7);
-    // A daemon from before the fields: the two varints at the blob's end are missing.
-    auto const legacy = decodeAs<ServerHello>(encodeWithoutTrailingField(DecodedPdu { hello }, 2));
+    // A daemon from before the fields: the two varints, and the presence byte after them, are missing.
+    auto const legacy = decodeAs<ServerHello>(encodeWithoutTrailingField(DecodedPdu { hello }, 3));
     CHECK(legacy.restoredWorkspaces == 0);
     CHECK(legacy.restoredTabs == 0);
     CHECK(legacy.daemonInstance == 7);
@@ -3506,4 +3506,48 @@ TEST_CASE("the WorkspaceMeta of a named workspace is pinned", "[vthost][pdu][enc
     CHECK(decoded == meta);
     CHECK(decoded.name == "ops");
     CHECK(decoded.position == 5);
+}
+
+TEST_CASE("the daemon extension consent PDUs are tags 63 to 65 and round-trip", "[vthost][pdu][consent]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::ExtensionPermissionRequest) == 63);
+    STATIC_CHECK(std::to_underlying(PduType::ExtensionPermissionReply) == 64);
+    STATIC_CHECK(std::to_underlying(PduType::ExtensionPermissionSettled) == 65);
+
+    auto const request = DecodedPdu { ExtensionPermissionRequest {
+        .name = "orchestrator",
+        .grantDigest = "9a1b",
+        .title = "“orchestrator” wants to run in the background",
+        .lines = { WireConsentLine { .text = "Module: orchestrator@/x.wasm", .weight = 0 },
+                   WireConsentLine { .text = "gh-auth (short, in repos): gh auth status", .weight = 1 } } } };
+    CHECK(roundTrip(request) == request);
+    auto const reply = DecodedPdu { ExtensionPermissionReply {
+        .name = "orchestrator", .grantDigest = "9a1b", .grantState = 1 } };
+    CHECK(roundTrip(reply) == reply);
+    CHECK(vthost::grantStateOf(std::get<ExtensionPermissionReply>(roundTrip(reply)).grantState)
+          == vthost::GrantState::Granted);
+    auto const settled =
+        DecodedPdu { ExtensionPermissionSettled { .name = "orchestrator", .grantDigest = "9a1b" } };
+    CHECK(roundTrip(settled) == settled);
+
+    // A body cut short is malformed.
+    auto cut = Writer {};
+    cut.string("orchestrator");
+    CHECK_FALSE(decodePdu(frameOf(PduType::ExtensionPermissionSettled, cut.view())).has_value());
+    CHECK_FALSE(decodePdu(frameOf(PduType::ExtensionPermissionReply, cut.view())).has_value());
+}
+
+TEST_CASE("the consent proof is tag 66; the hello carries the nonce it answers", "[vthost][pdu][consent]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::ConsentProof) == 66);
+    auto proof = ConsentProof {};
+    proof.mac.fill(std::byte { 0xA5 });
+    CHECK(roundTrip(DecodedPdu { proof }) == DecodedPdu { proof });
+
+    auto hello = ServerHello { .layout = HelloLayout::Negotiating, .agreedVersion = 1 };
+    CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).consentNonce == std::nullopt);
+    auto nonce = std::array<std::byte, 32> {};
+    nonce.fill(std::byte { 0x3C });
+    hello.consentNonce = nonce;
+    CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).consentNonce == nonce);
 }

@@ -20,11 +20,16 @@
 #include <vtbackend/screen/StatusLineExtensions.hpp>
 
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include <vtcontrol/Catalog.hpp>
 #include <vtcontrol/ControlError.hpp>
@@ -129,6 +134,86 @@ struct DaemonWorldEvents
     std::function<void()> summaryChanged;
 };
 
+/// A daemon-scoped extension waiting for its user's grant, and the question the daemon rendered for it.
+struct DaemonExtensionRequest
+{
+    std::string name;        ///< What the daemon's configuration calls it.
+    std::string grantDigest; ///< What an answer is recorded for: its manifest and resolved roots.
+    std::string title;       ///< The question's title.
+    /// The question's lines, each with its weight as the wire spells vtcontrol::ConsentWeight.
+    std::vector<std::pair<std::string, uint8_t>> lines;
+
+    bool operator==(DaemonExtensionRequest const&) const = default;
+};
+
+/// Where a daemon-scoped extension stands.
+enum class DaemonExtensionState : uint8_t
+{
+    Stopped = 0, ///< Not running, and not waiting for its user: it waits for nothing to ask for it.
+    Pending,     ///< It was to start, and waits for its user's grant.
+    Denied,      ///< Its user refused it.
+    Running,     ///< It runs (or recovers from a fault).
+    Disabled,    ///< It faulted too often, and runs no more until started again.
+};
+
+/// One daemon-scoped extension, as `extension.list` shows it.
+struct DaemonExtensionListing
+{
+    std::string name;                                           ///< What the daemon's configuration calls it.
+    DaemonExtensionState state = DaemonExtensionState::Stopped; ///< Where it stands.
+    std::string grantDigest;                                    ///< What its grant is recorded for.
+    std::optional<DaemonExtensionRequest> pending;              ///< Its question, while it is Pending.
+
+    bool operator==(DaemonExtensionListing const&) const = default;
+};
+
+/// What asking the windows again came to.
+enum class AskOutcome : uint8_t
+{
+    NotPending = 0, ///< The extension waits for no answer: nothing was sent.
+    Asked,          ///< Its question was sent again.
+};
+
+/// What IDaemonExtensionControl::ask() did.
+struct AskResult
+{
+    AskOutcome outcome = AskOutcome::NotPending; ///< Whether it asked.
+    std::size_t windows = 0;                     ///< How many connections that can answer were sent it.
+
+    bool operator==(AskResult const&) const = default;
+};
+
+/// What the control API may do with daemon-scoped extensions: look, ask the windows again, and revoke. Never
+/// record an answer: a grant completes only as a confirmation in a Contour window, since the control socket
+/// is reachable from every pane. A window is a connection that proved the daemon's consent key
+/// (DaemonConsentKey.hpp), so no extension, no control verb, and no process that merely inherits a pane's
+/// environment can grant; a process of the same user that reads the key file on purpose can still pass for a
+/// window, as it could fake key presses -- the user is the trust boundary. Implemented by SessionHost; loop
+/// thread only.
+class IDaemonExtensionControl
+{
+  public:
+    IDaemonExtensionControl() = default;
+    IDaemonExtensionControl(IDaemonExtensionControl const&) = delete;
+    IDaemonExtensionControl(IDaemonExtensionControl&&) = delete;
+    IDaemonExtensionControl& operator=(IDaemonExtensionControl const&) = delete;
+    IDaemonExtensionControl& operator=(IDaemonExtensionControl&&) = delete;
+    virtual ~IDaemonExtensionControl() = default;
+
+    /// @return Every declared extension that composed, in the configuration's order, its question when it is
+    ///         pending.
+    [[nodiscard]] virtual std::vector<DaemonExtensionListing> list() const = 0;
+
+    /// Sends the extension's pending question again to every connection that can answer it.
+    /// @param name What the configuration calls it.
+    /// @return Asked, and to how many windows; NotPending when it waits for no answer.
+    [[nodiscard]] virtual AskResult ask(std::string_view name) = 0;
+
+    /// Forgets the user's answer for the extension's manifest and roots and stops it; it is asked again.
+    /// @param name What the configuration calls it.
+    virtual void revoke(std::string_view name) = 0;
+};
+
 /// A daemon's daemon-scoped extensions: the ones that run beside its sessions, with no session or window.
 /// Loop thread only, unless a member says otherwise.
 class IDaemonWorldHosting
@@ -145,6 +230,24 @@ class IDaemonWorldHosting
     /// the user's consent instead.
     /// @param name What the configuration calls it.
     virtual void startOnDemand(std::string_view name) = 0;
+
+    /// @return The extensions waiting for their user's grant, in the configuration's order.
+    [[nodiscard]] virtual std::vector<DaemonExtensionRequest> pendingRequests() const = 0;
+
+    /// @return Every extension that composed, in the configuration's order.
+    [[nodiscard]] virtual std::vector<DaemonExtensionListing> list() const = 0;
+
+    /// Records a user's answer to a pending request, and starts the extension once granted. One to no pending
+    /// request is ignored. SessionHost::answerDaemonExtension() is its only caller, and is reached only with
+    /// a ticket a window's connection was given (ConsentTicket).
+    /// @param name What the configuration calls the extension.
+    /// @param grantDigest DaemonExtensionRequest::grantDigest.
+    /// @param answer Granted or Denied.
+    virtual void answer(std::string_view name, std::string_view grantDigest, GrantState answer) = 0;
+
+    /// Forgets the user's answer for the extension's manifest and roots and stops it; it is pending again.
+    /// @param name What the configuration calls it.
+    virtual void revoke(std::string_view name) = 0;
 
     /// Stops every extension for good, for a host about to go: joins the thread they run on, then cancels
     /// the processes in flight. Called by the host before it drains its loop of what they posted; after it,

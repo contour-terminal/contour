@@ -64,6 +64,7 @@
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/CommandInterruption.hpp>
 #include <vthost/ConnectionId.hpp>
+#include <vthost/ConsentTicket.hpp>
 #include <vthost/ExtensionHosting.hpp>
 #include <vthost/HistorySeed.hpp>
 #include <vthost/ObjectRegistry.hpp>
@@ -237,6 +238,20 @@ enum class DetachKind : uint8_t
 ///
 /// Mostly one per attached client — but NOT only: the daemon itself subscribes a single
 /// LastSessionWatcher for `sessionClosed`, so the subscriber count is not a client count.
+/// Whether a daemon-scoped extension's question is sent to a connection that was already sent it.
+enum class ConsentOffer : uint8_t
+{
+    IfNotSent = 0, ///< Only to one not sent it yet: the question opened, or a client attached.
+    Again,         ///< To every one that can answer: `contour extension grant` asks again.
+};
+
+/// Whether an observer sent a daemon-scoped extension's question.
+enum class ConsentDelivery : uint8_t
+{
+    NotSent = 0, ///< It cannot ask a user, or already did.
+    Sent,        ///< It sent it to a window.
+};
+
 class SessionStreamEvents
 {
   public:
@@ -345,6 +360,21 @@ class SessionStreamEvents
                                             proto::PermissionRequest const& /*request*/)
     {
     }
+
+    /// A daemon-scoped extension waits for its user's grant: an observer that can ask a user in a window
+    /// sends @p request. A client attaching later is asked through
+    /// SessionHost::pendingDaemonExtensionRequests() instead.
+    /// @param request The question.
+    /// @param offer Whether one already sent to this observer is sent again (`contour extension grant`).
+    /// @return Sent if the observer sent it.
+    [[nodiscard]] virtual ConsentDelivery daemonExtensionRequested(
+        proto::ExtensionPermissionRequest const& /*request*/, ConsentOffer /*offer*/)
+    {
+        return ConsentDelivery::NotSent;
+    }
+
+    /// A daemon-scoped extension's question was answered: an observer that sent it closes it.
+    virtual void daemonExtensionSettled(proto::ExtensionPermissionSettled const& /*settled*/) {}
 };
 
 /// What a hosted session hands a desktop notification on as: its title, its body, and the occasion
@@ -1153,7 +1183,7 @@ class HostGitLookups
 
 /// Owns every hosted session and the authoritative vtworkspace::SessionModel,
 /// fanning each completed model change out to subscribed observers.
-class SessionHost final: public vtworkspace::ModelEvents
+class SessionHost final: public vtworkspace::ModelEvents, public IDaemonExtensionControl
 {
   public:
     /// @param loop The event loop all model mutation is confined to.
@@ -1610,6 +1640,29 @@ class SessionHost final: public vtworkspace::ModelEvents
     {
         return _foregroundPoll.has_value() && !_foregroundPoll->settled();
     }
+
+    /// Records a window's answer to a daemon-scoped extension's question, and tells every other connection
+    /// that was sent it that it is settled. The only way to IDaemonWorldHosting::answer(): a ticket is made
+    /// only by a NativeSession that sent the question to a client that can answer it. An answer to a question
+    /// no longer pending, or a dismissal (Pending), records nothing.
+    /// @param ticket What the connection was given as it sent the question.
+    /// @param answer Granted or Denied.
+    void answerDaemonExtension(ConsentTicket ticket, GrantState answer);
+
+    /// @return The daemon-scoped extensions waiting for their user's grant, as the wire carries them: what a
+    ///         client that can answer, attaching now, is to be asked. None without daemon-scoped extensions.
+    [[nodiscard]] std::vector<proto::ExtensionPermissionRequest> pendingDaemonExtensionRequests() const;
+
+    /// @return What the control API may do with the daemon-scoped extensions; null without any, so that every
+    ///         `extension.*` verb answers unsupported.
+    [[nodiscard]] IDaemonExtensionControl* daemonExtensionControl() noexcept
+    {
+        return _daemonWorld ? this : nullptr;
+    }
+
+    [[nodiscard]] std::vector<DaemonExtensionListing> list() const override;
+    [[nodiscard]] AskResult ask(std::string_view name) override;
+    void revoke(std::string_view name) override;
 
     /// @return The permission requests no client has answered yet, oldest first: what a client attaching now
     ///         is to be asked. Valid until the host next changes them.
@@ -2198,6 +2251,10 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param factory What makes them; empty for none.
     /// @return The extensions; null for none.
     [[nodiscard]] std::shared_ptr<IDaemonWorldHosting> makeDaemonWorld(DaemonWorldFactory const& factory);
+
+    /// Sends every pending daemon-scoped extension's question to each connection that can answer it and was
+    /// not sent it yet.
+    void offerDaemonExtensionRequests();
 
     /// The session hooks a new session's status-line extensions reach the host through, every one of which
     /// does nothing once the session is gone.

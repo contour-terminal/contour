@@ -196,3 +196,12 @@ TEST_CASE("the workspace switch capability keeps its ident and name",
     REQUIRE(change != CapabilityTable.end());
     CHECK(change->name == "workspace-switch");
 }
+
+TEST_CASE("capability 34 is daemon-extension-consent", "[vthost][negotiation][consent]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::DaemonExtensionConsent) == 34);
+    auto const consent =
+        std::ranges::find(CapabilityTable, Capability::DaemonExtensionConsent, &CapabilityRow::capability);
+    REQUIRE(consent != CapabilityTable.end());
+    CHECK(consent->name == "daemon-extension-consent");
+}

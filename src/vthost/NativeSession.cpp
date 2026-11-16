@@ -999,6 +999,84 @@ void NativeSession::sessionPermissionRequested(SessionId session, proto::Permiss
     send(0, proto::DecodedPdu { request });
 }
 
+ConsentDelivery NativeSession::daemonExtensionRequested(proto::ExtensionPermissionRequest const& request,
+                                                        ConsentOffer offer)
+{
+    if (!asksDaemonConsent() || _closed)
+        return ConsentDelivery::NotSent;
+    auto const sent = std::ranges::any_of(_consentTickets, [&](ConsentTicket const& ticket) {
+        return ticket.name() == request.name && ticket.grantDigest() == request.grantDigest;
+    });
+    if (sent && offer == ConsentOffer::IfNotSent)
+        return ConsentDelivery::NotSent;
+    if (!sent)
+        _consentTickets.push_back(ConsentTicket { request.name, request.grantDigest });
+    send(0, proto::DecodedPdu { request });
+    return ConsentDelivery::Sent;
+}
+
+void NativeSession::daemonExtensionSettled(proto::ExtensionPermissionSettled const& settled)
+{
+    auto const dropped = std::erase_if(_consentTickets, [&](ConsentTicket const& ticket) {
+        return ticket.name() == settled.name && ticket.grantDigest() == settled.grantDigest;
+    });
+    if (dropped != 0 && !_closed)
+        send(0, proto::DecodedPdu { settled });
+}
+
+void NativeSession::acceptConsentProof(proto::ConsentProof const& proof)
+{
+    auto const& gate = _services.handshake.consent;
+    // One proof per connection, against the nonce of its own hello: a second, or one nobody asked for, counts
+    // for nothing. Not an error a peer can fill the log with: a debug line, as any ignored PDU.
+    if (!gate || !_consentNonce || _consentStanding != ConsentStanding::Unproven)
+    {
+        connectionLog()("{}: ignoring a consent proof nothing asked for", _id);
+        return;
+    }
+    auto const context = ConsentContext { .daemonInstance = _host.instance(), .socket = gate->socket };
+    if (checkConsentProof(gate->key, context, *_consentNonce, proof.mac) != ConsentProofCheck::Proven)
+    {
+        _consentStanding = ConsentStanding::Refused;
+        errorLog()(
+            "{}: refusing a wrong consent proof: this connection is asked no daemon extension's question",
+            _id);
+        return;
+    }
+    _consentStanding = ConsentStanding::Proven;
+    connectionLog()("{}: proved the consent key: asked the daemon extensions' questions", _id);
+    for (auto const& request: _host.pendingDaemonExtensionRequests())
+        std::ignore = daemonExtensionRequested(request, ConsentOffer::IfNotSent);
+}
+
+void NativeSession::answerDaemonExtension(proto::ExtensionPermissionReply const& reply)
+{
+    // Only a window may grant: a connection that cannot show the question, or was never sent it, records
+    // nothing, whatever it names.
+    if (!asksDaemonConsent())
+    {
+        errorLog()("{}: ignoring a daemon extension reply from a client that cannot be asked", _id);
+        return;
+    }
+    auto const ticket = std::ranges::find_if(_consentTickets, [&](ConsentTicket const& held) {
+        return held.name() == reply.name && held.grantDigest() == reply.grantDigest;
+    });
+    if (ticket == _consentTickets.end())
+    {
+        errorLog()("{}: ignoring a daemon extension reply to a question it was not sent", _id);
+        return;
+    }
+    auto const answer = grantStateOf(reply.grantState);
+    if (!answer || *answer == GrantState::Pending)
+    {
+        errorLog()("{}: ignoring a daemon extension reply with answer {}", _id, reply.grantState);
+        return;
+    }
+    auto spent = std::move(*ticket);
+    _consentTickets.erase(ticket);
+    _host.answerDaemonExtension(std::move(spent), *answer);
+}
+
 void NativeSession::emitSessionEvent(proto::SessionEventPdu const& event)
 {
     if (_phase != ConnectionPhase::Viewing || _closed)
@@ -2379,6 +2457,16 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
         _host.closeSession(vtworkspace::SessionId { close->session });
         return;
     }
+    if (auto const* reply = std::get_if<proto::ExtensionPermissionReply>(&frame.pdu))
+    {
+        answerDaemonExtension(*reply);
+        return;
+    }
+    if (auto const* proof = std::get_if<proto::ConsentProof>(&frame.pdu))
+    {
+        acceptConsentProof(*proof);
+        return;
+    }
     if (auto const* reply = std::get_if<proto::PermissionReply>(&frame.pdu))
     {
         // Read, never cast: a byte no answer has records nothing, and leaves the question open.
@@ -3084,6 +3172,15 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
         proto::Negotiated { .version = *agreed,
                             .peerCapabilities = hello->capabilities,
                             .shared = proto::intersect(policy.capabilities, hello->capabilities) };
+    // A window that can be asked a daemon extension's question must first prove it read the daemon's consent
+    // key: a fresh nonce for it to answer, and no question nor answer until it has.
+    if (policy.consent && hello->role == proto::ConnectionRole::Attach
+        && negotiated.shared.contains(proto::Capability::DaemonExtensionConsent))
+    {
+        auto& nonce = _consentNonce.emplace();
+        policy.consent->random.get().fill(nonce);
+        reply.consentNonce = nonce;
+    }
     switch (hello->role)
     {
         case proto::ConnectionRole::Attach:
@@ -3279,6 +3376,9 @@ void NativeSession::attachClient(uint64_t serial,
     for (auto const& request: _host.pendingPermissionRequests())
         if (asks(request) && mirrorsSession(SessionId { request.session }))
             send(0, proto::DecodedPdu { request });
+    // A daemon-scoped extension's question belongs to no pane: every window that can answer it is asked.
+    for (auto const& request: _host.pendingDaemonExtensionRequests())
+        std::ignore = daemonExtensionRequested(request, ConsentOffer::IfNotSent);
 }
 
 std::vector<WorkspaceSummary> NativeSession::workspaceSummaries() const

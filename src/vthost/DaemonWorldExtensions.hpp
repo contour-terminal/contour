@@ -21,6 +21,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <vtextension/DaemonExtensionRuntime.hpp>
 #include <vtextension/ExtensionPresence.hpp>
@@ -65,6 +66,10 @@ class DaemonWorldExtensions final: public IDaemonWorldHosting, private vtextensi
                           DaemonWorldEvents events);
 
     void startOnDemand(std::string_view name) override;
+    [[nodiscard]] std::vector<DaemonExtensionRequest> pendingRequests() const override;
+    [[nodiscard]] std::vector<DaemonExtensionListing> list() const override;
+    void answer(std::string_view name, std::string_view grantDigest, GrantState answer) override;
+    void revoke(std::string_view name) override;
     void stop() noexcept override;
 
     /// @param name What the configuration calls an extension.
@@ -75,6 +80,10 @@ class DaemonWorldExtensions final: public IDaemonWorldHosting, private vtextensi
     void publishSummary(std::string_view extension,
                         std::string_view shortText,
                         std::string_view detail) override;
+
+    /// Runs @p change on the runtime, and tells the host when the questions waiting changed with it.
+    template <typename Change>
+    void changingRequests(Change change);
 
     DaemonWorldEvents _events;
     mutable std::mutex _mutex;
