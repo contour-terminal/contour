@@ -27,7 +27,10 @@
 #include <vtextension/ExtensionHost.hpp>
 #include <vtextension/ExtensionLimits.hpp>
 #include <vtextension/ExtensionScheduler.hpp>
+#include <vtextension/ExtensionStore.hpp>
 #include <vtextension/ExtensionWorkerPool.hpp>
+#include <vtextension/FileExtensionStore.hpp>
+#include <vtextension/FileLocker.hpp>
 #include <vtextension/GuestCall.hpp>
 #include <vtextension/HostBindings.hpp>
 #include <vtextension/HostState.hpp>

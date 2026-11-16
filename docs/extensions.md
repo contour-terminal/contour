@@ -351,7 +351,13 @@ across them, and a callback may make at most 64 of them or spend 2 s in them.
 - `log`, `wake(after-ms)`, `now()`: logging, one pending wake-up, and the clocks;
 - `proc-start`, `procs`, `proc-take`, `proc-release`: declared commands, run directly, their results
   kept until released and read in 64 KiB pages;
-- `store-get`, `store-set`, `store-remove`, `store-keys`: a durable store of values up to 64 KiB;
+- `store-get`, `store-set`, `store-remove`, `store-keys`: a durable store of at most 1024 values of up to
+  64 KiB each (a larger value or a key past the last is `limit`), keyed by at most 128 bytes of
+  `[a-z0-9/._-]`: no leading `/`, and no component that is empty, ends in `.`, contains `.tmp-`, or is a
+  reserved device name (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`, alone or before a `.`).
+  Every platform applies the same rules; any other key is `bad-argument` from `store-get`, `store-set` and
+  `store-remove`, while `store-keys` takes any prefix. The store's directory is private (mode 0700) and held by one daemon
+  at a time through an exclusive `flock` on its lock file; on NFS, `flock` maps to `fcntl` byte-range locks;
 - `pane-open`, `pane-close`, `panes`: panes the extension owns;
 - `tab-open`, `tab-close`, `tab-reveal`, `tabs`, `tab-read`, `tab-write`: tabs it serves;
 - `actions-take`, `summary-set`, `pane-reveal`: its command-palette actions and its summary;

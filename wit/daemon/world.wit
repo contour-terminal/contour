@@ -235,13 +235,22 @@ interface host {
     proc-take: func(handle: proc-handle, output: proc-stream, offset: u32) -> result<chunk, host-error>;
     /// Frees a finished process's output; its handle is no longer valid.
     proc-release: func(handle: proc-handle) -> result<_, host-error>;
-    /// Reads a value from the extension's store.
+    /// Reads a value from the extension's store; `none` if the key holds none.
+    ///
+    /// A key, for every store call, is at most 128 bytes of `[a-z0-9/._-]` and is the same on every host:
+    /// it does not start with `/`; no `/`-separated component is empty, ends in `.` (so none is `.` or
+    /// `..`), contains `.tmp-`, or is a device name some systems reserve (`con`, `prn`, `aux`, `nul`,
+    /// `com1`-`com9`, `lpt1`-`lpt9`), alone or before a `.`. Any other key is `bad-argument`.
     store-get: func(key: string) -> result<option<list<u8>>, host-error>;
-    /// Writes a value to the extension's store; it is durable when the call returns.
+    /// Writes a value to the extension's store; it is durable when the call returns. The key is as for
+    /// `store-get`, else `bad-argument`; the value is at most 64 KiB, and the store holds at most 1024 keys:
+    /// a larger value, or a new key past the last, is `limit`.
     store-set: func(key: string, value: list<u8>) -> result<_, host-error>;
-    /// Removes a value from the extension's store.
+    /// Removes a value from the extension's store; it is durable when the call returns, and a key that holds
+    /// none is removed already. The key is as for `store-get`, else `bad-argument`.
     store-remove: func(key: string) -> result<_, host-error>;
-    /// Lists the store's keys that start with a prefix.
+    /// Lists the store's keys that start with a prefix, sorted. Any prefix is accepted; one no key of the
+    /// grammar of `store-get` can start with lists nothing.
     store-keys: func(prefix: string) -> result<list<string>, host-error>;
     /// Opens a pane from a declared template; `near` names a served tab whose workspace it opens in.
     pane-open: func(template: string, args: list<tuple<string, string>>, cwd: string, title: string, tag: string, near: option<string>) -> result<string, host-error>;
