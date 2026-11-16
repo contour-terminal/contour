@@ -20,7 +20,8 @@ class QScreen;
 namespace contour::window
 {
 class DaemonDriftModel;
-}
+class DaemonExtensionConsentModel;
+} // namespace contour::window
 
 namespace contour::session
 {
@@ -80,6 +81,11 @@ class WindowBinding
     /// than
     ///         this client; null for a binding with no daemon to drift. GUI thread.
     [[nodiscard]] virtual window::DaemonDriftModel* daemonDrift() noexcept = 0;
+
+    /// @return What the consent dialog of the windows it serves shows: the daemon-scoped extensions'
+    /// questions
+    ///         of its daemon; null for a binding to no daemon.
+    [[nodiscard]] virtual window::DaemonExtensionConsentModel* daemonExtensionConsent() noexcept = 0;
 
     /// Upgrades the daemon behind the windows bound here in place, because the user commanded it (the
     /// `UpgradeDaemon` action), whether or not its release drifts. Returns at once: the upgrade runs on, and

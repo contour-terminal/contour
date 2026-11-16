@@ -80,6 +80,10 @@ Dialog {
         return row.role === KitDialog.Accept ? root.acceptRole : chromeStyle.statusRunning;
     }
 
+    /// Whether the heading row shows a close control, which emits `escaped` as Escape does: for a dialog that
+    /// may be put away without an answer.
+    property bool closable: false
+
     /// Escape was pressed while the dialog keeps it (its closePolicy has no CloseOnEscape): a dialog for
     /// which Escape means something else than its reject button answers it here.
     signal escaped()
@@ -263,15 +267,32 @@ Dialog {
         // Reached only where the popup keeps Escape for itself (no CloseOnEscape).
         Keys.onEscapePressed: root.escaped()
 
-        Label {
-            objectName: "kitDialogHeading"
+        RowLayout {
             Layout.fillWidth: true
-            text: root.heading
-            font: chromeStyle.type.bodyStrong
-            color: sys.windowText
-            wrapMode: Text.Wrap
-            // A heading can name what a program chose (a title, an extension's name): text, never markup.
-            textFormat: Text.PlainText
+            spacing: chromeStyle.space.s3
+
+            Label {
+                objectName: "kitDialogHeading"
+                Layout.fillWidth: true
+                text: root.heading
+                font: chromeStyle.type.bodyStrong
+                color: sys.windowText
+                wrapMode: Text.Wrap
+                // A heading can name what a program chose (a title, an extension's name): text, never markup.
+                textFormat: Text.PlainText
+            }
+
+            // The close control a dialog that can be put away unanswered shows (closable): it does what
+            // Escape does.
+            ToolButton {
+                objectName: "kitDialogClose"
+                visible: root.closable
+                Layout.alignment: Qt.AlignTop
+                text: chromeStyle.closeGlyph
+                onClicked: root.escaped()
+                Accessible.role: Accessible.Button
+                Accessible.name: qsTr("Close")
+            }
         }
 
         // Taking no room without a message: the body then starts where the message would.

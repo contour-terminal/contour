@@ -272,6 +272,9 @@ class WindowController:
     // The window's own daemon's drift (window::DaemonDriftModel), which its drift badge shows; null for a
     // local window. Read anew whenever the window is bound to another host.
     Q_PROPERTY(QObject* daemonDrift READ daemonDrift NOTIFY hostLabelChanged)
+    // The window's own daemon's extensions' questions (window::DaemonExtensionConsentModel), which its
+    // consent dialog shows; null for a local window. Read anew whenever the window is bound to another host.
+    Q_PROPERTY(QObject* daemonExtensionConsent READ daemonExtensionConsent NOTIFY hostLabelChanged)
     // The window's host for ssh's login prompts (window::PromptHost), which its AskpassDialog shows.
     Q_PROPERTY(QObject* promptHost READ promptHost CONSTANT)
     // A window::HostChipState as its underlying value: where the connection to that host stands.
@@ -1657,6 +1660,7 @@ class WindowController:
     /// What this window's drift badge shows: whether the daemon of its own link runs another release.
     /// @return Its window::DaemonDriftModel; null for a local window.
     [[nodiscard]] QObject* daemonDrift() const;
+    [[nodiscard]] QObject* daemonExtensionConsent() const;
 
     /// @return The window's window::PromptHost: where the ssh logins this window started ask their questions.
     [[nodiscard]] QObject* promptHost() const noexcept;

@@ -412,6 +412,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/CommandPaletteModel.cpp
         window/ContextMenuModel.cpp
         window/DaemonDriftModel.cpp
+        window/DaemonExtensionConsentModel.cpp
         window/PromptHost.cpp
         window/BootstrapPrompt.cpp
         window/NewDefaultsNotice.cpp
@@ -613,6 +614,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/KitShortcutField.qml
         qml/KitFontPicker.qml
         qml/PermissionDialog.qml
+        qml/DaemonExtensionConsentDialog.qml
         qml/AskpassDialog.qml
         qml/PromptWindow.qml
     )
@@ -1132,6 +1134,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/TabLabel_test.cpp
             window/TabGlassShapes_test.cpp
             window/DaemonDriftModel_test.cpp
+            window/DaemonExtensionConsentModel_test.cpp
             window/DaemonDriftChoice_test.cpp
             window/NewDefaultsNotice_test.cpp
             geometry/CellRectangle_test.cpp

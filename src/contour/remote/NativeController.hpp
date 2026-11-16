@@ -204,6 +204,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
         SwitchRequests switchRequests = SwitchRequests::Answered;
         /// What the first connection does about a selected workspace that holds no tab.
         EmptyWorkspace emptyWorkspace = EmptyWorkspace::Wait;
+        /// Proves the daemon's consent key as each hello is answered, for the run that hello names; empty for
+        /// a daemon whose key this machine does not hold (another host's).
+        vthost::ConsentProver consentProver {};
     };
 
     /// @param config What the controller is built with.
@@ -313,6 +316,18 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param digest The manifest digest the answer is bound to.
     /// @param answer The user's answer.
     void answerPermission(std::string hostId, std::string digest, vthost::GrantState answer);
+
+    /// Takes what daemonExtensionConsentChanged() announced, oldest first: the daemon-scoped extensions'
+    /// questions to show in this connection's windows, and those answered elsewhere. GUI thread.
+    /// @return The events, as the daemon sent them.
+    [[nodiscard]] std::vector<vthost::client::NativeClient::DaemonConsentEvent> takeDaemonConsentEvents();
+
+    /// Answers a daemon-scoped extension's question takeDaemonConsentEvents() handed out. A no-op once
+    /// detached.
+    /// @param name ExtensionPermissionRequest::name.
+    /// @param grantDigest ExtensionPermissionRequest::grantDigest.
+    /// @param answer Granted or Denied.
+    void answerDaemonExtension(std::string name, std::string grantDigest, vthost::GrantState answer);
 
     /// Takes the switch requests switchRequested() announced, oldest first. GUI thread.
     /// @return The requests, as the daemon sent them.
@@ -745,6 +760,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// thread; connect queued). The GUI takes the requests with takeSwitchRequests().
     void switchRequested();
 
+    /// The daemon asks this connection's windows about a daemon-scoped extension's grant, or says one asked
+    /// was answered (fires on the reactor thread; connect queued). The GUI takes them with
+    /// takeDaemonConsentEvents().
+    void daemonExtensionConsentChanged();
+
     /// The daemon refused a tab merge this client asked for, and changed nothing (fires on the reactor
     /// thread; connect queued). The GUI tells the user.
     void tabMergeRefused();
@@ -948,6 +968,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// Reactor-side: keeps a daemon extension's question for the GUI, and tells it.
     void onPermissionRequest(vthost::proto::PermissionRequest const& request);
+    /// Queues a daemon-scoped extension's question, or its settling, for the GUI. Reactor thread.
+    void onDaemonConsent(vthost::client::NativeClient::DaemonConsentEvent const& event);
 
     /// Reactor-side: keeps a daemon's switch request for the GUI, and tells it.
     void onSwitchRequest(vthost::proto::SwitchRequest const& request);
@@ -1050,6 +1072,7 @@ class NativeController final: public QObject, public contour::session::SessionFa
     SessionSettingsSource _sessionSettings;
     /// The preference the app shows now, asked as every hello is built. @see Config::colorPreference
     ColorPreferenceSource _colorPreference;
+    vthost::ConsentProver _consentProver;
     vthost::latency::StartupTimeline& _timeline;
     vthost::client::BackoffSchedule _backoff;
     /// Filled, under _mutex, by the first callback after each accepted connection's ServerHello. @see
@@ -1132,6 +1155,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     std::vector<vthost::proto::PermissionRequest> _permissionRequests;
     /// The daemon's switch requests the GUI has not taken yet, oldest first. Guarded by _mutex.
     std::vector<vthost::proto::SwitchRequest> _switchRequestQueue;
+    /// What onDaemonConsent() queued for the GUI, oldest first. Under _mutex.
+    std::vector<vthost::client::NativeClient::DaemonConsentEvent> _daemonConsentEvents;
     /// Guards the geometry bookkeeping below, and ONLY that.
     ///
     /// A lock of its own because the resize sink is reached from inside a `_mutex`-holding frame:

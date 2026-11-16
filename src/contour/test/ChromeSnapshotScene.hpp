@@ -413,6 +413,9 @@ class ChromeSnapshotScene
                 break;
             case ScriptAction::OpenFindBar: openFindBar(); break;
             case ScriptAction::OpenPermission: openPermission(scriptRow(_variant.script).permission); break;
+            case ScriptAction::OpenDaemonConsent:
+                openDaemonConsent(scriptRow(_variant.script).daemonConsent);
+                break;
             case ScriptAction::OpenSaveLayout: openSaveLayout(scriptRow(_variant.script).layoutName); break;
             case ScriptAction::ShowSizeIndicator: showSizeIndicators(); break;
             case ScriptAction::HoldLinkModifier: holdLinkModifier(); break;
@@ -1347,6 +1350,91 @@ class ChromeSnapshotScene
                 return dialog != nullptr && dialog->property("opened").toBool();
             },
             PopupSettleMs));
+    }
+
+    /// The daemon extension question a script's window is asked: what the daemon renders and sends.
+    [[nodiscard]] static vthost::proto::ExtensionPermissionRequest daemonConsentQuestion(
+        SnapshotDaemonConsent consent)
+    {
+        using vthost::proto::WireConsentLine;
+        auto const commands = [](std::string_view root) {
+            return std::vector<WireConsentLine> {
+                WireConsentLine { .text = "It may run only these, which can reach the network as you:",
+                                  .weight = 0 },
+                WireConsentLine { .text = std::format("gh-auth (short, in {}): gh auth status", root),
+                                  .weight = 1 },
+                WireConsentLine {
+                    .text = std::format("git-fetch (long, in {}): git fetch --quiet {{remote}}", root),
+                    .weight = 1 },
+                WireConsentLine {
+                    .text = "It may open tabs running: agent (in worktrees): claude --model {model} "
+                            "--session-id {session} {prompt}",
+                    .weight = 1 },
+                WireConsentLine { .text = "It may read files in: worktrees", .weight = 0 },
+                WireConsentLine { .text = "It shows its own tab: orchestrator://", .weight = 0 },
+            };
+        };
+        auto request = vthost::proto::ExtensionPermissionRequest {
+            .name = "orchestrator",
+            .grantDigest = "9a1b",
+            .title = "“orchestrator” wants to run in the background",
+            .lines = {},
+        };
+        switch (consent)
+        {
+            case SnapshotDaemonConsent::None: break;
+            case SnapshotDaemonConsent::Held:
+            case SnapshotDaemonConsent::Armed:
+                request.lines = {
+                    WireConsentLine {
+                        .text = "Module: orchestrator@/usr/lib/contour/extensions/orchestrator.wasm",
+                        .weight = 0 },
+                    WireConsentLine { .text = "Directory (worktrees, created if missing): /home/me/worktrees",
+                                      .weight = 0 },
+                    WireConsentLine { .text = "Directory (repos): /home/me/src/contour", .weight = 0 },
+                };
+                break;
+            case SnapshotDaemonConsent::LongRoots:
+                request.lines = {
+                    WireConsentLine {
+                        .text = "Module: orchestrator@/home/me/.local/share/contour/extensions/build/release/"
+                                "wasm32-wasip1/orchestrator-with-a-rather-long-file-name.wasm",
+                        .weight = 0 },
+                    WireConsentLine { .text = "Directory (worktrees, created if missing): /home/me/projects/"
+                                              "agent-orchestrator/worktrees/a-very-deep/directory/structure",
+                                      .weight = 0 },
+                    WireConsentLine {
+                        .text = "Directory (repos): /home/me/src/github.com/contour-terminal/contour",
+                        .weight = 0 },
+                    WireConsentLine { .text = "Directory (repos): /home/me/src/github.com/contour-terminal/"
+                                              "libunicode-with-a-long-name",
+                                      .weight = 0 },
+                };
+                break;
+        }
+        auto const tail = commands("repos");
+        request.lines.insert(request.lines.end(), tail.begin(), tail.end());
+        return request;
+    }
+
+    /// Has the window's daemon ask @p consent, and lets its hold pass for SnapshotDaemonConsent::Armed.
+    void openDaemonConsent(SnapshotDaemonConsent consent)
+    {
+        // Allow is armed only in an active window: the user's, which this one plays.
+        window().requestActivate();
+        REQUIRE(QTest::qWaitForWindowActive(&window()));
+        auto& model = _controller.daemonExtensionConsent();
+        model.show(daemonConsentQuestion(consent));
+        auto* dialog = _root->findChild<QObject*>(QStringLiteral("daemonExtensionConsentDialog"));
+        REQUIRE(dialog != nullptr);
+        REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, PopupSettleMs));
+        if (consent != SnapshotDaemonConsent::Held)
+        {
+            _controller.consentClock.advance(window::DaemonConsentAllowHold);
+            for (auto const& timer: std::exchange(_controller.consentTimers, {}))
+                timer();
+            QCoreApplication::processEvents();
+        }
     }
 
     /// Opens Save Layout as a nameless SaveLayout action does, over this script's tabs, and types the name

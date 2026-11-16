@@ -990,6 +990,13 @@ window::DaemonDriftModel* TerminalSessionManager::daemonDriftOf(
     return binding != nullptr ? binding->daemonDrift() : nullptr;
 }
 
+window::DaemonExtensionConsentModel* TerminalSessionManager::daemonExtensionConsentOf(
+    vtworkspace::WorkspaceId window) const noexcept
+{
+    auto* const binding = mutableBindingOf(window);
+    return binding != nullptr ? binding->daemonExtensionConsent() : nullptr;
+}
+
 std::string_view TerminalSessionManager::hostLabelOf(TerminalSession const& session) const noexcept
 {
     auto const* const window = hostOf(&session).window;

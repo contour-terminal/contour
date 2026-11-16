@@ -139,6 +139,18 @@ enum class SnapshotScript : uint8_t
     SidebarWorkspaceColorPicker, //!< sidebar-workspace-tint with the colour picker open over billing's row.
     SidebarTreeCompact,          //!< sidebar-tree under `row_spacing: compact` (sidebar-tree is comfortable).
     SidebarTabColorPicker,       //!< sidebar-tab-tint with the tab colour picker open over build's row.
+    DaemonConsentHeld,  //!< A daemon extension's question just shown: Allow held, a root created if missing.
+    DaemonConsentArmed, //!< The same once the hold passed: Allow armed.
+    DaemonConsentLong,  //!< A question with long roots and a long module path, wrapping.
+};
+
+/// The daemon extension's question a script's window asks (ScriptAction::OpenDaemonConsent).
+enum class SnapshotDaemonConsent : uint8_t
+{
+    None = 0,  //!< None.
+    Held,      //!< The orchestrator's question, just shown.
+    Armed,     //!< The orchestrator's question, its hold over.
+    LongRoots, //!< A question whose roots and module path outgrow a line.
 };
 
 /// What the workspace sidebar of a script shows.
@@ -229,6 +241,7 @@ enum class ScriptAction : uint8_t
     HoverSidebarRow, //!< build's sidebar row given a long status, the pointer resting on it: its hover card.
     OpenWorkspaceColorPicker,  //!< The sidebar's colour picker over billing's row, as Custom… opens it.
     OpenSidebarTabColorPicker, //!< The sidebar's tab colour picker over build's row, as its Custom… opens it.
+    OpenDaemonConsent,         //!< The window's daemon asks the row's daemon extension question.
 };
 
 /// What a script's tabs carry beyond their titles.
@@ -554,6 +567,8 @@ struct SnapshotScriptRow
     config::SidebarWorkspaceColorStyle workspaceColorStyle = config::SidebarWorkspaceColorStyle::Tint;
     /// How much room a tab's or a pane's sidebar row takes (`sidebar.row_spacing`).
     config::SidebarRowSpacing rowSpacing = config::SidebarRowSpacing::Comfortable;
+    /// The daemon extension's question the window asks.
+    SnapshotDaemonConsent daemonConsent = SnapshotDaemonConsent::None;
 };
 
 /// The rows of the script table, in enumerator order.
@@ -2431,7 +2446,32 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::OpenSidebarTabColorPicker,
                         .sidebar = SnapshotSidebar::Tree,
                         .sidebarColor = SnapshotSidebarColor::Tabs },
+    SnapshotScriptRow { .script = SnapshotScript::DaemonConsentHeld,
+                        .name = "daemon-consent-held",
+                        .tabCount = 1,
+                        .action = ScriptAction::OpenDaemonConsent,
+                        .connection = HostConnection::LocalDaemon,
+                        .daemonConsent = SnapshotDaemonConsent::Held },
+    SnapshotScriptRow { .script = SnapshotScript::DaemonConsentArmed,
+                        .name = "daemon-consent-armed",
+                        .tabCount = 1,
+                        .action = ScriptAction::OpenDaemonConsent,
+                        .connection = HostConnection::LocalDaemon,
+                        .daemonConsent = SnapshotDaemonConsent::Armed },
+    SnapshotScriptRow { .script = SnapshotScript::DaemonConsentLong,
+                        .name = "daemon-consent-long",
+                        .tabCount = 1,
+                        .action = ScriptAction::OpenDaemonConsent,
+                        .connection = HostConnection::LocalDaemon,
+                        .daemonConsent = SnapshotDaemonConsent::LongRoots },
 };
+
+static_assert(std::ranges::all_of(SnapshotScripts,
+                                  [](SnapshotScriptRow const& row) {
+                                      return (row.action == ScriptAction::OpenDaemonConsent)
+                                             == (row.daemonConsent != SnapshotDaemonConsent::None);
+                                  }),
+              "a script names a daemon extension question exactly when it opens the consent dialog");
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),
                                   [](std::size_t i) {

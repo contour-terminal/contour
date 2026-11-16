@@ -20,6 +20,7 @@
 #include <set>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 using vtbackend::operator""_rgb;
@@ -833,6 +834,9 @@ TEST_CASE("ChromeSnapshotPlan: the switcher's eight scripts precede the location
           == static_cast<int>(SnapshotScript::SwitcherHover) + 1);
     CHECK(static_cast<int>(SnapshotScript::DaemonLocalSingleTab)
           == static_cast<int>(SnapshotScript::DaemonLocal) + 1);
+    // The daemon extension's consent scripts follow the sidebar's, whose last is its tab colour picker.
+    CHECK(static_cast<int>(SnapshotScript::DaemonConsentHeld)
+          == static_cast<int>(SnapshotScript::SidebarTabColorPicker) + 1);
     for (auto const script: { SnapshotScript::DaemonLocal, SnapshotScript::DaemonLocalSingleTab })
         CHECK(scriptRow(script).connection == HostConnection::LocalDaemon);
     for (auto const& [script, name, action]: std::array {
@@ -913,4 +917,21 @@ TEST_CASE("snapshot plan: the sidebar tree is drawn at each row spacing", "[snap
     CHECK(compact.tabCount == comfortable.tabCount);
     CHECK(compact.sidebarColor == comfortable.sidebarColor);
     CHECK(compact.action == comfortable.action);
+}
+
+TEST_CASE("ChromeSnapshotPlan: the daemon consent dialog is pictured held, armed and with long roots",
+          "[snapshot][consent]")
+{
+    using namespace contour::test::snapshot;
+    CHECK(SnapshotScripts.back().script == SnapshotScript::DaemonConsentLong);
+    for (auto const& [script, consent]: std::array {
+             std::pair { SnapshotScript::DaemonConsentHeld, SnapshotDaemonConsent::Held },
+             std::pair { SnapshotScript::DaemonConsentArmed, SnapshotDaemonConsent::Armed },
+             std::pair { SnapshotScript::DaemonConsentLong, SnapshotDaemonConsent::LongRoots },
+         })
+    {
+        CHECK(scriptRow(script).action == ScriptAction::OpenDaemonConsent);
+        CHECK(scriptRow(script).daemonConsent == consent);
+        CHECK(scriptRow(script).connection == HostConnection::LocalDaemon);
+    }
 }

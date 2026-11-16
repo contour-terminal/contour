@@ -7141,3 +7141,23 @@ TEST_CASE("a launch of a workspace holding no tab asks for a shell there, when t
         CHECK(daemon.clientFrames.count(vthost::proto::PduType::OpenFirstTab) == 0);
     }
 }
+
+TEST_CASE("only NativeController advertises daemon-extension consent", "[attach][controller][consent]")
+{
+    // Only a window can grant a daemon extension: the GUI's connection offers to be asked, the CLI's clients
+    // never do, so the daemon neither asks them nor takes a reply from them.
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline, ControllerOptions {});
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    auto const hellos = daemon.clientFrames.hellos();
+    REQUIRE(hellos.size() == 1);
+    CHECK(hellos.front().capabilities.contains(vthost::proto::Capability::DaemonExtensionConsent));
+
+    // A NativeClient's hello offers what its composition root names, which the CLI never does.
+    CHECK_FALSE(vthost::client::NativeClient::HandshakeOptions {}.capabilities.contains(
+        vthost::proto::Capability::DaemonExtensionConsent));
+}

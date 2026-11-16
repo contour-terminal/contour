@@ -1364,6 +1364,34 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                       == QStringLiteral("build"));
                 break;
             }
+            case SnapshotScript::DaemonConsentHeld:
+            case SnapshotScript::DaemonConsentArmed:
+            case SnapshotScript::DaemonConsentLong: {
+                // The window's daemon asks: the title, every line as plain text, Allow held until the hold
+                // passed.
+                auto const* dialog =
+                    scene.root().findChild<QObject*>(QStringLiteral("daemonExtensionConsentDialog"));
+                REQUIRE(dialog != nullptr);
+                CHECK(dialog->property("opened").toBool());
+                auto const* dialogContent = dialog->property("contentItem").value<QQuickItem*>();
+                REQUIRE(dialogContent != nullptr);
+                auto const lines =
+                    contour::test::itemsNamed(*dialogContent, QStringLiteral("daemonExtensionConsentLine"));
+                // The module, the directories, the header, two commands, the pane, the root it reads, the
+                // tab.
+                CHECK(lines.size() >= 9);
+                CHECK(std::ranges::all_of(lines, [](QQuickItem const* line) {
+                    return line->property("textFormat").toInt() == Qt::PlainText;
+                }));
+                auto const accept =
+                    contour::test::itemsNamed(*dialogContent, QStringLiteral("kitDialogAccept"));
+                REQUIRE(accept.size() == 1);
+                CHECK(accept.front()->property("enabled").toBool()
+                      == (variant.script != SnapshotScript::DaemonConsentHeld));
+                CHECK(contour::test::itemsNamed(*dialogContent, QStringLiteral("kitDialogClose")).size()
+                      == 1);
+                break;
+            }
             case SnapshotScript::QuickTerminal: {
                 // The panel's frame, and a role that made the window a frameless tool window.
                 CHECK(scene.window().size() == ChromeSnapshotScene::quickTerminalPanelSize());

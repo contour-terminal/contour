@@ -18,6 +18,7 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QPointer>
 #include <QtCore/QThread>
+#include <QtCore/QTimer>
 
 #include <algorithm>
 #include <chrono>
@@ -213,6 +214,15 @@ DaemonLink::DaemonLink(Id id,
     _host(host),
     _sessions(sessions),
     _hostLabel(config.hostLabel),
+    _consent(
+        [this](std::string name, std::string grantDigest, vthost::GrantState answer) {
+            if (_controller != nullptr)
+                _controller->answerDaemonExtension(std::move(name), std::move(grantDigest), answer);
+        },
+        core::platform::defaultSteadyClock(),
+        [](QObject* context, std::chrono::milliseconds delay, std::function<void()> job) {
+            QTimer::singleShot(delay, context, std::move(job));
+        }),
     _locality(config.locality),
     _upkeep(config.upkeep),
     _clientRelease(config.clientRelease),
@@ -452,6 +462,16 @@ void DaemonLink::connectController()
                 answerSwitchRequests();
         },
         Qt::QueuedConnection);
+    // The daemon's own extensions ask in every window of the link, whether or not this client runs any.
+    QObject::connect(
+        _controller.get(),
+        &NativeController::daemonExtensionConsentChanged,
+        &_receiver,
+        [this] {
+            if (!isStopped())
+                followDaemonConsent();
+        },
+        Qt::QueuedConnection);
 #ifdef CONTOUR_EXTENSIONS
     QObject::connect(
         _controller.get(),
@@ -521,6 +541,17 @@ void DaemonLink::stopForDaemonRestart()
         return;
     _sessions.noteTransportLost(*this);
     _controller->stop();
+}
+
+void DaemonLink::followDaemonConsent()
+{
+    for (auto const& event: _controller->takeDaemonConsentEvents())
+    {
+        if (auto const* request = std::get_if<vthost::proto::ExtensionPermissionRequest>(&event))
+            _consent.show(*request);
+        else if (auto const* settled = std::get_if<vthost::proto::ExtensionPermissionSettled>(&event))
+            _consent.settle(settled->name, settled->grantDigest);
+    }
 }
 
 void DaemonLink::showDaemonDrift()
@@ -1191,7 +1222,12 @@ void DaemonLink::connectReconnectSignals()
             _sessions.setHostConnection(*this, _controller->connectionState());
             // What a given-up switch selected again is the connection's own: the one sought now resumes it.
             if (_controller->connectionState() != vthost::client::ConnectionState::Connected)
+            {
                 _revertTo.reset();
+                // The questions were the lost connection's: a reconnect is asked again what is still open,
+                // and a restarted daemon what it asks now.
+                _consent.clear();
+            }
             // A switch fails when the connection goes before the workspace it waits for is shown.
             if (_switch || arrivalDue())
             {

@@ -1706,6 +1706,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         for a local window.
     [[nodiscard]] window::DaemonDriftModel* daemonDriftOf(vtworkspace::WorkspaceId window) const noexcept;
 
+    /// @param window A window of this manager.
+    /// @return What @p window's consent dialog shows: its own daemon's extensions' questions
+    ///         (WindowBinding::daemonExtensionConsent); null for a local window.
+    [[nodiscard]] window::DaemonExtensionConsentModel* daemonExtensionConsentOf(
+        vtworkspace::WorkspaceId window) const noexcept;
+
     /// @param session A session of this manager.
     /// @return The remote host the window holding @p session is attached to; empty for a local window, and
     ///         for a session no window holds.

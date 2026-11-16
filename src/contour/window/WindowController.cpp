@@ -28,6 +28,7 @@
 #include <contour/window/CloseDialogTable.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
+#include <contour/window/DaemonExtensionConsentModel.hpp>
 #include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
@@ -677,6 +678,11 @@ QString WindowController::hostLabel() const
 QObject* WindowController::daemonDrift() const
 {
     return _manager.daemonDriftOf(_displayed);
+}
+
+QObject* WindowController::daemonExtensionConsent() const
+{
+    return _manager.daemonExtensionConsentOf(_displayed);
 }
 
 QString WindowController::shortcutText(QString const& commandName) const

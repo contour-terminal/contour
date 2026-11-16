@@ -100,6 +100,8 @@
     #include <vtextension/SessionExtensions.hpp>
     #include <vtextension/wasm/DefaultBackend.hpp>
     #include <vtextension/wasm/WasmRuntime.hpp>
+    #include <vthost/DaemonConsentKey.hpp>
+    #include <vthost/FilePrivacy.hpp>
     #include <vthost/client/DaemonGrantReplies.hpp>
 #endif
 
@@ -1117,6 +1119,31 @@ std::optional<std::expected<void, std::string>> ContourGuiApp::pollNativeAttach(
     return attached;
 }
 
+vthost::ConsentProver ContourGuiApp::localConsentProver(std::filesystem::path const& controlPath) const
+{
+    // Where the local daemon at this socket keeps the key of each of its runs; read as each hello arrives,
+    // for the run it names. No pane's environment names this directory: the daemon never puts it there, so a
+    // program that merely runs in a pane cannot pass for this window.
+    auto const& fileSystem = core::platform::NativeFileSystem::instance();
+    auto const directory =
+        vthost::daemonConsentKeyDirectory(vthost::daemonStateDirectory(processEnvironment()));
+    auto const socket = fileSystem.weaklyCanonical(controlPath);
+    return [directory, socket](uint64_t daemonInstance,
+                               vthost::ConsentNonce const& nonce) -> std::optional<vthost::ConsentProofMac> {
+        auto const key =
+            vthost::readDaemonConsentKey(vthost::nativeConsentKeyFiles(), directory, socket, daemonInstance);
+        if (!key)
+        {
+            errorLog()("attach: {}; this window is asked no daemon extension's question", key.error());
+            return std::nullopt;
+        }
+        return vthost::consentProofOf(
+            *key,
+            vthost::ConsentContext { .daemonInstance = daemonInstance, .socket = core::pathToUtf8(socket) },
+            nonce);
+    };
+}
+
 remote::DaemonLink& ContourGuiApp::startDaemonLink(remote::DaemonLinkConfig config)
 {
     if (config.address.kind == vthost::proto::SwitchDaemonKind::Host)
@@ -1224,6 +1251,7 @@ std::expected<remote::DaemonLinkConfig, std::string> ContourGuiApp::linkConfigFo
                                  daemon);
             if (_upgradeDaemon)
                 config.upkeep = window::upkeepOfReachedDaemon(_launchControlPath, controlPath);
+            config.controller.consentProver = localConsentProver(controlPath);
             return config;
         }
         case SwitchDaemonKind::Host:
@@ -2029,6 +2057,9 @@ std::expected<void, std::string> ContourGuiApp::startLaunchLink(LaunchAttach att
     // _upgradeDaemon are set for it.
     if (attach.locality == window::DaemonLocality::Local)
         config.upkeep = window::DaemonUpkeep::ThisClient;
+    // A local daemon's windows prove its consent key, and are asked its extensions' questions.
+    if (attach.locality == window::DaemonLocality::Local && !_launchControlPath.empty())
+        config.controller.consentProver = localConsentProver(_launchControlPath);
     auto const id = startDaemonLink(std::move(config)).id();
     // Attach mode adopts the daemon's workspaces into the windows once the first one booted, and on every
     // layout change after (which the link wires itself). Both find the link by its id, which no window has

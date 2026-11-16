@@ -5151,6 +5151,10 @@ class ReleaseCountingBinding final: public contour::session::WindowBinding
     [[nodiscard]] contour::session::SessionFactory& sessions() noexcept override { return _factory; }
     [[nodiscard]] std::string_view hostLabel() const noexcept override { return {}; }
     [[nodiscard]] contour::window::DaemonDriftModel* daemonDrift() noexcept override { return nullptr; }
+    [[nodiscard]] contour::window::DaemonExtensionConsentModel* daemonExtensionConsent() noexcept override
+    {
+        return nullptr;
+    }
     void windowClosed(vtworkspace::WorkspaceId window) override { closed.push_back(window); }
     void lastWindowReleased() override { ++releases; }
 
@@ -5785,6 +5789,10 @@ class SourceBinding final: public contour::session::WindowBinding
     [[nodiscard]] contour::session::SessionFactory& sessions() noexcept override { return _factory; }
     [[nodiscard]] std::string_view hostLabel() const noexcept override { return {}; }
     [[nodiscard]] contour::window::DaemonDriftModel* daemonDrift() noexcept override { return nullptr; }
+    [[nodiscard]] contour::window::DaemonExtensionConsentModel* daemonExtensionConsent() noexcept override
+    {
+        return nullptr;
+    }
     [[nodiscard]] contour::window::IWorkspaceDirectorySource* directorySource() noexcept override
     {
         return &source;
@@ -6312,6 +6320,10 @@ class DaemonDirectoryBinding final: public contour::session::WindowBinding
     [[nodiscard]] contour::session::SessionFactory& sessions() noexcept override { return _factory; }
     [[nodiscard]] std::string_view hostLabel() const noexcept override { return {}; }
     [[nodiscard]] contour::window::DaemonDriftModel* daemonDrift() noexcept override { return nullptr; }
+    [[nodiscard]] contour::window::DaemonExtensionConsentModel* daemonExtensionConsent() noexcept override
+    {
+        return nullptr;
+    }
     [[nodiscard]] contour::window::IWorkspaceDirectorySource* directorySource() noexcept override
     {
         return &source;

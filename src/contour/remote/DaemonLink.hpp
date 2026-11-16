@@ -16,6 +16,7 @@
 #include <contour/session/WindowSwitching.hpp>
 #include <contour/window/DaemonDriftChoice.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
+#include <contour/window/DaemonExtensionConsentModel.hpp>
 #include <contour/window/WindowId.hpp>
 #include <contour/window/WorkspaceDirectorySource.hpp>
 
@@ -334,6 +335,12 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
 
     /// @return What the drift badge of each window it serves shows: its own drift.
     [[nodiscard]] window::DaemonDriftModel* daemonDrift() noexcept override { return &_drift; }
+
+    /// @return What the consent dialog of each window it serves shows: its daemon's extensions' questions.
+    [[nodiscard]] window::DaemonExtensionConsentModel* daemonExtensionConsent() noexcept override
+    {
+        return &_consent;
+    }
     /// Upgrades the daemon in place when window::upgradeVerdictFor() allows it for this link's daemon.
     [[nodiscard]] std::expected<void, std::string> upgradeDaemonOnCommand() override;
 
@@ -508,6 +515,8 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
 
     void showDaemonDrift();
     void askHostedExtensions();
+    /// Shows the daemon-scoped extensions' questions the daemon sent, and closes those answered elsewhere.
+    void followDaemonConsent();
     /// Answers the switch requests the daemon sent: each behind the guard (runGuardedSwitch()), in the window
     /// showing its workspace, or Failed when no window of this link shows it.
     void answerSwitchRequests();
@@ -518,6 +527,9 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     session::TerminalSessionManager& _sessions;
     std::string _hostLabel;
     window::DaemonDriftModel _drift; ///< Declared before the controllers: destroyed after them.
+    /// The daemon-scoped extensions' questions, for this link's windows. Declared before the controllers,
+    /// through which it answers: destroyed after them.
+    window::DaemonExtensionConsentModel _consent;
     window::DaemonLocality _locality;
     window::DaemonUpkeep _upkeep;
     std::string _clientRelease;

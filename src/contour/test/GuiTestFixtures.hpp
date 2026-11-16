@@ -266,6 +266,10 @@ class DaemonNamedBinding final: public contour::session::WindowBinding
         return _target;
     }
     [[nodiscard]] contour::window::DaemonDriftModel* daemonDrift() noexcept override { return nullptr; }
+    [[nodiscard]] contour::window::DaemonExtensionConsentModel* daemonExtensionConsent() noexcept override
+    {
+        return nullptr;
+    }
     [[nodiscard]] contour::window::DaemonLocality daemonLocality() const noexcept override
     {
         return _locality;
