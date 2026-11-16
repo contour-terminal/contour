@@ -3304,6 +3304,8 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadGuarded(keeper, "restart_hung", where.keeper.restartHung);
         loadKeeperRestartPolicy(keeper, where.keeper.restartPolicy);
     }
+
+    loadFromEntry(child, "extensions", where.extensions);
 }
 
 void YAMLConfigReader::loadKeeperRestartPolicy(YAML::Node const& keeper,
@@ -3856,6 +3858,27 @@ namespace
     }
 } // namespace
 
+std::optional<std::filesystem::path> YAMLConfigReader::readExtensionModulePath(YAML::Node const& settings,
+                                                                               std::string_view name,
+                                                                               std::string_view keyPath) const
+{
+    // A path that is given must name a module: falling back to the bundled extension of the same name
+    // would run something else than the file asked for.
+    auto const path = settings["path"];
+    if (!path)
+        return std::filesystem::path {};
+    auto const text = path.IsScalar() ? path.as<std::string>() : std::string {};
+    auto resolved = text.empty() ? std::filesystem::path {} : resolvedPath(text);
+    if (resolved.empty())
+    {
+        errorLog()("Skipping extension '{}' of {}: its 'path' must be a file name.", name, keyPath);
+        return std::nullopt;
+    }
+    if (resolved.is_relative())
+        resolved = (declaringDirectory() / resolved).lexically_normal();
+    return resolved;
+}
+
 std::optional<ExtensionConfig> YAMLConfigReader::readExtension(std::string name,
                                                                YAML::Node const& settings,
                                                                std::string_view keyPath) const
@@ -3872,21 +3895,10 @@ std::optional<ExtensionConfig> YAMLConfigReader::readExtension(std::string name,
         return std::nullopt;
     }
 
-    // A path that is given must name a module: falling back to the bundled extension of the same name
-    // would run something else than the file asked for.
-    if (auto const path = settings["path"]; path)
-    {
-        auto const text = path.IsScalar() ? path.as<std::string>() : std::string {};
-        extension.path = text.empty() ? std::filesystem::path {} : resolvedPath(text);
-        if (extension.path.empty())
-        {
-            errorLog()(
-                "Skipping extension '{}' of {}: its 'path' must be a file name.", extension.name, keyPath);
-            return std::nullopt;
-        }
-        if (extension.path.is_relative())
-            extension.path = (declaringDirectory() / extension.path).lexically_normal();
-    }
+    if (auto path = readExtensionModulePath(settings, extension.name, keyPath))
+        extension.path = *std::move(path);
+    else
+        return std::nullopt;
 
     if (auto const values = settings["config"]; values)
         readExtensionConfigValues(values, extension, keyPath);
@@ -3904,6 +3916,100 @@ std::optional<ExtensionConfig> YAMLConfigReader::readExtension(std::string name,
                 keyPath);
     }
     return extension;
+}
+
+std::optional<DaemonExtensionConfig> YAMLConfigReader::readDaemonExtension(std::string name,
+                                                                           YAML::Node const& settings,
+                                                                           std::string_view keyPath) const
+{
+    auto extension = DaemonExtensionConfig {};
+    extension.name = std::move(name);
+    if (settings.IsNull()) // `orchestrator:` alone: the bundled extension, with the defaults.
+        return extension;
+    if (!settings.IsMap())
+    {
+        errorLog()("Skipping extension '{}' of {}: expected a map of path, autostart and config.",
+                   extension.name,
+                   keyPath);
+        return std::nullopt;
+    }
+
+    if (auto path = readExtensionModulePath(settings, extension.name, keyPath))
+        extension.path = *std::move(path);
+    else
+        return std::nullopt;
+
+    // The YAML boolean stops here: inside, it is DaemonExtensionAutostart.
+    if (auto const autostart = settings["autostart"]; autostart && !autostart.IsNull())
+    {
+        auto value = false;
+        if (autostart.IsScalar() && YAML::convert<bool>::decode(autostart, value))
+            extension.autostart =
+                value ? DaemonExtensionAutostart::AtDaemonStart : DaemonExtensionAutostart::OnDemand;
+        else
+            errorLog()("Unknown autostart '{}' of extension '{}' of {}; expected true or false. Starting it "
+                       "on demand.",
+                       YAML::Dump(autostart),
+                       extension.name,
+                       keyPath);
+    }
+
+    if (auto const config = settings["config"]; config && !config.IsNull())
+    {
+        if (!config.IsMap())
+        {
+            errorLog()("Skipping extension '{}' of {}: its 'config' must be a map.", extension.name, keyPath);
+            return std::nullopt;
+        }
+        auto json = yamlToJson(config);
+        if (!json)
+        {
+            errorLog()("Skipping extension '{}' of {}: its 'config' {}.",
+                       extension.name,
+                       keyPath,
+                       json.error() == YamlToJsonError::TooDeep
+                           ? "nests too deeply"
+                           : "holds a key that is no text, a key given twice, or a number JSON cannot spell");
+            return std::nullopt;
+        }
+        extension.configJson = *std::move(json);
+    }
+    return extension;
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     std::vector<DaemonExtensionConfig>& where) const
+{
+    auto const child = node[entry];
+    if (!child)
+        return;
+    where.clear();
+    if (child.IsNull()) // `extensions:` with nothing under it: none.
+        return;
+    auto const keyPath = keyPathTo(node, entry);
+    if (!child.IsMap())
+    {
+        errorLog()("Ignoring {}: expected a map from an extension's name to its settings.", keyPath);
+        return;
+    }
+    for (auto const& item: child)
+    {
+        if (!item.first.IsScalar() || item.first.as<std::string>().empty())
+        {
+            errorLog()("Skipping an extension of {}: its name must be a non-empty text.", keyPath);
+            continue;
+        }
+        auto name = item.first.as<std::string>();
+        if (std::ranges::contains(where, name, &DaemonExtensionConfig::name))
+        {
+            errorLog()(
+                "Skipping extension '{}' of {}: it is declared twice; the first one stands.", name, keyPath);
+            continue;
+        }
+        if (auto extension = readDaemonExtension(std::move(name), item.second, keyPath))
+            where.push_back(*std::move(extension));
+    }
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,

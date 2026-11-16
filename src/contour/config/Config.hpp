@@ -9,6 +9,7 @@
 #include <contour/config/ConfigDocumentationTags.hpp>
 #include <contour/config/ConfigEnum.hpp>
 #include <contour/config/ConfigFwd.hpp>
+#include <contour/config/DaemonExtensionConfig.hpp>
 #include <contour/config/DefaultsEdition.hpp>
 #include <contour/config/FinishNotificationConfig.hpp>
 #include <contour/config/GpuSelector.hpp>
@@ -881,6 +882,10 @@ struct DaemonSettings
 
     /// How the PTY keeper keeps the daemon (`daemon.keeper`).
     DaemonKeeperConfig keeper {};
+
+    /// The extensions the daemon runs with no window attached (`daemon.extensions.<name>`), in the file's
+    /// order. Read when the daemon starts: a change takes effect at its next start.
+    std::vector<DaemonExtensionConfig> extensions {};
 };
 
 struct HorizontalMarginTag

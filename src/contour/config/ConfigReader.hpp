@@ -491,6 +491,38 @@ struct YAMLConfigReader
                        std::string const& entry,
                        std::vector<ExtensionConfig>& where) const;
 
+    /// Reads `daemon.extensions:` -- a map from an extension's name to its `path`, `autostart` and `config`.
+    ///
+    /// A relative `path` is relative to the directory of the file that declares it; an empty one names the
+    /// bundled extension of the entry's name. `autostart` is a boolean; anything else is reported and the
+    /// entry starts on demand. `config` is a map (or nothing, for `{}`), kept as JSON (yamlToJson()). A
+    /// malformed entry costs that entry, not the map; a name declared twice keeps the first.
+    /// @param node The mapping that holds @p entry.
+    /// @param entry The key to read (`extensions`).
+    /// @param where Receives the entries in file order; replaced when the key is present.
+    void loadFromEntry(YAML::Node const& node,
+                       std::string const& entry,
+                       std::vector<DaemonExtensionConfig>& where) const;
+
+    /// Reads one entry of `daemon.extensions:`.
+    /// @param name The entry's key.
+    /// @param settings The entry's value: a map, or null for a bundled extension with the defaults.
+    /// @param keyPath Where `extensions` is declared, for the diagnostics.
+    /// @return The extension, or no value when the entry is skipped, with the reason reported.
+    [[nodiscard]] std::optional<DaemonExtensionConfig> readDaemonExtension(std::string name,
+                                                                           YAML::Node const& settings,
+                                                                           std::string_view keyPath) const;
+
+    /// Reads the module `path` of an entry of `extensions:` or `daemon.extensions:`, relative to the directory of
+    /// the file that declares it.
+    /// @param settings The entry's map.
+    /// @param name The entry's key, for the diagnostic.
+    /// @param keyPath Where the entry is declared, for the diagnostic.
+    /// @return The module; empty when none is given; no value (reported) when the one given names no file.
+    [[nodiscard]] std::optional<std::filesystem::path> readExtensionModulePath(YAML::Node const& settings,
+                                                                              std::string_view name,
+                                                                              std::string_view keyPath) const;
+
     /// Reads one entry of `extensions:`.
     /// @param name The entry's key.
     /// @param settings The entry's value: a map, or null for a bundled extension with the defaults.
@@ -919,7 +951,28 @@ struct Writer
                       wholeSeconds(v.keeper.restartPolicy.backoffStart),
                       wholeSeconds(v.keeper.restartPolicy.backoffCap),
                       wholeSeconds(v.keeper.restartPolicy.restartStartupBound),
-                      wholeSeconds(v.keeper.restartPolicy.daemonExitBound));
+                      wholeSeconds(v.keeper.restartPolicy.daemonExitBound),
+                      daemonExtensions(v.extensions));
+    }
+
+    /// @return @p extensions as `daemon.extensions` is written, each `config` as the JSON it is kept as (a
+    ///         flow mapping YAML reads back alike); empty when there are none.
+    [[nodiscard]] static std::string daemonExtensions(std::vector<DaemonExtensionConfig> const& extensions)
+    {
+        if (extensions.empty())
+            return {};
+        auto result = std::string { "    extensions:\n" };
+        for (auto const& extension: extensions)
+        {
+            result += std::format("        {}:\n", SingleQuoted { extension.name });
+            if (!extension.path.empty())
+                result +=
+                    std::format("            path: {}\n", SingleQuoted { core::pathToUtf8(extension.path) });
+            result += std::format("            autostart: {}\n",
+                                  extension.autostart == DaemonExtensionAutostart::AtDaemonStart);
+            result += std::format("            config: {}\n", extension.configJson);
+        }
+        return result;
     }
 
     [[nodiscard]] std::string format(std::string_view doc, QuickTerminalConfig const& v)

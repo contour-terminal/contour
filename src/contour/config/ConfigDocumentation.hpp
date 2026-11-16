@@ -1873,6 +1873,17 @@ constexpr StringLiteral DaemonConfig {
     "        {comment} How many seconds a daemon that is stopping has to end, or is killed.\n"
     "        stop_timeout: {}\n"
     "\n"
+    "    {comment} Extensions the daemon runs with no window attached, by name. path names the module (none\n"
+    "    {comment} names the bundled extension of that name); autostart: true starts it with the daemon,\n"
+    "    {comment} otherwise it starts when asked for; config holds the extension's own settings. Read when\n"
+    "    {comment} the daemon starts: a change takes effect at its next start.\n"
+    "    {comment} extensions:\n"
+    "    {comment}     orchestrator:\n"
+    "    {comment}         autostart: true\n"
+    "    {comment}         config:\n"
+    "    {comment}             worktree_root: ~/worktrees\n"
+    "{}"
+    "\n"
 };
 
 constexpr StringLiteral ExperimentalFeaturesConfig {
