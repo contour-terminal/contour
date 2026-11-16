@@ -145,6 +145,12 @@ abi::IGuestMemory& GuestCall::memory() noexcept
     return *_memory;
 }
 
+GuestCall::ResumeDeadlineOnExit::~ResumeDeadlineOnExit()
+{
+    _call._deadline = _call._clock.now() + _remaining;
+    _call._watchdog.armDeadline(_call.watchToken(), std::chrono::ceil<std::chrono::milliseconds>(_remaining));
+}
+
 WatchToken GuestCall::watchToken() noexcept
 {
     return WatchToken { .instance = _instance.get(), .state = &_deadlineState };

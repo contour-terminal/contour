@@ -20,6 +20,7 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -329,4 +330,39 @@ TEST_CASE("DaemonInstance: a durable host call pauses the deadline", "[daemon][i
     CHECK(guest.services.storeWrites.front().first == "key");
     CHECK(guest.services.storeWrites.front().second == ByteList { 'v', 'a', 'l', 'u', 'e' });
     CHECK(guest.services.storeRemovals == std::vector<std::string> { "key" });
+}
+
+TEST_CASE("DaemonInstance: a durable host call that throws traps the guest and resumes the deadline",
+          "[daemon][instance]")
+{
+    auto events = std::vector<std::string> {};
+    auto watchdog = RecordingWatchdog { events };
+    auto guest = FakeDaemonGuest {};
+    guest.services.onCall = [&](DaemonImport import) {
+        events.emplace_back(DaemonImportRows.at(std::to_underlying(import)).name);
+        throw std::runtime_error("the disk went away");
+    };
+    auto instance = guest.start(&watchdog);
+    REQUIRE(instance.has_value());
+
+    auto storeSet = std::expected<void, ExtensionError> {};
+    guest.onUpdate = [&](std::span<uint32_t>) -> std::expected<void, wasm::CallFailure> {
+        guest.put(100, "key");
+        guest.put(110, "value");
+        storeSet = guest.call(DaemonImport::StoreSet, { 100, 3, 110, 5, 2048 });
+        return storeSet ? std::expected<void, wasm::CallFailure> {}
+                        : std::unexpected(wasm::CallFailure::HostFailure);
+    };
+    auto const result = (*instance)->update(DaemonHint::Procs);
+
+    REQUIRE_FALSE(storeSet.has_value());
+    CHECK(storeSet.error() == ExtensionError::Trapped);
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error() == ExtensionError::Trapped);
+    CHECK((*instance)->fault() == ExtensionError::Trapped);
+    // The pause ends on the throwing path as on the returning one: the deadline is armed again with what
+    // was left, and the end of the guarded call disarms it, so no deadline outlives the call.
+    auto const deadline = std::format("arm {}", guest.limits.callDeadline.count());
+    CHECK(events == std::vector<std::string> { deadline, "disarm", "store-set", deadline, "disarm" });
+    CHECK(guest.services.storeWrites.empty());
 }

@@ -117,7 +117,8 @@ class GuestCall
     }
 
     /// Runs @p call with the call's deadline standing still, and resumes it with what was left: for host
-    /// work whose time is not the guest's (a command, a durable write).
+    /// work whose time is not the guest's (a command, a durable write). The deadline resumes on every path
+    /// out of @p call, an exception included.
     /// @return What @p call answered; `DeadlineExceeded` if the deadline was spent before @p call could
     ///         start, in which case it is not made.
     template <typename Call>
@@ -131,11 +132,8 @@ class GuestCall
         if (isDeadlineExpired() || remaining <= core::platform::SteadyDuration::zero())
             return std::unexpected(ExtensionError::DeadlineExceeded);
 
-        auto result = call();
-
-        _deadline = _clock.now() + remaining;
-        _watchdog.armDeadline(token, std::chrono::ceil<std::chrono::milliseconds>(remaining));
-        return abi::Result<std::invoke_result_t<Call const&>> { std::in_place, std::move(result) };
+        auto const resume = ResumeDeadlineOnExit { *this, remaining };
+        return abi::Result<std::invoke_result_t<Call const&>> { std::in_place, call() };
     }
 
     /// @return The guest's memory, as the codec reaches it.
@@ -161,6 +159,29 @@ class GuestCall
     {
         Idle,
         InProgress,
+    };
+
+    /// Arms the call's deadline again with what was left of it when it goes out of scope, however the
+    /// scope is left: the end of pauseDeadline, an exception from the paused call included.
+    class ResumeDeadlineOnExit
+    {
+      public:
+        ResumeDeadlineOnExit(GuestCall& call, core::platform::SteadyDuration remaining) noexcept:
+            _call { call }, _remaining { remaining }
+        {
+        }
+
+        ResumeDeadlineOnExit(ResumeDeadlineOnExit const&) = delete;
+        ResumeDeadlineOnExit(ResumeDeadlineOnExit&&) = delete;
+        ResumeDeadlineOnExit& operator=(ResumeDeadlineOnExit const&) = delete;
+        ResumeDeadlineOnExit& operator=(ResumeDeadlineOnExit&&) = delete;
+
+        /// Takes the watchdog's mutex, as DisarmOnExit's destructor does, for the same bounded time.
+        ~ResumeDeadlineOnExit();
+
+      private:
+        GuestCall& _call;
+        core::platform::SteadyDuration _remaining;
     };
 
     /// Prepares a guarded call: the instance must be usable and the thread prepared.
