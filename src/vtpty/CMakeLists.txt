@@ -21,6 +21,7 @@ set(vtpty_SOURCES
     CommandCapture${PLATFORM_SUFFIX}.cpp
     CommandCaptureStop.hpp # private: shared by the platform implementations only
     CommandLine.cpp
+    DirectoryHandle${PLATFORM_SUFFIX}.cpp
     EnvironmentBlock.cpp
     ExecutablePath.cpp
     MockPty.cpp
@@ -28,6 +29,8 @@ set(vtpty_SOURCES
     OwnedFd.cpp
     Process${PLATFORM_SUFFIX}.cpp
     ProcessPlacement.cpp
+    ProcessRunner.cpp
+    ProcessRunner${PLATFORM_SUFFIX}.cpp
     ProgramLookup.cpp
     Pty.cpp
     PtyAdoption.cpp
@@ -53,6 +56,7 @@ set(vtpty_HEADERS
     ControllingTerminal.hpp
     CrossingHandle.hpp
     DetachedProcess.hpp # POSIX only; defined in Process_unix.cpp
+    DirectoryHandle.hpp
     EnvironmentBlock.hpp
     ErrnoText.hpp
     ExecutablePath.hpp
@@ -66,6 +70,7 @@ set(vtpty_HEADERS
     PlacementBreaker.hpp
     Process.hpp
     ProcessPlacement.hpp
+    ProcessRunner.hpp
     ProgramLookup.hpp
     Pty.hpp
     PtyAdoption.hpp
@@ -127,6 +132,12 @@ endif()
 if(UNIX)
     include(CheckFunctionExists)
     check_function_exists(close_range HAVE_CLOSE_RANGE)
+    # The process runner enters a working directory by its descriptor, and closes every inherited one.
+    include(CheckSymbolExists)
+    set(CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
+    check_symbol_exists(posix_spawn_file_actions_addfchdir_np spawn.h HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDFCHDIR_NP)
+    check_symbol_exists(posix_spawn_file_actions_addclosefrom_np spawn.h HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDCLOSEFROM_NP)
+    unset(CMAKE_REQUIRED_DEFINITIONS)
 
     list(APPEND vtpty_LIBRARIES util)
     list(APPEND vtpty_SOURCES ProcessCgroup.cpp ScopeRequestEncoding.cpp SystemdScopePlacement.cpp UnixPty.cpp UnixUtils.cpp)
@@ -143,6 +154,12 @@ if(CONTOUR_WITH_UTEMPTER)
 endif()
 if(HAVE_CLOSE_RANGE)
     target_compile_definitions(vtpty PRIVATE HAVE_CLOSE_RANGE)
+endif()
+if(HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDFCHDIR_NP)
+    target_compile_definitions(vtpty PRIVATE HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDFCHDIR_NP)
+endif()
+if(HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDCLOSEFROM_NP)
+    target_compile_definitions(vtpty PRIVATE HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDCLOSEFROM_NP)
 endif()
 if(CONTOUR_WITH_SYSTEMD)
     target_compile_definitions(vtpty PRIVATE VTPTY_SYSTEMD=1)
@@ -177,12 +194,14 @@ if(VTPTY_TESTING)
         CommandCapture_test.cpp
         CommandLine_test.cpp
         CrossingHandle_test.cpp
+        DirectoryHandle_test.cpp
         EnvironmentBlock_test.cpp
         ErrnoText_test.cpp
         ImageSize_test.cpp
         MockPty_test.cpp
         PlacementBreaker_test.cpp
         Process_test.cpp
+        ProcessRunner_test.cpp
         PtyAdoption_test.cpp
         SandboxInfo_test.cpp
         SpawnLadder_test.cpp

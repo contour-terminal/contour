@@ -129,6 +129,11 @@ enum class DescriptorSweep : std::uint8_t
     Bounded, ///< Every number up to the limit, open or not.
 };
 
+/// @param directory An open directory; -1 for this process's working directory.
+/// @param candidate A path, a relative one taken relative to @p directory.
+/// @return Whether @p candidate names an executable regular file.
+[[nodiscard]] bool isExecutableIn(int directory, std::string const& candidate) noexcept;
+
 /// @return One above the highest descriptor this process may open: sysconf(_SC_OPEN_MAX), or 1024 where it
 ///         is indeterminate. Not async-signal-safe -- POSIX.1-2008 took sysconf() off that list -- so read in
 ///         a single-threaded process, as the spawn trampoline is, or before a fork().

@@ -83,6 +83,28 @@ std::optional<std::string> findProgram(std::string_view program, ProgramSearch c
     return findOnPath(*named, search.path, programFile);
 }
 
+std::optional<std::string> findHeldDirectoryProgram(std::string_view program,
+                                                    std::string_view searchPath,
+                                                    ExecutableTest const& isExecutable)
+{
+    auto const named = core::pathFromUtf8(program);
+    if (program.empty() || !named)
+        return std::nullopt;
+    if (named->has_parent_path())
+        return isExecutable(std::string { program }) ? std::optional { std::string { program } }
+                                                     : std::nullopt;
+    for (auto const entry: std::views::split(searchPath, PathListSeparator))
+    {
+        auto const directory = core::pathFromUtf8(std::string_view { entry });
+        if (!directory || !directory->is_absolute())
+            continue;
+        auto candidate = core::pathToUtf8(*directory / *named);
+        if (isExecutable(candidate))
+            return candidate;
+    }
+    return std::nullopt;
+}
+
 std::string execSearchPath(std::optional<std::string> environmentPath)
 {
     if (environmentPath)
