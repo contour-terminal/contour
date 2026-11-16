@@ -37,12 +37,21 @@ endif()
 #
 # Without pthreads an Emscripten build must not link Threads::Threads: that would
 # force -pthread, and with it SharedArrayBuffer, onto every consumer (Part I §1).
+# wasm32-wasip1 has no threads at all, and FindThreads finds none; wasm32-wasip1-threads
+# (wasi-sdk's pthread toolchain, which compiles with -pthread) defines _REENTRANT.
 set(CORE_CPP_SINGLE_THREADED_WASM OFF)
 if(EMSCRIPTEN)
     check_cxx_source_compiles(
         "#if !defined(__EMSCRIPTEN_PTHREADS__)\n#error single-threaded\n#endif\nint main() { return 0; }"
         CORE_CPP_EMSCRIPTEN_PTHREADS)
     if(NOT CORE_CPP_EMSCRIPTEN_PTHREADS)
+        set(CORE_CPP_SINGLE_THREADED_WASM ON)
+    endif()
+elseif(CORE_CPP_PLATFORM_WASI)
+    check_cxx_source_compiles(
+        "#if !defined(_REENTRANT)\n#error single-threaded\n#endif\nint main() { return 0; }"
+        CORE_CPP_WASI_THREADS)
+    if(NOT CORE_CPP_WASI_THREADS)
         set(CORE_CPP_SINGLE_THREADED_WASM ON)
     endif()
 endif()

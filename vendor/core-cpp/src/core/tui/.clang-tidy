@@ -1,0 +1,44 @@
+---
+# core::tui's departures from the root .clang-tidy, which this inherits in full.
+#
+# `readability-function-cognitive-complexity` is raised HERE AND ONLY HERE, from the root's 50 to
+# 210. Eighteen functions of endo's terminal UI are over 50, and each is over it for the same
+# reason the root file already gives for `readability-function-size`: the shape of the problem is
+# the shape of the code.
+#
+#   * `GenericSyntaxHighlighter`'s nine `highlight*()` functions (59 to 133) are hand-written
+#     lexers, one per language. A lexer is a state machine over a character stream, and its
+#     branches are the language's tokens; splitting one into named halves moves the state into
+#     parameters without making any of it simpler to read.
+#   * `VtParser::dispatchCsi` (98) is a dispatch over the CSI final bytes, which is as large as
+#     the set of sequences a terminal answers.
+#   * `StyledText::fromMarkdown` (178), `MarkdownRenderer::renderInline` (94) and
+#     `renderTableCompact` (60), `MarkdownTable::stripInlineMarkdown` (55): the same, over
+#     Markdown's inline grammar.
+#   * `InputField::render` (200), `Screen::flushInline` (65; 121 before its cell loop moved to
+#     `FrameDiff.cpp`), `CompletionPopup::render` (62) and `QuestionComponent::processInput` (53)
+#     are renderers whose branches are the cases of the layout (clipping, scrolling, selection,
+#     decoration, images).
+#
+# 210 is the largest of those (`InputField::render`) with room for the measurement to move
+# between LLVM releases. A raised threshold rather than a disabled check, because a disabled check
+# counts nothing: a nineteenth function over 50, or a growing one of the eighteen, is a build
+# failure here and would not have been. Paying the list down and lowering this number back to the
+# root's 50 is core-cpp#22.
+#
+# This is a scope, not a verdict: the root's 50 still holds over base, log, cli, platform, async,
+# net and testing, where nothing is over it.
+#
+# `readability-enum-initial-value` is off, for `core::tui::KeyCode`: an enumeration whose
+# enumerators are grouped into numbered ranges (Unicode codepoints, then 0x10000 for the
+# non-printable keys, then 0x20000 for Kitty's) initializes the first of each range and lets the
+# rest follow. The check reads that as inconsistent, and its two options
+# (AllowExplicitZeroFirstInitialValue, AllowExplicitSequentialInitialValues) do not cover it.
+# Satisfying it would mean spelling out a hundred values, where the point is that they are
+# consecutive within a range. It stays live everywhere else, which is why this line is here and
+# not in the root file.
+InheritParentConfig: true
+Checks: >-
+  -readability-enum-initial-value
+CheckOptions:
+  readability-function-cognitive-complexity.Threshold: '210'

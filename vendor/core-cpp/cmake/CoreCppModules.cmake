@@ -4,7 +4,7 @@
 # dependency order (Part I §1).
 #
 #   core_cpp_module(NAME <name> [DIR <directory under src/core>] KIND STATIC|INTERFACE
-#                   [DEPS <module>...] PLATFORMS any|native|wasm-subset [WHEN <option>])
+#                   [DEPS <module>...] PLATFORMS any|native|wasm-subset [wasi] [WHEN <option>])
 #
 # DIR defaults to NAME. DEPS lists the modules this one may link, and every one of
 # them must appear in an earlier row. WHEN names the option that has to be ON for
@@ -15,11 +15,16 @@
 #   wasm-subset  only its SOURCES_EMSCRIPTEN, which lists the subset;
 #   native       none of it: the module is skipped.
 #
+# and a trailing `wasi` says the row builds under WASI (wasm32-wasip1) too, from its SOURCES,
+# SOURCES_WASI and SOURCES_PORTABLE. WASI builds no row without it: the mark is given to a row once
+# it is known to compile, link and run there (core-cpp.tui-core-wasi), not assumed of every `any`.
+# Only `any` takes it.
+#
 # core_cpp_add_module() and core_cpp_add_test() apply it (cmake/CoreCppTargets.cmake).
 #
 #   core_cpp_module_target(NAME <target> MODULE <module> KIND STATIC|INTERFACE|OBJECT
 #                          [DEPS <target or module>...]
-#                          PLATFORMS any|native|wasm-subset [WHEN <option>])
+#                          PLATFORMS any|native|wasm-subset [wasi] [WHEN <option>])
 #
 # A module builds the target named after it, and may build more in the same directory
 # and namespace (core::net_types and core::net_tls beside core::net). Such a target
@@ -74,8 +79,19 @@ function(core_cpp_check_when where when)
 endfunction()
 
 
+## @brief Refuses a PLATFORMS @p platforms that is not one of any, native and wasm-subset, optionally
+## followed by wasi, for @p where. wasi goes only with any: what WASI compiles of a row is SOURCES,
+## SOURCES_WASI and SOURCES_PORTABLE, all of it, so a row with a subset or none has nothing to give it.
+function(core_cpp_check_platforms where platforms)
+    if(NOT platforms MATCHES "^(any|native|wasm-subset)(;wasi)?$" OR platforms MATCHES "^(native|wasm-subset);wasi$")
+        message(FATAL_ERROR
+            "${where}: PLATFORMS must be any, native or wasm-subset, the first optionally followed by wasi, "
+            "not '${platforms}'.")
+    endif()
+endfunction()
+
 function(core_cpp_module)
-    cmake_parse_arguments(PARSE_ARGV 0 arg "" "NAME;DIR;KIND;PLATFORMS;WHEN" "DEPS")
+    cmake_parse_arguments(PARSE_ARGV 0 arg "" "NAME;DIR;KIND;WHEN" "DEPS;PLATFORMS")
     if(arg_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR "core_cpp_module(${arg_NAME}): unexpected arguments: ${arg_UNPARSED_ARGUMENTS}")
     endif()
@@ -86,10 +102,7 @@ function(core_cpp_module)
         message(FATAL_ERROR "core_cpp_module(${arg_NAME}): KIND must be STATIC or INTERFACE, not '${arg_KIND}'.")
     endif()
     core_cpp_check_when("core_cpp_module(${arg_NAME})" "${arg_WHEN}")
-    if(NOT arg_PLATFORMS MATCHES "^(any|native|wasm-subset)$")
-        message(FATAL_ERROR
-            "core_cpp_module(${arg_NAME}): PLATFORMS must be any, native or wasm-subset, not '${arg_PLATFORMS}'.")
-    endif()
+    core_cpp_check_platforms("core_cpp_module(${arg_NAME})" "${arg_PLATFORMS}")
     if(arg_NAME IN_LIST CORE_CPP_MODULES)
         message(FATAL_ERROR "core_cpp_module(${arg_NAME}): declared twice.")
     endif()
@@ -111,7 +124,7 @@ function(core_cpp_module)
 endfunction()
 
 function(core_cpp_module_target)
-    cmake_parse_arguments(PARSE_ARGV 0 arg "" "NAME;MODULE;KIND;PLATFORMS;WHEN" "DEPS")
+    cmake_parse_arguments(PARSE_ARGV 0 arg "" "NAME;MODULE;KIND;WHEN" "DEPS;PLATFORMS")
     if(arg_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR "core_cpp_module_target(${arg_NAME}): unexpected arguments: ${arg_UNPARSED_ARGUMENTS}")
     endif()
@@ -130,10 +143,7 @@ function(core_cpp_module_target)
         message(FATAL_ERROR
             "core_cpp_module_target(${arg_NAME}): KIND must be STATIC, INTERFACE or OBJECT, not '${arg_KIND}'.")
     endif()
-    if(NOT arg_PLATFORMS MATCHES "^(any|native|wasm-subset)$")
-        message(FATAL_ERROR
-            "core_cpp_module_target(${arg_NAME}): PLATFORMS must be any, native or wasm-subset, not '${arg_PLATFORMS}'.")
-    endif()
+    core_cpp_check_platforms("core_cpp_module_target(${arg_NAME})" "${arg_PLATFORMS}")
     foreach(dep IN LISTS arg_DEPS)
         if(dep STREQUAL arg_MODULE OR CORE_CPP_TARGET_${dep}_MODULE STREQUAL arg_MODULE
            OR dep IN_LIST CORE_CPP_MODULE_${arg_MODULE}_DEPS)
@@ -172,6 +182,8 @@ function(core_cpp_add_modules)
         if(NOT moduleBuilds)
             if(when AND NOT ${when})
                 set(reason "${when}=OFF")
+            elseif(CORE_CPP_PLATFORM_WASI)
+                set(reason "its row is not marked wasi, and this is WASI")
             else()
                 set(reason "native only, and this is Emscripten")
             endif()
@@ -219,7 +231,7 @@ endfunction()
 # --- the table -----------------------------------------------------------------
 
 # The headers directly in src/core/ are core::base, namespace core.
-core_cpp_module(NAME base DIR . KIND STATIC PLATFORMS any)
+core_cpp_module(NAME base DIR . KIND STATIC PLATFORMS any wasi)
 core_cpp_module(NAME log KIND STATIC DEPS base PLATFORMS any)
 core_cpp_module(NAME cli KIND STATIC DEPS base log PLATFORMS any)
 
@@ -264,6 +276,19 @@ core_cpp_module(NAME tui KIND STATIC DEPS base platform async net PLATFORMS nati
 # CORE_CPP_WITH_TUI it existed only in the configuration that also fetched libunicode (and, through
 # libunicode's configure, UCD.zip), so the one consumer it was split off for could not have it
 # without everything it was split off from. With CORE_CPP_WITH_TUI off and CORE_CPP_WITH_TUI_OUTPUT
-# on, core_cpp_add_modules() enters this directory for the leaf alone.
+# on, core_cpp_add_modules() enters this directory for the leaf alone. PLATFORMS any: on a platform
+# that is neither POSIX nor Windows its OS-bound members come from portable/, which needs only the C++
+# standard library. Its option stays forced off under Emscripten, as the whole TUI's is; WASI builds
+# it (`wasi`), with portable/ for its OS-bound members (docs/design/tui-headless.md).
 core_cpp_module_target(NAME tui_output MODULE tui KIND STATIC DEPS base
-                       PLATFORMS native WHEN CORE_CPP_WITH_TUI_OUTPUT)
+                       PLATFORMS any wasi WHEN CORE_CPP_WITH_TUI_OUTPUT)
+#
+# tui_core is the headless half: the parser, cells and buffers, components, widgets and the frame
+# driver, which draws on a ScreenSurface rather than on a Terminal (docs/design/tui-headless.md).
+# It links base, the leaf and libunicode, and nothing of platform, async or net, so a program with
+# no terminal under it -- a WebAssembly guest -- can render. core::tui links it and keeps the
+# terminal, the runtime and the file-system image loaders. PLATFORMS any describes its code; the
+# option is still forced off under Emscripten, with the rest of the TUI's. `wasi`: a wasm32-wasip1
+# guest builds it, which is what it exists for, and core-cpp.tui-core-wasi links and runs one.
+core_cpp_module_target(NAME tui_core MODULE tui KIND STATIC DEPS base tui_output
+                       PLATFORMS any wasi WHEN CORE_CPP_WITH_TUI_CORE)

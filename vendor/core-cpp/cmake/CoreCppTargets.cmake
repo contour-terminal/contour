@@ -6,13 +6,14 @@
 #                       [HEADERS <public header>...]
 #                       [SOURCES <source or private header>...]
 #                       [SOURCES_POSIX ...] [SOURCES_LINUX ...] [SOURCES_BSD ...] [SOURCES_WINDOWS ...]
-#                       [SOURCES_EMSCRIPTEN ...]
+#                       [SOURCES_EMSCRIPTEN ...] [SOURCES_WASI ...] [SOURCES_PORTABLE ...]
 #                       [PUBLIC_LIBS <lib>...] [PRIVATE_LIBS <lib>...]
 #                       [NO_STATIC_RUNTIME_TWIN])
 #
 #   core_cpp_add_test(<module> [NAME <name>]
 #                     [SOURCES ...] [SOURCES_POSIX ...] [SOURCES_LINUX ...]
 #                     [SOURCES_BSD ...] [SOURCES_WINDOWS ...] [SOURCES_EMSCRIPTEN ...]
+#                     [SOURCES_WASI ...] [SOURCES_PORTABLE ...]
 #                     [LIBS <lib>...] [LABELS <label>...] [DEFINITIONS <definition>...]
 #                     [TIMEOUT <seconds>])
 #
@@ -25,13 +26,14 @@
 # HEADERS are the public headers; they form the target's HEADERS file
 # set, based at src/ or, for a header CMake generates, at the generated include
 # root, so the target is install-ready. Private headers (detail/, posix/, linux/,
-# bsd/, darwin/, windows/, emscripten/) go in a SOURCES list and are in no file
+# bsd/, darwin/, windows/, emscripten/, portable/) go in a SOURCES list and are in no file
 # set.
 #
 # SOURCES is compiled everywhere the module builds, and each platform list where the
 # platform source table below says. Under Emscripten the module row's PLATFORMS
 # decides: an `any` module compiles SOURCES and SOURCES_EMSCRIPTEN, a `wasm-subset`
-# module only SOURCES_EMSCRIPTEN, which lists the subset (Part I §1).
+# module only SOURCES_EMSCRIPTEN, which lists the subset (Part I §1). Under WASI only
+# a row marked `any wasi` builds, from SOURCES, SOURCES_WASI and SOURCES_PORTABLE.
 #
 # It must be called from a directory that core_cpp_add_modules() entered for a row
 # of the module table, and a target it links as core::<x> must be one its row allows:
@@ -65,10 +67,19 @@ set(CORE_CPP_SKIP_EXIT_CODE 77)
 # when <variable> is true. BSD includes macOS, which shares its kqueue. POSIX means a
 # native POSIX system: Emscripten sets UNIX and its libc emulates much of POSIX, but
 # it has no pipes, signals, sockets or processes to speak of, so a SOURCES_POSIX file
-# is not compiled there; SOURCES_EMSCRIPTEN is.
+# is not compiled there; SOURCES_EMSCRIPTEN is. Nor is WASI (CORE_CPP_PLATFORM_WASI,
+# cmake/CoreCppOptions.cmake), whatever a toolchain file says of UNIX: WASI's libc has
+# no termios, no signals and no processes, so SOURCES_WASI is compiled there instead.
+# PORTABLE is every platform that is neither a native POSIX system nor Windows --
+# Emscripten and WASI -- where a SOURCES_PORTABLE file supplies, with the C++ standard
+# library alone, what the posix/ and windows/ halves supply elsewhere.
 set(CORE_CPP_PLATFORM_POSIX OFF)
-if(UNIX AND NOT EMSCRIPTEN)
+if(UNIX AND NOT EMSCRIPTEN AND NOT CORE_CPP_PLATFORM_WASI)
     set(CORE_CPP_PLATFORM_POSIX ON)
+endif()
+set(CORE_CPP_PLATFORM_PORTABLE OFF)
+if(NOT CORE_CPP_PLATFORM_POSIX AND NOT WIN32)
+    set(CORE_CPP_PLATFORM_PORTABLE ON)
 endif()
 set(CORE_CPP_PLATFORM_BSD OFF)
 if(APPLE OR BSD)
@@ -80,6 +91,8 @@ set(CORE_CPP_PLATFORM_SOURCE_TABLE
     "SOURCES_BSD|CORE_CPP_PLATFORM_BSD"
     "SOURCES_WINDOWS|WIN32"
     "SOURCES_EMSCRIPTEN|EMSCRIPTEN"
+    "SOURCES_WASI|CORE_CPP_PLATFORM_WASI"
+    "SOURCES_PORTABLE|CORE_CPP_PLATFORM_PORTABLE"
 )
 set(CORE_CPP_SOURCE_KEYWORDS SOURCES)
 
@@ -112,7 +125,8 @@ endforeach()
 ## under Emscripten.
 function(core_cpp_selected_sources prefix platforms outVar)
     set(sources ${${prefix}_SOURCES})
-    if(EMSCRIPTEN AND platforms STREQUAL "wasm-subset")
+    list(GET platforms 0 kind)
+    if(EMSCRIPTEN AND kind STREQUAL "wasm-subset")
         set(sources "")
     endif()
     foreach(row IN LISTS CORE_CPP_PLATFORM_SOURCE_TABLE)
@@ -127,14 +141,19 @@ function(core_cpp_selected_sources prefix platforms outVar)
 endfunction()
 
 ## @brief Sets @p outVar to ON when a table row with PLATFORMS @p platforms and WHEN
-## @p when builds in this configuration: its option, if it names one, is ON, and it is
-## not native-only in an Emscripten build.
+## @p when builds in this configuration: its option, if it names one, is ON, it is
+## not native-only in an Emscripten build, and under WASI its PLATFORMS end in wasi
+## (cmake/CoreCppModules.cmake): WASI builds only the rows known to build there.
 function(core_cpp_row_builds platforms when outVar)
     set(builds ON)
     if(when AND NOT ${when})
         set(builds OFF)
     endif()
-    if(EMSCRIPTEN AND platforms STREQUAL "native")
+    list(GET platforms 0 kind)
+    if(EMSCRIPTEN AND kind STREQUAL "native")
+        set(builds OFF)
+    endif()
+    if(CORE_CPP_PLATFORM_WASI AND NOT "wasi" IN_LIST platforms)
         set(builds OFF)
     endif()
     set(${outVar} ${builds} PARENT_SCOPE)
