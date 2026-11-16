@@ -749,7 +749,10 @@ TEST_CASE("TerminalSession: an extension's command runs once the user allows it"
     // A resize is what renders the guest again, and its render runs the command.
     session->terminal().resizeScreen(
         vtbackend::PageSize { vtbackend::LineCount(24), vtbackend::ColumnCount(90) });
-    CHECK(showsEventually(*session, "[ok:0:hello"));
+    auto const ran = showsEventually(*session, "[ok:0:hello");
+    // What the indicator shows instead says why: the command still pending, failed, or past its time.
+    CAPTURE(indicatorText(*session));
+    CHECK(ran);
 }
 #else
 TEST_CASE("TerminalSession: an extension's command runs once the user allows it",
