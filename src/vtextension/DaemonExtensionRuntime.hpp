@@ -25,6 +25,7 @@
 #include <vtextension/DaemonExtensionRunner.hpp>
 #include <vtextension/DaemonLimits.hpp>
 #include <vtextension/ExtensionAutostart.hpp>
+#include <vtextension/ExtensionConsent.hpp>
 #include <vtextension/ExtensionGrantStore.hpp>
 #include <vtextension/ExtensionHost.hpp>
 #include <vtextension/ExtensionLimits.hpp>
@@ -32,6 +33,7 @@
 #include <vtextension/ExtensionWorkerPool.hpp>
 #include <vtextension/FileLocker.hpp>
 #include <vtextension/IHostServices.hpp>
+#include <vtextension/RootResolution.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension
@@ -98,6 +100,32 @@ struct DeclarationProblem
     std::string message;            ///< For the daemon's log; names `daemon.extensions.<name>`.
 };
 
+/// A daemon-scoped extension waiting for the user's answer, for the manifest and roots it resolved.
+struct PendingConsent
+{
+    std::string name;         ///< What the configuration calls it.
+    std::string grantDigest;  ///< What the answer is recorded for (grantDigestOf()).
+    ConsentQuestion question; ///< What to ask (daemonConsentQuestion()).
+};
+
+/// Where a daemon-scoped extension stands.
+enum class DaemonExtensionPhase : uint8_t
+{
+    Stopped = 0, ///< Not running, and not waiting for its user.
+    Pending,     ///< It was to start, and waits for its user's grant.
+    Denied,      ///< Its user refused it.
+    Running,     ///< Its runner runs it, or recovers it from a fault.
+    Disabled,    ///< It faulted too often; it runs no more until started again.
+};
+
+/// One daemon-scoped extension that composed.
+struct DaemonExtensionEntry
+{
+    std::string name;                                           ///< What the configuration calls it.
+    DaemonExtensionPhase phase = DaemonExtensionPhase::Stopped; ///< Where it stands.
+    std::string grantDigest;                                    ///< What its grant is recorded for.
+};
+
 /// What a DaemonExtensionRuntime is: fixed for its whole life. A changed configuration takes effect at the
 /// next daemon start.
 struct DaemonExtensionRuntimeConfig
@@ -136,7 +164,10 @@ struct DaemonExtensionRuntimeServices
 /// started acquires the engine and has its module loaded (on the calling thread, prepared for the runtime);
 /// one not granted holds neither, and waits for the user's consent.
 ///
-/// start(), status() and stop() are for the owner's thread.
+/// An extension that was to start but is not granted waits for the user's answer (pending()); answer()
+/// records it, and starts the extension once granted. revoke() forgets the answer and asks again.
+///
+/// start(), status(), pending(), answer(), revoke() and stop() are for the owner's thread.
 class DaemonExtensionRuntime
 {
     struct Extension;
@@ -187,6 +218,29 @@ class DaemonExtensionRuntime
     /// @return Where its runner stands; nullopt while it does not run.
     [[nodiscard]] std::optional<DaemonRunnerStatus> status(std::string_view name) const;
 
+    /// @return Every extension that composed, in the configuration's order. None once stopped.
+    [[nodiscard]] std::vector<DaemonExtensionEntry> entries() const;
+
+    /// @return The extensions that were to start and wait for the user's answer, in the configuration's
+    ///         order. None once stopped.
+    [[nodiscard]] std::vector<PendingConsent> pending() const;
+
+    /// Records the user's answer to a pending() question, and starts the extension once it is granted. An
+    /// answer to no pending question -- another digest, a name that waits for nothing, a dismissal
+    /// (GrantState::Pending) -- is ignored, as everything is once stopped. A module that cannot be loaded is
+    /// reported as start() reports it.
+    /// @param name What the configuration calls the extension.
+    /// @param grantDigest The PendingConsent::grantDigest the user answered.
+    /// @param answer What the user answered.
+    void answer(std::string_view name, std::string_view grantDigest, GrantState answer);
+
+    /// Forgets the user's answer for the extension's current module and roots. One that runs is stopped --
+    /// its instance destroyed, the processes it started cancelled and their results dropped -- and is
+    /// pending() again; one that does not run is asked only when it is next started. Does nothing for a name
+    /// that does not compose, or once stopped.
+    /// @param name What the configuration calls the extension.
+    void revoke(std::string_view name);
+
     /// Stops every extension for good: detaches the runners, joins the lane (each runner's last job runs),
     /// then cancels the processes still in flight and releases what the runners retired. Idempotent.
     void stop() noexcept;
@@ -201,6 +255,16 @@ class DaemonExtensionRuntime
     /// consent, holding no engine and no loaded module.
     /// @return Nothing; or why the granted extension cannot run.
     [[nodiscard]] std::expected<void, DeclarationProblem> run(Extension& extension);
+
+    /// Runs @p extension as run() does, and logs why it cannot run.
+    void runOrReport(Extension& extension);
+
+    /// @return The extension the configuration calls @p name; null for none.
+    [[nodiscard]] Extension* find(std::string_view name) const;
+
+    /// Makes @p extension's declared processes from Extension::processesConfig.
+    /// @return Nothing; or why its roots do not fit them.
+    [[nodiscard]] std::expected<void, RootError> makeProcesses(Extension& extension);
 
     /// Loads @p extension's module on the daemon world's engine, on this thread prepared for the runtime.
     /// @return Nothing once it is loaded; or why it cannot be.
@@ -218,7 +282,8 @@ class DaemonExtensionRuntime
     ExtensionLimits _limits;
     EngineProvider _provider;    ///< The daemon world's engine; and where runners retire to.
     ExtensionGrantStore _grants; ///< The user's answers.
-    ExtensionWorkerPool _pool;   ///< The lane every extension runs on.
+    ExtensionWorkerPool _pool;   ///< The lane every extension runs on: one worker, so jobs run in post order.
+    LaneId _lane;                ///< The pool's lane, for the runtime's own jobs behind the runners'.
     std::vector<std::unique_ptr<Extension>> _extensions; ///< Last: destroyed before what they reach.
     Lifecycle _lifecycle = Lifecycle::Running;
 };

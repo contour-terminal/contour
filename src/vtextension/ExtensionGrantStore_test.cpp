@@ -267,3 +267,25 @@ TEST_CASE("ExtensionGrantStore: a GUI's denial survives a daemon's record", "[vt
     CHECK(ExtensionGrantStore { fileSystem, guiFile }.lookup(GitId, GitDigest) == GrantState::Denied);
     CHECK(ExtensionGrantStore { fileSystem, daemonFile }.lookup(GitId, GitDigest) == GrantState::Pending);
 }
+
+TEST_CASE(
+    "ExtensionGrantStore: the daemon's file is the daemon's; an edit made while it runs counts for nothing",
+    "[vtextension][extensions][consent]")
+{
+    // Read once as the daemon starts, rewritten whole by the daemon alone: a same-user process that writes a
+    // grant into it meanwhile grants nothing, and the daemon's next record writes it out again.
+    auto const directory = grantsFile().parent_path();
+    auto fileSystem = InMemoryFileSystem { FileEntry { .path = directory, .isDirectory = true } };
+    auto const file = directory / "extension-grants.daemon-scoped.txt";
+    auto daemon = ExtensionGrantStore { fileSystem, file };
+    daemon.record("other@/x.wasm", "ffff", GrantState::Denied);
+
+    auto grants = ExtensionGrants {};
+    grants.emplace(ExtensionGrantKey { .hostId = std::string { GitId }, .digest = std::string { GitDigest } },
+                   GrantState::Granted);
+    REQUIRE(fileSystem.writeFile(file, serializeExtensionGrants(grants)).has_value());
+    CHECK(daemon.lookup(GitId, GitDigest) == GrantState::Pending);
+
+    daemon.record("other@/x.wasm", "ffff", GrantState::Granted);
+    CHECK(ExtensionGrantStore { fileSystem, file }.lookup(GitId, GitDigest) == GrantState::Pending);
+}

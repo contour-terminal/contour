@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <functional>
 #include <latch>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -358,4 +359,220 @@ TEST_CASE("DaemonExtensionRuntime: the store lives in the directory it was given
         REQUIRE(problems.size() == 1);
         CHECK(problems[0].problem == DaemonExtensionProblem::StoreUnavailable);
     }
+}
+
+namespace
+{
+/// @return What the grants file says of `good` at `/ext/good.wasm` for @p grantDigest.
+[[nodiscard]] GrantState recordedFor(Fixture const& fixture, std::string_view grantDigest)
+{
+    return ExtensionGrantStore(fixture.fileSystem, GrantsFile)
+        .lookup(extensionHostId("good", "/ext/good.wasm"), grantDigest);
+}
+} // namespace
+
+TEST_CASE("DaemonExtensionRuntime: answer starts a waiting extension", "[daemon][runtime][consent]")
+{
+    auto fixture = Fixture {};
+    REQUIRE(
+        fixture.create({ declared("good", "/ext/good.wasm", ExtensionAutostart::AtDaemonStart) }).empty());
+    auto const pending = fixture.runtime->pending();
+    REQUIRE(pending.size() == 1);
+    CHECK(pending[0].name == "good");
+    CHECK(pending[0].question.title == "“probe” wants to run in the background");
+    CHECK(pending[0].question.lines.at(1).text == "Directory (work): /w");
+    auto const digest = pending[0].grantDigest;
+
+    // An answer to another question, or a dismissal, records nothing.
+    fixture.runtime->answer("good", "another digest", GrantState::Granted);
+    fixture.runtime->answer("other", digest, GrantState::Granted);
+    fixture.runtime->answer("good", digest, GrantState::Pending);
+    CHECK_FALSE(fixture.runtime->status("good").has_value());
+    CHECK(fixture.runtime->pending().size() == 1);
+
+    fixture.runtime->answer("good", digest, GrantState::Granted);
+    CHECK(fixture.runtime->status("good").has_value());
+    CHECK(fixture.runtime->pending().empty());
+    CHECK(recordedFor(fixture, digest) == GrantState::Granted);
+    fixture.firstLoad.wait();
+    fixture.runtime->stop();
+    CHECK(fixture.harness.loadedConfigs.size() == 1);
+}
+
+TEST_CASE("DaemonExtensionRuntime: an extension not asked to start waits for nothing",
+          "[daemon][runtime][consent]")
+{
+    auto fixture = Fixture {};
+    REQUIRE(fixture.create({ declared("good", "/ext/good.wasm", ExtensionAutostart::OnDemand) }).empty());
+    CHECK(fixture.runtime->pending().empty());
+    fixture.runtime->start("good");
+    CHECK(fixture.runtime->pending().size() == 1);
+}
+
+TEST_CASE("DaemonExtensionRuntime: a refusal is remembered for that digest and roots",
+          "[daemon][runtime][consent]")
+{
+    auto fixture = Fixture {};
+    REQUIRE(
+        fixture.create({ declared("good", "/ext/good.wasm", ExtensionAutostart::AtDaemonStart) }).empty());
+    auto const digest = fixture.runtime->pending().at(0).grantDigest;
+    fixture.runtime->answer("good", digest, GrantState::Denied);
+    CHECK(fixture.runtime->pending().empty());
+    CHECK_FALSE(fixture.runtime->status("good").has_value());
+    CHECK(recordedFor(fixture, digest) == GrantState::Denied);
+    // Answered once: a second answer to the same question is no longer taken.
+    fixture.runtime->answer("good", digest, GrantState::Granted);
+    CHECK(recordedFor(fixture, digest) == GrantState::Denied);
+
+    SECTION("the next daemon start does not ask again")
+    {
+        fixture.runtime.reset();
+        REQUIRE(fixture.create({ declared("good", "/ext/good.wasm", ExtensionAutostart::AtDaemonStart) })
+                    .empty());
+        fixture.runtime->start("good");
+        CHECK(fixture.runtime->pending().empty());
+        CHECK_FALSE(fixture.runtime->status("good").has_value());
+    }
+
+    SECTION("a moved root asks again")
+    {
+        fixture.runtime.reset();
+        auto declaration = declared("good", "/ext/good.wasm", ExtensionAutostart::AtDaemonStart);
+        declaration.configJson = R"({"work":"/elsewhere"})";
+        auto const problems = fixture.create({ std::move(declaration) });
+        REQUIRE(problems.empty());
+        auto const pending = fixture.runtime->pending();
+        REQUIRE(pending.size() == 1);
+        CHECK(pending[0].grantDigest != digest);
+        CHECK(pending[0].question.lines.at(1).text == "Directory (work): /elsewhere");
+    }
+}
+
+TEST_CASE("DaemonExtensionRuntime: revoke stops it and asks again", "[daemon][runtime][consent]")
+{
+    auto fixture = Fixture {};
+    fixture.grantGood();
+    REQUIRE(
+        fixture.create({ declared("good", "/ext/good.wasm", ExtensionAutostart::AtDaemonStart) }).empty());
+    REQUIRE(fixture.runtime->status("good").has_value());
+    CHECK(fixture.runtime->pending().empty());
+    fixture.firstLoad.wait();
+
+    fixture.runtime->revoke("good");
+    CHECK_FALSE(fixture.runtime->status("good").has_value());
+    auto const pending = fixture.runtime->pending();
+    REQUIRE(pending.size() == 1);
+    CHECK(recordedFor(fixture, pending[0].grantDigest) == GrantState::Pending);
+
+    // Granted again, it runs again, on the module it already loaded.
+    fixture.runtime->answer("good", pending[0].grantDigest, GrantState::Granted);
+    CHECK(fixture.runtime->status("good").has_value());
+    CHECK(fixture.runtime->pending().empty());
+
+    // A name that does not run is no one's to revoke.
+    fixture.runtime->revoke("other");
+    CHECK(fixture.runtime->status("good").has_value());
+}
+
+TEST_CASE("DaemonExtensionRuntime: entries say where each extension stands", "[daemon][runtime][consent]")
+{
+    auto fixture = Fixture {};
+    REQUIRE(fixture
+                .create({ declared("good", "/ext/good.wasm", ExtensionAutostart::OnDemand),
+                          declared("bad", "/ext/bad.wasm", ExtensionAutostart::OnDemand) })
+                .size()
+            == 1);
+    auto const phaseOf = [&] {
+        auto const entries = fixture.runtime->entries();
+        REQUIRE(entries.size() == 1);
+        CHECK(entries[0].name == "good");
+        return entries[0].phase;
+    };
+    CHECK(phaseOf() == DaemonExtensionPhase::Stopped);
+    fixture.runtime->start("good");
+    CHECK(phaseOf() == DaemonExtensionPhase::Pending);
+    auto const digest = fixture.runtime->pending().at(0).grantDigest;
+    CHECK(fixture.runtime->entries().at(0).grantDigest == digest);
+    fixture.runtime->answer("good", digest, GrantState::Denied);
+    CHECK(phaseOf() == DaemonExtensionPhase::Denied);
+    // Not running: revoking forgets the refusal; it is asked once it is next started.
+    fixture.runtime->revoke("good");
+    CHECK(phaseOf() == DaemonExtensionPhase::Stopped);
+    fixture.runtime->start("good");
+    CHECK(phaseOf() == DaemonExtensionPhase::Pending);
+    fixture.runtime->answer("good", digest, GrantState::Granted);
+    CHECK(phaseOf() == DaemonExtensionPhase::Running);
+    fixture.firstLoad.wait();
+    fixture.runtime->stop();
+    CHECK(fixture.runtime->entries().empty());
+}
+
+TEST_CASE("DaemonExtensionRuntime: revoking one that does not run only forgets its grant",
+          "[daemon][runtime][consent]")
+{
+    auto fixture = Fixture {};
+    fixture.grantGood();
+    REQUIRE(fixture.create({ declared("good", "/ext/good.wasm", ExtensionAutostart::OnDemand) }).empty());
+    REQUIRE_FALSE(fixture.runtime->status("good").has_value());
+
+    fixture.runtime->revoke("good");
+    // No question pops up whose Allow would start what nobody asked for.
+    CHECK(fixture.runtime->pending().empty());
+    CHECK(fixture.runtime->entries().at(0).phase == DaemonExtensionPhase::Stopped);
+    // Started on demand, it is asked again.
+    fixture.runtime->start("good");
+    CHECK(fixture.runtime->pending().size() == 1);
+}
+
+TEST_CASE("DaemonExtensionRuntime: revoke cancels the processes in flight; the next grant sees none of them",
+          "[daemon][runtime][consent]")
+{
+    auto fixture = Fixture {};
+    fixture.grantGood();
+    auto secondLoad = std::latch { 1 };
+    auto listed = std::optional<std::expected<std::vector<ProcInfo>, HostError>> {};
+    fixture.onLoad = [&]() -> std::expected<void, wasm::CallFailure> {
+        if (fixture.loads.load() == 0)
+            return fixture.startRun();
+        auto const called = fixture.harness.call(DaemonImport::Procs, { ResultAddress });
+        if (called)
+            if (auto read =
+                    fixture.harness.read<std::expected<std::vector<ProcInfo>, HostError>>(ResultAddress))
+                listed = std::move(*read);
+        secondLoad.count_down();
+        return {};
+    };
+    REQUIRE(
+        fixture.create({ declared("good", "/ext/good.wasm", ExtensionAutostart::AtDaemonStart) }).empty());
+    fixture.firstLoad.wait();
+
+    fixture.runtime->revoke("good");
+    auto const pending = fixture.runtime->pending();
+    REQUIRE(pending.size() == 1);
+    fixture.runtime->answer("good", pending[0].grantDigest, GrantState::Granted);
+    secondLoad.wait();
+    fixture.runtime->stop();
+
+    REQUIRE(fixture.runner.started().size() == 1);
+    CHECK(fixture.runner.cancelled() == std::vector { fixture.runner.started()[0].token });
+    REQUIRE(listed.has_value());
+    REQUIRE(listed->has_value());
+    CHECK((*listed)->empty());
+}
+
+TEST_CASE("DaemonExtensionRuntime: the same manifest over other code is asked about anew",
+          "[daemon][runtime][consent]")
+{
+    auto fixture = Fixture {};
+    fixture.grantGood();
+    // The module on disk changed after the grant: same manifest, one more custom section.
+    auto changed = testing::withManifest(testing::toModule(testing::DaemonProbeModule), WorkManifest);
+    for (auto const byte: { 0x00, 0x03, 0x01, 0x78, 0x2A })
+        changed.push_back(static_cast<std::byte>(byte));
+    fixture.fileSystem.addFile("/ext/good.wasm", textOf(changed));
+
+    REQUIRE(
+        fixture.create({ declared("good", "/ext/good.wasm", ExtensionAutostart::AtDaemonStart) }).empty());
+    CHECK_FALSE(fixture.runtime->status("good").has_value());
+    CHECK(fixture.runtime->pending().size() == 1);
 }

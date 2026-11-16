@@ -83,6 +83,13 @@ namespace
                                     .message = std::format("daemon.extensions.{}: {}", name, what) };
     }
 
+    /// Whether an extension waits for the user's answer.
+    enum class ConsentWait : uint8_t
+    {
+        NotWaiting = 0, ///< It was not to start, or it was answered.
+        Waiting,        ///< It was to start, and its grant is pending.
+    };
+
     /// Hands a finished process's `procs` hint to the runner, while there is one: the processes are made
     /// before the runner, and outlive it.
     class HintRelay
@@ -118,12 +125,15 @@ struct DaemonExtensionRuntime::Extension
     std::string hostId;      ///< What the grants are keyed on: the configuration key and the module.
     std::string grantDigest; ///< What a grant must be recorded for: the manifest and the resolved roots.
     std::vector<ResolvedRoot> roots;
+    ConsentQuestion question; ///< What the user is asked for its grant.
+    ConsentWait consent = ConsentWait::NotWaiting;
     std::vector<std::byte> module; ///< Its bytes, until it is loaded: only a granted extension is.
     std::shared_ptr<Engine>
         engine; ///< The daemon world's, which @ref compiled was loaded on; null till then.
     std::shared_ptr<CompiledExtension> compiled; ///< Null until it runs.
     std::unique_ptr<FileExtensionStore> store;
     std::shared_ptr<HintRelay> relay = std::make_shared<HintRelay>();
+    DeclaredProcessesConfig processesConfig; ///< What @ref processes was made from, to make them anew.
     std::unique_ptr<DeclaredProcesses> processes;
     std::unique_ptr<DaemonExtensionRunner> runner; ///< Null until it runs; last, as it reaches the rest.
 };
@@ -165,7 +175,8 @@ DaemonExtensionRuntime::DaemonExtensionRuntime(Key /*key*/,
     _limits { config.limits },
     _provider { _services.backend, World::Daemon, config.limits },
     _grants { _services.fileSystem, config.grantsFile },
-    _pool { _services.backend, 1 }
+    _pool { _services.backend, 1 },
+    _lane { _pool.assignLane() }
 {
 }
 
@@ -226,31 +237,47 @@ std::expected<std::unique_ptr<DaemonExtensionRuntime::Extension>, DeclarationPro
     extension->hostId = extensionHostId(name, *path);
     extension->grantDigest = grantDigestOf(manifest->digest, *roots);
     extension->roots = *roots;
+    extension->question =
+        daemonConsentQuestion(DaemonConsentRequest { .hostId = extension->hostId,
+                                                     .manifest = *manifest,
+                                                     .roots = *roots,
+                                                     .grantDigest = extension->grantDigest });
     extension->module = std::move(*bytes);
     extension->store = std::make_unique<FileExtensionStore>(std::move(*store));
 
-    auto processes = DeclaredProcesses::create(
+    extension->processesConfig =
         DeclaredProcessesConfig { .manifest = std::move(*manifest),
                                   .roots = std::move(*roots),
                                   .inheritedEnvironment = config.inheritedEnvironment,
                                   .hostId = extension->hostId,
-                                  .grantDigest = extension->grantDigest },
-        DeclaredProcessesServices {
-            .runner = _services.runner,
-            .directories = _services.directories,
-            .grants = _grants,
-            .onFinished = [relay = extension->relay] { relay->hint(DaemonHint::Procs); } });
-    if (!processes)
-        return std::unexpected(problemOf(
-            name, DaemonExtensionProblem::RootUnresolvable, textOf(RootErrorTexts, processes.error())));
-    extension->processes = std::move(*processes);
+                                  .grantDigest = extension->grantDigest };
+    if (auto made = makeProcesses(*extension); !made)
+        return std::unexpected(
+            problemOf(name, DaemonExtensionProblem::RootUnresolvable, textOf(RootErrorTexts, made.error())));
     return extension;
+}
+
+std::expected<void, RootError> DaemonExtensionRuntime::makeProcesses(Extension& extension)
+{
+    auto processes =
+        DeclaredProcesses::create(extension.processesConfig,
+                                  DeclaredProcessesServices { .runner = _services.runner,
+                                                              .directories = _services.directories,
+                                                              .grants = _grants,
+                                                              .onFinished = [relay = extension.relay] {
+                                                                  relay->hint(DaemonHint::Procs);
+                                                              } });
+    if (!processes)
+        return std::unexpected(processes.error());
+    extension.processes = std::move(*processes);
+    return {};
 }
 
 std::expected<void, DeclarationProblem> DaemonExtensionRuntime::run(Extension& extension)
 {
     if (extension.runner)
         return {};
+    extension.consent = ConsentWait::NotWaiting;
     switch (_grants.lookup(extension.hostId, extension.grantDigest))
     {
         case GrantState::Granted: break;
@@ -260,6 +287,7 @@ std::expected<void, DeclarationProblem> DaemonExtensionRuntime::run(Extension& e
         case GrantState::Pending:
             errorLog()("daemon.extensions.{}: it waits for the user's consent in a Contour window.",
                        extension.name);
+            extension.consent = ConsentWait::Waiting;
             return {};
     }
     if (auto loaded = load(extension); !loaded)
@@ -311,28 +339,120 @@ std::expected<void, DeclarationProblem> DaemonExtensionRuntime::load(Extension& 
     return {};
 }
 
+void DaemonExtensionRuntime::runOrReport(Extension& extension)
+{
+    // The one place a granted extension that cannot run is reported, whether it was started or just granted.
+    if (auto ran = run(extension); !ran)
+        errorLog()("{}", ran.error().message);
+}
+
+DaemonExtensionRuntime::Extension* DaemonExtensionRuntime::find(std::string_view name) const
+{
+    auto const found = std::ranges::find(
+        _extensions, name, [](auto const& extension) { return std::string_view { extension->name }; });
+    return found != _extensions.end() ? found->get() : nullptr;
+}
+
 void DaemonExtensionRuntime::start(std::string_view name)
 {
     if (_lifecycle == Lifecycle::Stopped)
         return;
-    auto const found = std::ranges::find(
-        _extensions, name, [](auto const& extension) { return std::string_view { extension->name }; });
-    if (found == _extensions.end())
+    auto* const extension = find(name);
+    if (extension == nullptr)
         return;
-    auto& extension = **found;
-    if (extension.runner)
-        extension.runner->restart();
-    else if (auto ran = run(extension); !ran)
-        errorLog()("{}", ran.error().message);
+    if (extension->runner)
+        extension->runner->restart();
+    else
+        runOrReport(*extension);
 }
 
 std::optional<DaemonRunnerStatus> DaemonExtensionRuntime::status(std::string_view name) const
 {
-    auto const found = std::ranges::find(
-        _extensions, name, [](auto const& extension) { return std::string_view { extension->name }; });
-    if (found == _extensions.end() || !(*found)->runner)
+    auto const* const extension = find(name);
+    if (extension == nullptr || !extension->runner)
         return std::nullopt;
-    return (*found)->runner->status();
+    return extension->runner->status();
+}
+
+std::vector<DaemonExtensionEntry> DaemonExtensionRuntime::entries() const
+{
+    auto listed = std::vector<DaemonExtensionEntry> {};
+    if (_lifecycle == Lifecycle::Stopped)
+        return listed;
+    for (auto const& extension: _extensions)
+    {
+        auto phase = DaemonExtensionPhase::Stopped;
+        if (extension->runner)
+            phase = extension->runner->status().state == DaemonRunnerState::Disabled
+                        ? DaemonExtensionPhase::Disabled
+                        : DaemonExtensionPhase::Running;
+        else
+            switch (_grants.lookup(extension->hostId, extension->grantDigest))
+            {
+                case GrantState::Denied: phase = DaemonExtensionPhase::Denied; break;
+                case GrantState::Pending:
+                    if (extension->consent == ConsentWait::Waiting)
+                        phase = DaemonExtensionPhase::Pending;
+                    break;
+                case GrantState::Granted: break;
+            }
+        listed.push_back(DaemonExtensionEntry {
+            .name = extension->name, .phase = phase, .grantDigest = extension->grantDigest });
+    }
+    return listed;
+}
+
+std::vector<PendingConsent> DaemonExtensionRuntime::pending() const
+{
+    auto waiting = std::vector<PendingConsent> {};
+    if (_lifecycle == Lifecycle::Stopped)
+        return waiting;
+    for (auto const& extension: _extensions)
+        // Answered meanwhile through the grants file of a former run is answered all the same.
+        if (extension->consent == ConsentWait::Waiting
+            && _grants.lookup(extension->hostId, extension->grantDigest) == GrantState::Pending)
+            waiting.push_back(PendingConsent { .name = extension->name,
+                                               .grantDigest = extension->grantDigest,
+                                               .question = extension->question });
+    return waiting;
+}
+
+void DaemonExtensionRuntime::answer(std::string_view name, std::string_view grantDigest, GrantState answer)
+{
+    if (_lifecycle == Lifecycle::Stopped || answer == GrantState::Pending)
+        return;
+    auto* const extension = find(name);
+    // Only the question still asked is answered: a reply may name any extension and digest.
+    if (extension == nullptr || extension->consent != ConsentWait::Waiting
+        || extension->grantDigest != grantDigest)
+        return;
+    _grants.record(extension->hostId, extension->grantDigest, answer);
+    extension->consent = ConsentWait::NotWaiting;
+    if (answer == GrantState::Granted)
+        runOrReport(*extension);
+}
+
+void DaemonExtensionRuntime::revoke(std::string_view name)
+{
+    if (_lifecycle == Lifecycle::Stopped)
+        return;
+    auto* const extension = find(name);
+    if (extension == nullptr)
+        return;
+    _grants.record(extension->hostId, extension->grantDigest, GrantState::Pending);
+    if (!extension->runner)
+        return; // Not running: forgotten, and asked again only when it is next started.
+    extension->relay->attach(nullptr);
+    extension->runner.reset();
+    // The runner's last job, queued on the lane just now, still reaches its processes: they are cancelled,
+    // and their results dropped, by the job queued behind it -- the pool has one worker, so its jobs run in
+    // the order they were posted. Nothing they did reaches the instance of a later grant, which gets
+    // processes of its own.
+    _pool.post(_lane, [old = std::shared_ptr<DeclaredProcesses> { std::move(extension->processes) }] {});
+    if (auto made = makeProcesses(*extension); !made)
+        errorLog()("daemon.extensions.{}: its processes cannot be made anew; it does not run.",
+                   extension->name);
+    extension->consent = ConsentWait::Waiting;
 }
 
 void DaemonExtensionRuntime::stop() noexcept

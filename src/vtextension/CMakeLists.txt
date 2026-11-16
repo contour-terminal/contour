@@ -181,6 +181,8 @@ if(VTEXTENSION_TESTING)
     # Manifest version 2 is checked against the conformance corpus the orchestrator extension tests against too.
     target_compile_definitions(vtextension_test PRIVATE
         VTEXTENSION_MANIFEST_CORPUS_DIR="${PROJECT_SOURCE_DIR}/extensions/orchestrator/contract/manifest-v2")
+    # The golden texts the tests compare against.
+    target_compile_definitions(vtextension_test PRIVATE VTEXTENSION_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/testdata")
     if(CONTOUR_WASM_GUESTS)
         # The test cases that run a Rust guest exist only when the guests can be built.
         foreach(_guest IN ITEMS echo hostile sleeper spawner)
