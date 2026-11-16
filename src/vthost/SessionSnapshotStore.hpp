@@ -187,4 +187,22 @@ class SessionSnapshotStore
     std::filesystem::path const& socket,
     std::filesystem::path const& namedSocket);
 
+/// The durable store's directory of the daemon-world extension @p extension of the daemon named @p name
+/// that listens on @p socket: `<stateDirectory>/extensions/<name>/<extension>/store`, the name spelled
+/// `<name>@<hash>` exactly where daemonSnapshotPath() adds the hash (a socket other than the name's own),
+/// so that two daemons sharing a state directory never share a store.
+/// @param stateDirectory The daemon's state directory.
+/// @param name The daemon's name.
+/// @param socket The socket the daemon listens on; canonical, as @p namedSocket.
+/// @param namedSocket The socket its name would run on.
+/// @param extension What the configuration calls the extension.
+/// @return The directory; nullopt for a name or an extension name that cannot name a file
+///         (isFileSafeDaemonName).
+[[nodiscard]] std::optional<std::filesystem::path> daemonExtensionStoreDirectory(
+    std::filesystem::path const& stateDirectory,
+    std::string_view name,
+    std::filesystem::path const& socket,
+    std::filesystem::path const& namedSocket,
+    std::string_view extension);
+
 } // namespace vthost
