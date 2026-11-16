@@ -800,6 +800,13 @@ PageSize ConPty::pageSize() const noexcept
 
 void ConPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
 {
+    // Under the lock close() closes the pseudoconsole under: a session's reader thread closes it the moment
+    // its program exits, which may be while the daemon's loop or the GUI thread resizes it. Checked unlocked,
+    // the pseudoconsole could be closed between isClosed() below and ResizePseudoConsole(), which then failed
+    // with ERROR_INVALID_HANDLE and threw out of the daemon's loop, ending it (Windows CI, run 43823980913:
+    // "The handle is invalid. (HRESULT 0x80070006)" as the daemon shut down). UnixPty does the same.
+    auto const _ = std::lock_guard { _mutex };
+
     // The pseudoconsole takes no pixel size; it is kept for a live upgrade, whose successor restores the
     // terminal's cell size from it before any client says it again.
     if (pixels)
