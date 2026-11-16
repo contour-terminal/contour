@@ -828,8 +828,10 @@ void ContourGuiApp::finishLatencyProbe()
 
 int ContourGuiApp::endUnfinishedLatencyProbe()
 {
-    // Exiting 0 without a report hid both that the run failed and how far the probe had got.
-    cerr << "contour: the app ended before the latency probe finished\n";
+    // Exiting 0 without a report hid both that the run failed and how far the probe had got; and why the
+    // app ended -- its session's program gone, or none -- is what a run's log then needs.
+    cerr << std::format("contour: the app ended before the latency probe finished ({})\n",
+                        session::describeSessionExit(_exitStatus));
     if (_keystrokeProbe)
         std::ignore = writeLatencyProbeReport();
     return EXIT_FAILURE;

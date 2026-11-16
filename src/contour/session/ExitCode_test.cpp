@@ -12,6 +12,7 @@
 
 #include <cstdlib>
 
+using contour::session::describeSessionExit;
 using contour::session::exitCodeFor;
 using contour::session::QuickExitNotice;
 using contour::session::quickExitNoticeFor;
@@ -32,6 +33,16 @@ TEST_CASE("exitCodeFor: a process normal exit propagates the child's exit code",
 
     SessionExitStatus const zero = vtpty::Process::ExitStatus { vtpty::Process::NormalExit { 0 } };
     CHECK(exitCodeFor(zero, 99) == 0);
+}
+
+TEST_CASE("describeSessionExit: names how the session's program ended, or that none did",
+          "[contour][exitcode]")
+{
+    CHECK(describeSessionExit(std::nullopt) == "no session ended");
+    CHECK(describeSessionExit(vtpty::Process::ExitStatus { vtpty::Process::NormalExit { 1 } })
+          == "its session's program exited with status 1");
+    CHECK(describeSessionExit(vtpty::Process::ExitStatus { vtpty::Process::SignalExit { 9 } })
+          == "its session's program was killed by signal 9");
 }
 
 TEST_CASE("exitCodeFor: a process signal exit maps to EXIT_FAILURE", "[contour][exitcode]")
