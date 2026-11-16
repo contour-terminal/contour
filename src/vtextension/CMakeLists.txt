@@ -12,6 +12,7 @@ set(vtextension_SOURCES
     CompiledExtension.cpp
     ControlImports.cpp
     DaemonExtensionRunner.cpp
+    DaemonExtensionRuntime.cpp
     DaemonImports.cpp
     DaemonInstance.cpp
     DeclaredProcesses.cpp
@@ -30,6 +31,7 @@ set(vtextension_SOURCES
     HostState.cpp
     Instance.cpp
     Manifest.cpp
+    RootPointer.cpp
     RootResolution.cpp
     Runner.cpp
     SessionExtensions.cpp
@@ -50,6 +52,7 @@ set(vtextension_HEADERS
     ControlCodec.hpp
     ControlImports.hpp
     DaemonExtensionRunner.hpp
+    DaemonExtensionRuntime.hpp
     DaemonImports.hpp
     DaemonInstance.hpp
     DaemonLimits.hpp
@@ -59,6 +62,7 @@ set(vtextension_HEADERS
     Engine.hpp
     Event.hpp
     EventQueue.hpp
+    ExtensionAutostart.hpp
     ExtensionComposition.hpp
     ExtensionConsent.hpp
     ExtensionError.hpp
@@ -80,6 +84,7 @@ set(vtextension_HEADERS
     Manifest.hpp
     Placement.hpp
     ProcessService.hpp
+    RootPointer.hpp
     RootResolution.hpp
     Runner.hpp
     SettableEnvironment.hpp
@@ -124,6 +129,7 @@ if(VTEXTENSION_TESTING)
         ControlCodec_test.cpp
         ControlImports_test.cpp
         DaemonExtensionRunner_test.cpp
+        DaemonExtensionRuntime_test.cpp
         DaemonInstance_test.cpp
         DaemonWorld_test.cpp
         DeadlineGuard_test.cpp
@@ -141,6 +147,7 @@ if(VTEXTENSION_TESTING)
         Isolation_test.cpp
         Manifest_test.cpp
         ParseBudget_test.cpp
+        RootPointer_test.cpp
         RootResolution_test.cpp
         Runner_test.cpp
         SessionExtensions_test.cpp

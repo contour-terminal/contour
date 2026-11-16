@@ -22,6 +22,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -276,7 +277,15 @@ class FakeWasmBackend final: public wasm::IWasmBackend
         auto const lock = std::scoped_lock { _mutex };
         if (_runtimesAlive == 0)
             return std::unexpected(ExtensionError::RuntimeUnavailable);
+        _enteredOn.push_back(std::this_thread::get_id());
         return std::make_unique<Guard>(_generation.load(std::memory_order_relaxed));
+    }
+
+    /// @return Whether a guard was ever entered on @p thread.
+    [[nodiscard]] bool enteredOn(std::thread::id thread) const
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return std::ranges::contains(_enteredOn, thread);
     }
 
     [[nodiscard]] bool isCurrentThreadPrepared() const override
@@ -332,9 +341,10 @@ class FakeWasmBackend final: public wasm::IWasmBackend
         --_runtimesAlive;
     }
 
-    mutable std::mutex _mutex;             ///< Guards the counters below; the generation is read without it.
-    std::size_t _runtimesAlive = 0;        ///< How many runtimes are alive.
-    std::atomic<uint64_t> _generation = 0; ///< How many times the engine was brought up.
+    mutable std::mutex _mutex; ///< Guards the counters below; the generation is read without it.
+    std::vector<std::thread::id> _enteredOn; ///< Every thread a guard was entered on; guarded by _mutex.
+    std::size_t _runtimesAlive = 0;          ///< How many runtimes are alive.
+    std::atomic<uint64_t> _generation = 0;   ///< How many times the engine was brought up.
 };
 
 inline FakeWasmRuntime::FakeWasmRuntime(FakeWasmBackend& backend,

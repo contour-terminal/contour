@@ -5,6 +5,8 @@
 
 #include <core/platform/FileSystem.hpp>
 
+#include <cstddef>
+#include <expected>
 #include <filesystem>
 #include <optional>
 #include <span>
@@ -13,6 +15,7 @@
 #include <vector>
 
 #include <vtextension/CommandPolicy.hpp>
+#include <vtextension/ExtensionError.hpp>
 #include <vtextension/ExtensionHost.hpp>
 #include <vtextension/ExtensionLimits.hpp>
 #include <vtextension/Instance.hpp>
@@ -60,6 +63,30 @@ struct ExtensionModuleLookup
     std::span<std::filesystem::path const> bundledDirectories; ///< Where a name-only entry is looked for.
 };
 
+/// Why an extension has no module: what its notice says, and what the diagnostic says.
+struct ExtensionModuleProblem
+{
+    ExtensionError error; ///< ModuleUnavailable or ModuleTooLarge.
+    std::string reason;   ///< Why, for the configuration's log.
+};
+
+/// Finds a declared extension's module.
+/// @param name What the configuration calls the extension: a bundled one's name.
+/// @param path The module the configuration names; empty for the bundled one called @p name.
+/// @param lookup Where modules are found.
+/// @return @p path if given, else the bundled module; or why there is none.
+[[nodiscard]] std::expected<std::filesystem::path, ExtensionModuleProblem> findExtensionModule(
+    std::string_view name, std::filesystem::path const& path, ExtensionModuleLookup const& lookup);
+
+/// Reads a module. Its size is checked before it is read, so that a huge file costs no memory, and after, for
+/// one that grew meanwhile.
+/// @param path The module.
+/// @param fileSystem Where it is read.
+/// @param limit The most bytes it may have.
+/// @return Its bytes; or why they could not be read.
+[[nodiscard]] std::expected<std::vector<std::byte>, ExtensionModuleProblem> readExtensionModule(
+    std::filesystem::path const& path, core::platform::FileSystem const& fileSystem, std::size_t limit);
+
 /// What one pane's extensions are, and what was wrong with the configuration that declared them.
 struct ComposedExtensions
 {
@@ -72,7 +99,9 @@ struct ComposedExtensions
 ///
 /// A module that is not found (a bundled name not installed, a path that does not exist or cannot be read)
 /// is passed on without bytes, so that its place shows the extension's disabled notice; it is diagnosed too.
-/// A take-over naming no declared extension is diagnosed, and nothing takes the status line over.
+/// A module whose manifest places it in the daemon world is diagnosed, naming `daemon.extensions.<name>`, and
+/// passed on without bytes too (WorldMismatch). A take-over naming no declared extension is diagnosed, and
+/// nothing takes the status line over.
 /// @param declared The profile's extensions.
 /// @param lookup Where modules are found.
 /// @param cellPixelSize One cell of the status line, in pixels; empty while unknown.

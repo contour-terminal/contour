@@ -13,6 +13,7 @@
 #include <vtextension/CompiledExtension.hpp>
 #include <vtextension/ControlImports.hpp>
 #include <vtextension/DaemonExtensionRunner.hpp>
+#include <vtextension/DaemonExtensionRuntime.hpp>
 #include <vtextension/DaemonImports.hpp>
 #include <vtextension/DaemonInstance.hpp>
 #include <vtextension/DaemonLimits.hpp>
@@ -22,6 +23,7 @@
 #include <vtextension/Engine.hpp>
 #include <vtextension/Event.hpp>
 #include <vtextension/EventQueue.hpp>
+#include <vtextension/ExtensionAutostart.hpp>
 #include <vtextension/ExtensionComposition.hpp>
 #include <vtextension/ExtensionConsent.hpp>
 #include <vtextension/ExtensionError.hpp>
@@ -43,6 +45,7 @@
 #include <vtextension/Manifest.hpp>
 #include <vtextension/Placement.hpp>
 #include <vtextension/ProcessService.hpp>
+#include <vtextension/RootPointer.hpp>
 #include <vtextension/RootResolution.hpp>
 #include <vtextension/Runner.hpp>
 #include <vtextension/SessionExtensions.hpp>
