@@ -8,6 +8,7 @@
 #include <fstream>
 #include <latch>
 #include <map>
+#include <memory>
 #include <random>
 #include <ranges>
 #include <string>
@@ -27,6 +28,12 @@ namespace fs = std::filesystem;
 class FakeProber final: public vthost::DaemonSpawner
 {
   public:
+    [[nodiscard]] std::expected<std::unique_ptr<vthost::DaemonSpawnLock>, vthost::SpawnLockError>
+    tryLockSpawn(std::filesystem::path const&) override
+    {
+        return std::make_unique<vthost::DaemonSpawnLock>(); // no other client starts one
+    }
+
     explicit FakeProber(std::map<fs::path, DaemonPresence> answers): _answers(std::move(answers)) {}
 
     [[nodiscard]] std::expected<void, std::string> spawn(std::span<std::string const> /*argv*/,

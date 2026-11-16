@@ -32,6 +32,12 @@ namespace
 class ScriptedSpawner final: public vthost::DaemonSpawner
 {
   public:
+    [[nodiscard]] std::expected<std::unique_ptr<vthost::DaemonSpawnLock>, vthost::SpawnLockError>
+    tryLockSpawn(std::filesystem::path const&) override
+    {
+        return std::make_unique<vthost::DaemonSpawnLock>(); // no other client starts one
+    }
+
     [[nodiscard]] std::expected<void, std::string> spawn(std::span<std::string const>,
                                                          vtpty::ProcessPlacement&) override
     {

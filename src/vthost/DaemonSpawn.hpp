@@ -182,8 +182,42 @@ class DaemonSpawner;
                                          std::filesystem::path const& socketPath,
                                          std::chrono::milliseconds timeout);
 
-/// Starts a daemon process, and asks whether one serves: the two operating-system effects of
-/// ensureDaemon(), behind an interface so the window between them is testable.
+/// Held while one client looks for, starts and waits for the daemon at a socket (ensureDaemon()), so that
+/// clients starting at once start one daemon between them. Released as it is destroyed; no child inherits it.
+class DaemonSpawnLock
+{
+  public:
+    DaemonSpawnLock() = default;
+    DaemonSpawnLock(DaemonSpawnLock const&) = delete;
+    DaemonSpawnLock(DaemonSpawnLock&&) = delete;
+    DaemonSpawnLock& operator=(DaemonSpawnLock const&) = delete;
+    DaemonSpawnLock& operator=(DaemonSpawnLock&&) = delete;
+    virtual ~DaemonSpawnLock() = default;
+};
+
+/// Why a spawn lock was not taken.
+enum class SpawnLockError : uint8_t
+{
+    Held = 0, ///< Another client holds it: it is starting the daemon.
+    Io,       ///< The lock file could not be made, opened or locked.
+};
+
+/// @param socketPath A daemon's control socket.
+/// @return The file its spawn lock is on: `<socketPath>.spawn.lock`, beside the socket. Never removed, so
+///         that no two clients ever lock two files of that name.
+[[nodiscard]] std::filesystem::path daemonSpawnLockPath(std::filesystem::path const& socketPath);
+
+/// Takes the operating system's spawn lock on @p lockFile without waiting, the file made owner-only (and its
+/// directory, as prepareSocketDirectory() makes it) if missing: an exclusive `flock` on a descriptor opened
+/// `O_NOFOLLOW|O_CLOEXEC` on POSIX; `LockFileEx` on a handle no child inherits, a reparse point refused, on
+/// Windows.
+/// @param lockFile daemonSpawnLockPath().
+/// @return The lock, or Held when anyone holds it (this process too, through another call), else Io.
+[[nodiscard]] std::expected<std::unique_ptr<DaemonSpawnLock>, SpawnLockError> tryLockDaemonSpawn(
+    std::filesystem::path const& lockFile);
+
+/// Starts a daemon process, asks whether one serves, and locks out other clients' starts: the
+/// operating-system effects of ensureDaemon(), behind an interface so the window between them is testable.
 class DaemonSpawner
 {
   public:
@@ -196,6 +230,12 @@ class DaemonSpawner
     /// @return Nothing once started, or why it could not be.
     [[nodiscard]] virtual std::expected<void, std::string> spawn(std::span<std::string const> argv,
                                                                  vtpty::ProcessPlacement& placement) = 0;
+
+    /// Takes the spawn lock of the daemon at @p socketPath without waiting (tryLockDaemonSpawn() on
+    /// daemonSpawnLockPath(), for the operating system's spawner).
+    /// @return The lock, held until it is destroyed, or why it was not taken.
+    [[nodiscard]] virtual std::expected<std::unique_ptr<DaemonSpawnLock>, SpawnLockError> tryLockSpawn(
+        std::filesystem::path const& socketPath) = 0;
 
     /// Safe to call from several threads at once: discoveries run it off the GUI thread, more than one at a
     /// time.
@@ -253,6 +293,11 @@ inline constexpr auto ClientActivationVariables = std::array<std::string_view, 2
 /// `contour daemon` in the background if the socket isn't already accepting
 /// connections, then blocks until the daemon is ready or @p timeout elapses.
 /// For TCP endpoints this is a no-op (remote daemons can't be auto-spawned).
+///
+/// The look, the start and the wait run under the socket's spawn lock (DaemonSpawner::tryLockSpawn()), so
+/// that clients starting together start one daemon: one that finds the lock held waits for the daemon the
+/// holder starts, and starts one itself only once the lock is free and still no daemon serves. A lock that
+/// cannot be taken at all (Io) is logged and the start goes ahead without it.
 ///
 /// The binary is asked for only once the probe found no daemon, since staging it can mean a copy of the
 /// whole install. The image it hands out stays leased until the spawned daemon serves, or the spawn has

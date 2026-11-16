@@ -1474,6 +1474,12 @@ namespace
             return spawnDetachedDaemon(argv, _environment, placement);
         }
 
+        [[nodiscard]] std::expected<std::unique_ptr<DaemonSpawnLock>, SpawnLockError> tryLockSpawn(
+            std::filesystem::path const& socketPath) override
+        {
+            return tryLockDaemonSpawn(daemonSpawnLockPath(socketPath));
+        }
+
         [[nodiscard]] DaemonPresence probe(std::filesystem::path const& socketPath) override
         {
             return daemonAccepts(core::pathToUtf8(nativeSocketPath(socketPath))) ? DaemonPresence::Serving
@@ -2069,6 +2075,13 @@ int runDaemon(DaemonConfig const& config,
     return EXIT_SUCCESS;
 }
 
+std::filesystem::path daemonSpawnLockPath(std::filesystem::path const& socketPath)
+{
+    auto lockFile = socketPath;
+    lockFile += ".spawn.lock";
+    return lockFile;
+}
+
 DaemonPresence awaitDaemon(DaemonSpawner& spawner,
                            std::filesystem::path const& socketPath,
                            std::chrono::milliseconds timeout)
@@ -2169,10 +2182,41 @@ int ensureDaemon(AttachEndpoint const& endpoint,
     // `--lifecycle=exit-when-idle` and ends once nothing needs it any more; one the user named is persistent.
     // The image is asked for only now, and held until the daemon serves: by then the daemon has leased it
     // itself.
-    auto const image = binary.imageForSpawn();
-    auto const args =
-        daemonSpawnArgs(core::pathToUtf8(image.executable), unixEp.socketPath, spawnOptions, lifecycle);
-    return spawnAndAwaitDaemon(spawner, args, placement, unixEp.socketPath, timeout);
+    auto const spawn = [&] {
+        auto const image = binary.imageForSpawn();
+        auto const args =
+            daemonSpawnArgs(core::pathToUtf8(image.executable), unixEp.socketPath, spawnOptions, lifecycle);
+        return spawnAndAwaitDaemon(spawner, args, placement, unixEp.socketPath, timeout);
+    };
+
+    // Under the socket's spawn lock, so that clients starting at once start one daemon. Whoever holds it is
+    // starting one: its daemon is waited for, and the lock taken only once it is free and none serves.
+    auto const deadline = std::chrono::steady_clock::now() + timeout;
+    auto delay = std::optional<core::platform::SteadyDuration> {};
+    while (true)
+    {
+        auto const lock = spawner.tryLockSpawn(unixEp.socketPath);
+        if (lock)
+            // The client that held it before may have started one.
+            return spawner.probe(unixEp.socketPath) == DaemonPresence::Serving ? EXIT_SUCCESS : spawn();
+        if (lock.error() == SpawnLockError::Io)
+        {
+            daemonLog()("cannot take the spawn lock '{}'; starting the daemon without it",
+                        core::pathToUtf8(daemonSpawnLockPath(unixEp.socketPath)));
+            return spawn();
+        }
+        if (spawner.probe(unixEp.socketPath) == DaemonPresence::Serving)
+            return EXIT_SUCCESS;
+        auto const remaining = deadline - std::chrono::steady_clock::now();
+        if (remaining <= core::platform::SteadyDuration::zero())
+        {
+            daemonLog()("another client kept the spawn lock '{}' and no daemon came to serve",
+                        core::pathToUtf8(daemonSpawnLockPath(unixEp.socketPath)));
+            return EXIT_FAILURE;
+        }
+        delay = nextProbeDelay(delay);
+        std::this_thread::sleep_for(std::min<core::platform::SteadyDuration>(*delay, remaining));
+    }
 }
 
 int ensureDaemon(AttachEndpoint const& endpoint,

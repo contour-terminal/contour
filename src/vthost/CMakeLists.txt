@@ -66,6 +66,8 @@ add_library(vthost STATIC
     DaemonConsentKey.cpp
     DaemonConsentKey_posix.cpp
     DaemonConsentKey_win32.cpp
+    DaemonSpawnLock_posix.cpp
+    DaemonSpawnLock_win32.cpp
     DaemonIdentity.cpp
     DaemonIdentity.hpp
     DaemonLifecycle.hpp
