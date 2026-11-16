@@ -53,8 +53,8 @@ class DirectoryHandle
     std::string _resolvedPath;
 };
 
-/// Opens directories by handle, resolves paths, and creates directories: the seam the filesystem is
-/// reached through where a working directory is chosen.
+/// Opens directories by handle, resolves paths, and creates directories one component at a time beneath a
+/// handle: the seam the filesystem is reached through where a working directory is chosen.
 class IDirectoryOpener
 {
   public:
@@ -74,9 +74,14 @@ class IDirectoryOpener
     [[nodiscard]] virtual std::expected<std::string, DirectoryError> canonical(
         std::string_view existingPath) = 0;
 
-    /// Creates the directory at @p path and every missing parent, as `mkdir -p` does.
-    /// @return Nothing once the directory exists; `NotADirectory` if something else is in the way.
-    [[nodiscard]] virtual std::expected<void, DirectoryError> ensureExists(std::string_view path) = 0;
+    /// Creates one directory beneath an open one, following no link: a name that is already a directory is
+    /// opened, a symlink or anything else in its place is refused.
+    /// @param parent The open directory to create in.
+    /// @param name One path component: not empty, not `.` or `..`, without `/`.
+    /// @return The new (or existing) directory, opened; `NotADirectory` if a symlink or a non-directory is in
+    ///         the way.
+    [[nodiscard]] virtual std::expected<DirectoryHandle, DirectoryError> createBeneath(
+        DirectoryHandle const& parent, std::string_view name) = 0;
 };
 
 /// @return The opener over this machine's filesystem. POSIX: a directory is opened

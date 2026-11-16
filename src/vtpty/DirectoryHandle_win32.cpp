@@ -25,7 +25,8 @@ namespace
             return std::unexpected(DirectoryError::Unsupported);
         }
 
-        [[nodiscard]] std::expected<void, DirectoryError> ensureExists(std::string_view /*path*/) override
+        [[nodiscard]] std::expected<DirectoryHandle, DirectoryError> createBeneath(
+            DirectoryHandle const& /*parent*/, std::string_view /*name*/) override
         {
             return std::unexpected(DirectoryError::Unsupported);
         }

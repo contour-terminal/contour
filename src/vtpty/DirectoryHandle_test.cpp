@@ -90,20 +90,30 @@ TEST_CASE("DirectoryHandle: resolvedPath follows symlinks", "[processrunner]")
     CHECK(*canonical == std::filesystem::canonical(real).string());
 }
 
-TEST_CASE("DirectoryHandle: ensureExists creates every missing parent", "[processrunner]")
+TEST_CASE("DirectoryHandle: createBeneath creates one directory and follows no link", "[processrunner]")
 {
     auto const directory = core::testing::ScopedTempDir { "contour-directoryhandle" };
-    auto const deep = directory.path() / "x" / "y" / "z";
-    REQUIRE(vtpty::nativeDirectoryOpener().ensureExists(deep.string()).has_value());
-    CHECK(std::filesystem::is_directory(deep));
-    // Again: it exists, which is all that is asked.
-    CHECK(vtpty::nativeDirectoryOpener().ensureExists(deep.string()).has_value());
+    auto& opener = vtpty::nativeDirectoryOpener();
+    auto const parent = opener.open(directory.path().string());
+    REQUIRE(parent.has_value());
 
-    auto const file = directory.path() / "file";
-    std::ofstream { file } << "x";
-    auto const blocked = vtpty::nativeDirectoryOpener().ensureExists(file.string());
-    REQUIRE_FALSE(blocked.has_value());
-    CHECK(blocked.error() == vtpty::DirectoryError::NotADirectory);
+    auto const created = opener.createBeneath(*parent, "x");
+    REQUIRE(created.has_value());
+    CHECK(std::filesystem::is_directory(directory.path() / "x"));
+    CHECK(created->resolvedPath() == (std::filesystem::canonical(directory.path()) / "x").string());
+    // Again: it exists, and is opened.
+    CHECK(opener.createBeneath(*parent, "x").has_value());
+
+    std::ofstream { directory.path() / "file" } << "x";
+    CHECK(opener.createBeneath(*parent, "file").error() == vtpty::DirectoryError::NotADirectory);
+
+    std::filesystem::create_directory(directory.path() / "elsewhere");
+    std::filesystem::create_directory_symlink(directory.path() / "elsewhere", directory.path() / "link");
+    CHECK(opener.createBeneath(*parent, "link").error() == vtpty::DirectoryError::NotADirectory);
+
+    for (auto const* const name: { "", ".", "..", "a/b" })
+        CHECK(opener.createBeneath(*parent, name).error() == vtpty::DirectoryError::AccessDenied);
+    CHECK_FALSE(std::filesystem::exists(directory.path() / "a"));
 }
 
 TEST_CASE("DirectoryHandle: an unbacked handle holds no descriptor", "[processrunner]")

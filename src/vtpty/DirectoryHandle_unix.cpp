@@ -2,18 +2,18 @@
 #include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/OwnedFd.hpp>
 
+#include <sys/stat.h>
+
 #include <array>
 #include <cerrno>
 #include <climits>
 #include <cstdlib>
 #include <expected>
-#include <filesystem>
 #include <format>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <utility>
 
 #include <fcntl.h>
@@ -97,16 +97,25 @@ namespace
             return realPath(std::string { existingPath });
         }
 
-        [[nodiscard]] std::expected<void, DirectoryError> ensureExists(std::string_view path) override
+        [[nodiscard]] std::expected<DirectoryHandle, DirectoryError> createBeneath(
+            DirectoryHandle const& parent, std::string_view name) override
         {
-            auto const directory = std::filesystem::path { path };
-            auto error = std::error_code {};
-            std::filesystem::create_directories(directory, error);
-            if (error && error != std::errc::file_exists)
-                return std::unexpected(directoryError(error.value()));
-            if (!std::filesystem::is_directory(directory, error))
-                return std::unexpected(DirectoryError::NotADirectory);
-            return {};
+            if (name.empty() || name == "." || name == ".." || name.contains('/') || name.contains('\0'))
+                return std::unexpected(DirectoryError::AccessDenied);
+            auto const component = std::string { name };
+            if (::mkdirat(parent.descriptor(), component.c_str(), 0777) != 0 && errno != EEXIST)
+                return std::unexpected(directoryError(errno));
+            auto descriptor = OwnedFd { ::openat(
+                parent.descriptor(), component.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC) };
+            if (!descriptor.isOpen())
+                // ELOOP here is a symlink in the name's place, which is never followed.
+                return std::unexpected(errno == ELOOP ? DirectoryError::NotADirectory
+                                                      : directoryError(errno));
+            auto resolved = pathOfDescriptor(descriptor.get());
+            if (!resolved)
+                resolved =
+                    parent.resolvedPath() == "/" ? "/" + component : parent.resolvedPath() + "/" + component;
+            return DirectoryHandle { std::move(descriptor), std::move(*resolved) };
         }
     };
 } // namespace

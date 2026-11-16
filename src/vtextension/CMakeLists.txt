@@ -6,12 +6,14 @@
 set(vtextension_SOURCES
     BundledExtensions.cpp
     CanonicalAbi.cpp
+    ChildEnvironment.cpp
     CommandLine.cpp
     CommandPolicy.cpp
     CompiledExtension.cpp
     ControlImports.cpp
     DaemonImports.cpp
     DaemonInstance.cpp
+    DeclaredProcesses.cpp
     Engine.cpp
     EventQueue.cpp
     ExtensionComposition.cpp
@@ -24,6 +26,7 @@ set(vtextension_SOURCES
     HostState.cpp
     Instance.cpp
     Manifest.cpp
+    RootResolution.cpp
     Runner.cpp
     SessionExtensions.cpp
     SettableEnvironment.cpp
@@ -36,6 +39,7 @@ set(vtextension_HEADERS
     AtomicSharedPtr.hpp
     BundledExtensions.hpp
     CanonicalAbi.hpp
+    ChildEnvironment.hpp
     CommandLine.hpp
     CommandPolicy.hpp
     CompiledExtension.hpp
@@ -45,6 +49,7 @@ set(vtextension_HEADERS
     DaemonInstance.hpp
     DaemonWorld.hpp
     DeadlineGuard.hpp
+    DeclaredProcesses.hpp
     Engine.hpp
     Event.hpp
     EventQueue.hpp
@@ -64,6 +69,8 @@ set(vtextension_HEADERS
     Instance.hpp
     Manifest.hpp
     Placement.hpp
+    ProcessService.hpp
+    RootResolution.hpp
     Runner.hpp
     SettableEnvironment.hpp
     SessionExtensions.hpp
@@ -101,6 +108,7 @@ if(VTEXTENSION_TESTING)
         Bundled_test.cpp
         BundledExtensions_test.cpp
         CanonicalAbi_test.cpp
+        ChildEnvironment_test.cpp
         CommandLine_test.cpp
         CommandPolicy_test.cpp
         ControlCodec_test.cpp
@@ -108,6 +116,7 @@ if(VTEXTENSION_TESTING)
         DaemonInstance_test.cpp
         DaemonWorld_test.cpp
         DeadlineGuard_test.cpp
+        DeclaredProcesses_test.cpp
         Engine_test.cpp
         EventQueue_test.cpp
         ExtensionComposition_test.cpp
@@ -120,6 +129,7 @@ if(VTEXTENSION_TESTING)
         Isolation_test.cpp
         Manifest_test.cpp
         ParseBudget_test.cpp
+        RootResolution_test.cpp
         Runner_test.cpp
         SessionExtensions_test.cpp
         SettableEnvironment_test.cpp
@@ -129,7 +139,9 @@ if(VTEXTENSION_TESTING)
         WorldCheck_test.cpp
         wasm/WasmBinary_test.cpp
         testing/FakeDaemonHostServices.hpp
+        testing/FakeDirectoryOpener.hpp
         testing/FakeGuestMemory.hpp
+        testing/FakeProcessRunner.hpp
         testing/FakeWasmBackend.hpp
         testing/Harness.hpp
         testing/LaneReport.hpp

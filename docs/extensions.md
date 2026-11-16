@@ -357,6 +357,24 @@ across them, and a callback may make at most 64 of them or spend 2 s in them.
 - `actions-take`, `summary-set`, `pane-reveal`: its command-palette actions and its summary;
 - `file-read`: regular files inside a root declared readable.
 
+A declared command runs only where its manifest binds it, and sees only what its manifest declares:
+
+- **Working directory.** It is opened by handle and judged by the path read back from that handle, so a
+  symlink leads nowhere it could not lead by name. A directory belongs to its most specific root: a root
+  nested inside another keeps the outer root's commands out. Two roots resolving to the same directory are
+  refused when the extension starts.
+- **`path:` arguments.** The value is resolved through its longest existing ancestor and must lie strictly
+  below its root. Missing directories above its last component are created by Contour, one at a time beneath
+  a handle, following no link; a `create` root is created the same way, and never when it would lie inside
+  another root. The last component alone reaches the program as a name, because the program (git, say)
+  takes a path: a process that can write inside the root can put a symlink there between Contour's check and
+  the program's use of it. That is the residual, and it is confined to what is already writable inside the
+  root.
+- **Environment.** Contour's own variables (`CONTOUR_*`), git's (`GIT_*`, but `GIT_SSH_COMMAND`, `GIT_SSH`
+  and `GIT_ASKPASS`) and gh's repository and host selection (`GH_REPO`, `GH_HOST`, `GH_ENTERPRISE_TOKEN`) are
+  withheld; everything the manifest declares is added, `command-env-for` replacing `command-env` by name.
+- **A missing program** is a refused start, never a vanished working directory.
+
 An import Contour does not serve yet answers `not-supported-yet`, which an extension treats as a
 capability it lacks, not a fault. Today that is every pane, tab, action and file import but
 `summary-set`.

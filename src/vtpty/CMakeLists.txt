@@ -27,6 +27,7 @@ set(vtpty_SOURCES
     MockPty.cpp
     MockViewPty.cpp
     OwnedFd.cpp
+    PathContainment.cpp
     Process${PLATFORM_SUFFIX}.cpp
     ProcessPlacement.cpp
     ProcessRunner.cpp
@@ -66,6 +67,7 @@ set(vtpty_HEADERS
     MockViewPty.hpp
     OwnedFd.hpp
     PageSize.hpp
+    PathContainment.hpp
     PreparedSpawn.hpp
     PlacementBreaker.hpp
     Process.hpp
@@ -199,6 +201,7 @@ if(VTPTY_TESTING)
         ErrnoText_test.cpp
         ImageSize_test.cpp
         MockPty_test.cpp
+        PathContainment_test.cpp
         PlacementBreaker_test.cpp
         Process_test.cpp
         ProcessRunner_test.cpp

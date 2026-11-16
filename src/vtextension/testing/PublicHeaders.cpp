@@ -7,6 +7,7 @@
 #include <vtextension/AtomicSharedPtr.hpp>
 #include <vtextension/BundledExtensions.hpp>
 #include <vtextension/CanonicalAbi.hpp>
+#include <vtextension/ChildEnvironment.hpp>
 #include <vtextension/CommandLine.hpp>
 #include <vtextension/CommandPolicy.hpp>
 #include <vtextension/CompiledExtension.hpp>
@@ -15,6 +16,7 @@
 #include <vtextension/DaemonInstance.hpp>
 #include <vtextension/DaemonWorld.hpp>
 #include <vtextension/DeadlineGuard.hpp>
+#include <vtextension/DeclaredProcesses.hpp>
 #include <vtextension/Engine.hpp>
 #include <vtextension/Event.hpp>
 #include <vtextension/EventQueue.hpp>
@@ -34,6 +36,8 @@
 #include <vtextension/Instance.hpp>
 #include <vtextension/Manifest.hpp>
 #include <vtextension/Placement.hpp>
+#include <vtextension/ProcessService.hpp>
+#include <vtextension/RootResolution.hpp>
 #include <vtextension/Runner.hpp>
 #include <vtextension/SessionExtensions.hpp>
 #include <vtextension/StatusLineAdapter.hpp>
