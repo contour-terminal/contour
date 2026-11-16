@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cerrno>
 #include <charconv>
 #include <chrono>
 #include <csignal>
@@ -14,6 +15,10 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#ifndef _WIN32
+    #include <sys/types.h>
+#endif
 
 #include <vthost/CommandRunner.hpp>
 
@@ -149,6 +154,44 @@ TEST_CASE("a command that closes its output and then hangs is killed at the dead
                                           std::chrono::milliseconds { 200 });
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error() == std::errc::timed_out);
+}
+
+TEST_CASE("a command's standard error is dropped however much it writes", "[vthost][service][command]")
+{
+    auto const runner = vthost::makeNativeCommandRunner();
+    auto const result =
+        runner->run(std::vector<std::string> { "sh", "-c", "head -c 67108864 /dev/zero >&2; echo ok" });
+    REQUIRE(result.has_value());
+    CHECK(result->exitCode == 0);
+    CHECK(result->standardOutput == "ok\n");
+}
+
+TEST_CASE("a command that outlives its deadline is ended with everything it started",
+          "[vthost][service][command]")
+{
+    auto const directory = core::testing::ScopedTempDir { "contour-runner" };
+    auto const pidFile = directory.path() / "pid";
+    auto const runner = vthost::makeNativeCommandRunner();
+    auto const result = runner->runWithin(
+        std::vector<std::string> {
+            "sh", "-c", R"(sleep 1000 & echo $! > "$1"; wait)", "sh", pidFile.string() },
+        std::chrono::milliseconds { 200 });
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error() == std::errc::timed_out);
+
+    auto text = std::string {};
+    std::getline(std::ifstream { pidFile }, text);
+    auto pid = pid_t {};
+    REQUIRE(std::from_chars(text.data(), text.data() + text.size(), pid).ec == std::errc {});
+    // The background sleep was in the command's group: it got the group's SIGTERM, and its SIGKILL once the
+    // leader had ended, before the run answered. Its new parent may not have reaped it yet.
+    auto const stateOf = [pid] {
+        auto stat = std::string {};
+        std::getline(std::ifstream { std::format("/proc/{}/stat", pid) }, stat);
+        auto const end = stat.rfind(") ");
+        return end == std::string::npos || end + 2 >= stat.size() ? 'X' : stat[end + 2];
+    };
+    CHECK(((::kill(pid, 0) != 0 && errno == ESRCH) || stateOf() == 'Z' || stateOf() == 'X'));
 }
 
 TEST_CASE("the native runner refuses an empty command", "[vthost][service][command]")
