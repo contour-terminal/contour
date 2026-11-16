@@ -39,17 +39,36 @@ fetch_source() {
     FULL_DISTFILE="$SYSDEPS_DIST_DIR/$DISTFILE"
 
     if ! test -f "$FULL_DISTFILE"; then
-        if command -v curl >/tmp/word 2>&1; then
-            curl -L -o "$FULL_DISTFILE" "$URL"
-        elif command -v wget >/tmp/word 2>&1; then
-            wget -O "$FULL_DISTFILE" "$URL"
-        elif command -v fetch >/tmp/word 2>&1; then
-            # FreeBSD
-            fetch -o "$FULL_DISTFILE" "$URL"
-        else
-            echo "Don't know how to fetch from the internet." 1>&2
-            exit 1
-        fi
+        # Into a .part file, kept only once it is a whole gzip archive, and tried again a few times: a
+        # transient error page from the host (GitHub's archive endpoint served one on 2026-11-16, 1812 bytes)
+        # used to be saved as the archive, fail tar, and be "Already fetched" by every later run.
+        attempt=1
+        while :; do
+            rm -f "$FULL_DISTFILE.part"
+            if command -v curl >/tmp/word 2>&1; then
+                curl --fail -L -o "$FULL_DISTFILE.part" "$URL" || true
+            elif command -v wget >/tmp/word 2>&1; then
+                wget -O "$FULL_DISTFILE.part" "$URL" || true
+            elif command -v fetch >/tmp/word 2>&1; then
+                # FreeBSD
+                fetch -o "$FULL_DISTFILE.part" "$URL" || true
+            else
+                echo "Don't know how to fetch from the internet." 1>&2
+                exit 1
+            fi
+            if test -s "$FULL_DISTFILE.part" && gzip -t "$FULL_DISTFILE.part" 2>/dev/null; then
+                mv "$FULL_DISTFILE.part" "$FULL_DISTFILE"
+                break
+            fi
+            if test $attempt -ge 5; then
+                rm -f "$FULL_DISTFILE.part"
+                echo "Could not fetch a gzip archive from $URL in $attempt attempts." 1>&2
+                exit 1
+            fi
+            echo "Fetching $URL gave no gzip archive (attempt $attempt); trying again." 1>&2
+            sleep $((attempt * 3))
+            attempt=$((attempt + 1))
+        done
     else
         echo "Already fetched $DISTFILE. Skipping."
     fi
