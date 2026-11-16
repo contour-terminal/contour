@@ -459,12 +459,16 @@ endif()
 #
 # Its own dependencies follow CONTOUR_USE_CPM: with CPM off, a missing one stops the configure with
 # the option that needed it rather than reaching the network. TLS is on because vthost serves and
-# dials TLS (core::net_tls); the TUI modules are not vendored, so they are off. The OS sleep/wake
+# dials TLS (core::net_tls). Of the TUI only the headless half is enabled: core::tui_core (and the
+# core::tui_output leaf it links), which needs no terminal, event loop or platform layer and links the
+# libunicode resolved above; the terminal half, core::tui, stays off. The OS sleep/wake
 # monitor reads logind over libsystemd on Linux, the same library and the same switch as vtpty's
 # session scopes, so a build without systemd loses both and needs neither.
 set(CORE_CPP_FETCH_DEPS ${CONTOUR_USE_CPM})
 set(CORE_CPP_TESTING ${CONTOUR_TESTING_CORE_CPP})
 set(CORE_CPP_WITH_TUI OFF)
+set(CORE_CPP_WITH_TUI_OUTPUT ON)
+set(CORE_CPP_WITH_TUI_CORE ON)
 set(CORE_CPP_WITH_TLS ON)
 set(CORE_CPP_WITH_SYSTEMD ${CONTOUR_WITH_SYSTEMD})
 find_package(OpenSSL REQUIRED)

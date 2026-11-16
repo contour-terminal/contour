@@ -200,8 +200,8 @@ core_cpp_dependency(OpenSSL
     FIND_PACKAGE OpenSSL
     NO_FETCH)
 
-# libunicode, for core::tui: grapheme segmentation, east-asian width and the codepoint property
-# tables. For core::tui alone: core::tui_output includes none of it, and CORE_CPP_WITH_TUI_OUTPUT
+# libunicode, for core::tui_core (and so core::tui): grapheme segmentation, east-asian width and the
+# codepoint property tables. For the TUI alone: core::tui_output includes none of it, and CORE_CPP_WITH_TUI_OUTPUT
 # builds that leaf with this row off (tests/consumer-tui-output asserts nothing here is fetched). 0.9.3 is what endo pins (f774a210), and its scan_text() fix (a zero-width codepoint after
 # an ASCII base) is what core::tui's grapheme handling is written against; it is also at or above
 # contour's LIBUNICODE_MINIMAL_VERSION, so a consumer that has both gets one library.
@@ -211,23 +211,56 @@ core_cpp_dependency(OpenSSL
 # build. PEDANTIC_COMPILER_WERROR is already OFF upstream and is pinned so a default change cannot
 # make someone else's warning fatal here. The four LIBUNICODE_* options drop the parts of it nothing
 # links: its tests, benchmarks, CLI tools and examples. BUILD_SHARED_LIBS OFF is endo's pin and is
-# kept: libunicode's target is linked PUBLIC from `core::tui`, so in a consumer configured with
+# kept: libunicode's target is linked PUBLIC from `core::tui_core`, so in a consumer configured with
 # BUILD_SHARED_LIBS=ON a fetched libunicode would come out shared behind a static core-cpp, and
-# every consumer of `core::tui` would need that shared object at run time to use a library it never
+# every consumer of `core::tui_core` would need that shared object at run time to use a library it never
 # asked to be shared. A libunicode found rather than fetched is whatever that installation is.
 #
-# A first configure with CORE_CPP_WITH_TUI on and no installed libunicode fetches it from GitHub,
+# A first configure with CORE_CPP_WITH_TUI_CORE on and no installed libunicode fetches it from GitHub,
 # and libunicode's own configure then downloads UCD.zip from www.unicode.org -- the one fetch this
 # build makes outside GitHub (docs/getting-started/building.md).
+#
+# Under WASI, LIBUNICODE_SIMD_IMPLEMENTATION none: libunicode's default for a processor it does not know is
+# std::experimental::simd, which wasi-sdk's libc++ does not have. A WASI build takes the tables a native
+# configure generated (CPM_libunicode_SOURCE, or an installed libunicode), never the generator or UCD.zip
+# (docs/design/tui-headless.md, "Where the tables come from").
+set(_coreCppLibunicodePlatformOptions "")
+if(CORE_CPP_PLATFORM_WASI)
+    list(APPEND _coreCppLibunicodePlatformOptions "LIBUNICODE_SIMD_IMPLEMENTATION none")
+endif()
+
+## @brief WRAP of the libunicode row: under WASI, where the row turns libunicode's SIMD off, a libunicode
+## core-cpp built from source compiles without -Wunused-template.
+##
+## With no SIMD, libunicode 0.9.3's `scan.cpp` leaves its `ascending()` template unused, so a consumer
+## that compiles everything beneath it with -Werror -- tests/consumer-tui-core does -- fails on a choice
+## core-cpp made. The warning is turned off on that target alone, PRIVATE, and only in the configuration
+## that causes it; the source fix (`ascending()` under the SIMD branch) belongs in libunicode. An
+## IMPORTED libunicode was built by someone else and is left alone.
+function(core_cpp_libunicode_without_simd name)
+    if(NOT CORE_CPP_PLATFORM_WASI OR NOT TARGET unicode::unicode)
+        return()
+    endif()
+    get_target_property(real unicode::unicode ALIASED_TARGET)
+    if(NOT real)
+        set(real unicode::unicode)
+    endif()
+    get_target_property(imported ${real} IMPORTED)
+    if(imported)
+        return()
+    endif()
+    target_compile_options(${real} PRIVATE -Wno-unused-template)
+endfunction()
 core_cpp_dependency(libunicode
-    WHEN CORE_CPP_WITH_TUI
+    WHEN CORE_CPP_WITH_TUI_CORE
     TARGETS unicode::unicode
     FIND_PACKAGE libunicode 0.9.3
     CPM NAME libunicode VERSION 0.9.3 GITHUB_REPOSITORY contour-terminal/libunicode GIT_TAG v0.9.3
         EXCLUDE_FROM_ALL YES SYSTEM YES
         OPTIONS "LIBUNICODE_TESTING OFF" "LIBUNICODE_BENCHMARK OFF" "LIBUNICODE_TOOLS OFF"
                 "LIBUNICODE_EXAMPLES OFF" "PEDANTIC_COMPILER OFF" "PEDANTIC_COMPILER_WERROR OFF"
-                "BUILD_SHARED_LIBS OFF")
+                "BUILD_SHARED_LIBS OFF" ${_coreCppLibunicodePlatformOptions}
+    WRAP core_cpp_libunicode_without_simd)
 
 ## @brief WRAP of the stb row: the INTERFACE target over the DOWNLOAD_ONLY source tree.
 ##

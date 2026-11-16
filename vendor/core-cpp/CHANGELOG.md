@@ -7,6 +7,212 @@ release may break the API; every break is listed under **Breaking** with a migra
 release tag `vX.Y.Z` equals the version in `project(core-cpp VERSION X.Y.Z)`, and the release
 workflow refuses one without a section here.
 
+## [0.21.0] - 2026-11-16
+
+### Breaking
+
+- **`core::tui::Component` has a new virtual, `onResize(Size)`** (protected), called when its area's size
+  changes -- through `setArea()` or `addChild()` -- before its flex children are laid out. A subclass that
+  already declares a member `onResize(Size)` now overrides it and is called on every resize; rename it, or mark it
+  `override` if that is what it wants. Consumers grepped: endo's only `onResize()` is `Prompt::onResize()`, which
+  takes no argument and is not a `Component`; fastcached, Lightweight's `dbtool` and contour have no `Component`
+  subclass.
+- **`core::tui::Screen` sizes its root to the viewport**, at every frame and on every `ResizeEvent`:
+  `screen.root().area()` is `{ 0, 0, columns, rows }` (the inline or fixed viewport's size) from the first `draw()`
+  on, where it was an empty `Rect` before. The first frame, and the first after a resize, therefore marks the root
+  for a full redraw (`_needsFullRedraw`), which a size change already did; an unchanged frame does nothing new.
+  Code that read `root().area()` and expected it empty, or used it as "no layout yet", must stop. Consumers
+  grepped: none reads it (endo places its children by hand and never asks the root's area).
+- **A component leaving a `Screen` loses its focus and its hover there.** `Screen` forgets a detached component
+  as the focus of every group and ends a hover on it, hiding its tooltip -- before, only the pointer capture was
+  forgotten, and a removed focused component kept receiving keys. A living component that leaves focused --
+  `hideOverlay()`, `removeChild()`, an ancestor removed or destroyed around it, a `Responsive` swapping its layout
+  out -- hears `onBlur()`, so an input that commits on blur commits; one being destroyed does not, its derived part
+  being gone. The call is deferred until the change it left in is over (the outermost `removeChild()`,
+  `clearChildren()`, `hideOverlay()` or layout pass), never inside a loop over a parent's children, so a handler
+  may change the tree; a `Responsive` keeps its old layout alive until then. A consumer that removes the focused component and re-adds it must focus it again.
+  Consumers grepped: endo removes no focused component from a live screen.
+
+- **`core::tui::ScreenConfig`'s two `bool`s are enumerations.** `inhibitReflow` is `reflow`, a `DiffReflow`
+  (`Keep`, the default, or `Inhibit`, the frame diff's own option it was always translated into), and
+  `alternateScreen` is `screenBuffer`, a new `ScreenBuffer` (`Primary`, the default, or `Alternate`). Each default is
+  its enumeration's zero, so the defaults are unchanged. Migrate `.inhibitReflow = true` to
+  `.reflow = core::tui::DiffReflow::Inhibit` and `.alternateScreen = true` to
+  `.screenBuffer = core::tui::ScreenBuffer::Alternate`. Consumers grepped: endo sets `.inhibitReflow = true` in
+  `src/shell/Shell.cpp:3226` and `src/shell/ui/Prompt.cpp:110` and must change both; tuidu sets
+  `config.alternateScreen = true` in `src/tuidu/App.cpp:28` and must change it when it moves its pin (v0.5.0);
+  fastcached and `dbtool` do not use `Screen`; contour does not vendor `tui`.
+- **`core::platform::IClock` is `core::IClock` now** (`<core/Clock.hpp>`, in `core::base`), with `SteadyClock`,
+  `ManualClock`, `defaultSteadyClock()`, `SteadyTimePoint` and `SteadyDuration`. `<core/platform/Clock.hpp>` includes it
+  and names each in `core::platform` by a using-declaration, so every `core::platform::` spelling still compiles and
+  names the same type; `CachedClock` and the wall clocks stay in `core::platform`. What breaks is a forward
+  declaration: `namespace core::platform { class IClock; }` now conflicts with the using-declaration once
+  `<core/platform/Clock.hpp>` is seen. Migrate it to `namespace core { class IClock; }`, or include `<core/Clock.hpp>`.
+  Consumers grepped: contour forward-declares it in `src/vtbackend/screen/LinkDetector.hpp:33-36` and must change
+  that on its next re-vendor; endo, fastcached and Lightweight's `dbtool` declare none.
+- **`core::tui::remainingMs()` takes the clock it measures on**: `remainingMs(clock, start, timeout)`, for both the
+  time-point and the optional overload. Migrate `remainingMs(start, timeout)` to
+  `remainingMs(core::defaultSteadyClock(), start, timeout)`, or pass the clock the start was read from. Consumers
+  grepped: endo calls it five times (`src/shell/ui/PromptComponent.cpp:1872`, `:1877`, `:1884`,
+  `src/agent/ui/AgentInputComponent.cpp:680`, `:687`) and must change; fastcached and `dbtool` do not use it; contour
+  does not vendor `tui`.
+- **`core::tui::Screen` draws on a `ScreenSurface`, not a `Terminal`.** The constructor takes `ScreenSurface&`, which
+  `Terminal` now implements, so `Screen(terminal, config)` compiles unchanged. `Screen::terminal()` is gone; it is
+  `Screen::surface()`, returning the `ScreenSurface&`. A caller that reached `Terminal`-only members through it keeps
+  its own `Terminal&` instead. No known consumer called it. `QueryUnanswered` moved from `<core/tui/Terminal.hpp>` to
+  `<core/tui/ScreenSurface.hpp>`, which `Terminal.hpp` includes.
+- **`core::tui::Terminal` is polymorphic now.** It derives from `ScreenSurface`, so `rows()`, `columns()`, `output()`
+  and `queryCursorPosition()` are virtual and `Terminal` has a vtable; its destructor is an override. Building a
+  `Screen` from a `Terminal&` converts derived to base, which needs `Terminal`'s complete type: include
+  `<core/tui/Terminal.hpp>` where a `Screen` is made from a forward-declared `Terminal`. Consumers grepped: endo
+  (constructs `Screen` from a `Terminal` member whose header it includes; compiles unchanged), fastcached (no
+  `core::tui` use), Lightweight's `dbtool` (`core::tui_output` only), contour (does not vendor `tui`).
+- **`core::tui::Buffer::at()` and `Buffer::tryAt()` are gone; `Buffer::cellAt(Point)` replaces both.** `at()` threw
+  `std::out_of_range` outside the buffer, which the headless TUI cannot do with exceptions off; `cellAt()` returns
+  the cell, or nullptr outside, with `Point { .x = column, .y = row }` in place of the `(row, col)` pair. Migrate
+  `buffer.at(row, col).grapheme` to `buffer.cellAt({ .x = col, .y = row })->grapheme` where the cell is known to be
+  inside, and test for nullptr where it is not. Consumers grepped: endo (`src/shell/ui/PromptComponent_test.cpp:589`
+  and `:590` call `at()`, and must change), fastcached (no `core::tui` use), Lightweight's `dbtool`
+  (`core::tui_output` only), contour (does not vendor `tui`).
+
+### Added
+
+- **`core::tui::layout::solve()`, a flexbox layout in the headless TUI** (`<core/tui/layout/Solve.hpp>`,
+  `<core/tui/layout/Style.hpp>`, in `core::tui_core`): a tree of `Node`s (a `Style` of direction, wrap, justify,
+  align, gap, grow, shrink, basis and min/max size, children and a preferred size) and a `Rect` in, one `Rect` per
+  node out in depth-first order. Integer cells, no floating point: leftover cells go to the earliest growing child
+  first, a deficit is taken in proportion to shrink times basis with the odd cells from the last child, a child that
+  reaches its min or max size is frozen and the rest re-shared until stable, and what still overflows is clipped to
+  the parent. Sizes and positions are capped at `MaxCells` (2^20), weights at `MaxWeight` (2^16), and a node's
+  children past `MaxChildren` (2^20) are not laid out (zero-size at the parent's origin); within these bounds no
+  input overflows. Reuses `core::tui::Rect` and `core::tui::Size`.
+- **WASI (`wasm32-wasip1`) is a platform of its own in the build.** A configure with wasi-sdk's
+  `wasi-sdk-p1.cmake` builds `core::base`, `core::tui_output` and `core::tui_core` -- the rows of
+  `cmake/CoreCppModules.cmake` now marked `PLATFORMS any wasi` -- and nothing else; `CORE_CPP_WITH_TUI`,
+  `CORE_CPP_WITH_IMAGES` and `CORE_CPP_WITH_TLS` are forced off there, `CORE_CPP_WITH_TUI_CORE` is not. WASI never
+  compiles `SOURCES_POSIX`, even where a toolchain sets `UNIX`; it compiles `SOURCES_WASI` and `SOURCES_PORTABLE`.
+  Threads is not linked without `_REENTRANT`, and libunicode is configured with `LIBUNICODE_SIMD_IMPLEMENTATION none`.
+  `core::currentUserPasswordEntry()` moved out of `UserInfo.cpp` into per-platform sources (no `#ifdef` left);
+  its behaviour is unchanged everywhere it built before. `core-cpp.tui-core-wasi` (label `wasm`) configures,
+  builds with `-fno-exceptions -fno-rtti` and runs a guest under Node's WASI; it skips without `WASI_SDK_PREFIX`
+  or node. Before, a WASI configure stopped in `core::base`. Consumers: none builds for WASI yet; native
+  configurations are unchanged.
+- **Every bordered widget in the headless TUI takes a `BorderStyle`**, so a view can frame all of them with
+  `BorderStyle::Rounded` (`╭ ╮ ╰ ╯`). New: `CompletionPopup(BorderStyle)`, `CommandPalettePopup(BorderStyle, clock)`,
+  `FuzzyPickerPopup(BorderStyle, clock)`, `Tooltip(BorderStyle)`, `ScreenConfig::tooltipBorder` (the tooltip a `Screen`
+  shows), `QuestionConfig::border` (the question's left bar) and a `border()` accessor on each popup and the tooltip;
+  `Box` and the dialogs already had one. Each default is what the widget drew before -- `Single` for the completion
+  popup and the tooltip, `Rounded` for the rest -- so existing callers render unchanged. `CompletionPopup`'s detail
+  panel now joins the menu's frame in the menu's style rather than always in single lines. `BorderStyle`'s zero stays
+  `None`; the defaults live in each widget. `core-cpp.tui-corners` (tree-level) refuses a square corner spelled in
+  any `src/core/tui` source outside the border helper. Consumers grepped: endo constructs these widgets with their default
+  constructors and configs, which keep their look; fastcached, Lightweight's `dbtool` and contour do not use them.
+- **A layout pass and `Responsive` in the headless TUI** (`core::tui_core`). `LayoutParams` gains `flex`, an
+  optional `layout::Style` whose item half (grow, shrink, basis, min/max size) sizes the child in its parent, with
+  the child's `minSize()` and `preferredSize()` hints joining it; a `Component` lays such children out with
+  `layout::solve()` whenever its size changes and whenever one is added, removed, shown or hidden
+  (`Component::layoutChildren()`, `layoutStyle()`, the protected `Component(layout::Style)` constructor and the
+  `onResize(Size)` hook, see Breaking); a child whose size hints changed calls `hintsChanged()`, and the screen
+  lays its parent out again once before the next frame. `FlexBox` is a container that owns what it lays out. `Responsive` takes a
+  `std::vector<Breakpoint>` (`minColumns`, `minRows`, `make`) at construction and builds the layout of the last
+  breakpoint the size meets, only when that choice changes; its layouts' hints must not size it into another band,
+  and the screen stops re-laying a chain of such swaps after `Screen::MaxChainedLayoutSweeps` (8) frames rather
+  than swapping once per frame for ever, which `Screen::layoutAbandoned()` reports until a resize or a changed
+  hint. A flex child added to a parent keeps its area until that parent's pass places it, so a sized `Responsive`
+  moved to a new parent builds only for its new size; a hidden one takes an empty area at the new parent's origin. `Screen` now sizes its root to the viewport on every
+  frame and `ResizeEvent`, so `screen.root().area()` is the viewport's size at the origin rather than empty.
+  Children added without a `flex` item are untouched, so existing trees lay out as before. `LayoutParams::area` gained
+  a default member initializer, so a designated initializer may now omit it. Consumers grepped: endo has no
+  `Component` subclass with an `onResize(Size)`, `layoutChildren` or `layoutStyle` member (its `Prompt::onResize()` is
+  not a `Component`), and its `endo::dap::Breakpoint` is in its own namespace; fastcached, Lightweight's `dbtool` and
+  contour are unaffected (no `core::tui_core` use).
+- **CI builds and runs the headless TUI for `wasm32-wasip1`.** A `wasi` job, required by `ci-ok`, installs wasi-sdk
+  34.0 and wasmtime 50.0.1 (each pinned by SHA-256) and Node 22, generates libunicode's tables in a native build,
+  and fails unless `core-cpp.unicode-wasi`, `core-cpp.tui-core-wasi` and the new `core-cpp.tui-core-reactor` all
+  run and pass. `core-cpp.tui-core-reactor` links `core::tui_core`, built with `-fno-exceptions -fno-rtti`, into a
+  WASI reactor (`tests/wasi-reactor`: no `main()`, an exported `core_tui_reactor_run`) that drives `VtParser` →
+  `Screen` → `diffFrames()` → `layout::solve()`, and runs it under wasmtime (`WASMTIME`, or on `PATH`); without
+  wasi-sdk or wasmtime it skips and says which.
+- **`core-cpp.unicode-wasi`, core::tui's width tables in a WebAssembly guest.** `tests/wasi-unicode` builds libunicode
+  for `wasm32-wasip1` from the tables a native configure generated (`CPM_libunicode_SOURCE`; it refuses a tree without
+  them, so the guest's build never downloads `UCD.zip` or builds the table generator), with
+  `-fno-exceptions -fno-rtti`, adds it with `add_subdirectory()` rather than CPM so the build reaches no network at
+  all, and runs a table of grapheme clusters and `core::tui::stringWidth()` columns under
+  Node's WASI. The test drives it against the enclosing build's libunicode tree; it skips without `WASI_SDK_PREFIX` or
+  node. Test-only: no target, option or dependency changes.
+- **The headless TUI measures time on an injected `core::IClock`.** `Screen` (its hover delay), `HoverState`,
+  `Spinner`, `InputField` and `TreeTableView` (their double-click windows) and, in the terminal half,
+  `SemanticBlockClient` take an `IClock const&` as a last constructor argument, by default
+  `core::defaultSteadyClock()`, and none of them reads `std::chrono::steady_clock` any more. `CommandPalettePopup`,
+  `FuzzyPickerPopup` and `QuestionComponent` take one the same way and hand it to their `InputField`. The clock is
+  kept, so each of these constructors refuses a temporary one (a deleted `IClock const&&` overload) and marks the
+  parameter with the new `CORE_LIFETIMEBOUND` (`<core/Defines.hpp>`: `[[clang::lifetimebound]]` under Clang,
+  nothing elsewhere). Existing constructor
+  calls compile unchanged and keep the steady clock; a test passes a `core::ManualClock` and advances it instead of
+  sleeping. `HoverState::tick()` takes a `core::SteadyTimePoint`, the same type it took before.
+- **`core::throwOrFail(exception)`** (`<core/Assert.hpp>`): `throw exception;` where exceptions are compiled in, and
+  a `Require()`-style failure where they are not, for the throws a `-fno-exceptions` build compiles.
+  `pathFromTrustedUtf8()` throws through it, unchanged where exceptions are on. Every consumer builds with exceptions
+  on, so none sees a difference; contour vendors both headers and picks this up on its next re-vendor.
+- **CI builds `core::tui_core` with `-fno-exceptions -fno-rtti`**: `consumer-smoke (tui-core)` builds
+  `tests/consumer-tui-core` a second time in the guest's language mode, `core::base`, `core::tui_output` and
+  libunicode included, and runs it. libunicode's table generator, a host tool that throws, is not built in that mode:
+  the second build takes the libunicode tree the first one generated its tables into.
+- **`core::tui_core`, the headless half of the TUI** (option `CORE_CPP_WITH_TUI_CORE`, defaulting to
+  `CORE_CPP_WITH_TUI`, which forces it on): the parser, cells, buffers, canvas, components, widgets, the Markdown
+  renderer and `Screen`, linking `core::base`, `core::tui_output` and libunicode -- nothing of `core::platform`,
+  `core::async` or `core::net`. `core::tui` links it and keeps the terminal, the runtime and the image file loaders.
+  No header moved; a consumer of `core::tui` changes nothing. `CORE_CPP_WITH_TUI` off and `CORE_CPP_WITH_TUI_CORE` on
+  builds it alone. The libunicode dependency now follows `CORE_CPP_WITH_TUI_CORE`. Design:
+  "A headless TUI" among the design notes (`docs/design/tui-headless.md`).
+- **`core-cpp.tui-core-symbols`** reads `core::tui_core`'s archive and fails on any symbol of `core::platform`,
+  `core::async`, `core::net`, `Terminal`, `TerminalInput`, `TerminalChannel` or the runtime;
+  `tests/consumer-tui-core` is a CPM consumer that renders a component with the terminal half off.
+  It also refuses `ClipboardWriter`, `SemanticBlockClient`, `FilesystemImageProvider` and `ImageLoader.hpp`'s
+  functions, and its include scan reads quoted includes, relative to the including file's directory as the compiler does, as
+  well as `<core/...>` ones.
+- **`core::tui::OutputKind` and `TerminalOutput::kind()` / `simulatedCursorPosition()`.** An output says whether a
+  terminal stands behind it (`Device`, the default) or whether it models the screen itself (`Simulation`, which
+  `MockTerminalOutput` reports, answering its cursor 1-based). `Terminal` reads these where it used to
+  `dynamic_cast` to `MockTerminalOutput`, so the TUI no longer needs RTTI; a subclass of the mock stays a
+  simulation, as it was. A consumer's own output that is not a mock and wants to be treated as one now overrides
+  `kind()`; no known consumer has one. Consumers grepped: Lightweight's `dbtool` derives `OStreamTerminalOutput` from
+  `TerminalOutput` and stays a `Device` by default, unchanged; endo and fastcached derive no output; contour does not
+  vendor `tui`. A subclass with a member of its own named `kind` or `simulatedCursorPosition` now hides or overrides
+  the new virtual and must rename it; none was found.
+- **`core::tui::diffFrames()` and `writeFrameDiff()`, the frame diff as a function** (`<core/tui/FrameDiff.hpp>`):
+  two `Buffer`s in, the bytes that turn the first into the second out, pure, with `DiffOptions` choosing absolute
+  (cursor-addressed) or relative (row by row) addressing, changed cells or all, the area covered, and whether the
+  frame's hyperlinks, Sixel images, row marks and reflow inhibition are written. Identical frames diff to nothing.
+  `Screen`'s fullscreen, fixed and inline flushes and `Buffer::writeTo()` all call it; their output is unchanged, so no
+  consumer changes anything (endo, the one consumer that drives a `Screen`, grepped).
+- **`core::tui::HeadlessSurface`**, a `ScreenSurface` of a size and a byte sink, for a `Screen` with no terminal under
+  it (a WebAssembly guest): every frame's bytes go to the sink, the cursor query answers `NotAsked`, and `resize()`
+  takes the host's size. Its output, **`core::tui::ByteSinkOutput`**, is a `TerminalOutput` that hands what it flushes
+  to a `ByteSink` and asks the operating system nothing -- no size, no probe, no terminal test. This is how a `Screen`
+  is built from a size and a byte sink: `Screen { headlessSurface }`, through the one constructor. Additive.
+- **`SOURCES_PORTABLE`, a platform source list for a platform that is neither POSIX nor Windows**, and
+  `core::tui_output`'s `portable/TerminalOutput.cpp` in it: the output's five OS-bound members (`initialize`,
+  `detectCapabilities`, `writeToDestination`, `isTerminal`, `updateDimensions`) with the C++ standard library alone,
+  so the base output needs no operating system. `core::tui_output`'s row says `PLATFORMS any`; the TUI options stay
+  forced off under Emscripten until a WebAssembly target has a row of its own. Native platforms are unchanged.
+
+### Fixed
+
+- **`core::tui::Terminal` refuses a null output instead of dereferencing it.** Both constructors that take a
+  `std::unique_ptr<TerminalOutput>` asked it its kind before any check, so a null pointer crashed; it is a documented
+  precondition now, failed through `Require()` (the fail handler, then the end of the process). No consumer passes
+  null (endo and Lightweight's `dbtool` grepped).
+- **`core::tui::Buffer::fill()` and `clearRect()` with an area wholly outside the buffer write nothing.** Above or
+  left of it, the clamped range ran backwards, which a hardened standard library (`_GLIBCXX_ASSERTIONS`) aborts on;
+  a fixed viewport past the screen's edge did the same in `Screen`'s flush. Both now clip through
+  `Rect::intersect()`.
+- **`core::detail::fail()` no longer needs exceptions to compile.** Its try block caught a throwing fail handler
+  only to abort, which its `noexcept` already does through `std::terminate()`; `<core/Assert.hpp>` now builds with
+  `-fno-exceptions`. A fail handler that throws still ends the process, now through `std::terminate()` (so an
+  installed terminate handler runs first) rather than a direct `std::abort()`. No consumer installs a fail handler
+  (contour, endo, fastcached, Lightweight grepped).
+
 ## [0.20.0] - 2026-11-14
 
 ### Added

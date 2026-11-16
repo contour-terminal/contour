@@ -467,7 +467,7 @@ std::expected<proto::UpgradeDaemonReply, ControlError> SocketDaemonControl::upgr
 std::unique_ptr<DaemonControlPort> makeDaemonControl(std::shared_ptr<ITransportFactory> transport,
                                                      AttachBudget const& timeout)
 {
-    return std::make_unique<OwnedLoopDaemonControl>(std::move(transport), std::move(timeout));
+    return std::make_unique<OwnedLoopDaemonControl>(std::move(transport), timeout);
 }
 
 } // namespace vthost::client

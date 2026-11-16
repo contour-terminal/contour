@@ -111,69 +111,15 @@ static_assert(std::is_constructible_v<OverloadForwarder, SystemWallClock>,
 
 } // namespace
 
-TEST_CASE("SteadyClock::now is monotonic", "[clock]")
+TEST_CASE("core::platform names the base module's steady clock seam", "[clock]")
 {
-    auto const clock = SteadyClock {};
-    auto const first = clock.now();
-    auto const second = clock.now();
-    REQUIRE(second >= first);
-}
-
-TEST_CASE("ManualClock starts at the constructed value and does not advance on its own", "[clock]")
-{
-    auto const start = SteadyTimePoint {} + 1s;
-    auto const clock = ManualClock { start };
-    REQUIRE(clock.now() == start);
-    // Reading twice yields the same value: time is frozen until advance/setNow.
-    REQUIRE(clock.now() == start);
-}
-
-TEST_CASE("ManualClock::advance moves time forward by the delta, and advances accumulate", "[clock]")
-{
-    auto clock = ManualClock {};
-    auto const origin = clock.now();
-    clock.advance(100ms);
-    REQUIRE(clock.now() == origin + 100ms);
-    clock.advance(200ms);
-    clock.advance(50ms);
-    REQUIRE(clock.now() == origin + 350ms);
-}
-
-TEST_CASE("ManualClock::setNow hard-sets the value", "[clock]")
-{
-    auto clock = ManualClock { SteadyTimePoint {} + 5s };
-    auto const target = SteadyTimePoint {} + 2s;
-    clock.setNow(target);
-    REQUIRE(clock.now() == target);
-}
-
-TEST_CASE("defaultSteadyClock returns a usable singleton", "[clock]")
-{
-    auto& a = core::platform::defaultSteadyClock();
-    auto& b = core::platform::defaultSteadyClock();
-    REQUIRE(&a == &b);
-    // Sample in a defined order (the macro's argument evaluation order is
-    // unspecified, so two inline now() calls could otherwise read out of order).
-    auto const first = a.now();
-    auto const second = b.now();
-    REQUIRE(second >= first);
-}
-
-TEST_CASE("refresh is a no-op for clocks that read their source directly", "[clock]")
-{
-    // SteadyClock and ManualClock inherit the default. An event loop calls refresh()
-    // unconditionally on whatever clock it was given, so this must be safe and must not disturb
-    // a test's manual timeline. Sampled into locals in a defined order: the two sides of a
-    // REQUIRE are not sequenced.
-    auto steady = SteadyClock {};
-    auto const before = steady.now();
-    steady.refresh();
-    auto const after = steady.now();
-    REQUIRE(after >= before);
-
-    auto manual = ManualClock { SteadyTimePoint { 7s } };
-    manual.refresh();
-    REQUIRE(manual.now() == SteadyTimePoint { 7s });
+    // The steady seam moved to <core/Clock.hpp>; these are using-declarations of it, so a
+    // core::platform::IClock& and a core::IClock& are one parameter type.
+    STATIC_CHECK(std::is_same_v<core::platform::IClock, core::IClock>);
+    STATIC_CHECK(std::is_same_v<core::platform::ManualClock, core::ManualClock>);
+    STATIC_CHECK(std::is_same_v<core::platform::SteadyClock, core::SteadyClock>);
+    STATIC_CHECK(std::is_same_v<core::platform::SteadyTimePoint, core::SteadyTimePoint>);
+    CHECK(&core::platform::defaultSteadyClock() == &core::defaultSteadyClock());
 }
 
 TEST_CASE("CachedClock samples once at construction", "[clock]")

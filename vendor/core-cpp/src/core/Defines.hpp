@@ -3,8 +3,9 @@
 
 /// @file
 /// Portability macros: CORE_PACKED (a packed struct), CORE_REQUIRES (a requires-clause where
-/// concepts are available), CORE_CONSTEVAL (consteval where available) and CORE_CONSTEXPR
-/// (constexpr where the standard algorithms are).
+/// concepts are available), CORE_CONSTEVAL (consteval where available), CORE_CONSTEXPR
+/// (constexpr where the standard algorithms are) and CORE_LIFETIMEBOUND (Clang's lifetimebound
+/// where the compiler has it).
 
 #ifdef __has_include
     #if __has_include(<version>)
@@ -30,6 +31,19 @@
     #define CORE_CONSTEVAL consteval
 #else
     #define CORE_CONSTEVAL constexpr
+#endif
+
+// Marks a reference parameter that the constructed object (or the returned reference) keeps, so a
+// compiler that knows the attribute warns when a temporary is bound to it (-Wdangling). Placed after
+// the parameter's name: `IClock const& clock CORE_LIFETIMEBOUND`. Nothing elsewhere, where GCC would
+// warn about an unknown attribute.
+#ifdef __has_cpp_attribute
+    #if __has_cpp_attribute(clang::lifetimebound)
+        #define CORE_LIFETIMEBOUND [[clang::lifetimebound]]
+    #endif
+#endif
+#ifndef CORE_LIFETIMEBOUND
+    #define CORE_LIFETIMEBOUND /*!*/
 #endif
 
 // Use this only when constexpr std algorithm is not supported but we still

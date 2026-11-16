@@ -13,6 +13,7 @@
 #include <format>
 #include <functional>
 #include <iostream>
+#include <source_location>
 #include <string_view>
 #include <utility>
 
@@ -41,18 +42,13 @@ namespace detail
                                   std::string_view file,
                                   int line) noexcept
     {
-        try
-        {
-            if (failHandler())
-                failHandler()(text, message, file, line);
-            else
-                std::cerr << std::format("[{}:{}] {} {}\n", file, line, message, text);
-        }
-        catch (...)
-        {
-            // A handler or a stream that throws ends the process all the same.
-            std::abort();
-        }
+        // A handler or a stream that throws ends the process all the same: the exception cannot
+        // leave this noexcept function, so it reaches std::terminate(). No try block catches it
+        // here, which is what lets this header compile with exceptions off (a WebAssembly guest).
+        if (failHandler())
+            failHandler()(text, message, file, line);
+        else
+            std::cerr << std::format("[{}:{}] {} {}\n", file, line, message, text);
         std::abort();
     }
 } // namespace detail
@@ -64,6 +60,29 @@ namespace detail
 inline void setFailHandler(FailHandler handler)
 {
     detail::failHandler() = std::move(handler);
+}
+
+/// @brief Throws @p exception, or, where exceptions are compiled out, fails as Require() does.
+///
+/// For the few throws in code a WebAssembly guest compiles with `-fno-exceptions`: there a
+/// `throw` does not compile, and would have ended the process if it did. So with exceptions on
+/// this is exactly `throw exception;`, and with them off it reports the exception's what() through
+/// the fail handler and aborts. This is the one place that asks which of the two it is.
+///
+/// @param exception The exception to throw; a std::exception, for its what().
+/// @param where Where the throw is, for the report when exceptions are off.
+template <typename Exception>
+[[noreturn]] void throwOrFail(Exception&& exception,
+                              [[maybe_unused]] std::source_location where = std::source_location::current())
+{
+#if defined(__cpp_exceptions) || defined(_CPPUNWIND)
+    throw std::forward<Exception>(exception);
+#else
+    detail::fail("exception thrown with exceptions disabled",
+                 exception.what(),
+                 where.file_name(),
+                 static_cast<int>(where.line()));
+#endif
 }
 
 /// This method prints an error message and then terminates the program.

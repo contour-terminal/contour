@@ -4,6 +4,8 @@
 /// @file
 /// A path from the UTF-8 text core-cpp's strings are spelled in, and that text back from a path.
 
+#include <core/Assert.hpp>
+
 #include <expected>
 #include <filesystem>
 #include <string>
@@ -46,12 +48,13 @@ namespace core
 /// @param text The path, in UTF-8.
 /// @return The path @p text spells.
 /// @throws std::system_error with @c std::errc::illegal_byte_sequence on Windows if @p text is not
-///         UTF-8. Never on POSIX, where a path is the bytes it is given.
+///         UTF-8. Never on POSIX, where a path is the bytes it is given. Built with exceptions off,
+///         the same failure ends the process through core::throwOrFail() instead.
 [[nodiscard]] inline std::filesystem::path pathFromTrustedUtf8(std::string_view text)
 {
     auto path = pathFromUtf8(text);
     if (!path)
-        throw std::system_error(path.error(), "pathFromTrustedUtf8");
+        throwOrFail(std::system_error(path.error(), "pathFromTrustedUtf8"));
     return *std::move(path);
 }
 
