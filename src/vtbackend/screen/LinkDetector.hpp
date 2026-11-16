@@ -29,10 +29,13 @@ namespace core::async
 {
 class IExecutor;
 }
+namespace core
+{
+class IClock;
+}
 namespace core::platform
 {
 class FileSystem;
-class IClock;
 } // namespace core::platform
 
 namespace vtbackend
@@ -99,7 +102,7 @@ struct LinkDetectionServices
     core::async::IExecutor& probeExecutor;        ///< One dedicated thread: a hung mount blocks only it.
     core::platform::FileSystem const& fileSystem; ///< Every existence check goes through it.
     /// Ages probe answers. The application's, not a terminal's: a probe job may outlive its terminal.
-    core::platform::IClock const& clock;
+    core::IClock const& clock;
     LinkDetectorTuning tuning {}; ///< Detection's timing and bounds; tests shrink them.
 };
 
