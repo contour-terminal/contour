@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cerrno>
 #include <chrono>
+#include <climits>
 #include <cstring>
 #include <deque>
 #include <expected>
@@ -21,9 +22,8 @@
 #ifndef _WIN32
     #include <crispy/FileDescriptor.hpp>
 
-    #include <sys/select.h>
-
     #include <fcntl.h>
+    #include <poll.h>
     #include <unistd.h>
 #endif
 
@@ -115,41 +115,40 @@ class PosixReadSelector
         if (auto const fd = tryPopPending(); fd.has_value())
             return fd;
 
-        FD_ZERO(&_reader);
-        FD_ZERO(&_writer);
-        FD_ZERO(&_except);
-
-        // Snapshot the registered fds under the lock, then run the blocking select() WITHOUT holding it:
+        // Snapshot the registered fds under the lock, then run the blocking poll() WITHOUT holding it:
         // a concurrent cancelRead()/wantRead() mutates the shared _fds vector, so iterating it here
-        // unsynchronized is a data race (garbage/dangling fd handed to select, or a crash). The lock must
-        // not span select() itself, or close()'s cancelRead() would block for the whole wait, defeating
+        // unsynchronized is a data race (garbage/dangling fd handed to poll, or a crash). The lock must
+        // not span poll() itself, or close()'s cancelRead() would block for the whole wait, defeating
         // the independent break-pipe wakeup. A cancelRead() that lands after this snapshot is still
-        // handled: the break-pipe wakeup returns select(), and the caller re-checks isWanted().
-        int maxfd = _breakPipeReader.get();
-        FD_SET(_breakPipeReader.get(), &_reader);
+        // handled: the break-pipe wakeup returns poll(), and the caller re-checks isWanted().
+        //
+        // poll() rather than select(): an fd_set holds only descriptors below FD_SETSIZE (1024), and
+        // FD_SET() on a larger one writes past the set into the heap. A daemon hosting a few hundred
+        // sessions has far more descriptors open than that.
+        auto polled = std::vector<pollfd> {};
         {
             auto const _ = std::scoped_lock { _fdsMutex };
+            polled.reserve(_fds.size() + 1);
+            polled.push_back(pollfd { .fd = _breakPipeReader.get(), .events = POLLIN, .revents = 0 });
             for (auto const fd: _fds)
-            {
-                FD_SET(fd, &_reader);
-                maxfd = std::max(maxfd, fd);
-            }
+                polled.push_back(pollfd { .fd = fd, .events = POLLIN, .revents = 0 });
         }
 
-        auto tv = std::unique_ptr<timeval>();
-        if (timeout.has_value())
-        {
-            tv = std::make_unique<timeval>(
-                timeval { .tv_sec = timeout->count() / 1000,
-                          .tv_usec = static_cast<int>((timeout->count() % 1000) * 1000) });
-        }
+        auto const timeoutMs =
+            timeout.has_value()
+                ? static_cast<int>(std::clamp<std::chrono::milliseconds::rep>(timeout->count(), 0, INT_MAX))
+                : -1;
 
-        auto const result = ::select(maxfd + 1, &_reader, &_writer, &_except, tv.get());
+        auto const result = ::poll(polled.data(), static_cast<nfds_t>(polled.size()), timeoutMs);
 
         if (result <= 0)
             return std::nullopt;
 
-        if (FD_ISSET(_breakPipeReader, &_reader))
+        // A hung-up or errored descriptor counts as readable, as it did under select(): the reader's
+        // read() is what reports the EOF or the error.
+        auto constexpr ReadableEvents = static_cast<short>(POLLIN | POLLHUP | POLLERR);
+
+        if ((polled.front().revents & ReadableEvents) != 0)
         {
             // Drain the pipe.
             char buf[256];
@@ -159,9 +158,9 @@ class PosixReadSelector
 
         {
             auto const _ = std::scoped_lock { _fdsMutex };
-            for (int const fd: _fds)
-                if (FD_ISSET(fd, &_reader))
-                    _pending.push_back(fd);
+            for (auto const& entry: polled | std::views::drop(1))
+                if ((entry.revents & ReadableEvents) != 0 && std::ranges::find(_fds, entry.fd) != _fds.end())
+                    _pending.push_back(entry.fd);
         }
 
         return tryPopPending();
@@ -182,9 +181,6 @@ class PosixReadSelector
     }
 
   private:
-    fd_set _reader {};
-    fd_set _writer {};
-    fd_set _except {};
     mutable std::mutex _fdsMutex; //!< Guards @c _fds against concurrent cancelRead()/wantRead() while
                                   //!< waitOne() snapshots it; the epoll backend delegates this to the
                                   //!< kernel, the posix backend must synchronize the vector itself.

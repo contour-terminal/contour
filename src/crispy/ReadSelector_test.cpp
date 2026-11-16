@@ -5,6 +5,7 @@
 
 #ifndef _WIN32
     #include <sys/resource.h>
+    #include <sys/select.h>
 
     #include <algorithm>
     #include <array>
@@ -302,6 +303,40 @@ TEST_CASE("ReadSelector.create_reports_running_out_of_descriptors")
     ::setrlimit(RLIMIT_NOFILE, &original); // before any assertion can unwind past it
     REQUIRE_FALSE(selector.has_value());
     CHECK(selector.error() == std::errc::too_many_files_open);
+}
+
+TEST_CASE("PosixReadSelector.descriptor_beyond_fd_setsize")
+{
+    // An fd_set holds only descriptors below FD_SETSIZE; FD_SET() on a larger one writes past the set
+    // into the heap. The selector must wait on such descriptors like on any other.
+    auto original = rlimit {};
+    REQUIRE(::getrlimit(RLIMIT_NOFILE, &original) == 0);
+    auto constexpr Needed = static_cast<rlim_t>(FD_SETSIZE + 64);
+    if (original.rlim_cur < Needed)
+    {
+        auto raised = original;
+        raised.rlim_cur = original.rlim_max < Needed ? original.rlim_max : Needed;
+        if (raised.rlim_cur < Needed || ::setrlimit(RLIMIT_NOFILE, &raised) != 0)
+            SKIP("cannot raise RLIMIT_NOFILE above FD_SETSIZE");
+    }
+
+    auto pipe = std::array<int, 2> { -1, -1 };
+    REQUIRE(::pipe(pipe.data()) == 0);
+    // Move the read end above FD_SETSIZE.
+    auto const high = ::fcntl(pipe[0], F_DUPFD, FD_SETSIZE + 8);
+    REQUIRE(high >= FD_SETSIZE);
+    ::close(pipe[0]);
+
+    auto selector = crispy::PosixReadSelector::create();
+    REQUIRE(selector.has_value());
+    (*selector)->wantRead(high);
+    REQUIRE(::write(pipe[1], "x", 1) == 1);
+    CHECK((*selector)->waitOne(std::chrono::milliseconds { 1000 }) == high);
+
+    (*selector)->cancelRead(high);
+    ::close(high);
+    ::close(pipe[1]);
+    ::setrlimit(RLIMIT_NOFILE, &original);
 }
 
 #endif // !_WIN32
