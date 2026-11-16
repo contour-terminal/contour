@@ -387,6 +387,69 @@ An import Contour does not serve yet answers `not-supported-yet`, which an exten
 capability it lacks, not a fault. Today that is every pane, tab, action and file import but
 `summary-set`.
 
+### Daemon extensions: granting
+
+A daemon extension runs only once its user granted it, and the grant is bound to its whole module -- its code
+as well as its manifest -- **and** the directories its roots resolved to: a rebuilt module, a moved root or
+one more repository asks again. (Status-line extensions' grants are bound to the whole module too.) When
+an extension is to start (at the daemon's start, or on demand) and has no grant, the daemon asks every
+attached Contour window, and again each window that attaches while the question is open:
+
+```
+“orchestrator” wants to run in the background
+Module: orchestrator@/usr/lib/contour/extensions/orchestrator.wasm
+Directory (worktrees, created if missing): /home/u/worktrees
+Directory (repos): /home/u/repo/contour
+It may run only these, which can reach the network as you:
+Each of them with:
+  GIT_TERMINAL_PROMPT=0
+  …
+gh-auth (short, in repos): gh auth status
+…
+git-status (short, in worktrees): git status --porcelain --untracked-files=normal --ignore-submodules=none
+  GIT_CONFIG_COUNT=3
+  …
+It may open tabs running: agent (in worktrees): claude --model {model} --session-id {session} {prompt}
+  GIT_CONFIG_COUNT=2
+  GIT_CONFIG_KEY_0=push.default
+  …
+It may read files in: worktrees
+It shows its own tab: orchestrator://
+```
+
+Every variable a command or pane is given is shown beneath it, one `NAME=value` line each, and those every
+command shares beneath `Each of them with:` -- what is granted is what is shown.
+
+**Only a window grants.** The dialog's Return is Deny, and Allow stays disabled while its window is not
+active, and for half a second each time a question is shown or the window becomes active; Escape and the close
+control put it away unanswered. The first window to answer settles the question, and the others close theirs.
+
+A window proves it is one: once a daemon holds its socket it makes a fresh secret key for that run, in a
+private file of the run's own under its state directory (`consent/<socket hash>-<run>.key`, mode 0600 in a
+0700 directory that may not be a link), and removes the files earlier runs at that socket left. A Contour
+window on the same machine reads the file of the run the daemon's hello names, and answers the hello's nonce
+with an HMAC bound to that run and the socket. A start that never serves -- a `--background` parent, a second
+daemon that lost the bind -- never touches the serving daemon's key. Only a connection that
+proved the key is asked, and only an answer from a connection that was asked is recorded. So no extension,
+no control call or `contour` verb, and no process that merely inherits a pane's environment can grant: the
+key's path is in no pane's environment, and the key never crosses the socket. A process of the same user that
+reads the key file on purpose can still pass for a window -- as it could fake key presses -- so the user
+account is the trust boundary. A window attached to a daemon on another machine holds no key and is not
+asked.
+
+```sh
+contour extension list            # every daemon extension, its state, and a pending one's question
+contour extension grant NAME      # asks the attached windows again; prints "confirm in a Contour window"
+contour extension revoke NAME     # forgets the grant and stops the extension; it asks again
+```
+
+`extension grant` with nothing pending fails with `notPending`; with no window attached it says so, and
+the question waits for the next window. `extension revoke` stops a running extension and asks again; one that
+does not run is asked when it is next started. A refusal is remembered for that module and those
+directories, in the daemon's own grants file (`extension-grants.daemon-scoped.txt` beside the configuration).
+That file is the daemon's: it is read as the daemon starts and written by it alone, so an edit made while the
+daemon runs counts for nothing and is overwritten by its next answer.
+
 [wit]: https://github.com/contour-terminal/contour/tree/master/wit/statusline
 [daemon-wit]: https://github.com/contour-terminal/contour/tree/master/wit/daemon
 [bundled]: https://github.com/contour-terminal/contour/tree/master/extensions/bundled

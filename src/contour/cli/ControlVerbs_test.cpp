@@ -44,6 +44,7 @@
 #include <vthost/testing/CountingRandom.hpp>
 
 using namespace std::string_literals;
+using namespace std::string_view_literals;
 using contour::cli::ControlIo;
 using contour::cli::ExitStatus;
 using vthost::client::ControlClientError;
@@ -348,6 +349,7 @@ TEST_CASE("every ControlErrorCode and ControlFailure has an exit status", "[cont
         CodeRow { .code = ControlErrorCode::Forbidden, .status = ExitStatus::Failed },
         CodeRow { .code = ControlErrorCode::Failed, .status = ExitStatus::Failed },
         CodeRow { .code = ControlErrorCode::LimitReached, .status = ExitStatus::Failed },
+        CodeRow { .code = ControlErrorCode::NotPending, .status = ExitStatus::Failed },
     };
     // Every code the API names has a row: a code added without one fails here, not at a script's exit.
     CHECK(CodeRows.size() == vtcontrol::EnumTable<ControlErrorCode>::Rows.size());
@@ -1165,5 +1167,85 @@ TEST_CASE("a reply is decoded without a byte past its end", "[contour][cli][cont
         auto out = std::ostringstream {};
         verbNamed("split").printHuman(contour::testing::ExactBuffer { row.reply }.view(), out);
         CHECK(out.str() == row.printed);
+    }
+}
+
+TEST_CASE("the extension verbs are rows of the extension group", "[contour][cli][control][consent]")
+{
+    for (auto const path: { "extension.list"sv, "extension.grant"sv, "extension.revoke"sv })
+    {
+        INFO(path);
+        CHECK(verbNamed(path).method == path);
+    }
+    auto const groups = contour::cli::controlVerbGroups();
+    CHECK(std::ranges::find(groups, "extension"sv, &contour::cli::ControlVerbGroup::name) != groups.end());
+    CHECK(*verbNamed("extension.grant").buildParams(parseFlags({ "extension", "grant", "orchestrator" }))
+          == R"({"name":"orchestrator"})");
+    CHECK(*verbNamed("extension.revoke").buildParams(parseFlags({ "extension", "revoke", "orchestrator" }))
+          == R"({"name":"orchestrator"})");
+    CHECK_FALSE(verbNamed("extension.grant").buildParams(parseFlags({ "extension", "grant" })));
+}
+
+TEST_CASE("extension list prints each extension, a pending one's question indented",
+          "[contour][cli][control][consent]")
+{
+    auto run = Run {};
+    auto channel = ScriptedChannel {
+        R"({"extensions":[{"name":"orchestrator","state":"pending","grantDigest":"9a1b","question":)"
+        R"({"title":"“orchestrator” wants to run in the background","lines":[)"
+        R"({"text":"Module: orchestrator@/x.wasm","weight":0},{"text":"gh-auth (short, in repos): gh auth status","weight":1}]}},)"
+        R"({"name":"stats","state":"running","grantDigest":"77"}]})"s
+    };
+    CHECK(contour::cli::runControlVerb(
+              verbNamed("extension.list"), parseFlags({ "extension", "list" }), channel, run.io())
+          == 0);
+    CHECK(run.out.str()
+          == "orchestrator  pending\n"
+             "  “orchestrator” wants to run in the background\n"
+             "  Module: orchestrator@/x.wasm\n"
+             "  gh-auth (short, in repos): gh auth status\n"
+             "stats  running\n");
+}
+
+TEST_CASE("extension grant says where to confirm", "[contour][cli][control][consent]")
+{
+    SECTION("a window is attached")
+    {
+        auto run = Run {};
+        auto channel = ScriptedChannel { R"({"asked":true,"windows":1})"s };
+        CHECK(contour::cli::runControlVerb(verbNamed("extension.grant"),
+                                           parseFlags({ "extension", "grant", "orchestrator" }),
+                                           channel,
+                                           run.io())
+              == 0);
+        CHECK(run.out.str() == "confirm in a Contour window\n");
+        REQUIRE(channel.calls.size() == 1);
+        CHECK(channel.calls[0].method == "extension.grant");
+    }
+    SECTION("no window is attached")
+    {
+        auto run = Run {};
+        auto channel = ScriptedChannel { R"({"asked":true,"windows":0})"s };
+        CHECK(contour::cli::runControlVerb(verbNamed("extension.grant"),
+                                           parseFlags({ "extension", "grant", "orchestrator" }),
+                                           channel,
+                                           run.io())
+              == 0);
+        CHECK(run.out.str()
+              == "confirm in a Contour window\nno window is attached; open Contour to answer\n");
+    }
+    SECTION("nothing pending fails with the daemon's error")
+    {
+        auto run = Run {};
+        auto channel = ScriptedChannel { std::unexpected(
+            remoteError(vtcontrol::ControlErrorCode::NotPending,
+                        "daemon extension `orchestrator` waits for no answer")) };
+        CHECK(contour::cli::runControlVerb(verbNamed("extension.grant"),
+                                           parseFlags({ "extension", "grant", "orchestrator" }),
+                                           channel,
+                                           run.io())
+              != 0);
+        CHECK(run.err.str().contains("daemon extension `orchestrator` waits for no answer"));
+        CHECK(run.out.str().empty());
     }
 }

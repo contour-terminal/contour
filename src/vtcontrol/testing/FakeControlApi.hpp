@@ -64,6 +64,9 @@ struct FakeControlApi final: public ControlApi
     void handle(CallContext& /*context*/, MoveTabRequest const& request, Completion<EmptyReply> done) override { lastMoveTab = request; done(EmptyReply {}); }
     void handle(CallContext& /*context*/, MovePaneRequest const& request, Completion<MovePaneReply> done) override { lastMovePane = request; done(MovePaneReply {}); }
     void handle(CallContext& /*context*/, SwitchWorkspaceRequest const& request, Completion<SwitchWorkspaceReply> done) override { lastSwitchWorkspace = request; if (switchWorkspaceFailure) done(std::unexpected(*switchWorkspaceFailure)); else done(switchWorkspaceReply); }
+    void handle(CallContext& /*context*/, ExtensionListRequest const& request, Completion<ExtensionListReply> done) override { lastExtensionList = request; done(extensionListReply); }
+    void handle(CallContext& /*context*/, ExtensionGrantRequest const& request, Completion<ExtensionGrantReply> done) override { lastExtensionGrant = request; if (extensionGrantFailure) done(std::unexpected(*extensionGrantFailure)); else done(extensionGrantReply); }
+    void handle(CallContext& /*context*/, ExtensionRevokeRequest const& request, Completion<ExtensionRevokeReply> done) override { lastExtensionRevoke = request; done(ExtensionRevokeReply { .revoked = true }); }
     void handle(CallContext& /*context*/, ObjectRenameRequest const& request, Completion<EmptyReply> done) override { lastRename = request; done(EmptyReply {}); }
     void handle(CallContext& /*context*/, ReportStatusRequest const& request, Completion<EmptyReply> done) override { lastReportStatus = request; done(EmptyReply {}); }
     void handle(CallContext& /*context*/, ClearStatusRequest const& request, Completion<EmptyReply> done) override { lastClearStatus = request; done(EmptyReply {}); }
@@ -95,6 +98,9 @@ struct FakeControlApi final: public ControlApi
     std::optional<ControlError> closeTabFailure; ///< When set, `tab.close` fails with it.
     SwitchWorkspaceReply switchWorkspaceReply;
     std::optional<ControlError> switchWorkspaceFailure; ///< When set, `workspace.switch` fails with it.
+    ExtensionListReply extensionListReply;
+    ExtensionGrantReply extensionGrantReply { .asked = true, .windows = 1 };
+    std::optional<ControlError> extensionGrantFailure; ///< When set, `extension.grant` fails with it.
 
     std::optional<DaemonInfoRequest> lastDaemonInfo;
     std::optional<DaemonUpgradeRequest> lastDaemonUpgrade;
@@ -113,6 +119,9 @@ struct FakeControlApi final: public ControlApi
     std::optional<ClosePaneRequest> lastClosePane;
     std::optional<CloseTabRequest> lastCloseTab;
     std::optional<SwitchWorkspaceRequest> lastSwitchWorkspace;
+    std::optional<ExtensionListRequest> lastExtensionList;
+    std::optional<ExtensionGrantRequest> lastExtensionGrant;
+    std::optional<ExtensionRevokeRequest> lastExtensionRevoke;
     std::optional<ObjectRenameRequest> lastRename;
     std::optional<BlockListRequest> lastBlockList;
     std::optional<BlockReadRequest> lastBlockRead;

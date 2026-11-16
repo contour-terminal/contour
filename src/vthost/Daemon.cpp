@@ -1858,7 +1858,11 @@ int runDaemon(DaemonConfig const& config,
     // drain unwinds drop their subscriptions and waits in it, and its own subscriptions to the host end
     // before the host goes.
     auto controlService =
-        control::ControlService { host, controlServiceConfig(config, wallClock, loop, runtime) };
+        control::ControlService { host, [&] {
+                                     auto service = controlServiceConfig(config, wallClock, loop, runtime);
+                                     service.extensions = host.daemonExtensionControl();
+                                     return service;
+                                 }() };
     // An auto-spawned daemon ends when it has nothing left to serve; a user-started one persists.
     // Declared after `host`, so it unsubscribes while the host is still alive, and before the drain, so
     // it outlives it: a sessionClosed in the loop's last turn leaves a post capturing a watcher queued,

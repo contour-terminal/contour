@@ -16,6 +16,8 @@
 #include <expected>
 #include <filesystem>
 #include <format>
+#include <functional>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -35,6 +37,7 @@
 #include <vthost/WorkspaceGit.hpp>
 #include <vthost/control/ControlService.hpp>
 #include <vthost/testing/ControlHarness.hpp>
+#include <vthost/testing/FakeDaemonWorldHosting.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/SessionModel.hpp>
@@ -2274,4 +2277,159 @@ TEST_CASE("workspace.switch drops the answer of a connection that closed", "[vth
 
     CHECK_FALSE(answer.has_value());
     h.host.noteClientDetached(&window, vthost::DetachKind::Dropped);
+}
+
+namespace
+{
+/// A host whose daemon world is a fake holding the orchestrator's question open, and a control service whose
+/// `extension.*` verbs reach it the only way the daemon wires them: through the host's
+/// IDaemonExtensionControl.
+struct ExtensionControlHarness
+{
+    ExtensionControlHarness()
+    {
+        world->pending = { vthost::DaemonExtensionRequest {
+            .name = "orchestrator",
+            .grantDigest = "9a1b",
+            .title = "“orchestrator” wants to run in the background",
+            .lines = { { "Module: orchestrator@/x.wasm", uint8_t { 0 } },
+                       { "gh-auth (short, in repos): gh auth status", uint8_t { 1 } } } } };
+        world->others = { vthost::DaemonExtensionListing { .name = "stats",
+                                                           .state = vthost::DaemonExtensionState::Running,
+                                                           .grantDigest = "77",
+                                                           .pending = {} } };
+    }
+
+    /// @return Every entry the daemon world journalled that records an answer.
+    [[nodiscard]] std::vector<std::string> answers() const
+    {
+        auto recorded = std::vector<std::string> {};
+        std::ranges::copy_if(*journal, std::back_inserter(recorded), [](std::string const& entry) {
+            return entry.starts_with("answer");
+        });
+        return recorded;
+    }
+
+    core::net::testing::ScriptedBackend source;
+    core::net::EventLoop loop { source };
+    core::platform::ManualWallClock wall {};
+    std::shared_ptr<std::vector<std::string>> journal = std::make_shared<std::vector<std::string>>();
+    std::shared_ptr<vthost::testing::FakeDaemonWorldHosting> world =
+        std::make_shared<vthost::testing::FakeDaemonWorldHosting>(
+            journal, [](std::function<void()> const& /*job*/) {});
+    vthost::SessionHost host { loop,
+                               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                   return std::make_unique<vtpty::MockPty>(size);
+                               },
+                               vtbackend::Settings {},
+                               core::defaultEnvironment(),
+                               vthost::SessionHostConfig {
+                                   .pumping = vthost::SessionPumping::Manual,
+                                   .daemonWorld = [world = world](vthost::DaemonWorldEvents const& /*events*/,
+                                                                  vthost::OwnerPost const& /*post*/) {
+                                       return world;
+                                   } } };
+    ControlService service { host,
+                             vthost::control::ControlServiceConfig { .version = "9.8.7",
+                                                                     .socketPath = "/run/test.sock",
+                                                                     .clock = wall,
+                                                                     .extensions =
+                                                                         host.daemonExtensionControl() } };
+    FakeCallContext context;
+};
+} // namespace
+
+TEST_CASE("extension.list shows each extension, and the pending one's question", "[vthost][control][consent]")
+{
+    auto h = ExtensionControlHarness {};
+    auto const listed =
+        callSync<vtcontrol::ExtensionListReply>(h.service, h.context, vtcontrol::ExtensionListRequest {});
+    REQUIRE(listed.has_value());
+    REQUIRE(listed->extensions.size() == 2);
+    auto const& pending = listed->extensions[0];
+    CHECK(pending.name == "orchestrator");
+    CHECK(pending.state == "pending");
+    CHECK(pending.grantDigest == "9a1b");
+    REQUIRE(pending.question.has_value());
+    CHECK(pending.question->title == "“orchestrator” wants to run in the background");
+    REQUIRE(pending.question->lines.size() == 2);
+    CHECK(pending.question->lines[1].text == "gh-auth (short, in repos): gh auth status");
+    CHECK(pending.question->lines[1].weight == 1);
+    CHECK(listed->extensions[1].name == "stats");
+    CHECK(listed->extensions[1].state == "running");
+    CHECK_FALSE(listed->extensions[1].question.has_value());
+}
+
+TEST_CASE("extension.grant asks the windows again and grants nothing", "[vthost][control][consent]")
+{
+    auto h = ExtensionControlHarness {};
+    SECTION("a pending extension is asked of every window; none is attached here")
+    {
+        auto const granted = callSync<vtcontrol::ExtensionGrantReply>(
+            h.service, h.context, vtcontrol::ExtensionGrantRequest { .name = "orchestrator" });
+        REQUIRE(granted.has_value());
+        CHECK(granted->asked);
+        CHECK(granted->windows == 0);
+        CHECK(h.world->pending.size() == 1);
+    }
+    SECTION("nothing pending is notPending")
+    {
+        auto const granted = callSync<vtcontrol::ExtensionGrantReply>(
+            h.service, h.context, vtcontrol::ExtensionGrantRequest { .name = "stats" });
+        REQUIRE_FALSE(granted.has_value());
+        CHECK(granted.error().code == ControlErrorCode::NotPending);
+        CHECK(granted.error().message.contains("stats"));
+    }
+}
+
+TEST_CASE("extension.revoke forgets the grant of a named extension", "[vthost][control][consent]")
+{
+    auto h = ExtensionControlHarness {};
+    auto const revoked = callSync<vtcontrol::ExtensionRevokeReply>(
+        h.service, h.context, vtcontrol::ExtensionRevokeRequest { .name = "stats" });
+    REQUIRE(revoked.has_value());
+    CHECK(revoked->revoked);
+    CHECK(std::ranges::find(*h.journal, std::string { "revoke stats" }) != h.journal->end());
+
+    auto const unknown = callSync<vtcontrol::ExtensionRevokeReply>(
+        h.service, h.context, vtcontrol::ExtensionRevokeRequest { .name = "nope" });
+    REQUIRE_FALSE(unknown.has_value());
+    CHECK(unknown.error().code == ControlErrorCode::NotFound);
+}
+
+TEST_CASE("no extension.* verb records an answer", "[vthost][control][consent]")
+{
+    // The control socket is reachable from every pane: an answer is recorded only with a ConsentTicket, which
+    // only a window's connection is given.
+    auto h = ExtensionControlHarness {};
+    std::ignore =
+        callSync<vtcontrol::ExtensionListReply>(h.service, h.context, vtcontrol::ExtensionListRequest {});
+    std::ignore = callSync<vtcontrol::ExtensionGrantReply>(
+        h.service, h.context, vtcontrol::ExtensionGrantRequest { .name = "orchestrator" });
+    std::ignore = callSync<vtcontrol::ExtensionGrantReply>(
+        h.service, h.context, vtcontrol::ExtensionGrantRequest { .name = "stats" });
+    std::ignore = callSync<vtcontrol::ExtensionRevokeReply>(
+        h.service, h.context, vtcontrol::ExtensionRevokeRequest { .name = "orchestrator" });
+    CHECK(h.answers().empty());
+    CHECK(h.world->pending.size() == 1);
+}
+
+TEST_CASE("without daemon-world hosting every extension.* verb is unsupported", "[vthost][control][consent]")
+{
+    auto h = ControlHarness {};
+    CHECK(h.host.daemonExtensionControl() == nullptr);
+    CHECK(callSync<vtcontrol::ExtensionListReply>(h.service, h.context, vtcontrol::ExtensionListRequest {})
+              .error()
+              .code
+          == ControlErrorCode::Unsupported);
+    CHECK(callSync<vtcontrol::ExtensionGrantReply>(
+              h.service, h.context, vtcontrol::ExtensionGrantRequest { .name = "orchestrator" })
+              .error()
+              .code
+          == ControlErrorCode::Unsupported);
+    CHECK(callSync<vtcontrol::ExtensionRevokeReply>(
+              h.service, h.context, vtcontrol::ExtensionRevokeRequest { .name = "orchestrator" })
+              .error()
+              .code
+          == ControlErrorCode::Unsupported);
 }

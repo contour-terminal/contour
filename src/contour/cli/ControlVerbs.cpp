@@ -300,6 +300,39 @@ namespace
         });
     }
 
+    /// `extension list`: one `NAME  STATE` line per extension, a pending one's question beneath it.
+    void humanExtensionList(std::string_view replyJson, std::ostream& out)
+    {
+        printDecoded<vtcontrol::ExtensionListReply>(replyJson, out, [&](auto const& reply) {
+            for (auto const& extension: reply.extensions)
+            {
+                out << std::format("{}  {}\n", extension.name, extension.state);
+                if (!extension.question)
+                    continue;
+                out << std::format("  {}\n", extension.question->title);
+                for (auto const& line: extension.question->lines)
+                    out << std::format("  {}\n", line.text);
+            }
+        });
+    }
+
+    /// `extension grant`: where the user answers, and that someone must open a window when none is attached.
+    void humanExtensionGrant(std::string_view replyJson, std::ostream& out)
+    {
+        printDecoded<vtcontrol::ExtensionGrantReply>(replyJson, out, [&](auto const& reply) {
+            out << "confirm in a Contour window\n";
+            if (reply.windows == 0)
+                out << "no window is attached; open Contour to answer\n";
+        });
+    }
+
+    void humanExtensionRevoke(std::string_view replyJson, std::ostream& out)
+    {
+        printDecoded<vtcontrol::ExtensionRevokeReply>(replyJson, out, [&](auto const& /*reply*/) {
+            out << "revoked; it asks again when it next starts\n";
+        });
+    }
+
     void humanBlockRead(std::string_view replyJson, std::ostream& out)
     {
         printDecoded<vtcontrol::BlockReadReply>(
@@ -671,6 +704,27 @@ namespace
         return vtcontrol::encodeJson(vtcontrol::ApiDescribeRequest { .name = std::string { words[0] } });
     }
 
+    /// @return The request of an `extension` verb that names one extension, `{"name":NAME}`.
+    template <typename Request>
+    [[nodiscard]] Params buildExtensionNamed(CLI::FlagStore const& flags, std::string_view path)
+    {
+        auto const& words = VerbFlags { flags, path }.words();
+        if (words.size() != 1)
+            return std::unexpected(
+                std::format("extension {} takes exactly one NAME", path.substr(path.find('.') + 1)));
+        return vtcontrol::encodeJson(Request { .name = std::string { words[0] } });
+    }
+
+    [[nodiscard]] Params buildExtensionGrant(CLI::FlagStore const& flags)
+    {
+        return buildExtensionNamed<vtcontrol::ExtensionGrantRequest>(flags, "extension.grant");
+    }
+
+    [[nodiscard]] Params buildExtensionRevoke(CLI::FlagStore const& flags)
+    {
+        return buildExtensionNamed<vtcontrol::ExtensionRevokeRequest>(flags, "extension.revoke");
+    }
+
     [[nodiscard]] Params buildApiCall(CLI::FlagStore const& flags)
     {
         auto const& words = VerbFlags { flags, "api.call" }.words();
@@ -1008,6 +1062,37 @@ namespace
                 .buildParams = buildSwitch,
                 .printHuman = humanSwitch,
                 .replyExitStatus = switchExitStatus,
+            },
+            ControlVerb {
+                .path = "extension.list",
+                .method = "extension.list",
+                .usage = "extension list",
+                .summary = "Lists the daemon's extensions, and the question each pending one asks.",
+                .options = [] { return withConnectionOptions({}); },
+                .verbatim = std::nullopt,
+                .buildParams = buildNothing,
+                .printHuman = humanExtensionList,
+            },
+            ControlVerb {
+                .path = "extension.grant",
+                .method = "extension.grant",
+                .usage = "extension grant NAME",
+                .summary = "Asks the attached Contour windows again for NAME's pending grant; only a window "
+                           "grants it.",
+                .options = [] { return withConnectionOptions({}); },
+                .verbatim = CLI::Verbatim { "NAME", "The daemon extension." },
+                .buildParams = buildExtensionGrant,
+                .printHuman = humanExtensionGrant,
+            },
+            ControlVerb {
+                .path = "extension.revoke",
+                .method = "extension.revoke",
+                .usage = "extension revoke NAME",
+                .summary = "Forgets NAME's grant and stops it; it asks again.",
+                .options = [] { return withConnectionOptions({}); },
+                .verbatim = CLI::Verbatim { "NAME", "The daemon extension." },
+                .buildParams = buildExtensionRevoke,
+                .printHuman = humanExtensionRevoke,
             },
             ControlVerb {
                 .path = "api.list",
@@ -1443,7 +1528,8 @@ ExitStatus exitStatusFor(vtcontrol::ControlErrorCode code) noexcept
         case ControlErrorCode::Unsupported:
         case ControlErrorCode::Forbidden:
         case ControlErrorCode::Failed:
-        case ControlErrorCode::LimitReached: break;
+        case ControlErrorCode::LimitReached:
+        case ControlErrorCode::NotPending: break;
     }
     return ExitStatus::Failed;
 }
@@ -1502,6 +1588,8 @@ std::span<ControlVerbGroup const> controlVerbGroups()
         ControlVerbGroup { "workspace", "Opens, closes and reorders workspaces." },
         ControlVerbGroup { "tab", "Moves tabs." },
         ControlVerbGroup { "api", "Explores and calls the control API." },
+        ControlVerbGroup { "extension",
+                           "Lists, asks for and revokes the grants of the daemon's extensions." },
     };
     return Groups;
 }

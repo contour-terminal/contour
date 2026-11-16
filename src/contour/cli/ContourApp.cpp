@@ -88,6 +88,7 @@
     #include <vtextension/FileLocker.hpp>
     #include <vtextension/wasm/DefaultBackend.hpp>
     #include <vtextension/wasm/WasmRuntime.hpp>
+    #include <vthost/DaemonConsentKey.hpp>
     #include <vthost/DaemonExtensions.hpp>
     #include <vthost/DaemonWorldExtensions.hpp>
 #endif

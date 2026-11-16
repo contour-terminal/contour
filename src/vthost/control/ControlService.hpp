@@ -66,6 +66,9 @@ struct ControlServiceConfig
     /// How `daemon.upgrade` starts an upgrade; empty for a service of no daemon, which refuses it
     /// `notSupported`.
     UpgradeStarter upgrade {};
+    /// What the `extension.*` verbs reach: never anything that records an answer. Borrowed; null for a daemon
+    /// without daemon-scoped extensions, which answers every `extension.*` verb unsupported.
+    IDaemonExtensionControl* extensions = nullptr;
 };
 
 /// Implements the control API over a SessionHost: one method per catalog row.
@@ -112,6 +115,9 @@ class ControlService final:
     void handle(vtcontrol::CallContext& context, vtcontrol::MoveTabRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::MovePaneRequest const& request, vtcontrol::Completion<vtcontrol::MovePaneReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::SwitchWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::SwitchWorkspaceReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::ExtensionListRequest const& request, vtcontrol::Completion<vtcontrol::ExtensionListReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::ExtensionGrantRequest const& request, vtcontrol::Completion<vtcontrol::ExtensionGrantReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::ExtensionRevokeRequest const& request, vtcontrol::Completion<vtcontrol::ExtensionRevokeReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ObjectRenameRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ReportStatusRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ClearStatusRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;

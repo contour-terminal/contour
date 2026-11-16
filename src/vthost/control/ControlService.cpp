@@ -1610,3 +1610,118 @@ void ControlService::tabClosed(WorkspaceId workspace, TabId tab, int /*index*/)
 // }}}
 
 } // namespace vthost::control
+
+// ---------------------------------------------------------------------------
+// Daemon-scoped extensions: listed, asked for again and revoked; never granted from here.
+
+namespace vthost::control
+{
+
+namespace
+{
+    /// How `extension.list` names a state.
+    struct ExtensionStateName
+    {
+        DaemonExtensionState state;
+        std::string_view name;
+    };
+
+    inline constexpr auto ExtensionStateNames = std::array {
+        ExtensionStateName { .state = DaemonExtensionState::Stopped, .name = "stopped" },
+        ExtensionStateName { .state = DaemonExtensionState::Pending, .name = "pending" },
+        ExtensionStateName { .state = DaemonExtensionState::Denied, .name = "denied" },
+        ExtensionStateName { .state = DaemonExtensionState::Running, .name = "running" },
+        ExtensionStateName { .state = DaemonExtensionState::Disabled, .name = "disabled" },
+    };
+
+    /// @return The error of an `extension.*` verb on a daemon without daemon-scoped extensions.
+    [[nodiscard]] ControlError noDaemonExtensions()
+    {
+        return ControlError { .code = ControlErrorCode::Unsupported,
+                              .message = "this daemon runs no daemon extensions",
+                              .candidates = {} };
+    }
+
+    /// @return @p listing as `extension.list` shows it.
+    [[nodiscard]] vtcontrol::ExtensionInfo extensionInfoOf(DaemonExtensionListing const& listing)
+    {
+        auto const named = std::ranges::find(ExtensionStateNames, listing.state, &ExtensionStateName::state);
+        auto info = vtcontrol::ExtensionInfo {
+            .name = listing.name,
+            .state = std::string { named != ExtensionStateNames.end() ? named->name : "stopped" },
+            .grantDigest = listing.grantDigest,
+            .question = std::nullopt,
+        };
+        if (listing.pending)
+        {
+            auto question = vtcontrol::ExtensionQuestion { .title = listing.pending->title, .lines = {} };
+            for (auto const& [text, weight]: listing.pending->lines)
+                question.lines.push_back(vtcontrol::ExtensionQuestionLine { .text = text, .weight = weight });
+            info.question = std::move(question);
+        }
+        return info;
+    }
+} // namespace
+
+void ControlService::handle(vtcontrol::CallContext& /*context*/,
+                            vtcontrol::ExtensionListRequest const& /*request*/,
+                            vtcontrol::Completion<vtcontrol::ExtensionListReply> done)
+{
+    if (_config.extensions == nullptr)
+    {
+        done(std::unexpected(noDaemonExtensions()));
+        return;
+    }
+    auto reply = vtcontrol::ExtensionListReply {};
+    for (auto const& listing: _config.extensions->list())
+        reply.extensions.push_back(extensionInfoOf(listing));
+    done(std::move(reply));
+}
+
+void ControlService::handle(vtcontrol::CallContext& /*context*/,
+                            vtcontrol::ExtensionGrantRequest const& request,
+                            vtcontrol::Completion<vtcontrol::ExtensionGrantReply> done)
+{
+    if (_config.extensions == nullptr)
+    {
+        done(std::unexpected(noDaemonExtensions()));
+        return;
+    }
+    // Asks the windows again, and records nothing: every pane can reach this socket, so a grant completes
+    // only as a confirmation in a Contour window.
+    auto const asked = _config.extensions->ask(request.name);
+    if (asked.outcome == AskOutcome::NotPending)
+    {
+        done(std::unexpected(
+            ControlError { .code = ControlErrorCode::NotPending,
+                           .message = std::format("daemon extension `{}` waits for no answer", request.name),
+                           .candidates = {} }));
+        return;
+    }
+    done(vtcontrol::ExtensionGrantReply { .asked = true, .windows = static_cast<uint32_t>(asked.windows) });
+}
+
+void ControlService::handle(vtcontrol::CallContext& /*context*/,
+                            vtcontrol::ExtensionRevokeRequest const& request,
+                            vtcontrol::Completion<vtcontrol::ExtensionRevokeReply> done)
+{
+    if (_config.extensions == nullptr)
+    {
+        done(std::unexpected(noDaemonExtensions()));
+        return;
+    }
+    auto const listings = _config.extensions->list();
+    if (std::ranges::none_of(
+            listings, [&](DaemonExtensionListing const& listing) { return listing.name == request.name; }))
+    {
+        done(std::unexpected(
+            ControlError { .code = ControlErrorCode::NotFound,
+                           .message = std::format("no daemon extension is called `{}`", request.name),
+                           .candidates = {} }));
+        return;
+    }
+    _config.extensions->revoke(request.name);
+    done(vtcontrol::ExtensionRevokeReply { .revoked = true });
+}
+
+} // namespace vthost::control

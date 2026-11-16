@@ -38,6 +38,9 @@ namespace
         void handle(CallContext& /*context*/, MoveTabRequest const& /*request*/, Completion<EmptyReply> done) override { refuse(done); }
         void handle(CallContext& /*context*/, MovePaneRequest const& /*request*/, Completion<MovePaneReply> done) override { refuse(done); }
         void handle(CallContext& /*context*/, SwitchWorkspaceRequest const& /*request*/, Completion<SwitchWorkspaceReply> done) override { refuse(done); }
+        void handle(CallContext& /*context*/, ExtensionListRequest const& /*request*/, Completion<ExtensionListReply> done) override { refuse(done); }
+        void handle(CallContext& /*context*/, ExtensionGrantRequest const& /*request*/, Completion<ExtensionGrantReply> done) override { refuse(done); }
+        void handle(CallContext& /*context*/, ExtensionRevokeRequest const& /*request*/, Completion<ExtensionRevokeReply> done) override { refuse(done); }
         void handle(CallContext& /*context*/, ObjectRenameRequest const& /*request*/, Completion<EmptyReply> done) override { refuse(done); }
         void handle(CallContext& /*context*/, ReportStatusRequest const& /*request*/, Completion<EmptyReply> done) override { refuse(done); }
         void handle(CallContext& /*context*/, ClearStatusRequest const& /*request*/, Completion<EmptyReply> done) override { refuse(done); }

@@ -50,6 +50,9 @@ pane.
 | `contour switch [--workspace W] (--to-name N \| --to-host H \| --to-workspace W2) [--to-workspace W2]` | Asks one window to switch to another workspace or daemon, in place. See [Switching a window](#switching-a-window). |
 | `contour wait [BLOCK] [--pane P] [--timeout SECONDS]` | Waits for a block to finish and exits with the command's own status. |
 | `contour events [--follow] [--kind K[,K...]] [--pane P]` | Prints the first matching event and exits, or with `--follow` every event until Ctrl+C (exit status 130). |
+| `contour extension list` | Lists the daemon's extensions with their state (`running`, `pending`, `denied`, `disabled`, `stopped`), and beneath a pending one the question its windows ask. |
+| `contour extension grant NAME` | Asks the attached Contour windows again for `NAME`'s pending grant; only a window grants it. Fails with `notPending` when nothing is pending. See [Daemon extensions: granting](extensions.md#daemon-extensions-granting). |
+| `contour extension revoke NAME` | Forgets `NAME`'s grant and stops it; it asks again. |
 | `contour api list [-q]` | Lists the API's methods and events; `-q` prints names only. |
 | `contour api describe NAME` | Prints one method's or event's schemas and examples. |
 | `contour api call NAME [JSON\|@FILE\|-]` | Calls any method with the given request, sent as is and without context. The output is indented on a terminal and one line otherwise. |

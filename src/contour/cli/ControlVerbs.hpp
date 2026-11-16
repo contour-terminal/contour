@@ -211,7 +211,7 @@ using HostLookup = std::function<std::expected<config::HostEntry, std::string>(s
 
 /// @param code What the daemon answered.
 /// @return BadRequest is BadUsage; NotFound and Ambiguous are TargetNotFound; everything else
-///         (Forbidden and LimitReached included) is Failed.
+///         (Forbidden, LimitReached and NotPending included) is Failed.
 [[nodiscard]] ExitStatus exitStatusFor(vtcontrol::ControlErrorCode code) noexcept;
 
 /// @param failure Why a call did not get its reply.
