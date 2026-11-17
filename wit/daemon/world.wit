@@ -280,10 +280,11 @@ interface host {
     /// Takes the actions the user invoked since the last call.
     actions-take: func() -> result<list<action>, host-error>;
     /// Sets the extension's summary: a short line for a status line, and its detail. The short line is at
-    /// most 120 characters (code points) and the detail at most 16 KiB; past either the call is `limit` and
-    /// the previous summary stays. The host shows both neutralised: every control, bidirectional,
-    /// zero-width or otherwise disguising character as its code point (`<U+001B>`); the detail's line
-    /// breaks (`\n`) are kept.
+    /// most 120 characters (code points) and the detail at most 16 KiB, both counted as given; past either
+    /// the call is `limit` and the previous summary stays. The host shows both neutralised: every control,
+    /// bidirectional, zero-width or otherwise disguising character as its code point (`<U+001B>`); the
+    /// detail's line breaks (`\n`) are kept. Neutralising can make a text up to eight times longer, so a
+    /// detail as shown is at most 128 KiB.
     summary-set: func(short: string, detail: string) -> result<_, host-error>;
     /// Shows a pane the extension owns in the origin's window.
     pane-reveal: func(pane: string, origin: origin) -> result<_, host-error>;

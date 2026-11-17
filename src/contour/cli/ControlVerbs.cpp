@@ -333,6 +333,62 @@ namespace
         });
     }
 
+    /// `extension status`: the summary the extension last published, then its detail.
+    void humanExtensionStatus(std::string_view replyJson, std::ostream& out)
+    {
+        printDecoded<vtcontrol::ExtensionStatusReply>(replyJson, out, [&](auto const& reply) {
+            if (!reply.summary.empty())
+                out << reply.summary << '\n';
+            if (reply.detail.empty())
+                return;
+            out << reply.detail;
+            if (!reply.detail.ends_with('\n'))
+                out << '\n';
+        });
+    }
+
+    /// What `extension status` says of an extension in one state, and the status it exits with.
+    struct ExtensionStateNote
+    {
+        std::string_view state;
+        std::string_view note; ///< A format of the extension's name and its problem; empty for none.
+        ExitStatus status;
+    };
+
+    inline constexpr auto ExtensionStateNotes = std::array {
+        ExtensionStateNote { .state = "running", .note = "", .status = ExitStatus::Ok },
+        ExtensionStateNote { .state = "stopped", .note = "{} is not running", .status = ExitStatus::Failed },
+        ExtensionStateNote { .state = "pending",
+                             .note = "{} waits for its grant in a Contour window",
+                             .status = ExitStatus::Failed },
+        ExtensionStateNote {
+            .state = "denied", .note = "{} was denied its grant", .status = ExitStatus::Failed },
+        ExtensionStateNote { .state = "disabled",
+                             .note = "{} faulted too often, and is disabled",
+                             .status = ExitStatus::Failed },
+        ExtensionStateNote { .state = "failed", .note = "{} failed: {}", .status = ExitStatus::Failed },
+    };
+
+    /// `extension status` succeeds only for an extension that runs; for any other it says why on @p err.
+    int extensionStatusExitStatus(std::string_view replyJson, std::ostream& err)
+    {
+        auto const reply = decodeReply<vtcontrol::ExtensionStatusReply>(replyJson);
+        if (!reply)
+        {
+            err << "Error: the daemon's reply could not be read: " << replyJson << '\n';
+            return exitCode(ExitStatus::Failed);
+        }
+        auto const row = std::ranges::find(ExtensionStateNotes, reply->state, &ExtensionStateNote::state);
+        if (row == ExtensionStateNotes.end())
+        {
+            err << std::format("{} is {}\n", reply->name, reply->state);
+            return exitCode(ExitStatus::Failed);
+        }
+        if (!row->note.empty())
+            err << std::vformat(row->note, std::make_format_args(reply->name, reply->problem)) << '\n';
+        return exitCode(row->status);
+    }
+
     void humanBlockRead(std::string_view replyJson, std::ostream& out)
     {
         printDecoded<vtcontrol::BlockReadReply>(
@@ -725,6 +781,11 @@ namespace
         return buildExtensionNamed<vtcontrol::ExtensionRevokeRequest>(flags, "extension.revoke");
     }
 
+    [[nodiscard]] Params buildExtensionStatus(CLI::FlagStore const& flags)
+    {
+        return buildExtensionNamed<vtcontrol::ExtensionStatusRequest>(flags, "extension.status");
+    }
+
     [[nodiscard]] Params buildApiCall(CLI::FlagStore const& flags)
     {
         auto const& words = VerbFlags { flags, "api.call" }.words();
@@ -1093,6 +1154,18 @@ namespace
                 .verbatim = CLI::Verbatim { "NAME", "The daemon extension." },
                 .buildParams = buildExtensionRevoke,
                 .printHuman = humanExtensionRevoke,
+            },
+            ControlVerb {
+                .path = "extension.status",
+                .method = "extension.status",
+                .usage = "extension status NAME",
+                .summary =
+                    "Prints what NAME last published of itself; fails, saying why, when it does not run.",
+                .options = [] { return withConnectionOptions({}); },
+                .verbatim = CLI::Verbatim { "NAME", "The daemon extension." },
+                .buildParams = buildExtensionStatus,
+                .printHuman = humanExtensionStatus,
+                .replyExitStatus = extensionStatusExitStatus,
             },
             ControlVerb {
                 .path = "api.list",

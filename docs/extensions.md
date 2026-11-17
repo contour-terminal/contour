@@ -439,6 +439,7 @@ asked.
 
 ```sh
 contour extension list            # every daemon extension, its state, and a pending one's question
+contour extension status NAME     # what it shows of itself (see below)
 contour extension grant NAME      # asks the attached windows again; prints "confirm in a Contour window"
 contour extension revoke NAME     # forgets the grant and stops the extension; it asks again
 ```
@@ -449,6 +450,42 @@ does not run is asked when it is next started. A refusal is remembered for that 
 directories, in the daemon's own grants file (`extension-grants.daemon-scoped.txt` beside the configuration).
 That file is the daemon's: it is read as the daemon starts and written by it alone, so an edit made while the
 daemon runs counts for nothing and is overwritten by its next answer.
+
+### Daemon extensions: what they show
+
+A daemon extension shows itself with `summary-set(short, detail)`: a one-line summary of at most 120
+characters and a detail of at most 16 KiB, both counted as the extension gives them; a longer one is refused
+with `limit`, and the previous summary stays. Contour neutralizes both before showing them: control, bidi and
+zero-width characters read as `<U+XXXX>`, and the detail keeps its line breaks. Neutralizing can make a text
+up to eight times longer (a one-byte control character becomes eight bytes), so a detail as shown is at most
+128 KiB.
+
+The summary is a status-line segment, `{DaemonExtension:<name>}`, in any profile of a session the daemon
+hosts. Every attached window shows it, and it is redrawn as the extension publishes or changes state, once per
+daemon loop turn however often it does. It is at most 40 columns wide, cut at its end with `…` past that;
+`{DaemonExtension:Name=<name>,MaxWidth=<columns>}` sets another width. A window's own sessions, which no daemon
+hosts, show nothing there.
+
+```yaml
+profiles:
+    main:
+        status_line:
+            indicator:
+                right: "{DaemonExtension:orchestrator} {Clock}"
+```
+
+What the segment shows follows from where the extension stands: its summary while it runs; `<name> disabled`
+once it faulted too often; `<name> failed` when it was granted and started but cannot run (its module does
+not load, say), and `contour extension status` says why; nothing while it is stopped, waiting for its grant,
+or denied. A revoked extension's summary goes with its grant.
+
+```sh
+contour extension status NAME     # its summary and detail; why it failed, if it did
+```
+
+`extension status` prints the summary and then the detail, and exits 0 while the extension runs. One that does
+not run exits 1 and says so on standard error: `NAME is not running`, `NAME failed: <why>`, or what it waits
+for.
 
 [wit]: https://github.com/contour-terminal/contour/tree/master/wit/statusline
 [daemon-wit]: https://github.com/contour-terminal/contour/tree/master/wit/daemon

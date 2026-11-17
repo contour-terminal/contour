@@ -2415,6 +2415,66 @@ TEST_CASE("no extension.* verb records an answer", "[vthost][control][consent]")
     CHECK(h.world->pending.size() == 1);
 }
 
+TEST_CASE("extension.status shows what an extension published of itself", "[vthost][control][summary]")
+{
+    auto h = ExtensionControlHarness {};
+    auto const statusOf = [&](std::string name) {
+        return callSync<vtcontrol::ExtensionStatusReply>(
+            h.service, h.context, vtcontrol::ExtensionStatusRequest { .name = std::move(name) });
+    };
+
+    SECTION("a running one: its summary, and its detail whole at its largest as shown (128 KiB)")
+    {
+        // 16 KiB published, each byte a control character shown as `<U+XXXX>`: well within a reply.
+        auto detail = std::string(std::size_t { 16 << 10 } * 8, 'x');
+        detail[100] = '\n';
+        h.world->statuses.emplace(
+            "stats",
+            vthost::DaemonExtensionStatus { .state = vthost::DaemonExtensionState::Running,
+                                            .summary = "agents 1/4",
+                                            .detail = detail,
+                                            .problem = {} });
+        auto const status = statusOf("stats");
+        REQUIRE(status.has_value());
+        CHECK(status->name == "stats");
+        CHECK(status->state == "running");
+        CHECK(status->summary == "agents 1/4");
+        CHECK(status->detail == detail);
+        CHECK(status->problem.empty());
+    }
+
+    SECTION("one not running is stopped, its detail empty")
+    {
+        h.world->statuses.emplace("stats", vthost::DaemonExtensionStatus {});
+        auto const status = statusOf("stats");
+        REQUIRE(status.has_value());
+        CHECK(status->state == "stopped");
+        CHECK(status->summary.empty());
+        CHECK(status->detail.empty());
+    }
+
+    SECTION("one that could not run is failed, and says why")
+    {
+        h.world->statuses.emplace(
+            "stats",
+            vthost::DaemonExtensionStatus { .state = vthost::DaemonExtensionState::Failed,
+                                            .summary = {},
+                                            .detail = {},
+                                            .problem = "daemon.extensions.stats: its module does not load" });
+        auto const status = statusOf("stats");
+        REQUIRE(status.has_value());
+        CHECK(status->state == "failed");
+        CHECK(status->problem == "daemon.extensions.stats: its module does not load");
+    }
+
+    SECTION("an unknown name is not found")
+    {
+        auto const status = statusOf("nope");
+        REQUIRE_FALSE(status.has_value());
+        CHECK(status.error().code == ControlErrorCode::NotFound);
+    }
+}
+
 TEST_CASE("without daemon-world hosting every extension.* verb is unsupported", "[vthost][control][consent]")
 {
     auto h = ControlHarness {};
@@ -2430,6 +2490,11 @@ TEST_CASE("without daemon-world hosting every extension.* verb is unsupported", 
           == ControlErrorCode::Unsupported);
     CHECK(callSync<vtcontrol::ExtensionRevokeReply>(
               h.service, h.context, vtcontrol::ExtensionRevokeRequest { .name = "orchestrator" })
+              .error()
+              .code
+          == ControlErrorCode::Unsupported);
+    CHECK(callSync<vtcontrol::ExtensionStatusReply>(
+              h.service, h.context, vtcontrol::ExtensionStatusRequest { .name = "orchestrator" })
               .error()
               .code
           == ControlErrorCode::Unsupported);

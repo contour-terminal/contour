@@ -1632,7 +1632,23 @@ namespace
         ExtensionStateName { .state = DaemonExtensionState::Denied, .name = "denied" },
         ExtensionStateName { .state = DaemonExtensionState::Running, .name = "running" },
         ExtensionStateName { .state = DaemonExtensionState::Disabled, .name = "disabled" },
+        ExtensionStateName { .state = DaemonExtensionState::Failed, .name = "failed" },
     };
+
+    /// @return How `extension.*` names @p state.
+    [[nodiscard]] std::string stateNameOf(DaemonExtensionState state)
+    {
+        auto const named = std::ranges::find(ExtensionStateNames, state, &ExtensionStateName::state);
+        return std::string { named != ExtensionStateNames.end() ? named->name : "stopped" };
+    }
+
+    /// @return The error of an `extension.*` verb naming an extension the daemon does not have.
+    [[nodiscard]] ControlError noSuchExtension(std::string_view name)
+    {
+        return ControlError { .code = ControlErrorCode::NotFound,
+                              .message = std::format("no daemon extension is called `{}`", name),
+                              .candidates = {} };
+    }
 
     /// @return The error of an `extension.*` verb on a daemon without daemon-scoped extensions.
     [[nodiscard]] ControlError noDaemonExtensions()
@@ -1645,10 +1661,9 @@ namespace
     /// @return @p listing as `extension.list` shows it.
     [[nodiscard]] vtcontrol::ExtensionInfo extensionInfoOf(DaemonExtensionListing const& listing)
     {
-        auto const named = std::ranges::find(ExtensionStateNames, listing.state, &ExtensionStateName::state);
         auto info = vtcontrol::ExtensionInfo {
             .name = listing.name,
-            .state = std::string { named != ExtensionStateNames.end() ? named->name : "stopped" },
+            .state = stateNameOf(listing.state),
             .grantDigest = listing.grantDigest,
             .question = std::nullopt,
         };
@@ -1714,14 +1729,33 @@ void ControlService::handle(vtcontrol::CallContext& /*context*/,
     if (std::ranges::none_of(
             listings, [&](DaemonExtensionListing const& listing) { return listing.name == request.name; }))
     {
-        done(std::unexpected(
-            ControlError { .code = ControlErrorCode::NotFound,
-                           .message = std::format("no daemon extension is called `{}`", request.name),
-                           .candidates = {} }));
+        done(std::unexpected(noSuchExtension(request.name)));
         return;
     }
     _config.extensions->revoke(request.name);
     done(vtcontrol::ExtensionRevokeReply { .revoked = true });
+}
+
+void ControlService::handle(vtcontrol::CallContext& /*context*/,
+                            vtcontrol::ExtensionStatusRequest const& request,
+                            vtcontrol::Completion<vtcontrol::ExtensionStatusReply> done)
+{
+    if (_config.extensions == nullptr)
+    {
+        done(std::unexpected(noDaemonExtensions()));
+        return;
+    }
+    auto status = _config.extensions->status(request.name);
+    if (!status)
+    {
+        done(std::unexpected(noSuchExtension(request.name)));
+        return;
+    }
+    done(vtcontrol::ExtensionStatusReply { .name = request.name,
+                                           .state = stateNameOf(status->state),
+                                           .summary = std::move(status->summary),
+                                           .detail = std::move(status->detail),
+                                           .problem = std::move(status->problem) });
 }
 
 } // namespace vthost::control

@@ -442,6 +442,14 @@ inline constexpr auto Methods = std::tuple {
         R"({"name":"orchestrator"})",
         R"({"revoked":true})",
     },
+    Method<ExtensionStatusRequest, ExtensionStatusReply> {
+        "extension.status",
+        "Show what a daemon extension last published of itself, and why it failed if it did.",
+        Permission::Read,
+        Exposure::SocketOnly,
+        R"({"name":"orchestrator"})",
+        R"({"name":"orchestrator","state":"running","summary":"⬢ agents 2/4","detail":"#2390 running\n#2391 blocked","problem":""})",
+    },
     Method<ApiListRequest, ApiListReply> {
         "api.list",
         "List the methods and events of this API.",

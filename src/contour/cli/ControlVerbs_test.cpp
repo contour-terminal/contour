@@ -1172,7 +1172,8 @@ TEST_CASE("a reply is decoded without a byte past its end", "[contour][cli][cont
 
 TEST_CASE("the extension verbs are rows of the extension group", "[contour][cli][control][consent]")
 {
-    for (auto const path: { "extension.list"sv, "extension.grant"sv, "extension.revoke"sv })
+    for (auto const path:
+         { "extension.list"sv, "extension.grant"sv, "extension.revoke"sv, "extension.status"sv })
     {
         INFO(path);
         CHECK(verbNamed(path).method == path);
@@ -1184,6 +1185,92 @@ TEST_CASE("the extension verbs are rows of the extension group", "[contour][cli]
     CHECK(*verbNamed("extension.revoke").buildParams(parseFlags({ "extension", "revoke", "orchestrator" }))
           == R"({"name":"orchestrator"})");
     CHECK_FALSE(verbNamed("extension.grant").buildParams(parseFlags({ "extension", "grant" })));
+    CHECK(*verbNamed("extension.status").buildParams(parseFlags({ "extension", "status", "orchestrator" }))
+          == R"({"name":"orchestrator"})");
+}
+
+TEST_CASE("extension status exits and notes by state", "[contour][cli][control][summary]")
+{
+    // Only a running extension exits 0; every other state exits 1 with a note naming it.
+    struct Row
+    {
+        std::string_view state;
+        int exit;
+        std::string_view note;
+    };
+    auto const rows = std::array {
+        Row { .state = "running", .exit = 0, .note = "" },
+        Row { .state = "stopped", .exit = 1, .note = "orchestrator is not running\n" },
+        Row {
+            .state = "pending", .exit = 1, .note = "orchestrator waits for its grant in a Contour window\n" },
+        Row { .state = "denied", .exit = 1, .note = "orchestrator was denied its grant\n" },
+        Row { .state = "disabled", .exit = 1, .note = "orchestrator faulted too often, and is disabled\n" },
+        Row { .state = "failed", .exit = 1, .note = "orchestrator failed: why\n" },
+        Row { .state = "sideways",
+              .exit = 1,
+              .note = "orchestrator is sideways\n" }, // a state it does not know
+    };
+    for (auto const& row: rows)
+    {
+        INFO(row.state);
+        auto run = Run {};
+        auto channel = ScriptedChannel { std::format(
+            R"({{"name":"orchestrator","state":"{}","summary":"","detail":"","problem":"why"}})",
+            row.state) };
+        CHECK(contour::cli::runControlVerb(verbNamed("extension.status"),
+                                           parseFlags({ "extension", "status", "orchestrator" }),
+                                           channel,
+                                           run.io())
+              == row.exit);
+        CHECK(run.err.str() == row.note);
+    }
+}
+
+TEST_CASE("extension status prints what the extension published, and says when it does not run",
+          "[contour][cli][control][summary]")
+{
+    auto const statusOf = [](std::string reply) {
+        auto run = Run {};
+        auto channel = ScriptedChannel { std::move(reply) };
+        auto const exit = contour::cli::runControlVerb(verbNamed("extension.status"),
+                                                       parseFlags({ "extension", "status", "orchestrator" }),
+                                                       channel,
+                                                       run.io());
+        REQUIRE(channel.calls.size() == 1);
+        CHECK(channel.calls[0].method == "extension.status");
+        return std::tuple { exit, run.out.str(), run.err.str() };
+    };
+
+    SECTION("a running one prints its summary, then its detail")
+    {
+        auto const [exit, out, err] =
+            statusOf(R"({"name":"orchestrator","state":"running","summary":"agents 1/4",)"
+                     R"("detail":"#2390 running\n#2391 blocked","problem":""})"s);
+        CHECK(exit == 0);
+        CHECK(out == "agents 1/4\n#2390 running\n#2391 blocked\n");
+        CHECK(err.empty());
+    }
+
+    SECTION("a stopped one is not running, and fails")
+    {
+        auto const [exit, out, err] =
+            statusOf(R"({"name":"orchestrator","state":"stopped","summary":"","detail":"","problem":""})"s);
+        CHECK(exit == 1);
+        CHECK(out.empty());
+        CHECK(err == "orchestrator is not running\n");
+    }
+
+    SECTION("a failed one says why, and fails")
+    {
+        auto const [exit, out, err] = statusOf(
+            R"({"name":"orchestrator","state":"failed","summary":"","detail":"",)"
+            R"j("problem":"daemon.extensions.orchestrator: its module does not load (world mismatch)"})j"s);
+        CHECK(exit == 1);
+        CHECK(out.empty());
+        CHECK(err
+              == "orchestrator failed: daemon.extensions.orchestrator: its module does not load (world "
+                 "mismatch)\n");
+    }
 }
 
 TEST_CASE("extension list prints each extension, a pending one's question indented",

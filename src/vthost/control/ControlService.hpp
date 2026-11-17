@@ -118,6 +118,7 @@ class ControlService final:
     void handle(vtcontrol::CallContext& context, vtcontrol::ExtensionListRequest const& request, vtcontrol::Completion<vtcontrol::ExtensionListReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ExtensionGrantRequest const& request, vtcontrol::Completion<vtcontrol::ExtensionGrantReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ExtensionRevokeRequest const& request, vtcontrol::Completion<vtcontrol::ExtensionRevokeReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::ExtensionStatusRequest const& request, vtcontrol::Completion<vtcontrol::ExtensionStatusReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ObjectRenameRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ReportStatusRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ClearStatusRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;

@@ -113,6 +113,7 @@ class ControlApi
     virtual void handle(CallContext& context, ExtensionListRequest const& request, Completion<ExtensionListReply> done) = 0;
     virtual void handle(CallContext& context, ExtensionGrantRequest const& request, Completion<ExtensionGrantReply> done) = 0;
     virtual void handle(CallContext& context, ExtensionRevokeRequest const& request, Completion<ExtensionRevokeReply> done) = 0;
+    virtual void handle(CallContext& context, ExtensionStatusRequest const& request, Completion<ExtensionStatusReply> done) = 0;
     virtual void handle(CallContext& context, ObjectRenameRequest const& request, Completion<EmptyReply> done) = 0;
     virtual void handle(CallContext& context, ReportStatusRequest const& request, Completion<EmptyReply> done) = 0;
     virtual void handle(CallContext& context, ClearStatusRequest const& request, Completion<EmptyReply> done) = 0;

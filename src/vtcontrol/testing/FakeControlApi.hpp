@@ -67,6 +67,7 @@ struct FakeControlApi final: public ControlApi
     void handle(CallContext& /*context*/, ExtensionListRequest const& request, Completion<ExtensionListReply> done) override { lastExtensionList = request; done(extensionListReply); }
     void handle(CallContext& /*context*/, ExtensionGrantRequest const& request, Completion<ExtensionGrantReply> done) override { lastExtensionGrant = request; if (extensionGrantFailure) done(std::unexpected(*extensionGrantFailure)); else done(extensionGrantReply); }
     void handle(CallContext& /*context*/, ExtensionRevokeRequest const& request, Completion<ExtensionRevokeReply> done) override { lastExtensionRevoke = request; done(ExtensionRevokeReply { .revoked = true }); }
+    void handle(CallContext& /*context*/, ExtensionStatusRequest const& request, Completion<ExtensionStatusReply> done) override { lastExtensionStatus = request; done(extensionStatusReply); }
     void handle(CallContext& /*context*/, ObjectRenameRequest const& request, Completion<EmptyReply> done) override { lastRename = request; done(EmptyReply {}); }
     void handle(CallContext& /*context*/, ReportStatusRequest const& request, Completion<EmptyReply> done) override { lastReportStatus = request; done(EmptyReply {}); }
     void handle(CallContext& /*context*/, ClearStatusRequest const& request, Completion<EmptyReply> done) override { lastClearStatus = request; done(EmptyReply {}); }
@@ -100,6 +101,7 @@ struct FakeControlApi final: public ControlApi
     std::optional<ControlError> switchWorkspaceFailure; ///< When set, `workspace.switch` fails with it.
     ExtensionListReply extensionListReply;
     ExtensionGrantReply extensionGrantReply { .asked = true, .windows = 1 };
+    ExtensionStatusReply extensionStatusReply;
     std::optional<ControlError> extensionGrantFailure; ///< When set, `extension.grant` fails with it.
 
     std::optional<DaemonInfoRequest> lastDaemonInfo;
@@ -122,6 +124,7 @@ struct FakeControlApi final: public ControlApi
     std::optional<ExtensionListRequest> lastExtensionList;
     std::optional<ExtensionGrantRequest> lastExtensionGrant;
     std::optional<ExtensionRevokeRequest> lastExtensionRevoke;
+    std::optional<ExtensionStatusRequest> lastExtensionStatus;
     std::optional<ObjectRenameRequest> lastRename;
     std::optional<BlockListRequest> lastBlockList;
     std::optional<BlockReadRequest> lastBlockRead;
