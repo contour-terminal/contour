@@ -72,13 +72,22 @@
     #include <vtbackend/screen/StatusLineExtensions.hpp>
 
     #include <vtpty/CommandCapture.hpp>
+    #include <vtpty/DirectoryHandle.hpp>
+    #include <vtpty/ProcessRunner.hpp>
+    #ifndef _WIN32
+        #include <vtpty/UnixUtils.hpp>
+    #endif
 
     #include <core/async/StopToken.hpp>
+    #include <core/platform/UserPaths.hpp>
 
     #include <vtextension/CommandPolicy.hpp>
+    #include <vtextension/DaemonExtensionRuntime.hpp>
     #include <vtextension/ExtensionHost.hpp>
     #include <vtextension/ExtensionLimits.hpp>
+    #include <vtextension/ExtensionPresence.hpp>
     #include <vtextension/ExtensionWorkerPool.hpp>
+    #include <vtextension/FileLocker.hpp>
     #include <vtextension/Placement.hpp>
     #include <vtextension/SessionExtensions.hpp>
     #include <vtextension/StatusLineAdapter.hpp>
@@ -1597,6 +1606,196 @@ PaneExtensions::PaneExtensions(ExtensionRig& rig): _hosted { rig.prepare(), rig.
 {
     return rig ? std::make_unique<PaneExtensions>(*rig) : nullptr;
 }
+
+/// Keeps where a daemon-world extension stands and the latest summary it published, for the report.
+class LatestPresence final: public vtextension::IExtensionPresence
+{
+  public:
+    void publishSummary(std::string_view /*extension*/,
+                        vtextension::DaemonRunGeneration /*generation*/,
+                        std::string_view shortText,
+                        std::string_view /*detail*/) override
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        _summary = shortText;
+    }
+
+    void phaseChanged(std::string_view /*extension*/,
+                      vtextension::DaemonRunGeneration /*generation*/,
+                      vtextension::DaemonExtensionPhase phase) override
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        _phase = phase;
+    }
+
+    /// @return Where the extension stands, and its latest summary.
+    [[nodiscard]] std::pair<vtextension::DaemonExtensionPhase, std::string> latest() const
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return { _phase, _summary };
+    }
+
+  private:
+    mutable std::mutex _mutex;
+    vtextension::DaemonExtensionPhase _phase = vtextension::DaemonExtensionPhase::Stopped;
+    std::string _summary;
+};
+
+/// @return This process's environment, `NAME=value` each: what a daemon-world extension's commands inherit,
+///         their PATH among it.
+[[nodiscard]] std::vector<std::string> benchEnvironmentEntries()
+{
+    #ifdef _WIN32
+    return {}; // No declared process runs on Windows: the process runner answers Unsupported.
+    #else
+    auto entries = std::vector<std::string> {};
+    for (auto const entry: vtpty::util::environmentEntries())
+        entries.emplace_back(entry);
+    return entries;
+    #endif
+}
+
+/// One daemon-world extension beside the measured terminal, as `contour daemon` runs it: the production
+/// engine on a DaemonExtensionRuntime of its own, the real process runner (the commands find their programs
+/// on the bench's own PATH), the native filesystem, and the extension's store and grants in a temporary
+/// directory the rig owns and removes. The grants file is the rig's alone: the rig grants the extension's
+/// question itself, which no control path can. It runs across every run, timed part and all.
+class DaemonExtensionRig
+{
+    struct Key
+    {
+        explicit Key() = default;
+    };
+
+  public:
+    /// Starts @p module with @p configJson, granted.
+    /// @return The rig, the extension started; or why it could not be.
+    [[nodiscard]] static std::expected<std::unique_ptr<DaemonExtensionRig>, std::string> create(
+        std::filesystem::path const& module, std::string configJson, core::Environment const& environment)
+    {
+        auto runner = vtpty::ThreadedProcessRunner::create(core::platform::defaultSteadyClock(), {});
+        if (!runner)
+            return std::unexpected(std::string("No process runner can be started for the daemon extension."));
+        auto directory = makeUniqueDirectory();
+        if (!directory)
+            return std::unexpected(std::move(directory.error()));
+        auto rig = std::make_unique<DaemonExtensionRig>(Key {}, std::move(*runner), std::move(*directory));
+        if (auto started = rig->start(module, std::move(configJson), environment); !started)
+            return std::unexpected(std::move(started.error()));
+        return rig;
+    }
+
+    /// For create() only.
+    DaemonExtensionRig(Key /*key*/,
+                       std::unique_ptr<vtpty::ThreadedProcessRunner> runner,
+                       std::filesystem::path directory):
+        _directory { std::move(directory) }, _runner { std::move(runner) }
+    {
+    }
+
+    /// Stops the extension, then removes the rig's directory.
+    ~DaemonExtensionRig()
+    {
+        if (_runtime)
+            _runtime->stop();
+        _runtime.reset();
+        _runner.reset();
+        auto error = std::error_code {};
+        std::filesystem::remove_all(_directory, error);
+    }
+
+    DaemonExtensionRig(DaemonExtensionRig const&) = delete;
+    DaemonExtensionRig(DaemonExtensionRig&&) = delete;
+    DaemonExtensionRig& operator=(DaemonExtensionRig const&) = delete;
+    DaemonExtensionRig& operator=(DaemonExtensionRig&&) = delete;
+
+    /// @return One line: the extension, where it stands, and its latest summary.
+    [[nodiscard]] std::string report() const
+    {
+        auto const [phase, summary] = _presence.latest();
+        auto const running = phase == vtextension::DaemonExtensionPhase::Running;
+        return std::format("Daemon extension {}: {}; summary: {}",
+                           _name,
+                           running ? "running" : "not running",
+                           summary.empty() ? "(none yet)" : summary);
+    }
+
+  private:
+    /// Creates a directory no other process has, as mkdtemp() does: a random name, taken only if it is new.
+    /// @return The directory, under the system's temporary directory; or why none could be made.
+    [[nodiscard]] static std::expected<std::filesystem::path, std::string> makeUniqueDirectory()
+    {
+        auto error = std::error_code {};
+        auto const parent = std::filesystem::temp_directory_path(error);
+        if (error)
+            return std::unexpected(std::format("No temporary directory: {}.", error.message()));
+        auto random = std::random_device {};
+        auto suffix = std::uniform_int_distribution<uint64_t> {};
+        for ([[maybe_unused]] auto const _: std::views::iota(0, 16))
+        {
+            auto directory = parent / std::format("bench-headless-daemon-{:016x}", suffix(random));
+            // create_directory() reports whether it made the directory: an existing one is someone else's.
+            if (std::filesystem::create_directory(directory, error))
+                return directory;
+            if (error)
+                return std::unexpected(
+                    std::format("Cannot create {}: {}.", directory.string(), error.message()));
+        }
+        return std::unexpected(std::format("No new directory could be made in {}.", parent.string()));
+    }
+
+    [[nodiscard]] std::expected<void, std::string> start(std::filesystem::path const& module,
+                                                         std::string configJson,
+                                                         core::Environment const& environment)
+    {
+        _name = module.stem().string();
+        auto config = vtextension::DaemonExtensionRuntimeConfig {
+            .declarations = { vtextension::DaemonExtensionDeclaration {
+                .name = _name,
+                .modulePath = module,
+                .autostart = vtextension::ExtensionAutostart::AtDaemonStart,
+                .configJson = std::move(configJson),
+                .storeDirectory = _directory / "store" } },
+            .grantsFile = _directory / vtextension::DaemonScopedGrantsFileName,
+            .home = core::platform::homeDirectory(environment)
+                        .transform([](std::filesystem::path const& home) { return home.string(); })
+                        .value_or(std::string {}),
+            .inheritedEnvironment = benchEnvironmentEntries(),
+            .bundledDirectories = {},
+        };
+        auto composed = vtextension::DaemonExtensionRuntime::create(
+            std::move(config),
+            vtextension::DaemonExtensionRuntimeServices {
+                .backend = *_backend,
+                .runner = *_runner,
+                .directories = vtpty::nativeDirectoryOpener(),
+                .fileSystem = core::platform::NativeFileSystem::instance(),
+                .locker = _locker,
+                .wallClock = _wallClock,
+                .localTime = _localTime,
+                .presence = _presence,
+                .onLog = [](std::string_view name, vtextension::LogLevel level, std::string_view message) {
+                    if (level == vtextension::LogLevel::Error)
+                        cerr << std::format("{}: {}\n", name, message);
+                } });
+        _runtime = std::move(composed.runtime);
+        if (!composed.problems.empty())
+            return std::unexpected(composed.problems.front().message);
+        for (auto const& pending: _runtime->pending())
+            _runtime->answer(pending.name, pending.grantDigest, vtextension::GrantState::Granted);
+        return {};
+    }
+
+    std::filesystem::path _directory; ///< The store and the grants file; removed last.
+    std::string _name;
+    std::unique_ptr<vtextension::wasm::IWasmBackend> _backend = vtextension::wasm::makeDefaultBackend();
+    std::unique_ptr<vtpty::ThreadedProcessRunner> _runner;
+    vtextension::NativeFileLocker _locker;
+    core::platform::SystemWallClock _wallClock;
+    vtbackend::LocalTimeConverter _localTime { &vtbackend::systemLocalTime };
+    LatestPresence _presence;
+    std::unique_ptr<vtextension::DaemonExtensionRuntime> _runtime; ///< Last: stopped before what it reaches.
+};
 #else
 /// Without extensions compiled in, nothing runs beside a terminal.
 class ExtensionRig
@@ -2590,6 +2789,20 @@ class ContourHeadlessBench: public core::cli::App
         };
         throughputOptions.insert(throughputOptions.end(), extensionOptions.begin(), extensionOptions.end());
         memoryOptions.insert(memoryOptions.end(), extensionOptions.begin(), extensionOptions.end());
+        // A daemon-world extension beside the measured terminal, across every run.
+        throughputOptions.push_back(CLI::Option {
+            .name = "daemon-extension",
+            .v = CLI::Value { ""s },
+            .helpText =
+                "Path of a daemon-world extension module (.wasm) to run beside the terminal, as `contour "
+                "daemon` runs it, granted: its commands run, with programs found on this process's "
+                "PATH. Its store and grants live in a temporary directory, removed at the end.",
+            .placeholder = "PATH" });
+        throughputOptions.push_back(
+            CLI::Option { .name = "daemon-extension-config",
+                          .v = CLI::Value { "{}"s },
+                          .helpText = "The daemon extension's configuration, as JSON.",
+                          .placeholder = "JSON" });
 #endif
 
         auto const snapshotOptions = CLI::OptionList {
@@ -2871,8 +3084,31 @@ class ContourHeadlessBench: public core::cli::App
             return EXIT_FAILURE;
         }
         options.extensionRig = *madeRig;
-        return runThroughputBenchmark(
+#ifdef CONTOUR_EXTENSIONS
+        // Started before the first run, stopped after the last.
+        auto daemonExtension = std::unique_ptr<DaemonExtensionRig> {};
+        if (auto const module = parameters().str("bench-headless.throughput.daemon-extension");
+            !module.empty())
+        {
+            auto made = DaemonExtensionRig::create(
+                module,
+                parameters().str("bench-headless.throughput.daemon-extension-config"),
+                processEnvironment());
+            if (!made)
+            {
+                cerr << made.error() << '\n';
+                return EXIT_FAILURE;
+            }
+            daemonExtension = std::move(*made);
+        }
+#endif
+        auto const result = runThroughputBenchmark(
             selection->workloads, selection->screens, options, processEnvironment(), _counters);
+#ifdef CONTOUR_EXTENSIONS
+        if (daemonExtension)
+            cout << daemonExtension->report() << '\n';
+#endif
+        return result;
     }
 
     /// Makes the extension rig @p command's `extensions` and `extension-config` options name, if any.
