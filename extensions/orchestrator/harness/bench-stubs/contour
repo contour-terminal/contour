@@ -1,0 +1,10 @@
+#! /bin/sh
+# SPDX-License-Identifier: Apache-2.0
+#
+# A stand-in for `contour` (see ./gh): `contour agent setup --dry-run --json` answers that the agents' status
+# hooks are installed, as recorded in core/testdata/contour/.
+testdata="$(dirname "$0")/../../core/testdata"
+case "$1 $2" in
+    "agent setup") exec cat "$testdata/contour/setup-hooks-present.json" ;;
+    *) echo "contour stub: not a declared command: $*" >&2; exit 2 ;;
+esac

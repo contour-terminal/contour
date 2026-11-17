@@ -27,9 +27,28 @@ macro(orchestrator_require target name)
     endif()
 endmacro()
 
-# glaze, the core's JSON reader. It is header-only, and its own CMakeLists is never run (glaze 9 requires
-# CMake 3.31, newer than this project does): SOURCE_SUBDIR names a directory without one, so MakeAvailable only
-# populates the sources, and the target is defined here -- as Contour defines it, which this mirrors.
+# Defines glaze::glaze, header-only, over the include directories given -- as Contour defines it, which this
+# mirrors.
+function(orchestrator_define_glaze)
+    add_library(glaze_glaze INTERFACE)
+    add_library(glaze::glaze ALIAS glaze_glaze)
+    target_compile_features(glaze_glaze INTERFACE cxx_std_23)
+    target_include_directories(glaze_glaze SYSTEM INTERFACE ${ARGN})
+    if(MSVC)
+        target_compile_options(glaze_glaze INTERFACE /Zc:preprocessor /permissive- /Zc:lambda)
+    else()
+        target_compile_options(glaze_glaze INTERFACE -Wno-missing-braces)
+    endif()
+endfunction()
+
+# glaze, the core's JSON reader. A system package's include directories, which Contour hands a WebAssembly
+# guest's sub-build as ORCHESTRATOR_GLAZE_INCLUDE_DIR (cmake/ContourWasiCxx.cmake), are taken as they are.
+# Otherwise its sources are fetched, or taken from FETCHCONTENT_SOURCE_DIR_GLAZE; its own CMakeLists is never run
+# (glaze 9 requires CMake 3.31, newer than this project does): SOURCE_SUBDIR names a directory without one, so
+# MakeAvailable only populates the sources.
+if(NOT TARGET glaze::glaze AND ORCHESTRATOR_GLAZE_INCLUDE_DIR)
+    orchestrator_define_glaze(${ORCHESTRATOR_GLAZE_INCLUDE_DIR})
+endif()
 orchestrator_require(glaze::glaze glaze
     URL "https://github.com/stephenberry/glaze/archive/refs/tags/v${ORCHESTRATOR_GLAZE_VERSION}.tar.gz"
     URL_HASH SHA256=${ORCHESTRATOR_GLAZE_SHA256}
@@ -37,15 +56,7 @@ orchestrator_require(glaze::glaze glaze
     SOURCE_SUBDIR "orchestrator-header-only"
 )
 if(NOT TARGET glaze::glaze)
-    add_library(glaze_glaze INTERFACE)
-    add_library(glaze::glaze ALIAS glaze_glaze)
-    target_compile_features(glaze_glaze INTERFACE cxx_std_23)
-    target_include_directories(glaze_glaze SYSTEM INTERFACE "$<BUILD_INTERFACE:${glaze_SOURCE_DIR}/include>")
-    if(MSVC)
-        target_compile_options(glaze_glaze INTERFACE /Zc:preprocessor /permissive- /Zc:lambda)
-    else()
-        target_compile_options(glaze_glaze INTERFACE -Wno-missing-braces)
-    endif()
+    orchestrator_define_glaze("$<BUILD_INTERFACE:${glaze_SOURCE_DIR}/include>")
 endif()
 
 if(ORCHESTRATOR_TESTING)

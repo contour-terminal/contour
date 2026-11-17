@@ -1,0 +1,14 @@
+#! /bin/sh
+# SPDX-License-Identifier: Apache-2.0
+#
+# A stand-in for `gh`, for runs of the orchestrator's module that must not reach GitHub (bench-headless with
+# `daemon-extension`): put this directory first on PATH. It answers the declared commands' argv words with the
+# recorded fixtures of core/testdata/github/, the pull request list already in its `--jq` projection.
+testdata="$(dirname "$0")/../../core/testdata"
+case "$1 $2" in
+    "auth status") exit 0 ;;
+    "repo view") exec cat "$testdata/github/default-branch.json" ;;
+    "pr list") exec cat "$testdata/github/prs-open.json" ;;
+    "issue list") exec cat "$testdata/github/issues-open.json" ;;
+    *) echo "gh stub: not a declared command: $*" >&2; exit 2 ;;
+esac

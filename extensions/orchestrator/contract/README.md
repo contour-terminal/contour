@@ -3,7 +3,8 @@
 What the extension and Contour's host must agree on, kept as files both sides test against.
 
 The other half of the contract, the `terminal-extensions:daemon` WIT world the extension is built
-against, is Contour's public interface and lives with the host, at `wit/daemon/` in Contour's tree.
+against, is Contour's public interface and lives with the host, at `wit/daemon/` in Contour's tree. The
+guest's C bindings (`guest/bindings/`) are generated from it; `guest/README.md` has the command.
 
 ## `manifest-v2/`
 
