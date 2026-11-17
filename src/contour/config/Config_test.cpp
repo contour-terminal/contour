@@ -429,6 +429,86 @@ profiles:
     CHECK_FALSE(reloadedRemote->shell.value().env.contains("REMOTE_VALUE"));
 }
 
+TEST_CASE("Config: ssh install_terminfo defaults to on", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: remote
+profiles:
+    remote:
+        ssh:
+            host: h
+)"sv);
+    auto const* remote = config.profile("remote");
+    REQUIRE(remote != nullptr);
+    CHECK(remote->ssh.value().terminfoInstall == vtpty::TerminfoInstall::Install);
+}
+
+TEST_CASE("Config: ssh install_terminfo: false turns it off", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: remote
+profiles:
+    remote:
+        ssh:
+            host: h
+            install_terminfo: false
+)"sv);
+    auto const* remote = config.profile("remote");
+    REQUIRE(remote != nullptr);
+    CHECK(remote->ssh.value().terminfoInstall == vtpty::TerminfoInstall::Off);
+}
+
+TEST_CASE("Config: install_terminfo round-trips through the writer", "[config]")
+{
+    QTemporaryDir dir;
+    auto const yaml = R"(
+default_profile: remote
+profiles:
+    remote:
+        ssh:
+            host: h
+            install_terminfo: false
+)"sv;
+    auto const before = loadFromYaml(dir, yaml);
+    auto const* remote = before.profile("remote");
+    REQUIRE(remote != nullptr);
+    auto const saved = contour::config::emitProfileYaml(*remote);
+    CHECK_FALSE(YAML::Load(saved)["ssh"]["install_terminfo"].as<bool>());
+    // The main file no longer says anything about it, so only the side file can supply Off.
+    writeSideFile(dir, "profiles/remote.yml", saved);
+    auto const after = loadFromYaml(dir, R"(
+default_profile: remote
+profiles:
+    remote:
+        ssh:
+            host: h
+)"sv);
+    auto const* reloaded = after.profile("remote");
+    REQUIRE(reloaded != nullptr);
+    CHECK(reloaded->ssh.value().terminfoInstall == vtpty::TerminfoInstall::Off);
+}
+
+TEST_CASE("Config: a pinned TERM does not change the saved install_terminfo", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: remote
+profiles:
+    remote:
+        ssh:
+            host: h
+        environment:
+            TERM: xterm-256color
+)"sv);
+    auto const* remote = config.profile("remote");
+    REQUIRE(remote != nullptr);
+    CHECK(remote->ssh.value().terminfoInstall == vtpty::TerminfoInstall::Install);
+    auto const saved = contour::config::emitProfileYaml(*remote);
+    CHECK(YAML::Load(saved)["ssh"]["install_terminfo"].as<bool>());
+}
+
 TEST_CASE("Config: a malformed ssh key falls back alone, the host stays", "[config]")
 {
     struct Row
@@ -440,6 +520,7 @@ TEST_CASE("Config: a malformed ssh key falls back alone, the host stays", "[conf
         Row { "port", "twenty-two" },
         Row { "port", "[1, 2]" },
         Row { "forward_agent", "maybe" },
+        Row { "install_terminfo", "maybe" },
         // Not port numbers: 70000 would wrap round to 4464 in htons().
         Row { "port", "70000" },
         Row { "port", "0" },
@@ -469,6 +550,7 @@ profiles:
         CHECK(ssh.username == "u");
         CHECK(ssh.port == 22);
         CHECK_FALSE(ssh.forwardAgent);
+        CHECK(ssh.terminfoInstall == vtpty::TerminfoInstall::Install);
     }
 }
 

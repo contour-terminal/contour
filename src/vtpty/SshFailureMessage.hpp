@@ -47,4 +47,21 @@ enum class SshConnectStage : uint8_t
                                                     std::string_view target,
                                                     std::string_view detail);
 
+/// Whether a terminfo install ran before the shell's channel was opened.
+enum class TerminfoInstallAttempt : uint8_t
+{
+    None = 0, ///< No install was tried on this connection.
+    Attempted ///< An install channel was opened (and has since been left).
+};
+
+/// The message a failed opening of the shell's SSH channel should carry.
+///
+/// After an install attempt the failure may be the install's doing -- a server that allows one session
+/// channel per connection, say -- so the message names the opt-out.
+/// @param detail  The libssh2 error text.
+/// @param attempt Whether a terminfo install ran first.
+/// @return The message, ready to show.
+[[nodiscard]] std::string describeSshChannelOpenFailure(std::string_view detail,
+                                                        TerminfoInstallAttempt attempt);
+
 } // namespace vtpty

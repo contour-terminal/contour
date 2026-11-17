@@ -20,9 +20,11 @@
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/Color.hpp>
+#include <vtbackend/vt/Capabilities.hpp>
 
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/ProgramLookup.hpp>
+#include <vtpty/SshTerminfoInstall.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
 #include <vtpty/test/ProcessTesting.hpp>
 
@@ -1019,4 +1021,48 @@ TEST_CASE("quitting flushes a pending Settings edit", "[contour][settings][livea
         testApp.configFile().parent_path() / "colorschemes" / contour::config::sideFileName(scheme));
     REQUIRE(written.has_value());
     CHECK(written->defaultBackground == vtbackend::RGBColor { 0x10, 0x20, 0x30 });
+}
+
+TEST_CASE("Contour's own terminfo source is installable", "[contour][ssh][terminfo]")
+{
+    CHECK(vtpty::buildTerminfoInstallCommand("contour", vtbackend::capabilities::StaticDatabase {}.terminfo())
+              .has_value());
+}
+
+TEST_CASE("an SSH session installs terminfo unless the option or a pinned TERM says otherwise",
+          "[contour][ssh][terminfo]")
+{
+    auto const installer = std::optional { vtpty::SshTerminfoInstaller {
+        .entryName = "contour",
+        .command = "sh -c ''",
+        .memo = std::make_shared<vtpty::InMemorySshTerminfoHostMemo>(),
+    } };
+    using vtpty::TerminfoInstall;
+    // A profile as the loader leaves it: the SSH config's env always carries a TERM (the loader fills the
+    // default in), and only configuredEnvironment holds what the user pinned.
+    auto const profileWith = [](TerminfoInstall option, vtpty::Process::Environment const& pinned) {
+        auto profile = contour::config::TerminalProfile {};
+        profile.ssh.value().hostname = "example.com";
+        profile.ssh.value().terminfoInstall = option;
+        profile.ssh.value().env["TERM"] = "xterm-256color";
+        profile.configuredEnvironment = pinned;
+        return profile;
+    };
+    auto const installs = [&](TerminfoInstall option, vtpty::Process::Environment const& pinned) {
+        return contour::session::sshTerminfoFor(profileWith(option, pinned), installer).has_value();
+    };
+
+    CHECK(installs(TerminfoInstall::Install, {}));                        // no TERM pinned
+    CHECK(installs(TerminfoInstall::Install, { { "TERM", "" } }));        // empty is not a pin
+    CHECK(installs(TerminfoInstall::Install, { { "TERM", "contour" } })); // the entry itself
+    CHECK_FALSE(installs(TerminfoInstall::Install, { { "TERM", "xterm-256color" } }));
+    CHECK_FALSE(installs(TerminfoInstall::Off, {}));
+    CHECK_FALSE(installs(TerminfoInstall::Off, { { "TERM", "contour" } }));
+    CHECK_FALSE(contour::session::sshTerminfoFor(profileWith(TerminfoInstall::Install, {}), std::nullopt)
+                    .has_value());
+
+    auto const kept = contour::session::sshTerminfoFor(profileWith(TerminfoInstall::Install, {}), installer);
+    REQUIRE(kept.has_value());
+    CHECK(kept->entryName == "contour");
+    CHECK(kept->memo == installer->memo); // one memo is shared by every session
 }

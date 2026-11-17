@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/ConfigFwd.hpp>
 #include <contour/platform/Notifier.hpp>
 #include <contour/session/EndReason.hpp>
 #include <contour/session/HostedOperation.hpp>
@@ -12,6 +13,7 @@
 
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
+#include <vtpty/SshTerminfoInstall.hpp>
 #ifdef VTPTY_LIBSSH2
     #include <vtpty/SshSession.hpp>
 #endif
@@ -71,6 +73,19 @@ namespace contour::session
 {
     return commandOverride.has_value() && !commandOverride->program.empty();
 }
+
+/// What an SSH session of a profile installs on its host: @p installer, unless the profile switches the
+/// install off or pins a TERM other than the installed entry (installing Contour's entry would not change
+/// what that profile asks for). The configured option itself stays as the user wrote it.
+///
+/// Takes the whole profile, not an environment, because only one of its environments says what the user
+/// pinned: `configuredEnvironment`. The SSH config's own `env` always carries a TERM -- the loader fills in
+/// the default there -- so judging by it would switch the install off for every profile.
+/// @param profile   The profile: its `ssh.install_terminfo` option and its configured `environment`.
+/// @param installer What the application would install, if anything.
+/// @return @p installer, or nullopt when this session installs nothing.
+[[nodiscard]] std::optional<vtpty::SshTerminfoInstaller> sshTerminfoFor(
+    config::TerminalProfile const& profile, std::optional<vtpty::SshTerminfoInstaller> const& installer);
 
 /// Drops from what @p shell inherits every variable a daemon hands the shells it hosts. A session the GUI
 /// spawns in process is hosted by no daemon, so a window started from a daemon's pane must not pass that
@@ -576,8 +591,12 @@ class AppSessionFactory final: public SessionFactory
   public:
     /// @param app       The application, for profile lookup (and SSH host-key verification routing).
     /// @param placement Moves each spawned shell into its own resource domain. @see vtpty::ProcessPlacement.
-    AppSessionFactory(ContourGuiApp& app, std::shared_ptr<vtpty::ProcessPlacement> placement):
-        _app { app }, _placement { std::move(placement) }
+    /// @param sshTerminfo What a built-in SSH session installs on its host; nullopt installs nothing.
+    ///                    Only used where libssh2 is built in.
+    AppSessionFactory(ContourGuiApp& app,
+                      std::shared_ptr<vtpty::ProcessPlacement> placement,
+                      std::optional<vtpty::SshTerminfoInstaller> sshTerminfo):
+        _app { app }, _placement { std::move(placement) }, _sshTerminfo { std::move(sshTerminfo) }
     {
     }
 
@@ -595,6 +614,7 @@ class AppSessionFactory final: public SessionFactory
 
     ContourGuiApp& _app;
     std::shared_ptr<vtpty::ProcessPlacement> _placement;
+    std::optional<vtpty::SshTerminfoInstaller> _sshTerminfo;
 };
 
 /// Holds a factory in the state of its panes being changed by the daemon, or by the window's housekeeping,

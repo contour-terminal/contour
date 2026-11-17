@@ -26,4 +26,13 @@ std::string describeSshConnectFailure(SshConnectStage stage,
     return std::format("{} {}. {}", what, target, detail);
 }
 
+std::string describeSshChannelOpenFailure(std::string_view detail, TerminfoInstallAttempt attempt)
+{
+    if (attempt == TerminfoInstallAttempt::Attempted)
+        return std::format("Failed to open SSH channel. {} Contour had just tried to install its terminfo "
+                           "on this host; set ssh.install_terminfo: false to skip that.",
+                           detail);
+    return std::format("Failed to open SSH channel. {}", detail);
+}
+
 } // namespace vtpty

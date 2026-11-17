@@ -2,7 +2,9 @@
 #pragma once
 
 #include <vtpty/Pty.hpp>
+#include <vtpty/SshFailureMessage.hpp>
 #include <vtpty/SshSessionRules.hpp>
+#include <vtpty/SshTerminfoInstall.hpp>
 
 #include <crispy/FileDescriptor.hpp>
 
@@ -10,6 +12,7 @@
 #include <core/log/LogStore.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <expected>
 #include <filesystem>
@@ -35,6 +38,9 @@ struct SshHostConfig
     std::filesystem::path publicKeyFile;
     std::filesystem::path knownHostsFile;
     bool forwardAgent = false;
+    /// Whether the built-in SSH profile installs Contour's terminfo on the remote host.
+    /// This is the configured value; the pinned-TERM rule is applied at session creation.
+    TerminfoInstall terminfoInstall = TerminfoInstall::Install;
     Environment env;
 
     [[nodiscard]] std::string toString() const;
@@ -132,7 +138,13 @@ class SshSession final: public Pty
     using ExitStatus = std::variant<NormalExit, SignalExit>;
     using Environment = std::map<std::string, std::string>;
 
-    explicit SshSession(SshHostConfig config, SshHostkeyVerificationRequestCallback hostkeyRequestCallback);
+    /// @param config                  The host to connect to.
+    /// @param hostkeyRequestCallback  Asks the user to trust an unknown host key.
+    /// @param terminfo                When engaged, Contour's terminfo is installed on the host before the
+    ///                                shell starts, unless the host's earlier install failed.
+    SshSession(SshHostConfig config,
+               SshHostkeyVerificationRequestCallback hostkeyRequestCallback,
+               std::optional<SshTerminfoInstaller> terminfo = std::nullopt);
     ~SshSession() override;
 
     [[nodiscard]] StartResult start() override;
@@ -168,6 +180,9 @@ class SshSession final: public Pty
         AuthenticatePasswordStart,          // start password authentication
         AuthenticatePasswordWaitForInput,   // wait for password (user input)
         AuthenticatePassword,               // authenticate with password
+        InstallTerminfoOpenChannel,         // open the channel that installs Contour's terminfo
+        InstallTerminfoExec,                // run the install command
+        InstallTerminfoRead,                // read its output and judge it
         OpenChannel,                        // open SSH channel
         RequestAuthAgent,                   // request SSH (auth) agent forwarding
         RequestPty,                         // request pty
@@ -229,6 +244,31 @@ class SshSession final: public Pty
 
     // some of the complex states to handle
     bool requestPty();
+
+    // The terminfo install, run between authentication and the shell's channel. Each step runs to
+    // completion (the session is blocking here) and ends in leaveTerminfoInstall(), which either moves on
+    // to the shell's channel or, when a timeout left the connection unable to open one, ends the session.
+    // An install that merely does not work never fails the connection. @see SshTerminfoInstaller.
+    void openTerminfoInstallChannel();
+    void execTerminfoInstall();
+    void readTerminfoInstall();
+
+    /// Arms libssh2's timeout with what is left of the install budget.
+    /// @return Whether anything was left to arm it with.
+    [[nodiscard]] SshBudget armTerminfoTimeout();
+
+    /// Ends the install step, reached at @p stage, with @p outcome: cleans up the channel, reports, remembers
+    /// a failed host and then, per afterTerminfoInstall(), moves on to State::OpenChannel or ends the
+    /// session. @see the definition for what a timeout leaves behind.
+    void leaveTerminfoInstall(TerminfoInstallStage stage, TerminfoInstallOutcome outcome);
+
+    /// Judges a failed install step. @see classifySshStepFailure()
+    /// @param rc The failed libssh2 call's result.
+    /// @return TimedOut if libssh2's timeout fired or the install deadline has passed, else Failed.
+    [[nodiscard]] SshStepFailure classifyTerminfoFailure(int rc) const;
+
+    /// @return The TERM used when the terminfo entry is not known to be installed.
+    [[nodiscard]] std::string fallbackTerm() const;
     bool setEnv();
     void resizeScreen();
 
@@ -290,6 +330,21 @@ class SshSession final: public Pty
     }
 
     SshHostConfig _config;
+
+    /// Installs Contour's terminfo before the shell, when engaged. Fixed at construction.
+    std::optional<SshTerminfoInstaller> _terminfo;
+
+    /// How the install ended; decides the TERM that requestPty() sends.
+    TerminfoInstallOutcome _terminfoOutcome = TerminfoInstallOutcome::NotAttempted;
+
+    /// Whether an install channel was opened, for the channel-open failure message.
+    TerminfoInstallAttempt _terminfoAttempt = TerminfoInstallAttempt::None;
+
+    /// The tail of the install command's standard output. Only the marker line matters.
+    std::string _terminfoOutput;
+
+    /// The end of the install budget. Set when the install channel is opened.
+    std::chrono::steady_clock::time_point _terminfoDeadline {};
 
     /// Why this session failed, for start() to hand back. Empty until something fails.
     std::string _failureReason;
@@ -363,6 +418,9 @@ struct std::formatter<vtpty::SshSession::State>: std::formatter<std::string_view
             case vtpty::SshSession::State::AuthenticatePasswordStart: name = "AuthenticatePasswordStart"; break;
             case vtpty::SshSession::State::AuthenticatePasswordWaitForInput: name = "AuthenticatePasswordWaitForInput"; break;
             case vtpty::SshSession::State::AuthenticatePassword: name = "AuthenticatePassword"; break;
+            case vtpty::SshSession::State::InstallTerminfoOpenChannel: name = "InstallTerminfoOpenChannel"; break;
+            case vtpty::SshSession::State::InstallTerminfoExec: name = "InstallTerminfoExec"; break;
+            case vtpty::SshSession::State::InstallTerminfoRead: name = "InstallTerminfoRead"; break;
             case vtpty::SshSession::State::OpenChannel: name = "OpenChannel"; break;
             case vtpty::SshSession::State::RequestAuthAgent: name = "RequestAuthAgent"; break;
             case vtpty::SshSession::State::RequestPty: name = "RequestPty"; break;

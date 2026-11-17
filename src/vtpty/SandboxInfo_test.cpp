@@ -16,11 +16,13 @@
 #include <optional>
 #include <string_view>
 
+using vtpty::describeSshChannelOpenFailure;
 using vtpty::describeSshConnectFailure;
 using vtpty::NetworkAccess;
 using vtpty::parseFlatpakInfo;
 using vtpty::SandboxState;
 using vtpty::SshConnectStage;
+using vtpty::TerminfoInstallAttempt;
 
 namespace
 {
@@ -163,6 +165,15 @@ TEST_CASE("describeSshConnectFailure does not trail off when the platform said n
 {
     CHECK(describeSshConnectFailure(SshConnectStage::Connect, NetworkAccess::Permitted, "host:22", "")
           == "Failed to connect to host:22.");
+}
+
+TEST_CASE("channel-open failure names install_terminfo after an install attempt", "[vtpty][ssh]")
+{
+    auto const attempted = describeSshChannelOpenFailure("boom", TerminfoInstallAttempt::Attempted);
+    CHECK(attempted.contains("install_terminfo: false"));
+    CHECK(attempted.contains("boom"));
+    CHECK(describeSshChannelOpenFailure("boom", TerminfoInstallAttempt::None)
+          == "Failed to open SSH channel. boom");
 }
 
 TEST_CASE("programHostFor runs a program on the host only from a Flatpak that escapes it", "[vtpty][sandbox]")

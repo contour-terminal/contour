@@ -34,6 +34,49 @@ directly. For built-in SSH, `TERM` travels in the PTY request. Other entries, su
 are sent as SSH environment requests and may require server permission (for example, OpenSSH's
 `AcceptEnv`). Review values in existing profiles before using them with a remote host.
 
+### Terminfo installation
+
+When a built-in SSH profile connects, Contour first runs a one-off command on a second SSH channel
+that compiles Contour's terminfo entry with the remote `tic` and installs it into the remote user's
+`~/.terminfo` (`c/contour`, or `63/contour` where the remote's `tic` uses hex-named directories, as
+on macOS). The entry stays there; every later connect reinstalls it, which also updates it after a
+Contour upgrade. When the install succeeds, the shell starts with `TERM=contour`.
+
+If the remote has no `tic` (for example Alpine without ncurses, or BusyBox), the home directory is
+not writable, or anything else fails, the connection proceeds with the terminal type chosen above;
+the details go to the SSH log only. The step is bounded by 3 seconds. When it times out and the
+connection is still usable, one line is shown in the terminal and the shell starts. When the install
+leaves the connection unable to open the shell's channel (the host stopped answering while the install
+channel was being opened, or while a request was still being sent), the connection ends with an error
+that names `ssh.install_terminfo: false`. A host whose install failed, timed out or ended the
+connection is skipped for the rest of that Contour run, so connecting again works.
+
+A profile `environment.TERM` set to anything other than `contour` skips the install. To turn it off
+for a profile, set `install_terminfo: false` (default `true`); the error message names it as
+`ssh.install_terminfo: false`:
+
+```yaml
+profiles:
+  remote-shell:
+    ssh:
+      host: homepc
+      install_terminfo: false
+```
+
+Two kinds of hosts need care:
+
+- Hosts that allow only one session per connection, or that drop the connection after a command, can
+  fail to open the shell after the attempt. The error message then says to set
+  `ssh.install_terminfo: false`.
+- Hosts with a forced command (`ForceCommand`, or `command=` in `authorized_keys`) run that command
+  once more on the first connect of a Contour run instead of the install; the install then fails and
+  the host is skipped from then on. If that forced command prompts (for example for MFA), turn the
+  option off for that profile.
+
+The installed file is a regular terminfo entry; removing `~/.terminfo/*/contour` on the remote undoes it.
+
+### Saved hosts
+
 Hosts are configured under the top-level `hosts` entry, a map of host name to its settings.
 Listings are sorted by name.
 

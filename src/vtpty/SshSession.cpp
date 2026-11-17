@@ -23,6 +23,7 @@
 #include <vtpty/SandboxInfo.hpp>
 #include <vtpty/SshFailureMessage.hpp>
 #include <vtpty/SshKnownHosts.hpp>
+#include <vtpty/SshTerminfoInstall.hpp>
 
 #include <core/Escape.hpp>
 #include <core/Utf8Path.hpp>
@@ -277,6 +278,24 @@ namespace
 #endif
     }
 
+    /// Reads whether libssh2 still holds a packet it could not finish sending.
+    /// @param session The libssh2 session.
+    /// @return Whether libssh2 still holds a half-sent packet. @see SshOutbound
+    [[nodiscard]] SshOutbound pendingOutbound(LIBSSH2_SESSION* session)
+    {
+        return (libssh2_session_block_directions(session) & LIBSSH2_SESSION_BLOCK_OUTBOUND) != 0
+                   ? SshOutbound::Pending
+                   : SshOutbound::Idle;
+    }
+
+    /// Tells libssh2's own timeout apart from every other failure. @see classifySshStepFailure()
+    /// @param rc A failed libssh2 call's result.
+    /// @return Timeout for LIBSSH2_ERROR_TIMEOUT, else Other.
+    [[nodiscard]] constexpr SshCallError sshCallError(ssize_t rc) noexcept
+    {
+        return rc == LIBSSH2_ERROR_TIMEOUT ? SshCallError::Timeout : SshCallError::Other;
+    }
+
 } // namespace
 // }}}
 
@@ -465,6 +484,7 @@ struct SshSession::Private
 {
     LIBSSH2_SESSION* sshSession = nullptr;
     LIBSSH2_CHANNEL* sshChannel = nullptr;
+    LIBSSH2_CHANNEL* installChannel = nullptr; // The terminfo install's; never the shell's.
     LIBSSH2_AGENT* sshAgent = nullptr;
 
     SocketHandle sshSocket;
@@ -472,8 +492,11 @@ struct SshSession::Private
     bool isReaderWoken = false; // Guarded by _injectMutex, including draining the wakeup channel.
 };
 
-SshSession::SshSession(SshHostConfig config, SshHostkeyVerificationRequestCallback hostkeyRequestCallback):
+SshSession::SshSession(SshHostConfig config,
+                       SshHostkeyVerificationRequestCallback hostkeyRequestCallback,
+                       std::optional<SshTerminfoInstaller> terminfo):
     _config { std::move(config) },
+    _terminfo { std::move(terminfo) },
     _hostkeyRequestCallback { std::move(hostkeyRequestCallback) },
     _ptySlave { std::make_unique<SshPtySlave>() },
     _p { new Private(), [](Private* p) { delete p; } }
@@ -511,6 +534,14 @@ SshSession::~SshSession()
         _p->sshAgent = nullptr;
     }
 
+    // close() shut the socket down, so a send fails at once and a read sees the end of the stream --
+    // except while a packet is pending, when libssh2 answers every other send with EAGAIN and a blocking
+    // call would loop on it for ever. @see sshTeardownFor()
+    auto const teardown =
+        _p->sshSession ? sshTeardownFor(pendingOutbound(_p->sshSession)) : SshTeardown::AsConfigured;
+    if (teardown == SshTeardown::NonBlocking)
+        libssh2_session_set_blocking(_p->sshSession, 0);
+
     if (_p->sshChannel)
     {
         libssh2_channel_send_eof(_p->sshChannel);
@@ -521,12 +552,18 @@ SshSession::~SshSession()
     if (_p->sshSession)
     {
         libssh2_session_disconnect(_p->sshSession, "Normal shutdown");
-        libssh2_session_free(_p->sshSession);
+        // Leaked by design when this cannot finish: libssh2_session_free() returns EAGAIN without freeing
+        // anything once a channel it closes cannot send (session.c, session_free), and calling it again
+        // would only return EAGAIN again. One dead session's memory, not a hung thread.
+        if (libssh2_session_free(_p->sshSession) == LIBSSH2_ERROR_EAGAIN)
+            errorLog()("Leaking the SSH session to {}: libssh2 could not finish tearing it down.",
+                       _config.hostname);
         _p->sshSession = nullptr;
     }
 
     // Only now: libssh2 sent its DISCONNECT and channel CLOSE through the descriptor above, and it must
-    // still be ours when it did, not a number another tab's socket has since been given.
+    // still be ours when it did, not a number another tab's socket has since been given. A leaked session
+    // never touches it again.
     if (_p->sshSocket.isOpen())
         _p->sshSocket.close();
 }
@@ -547,11 +584,236 @@ void SshSession::setState(State nextState)
     }
 }
 
+std::string SshSession::fallbackTerm() const
+{
+    return _config.env.contains("TERM") ? _config.env.at("TERM") : ""s;
+}
+
+SshBudget SshSession::armTerminfoTimeout()
+{
+    auto const left = remainingSshBudget(_terminfoDeadline, std::chrono::steady_clock::now());
+    if (!left)
+        return SshBudget::Spent;
+    libssh2_session_set_timeout(_p->sshSession, static_cast<long>(left->count()));
+    return SshBudget::Left;
+}
+
+SshStepFailure SshSession::classifyTerminfoFailure(int rc) const
+{
+    return classifySshStepFailure(sshCallError(rc), _terminfoDeadline, std::chrono::steady_clock::now());
+}
+
+void SshSession::openTerminfoInstallChannel()
+{
+    if (!_terminfo
+        || _terminfo->memo->hasFailed(terminfoHostKey(_config.username, _config.hostname, _config.port)))
+    {
+        if (_terminfo)
+            logInfo("Skipping the terminfo install on {}: it failed on this host before.", _config.hostname);
+        setState(State::OpenChannel);
+        return;
+    }
+
+    _terminfoAttempt = TerminfoInstallAttempt::Attempted;
+    _terminfoDeadline = std::chrono::steady_clock::now() + TerminfoInstallTimeout;
+    libssh2_session_set_timeout(_p->sshSession, static_cast<long>(TerminfoInstallTimeout.count()));
+
+    _p->installChannel = libssh2_channel_open_session(_p->sshSession);
+    if (!_p->installChannel)
+    {
+        auto const rc = libssh2_session_last_errno(_p->sshSession);
+        logInfo("Could not open the terminfo install channel: {}", libssl2ErrorString(rc));
+        // Only libssh2's own timeout leaves its open state stale, so only that ends the session; a clean
+        // refusal that merely arrived after the deadline leaves it idle, and the shell goes on.
+        leaveTerminfoInstall(TerminfoInstallStage::OpenChannel,
+                             rc == LIBSSH2_ERROR_TIMEOUT ? TerminfoInstallOutcome::TimedOut
+                                                         : TerminfoInstallOutcome::Failed);
+        return;
+    }
+    setState(State::InstallTerminfoExec);
+}
+
+void SshSession::execTerminfoInstall()
+{
+    if (armTerminfoTimeout() == SshBudget::Spent)
+    {
+        leaveTerminfoInstall(TerminfoInstallStage::Exec, TerminfoInstallOutcome::TimedOut);
+        return;
+    }
+
+    if (auto const rc = libssh2_channel_exec(_p->installChannel, _terminfo->command.c_str());
+        rc != LIBSSH2_ERROR_NONE)
+    {
+        logInfo("The host refused the terminfo install command: {}", libssl2ErrorString(rc));
+        leaveTerminfoInstall(TerminfoInstallStage::Exec, terminfoOutcomeOf(classifyTerminfoFailure(rc)));
+        return;
+    }
+
+    // The command reads nothing, but a remote shell that waits for stdin would otherwise never finish.
+    if (armTerminfoTimeout() == SshBudget::Spent)
+    {
+        leaveTerminfoInstall(TerminfoInstallStage::Exec, TerminfoInstallOutcome::TimedOut);
+        return;
+    }
+    if (auto const rc = libssh2_channel_send_eof(_p->installChannel); rc != LIBSSH2_ERROR_NONE)
+    {
+        logInfo("Could not close the terminfo install's input: {}", libssl2ErrorString(rc));
+        leaveTerminfoInstall(TerminfoInstallStage::Exec, terminfoOutcomeOf(classifyTerminfoFailure(rc)));
+        return;
+    }
+    _terminfoOutput.clear();
+    setState(State::InstallTerminfoRead);
+}
+
+void SshSession::readTerminfoInstall()
+{
+    constexpr auto OutputTailCap = size_t { 4096 };
+    auto chunk = std::array<char, 1024> {};
+
+    // Standard output first, to its end; the command is short and its stderr small, so what the host
+    // sends on stderr meanwhile waits in the channel's window. A budget that runs out after the marker
+    // was read still counts as installed.
+    while (true)
+    {
+        if (armTerminfoTimeout() == SshBudget::Spent)
+        {
+            leaveTerminfoInstall(TerminfoInstallStage::Read, judgeExpiredTerminfoRead(_terminfoOutput));
+            return;
+        }
+        auto const n = libssh2_channel_read(_p->installChannel, chunk.data(), chunk.size());
+        if (n < 0)
+        {
+            logInfo("Reading the terminfo install's output failed: {}",
+                    libssl2ErrorString(static_cast<int>(n)));
+            leaveTerminfoInstall(
+                TerminfoInstallStage::Read,
+                judgeFailedTerminfoRead(_terminfoOutput, classifyTerminfoFailure(static_cast<int>(n))));
+            return;
+        }
+        if (n == 0)
+            break;
+        appendTail(_terminfoOutput, std::string_view { chunk.data(), static_cast<size_t>(n) }, OutputTailCap);
+    }
+
+    auto errorOutput = std::string {};
+    while (true)
+    {
+        if (armTerminfoTimeout() == SshBudget::Spent)
+        {
+            leaveTerminfoInstall(TerminfoInstallStage::Read, judgeExpiredTerminfoRead(_terminfoOutput));
+            return;
+        }
+        auto const n = libssh2_channel_read_stderr(_p->installChannel, chunk.data(), chunk.size());
+        if (n <= 0)
+            break;
+        appendTail(errorOutput, std::string_view { chunk.data(), static_cast<size_t>(n) }, OutputTailCap);
+    }
+    if (!errorOutput.empty())
+        logInfo("Terminfo install on {} wrote to stderr: {}",
+                _config.hostname,
+                core::escape(errorOutput.data(), errorOutput.data() + errorOutput.size()));
+
+    leaveTerminfoInstall(TerminfoInstallStage::Read, judgeTerminfoInstallOutput(_terminfoOutput));
+}
+
+void SshSession::leaveTerminfoInstall(TerminfoInstallStage stage, TerminfoInstallOutcome outcome)
+{
+    _terminfoOutcome = outcome;
+
+    if (auto* const channel = std::exchange(_p->installChannel, nullptr))
+    {
+        // After a timeout, or with a packet pending, the channel is left alone: libssh2_channel_close() and
+        // _free() wait for the peer to close its side, which is exactly what a stalled host does not do,
+        // and a pending packet blocks the CLOSE until the budget is gone. libssh2_session_free() reclaims
+        // the channel. Each step runs under what is left of the budget; if it runs out, cleanup stops and
+        // the outcome already judged stays.
+        auto exitStatus = std::optional<int> {};
+        if (outcome != TerminfoInstallOutcome::TimedOut
+            && pendingOutbound(_p->sshSession) == SshOutbound::Idle
+            && armTerminfoTimeout() == SshBudget::Left
+            && libssh2_channel_close(channel) == LIBSSH2_ERROR_NONE)
+        {
+            // libssh2 reports 0 until an exit status arrives, which would claim a success nobody reported,
+            // so it is read only once the host's CLOSE is known to have arrived: a host sends the exit
+            // status before it. A clean close does not say so -- it returns after the first packet that
+            // follows our CLOSE (channel.c, _libssh2_channel_close) -- but a clean wait_closed() does
+            // (channel.c, channel_wait_closed). Only a command that ran, read to its end, has one to send.
+            if (stage == TerminfoInstallStage::Read && armTerminfoTimeout() == SshBudget::Left
+                && libssh2_channel_wait_closed(channel) == LIBSSH2_ERROR_NONE)
+                exitStatus = libssh2_channel_get_exit_status(channel);
+            if (armTerminfoTimeout() == SshBudget::Left)
+                libssh2_channel_free(channel);
+        }
+        logInfo("Terminfo install on {}: {}, {}.",
+                _config.hostname,
+                terminfoOutcomeName(outcome),
+                exitStatus ? std::format("exit status {}", *exitStatus) : "no exit status"s);
+    }
+
+    // Looked at after the cleanup above, whatever the outcome: libssh2's timeout counts whole seconds and
+    // can fire before our deadline, leaving a packet pending under an outcome other than TimedOut, and the
+    // cleanup's own CLOSE can be the packet left pending.
+    auto const outbound = pendingOutbound(_p->sshSession);
+
+    // Whatever happens above, the shell's channel and everything after it run without a timeout.
+    libssh2_session_set_timeout(_p->sshSession, 0);
+
+    auto const after = afterTerminfoInstall(stage, outcome, outbound);
+
+    switch (outcome)
+    {
+        case TerminfoInstallOutcome::TimedOut:
+            // Only a session that goes on to the shell is told it is using the fallback TERM.
+            if (after == AfterTerminfoInstall::StartShell)
+                logInfoWithInject("Installing Contour's terminfo on {} timed out; using TERM={}. Set "
+                                  "ssh.install_terminfo: false to skip it.",
+                                  _config.hostname,
+                                  fallbackTerm());
+            else
+                logInfo("Installing Contour's terminfo on {} timed out.", _config.hostname);
+            break;
+        case TerminfoInstallOutcome::Failed:
+            if (after == AfterTerminfoInstall::StartShell)
+                logInfo("Contour's terminfo was not installed on {}; using TERM={}.",
+                        _config.hostname,
+                        fallbackTerm());
+            else
+                logInfo("Contour's terminfo was not installed on {}.", _config.hostname);
+            break;
+        case TerminfoInstallOutcome::Installed:
+            logInfo("Installed Contour's terminfo on {}.", _config.hostname);
+            break;
+        case TerminfoInstallOutcome::NotAttempted: break;
+    }
+
+    // An install that cost the connection counts as failed even if the entry got there: the next
+    // connection to this host must not pay the same price again.
+    if (outcome == TerminfoInstallOutcome::Failed || outcome == TerminfoInstallOutcome::TimedOut
+        || after == AfterTerminfoInstall::EndSession)
+        _terminfo->memo->recordFailure(terminfoHostKey(_config.username, _config.hostname, _config.port));
+
+    if (after == AfterTerminfoInstall::EndSession)
+    {
+        // The connection cannot open the shell's channel any more. The host is in the memo, so the next
+        // connection skips the install.
+        fail(stage == TerminfoInstallStage::OpenChannel && outcome == TerminfoInstallOutcome::TimedOut
+                 ? describeSshChannelOpenFailure("Opening the terminfo install channel timed out.",
+                                                 TerminfoInstallAttempt::Attempted)
+                 : std::format("The terminfo install on {} could not finish sending in time and left the "
+                               "connection unusable. Set ssh.install_terminfo: false to skip it.",
+                               _config.hostname));
+        return;
+    }
+
+    setState(State::OpenChannel);
+}
+
 bool SshSession::requestPty()
 {
     // Mode encoding defined here: https://datatracker.ietf.org/doc/html/rfc4250#section-4.5
     auto const modes = ""sv;
-    auto const term = _config.env.contains("TERM") ? _config.env.at("TERM") : ""s;
+    auto const term =
+        _terminfo ? chooseSshTerm(_terminfoOutcome, _terminfo->entryName, fallbackTerm()) : fallbackTerm();
     auto const rc = libssh2_channel_request_pty_ex(_p->sshChannel,
                                                    term.data(),
                                                    term.size(),
@@ -727,6 +989,9 @@ void SshSession::processState()
                 authenticateWithPassword();
                 break;
             }
+            case State::InstallTerminfoOpenChannel: openTerminfoInstallChannel(); break;
+            case State::InstallTerminfoExec: execTerminfoInstall(); break;
+            case State::InstallTerminfoRead: readTerminfoInstall(); break;
             case State::OpenChannel: {
                 _p->sshChannel = libssh2_channel_open_session(_p->sshSession);
                 // A channel that came back is open, whatever error an earlier call left behind: the error
@@ -740,7 +1005,7 @@ void SshSession::processState()
                 }
                 if (rc != LIBSSH2_ERROR_NONE)
                 {
-                    fail("Failed to open SSH channel. {}", libssl2ErrorString(rc));
+                    fail(describeSshChannelOpenFailure(libssl2ErrorString(rc), _terminfoAttempt));
                     return;
                 }
                 assert(_p->sshChannel);
@@ -891,6 +1156,11 @@ void SshSession::close()
 
     if (_p->sshChannel)
     {
+        // The session can still be blocking here -- the connect sequence failed after the channel was
+        // opened -- and a packet still pending would make these calls loop for ever on a socket fail()
+        // shut down. Operational sessions are non-blocking already. @see sshTeardownFor()
+        if (sshTeardownFor(pendingOutbound(_p->sshSession)) == SshTeardown::NonBlocking)
+            libssh2_session_set_blocking(_p->sshSession, 0);
         libssh2_channel_send_eof(_p->sshChannel);
         libssh2_channel_close(_p->sshChannel);
         libssh2_channel_wait_closed(_p->sshChannel);
@@ -1583,7 +1853,7 @@ void SshSession::authenticateWithPrivateKey()
 
     logInfoWithInject("Successfully authenticated with private key.");
 
-    setState(State::OpenChannel);
+    setState(State::InstallTerminfoOpenChannel);
 }
 
 void SshSession::authenticateWithPassword()
@@ -1622,7 +1892,7 @@ void SshSession::authenticateWithPassword()
 
     logInfoWithInject("Successfully authenticated with password.");
 
-    setState(State::OpenChannel);
+    setState(State::InstallTerminfoOpenChannel);
 }
 
 bool SshSession::authenticateWithAgent()
@@ -1682,7 +1952,7 @@ bool SshSession::authenticateWithAgent()
         {
             logInfoWithInject("Successfully authenticated with SSH agent with identity: {}",
                               identity->comment);
-            setState(State::OpenChannel);
+            setState(State::InstallTerminfoOpenChannel);
             return true;
         }
         logInfo("Could not authenticate with SSH agent with identity: {}", identity->comment);

@@ -2868,6 +2868,10 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         loadGuarded(child, "public_key", where.publicKeyFile);
         loadGuarded(child, "known_hosts", where.knownHostsFile);
         loadGuarded(child, "forward_agent", where.forwardAgent);
+        auto installTerminfo = where.terminfoInstall == vtpty::TerminfoInstall::Install;
+        loadGuarded(child, "install_terminfo", installTerminfo);
+        where.terminfoInstall =
+            installTerminfo ? vtpty::TerminfoInstall::Install : vtpty::TerminfoInstall::Off;
     }
 }
 
@@ -5799,7 +5803,8 @@ static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile co
                      << YAML::DoubleQuoted << core::pathToUtf8(ssh.publicKeyFile) << YAML::Key
                      << "known_hosts" << YAML::Value << YAML::DoubleQuoted
                      << core::pathToUtf8(ssh.knownHostsFile) << YAML::Key << "forward_agent" << YAML::Value
-                     << ssh.forwardAgent << YAML::EndMap;
+                     << ssh.forwardAgent << YAML::Key << "install_terminfo" << YAML::Value
+                     << (ssh.terminfoInstall == vtpty::TerminfoInstall::Install) << YAML::EndMap;
             }
             if (!profile.configuredEnvironment.empty())
             {
