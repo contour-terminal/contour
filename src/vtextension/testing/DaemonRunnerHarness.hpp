@@ -158,6 +158,7 @@ class RecordingPresence final: public IExtensionPresence
 {
   public:
     void publishSummary(std::string_view extension,
+                        DaemonRunGeneration /*generation*/,
                         std::string_view shortText,
                         std::string_view detail) override
     {
@@ -167,6 +168,14 @@ class RecordingPresence final: public IExtensionPresence
                                                 .detail = std::string(detail) });
     }
 
+    void phaseChanged(std::string_view /*extension*/,
+                      DaemonRunGeneration generation,
+                      DaemonExtensionPhase phase) override
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        _phases.emplace_back(generation, phase);
+    }
+
     /// @return Every summary published, in order.
     [[nodiscard]] std::vector<PublishedSummary> published() const
     {
@@ -174,9 +183,17 @@ class RecordingPresence final: public IExtensionPresence
         return _published;
     }
 
+    /// @return Every phase told, with its run, in order.
+    [[nodiscard]] std::vector<std::pair<DaemonRunGeneration, DaemonExtensionPhase>> phases() const
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return _phases;
+    }
+
   private:
     mutable std::mutex _mutex;
     std::vector<PublishedSummary> _published;
+    std::vector<std::pair<DaemonRunGeneration, DaemonExtensionPhase>> _phases;
 };
 
 /// Every service a DaemonExtensionRunner reaches, single-threaded on a ManualScheduler, and a daemon guest

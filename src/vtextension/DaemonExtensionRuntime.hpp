@@ -108,22 +108,14 @@ struct PendingConsent
     ConsentQuestion question; ///< What to ask (daemonConsentQuestion()).
 };
 
-/// Where a daemon-scoped extension stands.
-enum class DaemonExtensionPhase : uint8_t
-{
-    Stopped = 0, ///< Not running, and not waiting for its user.
-    Pending,     ///< It was to start, and waits for its user's grant.
-    Denied,      ///< Its user refused it.
-    Running,     ///< Its runner runs it, or recovers it from a fault.
-    Disabled,    ///< It faulted too often; it runs no more until started again.
-};
-
 /// One daemon-scoped extension that composed.
 struct DaemonExtensionEntry
 {
     std::string name;                                           ///< What the configuration calls it.
     DaemonExtensionPhase phase = DaemonExtensionPhase::Stopped; ///< Where it stands.
     std::string grantDigest;                                    ///< What its grant is recorded for.
+    /// Why it could not run, neutralized for display, while it is Failed; empty otherwise.
+    std::string problem;
 };
 
 /// What a DaemonExtensionRuntime is: fixed for its whole life. A changed configuration takes effect at the
@@ -208,9 +200,8 @@ class DaemonExtensionRuntime
     DaemonExtensionRuntime& operator=(DaemonExtensionRuntime&&) = delete;
 
     /// Starts an extension on demand: one the user granted is run, a disabled one restarted; one not granted
-    /// waits for the user's consent. Does nothing for a name that does not run, or once stopped. A module
-    /// that
-    /// cannot be loaded is logged.
+    /// waits for the user's consent. Does nothing for a name that does not run, or once stopped. One whose
+    /// module cannot be loaded is logged, and Failed until it is started again (entries()).
     /// @param name What the configuration calls it.
     void start(std::string_view name);
 
@@ -256,8 +247,16 @@ class DaemonExtensionRuntime
     /// @return Nothing; or why the granted extension cannot run.
     [[nodiscard]] std::expected<void, DeclarationProblem> run(Extension& extension);
 
-    /// Runs @p extension as run() does, and logs why it cannot run.
+    /// Runs @p extension as run() does; why it cannot run is logged, and kept as the Failed phase's problem.
+    /// Where it then stands is reported.
     void runOrReport(Extension& extension);
+
+    /// @return Where @p extension stands.
+    [[nodiscard]] DaemonExtensionPhase phaseOf(Extension const& extension) const;
+
+    /// Tells the presence where @p extension stands, as its current run, unless a runner runs it: a runner
+    /// reports its own run's phases.
+    void report(Extension const& extension);
 
     /// @return The extension the configuration calls @p name; null for none.
     [[nodiscard]] Extension* find(std::string_view name) const;

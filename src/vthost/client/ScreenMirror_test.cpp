@@ -50,6 +50,7 @@
 #include <vthost/TimeWire.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/client/ScreenMirror.hpp>
+#include <vthost/testing/FakeDaemonWorldHosting.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/GridParity.hpp>
 #include <vthost/testing/ScenarioGuard.hpp>
@@ -185,12 +186,14 @@ struct MirrorHarness
     /// @param mirrorHistory The mirror terminal's scrollback depth.
     /// @param extensions The status-line extensions the hosted sessions run; none by default.
     /// @param adjustServer What the hosted sessions' settings differ in; nothing by default.
+    /// @param daemonWorld What makes the host's daemon-scoped extensions; none by default.
     explicit MirrorHarness(
         vtbackend::CommandBlockStoreLimits mirrorBlockLimits = {},
         vtbackend::HistoryLimits serverHistory = vtbackend::HistoryLimits::plain(ServerHistoryLines),
         vtbackend::LineCount mirrorHistory = MirrorHistoryLines,
         std::shared_ptr<vthost::IExtensionHosting> extensions = {},
-        std::function<void(vtbackend::Settings&)> const& adjustServer = {}):
+        std::function<void(vtbackend::Settings&)> const& adjustServer = {},
+        vthost::DaemonWorldFactory daemonWorld = {}):
         host { loop,
                [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                    return std::make_unique<vtpty::MockPty>(size);
@@ -203,7 +206,8 @@ struct MirrorHarness
                }(),
                core::defaultEnvironment(),
                vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
-                                           .extensions = std::move(extensions) } }
+                                           .extensions = std::move(extensions),
+                                           .daemonWorld = std::move(daemonWorld) } }
     {
         auto settings = gipSettings(mirrorHistory);
         settings.commandBlockLimits = mirrorBlockLimits;
@@ -2761,6 +2765,54 @@ TEST_CASE("a pushed then popped status display round-trips through the mirror", 
     }(&h, session);
 
     h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
+TEST_CASE("ScreenMirror.daemonExtension.summaryMirrored", "[vthost][mirror][daemon][summary]")
+{
+    // A window attaching after a daemon extension published its summary shows it: the client's terminal has
+    // no summaries of its own, and mirrors the row the daemon drew.
+    auto const journal = std::make_shared<std::vector<std::string>>();
+    auto world = std::shared_ptr<vthost::testing::FakeDaemonWorldHosting> {};
+    auto h = MirrorHarness { {},
+                             vtbackend::HistoryLimits::plain(ServerHistoryLines),
+                             MirrorHistoryLines,
+                             {},
+                             [](vtbackend::Settings& settings) {
+                                 settings.indicatorStatusLine.left = "[{DaemonExtension:orchestrator}]";
+                                 settings.indicatorStatusLine.middle.clear();
+                                 settings.indicatorStatusLine.right.clear();
+                             },
+                             [&](vthost::DaemonWorldEvents events, vthost::OwnerPost post) {
+                                 world = std::make_shared<vthost::testing::FakeDaemonWorldHosting>(
+                                     journal, std::move(post), std::move(events));
+                                 return world;
+                             } };
+    h.mirror->setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    h.populator = std::make_unique<ScreenMirror>(*h.mirror, MirrorHarness::Daemon);
+    auto const session = newSession(h.host);
+    REQUIRE(world != nullptr);
+    world->publishSummary("orchestrator", "agents 1/4");
+    std::ignore = h.loop.runOnce(std::chrono::milliseconds { 0 });
+
+    auto scenario = [](MirrorHarness* h, vthost::testing::FakeDaemonWorldHosting* world) -> Task<void> {
+        auto const indicatorText = [h] {
+            h->mirror->refreshRenderBuffer();
+            return h->mirror->indicatorStatusLineDisplay()
+                .grid()
+                .lineAt(vtbackend::LineOffset(0))
+                .toUtf8Trimmed();
+        };
+        co_await waitUntil(&h->loop, [&] { return indicatorText() == "[agents 1/4]"; });
+        CHECK(indicatorText() == "[agents 1/4]");
+
+        // And it follows the next one.
+        world->publishSummary("orchestrator", "agents 2/4");
+        co_await waitUntil(&h->loop, [&] { return indicatorText() == "[agents 2/4]"; });
+        CHECK(indicatorText() == "[agents 2/4]");
+        h->client->detach();
+    }(&h, world.get());
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+    std::ignore = session;
 }
 
 TEST_CASE("ScreenMirror.extension.applied", "[vthost][mirror][extensions]")

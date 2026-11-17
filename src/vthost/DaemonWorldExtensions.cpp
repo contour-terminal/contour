@@ -5,6 +5,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
+#include <format>
+#include <string_view>
 #include <utility>
 
 #include <vthost/DaemonExtensions.hpp>
@@ -66,6 +69,8 @@ namespace
                    .state = DaemonExtensionState::Running },
         PhaseRow { .phase = vtextension::DaemonExtensionPhase::Disabled,
                    .state = DaemonExtensionState::Disabled },
+        PhaseRow { .phase = vtextension::DaemonExtensionPhase::Failed,
+                   .state = DaemonExtensionState::Failed },
     };
 
     /// @return @p phase as vthost names it.
@@ -74,6 +79,42 @@ namespace
         auto const row = std::ranges::find(PhaseRows, phase, &PhaseRow::phase);
         return row != PhaseRows.end() ? row->state : DaemonExtensionState::Stopped;
     }
+
+    /// What the status line shows of an extension, by where it stands.
+    enum class StatusShows : uint8_t
+    {
+        Nothing = 0, ///< Nothing: it does not run, and says nothing of itself.
+        Summary,     ///< The summary it last published.
+        Notice,      ///< A notice naming it, StatusText::notice.
+    };
+
+    /// One row of what the status line shows for a phase.
+    struct StatusText
+    {
+        vtextension::DaemonExtensionPhase phase;
+        StatusShows shows;
+        std::string_view notice; ///< A format of the extension's name, for StatusShows::Notice.
+    };
+
+    inline constexpr auto StatusTexts = std::array {
+        StatusText { .phase = vtextension::DaemonExtensionPhase::Stopped,
+                     .shows = StatusShows::Nothing,
+                     .notice = {} },
+        StatusText { .phase = vtextension::DaemonExtensionPhase::Pending,
+                     .shows = StatusShows::Nothing,
+                     .notice = {} },
+        StatusText {
+            .phase = vtextension::DaemonExtensionPhase::Denied, .shows = StatusShows::Nothing, .notice = {} },
+        StatusText { .phase = vtextension::DaemonExtensionPhase::Running,
+                     .shows = StatusShows::Summary,
+                     .notice = {} },
+        StatusText { .phase = vtextension::DaemonExtensionPhase::Disabled,
+                     .shows = StatusShows::Notice,
+                     .notice = "{} disabled" },
+        StatusText { .phase = vtextension::DaemonExtensionPhase::Failed,
+                     .shows = StatusShows::Notice,
+                     .notice = "{} failed" },
+    };
 
     /// @return vthost's answer as vtextension's.
     [[nodiscard]] vtextension::GrantState grantOf(GrantState answer) noexcept
@@ -123,9 +164,11 @@ std::vector<DaemonExtensionListing> DaemonWorldExtensions::list() const
     auto listings = std::vector<DaemonExtensionListing> {};
     for (auto const& entry: _runtime->entries())
     {
-        auto listing = DaemonExtensionListing {
-            .name = entry.name, .state = stateOf(entry.phase), .grantDigest = entry.grantDigest, .pending = {}
-        };
+        auto listing = DaemonExtensionListing { .name = entry.name,
+                                                .state = stateOf(entry.phase),
+                                                .grantDigest = entry.grantDigest,
+                                                .pending = {},
+                                                .problem = entry.problem };
         if (auto const asked = std::ranges::find(pending, entry.name, &DaemonExtensionRequest::name);
             asked != pending.end())
             listing.pending = *asked;
@@ -136,12 +179,60 @@ std::vector<DaemonExtensionListing> DaemonWorldExtensions::list() const
 
 void DaemonWorldExtensions::answer(std::string_view name, std::string_view grantDigest, GrantState answer)
 {
+    // The host tells the windows the question is settled; where the extension then stands, it reports.
     _runtime->answer(name, grantDigest, grantOf(answer));
 }
 
 void DaemonWorldExtensions::revoke(std::string_view name)
 {
+    // The runtime starts a new run, which drops the old one's summary and whatever it still publishes; once
+    // it returned, the summary is forgotten here too, whatever reached us meanwhile.
     changingRequests([&] { _runtime->revoke(name); });
+    auto const lock = std::scoped_lock { _mutex };
+    if (auto const found = _shown.find(name); found != _shown.end())
+        found->second.summary.reset();
+}
+
+std::optional<DaemonExtensionStatus> DaemonWorldExtensions::status(std::string_view name) const
+{
+    auto const listings = list();
+    auto const listed = std::ranges::find(listings, name, &DaemonExtensionListing::name);
+    if (listed == listings.end())
+        return std::nullopt;
+    auto status =
+        DaemonExtensionStatus { .state = listed->state, .summary = {}, .detail = {}, .problem = {} };
+    if (status.state == DaemonExtensionState::Failed)
+        status.problem = listed->problem;
+    if (auto published = summary(name))
+    {
+        status.summary = std::move(published->shortText);
+        status.detail = std::move(published->detail);
+    }
+    return status;
+}
+
+vtbackend::IDaemonExtensionSummaries const& DaemonWorldExtensions::summaries() const noexcept
+{
+    return *this;
+}
+
+std::string DaemonWorldExtensions::summaryOf(std::string_view name) const
+{
+    auto const lock = std::scoped_lock { _mutex };
+    auto const found = _shown.find(name);
+    if (found == _shown.end())
+        return {};
+    auto const& shown = found->second;
+    auto const row = std::ranges::find(StatusTexts, shown.phase, &StatusText::phase);
+    if (row == StatusTexts.end())
+        return {};
+    switch (row->shows)
+    {
+        case StatusShows::Nothing: return {};
+        case StatusShows::Summary: return shown.summary ? shown.summary->shortText : std::string {};
+        case StatusShows::Notice: return std::vformat(row->notice, std::make_format_args(name));
+    }
+    return {};
 }
 
 void DaemonWorldExtensions::stop() noexcept
@@ -152,22 +243,62 @@ void DaemonWorldExtensions::stop() noexcept
 std::optional<DaemonExtensionSummary> DaemonWorldExtensions::summary(std::string_view name) const
 {
     auto const lock = std::scoped_lock { _mutex };
-    auto const found = _summaries.find(name);
-    if (found == _summaries.end())
+    auto const found = _shown.find(name);
+    if (found == _shown.end())
         return std::nullopt;
-    return found->second;
+    return found->second.summary;
+}
+
+DaemonWorldExtensions::Shown* DaemonWorldExtensions::shownAs(std::string_view name,
+                                                             vtextension::DaemonRunGeneration generation)
+{
+    auto found = _shown.find(name);
+    if (found == _shown.end())
+        found = _shown
+                    .emplace(std::string(name),
+                             Shown { .generation = generation,
+                                     .phase = vtextension::DaemonExtensionPhase::Stopped,
+                                     .summary = {} })
+                    .first;
+    auto& shown = found->second;
+    if (generation < shown.generation)
+        return nullptr;
+    if (generation > shown.generation)
+        shown = Shown { .generation = generation,
+                        .phase = vtextension::DaemonExtensionPhase::Stopped,
+                        .summary = {} };
+    return &shown;
 }
 
 void DaemonWorldExtensions::publishSummary(std::string_view extension,
+                                           vtextension::DaemonRunGeneration generation,
                                            std::string_view shortText,
                                            std::string_view detail)
 {
     {
         auto const lock = std::scoped_lock { _mutex };
-        _summaries.insert_or_assign(
-            std::string(extension),
-            DaemonExtensionSummary { .shortText = std::string(shortText), .detail = std::string(detail) });
+        auto* const shown = shownAs(extension, generation);
+        if (shown == nullptr)
+            return; // A run revoked since: what it says is no longer shown.
+        shown->summary =
+            DaemonExtensionSummary { .shortText = std::string(shortText), .detail = std::string(detail) };
     }
+    if (_events.summaryChanged)
+        _events.summaryChanged();
+}
+
+void DaemonWorldExtensions::phaseChanged(std::string_view extension,
+                                         vtextension::DaemonRunGeneration generation,
+                                         vtextension::DaemonExtensionPhase phase)
+{
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        auto* const shown = shownAs(extension, generation);
+        if (shown == nullptr)
+            return;
+        shown->phase = phase;
+    }
+    // Every phase change repaints: what the status line shows follows from it.
     if (_events.summaryChanged)
         _events.summaryChanged();
 }

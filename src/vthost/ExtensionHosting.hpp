@@ -130,7 +130,7 @@ struct DaemonWorldEvents
 {
     /// The set of extensions waiting for the user's consent changed.
     std::function<void()> requestsChanged;
-    /// An extension published a new summary of itself.
+    /// What an extension shows of itself changed: it published a new summary, or it failed to start.
     std::function<void()> summaryChanged;
 };
 
@@ -154,6 +154,7 @@ enum class DaemonExtensionState : uint8_t
     Denied,      ///< Its user refused it.
     Running,     ///< It runs (or recovers from a fault).
     Disabled,    ///< It faulted too often, and runs no more until started again.
+    Failed,      ///< It was granted and started, and could not run (its module does not load, for one).
 };
 
 /// One daemon-scoped extension, as `extension.list` shows it.
@@ -163,8 +164,20 @@ struct DaemonExtensionListing
     DaemonExtensionState state = DaemonExtensionState::Stopped; ///< Where it stands.
     std::string grantDigest;                                    ///< What its grant is recorded for.
     std::optional<DaemonExtensionRequest> pending;              ///< Its question, while it is Pending.
+    std::string problem; ///< Why it could not run, neutralized, while it is Failed; empty otherwise.
 
     bool operator==(DaemonExtensionListing const&) const = default;
+};
+
+/// What one daemon-scoped extension shows of itself, as `extension.status` reports it.
+struct DaemonExtensionStatus
+{
+    DaemonExtensionState state = DaemonExtensionState::Stopped; ///< Where it stands.
+    std::string summary; ///< The one-line summary it last published, neutralized; empty for none.
+    std::string detail;  ///< The longer text it last published, neutralized, `\n` between its lines.
+    std::string problem; ///< Why it could not run, neutralized, while it is Failed; empty otherwise.
+
+    bool operator==(DaemonExtensionStatus const&) const = default;
 };
 
 /// What asking the windows again came to.
@@ -212,6 +225,11 @@ class IDaemonExtensionControl
     /// Forgets the user's answer for the extension's manifest and roots and stops it; it is asked again.
     /// @param name What the configuration calls it.
     virtual void revoke(std::string_view name) = 0;
+
+    /// @param name What the configuration calls an extension.
+    /// @return Where it stands, what it last published of itself, and why it failed if it did; nullopt for a
+    ///         name that does not compose.
+    [[nodiscard]] virtual std::optional<DaemonExtensionStatus> status(std::string_view name) const = 0;
 };
 
 /// A daemon's daemon-scoped extensions: the ones that run beside its sessions, with no session or window.
@@ -246,8 +264,19 @@ class IDaemonWorldHosting
     virtual void answer(std::string_view name, std::string_view grantDigest, GrantState answer) = 0;
 
     /// Forgets the user's answer for the extension's manifest and roots and stops it; it is pending again.
+    /// What it published of itself is forgotten with it.
     /// @param name What the configuration calls it.
     virtual void revoke(std::string_view name) = 0;
+
+    /// @param name What the configuration calls an extension.
+    /// @return Where it stands, what it last published of itself, and why it failed if it did; nullopt for a
+    ///         name that does not compose.
+    [[nodiscard]] virtual std::optional<DaemonExtensionStatus> status(std::string_view name) const = 0;
+
+    /// @return What the hosted terminals' `{DaemonExtension}` items read: each extension's one-line summary,
+    ///         or why it failed. Readable from any thread; lives as long as this. DaemonWorldEvents's
+    ///         summaryChanged tells when it changed.
+    [[nodiscard]] virtual vtbackend::IDaemonExtensionSummaries const& summaries() const noexcept = 0;
 
     /// Stops every extension for good, for a host about to go: joins the thread they run on, then cancels
     /// the processes in flight. Called by the host before it drains its loop of what they posted; after it,

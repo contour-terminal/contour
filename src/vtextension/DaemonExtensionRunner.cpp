@@ -171,6 +171,9 @@ class DaemonExtensionRunner::Core final: public IDaemonHostServices, public std:
         }
     }
 
+    /// Tells the presence that this run is up, before any of its jobs runs.
+    void reportRunning() noexcept { reportPhase(DaemonExtensionPhase::Running); }
+
     void restart() noexcept
     {
         {
@@ -179,6 +182,7 @@ class DaemonExtensionRunner::Core final: public IDaemonHostServices, public std:
                 return;
             _status.state = DaemonRunnerState::Starting;
         }
+        reportPhase(DaemonExtensionPhase::Running);
         try
         {
             onLane([](Core& core) { core.restartDisabled(); });
@@ -186,8 +190,11 @@ class DaemonExtensionRunner::Core final: public IDaemonHostServices, public std:
         catch (...)
         {
             // The scheduler could not take the job: it stays disabled, and may be restarted again.
-            auto const lock = std::scoped_lock { _statusMutex };
-            _status.state = DaemonRunnerState::Disabled;
+            {
+                auto const lock = std::scoped_lock { _statusMutex };
+                _status.state = DaemonRunnerState::Disabled;
+            }
+            reportPhase(DaemonExtensionPhase::Disabled);
         }
     }
 
@@ -315,6 +322,7 @@ class DaemonExtensionRunner::Core final: public IDaemonHostServices, public std:
                 // Not even the fault could be recorded (out of memory): stop the extension as it is.
                 _instance.reset();
                 setState(DaemonRunnerState::Disabled);
+                reportPhase(DaemonExtensionPhase::Disabled);
             }
         }
     }
@@ -415,7 +423,7 @@ class DaemonExtensionRunner::Core final: public IDaemonHostServices, public std:
         if (characterCount(shortText) > MaxSummaryShortChars || detail.size() > MaxSummaryDetailBytes)
             return std::unexpected(HostError::Limit);
         _services.presence.publishSummary(
-            _config.name, neutralizedForDisplay(shortText), neutralizedLines(detail));
+            _config.name, _config.generation, neutralizedForDisplay(shortText), neutralizedLines(detail));
         return {};
     }
     // }}}
@@ -438,6 +446,12 @@ class DaemonExtensionRunner::Core final: public IDaemonHostServices, public std:
     [[nodiscard]] core::platform::IClock& clock() const noexcept { return _services.scheduler.clock(); }
 
     [[nodiscard]] bool isClosed() const noexcept { return _stop.stop_requested(); }
+
+    /// Tells the presence where the extension now stands, as this run.
+    void reportPhase(DaemonExtensionPhase phase) noexcept
+    {
+        _services.presence.phaseChanged(_config.name, _config.generation, phase);
+    }
 
     void setState(DaemonRunnerState state) noexcept
     {
@@ -536,6 +550,7 @@ class DaemonExtensionRunner::Core final: public IDaemonHostServices, public std:
         }
         if (disabled)
         {
+            reportPhase(DaemonExtensionPhase::Disabled);
             emitLog(LogLevel::Error, std::format("{} disabled: {}", _config.name, errorText(error)));
             return;
         }
@@ -586,6 +601,8 @@ DaemonExtensionRunner::DaemonExtensionRunner(std::shared_ptr<Engine> engine,
     _core { std::make_shared<Core>(
         std::move(engine), std::move(compiled), std::move(config), std::move(services)) }
 {
+    // Before its first job: whatever the lane reports of this run comes after it.
+    _core->reportRunning();
     _core->onLane([](Core& core) { core.start(); });
 }
 

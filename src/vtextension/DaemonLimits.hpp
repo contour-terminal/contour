@@ -18,8 +18,15 @@ inline constexpr auto MinWakeInterval = std::chrono::milliseconds { 16 };
 /// The most characters (code points) of `summary-set`'s one-line summary.
 inline constexpr std::size_t MaxSummaryShortChars = 120;
 
-/// The most bytes of `summary-set`'s detail.
+/// The most bytes of `summary-set`'s detail, as the guest publishes it: the cap is on the input.
 inline constexpr std::size_t MaxSummaryDetailBytes = 16 << 10;
+
+/// How many times its input a neutralized text may grow at most: a one-byte control character is shown as
+/// the eight bytes `<U+XXXX>`, and nothing grows more.
+inline constexpr std::size_t MaxNeutralizedGrowth = 8;
+
+/// The most bytes of a detail as it is shown, neutralized: 128 KiB.
+inline constexpr std::size_t MaxSummaryDetailShownBytes = MaxSummaryDetailBytes * MaxNeutralizedGrowth;
 
 /// The bound on durable host calls (`store-set`, `store-remove`): they pause the guest's call deadline, which
 /// bounds the guest's own work and not the disk, so this bounds them instead. One guest callback (`load`,

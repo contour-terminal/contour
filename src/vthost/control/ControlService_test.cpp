@@ -2297,7 +2297,8 @@ struct ExtensionControlHarness
         world->others = { vthost::DaemonExtensionListing { .name = "stats",
                                                            .state = vthost::DaemonExtensionState::Running,
                                                            .grantDigest = "77",
-                                                           .pending = {} } };
+                                                           .pending = {},
+                                                           .problem = {} } };
     }
 
     /// @return Every entry the daemon world journalled that records an answer.

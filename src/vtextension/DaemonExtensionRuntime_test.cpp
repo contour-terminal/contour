@@ -90,6 +90,10 @@ struct Fixture
             "/ext/good.wasm",
             textOf(testing::withManifest(testing::toModule(testing::DaemonProbeModule), WorkManifest)));
         fileSystem.addFile("/ext/bad.wasm", textOf(testing::daemonProbeNoPlacement()));
+        // A daemon module by its manifest, that the runtime refuses to load: it has a start function.
+        fileSystem.addFile(
+            "/ext/broken.wasm",
+            textOf(testing::withManifest(testing::toModule(testing::StartFunctionModule), WorkManifest)));
         harness.onLoad = [this]() -> std::expected<void, wasm::CallFailure> {
             auto result = onLoad ? onLoad() : std::expected<void, wasm::CallFailure> {};
             if (loads.fetch_add(1) == 0)
@@ -505,6 +509,70 @@ TEST_CASE("DaemonExtensionRuntime: entries say where each extension stands", "[d
     fixture.firstLoad.wait();
     fixture.runtime->stop();
     CHECK(fixture.runtime->entries().empty());
+}
+
+TEST_CASE("DaemonExtensionRuntime: a granted extension whose module does not load is Failed, and says why",
+          "[daemon][runtime][consent]")
+{
+    auto fixture = Fixture {};
+    REQUIRE(fixture.create({ declared("broken", "/ext/broken.wasm", ExtensionAutostart::OnDemand) }).empty());
+    fixture.runtime->start("broken");
+    REQUIRE(fixture.runtime->pending().size() == 1);
+    auto const digest = fixture.runtime->pending().at(0).grantDigest;
+
+    // Granted in a window, it cannot run: not "waiting for consent", but failed, with the reason.
+    fixture.runtime->answer("broken", digest, GrantState::Granted);
+    CHECK_FALSE(fixture.runtime->status("broken").has_value());
+    CHECK(fixture.runtime->pending().empty());
+    auto const failed = fixture.runtime->entries().at(0);
+    CHECK(failed.phase == DaemonExtensionPhase::Failed);
+    CHECK(failed.problem.contains("daemon.extensions.broken"));
+    CHECK(failed.problem.contains("its module does not load"));
+
+    // Started again, it fails again; revoked, the failure goes with the grant.
+    fixture.runtime->start("broken");
+    CHECK(fixture.runtime->entries().at(0).phase == DaemonExtensionPhase::Failed);
+    fixture.runtime->revoke("broken");
+    CHECK(fixture.runtime->entries().at(0).phase == DaemonExtensionPhase::Stopped);
+    CHECK(fixture.runtime->entries().at(0).problem.empty());
+}
+
+TEST_CASE("DaemonExtensionRuntime: revoke starts a new run, which its presence is told",
+          "[daemon][runtime][consent]")
+{
+    auto fixture = Fixture {};
+    fixture.grantGood();
+    REQUIRE(fixture.create({ declared("good", "/ext/good.wasm", ExtensionAutostart::OnDemand) }).empty());
+    fixture.runtime->start("good");
+    fixture.firstLoad.wait();
+    fixture.runtime->revoke("good");
+    // Run 0 was up; the revoke made run 1, which waits for the user's grant. What run 0's lane says from now
+    // on is older than that, and is dropped by the presence.
+    using Told = std::pair<DaemonRunGeneration, DaemonExtensionPhase>;
+    auto const phases = fixture.harness.presence.phases();
+    REQUIRE_FALSE(phases.empty());
+    CHECK(phases.front() == Told { 0, DaemonExtensionPhase::Running });
+    CHECK(phases.back() == Told { 1, DaemonExtensionPhase::Pending });
+    fixture.runtime->stop();
+}
+
+TEST_CASE("DaemonExtensionRuntime: a boot-time extension that cannot load is Failed", "[daemon][runtime]")
+{
+    auto fixture = Fixture {};
+    // Granted by a former run: the grant is recorded for the module's digest, which the question names.
+    REQUIRE(fixture.create({ declared("broken", "/ext/broken.wasm", ExtensionAutostart::OnDemand) }).empty());
+    fixture.runtime->start("broken");
+    auto const digest = fixture.runtime->pending().at(0).grantDigest;
+    fixture.runtime->answer("broken", digest, GrantState::Granted);
+    fixture.runtime.reset(); // Its store's lock goes with it.
+
+    auto const problems =
+        fixture.create({ declared("broken", "/ext/broken.wasm", ExtensionAutostart::AtDaemonStart) });
+    REQUIRE(problems.size() == 1);
+    CHECK(problems[0].problem == DaemonExtensionProblem::ModuleUnreadable);
+    auto const entry = fixture.runtime->entries().at(0);
+    CHECK(entry.phase == DaemonExtensionPhase::Failed);
+    CHECK(entry.problem == problems[0].message);
 }
 
 TEST_CASE("DaemonExtensionRuntime: revoking one that does not run only forgets its grant",

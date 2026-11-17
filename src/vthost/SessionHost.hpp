@@ -397,6 +397,9 @@ struct HostedSessionExtensions
     /// what they follow is known only once they have loaded. Invoked on the extension's WORKER, holding no
     /// lock, and only on such a change: it must not block (the host marshals it onto the loop).
     std::function<void()> onForegroundFollowingChanged {};
+    /// What the session's `{DaemonExtension}` items read; null without daemon-scoped extensions. Outlives the
+    /// session.
+    vtbackend::IDaemonExtensionSummaries const* daemonSummaries = nullptr;
 };
 
 /// Why a hosted session could not be quiesced.
@@ -605,6 +608,14 @@ class HostedSession
             return true;
         auto const guard = std::lock_guard { _terminal };
         return _terminal.indicatorStatusLineDependsOnHostState();
+    }
+
+    /// @return Whether the indicator row shows a daemon-scoped extension's summary: what a published one
+    ///         repaints. Takes the terminal lock.
+    [[nodiscard]] bool showsDaemonSummaries()
+    {
+        auto const guard = std::lock_guard { _terminal };
+        return _terminal.indicatorStatusLineShowsDaemonSummaries();
     }
 
     /// @return Whether the session's extensions follow its foreground program.
@@ -1663,6 +1674,7 @@ class SessionHost final: public vtworkspace::ModelEvents, public IDaemonExtensio
     [[nodiscard]] std::vector<DaemonExtensionListing> list() const override;
     [[nodiscard]] AskResult ask(std::string_view name) override;
     void revoke(std::string_view name) override;
+    [[nodiscard]] std::optional<DaemonExtensionStatus> status(std::string_view name) const override;
 
     /// @return The permission requests no client has answered yet, oldest first: what a client attaching now
     ///         is to be asked. Valid until the host next changes them.
@@ -2255,6 +2267,10 @@ class SessionHost final: public vtworkspace::ModelEvents, public IDaemonExtensio
     /// Sends every pending daemon-scoped extension's question to each connection that can answer it and was
     /// not sent it yet.
     void offerDaemonExtensionRequests();
+
+    /// Repaints the indicator row of every session that shows a daemon-scoped extension's summary, and tells
+    /// the attached clients: what a published summary, or a failed start, does once per loop turn.
+    void daemonSummariesChanged();
 
     /// The session hooks a new session's status-line extensions reach the host through, every one of which
     /// does nothing once the session is gone.

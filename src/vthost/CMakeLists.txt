@@ -525,6 +525,7 @@ if(VTHOST_TESTING)
     endif()
     # vthost links no WebAssembly runtime; its tests compose one, as `contour daemon` does.
     if(CONTOUR_EXTENSIONS)
+        target_sources(vthost_test PRIVATE DaemonWorldExtensions_test.cpp)
         target_link_libraries(vthost_test vtextension_runtime)
     endif()
     # The release check reads which releases metainfo.xml names (@see proto/ReleasedVersions.hpp).

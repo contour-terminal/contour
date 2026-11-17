@@ -39,6 +39,7 @@ struct DaemonRunnerConfig
     std::string home;                             ///< The user's home directory, as `load` tells it.
     ExtensionLimits limits = daemonWorldLimits(); ///< What it may cost; the engine's memory and stack caps.
     DurableBudget durableBudget {};               ///< What one callback may spend in durable host calls.
+    DaemonRunGeneration generation = 0; ///< Which run of the extension this is: what it tells its presence.
 };
 
 /// What a daemon-world runner reaches outside itself. Every reference must outlive the scheduler's processing
@@ -90,6 +91,8 @@ struct DaemonRunnerStatus
 /// - **Processes and store** forward to their services; their errors reach the guest through
 ///   ProcessErrorToHostError and StoreErrorToHostError. Durable calls are bounded per callback by the
 ///   config's DurableBudget.
+/// - **Presence.** The runner tells its presence where the extension stands, with its config's generation:
+///   Running as it is made and when a disabled one is restarted, Disabled once it faulted too often.
 /// - **`summary-set`** refuses a summary over MaxSummaryShortChars characters or a detail over
 ///   MaxSummaryDetailBytes bytes with `limit`, publishing nothing; otherwise it publishes both through
 ///   neutralizedForDisplay(), the detail line by line so that its line breaks remain.

@@ -2,6 +2,7 @@
 #include <vtextension/DaemonExtensionRuntime.hpp>
 
 #include <core/Utf8Path.hpp>
+#include <core/Utils.hpp>
 #include <core/log/LogStore.hpp>
 
 #include <algorithm>
@@ -128,6 +129,8 @@ struct DaemonExtensionRuntime::Extension
     ConsentQuestion question; ///< What the user is asked for its grant.
     ConsentWait consent = ConsentWait::NotWaiting;
     std::vector<std::byte> module; ///< Its bytes, until it is loaded: only a granted extension is.
+    std::string problem; ///< Why it could not run when it was last started, neutralized; empty if it could.
+    DaemonRunGeneration generation = 0; ///< Its current run: a revoke starts the next.
     std::shared_ptr<Engine>
         engine; ///< The daemon world's, which @ref compiled was loaded on; null till then.
     std::shared_ptr<CompiledExtension> compiled; ///< Null until it runs.
@@ -162,7 +165,11 @@ DaemonExtensionRuntime::Composed DaemonExtensionRuntime::create(DaemonExtensionR
         if (bootStartOf(extension->autostart, contents) != BootStart::Yes)
             continue;
         if (auto ran = runtime.run(*extension); !ran)
+        {
+            extension->problem = neutralizedForDisplay(ran.error().message);
             composed.problems.push_back(std::move(ran.error()));
+        }
+        runtime.report(*extension);
     }
     return composed;
 }
@@ -278,6 +285,7 @@ std::expected<void, DeclarationProblem> DaemonExtensionRuntime::run(Extension& e
     if (extension.runner)
         return {};
     extension.consent = ConsentWait::NotWaiting;
+    extension.problem.clear();
     switch (_grants.lookup(extension.hostId, extension.grantDigest))
     {
         case GrantState::Granted: break;
@@ -299,7 +307,9 @@ std::expected<void, DeclarationProblem> DaemonExtensionRuntime::run(Extension& e
                                                                      .configJson = extension.configJson,
                                                                      .roots = extension.roots,
                                                                      .home = _home,
-                                                                     .limits = _limits },
+                                                                     .limits = _limits,
+                                                                     .durableBudget = {},
+                                                                     .generation = extension.generation },
                                                 DaemonServices { .processes = *extension.processes,
                                                                  .store = *extension.store,
                                                                  .presence = _services.presence,
@@ -341,9 +351,40 @@ std::expected<void, DeclarationProblem> DaemonExtensionRuntime::load(Extension& 
 
 void DaemonExtensionRuntime::runOrReport(Extension& extension)
 {
-    // The one place a granted extension that cannot run is reported, whether it was started or just granted.
+    // The one place a granted extension that cannot run is reported, whether it was started or just granted:
+    // to the log, and to whoever asks where it stands -- the message names paths and the runtime's words.
     if (auto ran = run(extension); !ran)
+    {
         errorLog()("{}", ran.error().message);
+        extension.problem = neutralizedForDisplay(ran.error().message);
+    }
+    report(extension);
+}
+
+DaemonExtensionPhase DaemonExtensionRuntime::phaseOf(Extension const& extension) const
+{
+    if (extension.runner)
+        return extension.runner->status().state == DaemonRunnerState::Disabled
+                   ? DaemonExtensionPhase::Disabled
+                   : DaemonExtensionPhase::Running;
+    if (!extension.problem.empty())
+        return DaemonExtensionPhase::Failed;
+    switch (_grants.lookup(extension.hostId, extension.grantDigest))
+    {
+        case GrantState::Denied: return DaemonExtensionPhase::Denied;
+        case GrantState::Pending:
+            return extension.consent == ConsentWait::Waiting ? DaemonExtensionPhase::Pending
+                                                             : DaemonExtensionPhase::Stopped;
+        case GrantState::Granted: break;
+    }
+    return DaemonExtensionPhase::Stopped;
+}
+
+void DaemonExtensionRuntime::report(Extension const& extension)
+{
+    // A runner reports its own run's phases, from its lane; the runtime only the phases with no runner.
+    if (!extension.runner)
+        _services.presence.phaseChanged(extension.name, extension.generation, phaseOf(extension));
 }
 
 DaemonExtensionRuntime::Extension* DaemonExtensionRuntime::find(std::string_view name) const
@@ -381,23 +422,11 @@ std::vector<DaemonExtensionEntry> DaemonExtensionRuntime::entries() const
         return listed;
     for (auto const& extension: _extensions)
     {
-        auto phase = DaemonExtensionPhase::Stopped;
-        if (extension->runner)
-            phase = extension->runner->status().state == DaemonRunnerState::Disabled
-                        ? DaemonExtensionPhase::Disabled
-                        : DaemonExtensionPhase::Running;
-        else
-            switch (_grants.lookup(extension->hostId, extension->grantDigest))
-            {
-                case GrantState::Denied: phase = DaemonExtensionPhase::Denied; break;
-                case GrantState::Pending:
-                    if (extension->consent == ConsentWait::Waiting)
-                        phase = DaemonExtensionPhase::Pending;
-                    break;
-                case GrantState::Granted: break;
-            }
-        listed.push_back(DaemonExtensionEntry {
-            .name = extension->name, .phase = phase, .grantDigest = extension->grantDigest });
+        auto const phase = phaseOf(*extension);
+        listed.push_back(DaemonExtensionEntry { .name = extension->name,
+                                                .phase = phase,
+                                                .grantDigest = extension->grantDigest,
+                                                .problem = extension->problem });
     }
     return listed;
 }
@@ -430,6 +459,8 @@ void DaemonExtensionRuntime::answer(std::string_view name, std::string_view gran
     extension->consent = ConsentWait::NotWaiting;
     if (answer == GrantState::Granted)
         runOrReport(*extension);
+    else
+        report(*extension);
 }
 
 void DaemonExtensionRuntime::revoke(std::string_view name)
@@ -440,6 +471,11 @@ void DaemonExtensionRuntime::revoke(std::string_view name)
     if (extension == nullptr)
         return;
     _grants.record(extension->hostId, extension->grantDigest, GrantState::Pending);
+    extension->problem.clear(); // What failed under the grant forgotten is asked about anew.
+    // A new run: what the old one still publishes from its lane is dropped by the presence, and what it
+    // showed goes with it.
+    ++extension->generation;
+    auto const reported = core::Finally { [&] { report(*extension); } };
     if (!extension->runner)
         return; // Not running: forgotten, and asked again only when it is next started.
     extension->relay->attach(nullptr);

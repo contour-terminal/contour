@@ -122,7 +122,7 @@ HostedSession::HostedSession(SessionId id,
               vtbackend::randomSemanticBlockTokens(),
               std::nullopt,
               _extensions ? std::optional { _extensions->terminalServices() } : std::nullopt,
-              nullptr,
+              extensions.daemonSummaries,
               git),
     _onClosed(std::move(onClosed))
 {
@@ -2637,8 +2637,9 @@ std::shared_ptr<IDaemonWorldHosting> SessionHost::makeDaemonWorld(DaemonWorldFac
                 job();
         });
     } };
-    // A question that opens is sent to the windows that can answer it; the summaries are read where they are
-    // shown.
+    // A question that opens is sent to the windows that can answer it. A summary is read where it is shown,
+    // and repaints the rows that show it: a burst of them costs the loop one repaint, as frames do.
+    auto summaryPending = std::make_shared<std::atomic<bool>>(false);
     auto events = DaemonWorldEvents {
         .requestsChanged =
             [&loop = _loop, gate = _gate] {
@@ -2647,7 +2648,16 @@ std::shared_ptr<IDaemonWorldHosting> SessionHost::makeDaemonWorld(DaemonWorldFac
                         gate->host->offerDaemonExtensionRequests();
                 });
             },
-        .summaryChanged = {},
+        .summaryChanged =
+            [&loop = _loop, gate = _gate, pending = std::move(summaryPending)] {
+                if (pending->exchange(true, std::memory_order_acq_rel))
+                    return;
+                loop.post([gate, pending] {
+                    pending->store(false, std::memory_order_release);
+                    if (gate->host != nullptr)
+                        gate->host->daemonSummariesChanged();
+                });
+            },
     };
     return factory(std::move(events), std::move(post));
 }
@@ -2704,6 +2714,22 @@ void SessionHost::answerDaemonExtension(ConsentTicket ticket, GrantState answer)
         observer->daemonExtensionSettled(settled);
 }
 
+void SessionHost::daemonSummariesChanged()
+{
+    for (auto const& [id, session]: _sessions)
+    {
+        if (!session->showsDaemonSummaries())
+            continue;
+        refreshStatusLine(*session);
+        fanOutStream(&SessionStreamEvents::sessionScreenUpdated, SessionId { id });
+    }
+}
+
+std::optional<DaemonExtensionStatus> SessionHost::status(std::string_view name) const
+{
+    return _daemonWorld ? _daemonWorld->status(name) : std::nullopt;
+}
+
 std::vector<DaemonExtensionListing> SessionHost::list() const
 {
     return _daemonWorld ? _daemonWorld->list() : std::vector<DaemonExtensionListing> {};
@@ -2754,8 +2780,10 @@ HostedSessionExtensions SessionHost::makeSessionExtensions(SessionId session)
                 gate->host->extensionFramePublished(session);
         });
     };
+    auto const* const daemonSummaries = _daemonWorld ? &_daemonWorld->summaries() : nullptr;
     if (!_extensions)
-        return HostedSessionExtensions { .onPublished = std::move(onPublished) };
+        return HostedSessionExtensions { .onPublished = std::move(onPublished),
+                                         .daemonSummaries = daemonSummaries };
     auto post = OwnerPost { [&loop = _loop, hosted](std::function<void()> job) {
         loop.post([hosted, job = std::move(job)] {
             if (hosted())
@@ -2808,8 +2836,8 @@ HostedSessionExtensions SessionHost::makeSessionExtensions(SessionId session)
     return HostedSessionExtensions { .extensions =
                                          _extensions->createSession(std::move(events), std::move(post)),
                                      .onPublished = std::move(onPublished),
-                                     .onForegroundFollowingChanged =
-                                         std::move(onForegroundFollowingChanged) };
+                                     .onForegroundFollowingChanged = std::move(onForegroundFollowingChanged),
+                                     .daemonSummaries = daemonSummaries };
 }
 
 void SessionHost::refreshStatusLine(HostedSession& session)

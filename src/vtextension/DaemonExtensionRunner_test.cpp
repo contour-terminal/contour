@@ -421,6 +421,12 @@ TEST_CASE("DaemonExtensionRunner: three faults in 60 s disable the extension", "
     CHECK(harness.loadedConfigs.size() == 4);
     CHECK(harness.runner->status().state == DaemonRunnerState::Running);
     CHECK(harness.runner->status().faultsInWindow == 0);
+    // Its presence was told each change, as the run it is: up, disabled, and up again.
+    using Told = std::pair<DaemonRunGeneration, DaemonExtensionPhase>;
+    CHECK(harness.presence.phases()
+          == std::vector { Told { 0, DaemonExtensionPhase::Running },
+                           Told { 0, DaemonExtensionPhase::Disabled },
+                           Told { 0, DaemonExtensionPhase::Running } });
 
     harness.runner->restart();
     harness.scheduler.runPending();
@@ -509,6 +515,12 @@ TEST_CASE("DaemonExtensionRunner: summary-set is bounded and neutralized", "[dae
         CHECK(set("s", std::string(MaxSummaryDetailBytes + 1, 'd'))
               == UnitResult { std::unexpect, HostError::Limit });
         CHECK(harness.presence.published().size() == 1);
+    }
+    SECTION("the cap is on the input: its worst case, neutralized, grows eightfold and no more")
+    {
+        CHECK(set("s", std::string(MaxSummaryDetailBytes, '\x01')) == UnitResult {});
+        REQUIRE(harness.presence.published().size() == 1);
+        CHECK(harness.presence.published().front().detail.size() == MaxSummaryDetailShownBytes);
     }
     CHECK(harness.runner->status().state == DaemonRunnerState::Running);
 }

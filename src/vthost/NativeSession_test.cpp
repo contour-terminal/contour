@@ -74,6 +74,7 @@
 #include <vthost/control/ControlService.hpp>
 #include <vthost/proto/PduTrace.hpp>
 #include <vthost/testing/FakeDaemonControl.hpp>
+#include <vthost/testing/FakeDaemonWorldHosting.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/FakeProfileCatalog.hpp>
 #include <vthost/testing/PreNegotiationCodec.hpp>
@@ -369,6 +370,8 @@ struct HarnessOptions
     vthost::InputWatermarks inputWatermarks {};
     /// The status-line extensions the hosted sessions run; none by default.
     std::shared_ptr<vthost::IExtensionHosting> extensions {};
+    /// What makes the host's daemon-scoped extensions; none by default.
+    vthost::DaemonWorldFactory daemonWorld {};
     /// What the hosted terminals' settings differ in from hostSettings()'s; nothing by default.
     std::function<void(vtbackend::Settings&)> adjustSettings {};
     /// What the connection is constructed with: its handshake policy among them.
@@ -456,6 +459,7 @@ struct NativeHarness
                                                    .workspaceGit = options.workspaceGit,
                                                    .inputWatermarks = options.inputWatermarks,
                                                    .extensions = options.extensions,
+                                                   .daemonWorld = options.daemonWorld,
                                                    .profiles = options.profiles,
                                                    .instance = options.instance } };
     core::net::testing::SocketPair pair = makeConnection(loop, options.pipeBytes);
@@ -4190,6 +4194,30 @@ TEST_CASE("NativeSession.extension.statusRowsMirrored", "[vthost][native][extens
         REQUIRE(snapshot != nullptr);
         CHECK(snapshot->statusLinesChanged == 0);
     }
+}
+
+TEST_CASE("NativeSession.daemonExtension.summaryMirrored", "[vthost][native][daemon][summary]")
+{
+    // A client attaching after a daemon extension published its summary is sent the row that shows it: the
+    // client has no summary of its own to draw.
+    auto const journal = std::make_shared<std::vector<std::string>>();
+    auto world = std::shared_ptr<vthost::testing::FakeDaemonWorldHosting> {};
+    auto h = NativeHarness { HarnessOptions {
+        .daemonWorld =
+            [&](vthost::DaemonWorldEvents events, vthost::OwnerPost post) {
+                world = std::make_shared<vthost::testing::FakeDaemonWorldHosting>(
+                    journal, std::move(post), std::move(events));
+                return world;
+            },
+        .adjustSettings = showingIndicator("[{DaemonExtension:orchestrator}]") } };
+    std::ignore = newSession(h.host);
+    REQUIRE(world != nullptr);
+    world->publishSummary("orchestrator", "agents 1/4");
+    std::ignore = h.loop.runOnce(std::chrono::milliseconds { 0 });
+
+    auto const received = h.attach(AttachSnapshotFrames);
+    REQUIRE(received.size() == AttachSnapshotFrames);
+    CHECK(indicatorRowOf(received.back()) == "[agents 1/4]");
 }
 
 TEST_CASE("NativeSession.extension.reattachSnapshot", "[vthost][native][extensions]")

@@ -53,8 +53,12 @@ struct DaemonExtensionSummary
 
 /// The production IDaemonWorldHosting: every declared daemon-scoped extension on one
 /// vtextension::DaemonExtensionRuntime, composed on construction, its problems logged. Where they show
-/// themselves (`summary-set`) is kept here, latest per extension.
-class DaemonWorldExtensions final: public IDaemonWorldHosting, private vtextension::IExtensionPresence
+/// themselves is kept here, per extension and of its latest run only: where it stands, and the summary it
+/// last published (`summary-set`). What the status line shows follows from where it stands (StatusTexts).
+class DaemonWorldExtensions final:
+    public IDaemonWorldHosting,
+    private vtextension::IExtensionPresence,
+    private vtbackend::IDaemonExtensionSummaries
 {
   public:
     /// Composes the daemon world, and starts its boot-time extensions.
@@ -70,7 +74,13 @@ class DaemonWorldExtensions final: public IDaemonWorldHosting, private vtextensi
     [[nodiscard]] std::vector<DaemonExtensionListing> list() const override;
     void answer(std::string_view name, std::string_view grantDigest, GrantState answer) override;
     void revoke(std::string_view name) override;
+    [[nodiscard]] std::optional<DaemonExtensionStatus> status(std::string_view name) const override;
+    [[nodiscard]] vtbackend::IDaemonExtensionSummaries const& summaries() const noexcept override;
     void stop() noexcept override;
+
+    /// @return Where the runtime and its runners report what the extensions show of themselves: the seam a
+    ///         test stands in for a run's lane through.
+    [[nodiscard]] vtextension::IExtensionPresence& presence() noexcept { return *this; }
 
     /// @param name What the configuration calls an extension.
     /// @return What it last published of itself; nullopt if nothing yet. From any thread.
@@ -78,16 +88,35 @@ class DaemonWorldExtensions final: public IDaemonWorldHosting, private vtextensi
 
   private:
     void publishSummary(std::string_view extension,
+                        vtextension::DaemonRunGeneration generation,
                         std::string_view shortText,
                         std::string_view detail) override;
+    void phaseChanged(std::string_view extension,
+                      vtextension::DaemonRunGeneration generation,
+                      vtextension::DaemonExtensionPhase phase) override;
+
+    [[nodiscard]] std::string summaryOf(std::string_view name) const override;
 
     /// Runs @p change on the runtime, and tells the host when the questions waiting changed with it.
     template <typename Change>
     void changingRequests(Change change);
 
+    /// What one extension shows of itself: of its latest run only.
+    struct Shown
+    {
+        vtextension::DaemonRunGeneration generation = 0; ///< The latest run told.
+        vtextension::DaemonExtensionPhase phase =
+            vtextension::DaemonExtensionPhase::Stopped; ///< Where it stands.
+        std::optional<DaemonExtensionSummary> summary;  ///< What that run last published; none yet.
+    };
+
+    /// @return What @p name shows as of run @p generation, made anew for a newer run; null for an older run,
+    ///         whose word is dropped. Call holding _mutex.
+    [[nodiscard]] Shown* shownAs(std::string_view name, vtextension::DaemonRunGeneration generation);
+
     DaemonWorldEvents _events;
     mutable std::mutex _mutex;
-    std::map<std::string, DaemonExtensionSummary, std::less<>> _summaries; ///< Guarded by _mutex.
+    std::map<std::string, Shown, std::less<>> _shown; ///< Guarded by _mutex.
     /// Last: its lane publishes into what is above, from the moment it is composed.
     std::unique_ptr<vtextension::DaemonExtensionRuntime> _runtime;
 };
