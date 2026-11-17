@@ -424,11 +424,43 @@ inline constexpr int BarFillOverMaterialPercent = 70;
     return fill.kind == TabFillKind::Accent || fill.kind == TabFillKind::Custom;
 }
 
+/// A named look that sets several `tab_style:` keys at once (`tab_style.preset`). Zero is `None`.
+enum class TabPreset : uint8_t
+{
+    None = 0, //!< No preset: every key the user leaves alone is the chrome row's own.
+    Classic,  //!< Square tabs edge to edge on an opaque bar.
+    Minimal,  //!< No fills; the active tab is the one underlined.
+    Rounded,  //!< Floating pills with a little room between them.
+    Glass,    //!< Floating pills on a see-through bar, the active one a faint wash.
+    Outlined, //!< Floating outlines, an accent line under the active one.
+};
+
+namespace detail
+{
+    /// The preset spellings. The tokens are written into the configuration, so once shipped they are fixed.
+    inline constexpr auto TabPresetTable = std::array {
+        ConfigEnumInfo<TabPreset> { TabPreset::None, "none", "None" },
+        ConfigEnumInfo<TabPreset> { TabPreset::Classic, "classic", "Classic" },
+        ConfigEnumInfo<TabPreset> { TabPreset::Minimal, "minimal", "Minimal" },
+        ConfigEnumInfo<TabPreset> { TabPreset::Rounded, "rounded", "Rounded" },
+        ConfigEnumInfo<TabPreset> { TabPreset::Glass, "glass", "Glass" },
+        ConfigEnumInfo<TabPreset> { TabPreset::Outlined, "outlined", "Outlined" },
+    };
+} // namespace detail
+
+template <>
+constexpr std::span<ConfigEnumInfo<TabPreset> const> configEnumValues() noexcept
+{
+    return detail::TabPresetTable;
+}
+
 /// The `tab_style:` section. Every member defaults to the chrome row's own look.
 ///
 /// GLOBAL rather than per-profile: a window draws one tab strip whichever profiles its tabs run.
 struct TabStyleConfig
 {
+    /// The named look the keys left at their defaults take (`tab_style.preset`); see withTabPreset().
+    TabPreset preset = TabPreset::None;
     TabLook shape = TabLook::Auto; ///< How each tab is drawn (`tab_style.shape`).
     /// The gap between two tabs, in logical pixels from 0 to @c MaxTabSpacing (`tab_style.spacing`).
     int spacing = 0;
@@ -456,6 +488,84 @@ struct TabStyleConfig
 
     [[nodiscard]] bool operator==(TabStyleConfig const&) const = default;
 };
+
+/// What each preset sets, indexed by @c TabPreset; a new preset adds its row here. Members a row leaves at
+/// their defaults stay the chrome row's own.
+inline constexpr auto TabPresetRows = std::array {
+    TabStyleConfig {},
+    [] {
+        auto row = TabStyleConfig {};
+        row.shape = TabLook::Flat;
+        row.material = TabBarMaterial::Solid;
+        return row;
+    }(),
+    [] {
+        auto row = TabStyleConfig {};
+        row.shape = TabLook::Underline;
+        row.activeIndicator = TabIndicator::Underline;
+        return row;
+    }(),
+    [] {
+        auto row = TabStyleConfig {};
+        row.shape = TabLook::Pill;
+        row.spacing = 4;
+        return row;
+    }(),
+    [] {
+        auto row = TabStyleConfig {};
+        row.shape = TabLook::Pill;
+        row.spacing = 6;
+        row.material = TabBarMaterial::Glass;
+        row.activeFill = TabFill { .kind = TabFillKind::Subtle, .color = {} };
+        return row;
+    }(),
+    [] {
+        auto row = TabStyleConfig {};
+        row.shape = TabLook::Outlined;
+        row.spacing = 4;
+        row.activeIndicator = TabIndicator::Underline;
+        return row;
+    }(),
+};
+
+static_assert(TabPresetRows.size() == detail::TabPresetTable.size(), "every TabPreset needs a row");
+
+namespace detail
+{
+    /// Takes each of @p Members from @p preset where @p style still holds the member's default.
+    template <auto... Members>
+    constexpr void fillDefaultedMembers(TabStyleConfig& style, TabStyleConfig const& preset) noexcept
+    {
+        constexpr auto Defaults = TabStyleConfig {};
+        (((style.*Members == Defaults.*Members) ? void(style.*Members = preset.*Members) : void()), ...);
+    }
+} // namespace detail
+
+/// The section as the strip draws it: every key the user left at its default takes the preset's value.
+///
+/// "Left at its default" rather than "absent from the file": a generated configuration writes every key, its
+/// defaults included, and `auto` already means "no opinion of mine". A key set to anything else wins.
+/// @param style The section as configured.
+/// @return The section with its preset applied.
+[[nodiscard]] constexpr TabStyleConfig withTabPreset(TabStyleConfig style) noexcept
+{
+    auto const& preset = TabPresetRows[static_cast<size_t>(style.preset)];
+    detail::fillDefaultedMembers<&TabStyleConfig::shape,
+                                 &TabStyleConfig::spacing,
+                                 &TabStyleConfig::material,
+                                 &TabStyleConfig::activeFill,
+                                 &TabStyleConfig::inactiveFill,
+                                 &TabStyleConfig::barFill,
+                                 &TabStyleConfig::activeIndicator,
+                                 &TabStyleConfig::indicatorColor,
+                                 &TabStyleConfig::tabColorMode,
+                                 &TabStyleConfig::closeButton,
+                                 &TabStyleConfig::newTabButton,
+                                 &TabStyleConfig::tabWidth,
+                                 &TabStyleConfig::minTabWidth,
+                                 &TabStyleConfig::maxTabWidth>(style, preset);
+    return style;
+}
 
 /// Where the line between two joined tabs is drawn, and how strongly: a defaults edition's choice
 /// (EditionDefaults::tabSeparators), so a configuration that names no edition keeps the look it had.

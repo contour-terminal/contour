@@ -3421,6 +3421,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         return std::nullopt;
     };
 
+    loadGuarded(child, "preset", where.preset);
     loadGuarded(child, "shape", where.shape);
     loadGuarded(child, "material", where.material);
 

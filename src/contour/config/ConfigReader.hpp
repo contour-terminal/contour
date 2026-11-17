@@ -940,6 +940,7 @@ struct Writer
                                                      : tabFillText(value);
         };
         return format(doc,
+                      v.preset,
                       v.shape,
                       v.spacing,
                       v.material,

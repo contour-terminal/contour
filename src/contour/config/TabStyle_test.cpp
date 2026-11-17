@@ -612,3 +612,49 @@ TEST_CASE("tabStyle.theWidthKeysParseRejectOutOfRangeAndSurviveTheWriter", "[con
     CHECK(wild.tabStyle.value().minTabWidth == 0);
     CHECK(wild.tabStyle.value().maxTabWidth == 0);
 }
+
+TEST_CASE("tabStyle.aPresetFillsTheKeysLeftAtTheirDefaults", "[config][tabstyle]")
+{
+    using contour::config::TabBarMaterial;
+    using contour::config::TabPreset;
+    using contour::config::withTabPreset;
+
+    // No preset changes nothing.
+    CHECK(withTabPreset(TabStyleConfig {}) == TabStyleConfig {});
+
+    // Each preset is its row, the preset itself aside.
+    for (auto const& info: contour::config::configEnumValues<TabPreset>())
+    {
+        CAPTURE(info.token);
+        auto const applied = withTabPreset(TabStyleConfig { .preset = info.value });
+        auto expected = contour::config::TabPresetRows[static_cast<size_t>(info.value)];
+        expected.preset = info.value;
+        CHECK(applied == expected);
+    }
+
+    // A key the user set wins; the rest are the preset's.
+    auto const glass = withTabPreset(TabStyleConfig { .preset = TabPreset::Glass, .shape = TabLook::Flat });
+    CHECK(glass.shape == TabLook::Flat);
+    CHECK(glass.material == TabBarMaterial::Glass);
+    CHECK(glass.spacing == 6);
+}
+
+TEST_CASE("tabStyle.thePresetParsesAndSurvivesTheWriter", "[config][tabstyle]")
+{
+    using contour::config::TabPreset;
+
+    CHECK(loadConfigFromYaml("tab_style:\n  preset: glass\n").tabStyle.value().preset == TabPreset::Glass);
+    CHECK(loadConfigFromYaml("tab_style:\n  preset: Minimal\n").tabStyle.value().preset
+          == TabPreset::Minimal);
+    // A word no preset names is a typo, and keeps what was there.
+    CHECK(loadConfigFromYaml("tab_style:\n  preset: shiny\n").tabStyle.value().preset == TabPreset::None);
+
+    auto original = Config {};
+    original.tabStyle = TabStyleConfig { .preset = TabPreset::Rounded };
+    auto const rendered = contour::config::createString<YAMLConfigWriter>(original);
+    CHECK(rendered.contains("preset: rounded"));
+    // The written file states every key at its default, which still leaves each to the preset.
+    auto const reread = loadConfigFromYaml(rendered).tabStyle.value();
+    CHECK(reread == original.tabStyle.value());
+    CHECK(contour::config::withTabPreset(reread).shape == TabLook::Pill);
+}

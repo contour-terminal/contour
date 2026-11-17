@@ -1812,6 +1812,12 @@ std::vector<GlobalFieldDescriptor> const& globalFieldDescriptors()
             // The tab_style section, applied live like the density: the chrome style provider is rebuilt on
             // reload. The fills and the opacity are words or values, so they are checked strings rather
             // than combo boxes.
+            globalEnumFieldFromTable<config::TabPreset>(
+                "tab_style.preset",
+                "Preset",
+                "A named look that sets the shape, spacing, material and fills at once. A setting below "
+                "changed from its default wins over the preset.",
+                [](config::Config const& c) { return c.tabStyle.value().preset; }),
             globalEnumFieldFromTable<config::TabLook>(
                 "tab_style.shape",
                 "Tab shape",
