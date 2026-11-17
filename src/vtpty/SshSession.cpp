@@ -729,7 +729,10 @@ void SshSession::processState()
             }
             case State::OpenChannel: {
                 _p->sshChannel = libssh2_channel_open_session(_p->sshSession);
-                auto const rc = libssh2_session_last_errno(_p->sshSession);
+                // A channel that came back is open, whatever error an earlier call left behind: the error
+                // number is only read when there is none.
+                auto const rc =
+                    _p->sshChannel ? LIBSSH2_ERROR_NONE : libssh2_session_last_errno(_p->sshSession);
                 if (rc == LIBSSH2_ERROR_EAGAIN)
                 {
                     errno = EAGAIN;
