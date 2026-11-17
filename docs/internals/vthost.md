@@ -2029,6 +2029,10 @@ A served session is **disposable**: nothing of it survives the daemon, and its e
   held the latch is gone. A refused upgrade leaves the served tabs closed.
 - **A keeper recovery drops it.** It has no process, so the structure names it `SessionDevice::PtyOnly`, and
   recovery adopts only the sessions the keeper held (`KeeperChild`); restoring the image closes its pane.
+- **A workspace snapshot leaves it out.** A cold restart brings panes back as shells, which would bring a
+  dashboard back as a shell tab, so `captureWorkspace` skips every tab that holds a served leaf at any depth,
+  and remaps the workspace's active tab to the captured ones: an active served tab maps to the tab that would
+  become active were it closed -- the one after it, else the one before.
 
 ## Binary imsg IPC (the real tmux binary as a client)
 

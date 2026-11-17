@@ -15,13 +15,16 @@
 #include <chrono>
 #include <format>
 #include <memory>
+#include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <vthost/CommandBlockWire.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/TabEdits.hpp>
 #include <vthost/WorkspaceCapture.hpp>
+#include <vthost/testing/ServedTesting.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
 
@@ -127,6 +130,92 @@ TEST_CASE("captureWorkspace records each workspace's colour, and none where it h
     REQUIRE(snapshot.workspaces.size() == 2);
     CHECK_FALSE(snapshot.workspaces[0].color.has_value());
     CHECK(snapshot.workspaces[1].color == vtbackend::RGBColor { 0x7A3E9DU });
+}
+
+namespace
+{
+
+/// @return The tab of a served tab @p host opened, as the fake extension opens it.
+[[nodiscard]] vtworkspace::Tab& openServed(SessionHost& host)
+{
+    auto const session = vthost::testing::openServedTab(host);
+    REQUIRE(session.has_value());
+    auto const [workspace, tab, leaf] = host.model().findSessionLeaf(*session);
+    REQUIRE(tab != nullptr);
+    return *tab;
+}
+
+/// @return The UUID @p snapshot names @p tab by.
+[[nodiscard]] std::optional<vthost::ObjectUuid> uuidOf(TabSnapshot const& tab)
+{
+    return tab.identity ? std::optional { tab.identity->uuid } : std::nullopt;
+}
+
+} // namespace
+
+TEST_CASE("a snapshot leaves served tabs out", "[vthost][snapshot][capture][served]")
+{
+    auto h = CaptureHarness {};
+    auto* const shell = h.host.createTab();
+    REQUIRE(shell != nullptr);
+    std::ignore = openServed(h.host);
+    // A served leaf at any depth: a tab that holds one is left out whole.
+    auto& split = openServed(h.host);
+    h.host.splitActivePane(split.id(), SplitState::Vertical, 0.5);
+    REQUIRE(split.paneCount() == 2);
+
+    auto const snapshot = captureWorkspace(h.host, {}, Now);
+    REQUIRE(snapshot.workspaces.size() == 1);
+    REQUIRE(snapshot.workspaces[0].tabs.size() == 1);
+    CHECK(uuidOf(snapshot.workspaces[0].tabs[0]) == h.host.objects().uuidOf(shell->id())->bytes);
+    CHECK(snapshot.workspaces[0].activeTab == 0);
+
+    // A workspace whose only tab is a served one has nothing to restore.
+    auto lone = CaptureHarness {};
+    std::ignore = openServed(lone.host);
+    CHECK(captureWorkspace(lone.host, {}, Now).workspaces.empty());
+}
+
+TEST_CASE("the active tab is remapped past a served tab", "[vthost][snapshot][capture][served]")
+{
+    auto h = CaptureHarness {};
+    auto* const first = h.host.createTab();
+    REQUIRE(first != nullptr);
+    auto& served = openServed(h.host);
+    auto* const last = h.host.createTab();
+    REQUIRE(last != nullptr);
+    auto const workspace = h.host.workspaceId();
+    auto const capturedActive = [&] {
+        auto const snapshot = captureWorkspace(h.host, {}, Now);
+        REQUIRE(snapshot.workspaces.size() == 1);
+        REQUIRE(snapshot.workspaces[0].tabs.size() == 2);
+        return snapshot.workspaces[0].activeTab;
+    };
+
+    SECTION("an active tab after a served one shifts down")
+    {
+        h.host.model().activateTab(workspace, last->id());
+        CHECK(capturedActive() == 1);
+    }
+    SECTION("an active served tab maps to the tab after it")
+    {
+        h.host.model().activateTab(workspace, served.id());
+        CHECK(capturedActive() == 1);
+    }
+    SECTION("an active tab before a served one stays")
+    {
+        h.host.model().activateTab(workspace, first->id());
+        CHECK(capturedActive() == 0);
+    }
+    SECTION("an active served tab that is the last maps to the tab before it")
+    {
+        h.host.closeSession(last->rootPane()->session());
+        h.host.model().activateTab(workspace, served.id());
+        auto const snapshot = captureWorkspace(h.host, {}, Now);
+        REQUIRE(snapshot.workspaces.size() == 1);
+        REQUIRE(snapshot.workspaces[0].tabs.size() == 1);
+        CHECK(snapshot.workspaces[0].activeTab == 0);
+    }
 }
 
 TEST_CASE("captureWorkspace of an empty host is empty", "[vthost][snapshot][capture]")

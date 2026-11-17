@@ -69,6 +69,14 @@ namespace
         return record;
     }
 
+    /// @return Whether some leaf of the tree under @p pane, at any depth, is a served session of @p host.
+    [[nodiscard]] bool holdsServedLeaf(SessionHost const& host, vtworkspace::Pane const& pane)
+    {
+        if (pane.isLeaf())
+            return host.servedBy(pane.session()) != nullptr;
+        return holdsServedLeaf(host, *pane.first()) || holdsServedLeaf(host, *pane.second());
+    }
+
     /// Walks a pane tree depth first, first child first, converting it.
     class TreeCapture
     {
@@ -198,14 +206,19 @@ WorkspaceSnapshot captureWorkspace(SessionHost& host,
         auto captured = WorkspaceLayoutSnapshot {
             .identity = identityOf(
                 host.objects(), vtcontrol::ObjectKind::Workspace, host.objects().uuidOf(workspace->id())),
-            .activeTab = static_cast<std::uint32_t>(std::max(workspace->activeTabIndex(), 0)),
             .color = workspace->color(),
         };
+        auto const active = std::max(workspace->activeTabIndex(), 0);
+        auto capturedBeforeActive = std::size_t { 0 };
         for (auto const tabIndex: std::views::iota(0, workspace->tabCount()))
         {
             auto const* const tab = workspace->tabAt(tabIndex);
-            if (tab == nullptr || tab->rootPane() == nullptr)
+            // A served tab is left out: its extension opens it again, and a restore would bring it back as a
+            // shell.
+            if (tab == nullptr || tab->rootPane() == nullptr || holdsServedLeaf(host, *tab->rootPane()))
                 continue;
+            if (tabIndex < active)
+                ++capturedBeforeActive;
             auto tree = TreeCapture { host, options, tab->activePane() };
             auto entry = TabSnapshot {};
             entry.identity =
@@ -216,8 +229,13 @@ WorkspaceSnapshot captureWorkspace(SessionHost& host,
             entry.zoom = tab->isZoomed() ? TabZoom::Zoomed : TabZoom::Tiled;
             captured.tabs.push_back(std::move(entry));
         }
-        if (!captured.tabs.empty())
-            snapshot.workspaces.push_back(std::move(captured));
+        if (captured.tabs.empty())
+            continue;
+        // The active tab among those captured; one left out maps to the tab that would become active were it
+        // closed: the one after it, else the one before.
+        captured.activeTab =
+            static_cast<std::uint32_t>(std::min(capturedBeforeActive, captured.tabs.size() - 1));
+        snapshot.workspaces.push_back(std::move(captured));
     }
     return snapshot;
 }
