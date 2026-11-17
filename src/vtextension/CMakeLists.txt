@@ -130,6 +130,7 @@ if(VTEXTENSION_TESTING)
         ControlImports_test.cpp
         DaemonExtensionRunner_test.cpp
         DaemonExtensionRuntime_test.cpp
+        DaemonGuest_test.cpp
         DaemonGuestModule_test.cpp
         DaemonInstance_test.cpp
         DaemonWorld_test.cpp
@@ -166,6 +167,7 @@ if(VTEXTENSION_TESTING)
         testing/FakeGuestMemory.hpp
         testing/FakeProcessRunner.hpp
         testing/FakeWasmBackend.hpp
+        testing/FixtureProcessRunner.hpp
         testing/GuestModuleCheck.hpp
         testing/Harness.hpp
         testing/LaneReport.hpp
@@ -221,6 +223,14 @@ if(VTEXTENSION_TESTING)
                                    CMAKE_ARGS "-DCXX_PROBE_EXPECTED_DIRECTORIES=${PROJECT_SOURCE_DIR}/src${CONTOUR_WASM_CXX_LIST_SEPARATOR}${PROJECT_SOURCE_DIR}/cmake")
         add_dependencies(vtextension_test cxx-daemon-probe_wasm)
         target_compile_definitions(vtextension_test PRIVATE VTEXTENSION_CXX_PROBE_MODULE="${_cxx_probe_wasm}")
+        # The agent orchestrator's module (extensions/orchestrator, added after src/; its target is resolved at
+        # generation), run against the host's services with the orchestrator's recorded fixtures. The measured
+        # store lives in the build tree, on the disk the build is on: /tmp is often tmpfs.
+        add_dependencies(vtextension_test orchestrator_wasm)
+        target_compile_definitions(vtextension_test PRIVATE
+            VTEXTENSION_ORCHESTRATOR_MODULE="${CMAKE_BINARY_DIR}/wasm/orchestrator.wasm"
+            VTEXTENSION_ORCHESTRATOR_TESTDATA="${PROJECT_SOURCE_DIR}/extensions/orchestrator/core/testdata"
+            VTEXTENSION_MEASURE_STORE_DIR="${CMAKE_BINARY_DIR}/measure-store")
     endif()
     # The tests run real guests, so they link the selected backend; its own tests are added by its directory.
     target_link_libraries(vtextension_test PRIVATE vtextension_runtime glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
