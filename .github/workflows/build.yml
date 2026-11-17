@@ -69,6 +69,10 @@ env:
   # The SHA-256 of that release's pace-<version>-Windows-AMD64.zip, checked before it is unpacked. Bumped
   # together with PACE_VERSION: a digest that does not match makes the Windows job build without Pace.
   PACE_WINDOWS_ZIP_SHA256: "3c76e2771ff9aed970a57fbacdb2dbd15f05f0606599d9b899944212255277d5"
+  # The wasi-sdk the C++ WebAssembly guests are built with (cmake/ContourWasiCxx.cmake), and the SHA-256 of
+  # its x86_64 Linux tarball, the release asset's digest, checked before it is unpacked. Bumped together.
+  WASI_SDK_VERSION: "34"
+  WASI_SDK_X86_64_LINUX_SHA256: "b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4"
   # The one place where a step or script learns that it builds a release; jobs use the same condition
   # in their `if:` (docs/internals/releasing.md).
   CONTOUR_BUILD_CHANNEL: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'prerelease' }}
@@ -2067,11 +2071,30 @@ jobs:
         with:
           path: _ucd
           key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
+      # The C++ guests' toolchain, on the Clang x86 leg: the one a pull request builds, and the tarball is
+      # x86_64. Its tests then build the C++ daemon probe and run it on the host's runtime (vtextension_test).
+      - name: "wasi-sdk (the C++ WebAssembly guests)"
+        id: wasi_sdk
+        if: ${{ startsWith(matrix.compiler, 'Clang') && matrix.runner == 'ubuntu-24.04' }}
+        run: |
+          set -euo pipefail
+          name="wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux"
+          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/$name.tar.gz" \
+              "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/$name.tar.gz"
+          echo "$WASI_SDK_X86_64_LINUX_SHA256  $RUNNER_TEMP/$name.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP"
+          rm "$RUNNER_TEMP/$name.tar.gz"
+          echo "prefix=$RUNNER_TEMP/$name" >> "$GITHUB_OUTPUT"
       - name: "cmake"
+        env:
+          WASI_SDK_DIR: ${{ steps.wasi_sdk.outputs.prefix }}
         run: |
           CC_NAME=$(echo "${{ matrix.compiler }}" | awk '{ print tolower($1); }')
           CC_VER=$( echo "${{ matrix.compiler }}" | awk '{ print $2; }')
           test "${{ matrix.compiler }}" = "GCC 8"  && EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DPEDANTIC_COMPILER_WERROR=ON"
+          if [[ -n "$WASI_SDK_DIR" ]]; then
+              EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST=ON -DWASI_SDK_PREFIX=$WASI_SDK_DIR"
+          fi
           test "${CC_NAME}" = "gcc" && CC_EXE="g++"
           # The link of AArch64 GCC objects is what fills the runner; --no-keep-memory
           # tells ld to re-read symbol tables rather than hold them, trading time for RAM.
