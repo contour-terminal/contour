@@ -1143,10 +1143,15 @@ int SshSession::write(std::string_view buf)
         // short-circuits with EPIPE and the reader tears the session down.
         //
         // The one State::Failure that does NOT go through fail(): this is reachable only long after
-        // start() returned, so there is no _failureReason for anyone to read back, and fail() would
-        // close the socket out from under the reader thread that is blocked on it right now.
+        // start() returned, so there is no _failureReason for anyone to read back, nor a message to
+        // inject into a session that is ending. The rest is fail()'s: the socket is shut down, never
+        // closed, so the reader's descriptor stays valid, and the reader -- possibly parked in
+        // waitForSocket() with no timeout -- is woken to see the end. Both are safe under _mutex, as in
+        // close(): wakeupReader() takes _injectMutex after it, the established order.
         logError("Failed to write to SSH channel. {}", libssl2ErrorString(rv));
+        shutdownSocket();
         setState(State::Failure);
+        wakeupReader();
         errno = EIO;
         return -1;
     }
