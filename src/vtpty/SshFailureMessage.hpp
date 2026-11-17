@@ -7,6 +7,7 @@
 
 #include <vtpty/SandboxInfo.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -63,5 +64,26 @@ enum class TerminfoInstallAttempt : uint8_t
 /// @return The message, ready to show.
 [[nodiscard]] std::string describeSshChannelOpenFailure(std::string_view detail,
                                                         TerminfoInstallAttempt attempt);
+
+/// The message an SSH connection that took longer than `ssh.connect_timeout` to come up should carry.
+/// @param stage  What the connection was doing when the limit ran out, e.g. "the SSH handshake".
+/// @param host   The host being connected to.
+/// @param limit  The configured limit.
+/// @return The message, ready to show.
+[[nodiscard]] std::string describeSshConnectTimeout(std::string_view stage,
+                                                    std::string_view host,
+                                                    std::chrono::seconds limit);
+
+/// The message an SSH agent authentication that took longer than its own allowance should carry.
+/// @param host      The host being connected to.
+/// @param allowance How long the agent step may take. @see SshAgentAuthAllowance
+/// @return The message, ready to show.
+[[nodiscard]] std::string describeSshAgentTimeout(std::string_view host, std::chrono::seconds allowance);
+
+/// The message an SSH agent that closed its connection in the middle of authentication should carry. It makes
+/// no claim about an approval: the agent is gone, not waiting.
+/// @param host The host being connected to.
+/// @return The message, ready to show.
+[[nodiscard]] std::string describeSshAgentClosed(std::string_view host);
 
 } // namespace vtpty

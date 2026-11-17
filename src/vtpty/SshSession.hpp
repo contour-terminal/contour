@@ -21,11 +21,15 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <variant>
 
 namespace vtpty
 {
+
+/// How long an SSH connection may take to come up when the profile does not say.
+inline constexpr auto DefaultSshConnectTimeout = std::chrono::seconds { 30 };
 
 struct SshHostConfig
 {
@@ -41,6 +45,10 @@ struct SshHostConfig
     /// Whether the built-in SSH profile installs Contour's terminfo on the remote host.
     /// This is the configured value; the pinned-TERM rule is applied at session creation.
     TerminfoInstall terminfoInstall = TerminfoInstall::Install;
+    /// The longest the connection may take to come up, from the TCP connect to the started shell, not
+    /// counting the time spent waiting for the user (host key confirmation, passphrase, password).
+    /// nullopt means no limit.
+    std::optional<std::chrono::seconds> connectTimeout = DefaultSshConnectTimeout;
     Environment env;
 
     [[nodiscard]] std::string toString() const;
@@ -231,6 +239,12 @@ class SshSession final: public Pty
     /// next read re-entered the same case and libssh2_agent_get_identity() was called on an agent
     /// that had never connected.
     void fallBackFromAgent();
+
+    /// Judges a failed agent request and acts on it: an agent whose allowance ran out ends the session, one
+    /// that went away is reported and left for the next way to authenticate. @see classifySshAgentFailure()
+    /// @param rc The failed libssh2 call's result.
+    /// @return How it failed; the caller goes on as before only for SshAgentFailure::Failed.
+    [[nodiscard]] SshAgentFailure judgeAgentFailure(int rc);
     void authenticateWithPrivateKey();
     void authenticateWithPassword();
 
@@ -242,6 +256,25 @@ class SshSession final: public Pty
     // Handles each individual states.
     void processState();
 
+    /// Whether a step of the connect sequence lets processState() go on to the next state.
+    enum class ConnectStep : uint8_t
+    {
+        Stop = 0, ///< Stop here: the step failed, ended the session, or must be retried later.
+        Next,     ///< The step is done and the state moved on.
+    };
+
+    /// Runs the SSH handshake. @return Whether to go on.
+    [[nodiscard]] ConnectStep handshake();
+
+    /// Opens the shell's session channel. @return Whether to go on.
+    [[nodiscard]] ConnectStep openChannel();
+
+    /// Asks for agent forwarding where configured; a refusal is logged, not fatal. @return Whether to go on.
+    [[nodiscard]] ConnectStep requestAuthAgent();
+
+    /// Starts the shell and makes the session operational: no timeout, non-blocking.
+    void startShell();
+
     // some of the complex states to handle
     bool requestPty();
 
@@ -252,6 +285,33 @@ class SshSession final: public Pty
     void openTerminfoInstallChannel();
     void execTerminfoInstall();
     void readTerminfoInstall();
+
+    /// The connection's deadline, as the connect budget stands now. @see SshConnectBudget
+    /// @return It, or nullopt when no limit applies.
+    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> connectDeadline() const;
+
+    /// The deadline of the current step: the connect budget's, or in State::AuthenticateAgent the agent
+    /// allowance's. @see sshStepBudgetFor()
+    /// @return It, or nullopt when no limit applies.
+    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> stepDeadline() const;
+
+    /// Arms libssh2's timeout for the next blocking call of the connect sequence with what is left of the
+    /// current step's budget, or, once it is spent, ends the session with failStepTimeout().
+    /// @return Whether anything was left; the caller stops when not.
+    [[nodiscard]] SshBudget armStepTimeout();
+
+    /// Judges a failed call of the connect sequence and, if it timed out, ends the session with
+    /// failStepTimeout(). @see classifySshStepFailure()
+    /// @param rc The failed libssh2 call's result.
+    /// @return TimedOut if the session was ended; Failed if the caller handles the failure as before.
+    [[nodiscard]] SshStepFailure failIfStepTimedOut(int rc);
+
+    /// Ends the session because the current step ran out of its budget: ssh.connect_timeout, naming the stage
+    /// it had reached, or the agent's allowance. The session is switched to non-blocking first: a call that
+    /// timed out can leave libssh2 half-way through a request, and nothing done with the session afterwards
+    /// -- close(), the destructor's teardown -- may wait on a host that already took too long.
+    /// @see sshTeardownFor()
+    void failStepTimeout();
 
     /// Arms libssh2's timeout with what is left of the install budget.
     /// @return Whether anything was left to arm it with.
@@ -346,6 +406,14 @@ class SshSession final: public Pty
     /// The end of the install budget. Set when the install channel is opened.
     std::chrono::steady_clock::time_point _terminfoDeadline {};
 
+    /// The limit on the connection coming up. Engaged by start(), when its clock starts; setState() stops
+    /// that clock while the session waits for the user.
+    std::optional<SshConnectBudget> _connectBudget;
+
+    /// The end of the agent authentication step's own allowance; set by setState() on entering
+    /// State::AuthenticateAgent, nullopt without a connect limit. @see SshAgentAuthAllowance
+    std::optional<std::chrono::steady_clock::time_point> _agentDeadline;
+
     /// Why this session failed, for start() to hand back. Empty until something fails.
     std::string _failureReason;
 
@@ -392,6 +460,83 @@ class SshSession final: public Pty
     std::mutex _closedMutex;
     std::condition_variable _closedCV;
 };
+
+/// Which time limit governs @p state: the connect budget, the agent's own allowance, or none while the
+/// session waits for the user or is not coming up.
+/// @param state A state of the session.
+/// @return The budget that applies.
+[[nodiscard]] constexpr SshStepBudget sshStepBudgetFor(SshSession::State state) noexcept
+{
+    using State = SshSession::State;
+    switch (state)
+    {
+        case State::AuthenticateAgent: return SshStepBudget::Agent;
+        case State::VerifyHostkeyWaitForInput:
+        case State::AuthenticatePrivateKeyWaitForInput:
+        case State::AuthenticatePasswordWaitForInput:
+        case State::Initial:
+        case State::Operational:
+        case State::ResizeScreen:
+        case State::Failure:
+        case State::Closed: return SshStepBudget::None;
+        case State::Started:
+        case State::Connect:
+        case State::Handshake:
+        case State::VerifyHostkey:
+        case State::AuthenticatePrivateKeyStart:
+        case State::AuthenticatePrivateKeyRequest:
+        case State::AuthenticatePrivateKey:
+        case State::AuthenticatePasswordStart:
+        case State::AuthenticatePassword:
+        case State::InstallTerminfoOpenChannel:
+        case State::InstallTerminfoExec:
+        case State::InstallTerminfoRead:
+        case State::OpenChannel:
+        case State::RequestAuthAgent:
+        case State::RequestPty:
+        case State::SetEnv:
+        case State::StartShell: return SshStepBudget::Connect;
+    }
+    return SshStepBudget::None;
+}
+
+/// What the connection is doing in @p state, for the connect-timeout message.
+/// @param state A state of the session.
+/// @return A phrase such as "the SSH handshake"; "connecting" for a state outside the connect sequence.
+[[nodiscard]] constexpr std::string_view connectStageName(SshSession::State state) noexcept
+{
+    using State = SshSession::State;
+    switch (state)
+    {
+        case State::Started:
+        case State::Connect: return "the TCP connect";
+        case State::Handshake: return "the SSH handshake";
+        case State::VerifyHostkey:
+        case State::VerifyHostkeyWaitForInput: return "host key verification";
+        case State::AuthenticateAgent:
+        case State::AuthenticatePrivateKeyStart:
+        case State::AuthenticatePrivateKeyRequest:
+        case State::AuthenticatePrivateKeyWaitForInput:
+        case State::AuthenticatePrivateKey:
+        case State::AuthenticatePasswordStart:
+        case State::AuthenticatePasswordWaitForInput:
+        case State::AuthenticatePassword: return "authentication";
+        case State::InstallTerminfoOpenChannel:
+        case State::InstallTerminfoExec:
+        case State::InstallTerminfoRead: return "the terminfo install";
+        case State::OpenChannel: return "opening the session channel";
+        case State::RequestAuthAgent: return "the agent forwarding request";
+        case State::RequestPty: return "the PTY request";
+        case State::SetEnv: return "sending the environment";
+        case State::StartShell: return "starting the shell";
+        case State::Initial:
+        case State::Operational:
+        case State::ResizeScreen:
+        case State::Failure:
+        case State::Closed: break;
+    }
+    return "connecting";
+}
 
 } // namespace vtpty
 

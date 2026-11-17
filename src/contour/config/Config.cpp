@@ -2872,6 +2872,24 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         loadGuarded(child, "install_terminfo", installTerminfo);
         where.terminfoInstall =
             installTerminfo ? vtpty::TerminfoInstall::Install : vtpty::TerminfoInstall::Off;
+        // Seconds in the file, 0 for no limit; inside vtpty an absent limit is nullopt.
+        auto connectTimeout = where.connectTimeout.value_or(std::chrono::seconds { 0 }).count();
+        loadGuarded(child, "connect_timeout", connectTimeout);
+        auto const maxSeconds =
+            std::chrono::duration_cast<std::chrono::seconds>(vtpty::MaxSshConnectTimeout).count();
+        if (connectTimeout < 0)
+            errorLog()("Ignoring ssh.connect_timeout: {} is negative; use 0 for no limit.", connectTimeout);
+        else if (connectTimeout == 0)
+            where.connectTimeout = std::nullopt;
+        else if (connectTimeout > maxSeconds)
+        {
+            errorLog()("ssh.connect_timeout: {} seconds is more than the most allowed, {}; using that.",
+                       connectTimeout,
+                       maxSeconds);
+            where.connectTimeout = std::chrono::seconds { maxSeconds };
+        }
+        else
+            where.connectTimeout = std::chrono::seconds { connectTimeout };
     }
 }
 
@@ -5804,7 +5822,9 @@ static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile co
                      << "known_hosts" << YAML::Value << YAML::DoubleQuoted
                      << core::pathToUtf8(ssh.knownHostsFile) << YAML::Key << "forward_agent" << YAML::Value
                      << ssh.forwardAgent << YAML::Key << "install_terminfo" << YAML::Value
-                     << (ssh.terminfoInstall == vtpty::TerminfoInstall::Install) << YAML::EndMap;
+                     << (ssh.terminfoInstall == vtpty::TerminfoInstall::Install) << YAML::Key
+                     << "connect_timeout" << YAML::Value
+                     << ssh.connectTimeout.value_or(std::chrono::seconds { 0 }).count() << YAML::EndMap;
             }
             if (!profile.configuredEnvironment.empty())
             {

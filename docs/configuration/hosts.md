@@ -34,6 +34,34 @@ directly. For built-in SSH, `TERM` travels in the PTY request. Other entries, su
 are sent as SSH environment requests and may require server permission (for example, OpenSSH's
 `AcceptEnv`). Review values in existing profiles before using them with a remote host.
 
+### Connect timeout
+
+`ssh.connect_timeout` limits, in seconds, how long a built-in SSH connection may take to come up: from
+the TCP connect through the handshake, authentication and the terminfo installation below to the
+started shell. Time spent waiting for you (confirming a new host key, typing a key's passphrase or a
+password) does not count. It defaults to `30`; `0` means no limit, and more than `86400` (24 hours)
+is taken as `86400`. A connection that runs out of time ends with an error naming the step it was in,
+the host and `ssh.connect_timeout`. Once the shell runs, no limit applies. Resolving the host name is
+left to the system resolver and its own timeouts.
+
+Authenticating through an SSH agent does not count toward `ssh.connect_timeout` either: an agent may
+ask you to approve each use of a key (1Password, Secretive, `ssh-add -c`, a FIDO key waiting for a
+touch, gpg-agent asking for its PIN), and Contour cannot tell that wait apart from the host's. The
+agent step has its own allowance of 2 minutes (or `connect_timeout`, if that is longer), for all of
+the agent's keys together; when it runs out, the connection ends with an error saying the agent did
+not finish in time. On Linux, macOS and other Unix systems this also cuts off an agent that never
+answers, or an approval left pending. On Windows it does not: there the allowance takes effect only
+once the agent has answered, so an agent that never replies, or an approval left pending, is not cut
+off. With `connect_timeout: 0` the agent step has no limit either.
+
+```yaml
+profiles:
+  remote-shell:
+    ssh:
+      host: homepc
+      connect_timeout: 10
+```
+
 ### Terminfo installation
 
 When a built-in SSH profile connects, Contour first runs a one-off command on a second SSH channel
@@ -44,8 +72,9 @@ Contour upgrade. When the install succeeds, the shell starts with `TERM=contour`
 
 If the remote has no `tic` (for example Alpine without ncurses, or BusyBox), the home directory is
 not writable, or anything else fails, the connection proceeds with the terminal type chosen above;
-the details go to the SSH log only. The step is bounded by 3 seconds. When it times out and the
-connection is still usable, one line is shown in the terminal and the shell starts. When the install
+the details go to the SSH log only. The step is bounded by 3 seconds, and never by more than what
+is left of `ssh.connect_timeout`. When it times out and the connection is still usable, one line is
+shown in the terminal and the shell starts. When the install
 leaves the connection unable to open the shell's channel (the host stopped answering while the install
 channel was being opened, or while a request was still being sent), the connection ends with an error
 that names `ssh.install_terminfo: false`. A host whose install failed, timed out or ended the

@@ -139,6 +139,16 @@ TEST_CASE("effectiveTerminfoInstall applies the pinned-TERM rule", "[ssh][termin
     CHECK(effectiveTerminfoInstall(TerminfoInstall::Off, std::nullopt, "contour") == TerminfoInstall::Off);
 }
 
+TEST_CASE("the install budget never runs past the connection's", "[ssh][terminfo]")
+{
+    using namespace std::chrono;
+    auto const now = steady_clock::now();
+    CHECK(terminfoInstallDeadline(now, std::nullopt) == now + TerminfoInstallTimeout);
+    CHECK(terminfoInstallDeadline(now, now + seconds { 30 }) == now + TerminfoInstallTimeout);
+    CHECK(terminfoInstallDeadline(now, now + milliseconds { 1200 }) == now + milliseconds { 1200 });
+    CHECK(terminfoInstallDeadline(now, now) == now);
+}
+
 TEST_CASE("appendTail keeps the last bytes", "[ssh][terminfo]")
 {
     auto buffer = std::string {};
@@ -259,7 +269,8 @@ TEST_CASE("install command runs under a local shell", "[ssh][terminfo]")
 }
 #endif
 
-TEST_CASE("a timed-out open or a pending packet ends the session after the install", "[ssh][terminfo]")
+TEST_CASE("a timed-out open, a pending packet or a spent connect budget ends the session after the install",
+          "[ssh][terminfo]")
 {
     using enum TerminfoInstallOutcome;
     using enum TerminfoInstallStage;
@@ -270,26 +281,56 @@ TEST_CASE("a timed-out open or a pending packet ends the session after the insta
         TerminfoInstallStage stage {};
         TerminfoInstallOutcome outcome {};
         SshOutbound outbound {};
+        SshBudget connectBudget {};
         AfterTerminfoInstall expected {};
     };
     // Every combination, spelled out: a pending packet ends the session whatever the outcome (libssh2's
-    // timeout can fire before ours and leave Failed or Installed), and so does a timed-out open.
+    // timeout can fire before ours and leave Failed or Installed), and so does a timed-out open; otherwise a
+    // spent connect budget ends it as a connect timeout, even after a successful install.
     auto const table = std::array {
-        Row { OpenChannel, Installed, Idle, StartShell }, Row { OpenChannel, Installed, Pending, EndSession },
-        Row { OpenChannel, Failed, Idle, StartShell },    Row { OpenChannel, Failed, Pending, EndSession },
-        Row { OpenChannel, TimedOut, Idle, EndSession },  Row { OpenChannel, TimedOut, Pending, EndSession },
-        Row { Exec, Installed, Idle, StartShell },        Row { Exec, Installed, Pending, EndSession },
-        Row { Exec, Failed, Idle, StartShell },           Row { Exec, Failed, Pending, EndSession },
-        Row { Exec, TimedOut, Idle, StartShell },         Row { Exec, TimedOut, Pending, EndSession },
-        Row { Read, Installed, Idle, StartShell },        Row { Read, Installed, Pending, EndSession },
-        Row { Read, Failed, Idle, StartShell },           Row { Read, Failed, Pending, EndSession },
-        Row { Read, TimedOut, Idle, StartShell },         Row { Read, TimedOut, Pending, EndSession },
+        Row { OpenChannel, Installed, Idle, SshBudget::Left, StartShell },
+        Row { OpenChannel, Installed, Idle, SshBudget::Spent, ConnectTimedOut },
+        Row { OpenChannel, Installed, Pending, SshBudget::Left, EndSession },
+        Row { OpenChannel, Installed, Pending, SshBudget::Spent, EndSession },
+        Row { OpenChannel, Failed, Idle, SshBudget::Left, StartShell },
+        Row { OpenChannel, Failed, Idle, SshBudget::Spent, ConnectTimedOut },
+        Row { OpenChannel, Failed, Pending, SshBudget::Left, EndSession },
+        Row { OpenChannel, Failed, Pending, SshBudget::Spent, EndSession },
+        Row { OpenChannel, TimedOut, Idle, SshBudget::Left, EndSession },
+        Row { OpenChannel, TimedOut, Idle, SshBudget::Spent, EndSession },
+        Row { OpenChannel, TimedOut, Pending, SshBudget::Left, EndSession },
+        Row { OpenChannel, TimedOut, Pending, SshBudget::Spent, EndSession },
+        Row { Exec, Installed, Idle, SshBudget::Left, StartShell },
+        Row { Exec, Installed, Idle, SshBudget::Spent, ConnectTimedOut },
+        Row { Exec, Installed, Pending, SshBudget::Left, EndSession },
+        Row { Exec, Installed, Pending, SshBudget::Spent, EndSession },
+        Row { Exec, Failed, Idle, SshBudget::Left, StartShell },
+        Row { Exec, Failed, Idle, SshBudget::Spent, ConnectTimedOut },
+        Row { Exec, Failed, Pending, SshBudget::Left, EndSession },
+        Row { Exec, Failed, Pending, SshBudget::Spent, EndSession },
+        Row { Exec, TimedOut, Idle, SshBudget::Left, StartShell },
+        Row { Exec, TimedOut, Idle, SshBudget::Spent, ConnectTimedOut },
+        Row { Exec, TimedOut, Pending, SshBudget::Left, EndSession },
+        Row { Exec, TimedOut, Pending, SshBudget::Spent, EndSession },
+        Row { Read, Installed, Idle, SshBudget::Left, StartShell },
+        Row { Read, Installed, Idle, SshBudget::Spent, ConnectTimedOut },
+        Row { Read, Installed, Pending, SshBudget::Left, EndSession },
+        Row { Read, Installed, Pending, SshBudget::Spent, EndSession },
+        Row { Read, Failed, Idle, SshBudget::Left, StartShell },
+        Row { Read, Failed, Idle, SshBudget::Spent, ConnectTimedOut },
+        Row { Read, Failed, Pending, SshBudget::Left, EndSession },
+        Row { Read, Failed, Pending, SshBudget::Spent, EndSession },
+        Row { Read, TimedOut, Idle, SshBudget::Left, StartShell },
+        Row { Read, TimedOut, Idle, SshBudget::Spent, ConnectTimedOut },
+        Row { Read, TimedOut, Pending, SshBudget::Left, EndSession },
+        Row { Read, TimedOut, Pending, SshBudget::Spent, EndSession },
     };
     for (auto const& row: table)
     {
         INFO("stage " << static_cast<int>(row.stage) << " outcome " << static_cast<int>(row.outcome)
-                      << " outbound " << static_cast<int>(row.outbound));
-        CHECK(afterTerminfoInstall(row.stage, row.outcome, row.outbound) == row.expected);
+                      << " outbound " << static_cast<int>(row.outbound) << " budget "
+                      << static_cast<int>(row.connectBudget));
+        CHECK(afterTerminfoInstall(row.stage, row.outcome, row.outbound, row.connectBudget) == row.expected);
     }
 }
 

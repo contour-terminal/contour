@@ -150,8 +150,9 @@ enum class TerminfoInstallStage : uint8_t
 /// What the session does once the install step is left.
 enum class AfterTerminfoInstall : uint8_t
 {
-    StartShell = 0, ///< Carry on with the shell's own channel.
-    EndSession,     ///< End the session: the connection cannot open another channel.
+    StartShell = 0,  ///< Carry on with the shell's own channel.
+    EndSession,      ///< End the session: the connection cannot open another channel.
+    ConnectTimedOut, ///< End the session: the install used up the connection's time (ssh.connect_timeout).
 };
 
 /// Whether libssh2 still holds an outbound packet it could not finish sending. Read from
@@ -171,19 +172,25 @@ enum class SshOutbound : uint8_t
 ///   (session.c, _libssh2_wait_socket), so it can fire before our own deadline and leave an outcome other
 ///   than TimedOut. libssh2 refuses to send any other packet until that one is out (transport.c,
 ///   send_existing), so the shell's own open, which runs without a timeout, would spin on it forever.
+/// A usable session whose connect budget the install spent cannot go on either: the shell's channel would
+/// find it spent before sending a byte, so the session ends naming the install, the step that used the time.
 /// Every other state leaves the session usable.
-/// @param stage    Where the install ended.
-/// @param outcome  How it ended.
-/// @param outbound Whether a packet was still pending once the install's channel was cleaned up.
-/// @return Whether to start the shell or end the session.
+/// @param stage         Where the install ended.
+/// @param outcome       How it ended.
+/// @param outbound      Whether a packet was still pending once the install's channel was cleaned up.
+/// @param connectBudget Whether the connection has time left (ssh.connect_timeout).
+/// @return Whether to start the shell or end the session, and why.
 [[nodiscard]] constexpr AfterTerminfoInstall afterTerminfoInstall(TerminfoInstallStage stage,
                                                                   TerminfoInstallOutcome outcome,
-                                                                  SshOutbound outbound) noexcept
+                                                                  SshOutbound outbound,
+                                                                  SshBudget connectBudget) noexcept
 {
     if (outbound == SshOutbound::Pending)
         return AfterTerminfoInstall::EndSession;
     if (stage == TerminfoInstallStage::OpenChannel && outcome == TerminfoInstallOutcome::TimedOut)
         return AfterTerminfoInstall::EndSession;
+    if (connectBudget == SshBudget::Spent)
+        return AfterTerminfoInstall::ConnectTimedOut;
     return AfterTerminfoInstall::StartShell;
 }
 
@@ -207,6 +214,19 @@ enum class SshTeardown : uint8_t
 [[nodiscard]] constexpr SshTeardown sshTeardownFor(SshOutbound outbound) noexcept
 {
     return outbound == SshOutbound::Pending ? SshTeardown::NonBlocking : SshTeardown::AsConfigured;
+}
+
+/// The end of the install budget: TerminfoInstallTimeout from @p now, but never past the connection's own
+/// deadline -- the install is one step of the connection coming up.
+/// @param now             When the install starts.
+/// @param connectDeadline The connection's deadline; nullopt when it has no limit.
+/// @return The install's deadline.
+[[nodiscard]] constexpr std::chrono::steady_clock::time_point terminfoInstallDeadline(
+    std::chrono::steady_clock::time_point now,
+    std::optional<std::chrono::steady_clock::time_point> connectDeadline) noexcept
+{
+    auto const own = now + TerminfoInstallTimeout;
+    return connectDeadline && *connectDeadline < own ? *connectDeadline : own;
 }
 
 /// Appends @p chunk to @p buffer, keeping only the last @p cap bytes (the marker is the last line).

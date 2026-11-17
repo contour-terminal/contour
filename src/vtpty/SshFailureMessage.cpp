@@ -35,4 +35,37 @@ std::string describeSshChannelOpenFailure(std::string_view detail, TerminfoInsta
     return std::format("Failed to open SSH channel. {}", detail);
 }
 
+std::string describeSshConnectTimeout(std::string_view stage,
+                                      std::string_view host,
+                                      std::chrono::seconds limit)
+{
+    return std::format(
+        "Connecting to {} timed out during {}: it took longer than ssh.connect_timeout ({} s). "
+        "Raise it, or set it to 0 for no limit, if the host is slow to answer.",
+        host,
+        stage,
+        limit.count());
+}
+
+std::string describeSshAgentTimeout(std::string_view host, std::chrono::seconds allowance)
+{
+    auto const span =
+        allowance.count() % 60 == 0
+            ? std::format("{} minutes", std::chrono::duration_cast<std::chrono::minutes>(allowance).count())
+            : std::format("{} seconds", allowance.count());
+    return std::format(
+        "Authenticating to {} through the SSH agent did not finish within {}: the agent may be "
+        "waiting for an approval that never came, or the host stopped answering.",
+        host,
+        span);
+}
+
+std::string describeSshAgentClosed(std::string_view host)
+{
+    return std::format(
+        "The SSH agent closed its connection while authenticating to {}; trying the next way to "
+        "log in.",
+        host);
+}
+
 } // namespace vtpty
