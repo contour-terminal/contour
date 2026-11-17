@@ -475,7 +475,9 @@ Row {
             property string title: ""
 
             function locate(drag) {
-                const hit = root.controller ? root.controller.tabBarHit(drag.x) : undefined
+                // As this drag sees the strip: no slot beside a tab of its own it carries, which a drop there
+                // would put back where it is.
+                const hit = root.controller ? root.controller.tabBarHit(drag.x, nodePayload) : undefined
                 gapIndex = hit !== undefined && hit.spot === TabBarSpot.Gap ? hit.index : -1
             }
 

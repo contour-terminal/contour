@@ -537,10 +537,13 @@ class WindowController:
     /// lays out while the drag is over it.
     /// @param tabs Each tab's rectangle in the strip, left to right; only the horizontal extent is read.
     Q_INVOKABLE void setTabSpans(QList<QRectF> const& tabs);
-    /// Hit-tests the tab strip (resolveTabBarHit()) against the spans setTabSpans() last reported.
-    /// @param x The pointer's position along the strip.
+    /// Hit-tests the tab strip (resolveTabBarHit()) against the spans setTabSpans() last reported, as the
+    /// drag of @p nodePayload sees it: a gap beside a whole tab of this window being dragged is no gap
+    /// (excludingOwnPlace()).
+    /// @param x           The pointer's position along the strip.
+    /// @param nodePayload The drag's JSON.
     /// @return What the pointer is on (`hit.spot`, a TabBarSpot) and which tab or gap (`hit.index`).
-    Q_INVOKABLE [[nodiscard]] TabBarHitValue tabBarHit(qreal x) const;
+    Q_INVOKABLE [[nodiscard]] TabBarHitValue tabBarHit(qreal x, QString const& nodePayload) const;
     /// Whether resting a drag of @p nodePayload on the tab at @p tabIndex opens that tab
     /// (shouldSpringOpen()): never the tab dragged, nor the one the drag came from, nor in a window that
     /// refuses the drag.

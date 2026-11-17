@@ -399,11 +399,17 @@ class MainWindowControllerMock: public QAbstractListModel
                 return contour::window::TabSpan { .left = tab.left(), .right = tab.right() };
             }));
     }
-    /// Mirrors WindowController::tabBarHit() through the same pure decision (resolveTabBarHit).
-    Q_INVOKABLE [[nodiscard]] contour::window::TabBarHitValue tabBarHit(qreal x) const
+    /// Mirrors WindowController::tabBarHit() through the same pure decisions (resolveTabBarHit,
+    /// excludingOwnPlace), with draggedTabRow standing in for the drag the payload names.
+    Q_INVOKABLE [[nodiscard]] contour::window::TabBarHitValue tabBarHit(qreal x,
+                                                                        QString const& /*payload*/) const
     {
-        return contour::window::TabBarHitValue { contour::window::resolveTabBarHit(tabSpans, x) };
+        return contour::window::TabBarHitValue { contour::window::excludingOwnPlace(
+            contour::window::resolveTabBarHit(tabSpans, x), draggedTabRow) };
     }
+    /// The row of the whole tab of this window a drag carries, as WindowController resolves it from the
+    /// payload; none for a pane, or a tab of another window.
+    std::optional<int> draggedTabRow;
     std::vector<std::pair<int, QString>> tabDrops;  ///< Every dropNodeOnTab(), in order.
     std::vector<std::pair<int, QString>> gapDrops;  ///< Every dropNodeInGap(), in order.
     std::vector<contour::window::TabSpan> tabSpans; ///< What setTabSpans() last reported.

@@ -5,6 +5,7 @@
 
 #include <array>
 #include <chrono>
+#include <optional>
 
 using namespace contour::window;
 
@@ -110,4 +111,40 @@ TEST_CASE("tabBar.shouldSpringOpenTable", "[tabbar]")
                                       : DwellOpens::No;
             CHECK(shouldSpringOpen(subject, refusal) == expected);
         }
+}
+
+TEST_CASE("tabBar.aDraggedTabsOwnPlaceIsNoGap", "[tabbar]")
+{
+    // The gaps either side of the dragged tab would put it back where it is; past the last tab when it is the
+    // last names no place at all. Every other gap, and every gap for a drag that is not a tab of this strip,
+    // stays a gap.
+    struct Row
+    {
+        std::optional<int> dragged;
+        double x;
+        TabBarHit expected;
+    };
+    constexpr auto None = TabBarHit {};
+    auto const rows = std::array {
+        Row { .dragged = 1, .x = 100, .expected = None },                                  // before itself
+        Row { .dragged = 1, .x = 200, .expected = None },                                  // after itself
+        Row { .dragged = 1, .x = 0, .expected = { .spot = TabBarSpot::Gap, .index = 0 } }, // before the first
+        Row { .dragged = 1, .x = 300, .expected = { .spot = TabBarSpot::Gap, .index = 3 } }, // after the last
+        Row { .dragged = 2, .x = 300, .expected = None }, // the last, past it
+        Row { .dragged = 2, .x = 200, .expected = None }, // the last, before it
+        Row { .dragged = 2, .x = 100, .expected = { .spot = TabBarSpot::Gap, .index = 1 } }, // a real move
+        Row {
+            .dragged = 0, .x = 50, .expected = { .spot = TabBarSpot::OnTab, .index = 0 } }, // on a tab, kept
+        Row { .dragged = std::nullopt,
+              .x = 100,
+              .expected = { .spot = TabBarSpot::Gap, .index = 1 } }, // a pane
+    };
+    for (auto const& row: rows)
+    {
+        CAPTURE(row.dragged.value_or(-1), row.x);
+        auto const result = excludingOwnPlace(hit(row.x), row.dragged);
+        CHECK(result.spot == row.expected.spot);
+        if (result.spot != TabBarSpot::None)
+            CHECK(result.index == row.expected.index);
+    }
 }

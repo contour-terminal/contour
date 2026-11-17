@@ -344,11 +344,17 @@ class MockTabController: public QAbstractListModel
                 return contour::window::TabSpan { .left = tab.left(), .right = tab.right() };
             }));
     }
-    /// Mirrors WindowController::tabBarHit() through the same pure decision (resolveTabBarHit).
-    Q_INVOKABLE [[nodiscard]] contour::window::TabBarHitValue tabBarHit(qreal x) const
+    /// Mirrors WindowController::tabBarHit() through the same pure decisions (resolveTabBarHit,
+    /// excludingOwnPlace), with draggedTabRow standing in for the drag the payload names.
+    Q_INVOKABLE [[nodiscard]] contour::window::TabBarHitValue tabBarHit(qreal x,
+                                                                        QString const& /*payload*/) const
     {
-        return contour::window::TabBarHitValue { contour::window::resolveTabBarHit(tabSpans, x) };
+        return contour::window::TabBarHitValue { contour::window::excludingOwnPlace(
+            contour::window::resolveTabBarHit(tabSpans, x), draggedTabRow) };
     }
+    /// The row of the strip's own tab a drag carries, as WindowController resolves it from the payload; none
+    /// for a drag of a pane or of another window's tab.
+    std::optional<int> draggedTabRow;
     /// Mirrors WindowController::springOpens(): any tab but the one springClosedTab names.
     Q_INVOKABLE [[nodiscard]] bool springOpens(int tabIndex, QString const&) const
     {

@@ -870,6 +870,31 @@ TEST_CASE("releasing on a tab calls dropNodeOnTab (offscreen)", "[contour][gui][
     CHECK(f.controller.activatedTabs.empty());
 }
 
+TEST_CASE("a tab dragged in its own strip gets no slot where it already is (offscreen)",
+          "[contour][gui][qml][drop][tabdrag]")
+{
+    // The last of three tabs is the one dragged (the fixture's payload): the gap before it would put it back
+    // where it is, and the gap past it names no place it can go.
+    auto f = StripHost {};
+    f.controller.draggedTabRow = 2;
+    auto& slot = f.item("tabInsertionSlot");
+    f.source.enter(f.onTab(0, 0.5));
+    for (auto const own: { 2, 3 })
+    {
+        CAPTURE(own);
+        f.source.move(f.boundary(own));
+        QTest::qWait(50);
+        CHECK_FALSE(slot.isVisible());
+    }
+    CHECK(f.source.drop(f.boundary(3)) == Qt::MoveAction); // taken, so no window opens, but it moves nothing
+    CHECK(f.controller.gapDrops.empty());
+
+    // A gap that does move it still shows the slot.
+    f.source.enter(f.onTab(0, 0.5));
+    f.source.move(f.boundary(1));
+    CHECK(QTest::qWaitFor([&] { return slot.isVisible(); }));
+}
+
 TEST_CASE("a gap shows the insertion slot and calls dropNodeInGap (offscreen)",
           "[contour][gui][qml][drop][tabdrag]")
 {
@@ -916,9 +941,11 @@ TEST_CASE("a gap shows the insertion slot and calls dropNodeInGap (offscreen)",
             return f.controller.tabSpans.size() == 3
                    && f.controller.tabSpans[1].left >= secondRests + room - 1.0;
         }));
-        CHECK(f.controller.tabBarHit(slotRect.center().x()).hit().spot == contour::window::TabBarSpot::Gap);
-        CHECK(f.controller.tabBarHit(slotRect.center().x()).hit().index == 1);
-        CHECK(f.controller.tabBarHit(f.onTab(1, 0.5).x()).hit().spot == contour::window::TabBarSpot::OnTab);
+        CHECK(f.controller.tabBarHit(slotRect.center().x(), QString {}).hit().spot
+              == contour::window::TabBarSpot::Gap);
+        CHECK(f.controller.tabBarHit(slotRect.center().x(), QString {}).hit().index == 1);
+        CHECK(f.controller.tabBarHit(f.onTab(1, 0.5).x(), QString {}).hit().spot
+              == contour::window::TabBarSpot::OnTab);
 
         CHECK(f.source.drop(f.boundary(1)) == Qt::MoveAction);
         CHECK(f.controller.gapDrops

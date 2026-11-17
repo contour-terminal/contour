@@ -2662,7 +2662,7 @@ TEST_CASE("the tab strip is hit-tested against the spans it reports", "[contour]
     auto f = TwoWindows {};
     using contour::window::TabBarSpot;
     auto const hit = [&](qreal x) {
-        auto const answer = f.a->tabBarHit(x).hit();
+        auto const answer = f.a->tabBarHit(x, QString {}).hit();
         return std::pair { answer.spot, answer.index };
     };
     CHECK(hit(50) == std::pair { TabBarSpot::Gap, 0 });
@@ -2686,8 +2686,8 @@ TEST_CASE("QML reads a tab-strip hit as a value with a named spot", "[contour][m
         import QtQml
         import Contour.Terminal
         QtObject {
-            readonly property var onTab: win.tabBarHit(150)
-            readonly property var gap: win.tabBarHit(100)
+            readonly property var onTab: win.tabBarHit(150, "")
+            readonly property var gap: win.tabBarHit(100, "")
             readonly property bool onTabNamed: onTab.spot === TabBarSpot.OnTab
             readonly property bool gapNamed: gap.spot === TabBarSpot.Gap
             readonly property int onTabIndex: onTab.index

@@ -1548,9 +1548,16 @@ void WindowController::setTabSpans(QList<QRectF> const& tabs)
                                               }));
 }
 
-TabBarHitValue WindowController::tabBarHit(qreal x) const
+TabBarHitValue WindowController::tabBarHit(qreal x, QString const& nodePayload) const
 {
-    return TabBarHitValue { resolveTabBarHit(_tabSpans, x) };
+    auto const* const drag = _manager.resolveNodeDrag(nodePayload);
+    auto const* const window = _manager.model().workspace(_displayed);
+    auto draggedRow = std::optional<int> {};
+    if (drag != nullptr && window != nullptr && drag->tab && drag->workspace == _displayed
+        && drag->movesWholeTab())
+        if (auto const row = window->indexOf(*drag->tab); row >= 0)
+            draggedRow = row;
+    return TabBarHitValue { excludingOwnPlace(resolveTabBarHit(_tabSpans, x), draggedRow) };
 }
 
 bool WindowController::springOpens(int tabIndex, QString const& nodePayload) const
