@@ -1666,16 +1666,16 @@ bool SshSession::authenticateWithAgent()
     while ((rc = libssh2_agent_get_identity(_p->sshAgent, &identity, prevIdentity)) == 0) // NOLINT
     {
         prevIdentity = identity;
-        if (i < _walkIndex)
-        {
-            ++i;
+        // The identity this pass reached, counted for every one of them -- tried or skipped -- so that a
+        // retry resumes at the one it left, not at the last one it skipped.
+        auto const index = i++;
+        if (index < _walkIndex)
             continue;
-        }
 
         rc = libssh2_agent_userauth(_p->sshAgent, _config.username.data(), identity);
         if (rc == LIBSSH2_ERROR_EAGAIN)
         {
-            _walkIndex = i;
+            _walkIndex = index;
             return false;
         }
         if (rc == LIBSSH2_ERROR_NONE)
