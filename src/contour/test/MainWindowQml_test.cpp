@@ -3535,8 +3535,8 @@ TEST_CASE("tabs restored back to back all end whole, side by side and with their
         CHECK_FALSE(part(*tab, QStringLiteral("tabLabel")).property("truncated").toBool());
     }
     // None stands over the next.
-    for (auto const pair: tabs | std::views::adjacent<2>)
-        CHECK(std::get<0>(pair)->x() + std::get<0>(pair)->width() <= std::get<1>(pair)->x() + 0.5);
+    for (auto const& [tab, next]: std::views::zip(tabs, tabs | std::views::drop(1)))
+        CHECK(tab->x() + tab->width() <= next->x() + 0.5);
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
