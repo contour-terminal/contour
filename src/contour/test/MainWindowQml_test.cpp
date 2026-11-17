@@ -3458,6 +3458,47 @@ TEST_CASE("a tab still fading in stays whole when the tab before it closes (offs
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("a tab whose title grows while it fades in keeps the strip wide enough for it (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    using contour::config::MotionPreference;
+
+    // At startup a window's tab arrives with a placeholder title and the shell's title follows at once,
+    // while the tab still fades in: the strip must grow with it, or the + button stands over its end.
+    auto const motion = GENERATE(MotionPreference::Full, MotionPreference::Reduced);
+    CAPTURE(static_cast<int>(motion));
+    auto setup = rowSetup(ChromeStyle::Fluent);
+    setup.accessibility.motion = motion;
+
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 1 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+    showWindow(*root);
+    controller.closeTabAtIndex(0); // an empty strip, as a window has before its first tab arrives
+    QCoreApplication::processEvents();
+
+    auto const id = controller.insertTab(0, MockMainController::TabActivation::Activate);
+    QCoreApplication::processEvents();
+    controller.shownWorkspaceTabTitles.resize(static_cast<std::size_t>(id) + 1);
+    controller.shownWorkspaceTabTitles[static_cast<std::size_t>(id)] =
+        QStringLiteral("contour - PowerShell 7.7.0 - a title that has just arrived");
+    emit controller.dataChanged(controller.index(0, 0), controller.index(0, 0));
+    QTest::qWait(styleGroup(engine, "motion").property("standard").toInt() + 150);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 1);
+    auto const& tab = *tabs[0];
+    CHECK(tab.width() == tab.implicitWidth());
+    auto const& list = named(*root, QStringLiteral("tabList"));
+    INFO("tab " << tab.x() << "+" << tab.width() << " list content " << list.property("contentWidth").toReal()
+                << " list " << list.width());
+    CHECK(list.property("contentWidth").toReal() >= tab.x() + tab.width() - 0.5);
+    CHECK(list.width() >= tab.x() + tab.width() - 0.5);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("tabs restored back to back all end whole, side by side and with their titles in full (offscreen)",
           "[contour][gui][qml][mainwindow][joinedtabs]")
 {

@@ -297,6 +297,7 @@ Row {
                 onContentXChanged: root.scheduleSpans()
 
                 delegate: TabItem {
+                    id: tabDelegate
                     // Role values injected for this row. Declared as required properties (the modern
                     // delegate model); their names differ from this TabItem's own properties so there is
                     // no shadowing.
@@ -352,37 +353,44 @@ Row {
                     onGlassTintChanged: root.scheduleGlassShapes()
                     onEngagedChanged: root.engagedTabs += engaged ? 1 : -1
                     Component.onDestruction: if (engaged) root.engagedTabs -= 1
+
+                    // A tab opened fades in (and, with motion, grows from a little smaller), as its own animation
+                    // rather than the view's add transition. The view does not lay its first item out again when
+                    // that item is resized while a transition holds it (QQuickListViewPrivate::itemGeometryChanged)
+                    // -- and at startup the window's first tab is resized just then, its title arriving as it
+                    // fades in -- which left the strip at the old width, the + standing over the tab's end. Only
+                    // a tab the model adds fades: one the view creates as the strip scrolls does not.
+                    ListView.onAdd: appear.restart()
+                    ParallelAnimation {
+                        id: appear
+                        NumberAnimation {
+                            target: tabDelegate
+                            property: "opacity"
+                            from: 0
+                            to: 1
+                            duration: chromeStyle.motion.standard
+                        }
+                        NumberAnimation {
+                            target: tabDelegate
+                            property: "scale"
+                            from: chromeStyle.motion.animates ? 0.92 : 1
+                            to: 1
+                            duration: chromeStyle.motion.standard
+                            easing.type: Easing.OutCubic
+                        }
+                    }
                 }
 
                 // Animate reordering when a tab is moved, and the tabs making room for one opened or closing
-                // the gap one leaves. Under Reduce Motion nothing slides: a new tab only fades in. A closed tab
-                // goes at once, so what the strip holds is always what the model holds.
-                //
-                // A tab displaced while it still fades in (opened, then a tab before it closed at once) has its
-                // add transition cut short where it stood, half transparent or worse; so every displacement also
-                // finishes the fade (Qt's "Handling Interrupted Animations"), and under Reduce Motion, where the
-                // slide is off, a transition still runs to do just that.
+                // the gap one leaves. Under Reduce Motion nothing slides. A closed tab goes at once, so what the
+                // strip holds is always what the model holds.
                 moveDisplaced: Transition {
+                    enabled: chromeStyle.motion.animates
                     NumberAnimation { properties: "x"; duration: chromeStyle.motion.standard }
-                    NumberAnimation { properties: "opacity,scale"; to: 1; duration: chromeStyle.motion.standard }
                 }
                 displaced: Transition {
-                    NumberAnimation {
-                        properties: "x"
-                        duration: chromeStyle.motion.animates ? chromeStyle.motion.standard : 0
-                        easing.type: Easing.OutCubic
-                    }
-                    NumberAnimation { properties: "opacity,scale"; to: 1; duration: chromeStyle.motion.standard }
-                }
-                add: Transition {
-                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: chromeStyle.motion.standard }
-                    NumberAnimation {
-                        property: "scale"
-                        from: chromeStyle.motion.animates ? 0.92 : 1
-                        to: 1
-                        duration: chromeStyle.motion.standard
-                        easing.type: Easing.OutCubic
-                    }
+                    enabled: chromeStyle.motion.animates
+                    NumberAnimation { properties: "x"; duration: chromeStyle.motion.standard; easing.type: Easing.OutCubic }
                 }
 
                 // The active tab's indicator line, one for the strip, so that it slides from the tab it leaves to
