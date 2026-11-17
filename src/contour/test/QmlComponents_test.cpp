@@ -2172,7 +2172,7 @@ TEST_CASE("A TabItem's icon is the square, the program's initial, the profile's 
     initial.insert("tabZoomed", false);
     initial.insert("tabProgressState", 0);
     initial.insert("tabProgressPercentage", 0);
-    std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
+    auto const tab = std::unique_ptr<QObject>(component.createWithInitialProperties(initial));
     auto* item = qobject_cast<QQuickItem*>(tab.get());
     REQUIRE(item != nullptr);
     if (!item->property("kitTab").toBool())

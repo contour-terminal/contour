@@ -65,7 +65,7 @@ inline constexpr auto TabIconKeywords = std::array {
     auto const first = std::ranges::find_if(name, isWordChar);
     if (first == name.end())
         return {};
-    return std::string(1, static_cast<char>(std::toupper(static_cast<unsigned char>(*first))));
+    return { static_cast<char>(std::toupper(static_cast<unsigned char>(*first))) };
 }
 
 /// Decides a tab's icon.

@@ -15,8 +15,8 @@ namespace
 
 struct RegionRow
 {
-    CompositorBlurWishes wishes;
-    CompositorBlurRegion region;
+    CompositorBlurWishes wishes {};
+    CompositorBlurRegion region = CompositorBlurRegion::None;
 };
 
 // The profile's whole-window blur covers the band whatever its height; the band alone blurs only with a

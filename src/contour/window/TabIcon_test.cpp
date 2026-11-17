@@ -12,27 +12,31 @@ using contour::window::tabIconOf;
 
 namespace
 {
-std::filesystem::path const Home { "/home/u" };
+/// The home directory the cases resolve `~` against.
+[[nodiscard]] std::filesystem::path home()
+{
+    return "/home/u";
+}
 } // namespace
 
 TEST_CASE("TabIcon.autoShowsTheRunningProgramsInitialElseTheRowsOwn", "[contour][tabicon]")
 {
-    CHECK(tabIconOf("auto", "/usr/bin/nvim", Home)
+    CHECK(tabIconOf("auto", "/usr/bin/nvim", home())
           == TabIcon { .kind = TabIconKind::Monogram, .initial = "N", .image = {} });
-    CHECK(tabIconOf("auto", "", Home) == TabIcon {});
+    CHECK(tabIconOf("auto", "", home()) == TabIcon {});
     // An unset key is auto.
-    CHECK(tabIconOf("", "htop", Home).kind == TabIconKind::Monogram);
+    CHECK(tabIconOf("", "htop", home()).kind == TabIconKind::Monogram);
 }
 
 TEST_CASE("TabIcon.noneHidesItAndAnythingElseIsAnImage", "[contour][tabicon]")
 {
-    CHECK(tabIconOf("none", "nvim", Home)
+    CHECK(tabIconOf("none", "nvim", home())
           == TabIcon { .kind = TabIconKind::Hidden, .initial = {}, .image = {} });
-    auto const image = tabIconOf("/icons/pwsh.png", "", Home);
+    auto const image = tabIconOf("/icons/pwsh.png", "", home());
     CHECK(image.kind == TabIconKind::Image);
     CHECK(image.image == std::filesystem::path { "/icons/pwsh.png" });
     // A leading ~ is the home directory, as for every other path in the configuration.
-    CHECK(tabIconOf("~/icons/a.svg", "", Home).image == Home / "icons" / "a.svg");
+    CHECK(tabIconOf("~/icons/a.svg", "", home()).image == home() / "icons" / "a.svg");
 }
 
 TEST_CASE("TabIcon.theInitialIsTheFirstLetterOrDigitOfTheBaseName", "[contour][tabicon]")
