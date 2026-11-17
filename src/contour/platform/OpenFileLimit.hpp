@@ -17,7 +17,7 @@
 #include <format>
 #include <string>
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <cstdio>
 #endif
 
@@ -33,7 +33,7 @@ inline constexpr int OpenFileLimit = 8192;
 /// @return Nothing, or why the runtime refused; a refusal leaves the previous limit in place.
 [[nodiscard]] inline std::expected<void, std::string> raiseOpenFileLimit()
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     if (_setmaxstdio(OpenFileLimit) == -1)
         return std::unexpected(
             std::format("The C runtime kept its limit of {} open files; {} were asked for.",

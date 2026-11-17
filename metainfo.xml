@@ -122,7 +122,7 @@
           <li>Fixes the sidebar's tab rows of a window without a daemon showing "Terminal" instead of the title the shell set, until something else changed</li>
           <li>Fixes Contour on Windows ending when a terminal is resized just as its program exits</li>
           <li>Fixes data races when a pane of a daemon session is attached: the connection's thread read which display showed the pane, and which pane the session was, while the window changed them</li>
-          <li>Fixes Contour on Windows failing to save settings, load its configuration or write files with a few tabs open: each tab's fonts held files open until the process reached the C runtime's default limit of 512, which Contour now raises to 8192</li>
+          <li>Fixes Contour on Windows failing to save settings, load its configuration or write files with a few tabs open: each tab's fonts held files open until the process reached the C runtime's default limit of 512, which Contour now raises to 8192 (#2405)</li>
           <li>Fixes Contour on macOS and FreeBSD crashing, or no longer reading a terminal, once a process has more than about a thousand files open, as a daemon hosting a hundred or more sessions does</li>
           <li>Fixes Contour exiting at start on a Windows system without Cascadia Mono or Consolas: a missing font family now falls back to another monospace font, then to any font, and a system without any usable font is refused with a message instead of a crash</li>
           <li>Fixes a client attaching to a daemon over stdio, or a local connection, waiting forever on a daemon that never answers: the client gives up with an error after a deadline, and the daemon closes a local connection that sends nothing within 20 seconds (experimental daemon)</li>
