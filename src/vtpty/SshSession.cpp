@@ -975,27 +975,39 @@ std::optional<SshSession::ReadResult> SshSession::read(crispy::BufferObject<char
     // block every GUI-thread injectRead() until the remote sends a byte, and it would also invert the
     // _mutex -> _injectMutex order that processState() establishes. @see _mutex.
 
-    // Below is for state: Operational
-    {
+    // Below is for state: Operational. One lock from the state check to the libssh2 call: released in
+    // between, a close() or a failed write() on the GUI thread could end the session after the check, and
+    // the read would reach a closed channel. The session is non-blocking by now, so the read returns at
+    // once either way and the idle wait happens below, unlocked.
+    auto const rc = [&]() -> std::optional<ssize_t> {
         auto const _ = std::lock_guard { _mutex };
         processState();
 
-        if (_state != State::Operational && !isClosed())
+        // Over, here or on another thread: there may be no channel to read from. _mutex -> _injectMutex is
+        // the lock order.
+        if (isClosed())
+        {
+            auto const injected = [&]() {
+                auto const injectLock = std::lock_guard { _injectMutex };
+                return _injectedRead.empty() ? InjectedRead::Empty : InjectedRead::Pending;
+            }();
+            errno = sshClosedReadErrno(injected);
+            return std::nullopt;
+        }
+
+        if (_state != State::Operational)
         {
             errno = EAGAIN;
             return std::nullopt;
         }
-    }
 
-    // The lock covers the libssh2 call and nothing else. The session is non-blocking by now, so this
-    // returns at once either way and the idle wait happens below, unlocked.
-    auto const rc = [&]() {
-        auto const _ = std::lock_guard { _mutex };
         return libssh2_channel_read(
             _p->sshChannel, storage.hotEnd(), std::min(storage.bytesAvailable(), size));
     }();
+    if (!rc)
+        return std::nullopt; // errno says why
 
-    if (rc == LIBSSH2_ERROR_EAGAIN)
+    if (*rc == LIBSSH2_ERROR_EAGAIN)
     {
         // Park on the socket rather than returning EAGAIN straight away -- the caller treats EAGAIN
         // as "try again", so returning immediately would spin a core. waitForSocket() releases
@@ -1005,14 +1017,14 @@ std::optional<SshSession::ReadResult> SshSession::read(crispy::BufferObject<char
         return std::nullopt;
     }
 
-    if (rc < 0)
+    if (*rc < 0)
     {
-        logError("Failed to read from SSH channel. {}", libssl2ErrorString(rc));
+        logError("Failed to read from SSH channel. {}", libssl2ErrorString(*rc));
         errno = EIO;
         return std::nullopt;
     }
 
-    auto const target = std::string_view { (char const*) storage.hotEnd(), static_cast<size_t>(rc) };
+    auto const target = std::string_view { (char const*) storage.hotEnd(), static_cast<size_t>(*rc) };
     auto const isStdFastPipe = false; // can never be, because it's an SSH network connection
     if (ptyInLog)
         ptyInLog()("{} received: \"{}\"", "ssh", core::escape(target.data(), target.data() + target.size()));

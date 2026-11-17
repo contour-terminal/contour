@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtpty/Pty.hpp>
+#include <vtpty/SshSessionRules.hpp>
 
 #include <crispy/FileDescriptor.hpp>
 
