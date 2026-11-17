@@ -2854,13 +2854,15 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 {
     if (auto const child = node[entry])
     {
-        loadFromEntry(child, "host", where.hostname);
-        loadFromEntry(child, "port", where.port);
-        loadFromEntry(child, "user", where.username);
-        loadFromEntry(child, "private_key", where.privateKeyFile);
-        loadFromEntry(child, "public_key", where.publicKeyFile);
-        loadFromEntry(child, "known_hosts", where.knownHostsFile);
-        loadFromEntry(child, "forward_agent", where.forwardAgent);
+        // Each key under its own guard: one malformed value falls back to its own default, never takes the
+        // whole block -- and with it the host name, which is what makes the profile an SSH one -- with it.
+        loadGuarded(child, "host", where.hostname);
+        loadGuarded(child, "port", where.port);
+        loadGuarded(child, "user", where.username);
+        loadGuarded(child, "private_key", where.privateKeyFile);
+        loadGuarded(child, "public_key", where.publicKeyFile);
+        loadGuarded(child, "known_hosts", where.knownHostsFile);
+        loadGuarded(child, "forward_agent", where.forwardAgent);
     }
 }
 

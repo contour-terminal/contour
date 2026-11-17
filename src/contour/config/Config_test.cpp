@@ -429,6 +429,45 @@ profiles:
     CHECK_FALSE(reloadedRemote->shell.value().env.contains("REMOTE_VALUE"));
 }
 
+TEST_CASE("Config: a malformed ssh key falls back alone, the host stays", "[config]")
+{
+    struct Row
+    {
+        std::string_view key;
+        std::string_view value;
+    };
+    auto const table = std::array {
+        Row { "port", "twenty-two" },
+        Row { "port", "[1, 2]" },
+        Row { "forward_agent", "maybe" },
+    };
+    for (auto const& row: table)
+    {
+        INFO(row.key << ": " << row.value);
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir,
+                                         std::format(R"(
+default_profile: remote
+profiles:
+    remote:
+        ssh:
+            host: h
+            user: u
+            {}: {}
+)",
+                                                     row.key,
+                                                     row.value));
+        auto const* remote = config.profile("remote");
+        REQUIRE(remote != nullptr);
+        auto const& ssh = remote->ssh.value();
+        // Still an SSH profile: a lost host name would open a local shell instead.
+        CHECK(ssh.hostname == "h");
+        CHECK(ssh.username == "u");
+        CHECK(ssh.port == 22);
+        CHECK_FALSE(ssh.forwardAgent);
+    }
+}
+
 #ifdef _WIN32
 TEST_CASE("Config: Windows profile environment overrides inherited names regardless of case", "[config]")
 {
