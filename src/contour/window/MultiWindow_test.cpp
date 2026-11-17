@@ -19,6 +19,7 @@
 #include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/RemoteChrome.hpp>
+#include <contour/window/SidebarModel.hpp>
 #include <contour/window/TabBarDropPolicy.hpp>
 #include <contour/window/WindowController.hpp>
 
@@ -210,6 +211,36 @@ TEST_CASE("new tabs use their profile's default color", "[contour][multiwindow][
         window->resetTabColor(index);
         CHECK(tab->color() == color);
     }
+}
+
+TEST_CASE("the sidebar's rows of the window's own tabs show their tab icon",
+          "[contour][multiwindow][sidebar]")
+{
+    // The sidebar knows a tab only by the directory's ids, which are a daemon's own; the window finds its
+    // tab through the panes, and answers with what its strip shows.
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());
+    app.app().config().profile().tabIcon.value() = "none";
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    window->createNewTab();
+    window->sidebar().refreshNow();
+
+    using contour::window::SidebarModel;
+    using contour::window::SidebarRowKind;
+    auto& sidebar = window->sidebar();
+    auto tabRows = 0;
+    for (auto const row: std::views::iota(0, sidebar.rowCount()))
+    {
+        auto const index = sidebar.index(row);
+        if (index.data(SidebarModel::KindRole).toInt() != static_cast<int>(SidebarRowKind::Tab))
+            continue;
+        ++tabRows;
+        auto const icon = index.data(SidebarModel::IconRole).toMap();
+        CHECK(icon.value(QStringLiteral("kind")).toInt()
+              == static_cast<int>(contour::window::TabIconKind::Hidden));
+    }
+    CHECK(tabRows == 2);
 }
 
 TEST_CASE("unsupported taskbar adapters do not schedule updates", "[contour][multiwindow][taskbar]")

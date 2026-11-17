@@ -1886,6 +1886,10 @@ class WindowController:
     /// @return The session a pane row stands for, or a tab row's active pane's; null for a workspace row and
     ///         for panes this window does not hold.
     [[nodiscard]] session::TerminalSession* sessionForSidebarRow(SidebarRowKey const& row) const;
+    /// @param tab A tab the directory lists, by whatever ids its host gives it.
+    /// @return Its active pane's session, found through the panes this window holds; null for a tab whose
+    ///         panes the window does not hold.
+    [[nodiscard]] session::TerminalSession* sessionForDirectoryTab(DirectoryTab const& tab) const;
     /// @return What names the other machine this window's daemon runs on (a saved host, or the chrome's label
     /// for
     ///         a `--connect-tcp` daemon); empty for a daemon on this machine and a local window.

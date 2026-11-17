@@ -244,9 +244,11 @@ class ISidebarHost
     /// @param windowPosition Where the pointer is, in window coordinates.
     virtual void openContextMenu(SidebarRow const& row, QPointF windowPosition) = 0;
 
+    /// Asked for every tab row on every rebuild, so it is handed the directory's own entry rather than an id
+    /// to look up in a fresh copy of the directory.
     /// @param tab A tab the directory lists.
     /// @return Its icon as the window's tab strip shows it; none for a tab the window does not hold.
-    [[nodiscard]] virtual std::optional<TabIcon> tabIcon(TabRef tab) const = 0;
+    [[nodiscard]] virtual std::optional<TabIcon> tabIcon(DirectoryTab const& tab) const = 0;
 
     /// @param row A tab or pane row.
     /// @return What runs in it and how its last command ended (session::tabHoverLines()), one line each: a

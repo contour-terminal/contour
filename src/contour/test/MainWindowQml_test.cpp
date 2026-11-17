@@ -977,7 +977,7 @@ TEST_CASE("twenty tabs go icon-only and keep the active one in view (offscreen)"
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("a coloured pill is tinted at 20 % and its icon at 100 % (offscreen)",
+TEST_CASE("a coloured pill is tinted at 20 % and its icon is the colour where it stands out (offscreen)",
           "[contour][gui][qml][mainwindow][tabwell]")
 {
     for (auto const appearance: contour::test::snapshot::SnapshotAppearances)
@@ -1014,7 +1014,13 @@ TEST_CASE("a coloured pill is tinted at 20 % and its icon at 100 % (offscreen)",
         INFO("fill " << fill.name(QColor::HexArgb).toStdString() << " expected "
                      << expected.name(QColor::HexArgb).toStdString());
         CHECK(fill == expected);
-        CHECK(part(tab, QStringLiteral("tabIcon")).property("color").value<QColor>() == color);
+        // The icon is the tab's colour at full strength where that stands out from the tint, and a shade of
+        // it that does where it would not (UiStyleProvider::markOn).
+        auto const icon = part(tab, QStringLiteral("tabIcon")).property("color").value<QColor>();
+        if (contrastOf(color, fill) >= contour::config::MinimumMarkContrast)
+            CHECK(icon == color);
+        else
+            CHECK(contrastOf(icon, fill) >= contour::config::MinimumMarkContrast);
 
         // The label on the tint keeps 4.5:1, measured against the pixels the pill paints.
         auto const& label = part(tab, QStringLiteral("tabLabel"));
@@ -2925,7 +2931,8 @@ TEST_CASE("a tab's icon square stands out from a tab filled in its own colour (o
     auto const activeTab = GENERATE(0, 1);
     CAPTURE(static_cast<int>(activeFill), activeTab);
     auto setup = rowSetup(ChromeStyle::Fluent);
-    setup.tabStyle = { .activeFill = { .kind = activeFill, .color = {} }, .tabColorMode = TabColorMode::Fill };
+    setup.tabStyle = { .activeFill = { .kind = activeFill, .color = {} },
+                       .tabColorMode = TabColorMode::Fill };
 
     QQmlEngine engine;
     MockMainController controller { MainWindowScene {
@@ -2939,9 +2946,13 @@ TEST_CASE("a tab's icon square stands out from a tab filled in its own colour (o
         auto const& icon = part(*tab, QStringLiteral("tabIcon"));
         if (!icon.isVisible())
             continue;
-        auto const ground = evaluateIn(*tab, QStringLiteral("Qt.tint(root.bandGround, root.effectiveBackground)"))
-                                .value<QColor>();
-        CHECK(contrastOf(icon.property("color").value<QColor>(), ground) >= contour::config::MinimumMarkContrast);
+        // What the square sits on: the tab's fill over the bar.
+        auto const ground = over(tab->property("effectiveBackground").value<QColor>(),
+                                 tab->property("bandGround").value<QColor>());
+        auto const drawn = icon.property("color").value<QColor>();
+        INFO("icon " << drawn.name(QColor::HexArgb).toStdString() << " on "
+                     << ground.name(QColor::HexArgb).toStdString());
+        CHECK(contrastOf(drawn, ground) >= contour::config::MinimumMarkContrast);
     }
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);

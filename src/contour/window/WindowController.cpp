@@ -193,10 +193,9 @@ class WindowController::SidebarHost final: public ISidebarHost
         _window.openSidebarContextMenu(row, windowPosition);
     }
 
-    [[nodiscard]] std::optional<TabIcon> tabIcon(TabRef tab) const override
+    [[nodiscard]] std::optional<TabIcon> tabIcon(DirectoryTab const& tab) const override
     {
-        auto const* const session = _window.sessionForSidebarRow(
-            { .kind = SidebarRowKind::Tab, .workspace = tab.workspace, .tab = tab.tab, .pane = {} });
+        auto const* const session = _window.sessionForDirectoryTab(tab);
         return session != nullptr ? std::optional { _window.tabIconFor(*session) } : std::nullopt;
     }
 
@@ -1139,14 +1138,16 @@ session::TerminalSession* WindowController::sessionForSidebarRow(SidebarRowKey c
         return heldPane(row.pane).session;
     if (row.kind != SidebarRowKind::Tab || _directorySource == nullptr)
         return nullptr;
+    auto const directory = _directorySource->directory();
+    auto const listed = findTab(directory, row.workspace, row.tab);
+    return listed ? sessionForDirectoryTab(*listed->tab) : nullptr;
+}
+
+session::TerminalSession* WindowController::sessionForDirectoryTab(DirectoryTab const& tab) const
+{
     // A daemon's tab ids are its own: the tab is found by its panes, whose keys this window shares, and
     // speaks for itself through its active one, as it does in the strip.
-    auto const directory = _directorySource->directory();
-    auto const* const workspace = findWorkspace(directory, row.workspace);
-    auto const* const listed = workspace != nullptr ? findTab(*workspace, row.tab) : nullptr;
-    if (listed == nullptr)
-        return nullptr;
-    for (auto const& pane: listed->panes)
+    for (auto const& pane: tab.panes)
         if (auto const held = heldPane(pane.key); held.tab != nullptr && held.tab->activePane() != nullptr)
             return _manager.sessionForId(held.tab->activePane()->session());
     return nullptr;
@@ -1326,16 +1327,11 @@ QString WindowController::tabWorkingDirectory(int index) const
 
 QStringList WindowController::tabHoverLines(int index) const
 {
-    auto* tab = tabAtRow(index);
-    if (tab == nullptr)
+    auto* const tab = tabAtRow(index);
+    if (tab == nullptr || tab->activePane() == nullptr)
         return {};
-    auto* session = _manager.sessionForId(tab->activePane()->session());
-    if (session == nullptr)
-        return {};
-    auto lines = QStringList {};
-    for (auto const& line: session->tabHoverLines())
-        lines.append(QString::fromStdString(line));
-    return lines;
+    auto const* const session = _manager.sessionForId(tab->activePane()->session());
+    return session != nullptr ? toQStringList(session->tabHoverLines()) : QStringList {};
 }
 
 void WindowController::dispatchTabStripWheel(

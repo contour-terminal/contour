@@ -11,6 +11,8 @@
 #include <QtCore/QUrl>
 #include <QtCore/QVariantMap>
 
+#include <utility>
+
 namespace contour::window
 {
 
@@ -19,7 +21,7 @@ namespace contour::window
 ///         the initial otherwise.
 [[nodiscard]] inline QVariantMap tabIconVariant(TabIcon const& icon)
 {
-    return { { QStringLiteral("kind"), static_cast<int>(icon.kind) },
+    return { { QStringLiteral("kind"), int { std::to_underlying(icon.kind) } },
              { QStringLiteral("text"),
                icon.kind == TabIconKind::Image
                    ? QUrl::fromLocalFile(QString::fromStdU16String(icon.image.u16string())).toString()

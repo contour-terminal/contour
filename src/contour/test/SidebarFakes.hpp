@@ -102,9 +102,9 @@ struct FakeSidebarHost final: window::ISidebarHost
     std::map<uint64_t, window::TabIcon> icons;
     /// The hover lines of the rows the window holds, by row; a row not here has none.
     std::map<window::SidebarRowKey, std::vector<std::string>> lines;
-    [[nodiscard]] std::optional<window::TabIcon> tabIcon(window::TabRef tab) const override
+    [[nodiscard]] std::optional<window::TabIcon> tabIcon(window::DirectoryTab const& tab) const override
     {
-        auto const found = icons.find(tab.tab);
+        auto const found = icons.find(tab.id);
         return found != icons.end() ? std::optional { found->second } : std::nullopt;
     }
     [[nodiscard]] std::vector<std::string> hoverLines(window::SidebarRowKey const& row) const override

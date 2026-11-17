@@ -19,6 +19,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace contour::config
 {
@@ -549,7 +550,9 @@ namespace detail
 /// @return The section with its preset applied.
 [[nodiscard]] constexpr TabStyleConfig withTabPreset(TabStyleConfig style) noexcept
 {
-    auto const& preset = TabPresetRows[static_cast<size_t>(style.preset)];
+    auto const& preset = TabPresetRows[std::to_underlying(style.preset)];
+    // Every member a preset row may set; tabStyle.aPresetFillsTheKeysLeftAtTheirDefaults fails for a row that
+    // sets one this list misses.
     detail::fillDefaultedMembers<&TabStyleConfig::shape,
                                  &TabStyleConfig::spacing,
                                  &TabStyleConfig::material,

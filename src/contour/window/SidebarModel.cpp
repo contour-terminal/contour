@@ -4,6 +4,7 @@
 #include <contour/window/ChromeKeys.hpp>
 #include <contour/window/DisclosureWords.hpp>
 #include <contour/window/NodeDrag.hpp>
+#include <contour/window/QtString.hpp>
 #include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SidebarModel.hpp>
 #include <contour/window/TabIconVariant.hpp>
@@ -482,7 +483,8 @@ SidebarModel::Rebuilt SidebarModel::build(WorkspaceDirectory const& directory) c
     // A tab's icon is the window's to say: the directory knows neither its profile nor what runs in it.
     for (auto& row: listing.rows)
         if (row.key.kind == SidebarRowKind::Tab)
-            row.icon = _host.tabIcon({ .workspace = row.key.workspace, .tab = row.key.tab });
+            if (auto const listed = findTab(directory, row.key.workspace, row.key.tab))
+                row.icon = _host.tabIcon(*listed->tab);
     // A window that follows no selection shows the workspace of the tab it displays.
     auto current = directory.selected;
     if (!current && displayed)
@@ -759,10 +761,7 @@ QStringList SidebarModel::hoverLines(int row) const
     auto const* const shown = rowAt(row);
     if (shown == nullptr || shown->key.kind == SidebarRowKind::Workspace)
         return {};
-    auto lines = QStringList {};
-    for (auto const& line: _host.hoverLines(shown->key))
-        lines.append(qs(line));
-    return lines;
+    return toQStringList(_host.hoverLines(shown->key));
 }
 
 void SidebarModel::openContextMenu(int row, QPointF windowPosition)

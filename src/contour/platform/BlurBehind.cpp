@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/platform/BlurBehind.hpp>
+#include <contour/platform/CompositorBlur.hpp>
 #include <contour/platform/XcbProperty.hpp>
 
 #include <core/Utils.hpp>
-#include <core/log/LogStore.hpp>
 
 #include <QtCore/QDebug>
 #include <QtGui/QGuiApplication>
@@ -16,6 +16,7 @@
 #include <map>
 #include <memory>
 #include <span>
+#include <tuple>
 
 #ifdef _WIN32
     #include <contour/platform/Dwmapi.hpp>
@@ -39,41 +40,24 @@ namespace contour::platform
 #if !defined(_WIN32) && !defined(__APPLE__)
 namespace
 {
-    /// What one window asks of the compositor's blur: `background.blur`'s wish, behind the whole window, and
-    /// the title band's (setTitleBandBlur), behind its top alone. One blur object per surface carries both,
-    /// so each request recomputes the region from the two rather than overwriting the other's.
-    struct CompositorBlurWishes
-    {
-        BlurBehindWish window = BlurBehindWish::Off; ///< The profile's wish, for the whole window.
-        qreal bandHeight = 0.0;                      ///< The title band's height; 0 asks for none.
-    };
+    // A window's wishes are kept on the window itself, as dynamic properties: they live and go with it, and
+    // no table outlives a window or has to be told it went.
+    constexpr auto WholeWindowWishProperty = "contourBlurWholeWindow";
+    constexpr auto BandHeightWishProperty = "contourBlurBandHeight";
 
-    /// The region a window's wishes add up to.
-    enum class CompositorBlurRegion : uint8_t
+    /// @return What @p window has asked for so far; nothing for a window that never asked.
+    [[nodiscard]] CompositorBlurWishes wishesOf(QWindow const& window)
     {
-        None = 0,    ///< Nothing is blurred.
-        WholeWindow, ///< The whole surface: the profile asked for it, which covers the band too.
-        Band,        ///< The top @c bandHeight logical pixels.
-    };
-
-    /// @param wishes A window's wishes.
-    /// @return The region they add up to.
-    [[nodiscard]] constexpr CompositorBlurRegion regionOf(CompositorBlurWishes const& wishes) noexcept
-    {
-        if (wishes.window == BlurBehindWish::On)
-            return CompositorBlurRegion::WholeWindow;
-        return wishes.bandHeight > 0.0 ? CompositorBlurRegion::Band : CompositorBlurRegion::None;
+        return { .window = window.property(WholeWindowWishProperty).toBool() ? BlurBehindWish::On
+                                                                             : BlurBehindWish::Off,
+                 .bandHeight = window.property(BandHeightWishProperty).toDouble() };
     }
 
-    /// How wide a band region is: wider than any window, so it follows a resize without being sent again --
-    /// the compositor clips a blur region to its surface.
-    constexpr int BandBlurWidth = 32767;
-
-    /// The wishes of every window that has made one, forgotten when the window goes.
-    [[nodiscard]] std::map<QWindow*, CompositorBlurWishes>& wishesByWindow()
+    /// Keeps @p wishes on @p window for its next request.
+    void keepWishes(QWindow& window, CompositorBlurWishes const& wishes)
     {
-        static auto wishes = std::map<QWindow*, CompositorBlurWishes> {};
-        return wishes;
+        window.setProperty(WholeWindowWishProperty, wishes.window == BlurBehindWish::On);
+        window.setProperty(BandHeightWishProperty, wishes.bandHeight);
     }
 
     #if defined(CONTOUR_WAYLAND) && QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
@@ -128,7 +112,10 @@ namespace
 
         auto& blurs = activeBlurs();
         if (!blurs.contains(window))
+        {
             blurs[window] = std::make_unique<QtWayland::org_kde_kwin_blur>(blurManager->create(surface));
+            QObject::connect(window, &QWindow::destroyed, [window]() { releaseBlur(window); });
+        }
         auto& blur = *blurs[window];
         if (region == CompositorBlurRegion::WholeWindow)
             blur.set_region(nullptr);
@@ -181,18 +168,9 @@ namespace
     [[nodiscard]] std::expected<void, TitleBandMaterialError> updateCompositorBlur(QWindow* window,
                                                                                    Update const& update)
     {
-        auto& wishes = wishesByWindow();
-        if (!wishes.contains(window))
-        {
-            QObject::connect(window, &QWindow::destroyed, [window]() {
-                wishesByWindow().erase(window);
-    #if defined(CONTOUR_WAYLAND) && QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-                releaseBlur(window);
-    #endif
-            });
-        }
-        update(wishes[window]);
-        auto const& current = wishes[window];
+        auto current = wishesOf(*window);
+        update(current);
+        keepWishes(*window, current);
 
     #if defined(CONTOUR_WAYLAND) && QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
         if (QGuiApplication::platformName() == "wayland")
@@ -214,13 +192,10 @@ void setBlurBehind(QWindow* window, BlurBehindWish blur, QRegion const& region)
 
 #if !defined(_WIN32) && !defined(__APPLE__)
     // Not just Linux but every UNIX that is not macOS: the BSDs run KWin too. A desktop with no compositor
-    // blur (GNOME, most X11 window managers) is the ordinary case and says nothing; a compositor that has
-    // one and refuses it is worth a line.
-    if (auto const blurred =
-            updateCompositorBlur(window, [blur](CompositorBlurWishes& wishes) { wishes.window = blur; });
-        !blurred && blurred.error() == TitleBandMaterialError::Rejected)
-        errorLog()("The compositor rejected the window's background blur ({}).",
-                   titleBandMaterialErrorName(blurred.error()));
+    // blur (GNOME, most X11 window managers) is the ordinary case, and says nothing: the background stays
+    // as translucent as configured, unblurred.
+    std::ignore =
+        updateCompositorBlur(window, [blur](CompositorBlurWishes& wishes) { wishes.window = blur; });
 #else
     auto const enable = blur == BlurBehindWish::On;
 #endif
