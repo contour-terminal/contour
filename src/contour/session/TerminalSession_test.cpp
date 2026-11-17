@@ -3069,3 +3069,32 @@ TEST_CASE("TerminalSession: ViNormalMode holds the terminal lock while switching
     CHECK(completed.load(std::memory_order_acquire));
     CHECK(session->terminal().inputHandler().mode() == vtbackend::ViMode::Normal);
 }
+
+TEST_CASE("TerminalSession: output on another thread races neither a display change nor the pane's id",
+          "[contour][session][threading]")
+{
+    // The parser thread, or a remote session's reactor, raises the terminal's events -- output, a title --
+    // while the GUI thread moves the session between displays and the manager names the pane it mirrors it
+    // into. What those events read of either is read across threads: under the clang-tsan tree, a plain read
+    // of _display or of the pane's id there is a report.
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+    auto other = contour::test::FakeDisplaySurface {};
+    other.attachedSession = held.session.get();
+
+    constexpr auto Rounds = 50;
+    auto writer = std::thread { [&] {
+        for ([[maybe_unused]] auto const round: std::views::iota(0, Rounds))
+            held->terminal().writeToScreen("\033]2;title\033\\x\r\n");
+    } };
+    for (auto const round: std::views::iota(1, Rounds + 1))
+    {
+        held->setModelSessionId(vtworkspace::SessionId { static_cast<uint64_t>(round) });
+        held->attachDisplay(round % 2 == 0 ? *held.surface : other);
+    }
+    writer.join();
+    QCoreApplication::processEvents();
+
+    CHECK(held->modelSessionId() == vtworkspace::SessionId { static_cast<uint64_t>(Rounds) });
+    CHECK(held->display() == held.surface.get());
+}

@@ -2768,6 +2768,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param target The surface to forward to, or null.
     void setRenderNotifyTarget(DisplaySurface* target);
 
+    /// Whether a display is attached, as any thread may ask it: through _renderNotifyTarget, not _display.
+    /// @return True while a display is attached.
+    [[nodiscard]] bool hasRenderNotifyTarget();
+
     /// Guards _renderNotifyTarget, the copy of _display that renderBufferUpdated() forwards to. That
     /// callback can run on a pool thread (the status-line command cache), so it cannot read _display
     /// itself. Lock order: the cache's mutex, then this one. Held only for the forward and the stores in
