@@ -29,6 +29,7 @@
 #include <contour/test/QmlMocks.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/TabBadge.hpp>
+#include <contour/window/TabIcon.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowController.hpp>
 
@@ -2102,6 +2103,117 @@ TEST_CASE("A TabItem's tooltip shows a program's status text literally, never as
     }
 
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("A TabItem's hover card ends with what runs in it and how the last command ended",
+          "[contour][gui][qml][tabhover]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    controller.hoverLines = { QStringLiteral("Running: cargo build"), QStringLiteral("Last: ls · 4ms") };
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabItem.qml")));
+    REQUIRE(component.isReady());
+
+    QVariantMap initial;
+    initial.insert("controller", QVariant::fromValue(&controller));
+    initial.insert("window", QVariant::fromValue(static_cast<QObject*>(&controller)));
+    initial.insert("tabIndex", 0);
+    initial.insert("tabTitle", QStringLiteral("cargo"));
+    initial.insert("tabName", QString {});
+    initial.insert("tabColor", QColor(Qt::transparent));
+    initial.insert("tabActive", false);
+    initial.insert("tabPaneCount", 1);
+    initial.insert("tabZoomed", false);
+    initial.insert("tabProgressState", 0);
+    initial.insert("tabProgressPercentage", 0);
+    initial.insert("tabBadge", static_cast<int>(contour::window::TabBadgeKind::Blocked));
+    initial.insert("tabBadgeText", QStringLiteral("Waiting"));
+    std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
+    REQUIRE(tab != nullptr);
+
+    QVariant composed;
+    REQUIRE(QMetaObject::invokeMethod(tab.get(), "buildHoverTooltip", Q_RETURN_ARG(QVariant, composed)));
+    // The badge's word first, as before; the command lines last.
+    CHECK(composed.toString() == QStringLiteral("Waiting\nRunning: cargo build\nLast: ls · 4ms"));
+
+    // A pane that tells nothing adds nothing.
+    controller.hoverLines.clear();
+    REQUIRE(QMetaObject::invokeMethod(tab.get(), "buildHoverTooltip", Q_RETURN_ARG(QVariant, composed)));
+    CHECK(composed.toString() == QStringLiteral("Waiting"));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("A TabItem's icon is the square, the program's initial, the profile's image, or none",
+          "[contour][gui][qml][tabicon]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabItem.qml")));
+    REQUIRE(component.isReady());
+
+    QVariantMap initial;
+    initial.insert("controller", QVariant::fromValue(&controller));
+    initial.insert("window", QVariant::fromValue(static_cast<QObject*>(&controller)));
+    initial.insert("tabIndex", 0);
+    initial.insert("tabTitle", QStringLiteral("nvim"));
+    initial.insert("tabName", QString {});
+    initial.insert("tabColor", QColor(Qt::transparent));
+    initial.insert("tabActive", true);
+    initial.insert("tabPaneCount", 1);
+    initial.insert("tabZoomed", false);
+    initial.insert("tabProgressState", 0);
+    initial.insert("tabProgressPercentage", 0);
+    std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
+    auto* item = qobject_cast<QQuickItem*>(tab.get());
+    REQUIRE(item != nullptr);
+    if (!item->property("kitTab").toBool())
+        SKIP("This platform's native row draws no icon slot.");
+
+    auto* icon = item->findChild<QQuickItem*>(QStringLiteral("tabIcon"));
+    auto* initialText = item->findChild<QQuickItem*>(QStringLiteral("tabIconInitial"));
+    auto* image = item->findChild<QQuickItem*>(QStringLiteral("tabIconImage"));
+    REQUIRE(icon != nullptr);
+    REQUIRE(initialText != nullptr);
+    REQUIRE(image != nullptr);
+    auto const square = icon->width();
+    CHECK(square > 0);
+    using Kind = contour::window::TabIconKind;
+    auto const iconOf = [](Kind kind, QString const& text) {
+        return QVariantMap { { QStringLiteral("kind"), static_cast<int>(kind) },
+                             { QStringLiteral("text"), text } };
+    };
+
+    // No role: the row's square, empty.
+    CHECK(icon->isVisible());
+    CHECK_FALSE(initialText->isVisible());
+    CHECK_FALSE(image->isVisible());
+
+    // A running program's initial, in the square.
+    item->setProperty("iconInfo", iconOf(Kind::Monogram, QStringLiteral("N")));
+    CHECK(initialText->isVisible());
+    CHECK(initialText->property("text").toString() == QStringLiteral("N"));
+
+    // The profile's image, in the square's place, which goes clear.
+    item->setProperty("iconInfo", iconOf(Kind::Image, QStringLiteral("file:///nonexistent/icon.png")));
+    CHECK(image->isVisible());
+    CHECK_FALSE(initialText->isVisible());
+    CHECK(icon->property("color").value<QColor>().alpha() == 0);
+
+    // None: no icon, and no room kept for one.
+    auto const before = item->property("naturalWidth").toReal();
+    item->setProperty("iconInfo", iconOf(Kind::Hidden, {}));
+    CHECK_FALSE(icon->isVisible());
+    CHECK(icon->width() == 0.0);
+    CHECK(item->property("naturalWidth").toReal() == before - square);
 }
 
 TEST_CASE("A TabItem paints its OSC 9;4 progress bar only while an operation is in flight",

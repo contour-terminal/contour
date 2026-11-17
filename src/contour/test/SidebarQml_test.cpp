@@ -1445,6 +1445,57 @@ TEST_CASE("the hover card shows a long folder to its end (offscreen)", "[contour
     }
 }
 
+TEST_CASE("a tab row shows the strip's icon, and its hover card what runs there (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    auto scene = SidebarWindow { { .row = drawnRows().front() } };
+    auto& host = scene.controller.sidebarHost();
+    host.icons[10] = contour::window::TabIcon { .kind = contour::window::TabIconKind::Monogram,
+                                                .initial = "C",
+                                                .image = {} };
+    host.lines[contour::window::SidebarRowKey {
+        .kind = contour::window::SidebarRowKind::Tab, .workspace = 1, .tab = 10, .pane = {} }] = {
+        "Running: claude", "Last: make · exit 0 · 2s"
+    };
+    scene.controller.sidebarModel().noteChanged();
+    QCoreApplication::processEvents();
+
+    auto* claude = scene.rowTitled(QStringLiteral("claude"));
+    REQUIRE(claude != nullptr);
+    auto const* icon = SidebarWindow::findNamed(*claude, QStringLiteral("sidebarRowIcon"));
+    REQUIRE(icon != nullptr);
+    CHECK(icon->isVisible());
+    auto const* initial = SidebarWindow::findNamed(*icon, QStringLiteral("tabIconInitial"));
+    REQUIRE(initial != nullptr);
+    CHECK(initial->property("text").toString() == QStringLiteral("C"));
+    // build's tab is one the window does not hold an icon for: its row shows none.
+    auto* build = scene.rowTitled(QStringLiteral("build"));
+    REQUIRE(build != nullptr);
+    CHECK_FALSE(SidebarWindow::findNamed(*build, QStringLiteral("sidebarRowIcon"))->isVisible());
+
+    auto* card = scene.root->findChild<QObject*>(QStringLiteral("sidebarHoverCard"));
+    REQUIRE(card != nullptr);
+    auto const over = claude->mapToScene(QPointF { claude->width() / 2, claude->height() / 2 }).toPoint();
+    QTest::mouseMove(scene.window, over - QPoint { 0, 1 });
+    QTest::mouseMove(scene.window, over);
+    REQUIRE(QTest::qWaitFor([&] { return card->property("opened").toBool(); }, 3000));
+    // The card's items are its content item's, in the window's overlay.
+    auto* surface = qobject_cast<QQuickItem*>(card->property("contentItem").value<QObject*>());
+    REQUIRE(surface != nullptr);
+    auto lines = QStringList {};
+    auto const collect = [&](this auto const& self, QQuickItem const& item) -> void {
+        for (auto const* child: item.childItems())
+        {
+            if (child->objectName() == QStringLiteral("sidebarHoverCardLine"))
+                lines.append(child->property("text").toString());
+            self(*child);
+        }
+    };
+    collect(*surface);
+    CHECK(lines
+          == QStringList { QStringLiteral("Running: claude"), QStringLiteral("Last: make · exit 0 · 2s") });
+}
+
 TEST_CASE("the Terminal row keeps the sidebar's text on the cell grid (offscreen)",
           "[contour][gui][qml][sidebar]")
 {

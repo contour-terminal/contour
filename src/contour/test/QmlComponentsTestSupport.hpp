@@ -306,6 +306,9 @@ class MockTabController: public QAbstractListModel
     /// Mirrors WindowController::tabWorkingDirectory: what TabItem's hover tooltip asks for the
     /// working-directory line. Answering empty means "nothing known", which suppresses that line.
     Q_INVOKABLE [[nodiscard]] QString tabWorkingDirectory(int) const { return {}; }
+    /// Mirrors WindowController::tabHoverLines: the command lines a test gives the hover card.
+    Q_INVOKABLE [[nodiscard]] QStringList tabHoverLines(int) const { return hoverLines; }
+    QStringList hoverLines {}; ///< What tabHoverLines() answers for every tab.
     Q_INVOKABLE void moveTab(int, int) {}
     /// Mirrors WindowController::tabDragPayload(): the node drag of the tab at @p tabIndex, a tab of two
     /// panes named after its row, so a test can tell drags apart.

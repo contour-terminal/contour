@@ -847,6 +847,7 @@ TEST_CASE(
             { "idleLine", QString {} },
             { "tabColor", QColor { Qt::transparent } },
             { "workspaceColor", QColor { Qt::transparent } },
+            { "icon", QVariantMap {} },
             { "sidebar", QVariant::fromValue<QObject*>(nullptr) },
             { "controller", QVariant::fromValue<QObject*>(nullptr) },
         };
@@ -905,6 +906,7 @@ TEST_CASE("accessibility: a coloured workspace's row says what it is handed, and
             { "idleLine", QString {} },
             { "tabColor", QColor { Qt::transparent } },
             { "workspaceColor", workspaceColor },
+            { "icon", QVariantMap {} },
             { "sidebar", QVariant::fromValue<QObject*>(nullptr) },
             { "controller", QVariant::fromValue<QObject*>(nullptr) },
         };

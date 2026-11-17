@@ -61,6 +61,7 @@ Item {
     required property string railText
     /// What the rail draws on the row's second line; empty on a workspace row.
     required property string railTextContinued
+    required property var icon
 
     /// The sidebar's model (WindowController.sidebar), which the row's actions go to. Its bindings never
     /// read it: the row compares its roles with the SidebarRows enums, so a row that outlives its model while
@@ -544,6 +545,22 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 width: chromeStyle.snapToCells(glyphSlot.edge)
                 height: glyphSlot.implicitHeight
+            }
+
+            // A tab's icon as the strip shows it (IconRole): the running program's initial or the profile's
+            // image, for the tabs this window holds. The strip's plain square says nothing a row needs, so a
+            // tab without one of its own shows none here.
+            TabIconMark {
+                id: rowIcon
+                objectName: "sidebarRowIcon"
+                info: row.icon
+                fontFamily: chromeStyle.type.body.family
+                visible: rowIcon.isMonogram || rowIcon.isImage
+                anchors.verticalCenter: parent.verticalCenter
+                width: chromeStyle.sidebar.glyph
+                height: chromeStyle.sidebar.glyph
+                radius: chromeStyle.radii.tabIcon
+                color: rowIcon.isImage ? "transparent" : row.selected ? chromeStyle.accentColor : row.secondaryInk
             }
         }
 

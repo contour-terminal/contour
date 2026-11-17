@@ -1235,6 +1235,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ///         tab asks about such a pane, since it may be running anything.
     [[nodiscard]] window::PaneActivity paneActivity() const;
 
+    /// What this session's tab hover card says of its commands (tabHoverLines()): the running command as
+    /// the shell reported it, else the foreground program when it is not the shell, and the last one that
+    /// finished with how it ended. GUI thread; takes the terminal lock briefly.
+    /// @return The lines, none when nothing is known.
+    [[nodiscard]] std::vector<std::string> tabHoverLines() const;
+
     config::Config const& config() const noexcept { return _config; }
     config::TerminalProfile const& profile() const noexcept { return _profile; }
 

@@ -392,6 +392,7 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _paneHeaderActionCommands { paneHeaderActionTexts(&PaneHeaderActionRow::commandName) },
     _paneRoles { this },
     _badgeKinds { this },
+    _tabIconKinds { this },
     _paneEnds { this },
     _paneStates { this },
     _headerOccupants { this },
@@ -957,6 +958,12 @@ QColor UiStyleProvider::statusInk(config::StatusColorRole role,
     }
     auto const& hues = row.hues(use);
     return QColor::fromRgb(tone == ChromeTone::Dark ? hues.dark : hues.light);
+}
+
+QColor UiStyleProvider::markOn(QColor const& mark, QColor const& background) const
+{
+    return platform::toQColor(config::legibleShadeOn(
+        platform::toRGBColor(mark), platform::toRGBColor(background), config::MinimumMarkContrast));
 }
 
 QColor UiStyleProvider::statusMarkOn(int role, QColor const& background) const

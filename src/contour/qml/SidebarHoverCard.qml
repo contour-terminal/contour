@@ -80,6 +80,23 @@ Popup {
             }
         }
 
+        // What runs in the row's pane and how its last command ended (SidebarModel.hoverLines), as the tab's
+        // tooltip in the strip says it: asked as the card opens on a row.
+        Repeater {
+            model: card.row !== null ? card.sidebar.hoverLines(card.row.index) : []
+
+            Text {
+                required property string modelData
+                objectName: "sidebarHoverCardLine"
+                width: card.availableWidth
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                text: modelData
+                font: chromeStyle.type.body
+                color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.paletteText
+            }
+        }
+
         // What it is about, where and for how long; it wraps, so a long folder the row cut reads to its end.
         Text {
             objectName: "sidebarHoverCardDetail"

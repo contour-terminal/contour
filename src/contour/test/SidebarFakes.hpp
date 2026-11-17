@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <utility>
@@ -96,6 +97,20 @@ struct FakeSidebarHost final: window::ISidebarHost
     {
         menus.push_back(row.key);
         menuPositions.push_back(position);
+    }
+    /// The icons of the tabs the window holds, by tab id; a tab not here is one it does not hold.
+    std::map<uint64_t, window::TabIcon> icons;
+    /// The hover lines of the rows the window holds, by row; a row not here has none.
+    std::map<window::SidebarRowKey, std::vector<std::string>> lines;
+    [[nodiscard]] std::optional<window::TabIcon> tabIcon(window::TabRef tab) const override
+    {
+        auto const found = icons.find(tab.tab);
+        return found != icons.end() ? std::optional { found->second } : std::nullopt;
+    }
+    [[nodiscard]] std::vector<std::string> hoverLines(window::SidebarRowKey const& row) const override
+    {
+        auto const found = lines.find(row);
+        return found != lines.end() ? found->second : std::vector<std::string> {};
     }
 };
 

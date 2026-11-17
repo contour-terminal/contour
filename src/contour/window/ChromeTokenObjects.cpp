@@ -328,6 +328,10 @@ ChromeBadgeKindNames::ChromeBadgeKindNames(QObject* parent): QObject { parent }
 {
 }
 
+ChromeTabIconKindNames::ChromeTabIconKindNames(QObject* parent): QObject { parent }
+{
+}
+
 ChromePaneEndNames::ChromePaneEndNames(QObject* parent): QObject { parent }
 {
 }

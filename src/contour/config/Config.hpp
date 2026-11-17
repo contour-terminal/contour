@@ -1162,6 +1162,8 @@ struct TerminalProfile
     ConfigEntry<std::string, documentation::WMClass> wmClass { CONTOUR_APP_ID };
     ConfigEntry<std::string, documentation::TabLabel> tabLabel { "{TabName}" };
     ConfigEntry<std::optional<vtbackend::RGBColor>, documentation::TabColor> tabColor {};
+    /// The icon on tabs opened with this profile: `auto`, `none`, or an image path (window::tabIconOf).
+    ConfigEntry<std::string, documentation::TabIcon> tabIcon { "auto" };
     ConfigEntry<OptionAsAlt, documentation::OptionKeyAsAlt> optionAsAlt { OptionAsAlt::Off };
 };
 

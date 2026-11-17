@@ -540,6 +540,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SymbolicIcon.qml
         qml/TabStrip.qml
         qml/TabItem.qml
+        qml/TabIconMark.qml
         qml/DashedFrame.qml
         qml/DragCard.qml
         qml/NodeDragSource.qml
@@ -1808,6 +1809,7 @@ if(CONTOUR_TESTING)
         window/SidebarMenuState_test.cpp
         window/WorkspaceDirectory_test.cpp
         window/TabBadge_test.cpp
+        window/TabIcon_test.cpp
         window/StatusUrgency_test.cpp
         window/AttentionJump_test.cpp
         window/SidebarTree.cpp

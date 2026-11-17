@@ -1842,6 +1842,19 @@ window::PaneActivity TerminalSession::paneActivity() const
     return window::paneActivityOf(_profile.shell.value().program, _terminal.device().foregroundProcessName());
 }
 
+std::vector<std::string> TerminalSession::tabHoverLines() const
+{
+    auto facts = core::locked(_terminal, [this] {
+        auto const& store = _terminal.commandBlocks();
+        return tabHoverFactsOf(store.records(), _terminal.wallTimeNow());
+    });
+    // A shell without OSC 133 says nothing of what runs; the process table may, where the device can ask it.
+    if (facts.running.empty())
+        facts.running =
+            std::string(window::runningProgramOf(_profile.shell.value().program, foregroundProcessName()));
+    return session::tabHoverLines(facts);
+}
+
 void TerminalSession::updateColorPreference(vtbackend::ColorPreference preference)
 {
     if (preference == _currentColorPreference)

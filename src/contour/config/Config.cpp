@@ -2163,6 +2163,11 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child,
         loadFromEntry(child, "wm_class", where.wmClass);
         loadFromEntry(child, "tab_label", where.tabLabel);
         loadFromEntry(child, "tab_color", where.tabColor);
+        // Not inherited from the default profile, as every other key is: an icon is there to tell a
+        // profile's tabs from the rest, and one copied into every profile -- an SSH host showing the
+        // PowerShell logo -- tells nothing. A profile that names none decides from what it runs.
+        where.tabIcon = std::string { "auto" };
+        loadFromEntry(child, "tab_icon", where.tabIcon);
         loadFromEntry(child, "pixel_reporting", where.pixelReporting);
         loadFromEntry(child, "option_as_alt", where.optionAsAlt);
         loadFromEntry(child, "margins", where.margins);

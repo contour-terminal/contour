@@ -137,6 +137,43 @@ TEST_CASE("SidebarModel: a directory change keeps the selection and the collapse
     CHECK(t.sidebar().index(1).data(SidebarModel::TitleRole).toString() == "documentation");
 }
 
+TEST_CASE("SidebarModel: a tab the window holds shows its icon and hover lines", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(
+        1, "billing", { directoryPaneOf(10), directoryPaneOf(11) }) } };
+    t.host.icons[10] = TabIcon { .kind = TabIconKind::Monogram, .initial = "V", .image = {} };
+    auto const held = SidebarRowKey { .kind = SidebarRowKind::Tab, .workspace = 1, .tab = 10, .pane = {} };
+    t.host.lines[held] = { "Running: vim" };
+    t.sidebar().refreshNow();
+    REQUIRE(t.sidebar().rowCount() == 3); // billing, its two tabs
+
+    auto const icon = t.sidebar().index(1).data(SidebarModel::IconRole).toMap();
+    CHECK(icon.value(QStringLiteral("kind")).toInt() == static_cast<int>(TabIconKind::Monogram));
+    CHECK(icon.value(QStringLiteral("text")).toString() == QStringLiteral("V"));
+    CHECK(t.sidebar().hoverLines(1) == QStringList { QStringLiteral("Running: vim") });
+
+    // A tab the window does not hold, and the workspace row, have neither.
+    CHECK(t.sidebar().index(2).data(SidebarModel::IconRole).toMap().isEmpty());
+    CHECK(t.sidebar().hoverLines(2).isEmpty());
+    CHECK(t.sidebar().index(0).data(SidebarModel::IconRole).toMap().isEmpty());
+    CHECK(t.sidebar().hoverLines(0).isEmpty());
+
+    // A program starting in the other tab changes its row's icon, and only that role.
+    auto changed = QList<int> {};
+    QObject::connect(&t.sidebar(),
+                     &QAbstractItemModel::dataChanged,
+                     [&](QModelIndex const& from, QModelIndex const&, QList<int> const& roles) {
+                         if (from.row() == 2)
+                             changed = roles;
+                     });
+    t.host.icons[11] = TabIcon { .kind = TabIconKind::Monogram, .initial = "M", .image = {} };
+    t.sidebar().noteChanged();
+    letEventLoopRun();
+    CHECK(changed == QList<int> { SidebarModel::IconRole });
+    CHECK(t.sidebar().index(2).data(SidebarModel::IconRole).toMap().value(QStringLiteral("text")).toString()
+          == QStringLiteral("M"));
+}
+
 TEST_CASE("SidebarModel: a new workspace inserts rows without a reset", "[contour][sidebar]")
 {
     auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };

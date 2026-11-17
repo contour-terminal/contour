@@ -343,6 +343,8 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QObject* roles READ roles CONSTANT)
     /// The QML names of the tab badge kinds, for badgeLook().
     Q_PROPERTY(QObject* badgeKinds READ badgeKinds CONSTANT)
+    /// The QML names of the tab icon kinds, for the tab icon WindowController hands each tab.
+    Q_PROPERTY(QObject* tabIconKinds READ tabIconKinds CONSTANT)
     /// The QML names of an ended pane's ends and restart offers.
     Q_PROPERTY(QObject* paneEnds READ paneEnds CONSTANT)
     /// The QML names of a pane's states (window::PaneState), for a session's paneState.
@@ -462,6 +464,7 @@ class UiStyleProvider: public QObject
     [[nodiscard]] Q_INVOKABLE QString findBarShortcutText(QString const& name) const;
     [[nodiscard]] QObject* roles() noexcept { return &_paneRoles; }
     [[nodiscard]] QObject* badgeKinds() noexcept { return &_badgeKinds; }
+    [[nodiscard]] QObject* tabIconKinds() noexcept { return &_tabIconKinds; }
     [[nodiscard]] QObject* paneEnds() noexcept { return &_paneEnds; }
     [[nodiscard]] QObject* paneStates() noexcept { return &_paneStates; }
     [[nodiscard]] QObject* headerOccupants() noexcept { return &_headerOccupants; }
@@ -1122,6 +1125,14 @@ class UiStyleProvider: public QObject
     /// @return The ink; transparent for a role outside the table.
     [[nodiscard]] Q_INVOKABLE QColor statusMarkOn(int role, QColor const& background) const;
 
+    /// @p mark where it stands out from @p background as a mark must (config::MinimumMarkContrast), else
+    /// shaded away from it until it does (config::legibleShadeOn()): a tab's icon square in the accent on a
+    /// tab the accent fills, say, which would otherwise vanish into it.
+    /// @param mark       The colour the mark would be drawn in.
+    /// @param background The opaque fill it is drawn on.
+    /// @return The mark's colour.
+    [[nodiscard]] Q_INVOKABLE QColor markOn(QColor const& mark, QColor const& background) const;
+
     /// statusMarkOn()'s counterpart for words: the text ink of @p role (config::StatusInkUse::Text) for text
     /// drawn on @p background, shaded away from the background where it falls short of
     /// config::MinimumTextContrast there, or black or white where no shade of it reaches that
@@ -1301,6 +1312,7 @@ class UiStyleProvider: public QObject
     QStringList _paneHeaderActionCommands; ///< PaneHeaderActions' command names, built once.
     ChromePaneRoleNames _paneRoles;
     ChromeBadgeKindNames _badgeKinds;
+    ChromeTabIconKindNames _tabIconKinds;
     ChromePaneEndNames _paneEnds;
     ChromePaneStateNames _paneStates;
     ChromeHeaderOccupantNames _headerOccupants;

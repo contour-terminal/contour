@@ -210,6 +210,24 @@ Item {
     readonly property bool colorTinted: root.colored && root.tabStyle.tabColorMode === root.tabStyle.colorTint
     readonly property bool colorLined: root.colored
         && root.tabStyle.tabColorMode === root.tabStyle.colorIndicator
+
+    // The indicator line, as the tab draws it or the strip slides it (TabStrip.qml): whether this tab, the
+    // active one, carries it, along which edge, how far in from the corners, and in what colour.
+    readonly property bool marksActive: root.tabActive
+        && (root.colorLined || root.tabStyle.indicator !== root.tabStyle.none || root.tabStyle.underlinesActive)
+    readonly property real indicatorInset: background.radius
+    readonly property real indicatorY: root.tabStyle.indicator === root.tabStyle.topLine
+        ? 0 : root.height - chromeStyle.size.progressBar
+    readonly property color indicatorTint: root.colorLined ? root.tabColor : root.tabStyle.indicatorColor
+    readonly property real indicatorWidth: Math.max(0, root.width - 2 * root.indicatorInset)
+    // Whether the strip draws this tab's line (TabStrip.qml): the active tab's, unless the tab reports
+    // progress, whose bar shares the edge and is drawn over a line the tab draws itself.
+    readonly property bool lineOnStrip: root.marksActive && root.tabProgressState === 0
+
+    // The tab's icon, as WindowController's IconRole hands it: `{ kind, text }` (see the icon below). Not
+    // required, so a TabItem built on its own, or by a model without the role, shows the kit's square.
+    property var iconInfo: ({})
+
     readonly property bool styledFill: !root.colorFilled
         && (root.tabActive ? root.tabStyle.hasActiveFill : root.tabStyle.hasInactiveFill)
     readonly property color styleFill: root.tabActive ? root.tabStyle.activeFill : root.tabStyle.inactiveFill
@@ -432,16 +450,16 @@ Item {
     Rectangle {
         id: activeIndicator
         objectName: "tabActiveIndicator"   // findChild() handle for the GUI test
-        // A look that marks the active tab with the line shows it whatever active_indicator says.
-        visible: root.colorLined
-                 || (root.tabActive && (root.tabStyle.indicator !== root.tabStyle.none
-                                        || root.tabStyle.underlinesActive))
-        x: background.radius
-        y: root.tabStyle.indicator === root.tabStyle.topLine ? 0 : parent.height - height
-        width: Math.max(0, parent.width - background.radius - background.radius)
+        // A look that marks the active tab with the line shows it whatever active_indicator says. The active
+        // tab's line is the strip's, which slides from tab to tab (TabStrip.qml); a tab draws its own only
+        // where the strip's does not stand.
+        visible: (root.colorLined || root.marksActive) && !root.lineOnStrip
+        x: root.indicatorInset
+        y: root.indicatorY
+        width: root.indicatorWidth
         // As thick as the progress bar, the other line a tab draws along its edge.
         height: chromeStyle.size.progressBar
-        color: root.colorLined ? root.tabColor : root.tabStyle.indicatorColor
+        color: root.indicatorTint
     }
 
     // The tab colour as a cell of its own, on a row that draws colours as glyphs (the Terminal row's
@@ -459,22 +477,29 @@ Item {
         color: root.tabColor
     }
 
-    // The pill's icon: the kit's tinted square (one per tab, whatever runs in it). A coloured tab fills
-    // it with its colour, the active tab with the accent, the rest with the dimmed label colour. In an
-    // icon-only pill the badge takes its place when there is one.
-    Rectangle {
+    // The kit tab's icon (WindowController's IconRole, window::tabIconOf): the kit's tinted square, with the
+    // running program's initial in it while a program runs, or the profile's image; none under
+    // `tab_icon: none`, which gives the label the room. A coloured tab fills the square with its colour, the
+    // active tab with the accent, the rest with the dimmed label colour. In an icon-only pill the badge takes
+    // its place when there is one.
+    TabIconMark {
         id: icon
-        objectName: "tabIcon"   // findChild() handle for the GUI test
+        info: root.iconInfo
+        fontFamily: root.labelFont.family
         anchors.left: parent.left
         anchors.leftMargin: root.leadingInset
         anchors.verticalCenter: parent.verticalCenter
-        visible: root.kitTab && !(root.iconOnly && (root.hasBadge || renameLoader.active))
-        width: root.kitTab ? chromeStyle.size.tabIcon : 0
-        height: width
+        visible: root.kitTab && !icon.isHidden && !(root.iconOnly && (root.hasBadge || renameLoader.active))
+        width: root.kitTab && !icon.isHidden ? chromeStyle.size.tabIcon : 0
+        height: chromeStyle.size.tabIcon
         radius: chromeStyle.radii.tabIcon
-        color: root.colored ? root.tabColor
-             : root.tabActive ? chromeStyle.accentColor
-             : root.colors.tabTextDimmed
+        // Shaded away from the tab where it would vanish into it: a coloured tab filled with its colour, an
+        // active tab filled with the accent.
+        color: icon.isImage ? "transparent"
+             : chromeStyle.markOn(root.colored ? root.tabColor
+                                  : root.tabActive ? chromeStyle.accentColor
+                                  : root.colors.tabTextDimmed,
+                                  Qt.tint(root.bandGround, root.effectiveBackground))
     }
 
     // Progress indicator (OSC 9;4) for the tab's active pane: a thin bar along the tab's bottom edge,
@@ -543,7 +568,8 @@ Item {
     // What the hover tooltip shows. Empty means "nothing worth saying", which suppresses it entirely.
     property string hoverTooltip: ""
 
-    /// The full title (only when the tab is too narrow to show it) above the session's working directory.
+    /// The full title (only when the tab is too narrow to show it) above the session's working directory,
+    /// then what runs in it and how its last command ended.
     ///
     /// The directory is the point: with several tabs running full-screen applications, nothing on screen
     /// says where any of them was started, and the tab label is usually the application's name.
@@ -558,6 +584,10 @@ Item {
         var cwd = root.controller ? root.controller.tabWorkingDirectory(root.tabIndex) : ""
         if (cwd !== "")
             lines.push(cwd)
+        // What runs in it now and how the last command ended. A controller without the call (a test's
+        // lightweight mock) adds nothing.
+        if (root.controller && typeof root.controller.tabHoverLines === "function")
+            lines = lines.concat(root.controller.tabHoverLines(root.tabIndex))
         return lines.join("\n")
     }
 

@@ -16,6 +16,7 @@
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/StickyHeaderPlacement.hpp>
 #include <contour/window/TabBadge.hpp>
+#include <contour/window/TabIcon.hpp>
 
 #include <vtbackend/shell/ScrollbarMarks.hpp>
 
@@ -2066,6 +2067,29 @@ class ChromeBadgeKindNames: public QObject
 
   private:
     [[nodiscard]] static constexpr int of(TabBadgeKind kind) noexcept { return static_cast<int>(kind); }
+};
+
+/// The QML names of the tab icon kinds, `chromeStyle.tabIconKinds`, for WindowController's IconRole.
+class ChromeTabIconKindNames: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int row READ row CONSTANT)
+    Q_PROPERTY(int monogram READ monogram CONSTANT)
+    Q_PROPERTY(int image READ image CONSTANT)
+    Q_PROPERTY(int hidden READ hidden CONSTANT)
+
+  public:
+    /// @param parent Qt ownership.
+    explicit ChromeTabIconKindNames(QObject* parent);
+
+    /// @return Each kind's window::TabIconKind as its underlying value.
+    [[nodiscard]] static constexpr int row() noexcept { return of(TabIconKind::Row); }
+    [[nodiscard]] static constexpr int monogram() noexcept { return of(TabIconKind::Monogram); }
+    [[nodiscard]] static constexpr int image() noexcept { return of(TabIconKind::Image); }
+    [[nodiscard]] static constexpr int hidden() noexcept { return of(TabIconKind::Hidden); }
+
+  private:
+    [[nodiscard]] static constexpr int of(TabIconKind kind) noexcept { return static_cast<int>(kind); }
 };
 
 /// The QML names of an ended pane's ends and of the footers a pane shows, `chromeStyle.paneEnds`, for what

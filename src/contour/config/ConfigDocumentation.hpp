@@ -285,6 +285,24 @@ constexpr StringLiteral TabColorWeb {
     "colors override it. Split tabs keep the color of the profile that created the tab.\n"
 };
 
+constexpr StringLiteral TabIconConfig {
+    "{comment} The icon on tabs opened with this profile:\n"
+    "{comment}   auto  = the running program's initial while a program runs, else the interface\n"
+    "{comment}           style's own (default).\n"
+    "{comment}   none  = no icon.\n"
+    "{comment}   or the path to an image (PNG, SVG, ...), shown on every tab shape.\n"
+    "{comment} Unlike the other keys it is not inherited from the default profile.\n"
+    "tab_icon: {}\n"
+};
+
+constexpr StringLiteral TabIconWeb {
+    "The icon on tabs opened with this profile: `auto` (the default) shows the running program's initial "
+    "while a program other than the shell runs, else the interface style's own icon; `none` shows no icon; "
+    "anything else is the path to an image (PNG, SVG and the other formats Qt reads), shown on every tab "
+    "shape, `~` meaning the home directory. Unlike the other profile keys it is not inherited from the "
+    "default profile: a profile that sets none uses `auto`.\n"
+};
+
 constexpr StringLiteral PixelReportingConfig {
     "{comment} The unit pixel sizes are reported to applications in (ignore-case).\n"
     "{comment} Applications divide a reported extent by the grid to learn the cell size, and size\n"
@@ -4322,6 +4340,10 @@ struct Text<TabLabel>: DocumentationEntry<TabLabelConfig, TabLabelWeb, "tab_labe
 };
 template <>
 struct Text<TabColor>: DocumentationEntry<TabColorConfig, TabColorWeb>
+{
+};
+template <>
+struct Text<TabIcon>: DocumentationEntry<TabIconConfig, TabIconWeb>
 {
 };
 template <>

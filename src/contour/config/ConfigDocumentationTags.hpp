@@ -36,6 +36,7 @@ struct CopyLastMarkRangeOffset {};
 struct WMClass {};
 struct TabLabel {};
 struct TabColor {};
+struct TabIcon {};
 struct PixelReporting {};
 struct AccessibilityAnnouncements {};
 struct AccessibilityCaretReporting {};

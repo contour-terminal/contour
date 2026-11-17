@@ -1449,6 +1449,36 @@ using contour::config::TabBarVisibility;
     return *item;
 }
 
+/// A tab's indicator line as the user sees it, with its geometry relative to the tab.
+struct IndicatorLine
+{
+    bool isVisible = false; ///< Whether the tab shows the line.
+    QRectF rect;            ///< Where, in the tab's coordinates.
+    QColor color;           ///< In what colour.
+};
+
+/// The indicator line @p tab shows: its own, or the strip's, which carries the active tab's (TabStrip.qml)
+/// and stands beside the tabs in the list's content item.
+/// @param tab A tab delegate.
+/// @return The line, empty when the tab shows none.
+[[nodiscard]] IndicatorLine indicatorOf(QQuickItem const& tab)
+{
+    auto const lineOf = [](QQuickItem const& line, QPointF origin) {
+        return IndicatorLine { .isVisible = true,
+                               .rect = QRectF(line.position() - origin, line.size()),
+                               .color = line.property("color").value<QColor>() };
+    };
+    auto const& own = part(tab, QStringLiteral("tabActiveIndicator"));
+    if (own.isVisible())
+        return lineOf(own, {});
+    if (!tab.property("lineOnStrip").toBool() || tab.parentItem() == nullptr)
+        return {};
+    for (auto const* sibling: tab.parentItem()->childItems())
+        if (sibling->objectName() == QStringLiteral("tabSlidingIndicator") && sibling->isVisible())
+            return lineOf(*sibling, tab.position());
+    return {};
+}
+
 /// Whether an item named @p name lies beneath @p root in the visual tree.
 [[nodiscard]] bool isInVisualTree(QQuickItem const& root, QString const& name)
 {
@@ -2872,12 +2902,47 @@ TEST_CASE("tab_style restyles the joined tabs (offscreen)", "[contour][gui][qml]
     CHECK_FALSE(part(*tabs[1], QStringLiteral("tabJoinedRule")).isVisible());
 
     // The indicator is on the active tab alone, along its top edge, inside its rounded corners.
-    auto const& indicator = part(*tabs[0], QStringLiteral("tabActiveIndicator"));
-    CHECK(indicator.isVisible());
-    CHECK(indicator.y() == 0.0);
-    CHECK(indicator.x() == styleGroup(engine, "radii").property("tab").toReal());
-    CHECK(indicator.width() == tabs[0]->width() - (2 * indicator.x()));
-    CHECK_FALSE(part(*tabs[1], QStringLiteral("tabActiveIndicator")).isVisible());
+    auto const indicator = indicatorOf(*tabs[0]);
+    CHECK(indicator.isVisible);
+    CHECK(indicator.rect.y() == 0.0);
+    CHECK(indicator.rect.x() == styleGroup(engine, "radii").property("tab").toReal());
+    CHECK(indicator.rect.width() == tabs[0]->width() - (2 * indicator.rect.x()));
+    CHECK_FALSE(indicatorOf(*tabs[1]).isVisible);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a tab's icon square stands out from a tab filled in its own colour (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    using contour::config::TabColorMode;
+    using contour::config::TabFillKind;
+    using contour::test::snapshot::TabDecor;
+
+    // The square is the tab's colour, or the accent on the active tab: a tab its colour fills, or an active
+    // tab the accent fills, would lose it.
+    auto const activeFill = GENERATE(TabFillKind::Auto, TabFillKind::Accent);
+    auto const activeTab = GENERATE(0, 1);
+    CAPTURE(static_cast<int>(activeFill), activeTab);
+    auto setup = rowSetup(ChromeStyle::Fluent);
+    setup.tabStyle = { .activeFill = { .kind = activeFill, .color = {} }, .tabColorMode = TabColorMode::Fill };
+
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene {
+        .tabCount = 2, .decor = TabDecor::EveryBadge, .activeTab = activeTab } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+    showWindow(*root);
+
+    for (auto* tab: tabDelegates(*root))
+    {
+        auto const& icon = part(*tab, QStringLiteral("tabIcon"));
+        if (!icon.isVisible())
+            continue;
+        auto const ground = evaluateIn(*tab, QStringLiteral("Qt.tint(root.bandGround, root.effectiveBackground)"))
+                                .value<QColor>();
+        CHECK(contrastOf(icon.property("color").value<QColor>(), ground) >= contour::config::MinimumMarkContrast);
+    }
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
@@ -2913,7 +2978,7 @@ TEST_CASE("tab_color_mode decides how a coloured joined tab shows its colour (of
     auto const styled = contour::platform::toQColor(styleFill);
     auto const fill = part(*tabs[0], QStringLiteral("tabBackground")).property("color").value<QColor>();
     auto const& tint = part(*tabs[0], QStringLiteral("tabColorTint"));
-    auto const& line = part(*tabs[0], QStringLiteral("tabActiveIndicator"));
+    auto const line = indicatorOf(*tabs[0]);
 
     // As a fill the colour replaces the styled fill; in the other two modes the tab is filled as styled.
     CHECK((fill.rgb() == styled.rgb()) == (mode != TabColorMode::Fill));
@@ -2928,18 +2993,18 @@ TEST_CASE("tab_color_mode decides how a coloured joined tab shows its colour (of
     }
     // As the indicator the colour is a line the tab carries active or not; no indicator is configured, so
     // the other modes draw none.
-    CHECK(line.isVisible() == (mode == TabColorMode::Indicator));
+    CHECK(line.isVisible == (mode == TabColorMode::Indicator));
     if (mode == TabColorMode::Indicator)
     {
-        CHECK(line.property("color").value<QColor>().rgb() == tabColor.rgb());
-        CHECK(line.y() == tabs[0]->height() - line.height());
+        CHECK(line.color.rgb() == tabColor.rgb());
+        CHECK(line.rect.y() == tabs[0]->height() - line.rect.height());
     }
 
     // The uncoloured tab beside it is the styled one in every mode.
     CHECK(part(*tabs[1], QStringLiteral("tabBackground")).property("color").value<QColor>().rgb()
           == styled.rgb());
     CHECK_FALSE(part(*tabs[1], QStringLiteral("tabColorTint")).isVisible());
-    CHECK_FALSE(part(*tabs[1], QStringLiteral("tabActiveIndicator")).isVisible());
+    CHECK_FALSE(indicatorOf(*tabs[1]).isVisible);
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
@@ -2963,10 +3028,10 @@ TEST_CASE("the indicator on a filled coloured tab is indicator_color, not the ta
 
     auto const tabs = tabDelegates(*root);
     REQUIRE(tabs.size() == 2);
-    auto const& line = part(*tabs[0], QStringLiteral("tabActiveIndicator"));
-    REQUIRE(line.isVisible());
-    CHECK(line.property("color").value<QColor>().rgb() == QColor(0x11CC88).rgb());
-    CHECK(line.y() == 0.0);
+    auto const line = indicatorOf(*tabs[0]);
+    REQUIRE(line.isVisible);
+    CHECK(line.color.rgb() == QColor(0x11CC88).rgb());
+    CHECK(line.rect.y() == 0.0);
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
@@ -3066,15 +3131,15 @@ TEST_CASE("tab_style.shape redraws the tabs on the row's own strip (offscreen)",
     REQUIRE(border != nullptr);
     CHECK((border->property("width").toReal() > 0.0) == (traits.active == TabActiveMark::Outline));
     // A look that marks the active tab with the line shows it with no active_indicator configured.
-    auto const& line = part(*tabs[0], QStringLiteral("tabActiveIndicator"));
-    CHECK(line.isVisible() == (traits.active == TabActiveMark::Underline));
-    if (line.isVisible())
-        CHECK(line.y() == tabs[0]->height() - line.height());
+    auto const line = indicatorOf(*tabs[0]);
+    CHECK(line.isVisible == (traits.active == TabActiveMark::Underline));
+    if (line.isVisible)
+        CHECK(line.rect.y() == tabs[0]->height() - line.rect.height());
 
     // A tab at rest shows the bar, with no outline and no line.
     CHECK(resting.property("color").value<QColor>().alpha() == 0);
     CHECK(resting.property("border").value<QObject*>()->property("width").toReal() == 0.0);
-    CHECK_FALSE(part(*tabs[1], QStringLiteral("tabActiveIndicator")).isVisible());
+    CHECK_FALSE(indicatorOf(*tabs[1]).isVisible);
 
     // The labels are the bar's: the active one and the rest, a level dimmer in a background window.
     auto const* window = qobject_cast<QQuickWindow*>(root.get());
@@ -3267,7 +3332,7 @@ TEST_CASE("tab_style.tab_width: equal shares the bar between the tabs, fit keeps
         auto root = loadMainWindow(engine, controller, warnings, setup);
         showWindow(*root);
         auto widths = std::vector<qreal> {};
-        for (auto const* tab: tabDelegates(*root))
+        for (auto* tab: tabDelegates(*root))
             widths.push_back(tab->width());
         CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
         return widths;
@@ -3305,6 +3370,125 @@ TEST_CASE("the bar's foot is ruled only under a look that asks for it (offscreen
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("the indicator line slides to the tab made active, unless motion is reduced (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    using contour::config::MotionPreference;
+    using contour::config::TabIndicator;
+
+    auto const motion = GENERATE(MotionPreference::Full, MotionPreference::Reduced);
+    CAPTURE(static_cast<int>(motion));
+    auto setup = rowSetup(ChromeStyle::Fluent);
+    setup.tabStyle = { .activeIndicator = TabIndicator::Underline };
+    setup.accessibility.motion = motion;
+
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+    showWindow(*root);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 3);
+    // At rest the line is the strip's, exactly on the active tab, which draws none of its own.
+    auto const& slider = named(*root, QStringLiteral("tabSlidingIndicator"));
+    CHECK(slider.isVisible());
+    CHECK_FALSE(part(*tabs[0], QStringLiteral("tabActiveIndicator")).isVisible());
+    auto const settled = indicatorOf(*tabs[0]).rect;
+
+    controller.setActiveTab(2);
+    QCoreApplication::processEvents();
+    auto const target = tabs[2]->x() + settled.x();
+    if (motion == MotionPreference::Full)
+    {
+        // On its way: not yet over the new tab.
+        CHECK(slider.x() < target);
+        QTest::qWait(styleGroup(engine, "motion").property("standard").toInt() + 100);
+    }
+    // Over: on the new tab, as wide as the line it left; under Reduce Motion at once.
+    CHECK(slider.x() == target);
+    CHECK(slider.width() == settled.width());
+    CHECK_FALSE(part(*tabs[2], QStringLiteral("tabActiveIndicator")).isVisible());
+    CHECK(indicatorOf(*tabs[2]).isVisible);
+    CHECK_FALSE(indicatorOf(*tabs[0]).isVisible);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a tab still fading in stays whole when the tab before it closes (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    using contour::config::MotionPreference;
+
+    auto const motion = GENERATE(MotionPreference::Full, MotionPreference::Reduced);
+    CAPTURE(static_cast<int>(motion));
+    auto setup = rowSetup(ChromeStyle::Fluent);
+    setup.accessibility.motion = motion;
+
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 1 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+    showWindow(*root);
+
+    // A tab opened, and the one before it closed while the new one is still on its way in: its fade is cut
+    // short by the slide into the room the closed one left.
+    std::ignore = controller.insertTab(1, MockMainController::TabActivation::Activate);
+    QCoreApplication::processEvents();
+    controller.closeTabAtIndex(0);
+    QTest::qWait(styleGroup(engine, "motion").property("standard").toInt() + 150);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 1);
+    CHECK(tabs[0]->isVisible());
+    CHECK(tabs[0]->opacity() == 1.0);
+    CHECK(tabs[0]->scale() == 1.0);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("tabs restored back to back all end whole, side by side and with their titles in full (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    using contour::config::MotionPreference;
+
+    auto const motion = GENERATE(MotionPreference::Full, MotionPreference::Reduced);
+    CAPTURE(static_cast<int>(motion));
+    auto setup = rowSetup(ChromeStyle::Fluent);
+    setup.accessibility.motion = motion;
+
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 1 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+    showWindow(*root);
+
+    // As a restore brings a window's tabs in at startup: one after another, each while the last still
+    // animates in, some before the first, the active one moving.
+    for (auto const at: { 1, 0, 2, 1 })
+    {
+        std::ignore = controller.insertTab(at, MockMainController::TabActivation::Activate);
+        QCoreApplication::processEvents();
+    }
+    QTest::qWait(styleGroup(engine, "motion").property("standard").toInt() + 150);
+
+    auto tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 5);
+    std::ranges::sort(tabs, {}, [](QQuickItem const* tab) { return tab->x(); });
+    for (auto const* tab: tabs)
+    {
+        CHECK(tab->opacity() == 1.0);
+        CHECK(tab->scale() == 1.0);
+        CHECK(tab->width() == tab->implicitWidth());
+        CHECK_FALSE(part(*tab, QStringLiteral("tabLabel")).property("truncated").toBool());
+    }
+    // None stands over the next.
+    for (auto const pair: tabs | std::views::adjacent<2>)
+        CHECK(std::get<0>(pair)->x() + std::get<0>(pair)->width() <= std::get<1>(pair)->x() + 0.5);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("the joined tabs carry no indicator and the row's line by default (offscreen)",
           "[contour][gui][qml][mainwindow][joinedtabs]")
 {
@@ -3316,7 +3500,7 @@ TEST_CASE("the joined tabs carry no indicator and the row's line by default (off
 
     auto const tabs = tabDelegates(*root);
     REQUIRE(tabs.size() == 3);
-    CHECK_FALSE(part(*tabs[0], QStringLiteral("tabActiveIndicator")).isVisible());
+    CHECK_FALSE(indicatorOf(*tabs[0]).isVisible);
 
     // The line after an inactive tab is the tab text's ink, at the chrome's separator strength: the classic
     // rule, which a configuration that names no newer edition keeps.

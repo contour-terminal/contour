@@ -57,6 +57,7 @@
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
 #include <core/Overloaded.hpp>
+#include <core/Utf8Path.hpp>
 
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -190,6 +191,19 @@ class WindowController::SidebarHost final: public ISidebarHost
     void openContextMenu(SidebarRow const& row, QPointF windowPosition) override
     {
         _window.openSidebarContextMenu(row, windowPosition);
+    }
+
+    [[nodiscard]] std::optional<TabIcon> tabIcon(TabRef tab) const override
+    {
+        auto const* const session = _window.sessionForSidebarRow(
+            { .kind = SidebarRowKind::Tab, .workspace = tab.workspace, .tab = tab.tab, .pane = {} });
+        return session != nullptr ? std::optional { _window.tabIconFor(*session) } : std::nullopt;
+    }
+
+    [[nodiscard]] std::vector<std::string> hoverLines(SidebarRowKey const& row) const override
+    {
+        auto const* const session = _window.sessionForSidebarRow(row);
+        return session != nullptr ? session->tabHoverLines() : std::vector<std::string> {};
     }
 
   private:
@@ -1034,6 +1048,7 @@ QHash<int, QByteArray> WindowController::roleNames() const
         { static_cast<int>(Roles::BadgeTextRole), "badgeText" },
         { static_cast<int>(Roles::BadgeProgressRole), "badgeProgress" },
         { static_cast<int>(Roles::SecureRole), "tabSecure" },
+        { static_cast<int>(Roles::IconRole), "tabIcon" },
     };
 }
 
@@ -1084,8 +1099,57 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
         case Roles::BadgeProgressRole:
             return tab != nullptr ? tabBadge(*tab).progressPercent.value_or(-1) : -1;
         case Roles::SecureRole: return tab != nullptr ? static_cast<int>(tabSecureIndicator(*tab)) : 0;
+        case Roles::IconRole:
+            return session != nullptr ? tabIconVariant(tabIconFor(*session)) : QVariantMap {};
         default: return {};
     }
+}
+
+TabIcon WindowController::tabIconFor(session::TerminalSession const& session) const
+{
+    // The program in front of the shell: the one cachedProcessName() asked for with the title, unless that
+    // is the shell itself.
+    auto const running =
+        runningProgramOf(session.profile().shell.value().program, cachedProcessName(session));
+    return tabIconOf(
+        session.profile().tabIcon.value(), running, core::pathFromTrustedUtf8(_manager.homeDirectory()));
+}
+
+WindowController::HeldPane WindowController::heldPane(PaneKey key) const
+{
+    auto* const win = window();
+    if (win == nullptr)
+        return {};
+    for (auto const row: std::views::iota(0, win->tabCount()))
+    {
+        auto* const tab = win->tabAt(row);
+        if (tab == nullptr || tab->rootPane() == nullptr)
+            continue;
+        if (auto const* const leaf = tab->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+                return pane.isLeaf() && _manager.paneKeyOf(pane.session()) == key;
+            }))
+            return { .tab = tab, .session = _manager.sessionForId(leaf->session()) };
+    }
+    return {};
+}
+
+session::TerminalSession* WindowController::sessionForSidebarRow(SidebarRowKey const& row) const
+{
+    if (row.kind == SidebarRowKind::Pane)
+        return heldPane(row.pane).session;
+    if (row.kind != SidebarRowKind::Tab || _directorySource == nullptr)
+        return nullptr;
+    // A daemon's tab ids are its own: the tab is found by its panes, whose keys this window shares, and
+    // speaks for itself through its active one, as it does in the strip.
+    auto const directory = _directorySource->directory();
+    auto const* const workspace = findWorkspace(directory, row.workspace);
+    auto const* const listed = workspace != nullptr ? findTab(*workspace, row.tab) : nullptr;
+    if (listed == nullptr)
+        return nullptr;
+    for (auto const& pane: listed->panes)
+        if (auto const held = heldPane(pane.key); held.tab != nullptr && held.tab->activePane() != nullptr)
+            return _manager.sessionForId(held.tab->activePane()->session());
+    return nullptr;
 }
 
 int WindowController::rowCount(QModelIndex const& parent) const
@@ -1258,6 +1322,20 @@ QString WindowController::tabWorkingDirectory(int index) const
 
     // The same answer the pane header shows: abbreviated for a directory on this machine, made safe to show.
     return QString::fromStdString(session->shownWorkingDirectory(_manager.homeDirectory()));
+}
+
+QStringList WindowController::tabHoverLines(int index) const
+{
+    auto* tab = tabAtRow(index);
+    if (tab == nullptr)
+        return {};
+    auto* session = _manager.sessionForId(tab->activePane()->session());
+    if (session == nullptr)
+        return {};
+    auto lines = QStringList {};
+    for (auto const& line: session->tabHoverLines())
+        lines.append(QString::fromStdString(line));
+    return lines;
 }
 
 void WindowController::dispatchTabStripWheel(
@@ -4645,9 +4723,15 @@ void WindowController::notifyTabRowChanged(vtworkspace::TabId tab, QList<Roles> 
         return;
 
     auto roleIds = QList<int> {};
-    roleIds.reserve(roles.size());
+    roleIds.reserve(roles.size() + 1);
     for (auto const role: roles)
         roleIds.append(static_cast<int>(role));
+    // The icon names the process the title asked for afresh, in the strip and on the sidebar's row.
+    if (roles.contains(Roles::TitleRole))
+    {
+        roleIds.append(static_cast<int>(Roles::IconRole));
+        noteSidebarChanged();
+    }
     emit dataChanged(index(row), index(row), roleIds);
 }
 
@@ -4680,8 +4764,11 @@ void WindowController::notifyAllTabRowsChanged(QList<Roles> const& roles)
 void WindowController::refreshAllTabTitles()
 {
     _processNames.clear();
+    noteSidebarChanged(); // the rows' icons follow the strip's
     if (auto const rows = rowCount(); rows > 0)
-        emit dataChanged(index(0), index(rows - 1), { static_cast<int>(Roles::TitleRole) });
+        emit dataChanged(index(0),
+                         index(rows - 1),
+                         { static_cast<int>(Roles::TitleRole), static_cast<int>(Roles::IconRole) });
 }
 
 void WindowController::showHostingNotice(QString notice)

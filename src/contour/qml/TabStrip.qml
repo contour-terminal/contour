@@ -338,6 +338,7 @@ Row {
                     tabBadgeProgress: badgeProgress
                     locked: (model.tabSecure ?? 0) !== 0
                     secureState: model.tabSecure ?? 0
+                    iconInfo: model.tabIcon ?? ({})
                     // The tabs from the slot's gap on make room for it, animated as a reorder is.
                     transform: Translate {
                         x: index >= root.slotGap ? root.roomMade : 0
@@ -353,9 +354,79 @@ Row {
                     Component.onDestruction: if (engaged) root.engagedTabs -= 1
                 }
 
-                // Animate reordering when a tab is moved.
+                // Animate reordering when a tab is moved, and the tabs making room for one opened or closing
+                // the gap one leaves. Under Reduce Motion nothing slides: a new tab only fades in. A closed tab
+                // goes at once, so what the strip holds is always what the model holds.
+                //
+                // A tab displaced while it still fades in (opened, then a tab before it closed at once) has its
+                // add transition cut short where it stood, half transparent or worse; so every displacement also
+                // finishes the fade (Qt's "Handling Interrupted Animations"), and under Reduce Motion, where the
+                // slide is off, a transition still runs to do just that.
                 moveDisplaced: Transition {
                     NumberAnimation { properties: "x"; duration: chromeStyle.motion.standard }
+                    NumberAnimation { properties: "opacity,scale"; to: 1; duration: chromeStyle.motion.standard }
+                }
+                displaced: Transition {
+                    NumberAnimation {
+                        properties: "x"
+                        duration: chromeStyle.motion.animates ? chromeStyle.motion.standard : 0
+                        easing.type: Easing.OutCubic
+                    }
+                    NumberAnimation { properties: "opacity,scale"; to: 1; duration: chromeStyle.motion.standard }
+                }
+                add: Transition {
+                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: chromeStyle.motion.standard }
+                    NumberAnimation {
+                        property: "scale"
+                        from: chromeStyle.motion.animates ? 0.92 : 1
+                        to: 1
+                        duration: chromeStyle.motion.standard
+                        easing.type: Easing.OutCubic
+                    }
+                }
+
+                // The active tab's indicator line, one for the strip, so that it slides from the tab it leaves to
+                // the tab it marks; under Reduce Motion it moves at once. A tab draws its own line where this
+                // one does not stand (TabItem.lineOnStrip).
+                Rectangle {
+                    id: slidingIndicator
+                    objectName: "tabSlidingIndicator"   // findChild() handle for the GUI test
+                    parent: list.contentItem
+                    z: 2
+                    readonly property Item tab: list.currentItem
+                    readonly property real targetX: tab ? tab.x + tab.indicatorInset : 0
+                    readonly property real targetWidth: tab ? tab.indicatorWidth : 0
+                    // The slide runs from the tab the line leaves, and only when the active tab changes: at
+                    // startup, and as tabs resize or scroll, the line stays on its tab. A tab that closed has
+                    // no place to slide from (a guarded Item property reads null once its object is gone).
+                    property Item lastTab: null
+                    property real fromX: 0
+                    property real fromWidth: 0
+                    property real travel: 1
+                    onTabChanged: {
+                        if (chromeStyle.motion.animates && lastTab !== null && tab !== null) {
+                            fromX = lastTab.x + lastTab.indicatorInset
+                            fromWidth = lastTab.indicatorWidth
+                            slide.restart()
+                        }
+                        lastTab = tab
+                    }
+                    NumberAnimation {
+                        id: slide
+                        target: slidingIndicator
+                        property: "travel"
+                        from: 0
+                        to: 1
+                        duration: chromeStyle.motion.standard
+                        easing.type: Easing.OutCubic
+                    }
+                    visible: tab !== null && tab.lineOnStrip
+                    // Exactly on the tab once the slide is over, where a blend would leave a rounding error.
+                    x: travel >= 1 ? targetX : fromX + (targetX - fromX) * travel
+                    y: tab ? tab.y + tab.indicatorY : 0
+                    width: travel >= 1 ? targetWidth : fromWidth + (targetWidth - fromWidth) * travel
+                    height: chromeStyle.size.progressBar
+                    color: tab ? tab.indicatorTint : "transparent"
                 }
             }
         }

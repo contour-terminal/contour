@@ -243,6 +243,15 @@ class ISidebarHost
     /// @param row The row, as the model lists it.
     /// @param windowPosition Where the pointer is, in window coordinates.
     virtual void openContextMenu(SidebarRow const& row, QPointF windowPosition) = 0;
+
+    /// @param tab A tab the directory lists.
+    /// @return Its icon as the window's tab strip shows it; none for a tab the window does not hold.
+    [[nodiscard]] virtual std::optional<TabIcon> tabIcon(TabRef tab) const = 0;
+
+    /// @param row A tab or pane row.
+    /// @return What runs in it and how its last command ended (session::tabHoverLines()), one line each: a
+    ///         tab's active pane's; empty for a row whose panes the window does not hold.
+    [[nodiscard]] virtual std::vector<std::string> hoverLines(SidebarRowKey const& row) const = 0;
 };
 
 /// Whether the user can see the sidebar's rows, which decides whether their times need to run.
@@ -415,6 +424,7 @@ class SidebarModel: public QAbstractListModel
         WorkspaceColorRole,    ///< QColor: the row's workspace colour; fully transparent when it has none.
         RailTextRole, ///< The Terminal look's workspace rail on the first line (workspaceRailCellsOf()).
         RailTextContinuedRole, ///< The rail on the second line (workspaceRailCellsOf()).
+        IconRole,              ///< A tab row's icon as { kind, text } (tabIconVariant()); empty for none.
     };
 
     /// @param host The window the sidebar sits in; must outlive the model.
@@ -565,6 +575,11 @@ class SidebarModel: public QAbstractListModel
     /// Counts every pane under @p row as seen.
     /// @param row The row.
     Q_INVOKABLE void markSeen(int row);
+    /// What the hover card of @p row adds: what runs in it and how its last command ended
+    /// (ISidebarHost::hoverLines()). Asked as the card opens, so never stale by more than one hover.
+    /// @param row The row.
+    /// @return One line each; empty for a workspace row and for panes the window does not hold.
+    [[nodiscard]] Q_INVOKABLE QStringList hoverLines(int row) const;
     /// Opens the context menu of @p row.
     /// @param row The row.
     /// @param windowPosition Where the pointer is, in window coordinates.

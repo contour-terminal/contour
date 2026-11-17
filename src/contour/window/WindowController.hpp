@@ -39,6 +39,8 @@
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabBarDropPolicy.hpp>
 #include <contour/window/TabBarHitValue.hpp>
+#include <contour/window/TabIcon.hpp>
+#include <contour/window/TabIconVariant.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/TitleBandSurface.hpp>
@@ -313,6 +315,10 @@ class WindowController:
         BadgeProgressRole = Qt::UserRole + 12,
         //!< The strongest window::SecureIndicator of the tab's panes, as its value (0 for no lock).
         SecureRole = Qt::UserRole + 13,
+        //!< The tab's icon (window::tabIconOf) as `{ kind, text }`: a window::TabIconKind value
+        //!< (`chromeStyle.tabIconKinds`), and the initial of a Monogram or the file URL of an Image. Re-read
+        //!< with the title, as is the program name it comes from.
+        IconRole = Qt::UserRole + 14,
     };
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
@@ -428,6 +434,11 @@ class WindowController:
     /// @param index The tab's row.
     /// @return The directory, or an empty string when none can be determined.
     Q_INVOKABLE [[nodiscard]] QString tabWorkingDirectory(int index) const;
+    /// What the tab's hover card says of the commands in its active pane: what runs now, and the last
+    /// command that finished with how it ended (session::tabHoverLines).
+    /// @param index The tab's row.
+    /// @return The lines; none for a row out of range or a pane that tells nothing.
+    Q_INVOKABLE [[nodiscard]] QStringList tabHoverLines(int index) const;
     /// Routes a wheel event that occurred over the tab strip.
     ///
     /// Horizontal notches resolve through the same built-in fallback mouse mappings the terminal grid
@@ -1859,6 +1870,22 @@ class WindowController:
     /// _processNames). Only a TitleRole change re-reads it, so a tab keeps the name of the process it first
     /// found until its title changes; Step 2's foreground poll is what invalidates it on a process change.
     [[nodiscard]] std::string const& cachedProcessName(session::TerminalSession const& session) const;
+    /// @param session The tab's active session.
+    /// @return Its tab icon: from its profile's `tab_icon` and the program it runs (window::tabIconOf).
+    [[nodiscard]] TabIcon tabIconFor(session::TerminalSession const& session) const;
+    /// A pane this window holds, with the tab it is in.
+    struct HeldPane
+    {
+        vtworkspace::Tab* tab = nullptr;             ///< The tab; null when the window holds no such pane.
+        session::TerminalSession* session = nullptr; ///< The pane's session; null as well.
+    };
+    /// @param key A pane, by the key the directory lists it under.
+    /// @return It and its tab, when one of this window's tabs holds it.
+    [[nodiscard]] HeldPane heldPane(PaneKey key) const;
+    /// @param row A sidebar row.
+    /// @return The session a pane row stands for, or a tab row's active pane's; null for a workspace row and
+    ///         for panes this window does not hold.
+    [[nodiscard]] session::TerminalSession* sessionForSidebarRow(SidebarRowKey const& row) const;
     /// @return What names the other machine this window's daemon runs on (a saved host, or the chrome's label
     /// for
     ///         a `--connect-tcp` daemon); empty for a daemon on this machine and a local window.
