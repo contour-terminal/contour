@@ -120,9 +120,9 @@ TEST_CASE("tabBar.aDraggedTabsOwnPlaceIsNoGap", "[tabbar]")
     // stays a gap.
     struct Row
     {
-        std::optional<int> dragged;
-        double x;
-        TabBarHit expected;
+        std::optional<int> dragged {};
+        double x = 0.0;
+        TabBarHit expected {};
     };
     constexpr auto None = TabBarHit {};
     auto const rows = std::array {
