@@ -122,6 +122,7 @@ HostedSession::HostedSession(SessionId id,
               vtbackend::randomSemanticBlockTokens(),
               std::nullopt,
               _extensions ? std::optional { _extensions->terminalServices() } : std::nullopt,
+              nullptr,
               git),
     _onClosed(std::move(onClosed))
 {

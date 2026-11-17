@@ -794,6 +794,67 @@ TEST_CASE("Terminal.extensions.drivenByExtensions", "[extensions]")
     }
 }
 
+TEST_CASE("Terminal.extensions.daemonSummariesDriveTheRow", "[extensions][statusline][summary]")
+{
+    // A daemon whose only extension is daemon-scoped still draws the indicator row: its clients have no
+    // summary to read.
+    class Summaries final: public IDaemonExtensionSummaries
+    {
+      public:
+        [[nodiscard]] std::string summaryOf(std::string_view name) const override
+        {
+            return name == "orchestrator" ? "agents 1/4" : "";
+        }
+    };
+    auto const summaries = Summaries {};
+
+    SECTION("a daemon whose only extension is daemon-scoped still draws the indicator row")
+    {
+        auto mock = MockTerm { ExtensionPageSize, summaries };
+        showIndicator(mock.terminal, "[{DaemonExtension:orchestrator}]");
+        CHECK(mock.terminal.indicatorStatusLineDependsOnHostState());
+        CHECK(mock.terminal.indicatorStatusLineShowsDaemonSummaries());
+        CHECK(indicatorText(mock.terminal) == "[agents 1/4]");
+    }
+
+    SECTION("without the item it does not")
+    {
+        auto mock = MockTerm { ExtensionPageSize, summaries };
+        showIndicator(mock.terminal, "{Title} {Clock}");
+        CHECK_FALSE(mock.terminal.indicatorStatusLineDependsOnHostState());
+        CHECK_FALSE(mock.terminal.indicatorStatusLineShowsDaemonSummaries());
+    }
+
+    SECTION("one repaint reads each summary once, however many items show it")
+    {
+        class Counting final: public IDaemonExtensionSummaries
+        {
+          public:
+            [[nodiscard]] std::string summaryOf(std::string_view /*name*/) const override
+            {
+                return std::format("read {}", ++reads);
+            }
+            mutable int reads = 0;
+        };
+        auto const counting = Counting {};
+        auto mock = MockTerm { ExtensionPageSize, counting };
+        showIndicator(mock.terminal, "[{DaemonExtension:orchestrator}|{DaemonExtension:orchestrator}]");
+        auto const before = counting.reads;
+        mock.terminal.setStatusDisplay(StatusDisplayType::None);
+        mock.terminal.runUnderStateLock([&] { mock.terminal.refreshIndicatorStatusLine(); });
+        CHECK(counting.reads == before + 1);
+        CHECK(indicatorText(mock.terminal) == std::format("[read {0}|read {0}]", counting.reads));
+    }
+
+    SECTION("without summaries the item draws nothing, and depends on nothing")
+    {
+        auto mock = MockTerm { ExtensionPageSize };
+        showIndicator(mock.terminal, "[{DaemonExtension:orchestrator}]");
+        CHECK_FALSE(mock.terminal.indicatorStatusLineDependsOnHostState());
+        CHECK(indicatorText(mock.terminal) == "[]");
+    }
+}
+
 TEST_CASE("Terminal.extensions.userVarsTellOnlyWhatIsStored", "[extensions][uservar]")
 {
     // A name beyond the terminal's bound is dropped, and so no extension is told of it either.

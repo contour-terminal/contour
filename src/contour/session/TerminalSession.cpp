@@ -445,6 +445,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                 vtbackend::randomSemanticBlockTokens(),
                 app.linkDetectionServices(),
                 terminalExtensionServices(),
+                nullptr, // A window's own session hosts no daemon-scoped extension.
                 app.gitHeadServices() },
     _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) },
     // _config is declared before _desktopNotifier, so reading it here is well-defined. The delay is

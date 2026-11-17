@@ -762,6 +762,17 @@ namespace
             return text;
         }
 
+        std::string visit(StatusLineDefinitions::DaemonExtension const& item)
+        {
+            // The daemon neutralized it already; sanitized here all the same, as a {UserVar} is, since the
+            // summaries are an interface: no escape of any implementation's reaches the status line's screen.
+            // Cut to its width as a {UserVar} is too.
+            return elideEnd(
+                sanitizeCommandLine(vt.statusLineDaemonExtensionText(item), SanitizePurpose::Display),
+                item.maxWidth,
+                vt.clusterWidthPolicy());
+        }
+
         std::string visit(StatusLineDefinitions::UserVar const& item)
         {
             // A program set it, so it is sanitized as the working directory is: no control byte of it

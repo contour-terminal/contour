@@ -105,6 +105,7 @@ class MockTerm: public Terminal::NullEvents
                    &fixedOffsetLocalTime<>,
                    std::nullopt,
                    std::nullopt,
+                   nullptr,
                    gitServices }
     {
     }
@@ -139,6 +140,26 @@ class MockTerm: public Terminal::NullEvents
                    &fixedOffsetLocalTime<>,
                    std::nullopt,
                    extensionServices }
+    {
+    }
+
+    /// A terminal as a daemon hosts it, whose `{DaemonExtension}` items read @p daemonSummaries, and which
+    /// shows the status-line extensions @p extensionServices names, if any.
+    /// @param size The page size.
+    /// @param daemonSummaries What the daemon's daemon-scoped extensions published. Borrowed: it must outlive
+    ///                        the terminal.
+    /// @param extensionServices The status-line extensions; nullopt shows none.
+    MockTerm(PageSize size,
+             IDaemonExtensionSummaries const& daemonSummaries,
+             std::optional<StatusLineExtensionServices> extensionServices = std::nullopt):
+        MockTerm { createSettings(size, HistoryLimits {}, 1024),
+                   core::defaultEnvironment(),
+                   core::platform::NativeFileSystem::instance(),
+                   std::nullopt,
+                   &fixedOffsetLocalTime<>,
+                   std::nullopt,
+                   std::move(extensionServices),
+                   &daemonSummaries }
     {
     }
 
@@ -540,6 +561,7 @@ class MockTerm: public Terminal::NullEvents
              LocalTimeConverter localTime,
              std::optional<LinkDetectionServices> linkServices,
              std::optional<StatusLineExtensionServices> extensionServices,
+             IDaemonExtensionSummaries const* daemonSummaries = nullptr,
              std::optional<GitHeadServices> gitServices = std::nullopt);
 };
 
@@ -581,6 +603,7 @@ inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
                                      LocalTimeConverter localTime,
                                      std::optional<LinkDetectionServices> linkServices,
                                      std::optional<StatusLineExtensionServices> extensionServices,
+                                     IDaemonExtensionSummaries const* daemonSummaries,
                                      std::optional<GitHeadServices> gitServices):
     terminal { *this,
                environment,
@@ -596,6 +619,7 @@ inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
                },
                std::move(linkServices),
                extensionServices,
+               daemonSummaries,
                gitServices }
 {
     if (auto const logFilterString = core::defaultEnvironment().get("LOG"))
