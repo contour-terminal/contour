@@ -7,6 +7,7 @@
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QObject>
+#include <QtCore/QThread>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -50,4 +51,27 @@ TEST_CASE("PostTarget posts until it is withdrawn, then drops", "[contour][qt][t
     std::thread { [&] { target.post([&runs] { ++runs; }); } }.join();
     QCoreApplication::sendPostedEvents(&receiver);
     CHECK(runs == 1);
+}
+
+TEST_CASE("invokeBlocking hands this thread's locals there and the functor's writes back",
+          "[contour][qt][threading]")
+{
+    // The functor runs on a QThread of its own and writes this thread's locals by reference; what orders
+    // both directions is a posted-event queue and a QSemaphore inside libQt6Core. Under the clang-tsan tree
+    // the sanitizer has to see both, or it reports the locals as raced.
+    auto worker = QThread {};
+    auto receiver = QObject {};
+    receiver.moveToThread(&worker);
+    worker.start();
+
+    auto question = std::string { "asked by the caller" };
+    auto answer = std::string {};
+    contour::platform::invokeBlocking(&receiver, [&] { answer = question + ", answered by the worker"; });
+    CHECK(answer == "asked by the caller, answered by the worker");
+
+    // Back to this thread, so it is destroyed where it lives.
+    contour::platform::invokeBlocking(&receiver,
+                                      [&] { receiver.moveToThread(QCoreApplication::instance()->thread()); });
+    worker.quit();
+    worker.wait();
 }
