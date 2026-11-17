@@ -47,6 +47,9 @@ function(_contour_wasi_cxx_locate)
     endif()
 
     if(_prefix)
+        # Absolute, a relative one taken against the source tree: the tools' paths are handed to sub-builds
+        # running elsewhere, and -fuse-ld takes the linker's path as it is.
+        cmake_path(ABSOLUTE_PATH _prefix BASE_DIRECTORY "${CMAKE_SOURCE_DIR}" NORMALIZE)
         foreach(_row IN LISTS _contour_wasi_tools)
             string(REGEX REPLACE ":.*" "" _variable "${_row}")
             string(REGEX REPLACE "^[^:]*:" "" _tool "${_row}")

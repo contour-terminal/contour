@@ -5,7 +5,7 @@
 #
 #   CONTOUR_WASI_C_COMPILER    clang
 #   CONTOUR_WASI_CXX_COMPILER  clang++
-#   CONTOUR_WASI_LINKER        wasm-ld, passed to clang as --ld-path
+#   CONTOUR_WASI_LINKER        wasm-ld, passed to clang as -fuse-ld (clang's WebAssembly driver ignores --ld-path)
 #   CONTOUR_WASI_AR            llvm-ar, and CONTOUR_WASI_RANLIB llvm-ranlib, which index wasm objects
 #   CONTOUR_WASI_SYSROOT       the sysroot holding wasi-libc and libc++
 #   CONTOUR_WASI_CMAKE_DIR     optional: a directory with Platform/WASI.cmake, for a CMake that lacks it
@@ -48,7 +48,7 @@ set(CMAKE_SYSROOT "${CONTOUR_WASI_SYSROOT}")
 set(CMAKE_C_FLAGS_INIT "-fvisibility=hidden")
 set(CMAKE_CXX_FLAGS_INIT "-fno-exceptions -fno-rtti -fvisibility=hidden")
 set(CMAKE_EXE_LINKER_FLAGS_INIT
-    "--ld-path=${CONTOUR_WASI_LINKER} -mexec-model=reactor -Wl,--gc-sections -Wl,--strip-debug -Wl,-z,stack-size=65536")
+    "-fuse-ld=${CONTOUR_WASI_LINKER} -mexec-model=reactor -Wl,--gc-sections -Wl,--strip-debug -Wl,-z,stack-size=65536")
 
 # Programs run during the build are the host's; everything else comes from the sysroot.
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
