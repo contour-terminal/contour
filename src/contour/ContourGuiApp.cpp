@@ -681,7 +681,7 @@ std::optional<vthost::WorkspaceGitServices> ContourGuiApp::workspaceGitServices(
 
 void ContourGuiApp::postToGui(std::function<void()> job)
 {
-    QMetaObject::invokeMethod(this, std::move(job), Qt::QueuedConnection);
+    platform::postToObject(this, std::move(job));
 }
 
 ContourGuiApp::~ContourGuiApp()
@@ -1321,7 +1321,7 @@ remote::UpgradeStart ContourGuiApp::upgradeDaemon(remote::DaemonLink& link)
     _daemonWorker = DaemonWorker::Busy;
     _daemonRestartThread = std::jthread { [this, id = link.id()](std::stop_token const& stop) {
         auto const upgraded = _upgradeDaemon(stop);
-        QMetaObject::invokeMethod(
+        platform::postToObject(
             this,
             [this,
              id,
@@ -1336,8 +1336,7 @@ remote::UpgradeStart ContourGuiApp::upgradeDaemon(remote::DaemonLink& link)
                     upgradedLink->drift().noteUpgradeRequestDone();
                 else
                     upgradedLink->drift().noteUpgradeFailed(reason);
-            },
-            Qt::QueuedConnection);
+            });
     } };
     return remote::UpgradeStart::Started;
 }
@@ -1360,37 +1359,34 @@ void ContourGuiApp::restartDaemon(remote::DaemonLink& link)
     // The outcome is told to the link by its id: the restart closed its windows, which ended it.
     _daemonRestartThread = std::jthread { [this, id = link.id()] {
         auto result = _restartDaemon();
-        QMetaObject::invokeMethod(
-            this,
-            [this, id, result = std::move(result)] {
-                _daemonWorker = DaemonWorker::Idle;
-                QGuiApplication::setQuitOnLastWindowClosed(true);
-                auto* const restarted = daemonLink(id);
-                if (!result)
-                {
-                    if (restarted)
-                        restarted->drift().noteRestartFailed(QString::fromStdString(result.error()));
-                    quitIfWindowless();
-                    return;
-                }
-                // Until the client reconnects by itself, the new process is what attaches to the
-                // new daemon.
-                auto arguments = QStringList {};
-                for (auto const argument: std::span { _argv, static_cast<size_t>(_argc) }.subspan(1))
-                    arguments.push_back(QString::fromUtf8(argument));
-                if (auto const started =
-                        externalLauncher().runDetached(QString::fromStdString(programPath()), arguments);
-                    !started)
-                {
-                    if (restarted)
-                        restarted->drift().noteRestartFailed(
-                            tr("the daemon restarted, but this window could not be reopened"));
-                    quitIfWindowless();
-                    return;
-                }
-                QCoreApplication::quit();
-            },
-            Qt::QueuedConnection);
+        platform::postToObject(this, [this, id, result = std::move(result)] {
+            _daemonWorker = DaemonWorker::Idle;
+            QGuiApplication::setQuitOnLastWindowClosed(true);
+            auto* const restarted = daemonLink(id);
+            if (!result)
+            {
+                if (restarted)
+                    restarted->drift().noteRestartFailed(QString::fromStdString(result.error()));
+                quitIfWindowless();
+                return;
+            }
+            // Until the client reconnects by itself, the new process is what attaches to the
+            // new daemon.
+            auto arguments = QStringList {};
+            for (auto const argument: std::span { _argv, static_cast<size_t>(_argc) }.subspan(1))
+                arguments.push_back(QString::fromUtf8(argument));
+            if (auto const started =
+                    externalLauncher().runDetached(QString::fromStdString(programPath()), arguments);
+                !started)
+            {
+                if (restarted)
+                    restarted->drift().noteRestartFailed(
+                        tr("the daemon restarted, but this window could not be reopened"));
+                quitIfWindowless();
+                return;
+            }
+            QCoreApplication::quit();
+        });
     } };
 }
 
