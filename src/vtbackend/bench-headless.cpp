@@ -1806,7 +1806,8 @@ class ExtensionRig
 class PaneExtensions
 {
   public:
-    [[nodiscard]] static std::optional<vtbackend::StatusLineExtensionServices> services() noexcept
+    /// @return None: there is nothing to run. A member, as the real one is, so that a call reads alike.
+    [[nodiscard]] std::optional<vtbackend::StatusLineExtensionServices> services() const noexcept
     {
         return std::nullopt;
     }
