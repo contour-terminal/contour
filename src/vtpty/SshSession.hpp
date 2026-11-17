@@ -271,10 +271,16 @@ class SshSession final: public Pty
     /// far enough to attempt the connection, so a host that is not there is known BEFORE start()
     /// returns, and can be reported as the StartFailure the session layer already knows how to show.
     ///
-    /// The socket is closed directly rather than through close(), which takes _mutex -- and every
+    /// The socket is shut down directly rather than through close(), which takes _mutex -- and every
     /// caller of this already holds it, processState() running under the lock in both start() and
-    /// read(). @see _mutex.
+    /// read(). It is only shut down, not closed: libssh2 still sends its DISCONNECT/CLOSE through it when
+    /// the session is freed, and a closed descriptor number may by then belong to another socket. The
+    /// destructor closes it, after the session is freed. @see _mutex.
     void fail(std::string reason);
+
+    /// Shuts the connection down in both directions, keeping the descriptor open until the destructor.
+    /// The shutdown is what tells the peer, and any poll() on the socket, that we are gone.
+    void shutdownSocket();
 
     template <typename... Args>
     void fail(std::format_string<Args...> fmt, Args&&... args)

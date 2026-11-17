@@ -524,6 +524,11 @@ SshSession::~SshSession()
         libssh2_session_free(_p->sshSession);
         _p->sshSession = nullptr;
     }
+
+    // Only now: libssh2 sent its DISCONNECT and channel CLOSE through the descriptor above, and it must
+    // still be ours when it did, not a number another tab's socket has since been given.
+    if (_p->sshSocket.isOpen())
+        _p->sshSocket.close();
 }
 
 void SshSession::setState(State nextState)
@@ -888,8 +893,7 @@ void SshSession::close()
         libssh2_channel_wait_closed(_p->sshChannel);
     }
 
-    if (_p->sshSocket.isOpen())
-        _p->sshSocket.close();
+    shutdownSocket();
 }
 
 bool SshSession::isClosed() const noexcept
@@ -1260,10 +1264,20 @@ void SshSession::fail(std::string reason)
     logErrorWithInject(reason);
     _failureReason = std::move(reason);
 
-    if (_p->sshSocket.isOpen())
-        _p->sshSocket.close();
+    shutdownSocket();
 
     setState(State::Failure);
+}
+
+void SshSession::shutdownSocket()
+{
+    if (!_p->sshSocket.isOpen())
+        return;
+#ifdef _WIN32
+    ::shutdown(_p->sshSocket.get(), SD_BOTH);
+#else
+    ::shutdown(_p->sshSocket.get(), SHUT_RDWR);
+#endif
 }
 
 bool SshSession::connect(std::string_view host, int port)
@@ -1345,7 +1359,7 @@ bool SshSession::connect(std::string_view host, int port)
         return false;
     }
 
-    // Every resolved address refused. fail() closes the socket, which is what tells the rest of this
+    // Every resolved address refused. fail() moves to State::Failure, which is what tells the rest of this
     // class that we are not connected.
     fail(describeSshConnectFailure(SshConnectStage::Connect,
                                    currentSandbox().network,
@@ -1464,7 +1478,10 @@ int SshSession::waitForSocket(std::optional<std::chrono::milliseconds> timeout)
     auto const [dir, socket] = [&]() {
         auto const _ = std::lock_guard { _mutex };
         assert(_p->sshSession);
-        auto const socket = _p->sshSocket.isOpen() ? std::optional { _p->sshSocket.get() } : std::nullopt;
+        // A shut-down socket reads as ready forever; once the session is over only the wakeup channel counts.
+        auto const isOver = _state == State::Closed || _state == State::Failure;
+        auto const socket =
+            _p->sshSocket.isOpen() && !isOver ? std::optional { _p->sshSocket.get() } : std::nullopt;
         return std::pair { libssh2_session_block_directions(_p->sshSession), socket };
     }();
 
