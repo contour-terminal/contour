@@ -21,11 +21,11 @@
 namespace vtextension::testing
 {
 
-#ifdef VTEXTENSION_TEST_MODULE_DIR
-/// Reads a guest module built by the test target's wasm dependencies.
-[[nodiscard]] inline std::vector<std::byte> readTestModule(std::string_view fileName)
+/// Reads a module file.
+/// @param path Where the module is.
+/// @return Its bytes.
+[[nodiscard]] inline std::vector<std::byte> readModuleFile(std::string const& path)
 {
-    auto const path = std::string(VTEXTENSION_TEST_MODULE_DIR) + "/" + std::string(fileName);
     auto file = std::ifstream(path, std::ios::binary);
     REQUIRE(file.good());
     auto const chars =
@@ -34,7 +34,48 @@ namespace vtextension::testing
     std::ranges::transform(chars, bytes.begin(), [](char c) { return static_cast<std::byte>(c); });
     return bytes;
 }
+
+#ifdef VTEXTENSION_TEST_MODULE_DIR
+/// Reads a guest module built by the test target's wasm dependencies.
+[[nodiscard]] inline std::vector<std::byte> readTestModule(std::string_view fileName)
+{
+    return readModuleFile(std::string(VTEXTENSION_TEST_MODULE_DIR) + "/" + std::string(fileName));
+}
 #endif
+
+/// Appends @p value to @p out as an unsigned LEB128 number.
+inline void appendLeb128(std::vector<std::byte>& out, std::size_t value)
+{
+    do
+    {
+        auto byte = static_cast<uint8_t>(value & 0x7FU);
+        value >>= 7U;
+        if (value != 0)
+            byte |= 0x80U;
+        out.push_back(static_cast<std::byte>(byte));
+    } while (value != 0);
+}
+
+/// Appends @p chars to @p out, byte for byte.
+inline void appendText(std::vector<std::byte>& out, std::string_view chars)
+{
+    std::ranges::transform(chars, std::back_inserter(out), [](char c) { return static_cast<std::byte>(c); });
+}
+
+/// Appends @p chars to @p out as a WebAssembly name: its length, then its bytes.
+inline void appendName(std::vector<std::byte>& out, std::string_view chars)
+{
+    appendLeb128(out, chars.size());
+    appendText(out, chars);
+}
+
+/// Appends a section to @p module: its id, its size, then @p content.
+inline void appendSection(std::vector<std::byte>& module, uint8_t id, std::span<std::byte const> content)
+{
+    module.push_back(std::byte { id });
+    appendLeb128(module, content.size());
+    module.insert(module.end(), content.begin(), content.end());
+}
 
 /// @return @p bytes as a module's bytes.
 template <std::size_t N>
@@ -50,28 +91,11 @@ template <std::size_t N>
 [[nodiscard]] inline std::vector<std::byte> withManifest(std::vector<std::byte> module,
                                                          std::string_view manifest)
 {
-    auto const leb128 = [](std::vector<std::byte>& out, std::size_t value) {
-        do
-        {
-            auto byte = static_cast<uint8_t>(value & 0x7FU);
-            value >>= 7U;
-            if (value != 0)
-                byte |= 0x80U;
-            out.push_back(static_cast<std::byte>(byte));
-        } while (value != 0);
-    };
-    auto const text = [](std::vector<std::byte>& out, std::string_view chars) {
-        std::ranges::transform(
-            chars, std::back_inserter(out), [](char c) { return static_cast<std::byte>(c); });
-    };
     constexpr auto SectionName = std::string_view { "terminal-extension-manifest" };
     auto payload = std::vector<std::byte> {};
-    leb128(payload, SectionName.size());
-    text(payload, SectionName);
-    text(payload, manifest);
-    module.push_back(std::byte { 0 }); // a custom section
-    leb128(module, payload.size());
-    module.insert(module.end(), payload.begin(), payload.end());
+    appendName(payload, SectionName);
+    appendText(payload, manifest);
+    appendSection(module, 0, payload); // a custom section
     return module;
 }
 

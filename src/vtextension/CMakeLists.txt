@@ -130,6 +130,7 @@ if(VTEXTENSION_TESTING)
         ControlImports_test.cpp
         DaemonExtensionRunner_test.cpp
         DaemonExtensionRuntime_test.cpp
+        DaemonGuestModule_test.cpp
         DaemonInstance_test.cpp
         DaemonWorld_test.cpp
         DeadlineGuard_test.cpp
@@ -165,6 +166,7 @@ if(VTEXTENSION_TESTING)
         testing/FakeGuestMemory.hpp
         testing/FakeProcessRunner.hpp
         testing/FakeWasmBackend.hpp
+        testing/GuestModuleCheck.hpp
         testing/Harness.hpp
         testing/LaneReport.hpp
         testing/ManualScheduler.hpp
@@ -208,6 +210,17 @@ if(VTEXTENSION_TESTING)
         endif()
     else()
         message(STATUS "[vtextension] CONTOUR_EXTENSIONS_BUNDLED is OFF: the Rust-guest test cases are compiled out, and SKIP.")
+    endif()
+    if(CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST)
+        # The C++ daemon-world probe, built with the WASI C++ toolchain the orchestrator's guest is built with:
+        # checked as a module and run on the daemon engine.
+        contour_add_wasm_cxx_guest(NAME cxx-daemon-probe
+                                   SOURCE_DIR ${PROJECT_SOURCE_DIR}/extensions/testing/cxx-daemon-probe
+                                   OUTPUT_VAR _cxx_probe_wasm
+                                   # A list value, which the probe's configuration checks arrives whole.
+                                   CMAKE_ARGS "-DCXX_PROBE_EXPECTED_DIRECTORIES=${PROJECT_SOURCE_DIR}/src${CONTOUR_WASM_CXX_LIST_SEPARATOR}${PROJECT_SOURCE_DIR}/cmake")
+        add_dependencies(vtextension_test cxx-daemon-probe_wasm)
+        target_compile_definitions(vtextension_test PRIVATE VTEXTENSION_CXX_PROBE_MODULE="${_cxx_probe_wasm}")
     endif()
     # The tests run real guests, so they link the selected backend; its own tests are added by its directory.
     target_link_libraries(vtextension_test PRIVATE vtextension_runtime glaze::glaze core::testing Catch2::Catch2 contour_test_trace)

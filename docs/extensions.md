@@ -257,6 +257,44 @@ the module's memory is capped at 32 MiB, one `render` may return at most 1 MiB, 
 least 16 ms apart. Events are coalesced under load, so an extension sees the latest working directory
 rather than every one in between.
 
+### Building a C++ guest
+
+A guest can be C++23 too, compiled to a `wasm32-wasip1` core module with [wasi-sdk] 34 or later. Contour
+builds its own C++ guests that way when configured with `-DCONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST=ON`:
+`cmake/ContourWasiCxx.cmake` takes the toolchain from `WASI_SDK_PREFIX` (the CMake variable, else the
+environment variable), else from the system's clang, `wasm-ld`, `llvm-ar` and `/usr/share/wasi-sysroot`,
+proves it by building a C++23 reactor, and fails the configuration naming what is missing. Each guest is
+then a CMake project of its own, built by `contour_add_wasm_cxx_guest(NAME … SOURCE_DIR … OUTPUT_VAR …)`
+with `cmake/toolchains/wasm32-wasip1.cmake`, offline, into `<build>/wasm/<name>.wasm`.
+
+```sh
+cmake --preset clang-asan -DCONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST=ON \
+      -DWASI_SDK_PREFIX=$HOME/opt/wasi-sdk-34.0-x86_64-linux
+```
+
+The toolchain file compiles with `-fno-exceptions -fno-rtti -fvisibility=hidden` and links with
+`-mexec-model=reactor -Wl,--gc-sections -Wl,--strip-debug -Wl,-z,stack-size=65536`. A guest built any
+other way must end up with the same shape:
+
+- **A reactor**, not a command: no `main`; `_initialize` runs the static constructors, and the host calls
+  it under the load deadline. The module has no start section and does not export `__wasm_call_ctors`.
+- **Exports** carry their WIT names, `[[clang::export_name("load")]]`, with `cabi_realloc` beside them.
+- **Imports** come from the world's module and nothing else but WASI's allow-list, each declared with
+  `__attribute__((import_module("terminal-extensions:daemon/host@0.1.0"), import_name("summary-set")))`.
+- **The manifest** is exactly one custom section, written by module-level assembly; the `section` attribute
+  produces nothing for a custom section, and `--strip-debug` (not `--strip-all`) keeps it:
+
+  ```cpp
+  asm(R"(.section ".custom_section.terminal-extension-manifest","",@
+  .ascii "name = hello\nversion = 2\nplacement daemon\n"
+  .text
+  )");
+  ```
+
+[`extensions/testing/cxx-daemon-probe/`][cxx-probe] is the smallest complete example: three imports and
+the world's exports declared by hand in the Canonical ABI's flat form, no bindings. `vtextension_test`
+checks the built module for the shape above and runs it on the daemon engine.
+
 ### The manifest
 
 A module that runs commands declares them in a custom section named `terminal-extension-manifest`,
@@ -492,6 +530,8 @@ for.
 [bundled]: https://github.com/contour-terminal/contour/tree/master/extensions/bundled
 [manifest]: https://github.com/contour-terminal/contour/tree/master/extensions/manifest
 [corpus]: https://github.com/contour-terminal/contour/tree/master/extensions/orchestrator/contract/manifest-v2
+[cxx-probe]: https://github.com/contour-terminal/contour/tree/master/extensions/testing/cxx-daemon-probe
+[wasi-sdk]: https://github.com/WebAssembly/wasi-sdk
 
 ## Performance
 
