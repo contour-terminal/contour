@@ -919,8 +919,17 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// The id by which the vtworkspace layout model refers to this session. Set when the manager mirrors
     /// the session into the model. Identifies the leaf pane that hosts this session.
-    [[nodiscard]] vtworkspace::SessionId modelSessionId() const noexcept { return _modelSessionId; }
-    void setModelSessionId(vtworkspace::SessionId id) noexcept { _modelSessionId = id; }
+    ///
+    /// Read from any thread: the parser thread and a remote session's reactor thread key the refreshes they
+    /// post to the GUI thread by it, while the GUI thread sets it.
+    [[nodiscard]] vtworkspace::SessionId modelSessionId() const noexcept
+    {
+        return vtworkspace::SessionId { _modelSessionId.load(std::memory_order_acquire) };
+    }
+    void setModelSessionId(vtworkspace::SessionId id) noexcept
+    {
+        _modelSessionId.store(id.value, std::memory_order_release);
+    }
 
     std::optional<std::string> name() const
     {
@@ -2596,7 +2605,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     //
     TerminalSessionManager* _manager;
     int _id;
-    vtworkspace::SessionId _modelSessionId {};
+    /// The value of modelSessionId(), atomic because it is read off the GUI thread (see there).
+    std::atomic<uint64_t> _modelSessionId { 0 };
     /// When the session started, read from the app's injected steady clock (TerminalClocks::steady), which
     /// every reader of it reads too.
     std::chrono::steady_clock::time_point _startTime;
