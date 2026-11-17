@@ -86,10 +86,12 @@ HostedSession::HostedSession(SessionId id,
                              HostedSessionExtensions extensions,
                              std::string profileName,
                              SettingsOrigin settingsOrigin,
-                             std::optional<vtbackend::GitHeadServices> git):
+                             std::optional<vtbackend::GitHeadServices> git,
+                             std::optional<ServedBy> servedBy):
     _id(id),
     _profileName(std::move(profileName)),
     _settingsOrigin(settingsOrigin),
+    _servedBy(std::move(servedBy)),
     _statedSettings(toWireSessionSettings(settings)),
     _extensions(std::move(extensions.extensions)),
     _events(std::move(identity),
@@ -541,6 +543,8 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _defaultCellPixelSize(config.defaultCellPixelSize),
     _nextSessionId(config.firstSessionId),
     _extensions(std::move(config.extensions)),
+    // Before _objects takes config.uuids over.
+    _served(config.servedIds ? std::move(config.servedIds) : config.uuids),
     // Once the loop and the gate exist: the factory may post to the loop already.
     _daemonWorld(makeDaemonWorld(config.daemonWorld)),
     _announcedStatusPatience(config.announcedStatusPatience),
@@ -709,24 +713,127 @@ void SessionHost::settleStartDirectory(SessionSpawnRequest& request) const
     exec.workingDirectory.clear();
 }
 
+namespace
+{
+    /// A served session's device, as its terminal owns it: forwards every operation to the ChannelPty it
+    /// shares with ServedSessions, which buffers what the terminal writes. Closing it closes the device.
+    class ServedDevicePty final: public vtpty::Pty
+    {
+      public:
+        /// @param device The shared device; not null.
+        explicit ServedDevicePty(std::shared_ptr<vtpty::ChannelPty> device): _device(std::move(device)) {}
+
+        [[nodiscard]] vtpty::StartResult start() override { return _device->start(); }
+        [[nodiscard]] vtpty::PtySlave& slave() noexcept override { return _device->slave(); }
+        void close() override { _device->close(); }
+        void waitForClosed() override { _device->waitForClosed(); }
+        [[nodiscard]] bool isClosed() const noexcept override { return _device->isClosed(); }
+        [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
+                                                     std::optional<std::chrono::milliseconds> timeout,
+                                                     size_t size) override
+        {
+            return _device->read(storage, timeout, size);
+        }
+        void wakeupReader() override { _device->wakeupReader(); }
+        [[nodiscard]] int write(std::string_view data) override { return _device->write(data); }
+        [[nodiscard]] int writeInput(std::string_view data, vtpty::InputKind kind) override
+        {
+            return _device->writeInput(data, kind);
+        }
+        [[nodiscard]] vtpty::PageSize pageSize() const noexcept override { return _device->pageSize(); }
+        void resizeScreen(vtpty::PageSize cells,
+                          std::optional<vtpty::ImageSize> pixels = std::nullopt) override
+        {
+            _device->resizeScreen(cells, pixels);
+        }
+        [[nodiscard]] vtpty::ReadOrigin lastReadOrigin() const override { return _device->lastReadOrigin(); }
+
+      private:
+        std::shared_ptr<vtpty::ChannelPty> _device;
+    };
+
+    /// @return Who draws a session spawned as @p served; nullopt for a program.
+    [[nodiscard]] std::optional<ServedBy> servedByOf(std::optional<ServedSpawn> const& served)
+    {
+        if (!served)
+            return std::nullopt;
+        return ServedBy { .extension = served->extension,
+                          .scheme = served->scheme,
+                          .moduleDigest = served->moduleDigest };
+    }
+} // namespace
+
+bool SessionHost::admitsServed(ServedSpawn const& served) const
+{
+    if (_servedAdmission == ServedAdmission::Closed)
+    {
+        sessionLog()("a served tab of {} is refused while a live upgrade runs", served.extension);
+        return false;
+    }
+    if (served.device == nullptr)
+    {
+        errorLog()("a served tab of {} names no device; no session created", served.extension);
+        return false;
+    }
+    return true;
+}
+
+ServedBy const* SessionHost::servedBy(SessionId session) const noexcept
+{
+    auto const it = _sessions.find(session.value);
+    return it != _sessions.end() ? it->second->servedBy() : nullptr;
+}
+
+void SessionHost::closeServedSessions()
+{
+    _servedAdmission = ServedAdmission::Closed;
+    // Collected first: ending a session changes the map being walked.
+    auto const served = std::ranges::to<std::vector<SessionId>>(
+        sessionIds() | std::views::filter([this](SessionId id) { return servedBy(id) != nullptr; }));
+    for (auto const id: served)
+        endSession(id, SessionEnd::Upgrade);
+}
+
+void SessionHost::admitServedSessions() noexcept
+{
+    _servedAdmission = ServedAdmission::Open;
+}
+
 std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& incoming, SpawnIds const& ids)
 {
+    if (incoming.served && !admitsServed(*incoming.served))
+        return std::nullopt;
     auto const id = SessionId { _nextSessionId++ };
 
-    // Every shell is told where it lives, so the override is always engaged; an empty program or working
-    // directory in it still means "the configured one". The ids win over anything the request's own
-    // environment says.
     auto request = incoming;
-    if (!request.commandOverride)
-        request.commandOverride.emplace();
-    for (auto const& [name, value]: paneEnvironment(ids.workspace, ids.tab, ids.pane))
-        request.commandOverride->env.insert_or_assign(name, value);
-    settleStartDirectory(request);
-
-    auto spawn = resolveSpawn(request, id);
+    auto spawn = ResolvedSpawn {};
+    auto pty = std::unique_ptr<vtpty::Pty> {};
+    if (request.served)
+    {
+        // No program, so nothing that shapes one applies: the device the extension draws through, still
+        // shared with _served.
+        spawn.settings = request.settings;
+        spawn.settingsOrigin = request.settings ? SettingsOrigin::Client : SettingsOrigin::Profile;
+        request = SessionSpawnRequest { .settings = incoming.settings,
+                                        .presetIds = incoming.presetIds,
+                                        .served = incoming.served };
+        pty = std::make_unique<ServedDevicePty>(request.served->device);
+    }
+    else
+    {
+        // Every shell is told where it lives, so the override is always engaged; an empty program or working
+        // directory in it still means "the configured one". The ids win over anything the request's own
+        // environment says.
+        if (!request.commandOverride)
+            request.commandOverride.emplace();
+        for (auto const& [name, value]: paneEnvironment(ids.workspace, ids.tab, ids.pane))
+            request.commandOverride->env.insert_or_assign(name, value);
+        settleStartDirectory(request);
+        spawn = resolveSpawn(request, id);
+        pty = makePty(spawn);
+    }
     auto& requestedSettings = spawn.settings;
     auto& profileName = spawn.profileName;
-    auto pty = makePty(spawn);
     if (!pty)
     {
         // Until this line existed, a shell that could not be spawned produced NOTHING: the
@@ -757,8 +864,12 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
                      id.value,
                      settings.terminalId);
 
-    auto session = makeHostedSession(
-        id, std::move(pty), std::move(settings), std::move(profileName), spawn.settingsOrigin);
+    auto session = makeHostedSession(id,
+                                     std::move(pty),
+                                     std::move(settings),
+                                     std::move(profileName),
+                                     spawn.settingsOrigin,
+                                     servedByOf(request.served));
 
     // Before the pump starts: the seed assumes nothing else writes to the terminal.
     if (request.restoredHistory)
@@ -796,7 +907,8 @@ std::unique_ptr<HostedSession> SessionHost::makeHostedSession(SessionId id,
                                                               std::unique_ptr<vtpty::Pty> device,
                                                               vtbackend::Settings settings,
                                                               std::string profileName,
-                                                              SettingsOrigin origin)
+                                                              SettingsOrigin origin,
+                                                              std::optional<ServedBy> servedBy)
 {
     // The control-mode byte tap: fires on the session's PUMP thread with a view
     // into the read buffer, so the bytes are copied before crossing to the loop.
@@ -857,7 +969,8 @@ std::unique_ptr<HostedSession> SessionHost::makeHostedSession(SessionId id,
         makeSessionExtensions(id),
         std::move(profileName),
         origin,
-        _git.services());
+        _git.services(),
+        std::move(servedBy));
     // Neither pumped nor restored yet, so the application's first look at its window already sees the
     // host's cell -- a handover restore keeps it, as a cell size is not part of a terminal's state.
     pushCellPixelSize(hosted->terminal());

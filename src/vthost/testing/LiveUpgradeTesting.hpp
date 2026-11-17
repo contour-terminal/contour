@@ -31,6 +31,7 @@
 
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/DaemonImage.hpp>
+#include <vthost/SessionHost.hpp>
 #include <vthost/handover/HandoverToken.hpp>
 #include <vthost/handover/ImageHandoff.hpp>
 #include <vthost/handover/LiveUpgrade.hpp>
@@ -80,7 +81,29 @@ class RecordingHooks final: public handover::UpgradeHooks
         return ending ? ending() : std::size_t { 0 };
     }
 
+    void closeServedSessions() override
+    {
+        served.emplace_back("close");
+        if (onCloseServed)
+            onCloseServed();
+        if (host != nullptr)
+            host->closeServedSessions();
+    }
+
+    /// Records the call; a test that runs out of memory here ends, as noexcept says.
+    void admitServedSessions() noexcept override
+    {
+        served.emplace_back("admit");
+        if (host != nullptr)
+            host->admitServedSessions();
+    }
+
     std::vector<std::string> events;
+    /// What the served sessions were asked, in order: "close" and "admit". Apart from @ref events, which
+    /// tell the clients' story.
+    std::vector<std::string> served;
+    SessionHost* host = nullptr;         ///< The host the served-session calls reach; none when unset.
+    std::function<void()> onCloseServed; ///< Runs as the served sessions are closed, before the host is told.
     std::function<std::size_t()> ending; ///< How many connections are still ending; none when unset.
     std::function<void()> onClose;       ///< Runs as the clients are closed, while the sessions still run.
     std::function<void()> onAbort;       ///< Runs as the clients are closed at once.
@@ -111,6 +134,7 @@ struct UpgradeBench
         live { std::make_unique<LiveHost>(
             std::move(devices), LiveHost::sequentialIds(), std::move(settings)) }
     {
+        hooks.host = &live->host;
         std::ignore = files.writeFile("/home/u/Contour.AppImage", "ELF");
         auto staged = store.stage();
         REQUIRE(staged.has_value());

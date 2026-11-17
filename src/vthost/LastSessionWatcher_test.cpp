@@ -137,6 +137,25 @@ TEST_CASE("the shutdown is requested once across several exits", "[vthost][lifec
     CHECK(h.shutdowns == 1); // only the zero-transition arms the decision
 }
 
+TEST_CASE("an upgrade's own close of the last session keeps the daemon", "[vthost][lifecycle]")
+{
+    // A live upgrade closes a served session itself; an upgrade rolled back after it serves on with none.
+    auto h = WatcherHarness {};
+    auto const session = h.createSession();
+
+    h.host.endSession(session, vthost::SessionEnd::Upgrade);
+    h.pump();
+    h.pump();
+
+    REQUIRE(h.host.sessionCount() == 0);
+    CHECK(h.shutdowns == 0);
+
+    // The next close of a last session is the user's again, and ends the daemon.
+    h.host.closeSession(h.createSession());
+    h.pump();
+    CHECK(h.shutdowns == 1);
+}
+
 #ifndef _WIN32
 namespace
 {

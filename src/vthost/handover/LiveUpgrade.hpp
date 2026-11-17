@@ -84,6 +84,16 @@ class UpgradeHooks
     /// those still attached half way through LiveUpgradeConfig::settleTimeout, since a peer that stopped
     /// reading would hold an orderly close up for as long as it lives.
     virtual void abortClients() = 0;
+
+    /// Closes every served session (SessionHost::closeServedSessions()) and latches their admission closed:
+    /// no new image could adopt their devices (a served tab is disposable; its extension opens it again).
+    /// Called before the sessions are checked for a capture, so that the check never meets one.
+    virtual void closeServedSessions() = 0;
+
+    /// Admits served sessions again (SessionHost::admitServedSessions()): the upgrade ended without an exec,
+    /// whichever way. Called once for every closeServedSessions(), as run() unwinds.
+    /// Never throws: it runs from the guard's destructor, perhaps while an exception unwinds run().
+    virtual void admitServedSessions() noexcept = 0;
 };
 
 /// The PTY keeper a daemon runs behind, as its live upgrade sees it. An interface, because the keeper's

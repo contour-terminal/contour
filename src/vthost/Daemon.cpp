@@ -1834,7 +1834,8 @@ int runDaemon(DaemonConfig const& config,
     // before the runtime that holds the hooks and the drain that unwinds the tracked connections.
     auto const connections = ConnectionRegistry {};
     auto upgradeHooks =
-        DaemonUpgradeHooks { connections,
+        DaemonUpgradeHooks { host,
+                             connections,
                              persistence
                                  ? std::function<void()> { [&persistence] { persistence->writeNow(); } }
                                  : std::function<void()> {} };

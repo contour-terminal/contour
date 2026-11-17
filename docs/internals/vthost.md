@@ -2003,6 +2003,33 @@ Windows' built-in ConPTY and the bundled `conpty.dll` with `OpenConsole.exe`:
 | An AF_UNIX listener accepts in the successor what connected during and after the gap (`WSADuplicateSocketW` and handle inheritance alike) | pass | |
 | The same for a listener bound to the first process's completion port, once released | pass | |
 
+### Served sessions
+
+A *served session* is a hosted session that runs no program: a daemon-scoped extension draws its screen. Its
+device is a host-owned `vtpty::ChannelPty` that `ServedSessions` (one per `SessionHost`) makes: what the
+extension feeds it is the terminal's output, and what the terminal writes to it -- keys, mouse reports,
+replies -- is buffered for the extension, up to `MaxServedInputBytes` (64 KiB, one read). A chunk the terminal
+writes that does not fit whole is dropped whole, never cut, so that the extension never reads half a sequence.
+A spawn names it with `SessionSpawnRequest::served`; the session carries `ServedBy` (the extension, its scheme,
+the module's digest), and its tab holds that one pane.
+
+A served session is **disposable**: nothing of it survives the daemon, and its extension opens it again.
+
+- **A live upgrade closes it.** `LiveUpgrade::run` calls `UpgradeHooks::closeServedSessions()` right before it
+  checks that the sessions can be captured (`checkCapturable`), which therefore never meets one and keeps
+  refusing every *other* device no new image could adopt. The close is of its own kind,
+  `SessionEnd::Upgrade`: `LastSessionWatcher` does not count it, so an upgrade whose only session was a served
+  tab neither fails nor ends a daemon that exits with its last session -- one rolled back after the close serves
+  on with no session, exactly as the new image would.
+- **The upgrade latch.** The close also latches `ServedAdmission::Closed`: until the upgrade ends, a served
+  spawn is refused (logged), so that none is opened in place of the ones closed. `ServedAdmissionGuard`, armed
+  in `run` just before the close, calls `UpgradeHooks::admitServedSessions()` on every way out of `run` -- a
+  capture refusal, a failed quiesce, an oversized image, a keeper refusal, a failed exec. It is independent of
+  `UpgradeRollback`, which is built only after the capture check. After an exec that succeeded, the image that
+  held the latch is gone. A refused upgrade leaves the served tabs closed.
+- **A keeper recovery drops it.** It has no process, so the structure names it `SessionDevice::PtyOnly`, and
+  recovery adopts only the sessions the keeper held (`KeeperChild`); restoring the image closes its pane.
+
 ## Binary imsg IPC (the real tmux binary as a client)
 
 The daemon's third endpoint, `<control-socket>-tmux`, speaks tmux's binary

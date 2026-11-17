@@ -119,6 +119,8 @@ add_library(vthost STATIC
     ObjectRegistry.cpp
     ObjectRegistry.hpp
     PduPump.hpp
+    ServedSessions.cpp
+    ServedSessions.hpp
     SessionHost.cpp
     SessionHost.hpp
     WorkspaceGit.cpp
@@ -377,6 +379,7 @@ if(VTHOST_TESTING)
         LoopDrain_test.cpp
         NodeMove_test.cpp
         ObjectRegistry_test.cpp
+        ServedSessions_test.cpp
         SessionHost_test.cpp
         FlushPolicy_test.cpp
         SessionSettings_test.cpp
@@ -457,6 +460,7 @@ if(VTHOST_TESTING)
         testing/ForwardingFileSystem.hpp
         testing/GatedFileSystem.hpp
         testing/HandoverTesting.hpp
+        testing/ServedTesting.hpp
         testing/MemoryByteStream.hpp
         testing/StagingFileSystem.hpp
         testing/TestHelpers.hpp
@@ -520,7 +524,8 @@ if(VTHOST_TESTING)
         target_sources(vthost_test PRIVATE
             KeeperCrash_test.cpp keeperlink/KeeperChild_test.cpp keeperlink/KeeperDaemon_test.cpp
             keeperlink/KeeperLink_test.cpp
-            keeperlink/Recovery_test.cpp keeperlink/Structure_test.cpp testing/StartTrace_test.cpp)
+            keeperlink/Recovery_test.cpp keeperlink/Structure_test.cpp testing/StartTrace_test.cpp
+            ServedSession_test.cpp)
         target_link_libraries(vthost_test vthost_keeper_harness)
     endif()
     # vthost links no WebAssembly runtime; its tests compose one, as `contour daemon` does.

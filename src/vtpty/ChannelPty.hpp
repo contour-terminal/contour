@@ -57,11 +57,13 @@ class ChannelPty: public Pty
     /// Installs @p sink as the resize-request receiver.
     void setResizeSink(ResizeSink sink);
 
-    /// Feeds output to the (possibly blocked) reader, as a peer's bytes.
+    /// Feeds output to the (possibly blocked) reader, as a peer's bytes. Dropped once closed: nothing reads
+    /// them any more, and a peer that feeds on must not grow the buffer without bound.
     void feed(std::string_view data);
 
     /// Feeds a refill of what the peer's program wrote before (a tmux pane's capture-pane), which the reader
-    /// learns of through lastReadOrigin(): a read that lies within it is a Replay.
+    /// learns of through lastReadOrigin(): a read that lies within it is a Replay. Dropped once closed, as
+    /// feed().
     void feedReplay(std::string_view data);
 
     /// @return Everything the terminal wrote while no write sink was set.

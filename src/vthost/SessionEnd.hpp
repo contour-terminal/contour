@@ -4,7 +4,8 @@
 /// @file
 /// Why a hosted session ended. A session the user closed, or whose shell said `exit`, is gone for good; one
 /// a signal ended (the system stopping every shell before the daemon on shutdown, or Windows ending its
-/// console children at logoff) is a casualty of the machine going down, and a workspace snapshot keeps it.
+/// console children at logoff) is a casualty of the machine going down, and a workspace snapshot keeps it. A
+/// served session a live upgrade closes is neither: the upgrade's own close.
 
 #include <vtpty/Process.hpp>
 
@@ -22,6 +23,10 @@ enum class SessionEnd : std::uint8_t
     Exited = 0,    ///< The program ended on its own (`exit`), or how it ended is unknown.
     Requested = 1, ///< A client closed the pane or tab.
     Killed = 2,    ///< A signal ended it, or Windows' console-close status: a logoff or shutdown.
+    /// The host closed it for a live upgrade: a served session, whose device no new image could adopt.
+    /// Neither the user's close nor the program's end, so it never ends a daemon that exits with its last
+    /// session.
+    Upgrade = 3,
 };
 
 /// @param end The cause.
@@ -33,6 +38,7 @@ enum class SessionEnd : std::uint8_t
         case SessionEnd::Exited: return "exited";
         case SessionEnd::Requested: return "closed on request";
         case SessionEnd::Killed: return "killed";
+        case SessionEnd::Upgrade: return "closed for an upgrade";
     }
     return "ended";
 }

@@ -19,6 +19,7 @@
     #include <cstddef>
     #include <cstring>
     #include <exception>
+    #include <expected>
     #include <filesystem>
     #include <format>
     #include <functional>
@@ -61,6 +62,7 @@
     #include <vthost/testing/HandoverTesting.hpp>
     #include <vthost/testing/KeeperFixture.hpp>
     #include <vthost/testing/LiveUpgradeTesting.hpp>
+    #include <vthost/testing/ServedTesting.hpp>
     #include <vthost/testing/StagingFileSystem.hpp>
     #include <vthost/testing/TestHelpers.hpp>
 
@@ -1187,5 +1189,98 @@ TEST_CASE("a daemon running in place upgrades to its installed executable",
 
     // An image name means nothing to a store that stages nothing.
     CHECK(refusedWith(u.run(upgrade, UpgradeTarget { .imageId = u.imageId }), UpgradeRefusal::NotStaged));
+}
+
+TEST_CASE("the served sessions are closed before the capture is checked",
+          "[vthost][handover][upgrade][served]")
+{
+    auto u = Upgrade {};
+    u.live->spawnTwo();
+    auto const shells = u.live->host.sessionIds();
+    auto const served = vthost::testing::openServedTab(u.live->host);
+    REQUIRE(served.has_value());
+    REQUIRE(u.live->eventually([&] {
+        return std::ranges::all_of(shells,
+                                   [&](SessionId id) { return u.live->pageText(id).contains("ready"); });
+    }));
+
+    // Asked before anything else: nothing announced, nothing captured, the served session still there.
+    u.hooks.onCloseServed = [&] {
+        CHECK(u.hooks.events.empty());
+        CHECK(u.replacer.replacements.empty());
+        CHECK(u.live->host.servedBy(*served) != nullptr);
+    };
+    auto image = std::optional<HandoverImage> {};
+    u.replacer.onReplace = [&] {
+        image = readHandover(u.memory, handoverFdOf(u.replacer.replacements.back().second)).value();
+        throw ImageReplaced {};
+    };
+    auto upgrade = u.orchestrator();
+    REQUIRE_THROWS_AS(std::ignore = u.run(upgrade, UpgradeTarget { .imageId = u.imageId }), ImageReplaced);
+
+    REQUIRE(image.has_value());
+    CHECK(
+        std::ranges::to<std::vector<SessionId>>(image->sessions | std::views::transform(&HandoverSession::id))
+        == shells);
+    REQUIRE_FALSE(u.hooks.served.empty());
+    CHECK(u.hooks.served.front() == "close");
+    CHECK(u.live->host.servedBy(*served) == nullptr);
+}
+
+TEST_CASE("every refused upgrade admits served sessions again", "[vthost][handover][upgrade][served]")
+{
+    /// One way an upgrade ends without an exec, after the served sessions were closed.
+    struct Refusal
+    {
+        std::string_view name;
+        LiveHost::Devices shell; ///< The device of the session beside the served one.
+        std::string_view ready;  ///< What its screen shows once it can be captured.
+        uint64_t maxImageSize;   ///< LiveUpgradeConfig::maxImageSize.
+        std::function<bool(std::expected<void, UpgradeError> const&)> expected;
+    };
+    auto const refusals = std::vector<Refusal> {
+        // The path UpgradeRollback never covers: nothing is stopped yet.
+        { .name = "a session no new image could adopt",
+          .shell = [](vtpty::PageSize size) -> std::unique_ptr<vtpty::Pty> {
+              return std::make_unique<vthost::testing::StallingPty>(size);
+          },
+          .ready = "",
+          .maxImageSize = MaxHandoverImageSize,
+          .expected =
+              [](auto const& result) { return refusedWith(result, UpgradeRefusal::UnsupportedSession); } },
+        { .name = "an oversized image",
+          .shell = catDevice,
+          .ready = "ready",
+          .maxImageSize = 1,
+          .expected = [](auto const& result) { return refusedWith(result, UpgradeRefusal::ImageTooLarge); } },
+        { .name = "a failed exec",
+          .shell = catDevice,
+          .ready = "ready",
+          .maxImageSize = MaxHandoverImageSize,
+          .expected =
+              [](auto const& result) {
+                  return !result.has_value() && std::holds_alternative<ExecFailure>(result.error());
+              } },
+    };
+    for (auto const& refusal: refusals)
+    {
+        DYNAMIC_SECTION(refusal.name)
+        {
+            auto u = Upgrade { refusal.shell };
+            REQUIRE(u.live->host.createTab() != nullptr);
+            auto const shell = u.live->host.sessionIds().front();
+            REQUIRE(vthost::testing::openServedTab(u.live->host).has_value());
+            REQUIRE(u.live->eventually([&] { return u.live->pageText(shell).contains(refusal.ready); }));
+
+            auto config = Upgrade::config();
+            config.maxImageSize = refusal.maxImageSize;
+            auto upgrade = u.orchestrator(std::move(config));
+            CHECK(refusal.expected(u.run(upgrade, UpgradeTarget { .imageId = u.imageId })));
+
+            CHECK(u.hooks.served == std::vector<std::string> { "close", "admit" });
+            CHECK(u.live->host.servedAdmission() == ServedAdmission::Open);
+            CHECK(u.live->host.sessionIds() == std::vector { shell });
+        }
+    }
 }
 #endif

@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/MockPty.hpp>
+
+#include <core/Environment.hpp>
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
@@ -10,6 +13,7 @@
 #include <array>
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -18,9 +22,27 @@
 
 #include <vthost/ConnectionRegistry.hpp>
 #include <vthost/DaemonUpgradeHooks.hpp>
+#include <vthost/SessionHost.hpp>
+#include <vthost/testing/ServedTesting.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/Tab.hpp>
 
 namespace
 {
+
+/// A host over MockPty sessions with no pump threads, whose served sessions an upgrade closes.
+struct HostHarness
+{
+    core::net::testing::ScriptedBackend source;
+    core::net::EventLoop loop { source };
+    vthost::SessionHost host { loop,
+                               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                   return std::make_unique<vtpty::MockPty>(size);
+                               },
+                               vtbackend::Settings {},
+                               core::defaultEnvironment(),
+                               vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
+};
 
 /// An UpgradeObserver that records what it was told, in order, into a shared log.
 class RecordingObserver final: public vthost::UpgradeObserver
@@ -59,7 +81,8 @@ TEST_CASE("the requester is answered before any client is told", "[vthost][upgra
 {
     auto log = std::vector<std::string> {};
     auto const registry = vthost::ConnectionRegistry {};
-    auto hooks = vthost::DaemonUpgradeHooks { registry, [&log] { log.emplace_back("snapshot"); } };
+    auto host = HostHarness {};
+    auto hooks = vthost::DaemonUpgradeHooks { host.host, registry, [&log] { log.emplace_back("snapshot"); } };
     auto first = RecordingObserver { "a", log };
     auto second = RecordingObserver { "b", log };
     hooks.subscribe(first);
@@ -89,7 +112,8 @@ TEST_CASE("an unsubscribed observer is told nothing, and a daemon without a work
 {
     auto log = std::vector<std::string> {};
     auto const registry = vthost::ConnectionRegistry {};
-    auto hooks = vthost::DaemonUpgradeHooks { registry, {} };
+    auto host = HostHarness {};
+    auto hooks = vthost::DaemonUpgradeHooks { host.host, registry, {} };
     auto observer = RecordingObserver { "a", log };
     hooks.subscribe(observer);
     hooks.unsubscribe(observer);
@@ -117,7 +141,8 @@ TEST_CASE("closeClients closes every tracked connection of the other protocols",
     std::ignore = loop.runUntilIdle();
     REQUIRE(registry.size() == 2);
 
-    auto hooks = vthost::DaemonUpgradeHooks { registry, {} };
+    auto host = HostHarness {};
+    auto hooks = vthost::DaemonUpgradeHooks { host.host, registry, {} };
     hooks.closeClients();
     std::ignore = loop.runUntilIdle();
 
@@ -130,7 +155,8 @@ TEST_CASE("aborting the clients closes every observer's connection at once, and 
 {
     auto log = std::vector<std::string> {};
     auto const registry = vthost::ConnectionRegistry {};
-    auto hooks = vthost::DaemonUpgradeHooks { registry, {} };
+    auto host = HostHarness {};
+    auto hooks = vthost::DaemonUpgradeHooks { host.host, registry, {} };
     auto first = RecordingObserver { "a", log };
     auto second = RecordingObserver { "b", log };
     hooks.subscribe(first);
@@ -145,11 +171,32 @@ TEST_CASE("a connection is ending for as long as it stays subscribed", "[vthost]
 {
     auto log = std::vector<std::string> {};
     auto const registry = vthost::ConnectionRegistry {};
-    auto hooks = vthost::DaemonUpgradeHooks { registry, {} };
+    auto host = HostHarness {};
+    auto hooks = vthost::DaemonUpgradeHooks { host.host, registry, {} };
     auto observer = RecordingObserver { "a", log };
     CHECK(hooks.endingConnections() == 0);
     hooks.subscribe(observer);
     CHECK(hooks.endingConnections() == 1);
     hooks.unsubscribe(observer);
     CHECK(hooks.endingConnections() == 0);
+}
+
+TEST_CASE("the hooks close the host's served sessions, and admit them again",
+          "[vthost][upgrade][hooks][served]")
+{
+    auto h = HostHarness {};
+    auto const registry = vthost::ConnectionRegistry {};
+    auto hooks = vthost::DaemonUpgradeHooks { h.host, registry, {} };
+    REQUIRE(vthost::testing::openServedTab(h.host).has_value());
+    auto* const shell = h.host.createTab();
+    REQUIRE(shell != nullptr);
+    REQUIRE(h.host.sessionCount() == 2);
+
+    hooks.closeServedSessions();
+    CHECK(h.host.servedAdmission() == vthost::ServedAdmission::Closed);
+    REQUIRE(h.host.sessionCount() == 1);
+    CHECK(h.host.sessionIds().front() == shell->rootPane()->session());
+
+    hooks.admitServedSessions();
+    CHECK(h.host.servedAdmission() == vthost::ServedAdmission::Open);
 }

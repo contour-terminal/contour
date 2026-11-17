@@ -21,6 +21,7 @@
 #include <vtbackend/screen/TerminalClocks.hpp>
 #include <vtbackend/state/TerminalState.hpp>
 
+#include <vtpty/ChannelPty.hpp>
 #include <vtpty/ImageSize.hpp>
 #include <vtpty/PageSize.hpp>
 #include <vtpty/Process.hpp>
@@ -71,6 +72,7 @@
 #include <vthost/PermissionWire.hpp>
 #include <vthost/ProfileCatalog.hpp>
 #include <vthost/RestoredCounts.hpp>
+#include <vthost/ServedSessions.hpp>
 #include <vthost/SessionEnd.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/SessionSnapshot.hpp>
@@ -439,6 +441,35 @@ enum class TerminationReason : uint8_t
     Teardown,
 };
 
+/// Which extension draws a served session: a session that runs no program, whose device a daemon-scoped
+/// extension feeds. Disposable by design: a live upgrade closes it (SessionEnd::Upgrade), a keeper recovery
+/// drops it, and a workspace snapshot leaves its tab out; the extension opens it again.
+struct ServedBy
+{
+    std::string extension;    ///< The extension's name.
+    std::string scheme;       ///< What it serves the tab as, as the extension names it.
+    std::string moduleDigest; ///< The hex SHA-256 of the module that draws it; empty when unknown.
+
+    bool operator==(ServedBy const&) const = default;
+};
+
+/// A served spawn: no program, but the device ServedSessions::makeDevice() built, which the session adopts.
+/// The device stays shared with ServedSessions, which buffers what the session's terminal writes to it.
+struct ServedSpawn
+{
+    std::string extension;                        ///< @see ServedBy::extension
+    std::string scheme;                           ///< @see ServedBy::scheme
+    std::string moduleDigest;                     ///< @see ServedBy::moduleDigest
+    std::shared_ptr<vtpty::ChannelPty> device {}; ///< The device; null is refused.
+};
+
+/// Whether a host admits a served spawn.
+enum class ServedAdmission : uint8_t
+{
+    Open = 0, ///< It does.
+    Closed,   ///< A live upgrade runs: what it would have to close again is refused until it ends.
+};
+
 /// One hosted session: the terminal (owning its PTY) plus the pump thread
 /// feeding it, mirroring the GUI's TerminalSession::mainLoop.
 class HostedSession
@@ -466,6 +497,7 @@ class HostedSession
     /// @param profileName The host profile the session was spawned under; empty for none named.
     /// @param settingsOrigin Where @p settings came from.
     /// @param git Where the terminal's `{Git}` looks up its branch; none shows no branch.
+    /// @param servedBy The extension that draws the session; none for a session that runs a program.
     HostedSession(vtworkspace::SessionId id,
                   core::Environment const& env,
                   std::unique_ptr<vtpty::Pty> pty,
@@ -483,7 +515,8 @@ class HostedSession
                   HostedSessionExtensions extensions = {},
                   std::string profileName = {},
                   SettingsOrigin settingsOrigin = SettingsOrigin::Profile,
-                  std::optional<vtbackend::GitHeadServices> git = std::nullopt);
+                  std::optional<vtbackend::GitHeadServices> git = std::nullopt,
+                  std::optional<ServedBy> servedBy = std::nullopt);
 
     /// Closes the PTY, as terminate(TerminationReason::Teardown) does, and joins the pump thread.
     ~HostedSession();
@@ -565,6 +598,9 @@ class HostedSession
 
     /// @return Where the session's emulation settings came from.
     [[nodiscard]] SettingsOrigin settingsOrigin() const noexcept { return _settingsOrigin; }
+
+    /// @return The extension that draws the session; null for a session that runs a program.
+    [[nodiscard]] ServedBy const* servedBy() const noexcept { return _servedBy ? &*_servedBy : nullptr; }
 
     /// @return The emulation settings the session's terminal runs under, as a client states them: kept apart
     ///         from the terminal, so that reading them locks nothing (a structure capture runs while a pump
@@ -842,6 +878,7 @@ class HostedSession
     vtworkspace::SessionId _id;
     std::string _profileName;                   ///< @see profileName
     SettingsOrigin _settingsOrigin;             ///< @see settingsOrigin
+    std::optional<ServedBy> _servedBy;          ///< @see servedBy
     proto::WireSessionSettings _statedSettings; ///< @see statedSettings
     /// The session's status-line extensions; null without any. Declared before _terminal, which it outlives:
     /// ~Terminal revokes the sink their workers publish through before they are destroyed.
@@ -948,6 +985,11 @@ struct SessionSpawnRequest
     /// the host, when the session is seeded (@see SessionHost::workingDirectoryOf); a pane whose directory
     /// is unknown, or no longer exists, leaves the profile's directory in force. Nullopt inherits nothing.
     std::optional<vtworkspace::SessionId> directoryFrom {};
+
+    /// Engaged for a served session: it runs no program, but adopts the device named here, and every field
+    /// above that shapes a program (its command, profile, directory, history and input) is ignored. Refused
+    /// while the host's ServedAdmission is Closed. Nullopt spawns a program.
+    std::optional<ServedSpawn> served {};
 };
 
 /// Starts @p request's shell in @p directory by a directory-only override: an empty program keeps the
@@ -1134,6 +1176,8 @@ struct SessionHostConfig
     RecoveredSeeder seedRecovered {};
     /// Where the UUIDs of workspaces, tabs and panes come from. Tests pass a sequential one.
     std::shared_ptr<vtcontrol::UuidSource> uuids = vtcontrol::systemUuidSource();
+    /// Where the UUIDs of served tabs come from (@see ServedSessions); null for @ref uuids.
+    std::shared_ptr<vtcontrol::UuidSource> servedIds {};
     /// How long after its connection dropped a window is taken to still show its workspace, so that an
     /// attach does not take it (@see SessionHost::shownForAttach). The default is proto::ReconnectGrace: the
     /// longest wait between two reconnect attempts of a client plus the time one may take to attach.
@@ -1836,6 +1880,25 @@ class SessionHost final: public vtworkspace::ModelEvents, public IDaemonExtensio
     /// @param session The session to end.
     void closeSession(vtworkspace::SessionId session);
 
+    /// @param session A hosted session, or not.
+    /// @return The extension that draws @p session; null for one that runs a program, or is unknown.
+    [[nodiscard]] ServedBy const* servedBy(vtworkspace::SessionId session) const noexcept;
+
+    /// What a live upgrade does before it checks that the sessions can be captured: latches
+    /// ServedAdmission::Closed, so that no served spawn comes in its place, then ends every served session
+    /// with SessionEnd::Upgrade, as no new image could adopt its device. Loop thread.
+    void closeServedSessions();
+
+    /// Clears the latch closeServedSessions() set: the upgrade ended without an exec. The served sessions it
+    /// closed stay closed; their extensions open them again. Loop thread.
+    void admitServedSessions() noexcept;
+
+    /// @return Whether a served spawn is admitted now.
+    [[nodiscard]] ServedAdmission servedAdmission() const noexcept { return _servedAdmission; }
+
+    /// @return The devices of this host's served sessions.
+    [[nodiscard]] ServedSessions& served() noexcept { return _served; }
+
     /// @param session A hosted session.
     /// @return What the pane is doing now; every field empty for an unknown session.
     [[nodiscard]] PaneRuntime paneRuntime(vtworkspace::SessionId session) const;
@@ -1919,9 +1982,14 @@ class SessionHost final: public vtworkspace::ModelEvents, public IDaemonExtensio
         std::string name {};
     };
 
+    /// @param served A served spawn.
+    /// @return Whether it is admitted: the host's ServedAdmission is Open, and it names a device. Logs why
+    /// not.
+    [[nodiscard]] bool admitsServed(ServedSpawn const& served) const;
+
     /// @param incoming What this creation overrides about the session.
     /// @param ids The UUIDs the shell is told, and the pane's is bound to the session.
-    /// @return The minted id, or nullopt if the PTY factory failed.
+    /// @return The minted id, or nullopt if the PTY factory failed, or a served spawn was not admitted.
     [[nodiscard]] std::optional<vtworkspace::SessionId> seedSession(SessionSpawnRequest const& incoming,
                                                                     SpawnIds const& ids);
 
@@ -1932,12 +2000,15 @@ class SessionHost final: public vtworkspace::ModelEvents, public IDaemonExtensio
     /// @param settings Its terminal's settings, normalized already.
     /// @param profileName The profile it runs under; empty for none.
     /// @param origin Where @p settings came from.
+    /// @param servedBy The extension that draws it; none for a session that runs a program.
     /// @return The session.
-    [[nodiscard]] std::unique_ptr<HostedSession> makeHostedSession(vtworkspace::SessionId id,
-                                                                   std::unique_ptr<vtpty::Pty> device,
-                                                                   vtbackend::Settings settings,
-                                                                   std::string profileName,
-                                                                   SettingsOrigin origin);
+    [[nodiscard]] std::unique_ptr<HostedSession> makeHostedSession(
+        vtworkspace::SessionId id,
+        std::unique_ptr<vtpty::Pty> device,
+        vtbackend::Settings settings,
+        std::string profileName,
+        SettingsOrigin origin,
+        std::optional<ServedBy> servedBy = std::nullopt);
 
     /// Starts @p session's pump (unless the host pumps none), paints the indicator row its clients mirror,
     /// and registers it.
@@ -2504,6 +2575,11 @@ class SessionHost final: public vtworkspace::ModelEvents, public IDaemonExtensio
     /// The extensions every session runs; null for none. Declared before _sessions, so that it is destroyed
     /// after every session's extensions: its runtime joins the threads their runners lived on.
     std::shared_ptr<IExtensionHosting> _extensions;
+    /// The devices of the served sessions. Before _daemonWorld, whose extensions serve them, and before
+    /// _sessions, which hold the devices it made.
+    ServedSessions _served;
+    /// Whether a served spawn is admitted (@see closeServedSessions). Loop thread.
+    ServedAdmission _servedAdmission = ServedAdmission::Open;
     /// The daemon-scoped extensions; null for none. Made by SessionHostConfig::daemonWorld in the
     /// constructor, stopped by the destructor before it drains the loop. @see makeDaemonWorld
     std::shared_ptr<IDaemonWorldHosting> _daemonWorld;
