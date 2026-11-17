@@ -536,6 +536,15 @@ if(VTHOST_TESTING)
             VTHOST_TEST_SPAWNER_WASM="${CONTOUR_CARGO_TARGET_DIR}/${CONTOUR_WASM_TARGET}/release/spawner.wasm")
         add_dependencies(vthost_test spawner_wasm)
     endif()
+    # The daemon world end to end, with the agent orchestrator's module (extensions/orchestrator, added after
+    # src/; its target is resolved at generation) and its recorded fixtures, where the C++ guests are built.
+    if(CONTOUR_EXTENSIONS AND CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST)
+        target_sources(vthost_test PRIVATE DaemonWorldE2E_test.cpp)
+        target_compile_definitions(vthost_test PRIVATE
+            VTHOST_TEST_ORCHESTRATOR_WASM="${CMAKE_BINARY_DIR}/wasm/orchestrator.wasm"
+            VTHOST_TEST_ORCHESTRATOR_TESTDATA="${PROJECT_SOURCE_DIR}/extensions/orchestrator/core/testdata")
+        add_dependencies(vthost_test orchestrator_wasm)
+    endif()
     # The daemon's font behaviour is checked with the echo guest, which renders the state it reads.
     if(CONTOUR_EXTENSIONS AND TARGET echo_wasm)
         target_compile_definitions(vthost_test PRIVATE
