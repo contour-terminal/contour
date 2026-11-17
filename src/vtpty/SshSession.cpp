@@ -1127,6 +1127,14 @@ int SshSession::write(std::string_view buf)
         lock.unlock();
         waitForSocket(WriteRetryTimeout);
         lock.lock();
+
+        // Closed meanwhile by another thread: writing on would fail on a closed channel and turn the
+        // orderly Closed into a Failure.
+        if (isClosed())
+        {
+            errno = EPIPE;
+            return -1;
+        }
     }
 
     if (rv == LIBSSH2_ERROR_EAGAIN)
