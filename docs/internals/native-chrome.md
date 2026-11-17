@@ -170,6 +170,44 @@ is a defaults-edition choice (`EditionDefaults::tabSeparators`): `Classic` keeps
 every tab at rest at `separatorPercent`; `Native2026` draws it only where two tabs at rest meet, at
 `tabSeparatorPercent`.
 
+`tab_style.preset` names a look that sets several keys at once. Each preset is one row of
+`TabPresetRows`. `withTabPreset` lays it under the section before anything reads it (at
+`resolvedChromeTokens` and in the chrome inputs): a key still at its default takes the preset's value,
+and a key the user set wins. "At its default" rather than "absent", because a generated file writes every
+key. `withTabPreset` lists the members a row may set; the preset test fails for a row that sets one the
+list misses.
+
+The tabs, beyond the section:
+
+- **Icons.** A profile's `tab_icon` (`auto`, `none`, or an image path) becomes a `TabIcon` through the pure
+  `window::tabIconOf` (`TabIcon.hpp`). `auto` takes the initial of the program in front of the shell
+  (`runningProgramOf`). `WindowController` publishes it as `IconRole`, a `{ kind, text }` map
+  (`tabIconVariant`), and `TabIconMark.qml` draws it in the strip and on the sidebar's tab rows. The
+  square is shaded away from a tab its colour or the accent fills (`UiStyleProvider::markOn`, which is
+  `config::legibleShadeOn` at mark contrast). `tab_icon` is the one profile key that is not inherited
+  from the default profile: `loadProfileBody` resets it to `auto` before reading the profile's own value,
+  because an icon copied into every profile identifies none of them.
+- **Motion.** The strip's `ListView` fades a new tab in and slides the tabs beside one opened or closed
+  (`add`, `displaced`, `moveDisplaced`). The active tab's indicator is one line for the strip
+  (`tabSlidingIndicator`), which slides to the tab made active; a tab draws its own line only where the
+  strip's does not stand (`lineOnStrip`). Every displacement also animates opacity and scale back to 1.
+  A tab displaced while its `add` transition runs (opened, then the tab before it closed) otherwise keeps
+  the opacity and scale that transition had reached: transparent under Reduce Motion, 92% wide under full
+  motion. This is Qt's "handling interrupted animations"; the sidebar's rows follow the same rule.
+- **Hover details.** The tab's tooltip, and the sidebar's hover card for a tab or pane the window holds,
+  add what runs in the pane and how its last command ended. `session::tabHoverFactsOf` reads them from
+  the command-block records, falling back to the foreground process name without shell integration.
+- **The sidebar's rows of tabs the window holds** find their session through the directory tab's pane
+  keys (`WindowController::sessionForDirectoryTab`), since a daemon's tab ids are its own. Rows of other
+  workspaces and daemons show neither icon nor hover lines: the directory carries no profile or
+  program for them.
+
+The activity badges (unseen output, a bell, a finished command) predate this section and are unchanged,
+except for what counts as output. `vtbackend::Terminal::mainDisplayOutputCount()` counts the runs of text
+and C0 controls the parser writes to the main display. The in-process session (`screenUpdated`) and the
+daemon's summary mark (`NativeSession::noteActivity`) raise the unseen-output mark only when it moved,
+so a program that only rewrites the host-writable status line marks nothing.
+
 `DefaultsEdition { Classic = 0, Native2026 }` exists because a configuration that sets only
 `profiles.main.font` would otherwise inherit every new default. A fresh install is `Native2026` by
 virtue of the generated file carrying `defaults_edition: native2026`. A file that sets nothing is
