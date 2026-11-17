@@ -440,6 +440,10 @@ TEST_CASE("Config: a malformed ssh key falls back alone, the host stays", "[conf
         Row { "port", "twenty-two" },
         Row { "port", "[1, 2]" },
         Row { "forward_agent", "maybe" },
+        // Not port numbers: 70000 would wrap round to 4464 in htons().
+        Row { "port", "70000" },
+        Row { "port", "0" },
+        Row { "port", "-22" },
     };
     for (auto const& row: table)
     {
