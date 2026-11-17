@@ -430,9 +430,9 @@ Row {
                     }
                     visible: tab !== null && tab.lineOnStrip
                     // Exactly on the tab once the slide is over, where a blend would leave a rounding error.
-                    x: travel >= 1 ? targetX : fromX + (targetX - fromX) * travel
+                    x: travel >= slide.to ? targetX : fromX + (targetX - fromX) * travel
                     y: tab ? tab.y + tab.indicatorY : 0
-                    width: travel >= 1 ? targetWidth : fromWidth + (targetWidth - fromWidth) * travel
+                    width: travel >= slide.to ? targetWidth : fromWidth + (targetWidth - fromWidth) * travel
                     height: chromeStyle.size.progressBar
                     color: tab ? tab.indicatorTint : "transparent"
                 }

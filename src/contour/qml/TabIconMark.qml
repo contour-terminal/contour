@@ -12,6 +12,8 @@ Rectangle {
     property var info: ({})
     /// The face the initial is set in.
     property string fontFamily: ""
+    /// How much of the square's height the initial takes.
+    readonly property real initialShare: 0.7
 
     readonly property int kind: mark.info.kind ?? chromeStyle.tabIconKinds.row
     readonly property bool isHidden: mark.kind === chromeStyle.tabIconKinds.hidden
@@ -26,7 +28,7 @@ Rectangle {
         visible: mark.isMonogram
         text: visible ? mark.info.text : ""
         font.family: mark.fontFamily
-        font.pixelSize: Math.round(parent.height * 0.7)
+        font.pixelSize: Math.round(parent.height * mark.initialShare)
         font.bold: true
         // Black or white, whichever reads on the square.
         color: chromeStyle.onColor(parent.color)
