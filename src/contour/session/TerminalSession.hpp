@@ -3164,6 +3164,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The origins of the output gathered for the queued tab-badge notice, one bit per window::OutputOrigin;
     /// zero when none is queued (@see noteOutputForTab). Set on the parser thread, cleared on the GUI thread.
     std::atomic<uint8_t> _pendingOutputOrigins = 0;
+    /// The terminal's mainDisplayOutputCount() when screenUpdated() last looked: a batch that leaves it where
+    /// it was wrote to a status line alone, and raises no unseen-output mark. Parser thread only.
+    uint64_t _notedMainDisplayOutput = 0;
     /// The origins of the bells gathered for the queued bell notice, like @ref _pendingOutputOrigins
     /// (@see noteBellForTab). Set on the parser thread, cleared on the GUI thread.
     std::atomic<uint8_t> _pendingBellOrigins = 0;

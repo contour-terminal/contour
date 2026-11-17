@@ -486,7 +486,7 @@ void NativeSession::forgetSession(SessionId session)
     _recordsAwaitingRoom.erase(session.value);
     _programStatusPending.erase(session.value);
     _pendingSummaries.erase(session.value);
-    _activityMarkedAt.erase(session.value);
+    _activityMarks.erase(session.value);
     _inputEchoPending.erase(session.value);
     _inputEchoSent.erase(session.value);
     _softFontsSent.erase(session.value);
@@ -819,14 +819,18 @@ void NativeSession::noteActivity(SessionId session)
 {
     if (!summarizesPanes())
         return;
-    auto const now = _loop.clock().now();
-    auto const [marked, first] = _activityMarkedAt.try_emplace(session.value, now);
-    if (!first)
+    auto& mark = _activityMarks[session.value];
+    // A program that only rewrote its status line changed nothing the user would see in the pane.
+    if (auto const* terminal = _host.terminal(session))
     {
-        if (now - marked->second < _services.flush.activityMarkInterval)
+        auto const pageOutput = terminal->mainDisplayOutputCount();
+        if (std::exchange(mark.mainDisplayOutput, pageOutput) == pageOutput)
             return;
-        marked->second = now;
     }
+    auto const now = _loop.clock().now();
+    if (mark.markedAt && now - *mark.markedAt < _services.flush.activityMarkInterval)
+        return;
+    mark.markedAt = now;
     queueSummary(session,
                  [](proto::PaneSummary& summary) { summary.activity = proto::OutputActivity::Output; });
 }

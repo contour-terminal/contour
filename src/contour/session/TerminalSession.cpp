@@ -969,10 +969,15 @@ void TerminalSession::screenUpdated()
         requestOverlayClearanceRefresh();
     // Ahead of the display check: the tab badge's unseen-output dot is for the sessions that have no
     // display -- a background tab's panes are not loaded at all. A tmux pane's capture-pane refill arrives
-    // as bytes like any other, so its device says where what the parser just read came from.
-    noteOutputForTab(_terminal.device().lastReadOrigin() == vtpty::ReadOrigin::Replay
-                         ? window::OutputOrigin::Resync
-                         : window::OutputOrigin::Live);
+    // as bytes like any other, so its device says where what the parser just read came from. A batch that
+    // wrote only to the host-writable status line (a prompt's clock, a program's own status) left the page
+    // as it was, which is no news; a mirror parses nothing, and its host made that call already.
+    auto const pageOutput = _terminal.mainDisplayOutputCount();
+    if (_hosting == SessionHosting::Remote
+        || std::exchange(_notedMainDisplayOutput, pageOutput) != pageOutput)
+        noteOutputForTab(_terminal.device().lastReadOrigin() == vtpty::ReadOrigin::Replay
+                             ? window::OutputOrigin::Resync
+                             : window::OutputOrigin::Live);
     askAboutInterruptionOffer();
     repaintChangedScreen();
 }
