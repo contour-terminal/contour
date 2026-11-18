@@ -6349,6 +6349,77 @@ TEST_CASE("TerminalSessionManager: a daemon's window routes the workspace mutati
 
     manager.releaseBinding(binding);
 }
+
+TEST_CASE("TerminalSessionManager: a daemon's window asks its daemon to move a tab by its action",
+          "[manager][workspace][daemon]")
+{
+    // The daemon knows the two panes made here as its sessions 1000 and 1001: tabs 100 and 101 of workspace
+    // 10, as its directory lists them.
+    contour::test::MockPtySessionFactory daemon;
+    hostAsDaemon(daemon, 7);
+    daemon.hostSessionIdBase = 1000;
+    auto binding = DaemonDirectoryBinding { daemon };
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, binding);
+    auto* const first = manager.createSession(window.id);
+    auto* const second = manager.createSession(window.id);
+    REQUIRE(first != nullptr);
+    REQUIRE(second != nullptr);
+    auto const* const workspace = manager.model().workspace(window.id);
+    REQUIRE(workspace->tabCount() == 2);
+    auto const firstTab = workspace->tabAt(0)->id();
+    auto const requireMove = [&](uint64_t source, int index, uint64_t workspaceSession = 1000) {
+        REQUIRE(daemon.requestedMoves.size() == 1);
+        auto const& move = daemon.requestedMoves.front();
+        CHECK(move.source == vtworkspace::MoveSourceKind::Tab);
+        CHECK(move.sourceSessions == std::vector<uint64_t> { source });
+        CHECK(move.target == vtworkspace::MoveTargetKind::TabWell);
+        CHECK(move.targetSession == workspaceSession);
+        CHECK(move.index == index);
+        daemon.requestedMoves.clear();
+    };
+
+    // The leftmost tab moved left is nowhere to go: the daemon is not asked.
+    manager.moveTabToLeft(first);
+    CHECK(daemon.requestedMoves.empty());
+
+    // Moved right, it is asked of the daemon, to end at the second place; the daemon's push moves it here.
+    manager.moveTabToRight(first);
+    requireMove(1000, 1);
+    CHECK(workspace->tabAt(0)->id() == firstTab);
+
+    // The second tab moved left, and the first moved to the second place by position.
+    manager.moveTabToLeft(second);
+    requireMove(1001, 0);
+    manager.moveTabTo(2, first);
+    requireMove(1000, 1);
+    CHECK(workspace->tabAt(0)->id() == firstTab);
+
+    // The daemon lists a tab of session 1002 ahead of them that this window does not mirror yet (it would
+    // place it last), so the places are the daemon's: the first tab is its second, and can move left; and
+    // there are three places to move to by position, the third being past the window's own two.
+    auto directory = binding.source.directory();
+    auto& build = directory.workspaces.front();
+    auto unmirrored = build.tabs.front();
+    unmirrored.id = 102;
+    unmirrored.panes.front().key = contour::window::PaneKey { 1002 };
+    build.tabs.insert(build.tabs.begin(), unmirrored);
+    binding.source.replaced = directory;
+    manager.moveTabToLeft(first);
+    requireMove(1000, 0, 1002);
+    manager.moveTabTo(3, first);
+    requireMove(1000, 2, 1002);
+    // The second tab is the daemon's last: there is no place to its right.
+    manager.moveTabToRight(second);
+    CHECK(daemon.requestedMoves.empty());
+    manager.moveTabTo(4, first);
+    CHECK(daemon.requestedMoves.empty());
+
+    contour::test::closeAllTabs(*window.controller);
+    manager.releaseBinding(binding);
+}
 // }}}
 
 // {{{ the sidebar's actions reach the workspace mutations

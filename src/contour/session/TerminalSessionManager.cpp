@@ -2836,45 +2836,75 @@ void TerminalSessionManager::moveTabByTab(vtworkspace::Tab* tab, int targetRow)
 {
     // The single move mechanism: reorder the tab through the authoritative model — within the tab's
     // OWNING window — so the tab strip and status line (both model-driven) actually move, then
-    // refresh. Every move entry point funnels through here so this post-move refresh lives in one
-    // place.
+    // refresh. Every in-process move entry point funnels through here so this post-move refresh lives in
+    // one place; a daemon-served window's keyboard moves do not (moveTabByPlacement() asks its daemon
+    // instead).
     if (tab == nullptr)
         return;
     _model->moveTab(_model->workspaceOfTab(tab->id()), tab->id(), targetRow);
     updateStatusLine();
 }
 
-void TerminalSessionManager::moveTabToRow(TerminalSession* session, int targetRow)
+std::optional<int> TerminalSessionManager::targetPlaceOf(TabPlacement placement,
+                                                         int current,
+                                                         int count) noexcept
 {
-    moveTabByTab(tabHostingSession(session), targetRow);
+    if (current < 0 || current >= count)
+        return std::nullopt;
+    auto const target =
+        placement.kind == TabPlacement::Kind::Offset ? current + placement.amount : placement.amount - 1;
+    if (target < 0 || target >= count)
+        return std::nullopt;
+    return target;
+}
+
+void TerminalSessionManager::moveTabByPlacement(TerminalSession* session, TabPlacement placement)
+{
+    auto* const tab = tabHostingSession(session);
+    if (tab == nullptr)
+        return;
+    // A daemon's window shows the daemon's layout: one moved here only would be put back by its next push.
+    // The daemon is asked instead, by the tab its directory lists, and its push moves the tab here. The place
+    // is reckoned in the daemon's list, which can hold tabs not mirrored here yet (placed last locally).
+    if (auto* const owner = controllerOwning(_model->workspaceOfTab(tab->id()));
+        owner != nullptr && listsRemotely(*owner))
+    {
+        auto const* const source = owner->directorySource();
+        if (source == nullptr)
+            return;
+        auto const host = hostSessionIdOf(*session);
+        auto const directory = source->directory();
+        auto const listed =
+            host ? window::tabHoldingPane(directory, window::PaneKey { *host }) : std::nullopt;
+        if (!listed)
+            return;
+        auto const& tabs = listed->workspace->tabs;
+        auto const current = static_cast<int>(listed->tab - tabs.data());
+        if (auto const target = targetPlaceOf(placement, current, static_cast<int>(tabs.size())))
+            moveTabToWorkspace(*owner, listed->tab->id, listed->workspace->id, *target);
+        return;
+    }
+    auto const* const win = windowHostingSession(session);
+    if (win == nullptr)
+        return;
+    if (auto const target = targetPlaceOf(placement, rowOfTab(tab->id()), win->tabCount()))
+        moveTabByTab(tab, *target);
 }
 
 void TerminalSessionManager::moveTabTo(int position, TerminalSession* acting)
 {
-    // position is 1-based (the keybinding's argument); the model is 0-based tab-space.
-    auto* win = windowHostingSession(acting);
-    if (win == nullptr || position < 1 || position > win->tabCount())
-        return;
-    moveTabToRow(acting, position - 1);
+    // position is 1-based (the keybinding's argument).
+    moveTabByPlacement(acting, TabPlacement { .kind = TabPlacement::Kind::Position, .amount = position });
 }
 
 void TerminalSessionManager::moveTabToLeft(TerminalSession* session)
 {
-    auto* tab = tabHostingSession(session);
-    if (tab == nullptr)
-        return;
-    if (auto const row = rowOfTab(tab->id()); row > 0)
-        moveTabToRow(session, row - 1);
+    moveTabByPlacement(session, TabPlacement { .kind = TabPlacement::Kind::Offset, .amount = -1 });
 }
 
 void TerminalSessionManager::moveTabToRight(TerminalSession* session)
 {
-    auto* win = windowHostingSession(session);
-    auto* tab = tabHostingSession(session);
-    if (tab == nullptr || win == nullptr)
-        return;
-    if (auto const row = rowOfTab(tab->id()); row >= 0 && row + 1 < win->tabCount())
-        moveTabToRow(session, row + 1);
+    moveTabByPlacement(session, TabPlacement { .kind = TabPlacement::Kind::Offset, .amount = 1 });
 }
 
 void TerminalSessionManager::currentSessionIsTerminated()

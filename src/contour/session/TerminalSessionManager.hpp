@@ -2334,13 +2334,34 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
         return hostOf(session).controller;
     }
 
-    /// Shared move primitive for the public move-tab entry points: reorders the tab hosting @p session to
-    /// model row @p targetRow through the authoritative model and refreshes the status line. The callers
-    /// own their distinct target-row computation and bounds checks; this resolves the session to its tab
-    /// then defers to moveTabByTab() for the common move / updateStatusLine mechanism.
+    /// Where a keyboard move takes a tab: some places along its row, or to a 1-based position.
+    struct TabPlacement
+    {
+        /// How @c amount reads.
+        enum class Kind : uint8_t
+        {
+            Offset,   ///< Places along: -1 is one to the left.
+            Position, ///< The 1-based place it ends at.
+        };
+        Kind kind = Kind::Offset;
+        int amount = 0;
+    };
+
+    /// Shared move primitive for the public move-tab entry points: moves the tab hosting @p session to where
+    /// @p placement says, in the order of whoever owns it. In-process that is the model's, and the move goes
+    /// through moveTabByTab(). In a window a daemon lists (listsRemotely()) it is the daemon's, whose
+    /// workspace can list tabs this window does not mirror, so the place is reckoned among the daemon's tabs
+    /// and the daemon is asked to move it (moveTabToWorkspace()); its layout push moves it here. A placement
+    /// past either end is a no-op.
     /// @param session   The backing session whose tab to move (nullptr or unknown is a no-op).
-    /// @param targetRow The destination row in 0-based model tab-space.
-    void moveTabToRow(TerminalSession* session, int targetRow);
+    /// @param placement Where the tab goes.
+    void moveTabByPlacement(TerminalSession* session, TabPlacement placement);
+
+    /// @return The 0-based place @p placement takes a tab at place @p current among @p count tabs, or none
+    ///         when that is past either end (or @p current is no place at all).
+    [[nodiscard]] static std::optional<int> targetPlaceOf(TabPlacement placement,
+                                                          int current,
+                                                          int count) noexcept;
 
     /// A move into a window of its own, staged until that window exists.
     struct PendingTransplant
