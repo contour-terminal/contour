@@ -1019,6 +1019,19 @@ TEST_CASE("display: font zoom keeps the window fixed and changes the page size i
     CHECK(h.session->terminal().pageSize().columns >= pageAfter.columns);
 }
 
+TEST_CASE("display: a second window has its own display, session and controller", "[display][multiwindow]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness a;
+    a.bindController();
+    contour::test::SecondWindow b { a };
+    CHECK(b.display.get() != a.display.get());
+    CHECK(b.session.get() != a.session.get());
+    CHECK(b.controller != a.controller);
+    CHECK(b.controller->windowId() != a.controller->windowId());
+    CHECK(b.display->fontSize().pt == a.display->fontSize().pt);
+}
+
 TEST_CASE("display: a font-size change with resize reports echoed locally does not deadlock",
           "[display][fonts]")
 {
