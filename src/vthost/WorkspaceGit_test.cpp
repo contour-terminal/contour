@@ -495,7 +495,7 @@ TEST_CASE("switching the active pane queues a probe", "[vthost][git][host]")
 {
     auto h = FollowedHost {};
     auto const firstLeaf = h.tab->activePane()->id();
-    h.f.host.splitActivePane(h.tab->id(), vtworkspace::SplitState::Vertical);
+    std::ignore = h.f.host.splitActivePane(h.tab->id(), vtworkspace::SplitState::Vertical);
     REQUIRE(h.tab->activePane()->id() != firstLeaf);
     h.report(*h.tab, "/r/b"); // the new pane's shell
     h.f.probe.asked.clear();

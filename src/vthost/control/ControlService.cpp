@@ -88,6 +88,15 @@ namespace
                               .candidates = {} };
     }
 
+    /// @param message Why a served tab refused the call.
+    /// @return `Forbidden`, saying @p message: a served tab stays whole.
+    [[nodiscard]] ControlError servedRefusal(std::string message)
+    {
+        return ControlError { .code = ControlErrorCode::Forbidden,
+                              .message = std::move(message),
+                              .candidates = {} };
+    }
+
     /// @return @p done as a waiter's completion: the block it ended with becomes the reply's `block`.
     /// @tparam Reply A reply whose one member is the optional block, `WaitReply` or `SendReply`.
     template <typename Reply>
@@ -249,8 +258,22 @@ std::vector<TargetCandidate> ControlService::workspaceCandidates() const
     return candidates;
 }
 
+std::expected<ControlService::PaneTarget, ControlError> ControlService::reachable(PaneTarget const& pane,
+                                                                                  PaneUse use) const
+{
+    auto const* const served = use == PaneUse::Content ? _host.servedBy(pane.session) : nullptr;
+    if (served == nullptr)
+        return pane;
+    return std::unexpected(ControlError {
+        .code = ControlErrorCode::Forbidden,
+        .message = std::format(
+            "the pane is served by extension '{}'; its content is not reachable through the control API",
+            served->extension),
+        .candidates = {} });
+}
+
 std::expected<ControlService::PaneTarget, ControlError> ControlService::resolvePane(
-    vtcontrol::CallContext const& context, std::string_view spec) const
+    vtcontrol::CallContext const& context, std::string_view spec, PaneUse use) const
 {
     // An empty target is the caller's own pane. A caller that names a pane that is gone gets NotFound for it,
     // never another pane: a script outliving its pane must not type into whatever is active now.
@@ -265,7 +288,9 @@ std::expected<ControlService::PaneTarget, ControlError> ControlService::resolveP
         auto const uuid = _host.objects().uuidOf(leaf->session());
         if (!uuid)
             return std::unexpected(notFound("the active pane has no id"));
-        return livePane(leaf->session(), *uuid, "the active pane");
+        return livePane(leaf->session(), *uuid, "the active pane").and_then([&](PaneTarget const& pane) {
+            return reachable(pane, use);
+        });
     }
 
     auto const candidates = paneCandidates();
@@ -275,7 +300,8 @@ std::expected<ControlService::PaneTarget, ControlError> ControlService::resolveP
             auto const* session = handle ? std::get_if<SessionId>(&*handle) : nullptr;
             if (session == nullptr)
                 return std::unexpected(notFound(std::format("pane '{}' is gone", named)));
-            return livePane(*session, ref.uuid, std::format("pane '{}'", named));
+            return livePane(*session, ref.uuid, std::format("pane '{}'", named))
+                .and_then([&](PaneTarget const& pane) { return reachable(pane, use); });
         });
 }
 
@@ -293,7 +319,7 @@ std::expected<TabId, ControlError> ControlService::resolveTab(vtcontrol::CallCon
                                                               std::string_view spec) const
 {
     if (spec.empty())
-        return resolvePane(context, {})
+        return resolvePane(context, {}, PaneUse::Address)
             .and_then([&](PaneTarget const& pane) -> std::expected<TabId, ControlError> {
                 auto const [workspace, tab, leaf] = _host.model().findSessionLeaf(pane.session);
                 if (tab == nullptr)
@@ -318,7 +344,7 @@ std::expected<WorkspaceId, ControlError> ControlService::resolveWorkspace(
 {
     if (spec.empty())
     {
-        auto const pane = resolvePane(context, {});
+        auto const pane = resolvePane(context, {}, PaneUse::Address);
         // A daemon whose workspace holds no pane yet still has a workspace to put a tab in; a caller whose
         // pane is gone has none.
         if (!pane)
@@ -533,27 +559,24 @@ void ControlService::handle(vtcontrol::CallContext& context,
             .candidates = {} }));
         return;
     }
-    done(resolvePane(context, request.pane).transform([&](PaneTarget const& pane) {
-        return capture(pane, request.scrollback);
-    }));
+    done(resolvePane(context, request.pane, paneUseOf<vtcontrol::CaptureRequest>())
+             .transform([&](PaneTarget const& pane) { return capture(pane, request.scrollback); }));
 }
 
 void ControlService::handle(vtcontrol::CallContext& context,
                             vtcontrol::BlockListRequest const& request,
                             vtcontrol::Completion<vtcontrol::BlockListReply> done)
 {
-    done(resolvePane(context, request.pane).transform([&](PaneTarget const& pane) {
-        return listBlocks(pane, request.limit);
-    }));
+    done(resolvePane(context, request.pane, paneUseOf<vtcontrol::BlockListRequest>())
+             .transform([&](PaneTarget const& pane) { return listBlocks(pane, request.limit); }));
 }
 
 void ControlService::handle(vtcontrol::CallContext& context,
                             vtcontrol::BlockReadRequest const& request,
                             vtcontrol::Completion<vtcontrol::BlockReadReply> done)
 {
-    done(resolveBlock(context, request.block, request.pane).and_then([&](BlockTarget const& block) {
-        return readBlock(block, request.part);
-    }));
+    done(resolveBlock(context, request.block, request.pane, paneUseOf<vtcontrol::BlockReadRequest>())
+             .and_then([&](BlockTarget const& block) { return readBlock(block, request.part); }));
 }
 
 void ControlService::handle(vtcontrol::CallContext& context,
@@ -624,11 +647,11 @@ vtcontrol::BlockListReply ControlService::listBlocks(PaneTarget const& pane, uin
 }
 
 std::expected<ControlService::BlockTarget, ControlError> ControlService::resolveBlock(
-    vtcontrol::CallContext const& context, std::string_view block, std::string_view pane) const
+    vtcontrol::CallContext const& context, std::string_view block, std::string_view pane, PaneUse use) const
 {
     // No block names the pane's last finished one.
     if (block.empty())
-        return resolvePane(context, pane).transform([](PaneTarget const& target) {
+        return resolvePane(context, pane, use).transform([](PaneTarget const& target) {
             return BlockTarget { .pane = target, .serial = std::nullopt };
         });
 
@@ -636,9 +659,12 @@ std::expected<ControlService::BlockTarget, ControlError> ControlService::resolve
     auto const ref = vtcontrol::parseBlockRef(block);
     if (!ref)
         return std::unexpected(notFound(std::format("'{}' is not a block id", block)));
-    auto const target = resolvePane(context, idOf(ObjectKind::Pane, ref->pane));
+    auto const target = resolvePane(context, idOf(ObjectKind::Pane, ref->pane), use);
     if (!target)
-        return std::unexpected(notFound(std::format("block '{}': {}", block, target.error().message)));
+        return std::unexpected(
+            ControlError { .code = target.error().code,
+                           .message = std::format("block '{}': {}", block, target.error().message),
+                           .candidates = {} });
     return BlockTarget { .pane = *target, .serial = ref->serial };
 }
 
@@ -694,7 +720,7 @@ std::expected<ObjectRef, ControlError> ControlService::resolveObject(vtcontrol::
     switch (*kind)
     {
         case ObjectKind::Pane:
-            return resolvePane(context, spec).transform([](PaneTarget const& pane) {
+            return resolvePane(context, spec, PaneUse::Address).transform([](PaneTarget const& pane) {
                 return ObjectRef { .kind = ObjectKind::Pane, .uuid = pane.uuid };
             });
         case ObjectKind::Tab:
@@ -731,7 +757,7 @@ void ControlService::handle(vtcontrol::CallContext& context,
                             vtcontrol::SendRequest const& request,
                             vtcontrol::Completion<vtcontrol::SendReply> done)
 {
-    auto const pane = resolvePane(context, request.pane);
+    auto const pane = resolvePane(context, request.pane, paneUseOf<vtcontrol::SendRequest>());
     if (pane && request.wait == vtcontrol::SendWait::CommandFinished)
     {
         sendAndWait(context, *pane, request.text, std::move(done));
@@ -812,16 +838,18 @@ void ControlService::handle(vtcontrol::CallContext& context,
                             vtcontrol::ReportStatusRequest const& request,
                             vtcontrol::Completion<vtcontrol::EmptyReply> done)
 {
-    done(resolvePane(context, request.pane).and_then([&](PaneTarget const& pane) {
-        return integrationRecordOf(request).and_then(
-            [&](vtbackend::ProgramStatusRecord record) -> std::expected<vtcontrol::EmptyReply, ControlError> {
-                auto* const terminal = _host.terminal(pane.session);
-                if (terminal == nullptr)
-                    return std::unexpected(notFound("the pane has no terminal"));
-                std::ignore = terminal->applyIntegrationStatus(std::move(record));
-                return vtcontrol::EmptyReply {};
-            });
-    }));
+    done(resolvePane(context, request.pane, paneUseOf<vtcontrol::ReportStatusRequest>())
+             .and_then([&](PaneTarget const& pane) {
+                 return integrationRecordOf(request).and_then(
+                     [&](vtbackend::ProgramStatusRecord record)
+                         -> std::expected<vtcontrol::EmptyReply, ControlError> {
+                         auto* const terminal = _host.terminal(pane.session);
+                         if (terminal == nullptr)
+                             return std::unexpected(notFound("the pane has no terminal"));
+                         std::ignore = terminal->applyIntegrationStatus(std::move(record));
+                         return vtcontrol::EmptyReply {};
+                     });
+             }));
 }
 
 void ControlService::handle(vtcontrol::CallContext& context,
@@ -829,7 +857,9 @@ void ControlService::handle(vtcontrol::CallContext& context,
                             vtcontrol::Completion<vtcontrol::EmptyReply> done)
 {
     done(checkIntegrationId(request.integration)
-             .and_then([&] { return resolvePane(context, request.pane); })
+             .and_then([&] {
+                 return resolvePane(context, request.pane, paneUseOf<vtcontrol::ClearStatusRequest>());
+             })
              .and_then([&](PaneTarget const& pane) -> std::expected<vtcontrol::EmptyReply, ControlError> {
                  auto* const terminal = _host.terminal(pane.session);
                  if (terminal == nullptr)
@@ -843,10 +873,11 @@ void ControlService::handle(vtcontrol::CallContext& context,
                             vtcontrol::ClosePaneRequest const& request,
                             vtcontrol::Completion<vtcontrol::EmptyReply> done)
 {
-    done(resolvePane(context, request.pane).transform([&](PaneTarget const& pane) {
-        closePane(pane.session);
-        return vtcontrol::EmptyReply {};
-    }));
+    done(resolvePane(context, request.pane, paneUseOf<vtcontrol::ClosePaneRequest>())
+             .transform([&](PaneTarget const& pane) {
+                 closePane(pane.session);
+                 return vtcontrol::EmptyReply {};
+             }));
 }
 
 void ControlService::handle(vtcontrol::CallContext& context,
@@ -1008,25 +1039,43 @@ void ControlService::handle(vtcontrol::CallContext& context,
                             vtcontrol::MovePaneRequest const& request,
                             vtcontrol::Completion<vtcontrol::MovePaneReply> done)
 {
-    done(resolvePane(context, request.pane).and_then([&](PaneTarget const& pane) {
-        return paneDestination(context, request).and_then([&](vtworkspace::MoveTarget const& target) {
-            // The same move a client's MoveNode makes: a workspace it empties goes, a new one is the host's.
-            auto const hooks = MoveWorkspaceHooks {
-                .create = [this] { return _host.createEmptyWorkspace().id(); },
-                .discard = [this](WorkspaceId workspace) { _host.discardWorkspace(workspace); }
-            };
-            return applyMove(_host.model(), vtworkspace::PaneSource { pane.session }, target, hooks)
-                .transform_error(moveRefused)
-                .transform([&](vtworkspace::MoveResult const& moved) {
-                    auto const& objects = _host.objects();
-                    return vtcontrol::MovePaneReply {
-                        .workspace = idOf(ObjectKind::Workspace,
-                                          objects.uuidOf(moved.workspace).value_or(vtcontrol::Uuid {})),
-                        .tab = idOf(ObjectKind::Tab, objects.uuidOf(moved.tab).value_or(vtcontrol::Uuid {})),
+    done(
+        resolvePane(context, request.pane, paneUseOf<vtcontrol::MovePaneRequest>())
+            .and_then([&](PaneTarget const& pane) {
+                return paneDestination(context, request).and_then([&](vtworkspace::MoveTarget const& target) {
+                    // The same move a client's MoveNode makes: a workspace it empties goes, a new one is the
+                    // host's.
+                    auto const hooks = MoveWorkspaceHooks {
+                        .create = [this] { return _host.createEmptyWorkspace().id(); },
+                        .discard = [this](WorkspaceId workspace) { _host.discardWorkspace(workspace); }
                     };
+                    return _host.moveNode(vtworkspace::PaneSource { pane.session }, target, hooks)
+                        .transform_error([&](NodeMoveFailure const& failure) {
+                            if (failure.error != NodeMoveError::Served)
+                                return moveRefused(failure);
+                            // Either the pane is served and would leave its tab, or the tab it would enter
+                            // is.
+                            if (_host.servedBy(pane.session) != nullptr)
+                                return servedRefusal(std::format(
+                                    "pane '{}' is served by extension '{}'; it cannot leave its tab",
+                                    idOf(ObjectKind::Pane, pane.uuid),
+                                    failure.extension));
+                            return servedRefusal(std::format(
+                                "the target tab is served by extension '{}'; no pane can enter it",
+                                failure.extension));
+                        })
+                        .transform([&](vtworkspace::MoveResult const& moved) {
+                            auto const& objects = _host.objects();
+                            return vtcontrol::MovePaneReply {
+                                .workspace =
+                                    idOf(ObjectKind::Workspace,
+                                         objects.uuidOf(moved.workspace).value_or(vtcontrol::Uuid {})),
+                                .tab = idOf(ObjectKind::Tab,
+                                            objects.uuidOf(moved.tab).value_or(vtcontrol::Uuid {})),
+                            };
+                        });
                 });
-        });
-    }));
+            }));
 }
 
 namespace
@@ -1164,7 +1213,7 @@ std::expected<vtcontrol::CreateTabReply, ControlError> ControlService::createTab
         auto const* previous = workspace->activeTab();
         // A caller inside a pane opens its tab where that pane is; a new workspace inherits nothing.
         if (!context.caller().empty())
-            if (auto const caller = resolvePane(context, {}))
+            if (auto const caller = resolvePane(context, {}, paneUseOf<vtcontrol::CreateTabRequest>()))
                 spawn.directoryFrom = caller->session;
         // The host names a workspace by a session it holds.
         auto beside = std::optional<SessionId> {};
@@ -1200,7 +1249,7 @@ std::expected<vtcontrol::SplitReply, ControlError> ControlService::split(
             .message = std::format(
                 "ratioPercent {} is outside {}..{}", percent, MinimumSplitPercent, MaximumSplitPercent),
             .candidates = {} });
-    auto const anchor = resolvePane(context, request.pane);
+    auto const anchor = resolvePane(context, request.pane, paneUseOf<vtcontrol::SplitRequest>());
     if (!anchor)
         return std::unexpected(anchor.error());
 
@@ -1208,22 +1257,29 @@ std::expected<vtcontrol::SplitReply, ControlError> ControlService::split(
     if (tab == nullptr)
         return std::unexpected(notFound("the pane is in no tab"));
     auto const previous = tab->activePane()->id();
-    auto const paneCount = tab->paneCount();
     _host.model().setActivePane(tab->id(), leaf->id());
     // The new pane starts where its anchor is, unless the caller named a directory itself.
     auto spawn = spawnRequestOf(request.command, request.cwd);
     spawn.directoryFrom = anchor->session;
     // The ratio is the first child's share, and the new pane is the second.
-    _host.splitActivePane(tab->id(),
-                          request.direction == vtcontrol::SplitDirection::Right
-                              ? vtworkspace::SplitState::Vertical
-                              : vtworkspace::SplitState::Horizontal,
-                          1.0 - (static_cast<double>(percent) / 100.0),
-                          spawn);
-    if (tab->paneCount() == paneCount)
-        return std::unexpected(failed("the new pane's shell could not be started"));
+    auto const split = _host.splitActivePane(tab->id(),
+                                             request.direction == vtcontrol::SplitDirection::Right
+                                                 ? vtworkspace::SplitState::Vertical
+                                                 : vtworkspace::SplitState::Horizontal,
+                                             1.0 - (static_cast<double>(percent) / 100.0),
+                                             spawn);
+    if (!split)
+    {
+        _host.model().setActivePane(tab->id(), previous);
+        if (auto const* const served = _host.servedBy(anchor->session); split.error() == SplitError::Served)
+            return std::unexpected(
+                servedRefusal(std::format("pane '{}' is served by extension '{}'; it cannot be split",
+                                          idOf(ObjectKind::Pane, anchor->uuid),
+                                          served != nullptr ? served->extension : std::string {})));
+        return std::unexpected(failed(std::format("the pane cannot be split: {}", describe(split.error()))));
+    }
 
-    auto const created = tab->activePane()->session();
+    auto const created = *split;
     auto const paneRef = ObjectRef { .kind = ObjectKind::Pane, .uuid = *_host.objects().uuidOf(created) };
     if (!request.name.empty())
         _host.objects().setName(paneRef, request.name);
@@ -1249,7 +1305,8 @@ void ControlService::waitForBlock(vtcontrol::CallContext& context,
                                   vtcontrol::WaitRequest const& request,
                                   vtcontrol::Completion<vtcontrol::WaitReply> done)
 {
-    auto const target = resolveBlock(context, request.block, request.pane);
+    auto const target =
+        resolveBlock(context, request.block, request.pane, paneUseOf<vtcontrol::WaitRequest>());
     if (!target)
     {
         done(std::unexpected(target.error()));
@@ -1379,7 +1436,7 @@ void ControlService::handle(vtcontrol::CallContext& context,
     auto filter = EventFilter { .kinds = std::move(kinds), .pane = std::nullopt };
     if (!request.pane.empty())
     {
-        auto const pane = resolvePane(context, request.pane);
+        auto const pane = resolvePane(context, request.pane, paneUseOf<vtcontrol::SubscribeRequest>());
         if (!pane)
         {
             done(std::unexpected(pane.error()));

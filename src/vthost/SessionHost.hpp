@@ -161,6 +161,29 @@ enum class WorkspaceCloseError : uint8_t
     return "unknown error";
 }
 
+/// Why the host split no pane.
+enum class SplitError : uint8_t
+{
+    UnknownTab = 0, ///< No tab of the host has that id.
+    Served,         ///< The tab's active pane is served by an extension, and a served tab stays whole.
+    SpawnFailed,    ///< The new pane's session could not be spawned.
+    Refused,        ///< The model refused the split (a zoomed tab, ...); the spawned session was reaped.
+};
+
+/// @param error The failure.
+/// @return A lower-case phrase for a log line.
+[[nodiscard]] constexpr std::string_view describe(SplitError error) noexcept
+{
+    switch (error)
+    {
+        case SplitError::UnknownTab: return "unknown tab";
+        case SplitError::Served: return "an extension serves the pane, which cannot be split";
+        case SplitError::SpawnFailed: return "the new pane's session could not be spawned";
+        case SplitError::Refused: return "the model refused the split";
+    }
+    return "unknown error";
+}
+
 /// @param error The failure.
 /// @return A lower-case phrase for a log line.
 [[nodiscard]] constexpr std::string_view describe(OperationError error) noexcept
@@ -169,6 +192,7 @@ enum class WorkspaceCloseError : uint8_t
     {
         case OperationError::UnknownSession: return "unknown session";
         case OperationError::UnknownOperation: return "unknown operation";
+        case OperationError::Served: return "an extension draws the session";
     }
     return "unknown error";
 }
@@ -192,7 +216,6 @@ struct TitleChangedSignal
 };
 
 /// The application reported a working directory different from the one before.
-        case OperationError::Served: return "an extension draws the session";
 struct WorkingDirectoryChangedSignal
 {
 };
@@ -1533,16 +1556,18 @@ class SessionHost final:
     ///         nullopt with none attached. @see raiseHolder
     [[nodiscard]] std::optional<ConnectionId> raiseHolderNow() const;
 
-    /// Splits @p tab's active pane, backing the new leaf with a fresh session. Refused, logged and nothing
-    /// changed, when that pane is served (@see servedRestructuring).
+    /// Splits @p tab's active pane, backing the new leaf with a fresh session. Nothing changes when it fails.
     /// @param tab The tab whose active pane splits.
     /// @param orientation The split axis.
     /// @param ratio The first child's share.
     /// @param request What this creation overrides about the session it spawns.
-    void splitActivePane(vtworkspace::TabId tab,
-                         vtworkspace::SplitState orientation,
-                         double ratio = 0.5,
-                         SessionSpawnRequest const& request = {});
+    /// @return The new pane's session, or why there is none; SplitError::Served when the active pane is
+    ///         served (@see servedRestructuring).
+    [[nodiscard]] std::expected<vtworkspace::SessionId, SplitError> splitActivePane(
+        vtworkspace::TabId tab,
+        vtworkspace::SplitState orientation,
+        double ratio = 0.5,
+        SessionSpawnRequest const& request = {});
 
     /// The one place a restructuring is judged against served tabs, which every front end -- the native
     /// protocol, the control API, tmux control mode -- reaches through splitActivePane(), mergeTabIntoSplit()

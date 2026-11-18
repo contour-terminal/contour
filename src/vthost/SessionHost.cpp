@@ -1803,19 +1803,19 @@ std::expected<vtworkspace::MoveResult, NodeMoveFailure> SessionHost::moveNode(
     return applyMove(_model, source, target, hooks);
 }
 
-void SessionHost::splitActivePane(TabId tab,
-                                  SplitState orientation,
-                                  double ratio,
-                                  SessionSpawnRequest const& request)
+std::expected<SessionId, SplitError> SessionHost::splitActivePane(TabId tab,
+                                                                  SplitState orientation,
+                                                                  double ratio,
+                                                                  SessionSpawnRequest const& request)
 {
-    if (auto const* const splitting = _model.findTab(tab); splitting != nullptr)
+    auto const* const splitting = _model.findTab(tab);
+    if (splitting == nullptr)
+        return std::unexpected(SplitError::UnknownTab);
+    if (auto const served =
+            servedRestructuring(Restructure::Split, splitting->activePane()->session(), std::nullopt))
     {
-        if (auto const served =
-                servedRestructuring(Restructure::Split, splitting->activePane()->session(), std::nullopt))
-        {
-            errorLog()("refusing to split a pane: extension '{}' serves it", *served);
-            return;
-        }
+        errorLog()("refusing to split a pane: extension '{}' serves it", *served);
+        return std::unexpected(SplitError::Served);
     }
     auto const pane = paneUuidFor(request);
     auto const seeded = seedSession(request,
@@ -1823,24 +1823,22 @@ void SessionHost::splitActivePane(TabId tab,
                                                .tab = _objects.uuidOf(tab).value_or(Uuid {}),
                                                .pane = pane });
     if (!seeded)
-        return;
+        return std::unexpected(SplitError::SpawnFailed);
 
-    auto const paneCountBefore = [&] {
-        auto const* tabPtr = _model.findTab(tab);
-        return tabPtr != nullptr ? tabPtr->paneCount() : 0;
-    }();
-
+    auto const paneCountBefore = splitting->paneCount();
     _model.splitActivePane(tab, orientation, ratio);
     _pendingSessionId.reset();
 
-    // The model refused (unknown tab, zoomed, ...): reap the orphaned session.
+    // The model refused (zoomed, ...): reap the orphaned session.
     auto const* tabPtr = _model.findTab(tab);
     if (tabPtr == nullptr || tabPtr->paneCount() == paneCountBefore)
     {
         errorLog()(
             "model refused the split of tab {}; reaping orphaned session {}", tab.value, seeded->value);
         reapOrphan(*seeded);
+        return std::unexpected(SplitError::Refused);
     }
+    return *seeded;
 }
 
 namespace
@@ -2399,6 +2397,8 @@ namespace
     ///
     /// Or a light/dark preference to re-seed the session's palette under, which needs the host's profiles.
     /// @see SessionHost::applyColorPreference()
+    using OperationPerform = std::variant<LoopPerform, DeliveryKind, vtbackend::ColorPreference>;
+
     /// What an operation does to a served session, whose grid only its extension draws.
     enum class OnServed : uint8_t
     {
@@ -2406,14 +2406,12 @@ namespace
         Performed,   ///< It changes only how the grid is shown.
     };
 
-    using OperationPerform = std::variant<LoopPerform, DeliveryKind, vtbackend::ColorPreference>;
-
     /// One engine operation a client may ask the host to perform.
     struct OperationRow
     {
-        OnServed onServed = OnServed::Refused;
         proto::EngineOperation operation;
         OperationPerform perform;
+        OnServed onServed = OnServed::Refused;
     };
 
     /// Has @p terminal place or take off the user mark on the row @p request names.
@@ -2477,10 +2475,10 @@ std::expected<void, OperationError> SessionHost::performOperation(proto::Perform
     if (hosted == _sessions.end())
         return std::unexpected(OperationError::UnknownSession);
     auto const row = std::ranges::find(OperationTable, request.operation, &OperationRow::operation);
-    if (row->onServed == OnServed::Refused && servedBy(session) != nullptr)
-        return std::unexpected(OperationError::Served);
     if (row == OperationTable.end())
         return std::unexpected(OperationError::UnknownOperation);
+    if (row->onServed == OnServed::Refused && servedBy(session) != nullptr)
+        return std::unexpected(OperationError::Served);
 
     auto& hostedSession = *hosted->second;
     std::visit(core::Overloaded {

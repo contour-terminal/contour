@@ -19,6 +19,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -1167,7 +1168,7 @@ TEST_CASE("attach receives the daemon's tab and pane layout", "[vthost][attach]"
                               vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     auto* tab = host.createTab();
     // Split the tab into two panes (a vertical divider at 60/40).
-    host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.6);
+    std::ignore = host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.6);
 
     auto pair = *core::net::testing::makeSocketPair(loop);
     auto server = NativeSession {
@@ -2969,7 +2970,7 @@ TEST_CASE("moveNode is sent to a daemon that shares MoveNode, and the pane moves
                                                                   { proto::Capability::MoveNode }) } };
     auto const* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
-    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
+    std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
     REQUIRE(tab->paneCount() == 2);
     // The split's new leaf is the tab's active pane.
     auto const moved = tab->activePane()->session();
@@ -3607,7 +3608,7 @@ struct FocusRace
     auto* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
     auto const tabId = tab->id();
-    h.host.splitActivePane(tabId, vtworkspace::SplitState::Vertical);
+    std::ignore = h.host.splitActivePane(tabId, vtworkspace::SplitState::Vertical);
     auto race = FocusRace {};
     auto scenario = [](IntentHarness* h, vtworkspace::TabId tabId, FocusRace* race) -> Task<void> {
         auto const split = co_await core::net::testing::waitUntil(

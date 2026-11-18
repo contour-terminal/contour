@@ -823,7 +823,7 @@ TEST_CASE("attach reconciles a pane closed on the daemon by removing it locally"
     std::ignore = daemon.seedSession("first");
     auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
         auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session(); // the new (active) pane's session
     });
 
@@ -3006,7 +3006,7 @@ TEST_CASE("a pane dragged out of its tab leaves the other pane in that tab",
     auto const stays = daemon.seedSession("stays");
     auto const dragged = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
         auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session();
     });
 
@@ -3476,7 +3476,7 @@ TEST_CASE("a swap within one tab pushed by the daemon keeps both TerminalSession
     auto const left = daemon.seedSession("left");
     auto const right = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
         auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session();
     });
 
@@ -3771,7 +3771,7 @@ TEST_CASE("a swap across two tabs pushed by the daemon keeps every TerminalSessi
     auto const splitActive = [&daemon] {
         return daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
             auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
-            daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+            std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
             return tab->activePane()->session();
         });
     };
@@ -3943,7 +3943,7 @@ TEST_CASE("a pane moved into another GUI process's window appears there, on ever
             auto const first = daemon.seedSession("first");
             auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
                 auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
-                daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+                std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
                 return tab->activePane()->session();
             });
             auto const receiving = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
@@ -4076,7 +4076,7 @@ TEST_CASE("a pane dropped on an edge of its only sibling over a daemon re-splits
             auto const first = daemon.seedSession("first");
             auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
                 auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
-                daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+                std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
                 return tab->activePane()->session();
             });
             auto const followed = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
@@ -4127,7 +4127,7 @@ TEST_CASE("a split orientation toggled over a daemon is kept by the next layout 
     auto const first = daemon.seedSession("first");
     auto const tabId = daemon.onDaemon([&daemon]() -> vtworkspace::TabId {
         auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->id();
     });
     auto const followed = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
@@ -4169,7 +4169,7 @@ TEST_CASE("a daemon that does not end its pushes is reconciled frame by frame, a
     std::ignore = daemon.seedSession("first");
     auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
         auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session();
     });
 

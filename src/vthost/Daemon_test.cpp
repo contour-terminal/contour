@@ -878,7 +878,7 @@ struct RestartHarness
         auto host = startHost(std::nullopt);
         auto* const tab = host->createTab();
         REQUIRE(tab != nullptr);
-        host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
+        std::ignore = host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
         REQUIRE(tab->paneCount() == 2);
         auto persistence = vthost::DaemonPersistence { loop,
                                                        *host,

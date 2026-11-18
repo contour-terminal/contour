@@ -2431,10 +2431,14 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
             leaf != nullptr)
         {
             model.setActivePane(tab->id(), leaf->id());
-            _host.splitActivePane(tab->id(),
-                                  static_cast<vtworkspace::SplitState>(split->orientation),
-                                  proto::fromWireRatio(split->ratio),
-                                  spawnRequest(split->profileName, SessionId { split->session }));
+            // The protocol has no refusal for a split: one that fails pushes no layout, and is logged.
+            if (auto const created =
+                    _host.splitActivePane(tab->id(),
+                                          static_cast<vtworkspace::SplitState>(split->orientation),
+                                          proto::fromWireRatio(split->ratio),
+                                          spawnRequest(split->profileName, SessionId { split->session }));
+                !created)
+                errorLog()("{}: ignoring {}: {}", _id, proto::describe(frame.pdu), describe(created.error()));
         }
         return;
     }

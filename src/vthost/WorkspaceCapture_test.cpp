@@ -82,8 +82,8 @@ TEST_CASE("captureWorkspace records the layout as the model holds it", "[vthost]
     auto* first = h.host.createTab();
     auto* second = h.host.createTab();
     REQUIRE((first != nullptr && second != nullptr));
-    h.host.splitActivePane(second->id(), SplitState::Vertical, 0.3);
-    h.host.splitActivePane(second->id(), SplitState::Horizontal, 0.5);
+    std::ignore = h.host.splitActivePane(second->id(), SplitState::Vertical, 0.3);
+    std::ignore = h.host.splitActivePane(second->id(), SplitState::Horizontal, 0.5);
     REQUIRE(second->paneCount() == 3);
     h.host.model().toggleActivePaneZoom(second->id());
     vthost::RegistryTabNames { h.host.objects() }.setName(second->id(), "build");
@@ -161,7 +161,7 @@ TEST_CASE("a snapshot leaves served tabs out", "[vthost][snapshot][capture][serv
     std::ignore = openServed(h.host);
     // A served tab stays whole (the host refuses to split one), so each served tab is one leaf.
     auto& refused = openServed(h.host);
-    h.host.splitActivePane(refused.id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(refused.id(), SplitState::Vertical, 0.5);
     REQUIRE(refused.paneCount() == 1);
 
     auto const snapshot = captureWorkspace(h.host, {}, Now);

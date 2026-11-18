@@ -296,7 +296,7 @@ TEST_CASE("the id-minting changes of one turn are pushed once", "[keeper][struct
     // A tab, its session and its activation: three changes the keeper must hold before a client hears.
     auto* const tab = h.host.createTab();
     REQUIRE(tab != nullptr);
-    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
+    std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
     CHECK(h.sink.pushed.size() == initial);
     std::ignore = h.loop.runOnce(0ms);
     REQUIRE(h.sink.pushed.size() == initial + 1);
@@ -402,9 +402,9 @@ TEST_CASE("every structure pushed restores into a model", "[keeper][structure]")
     auto* const second = h.host.createTab();
     REQUIRE(second != nullptr);
     std::ignore = h.loop.runOnce(0ms);
-    h.host.splitActivePane(second->id(), vtworkspace::SplitState::Vertical);
+    std::ignore = h.host.splitActivePane(second->id(), vtworkspace::SplitState::Vertical);
     std::ignore = h.loop.runOnce(0ms);
-    h.host.splitActivePane(second->id(), vtworkspace::SplitState::Horizontal);
+    std::ignore = h.host.splitActivePane(second->id(), vtworkspace::SplitState::Horizontal);
     std::ignore = h.loop.runOnce(0ms);
     h.host.closeSession(h.host.sessionIds().back());
     std::ignore = h.loop.runOnce(0ms);

@@ -821,7 +821,7 @@ TEST_CASE("splitActivePane backs the new leaf with a fresh session", "[vthost][h
     auto* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
 
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
 
     REQUIRE(tab->paneCount() == 2);
     REQUIRE(h.host.sessionCount() == 2);
@@ -842,7 +842,7 @@ TEST_CASE("a refused split reaps the orphaned backing session", "[vthost][host]"
     REQUIRE(tab != nullptr);
     REQUIRE(h.host.sessionCount() == 1);
 
-    h.host.splitActivePane(vtworkspace::TabId { 4711 }, SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(vtworkspace::TabId { 4711 }, SplitState::Vertical, 0.5);
 
     // The unknown tab refused the split; the pre-spawned session must not leak.
     CHECK(h.host.sessionCount() == 1);
@@ -854,7 +854,7 @@ TEST_CASE("a session exit prunes its pane and keeps the sibling", "[vthost][host
     auto h = HostHarness {};
     auto* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
-    h.host.splitActivePane(tab->id(), SplitState::Horizontal, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Horizontal, 0.5);
     REQUIRE(h.host.sessionCount() == 2);
 
     auto const exited = tab->rootPane()->first()->session();
@@ -1001,7 +1001,7 @@ TEST_CASE("a pane size reported for a session that ended meanwhile is no error",
     auto h = HostHarness {};
     auto* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const ended = tab->rootPane()->second()->session();
     h.host.handleSessionExit(ended);
     REQUIRE(h.host.terminal(ended) == nullptr);
@@ -1051,7 +1051,7 @@ TEST_CASE("applyPaneSize resizes one pane without disturbing the rest", "[vthost
         &h.client,
         vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(100) },
         std::nullopt);
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     REQUIRE(h.host.sessionCount() == 2);
 
     auto const firstSession = tab->rootPane()->first()->session();
@@ -1089,7 +1089,7 @@ TEST_CASE("a re-projection discards per-pane refinements", "[vthost][host]")
         &h.client,
         vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(100) },
         std::nullopt);
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const firstSession = tab->rootPane()->first()->session();
     h.host.applyPaneSize(&h.client,
                          firstSession,
@@ -1117,7 +1117,7 @@ TEST_CASE("a client reporting a different area forgets its pane refinements", "[
     h.host.subscribeStream(&h.otherClient);
     std::ignore = h.host.applyClientSize(&h.client, cells(100, 30), std::nullopt);
     std::ignore = h.host.applyClientSize(&h.otherClient, cells(100, 30), std::nullopt);
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const firstSession = tab->rootPane()->first()->session();
     std::ignore = h.host.applyPaneSize(&h.client, firstSession, cells(70, 30), std::nullopt);
 
@@ -1148,19 +1148,19 @@ TEST_CASE("a structural change in one tab leaves another tab's refined panes alo
     auto const firstTab = first->id();
     h.host.subscribeStream(&h.client);
     std::ignore = h.host.applyClientSize(&h.client, cells(100, 30), std::nullopt);
-    h.host.splitActivePane(firstTab, SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(firstTab, SplitState::Vertical, 0.5);
     auto const refinedInFirst = h.host.model().findTab(firstTab)->rootPane()->first()->session();
     std::ignore = h.host.applyPaneSize(&h.client, refinedInFirst, cells(70, 30), std::nullopt);
     auto* second = h.host.createTab();
     REQUIRE(second != nullptr);
     auto const secondTab = second->id();
-    h.host.splitActivePane(secondTab, SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(secondTab, SplitState::Vertical, 0.5);
     auto const refinedInSecond = h.host.model().findTab(secondTab)->rootPane()->first()->session();
     std::ignore = h.host.applyPaneSize(&h.client, refinedInSecond, cells(30, 30), std::nullopt);
     h.client.resizesHeard.clear();
 
     // A split in the second tab.
-    h.host.splitActivePane(secondTab, SplitState::Horizontal, 0.5);
+    std::ignore = h.host.splitActivePane(secondTab, SplitState::Horizontal, 0.5);
 
     CHECK(h.host.terminal(refinedInFirst)->totalPageSize().columns.value == 70);
     CHECK_FALSE(h.client.resizesHeard.contains(refinedInFirst.value));
@@ -1180,7 +1180,7 @@ TEST_CASE("a re-projection resizes a zoomed pane once", "[vthost][host][size]")
     auto const tabId = tab->id();
     h.host.subscribeStream(&h.client);
     std::ignore = h.host.applyClientSize(&h.client, cells(100, 30), std::nullopt);
-    h.host.splitActivePane(tabId, SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tabId, SplitState::Vertical, 0.5);
     h.host.model().toggleActivePaneZoom(tabId);
     auto const zoomed = h.host.model().findTab(tabId)->layoutRoot()->session();
     REQUIRE(h.host.terminal(zoomed)->totalPageSize().columns.value == 100);
@@ -1291,7 +1291,7 @@ TEST_CASE("a detaching client that leaves the client area unchanged keeps the pe
     REQUIRE(tab != nullptr);
     h.host.subscribeStream(&h.client);
     std::ignore = h.host.applyClientSize(&h.client, area, std::nullopt);
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const firstSession = tab->rootPane()->first()->session();
 
     h.host.subscribeStream(&h.otherClient);
@@ -1319,7 +1319,7 @@ TEST_CASE("a detaching client's pane refinements give way to the survivor's own"
     h.host.subscribeStream(&h.client);
     h.host.subscribeStream(&h.otherClient);
     std::ignore = h.host.applyClientSize(&h.otherClient, area, std::nullopt);
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const firstSession = tab->rootPane()->first()->session();
     std::ignore = h.host.applyPaneSize(
         &h.otherClient, firstSession, cells(60, 30), std::nullopt); // the survivor's divider
@@ -1353,7 +1353,7 @@ TEST_CASE("a client area report that leaves the resolved area unchanged keeps ev
     h.host.subscribeStream(&third);
     std::ignore = h.host.applyClientSize(&h.client, small, std::nullopt);
     std::ignore = h.host.applyClientSize(&h.otherClient, small, std::nullopt);
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const firstSession = tab->rootPane()->first()->session();
     std::ignore = h.host.applyPaneSize(&h.otherClient, firstSession, cells(70, 30), std::nullopt);
     REQUIRE(h.host.terminal(firstSession)->totalPageSize().columns.value == 70);
@@ -1383,7 +1383,7 @@ TEST_CASE("a departure that moves the area resizes each refined pane once, to th
     h.host.subscribeStream(&h.client);
     h.host.subscribeStream(&h.otherClient);
     std::ignore = h.host.applyClientSize(&h.client, cells(100, 30), std::nullopt);
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const firstSession = tab->rootPane()->first()->session();
     auto const secondSession = tab->rootPane()->second()->session();
     std::ignore = h.host.applyClientSize(
@@ -1459,7 +1459,7 @@ TEST_CASE("a larger client's pane refinement is not forced into a smaller area",
         h.host.applyClientSize(&third, cells(90, 30), std::nullopt); // what is left after the departure
     std::ignore =
         h.host.applyClientSize(&h.otherClient, cells(80, 30), std::nullopt); // the smallest, departing
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const firstSession = tab->rootPane()->first()->session();
     std::ignore = h.host.applyPaneSize(&h.client, firstSession, cells(65, 30), std::nullopt);
 
@@ -1485,7 +1485,7 @@ TEST_CASE("an ineligible client's pane report does not resize the pane", "[vthos
     std::ignore = h.host.applyClientSize(&h.client, cells(100, 30), std::nullopt); // the resolved one
     std::ignore =
         h.host.applyClientSize(&h.otherClient, cells(140, 40), std::nullopt); // larger, so ineligible
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const firstSession = tab->rootPane()->first()->session();
     REQUIRE(h.host.terminal(firstSession)->totalPageSize().columns.value == 50);
 
@@ -1529,7 +1529,7 @@ TEST_CASE("an area that matches no client lets the latest pane refinement throug
     std::ignore = h.host.applyClientSize(&h.client, cells(100, 20), std::nullopt);
     std::ignore = h.host.applyClientSize(&h.otherClient, cells(80, 30), std::nullopt);
     REQUIRE(h.host.pageSize() == cells(80, 20));
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const firstSession = tab->rootPane()->first()->session();
 
     std::ignore = h.host.applyPaneSize(&h.client, firstSession, cells(50, 20), std::nullopt);
@@ -1562,7 +1562,7 @@ TEST_CASE("a client resizing its window under an area nobody displays leaves its
     std::ignore = h.host.applyClientSize(&h.client, cells(100, 20), std::nullopt);
     std::ignore = h.host.applyClientSize(&h.otherClient, cells(80, 30), std::nullopt);
     REQUIRE(h.host.pageSize() == cells(80, 20));
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const firstSession = tab->rootPane()->first()->session();
     std::ignore = h.host.applyPaneSize(&h.otherClient, firstSession, cells(42, 20), std::nullopt);
     std::ignore = h.host.applyPaneSize(&h.client, firstSession, cells(38, 20), std::nullopt);
@@ -1598,7 +1598,7 @@ TEST_CASE("a departure that leaves the area matching no client applies the lates
     std::ignore = h.host.applyClientSize(&h.otherClient, cells(100, 20), std::nullopt);
     std::ignore = h.host.applyClientSize(&third, cells(80, 30), std::nullopt);
     REQUIRE(h.host.pageSize() == cells(80, 20));
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const firstSession = tab->rootPane()->first()->session();
     auto const projected = h.host.terminal(firstSession)->totalPageSize().columns.value;
     std::ignore = h.host.applyPaneSize(&h.otherClient, firstSession, cells(60, 20), std::nullopt);
@@ -1625,7 +1625,7 @@ TEST_CASE("a client whose new area leaves the resolved one hands its panes to th
     h.host.subscribeStream(&h.otherClient);
     std::ignore = h.host.applyClientSize(&h.client, cells(100, 30), std::nullopt);
     std::ignore = h.host.applyClientSize(&h.otherClient, cells(100, 30), std::nullopt);
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const firstSession = tab->rootPane()->first()->session();
     std::ignore = h.host.applyPaneSize(&h.otherClient, firstSession, cells(70, 30), std::nullopt);
     std::ignore =
@@ -1653,18 +1653,19 @@ TEST_CASE("a client's refinements are still forgotten after some of them were", 
     h.host.subscribeStream(&h.otherClient);
     std::ignore = h.host.applyClientSize(&h.client, cells(100, 30), std::nullopt);
     std::ignore = h.host.applyClientSize(&h.otherClient, cells(100, 30), std::nullopt);
-    h.host.splitActivePane(firstTab, SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(firstTab, SplitState::Vertical, 0.5);
     auto* second = h.host.createTab();
     REQUIRE(second != nullptr);
     auto const secondTab = second->id();
-    h.host.splitActivePane(secondTab, SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(secondTab, SplitState::Vertical, 0.5);
     auto const inFirst = h.host.model().findTab(firstTab)->rootPane()->first()->session();
     auto const inSecond = h.host.model().findTab(secondTab)->rootPane()->first()->session();
     std::ignore = h.host.applyPaneSize(&h.client, inFirst, cells(70, 30), std::nullopt);
     std::ignore = h.host.applyPaneSize(&h.client, inSecond, cells(70, 30), std::nullopt);
     REQUIRE(h.host.terminal(inSecond)->totalPageSize().columns.value == 70);
 
-    h.host.splitActivePane(firstTab, SplitState::Horizontal, 0.5); // forgets the first tab's refinement
+    std::ignore =
+        h.host.splitActivePane(firstTab, SplitState::Horizontal, 0.5); // forgets the first tab's refinement
 
     std::ignore =
         h.host.applyClientSize(&h.client, cells(120, 40), std::nullopt); // the area stays the other client's
@@ -1681,7 +1682,7 @@ TEST_CASE("applyClientSize is race-free against a concurrent terminal writer", "
     auto h = HostHarness {};
     auto* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     REQUIRE(h.host.sessionCount() == 2);
 
     auto* firstTerm = h.host.terminal(tab->rootPane()->first()->session());
@@ -1813,17 +1814,17 @@ TEST_CASE("a failing PTY factory is reported", "[vthost][host][diagnostics]")
     CHECK(capture.contains("PTY factory failed"));
 }
 
-TEST_CASE("reaping an orphaned session after a model refusal is reported", "[vthost][host][diagnostics]")
-    auto capture = core::log::ScopedCapture {};
+TEST_CASE("a split of an unknown tab spawns nothing", "[vthost][host][diagnostics]")
 {
     auto h = HostHarness {};
     REQUIRE(h.host.createTab() != nullptr);
 
-    h.host.splitActivePane(vtworkspace::TabId { 4711 }, SplitState::Vertical, 0.5);
+    // Asked before anything is spawned, so there is no orphan to reap.
+    auto const split = h.host.splitActivePane(vtworkspace::TabId { 4711 }, SplitState::Vertical, 0.5);
 
-    CHECK(h.host.sessionCount() == 1); // the orphan really was reaped
-    CHECK(capture.contains("model refused the split of tab 4711"));
-    CHECK(capture.contains("reaping orphaned session"));
+    REQUIRE_FALSE(split.has_value());
+    CHECK(split.error() == vthost::SplitError::UnknownTab);
+    CHECK(h.host.sessionCount() == 1);
 }
 
 TEST_CASE("session spawn and exit are recorded once each", "[vthost][host][diagnostics]")
@@ -3884,8 +3885,8 @@ TEST_CASE("SessionHost reports why each session ended", "[vthost][snapshot]")
     h.host.subscribeStream(&recorder);
     auto* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
-    h.host.splitActivePane(tab->id(), SplitState::Horizontal, 0.5);
-    h.host.splitActivePane(tab->id(), SplitState::Horizontal, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Horizontal, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Horizontal, 0.5);
     REQUIRE(h.host.sessionCount() == 3);
     auto const a = tab->rootPane()->first()->session();
     auto const b = tab->rootPane()->second()->first()->session();
@@ -4091,7 +4092,7 @@ TEST_CASE("a split pane gets a new id and its tab's id in CONTOUR_TAB", "[vthost
     auto* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
 
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
 
     REQUIRE(h.seen.size() == 2);
     CHECK(h.seen.back().env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 4));
@@ -4222,7 +4223,7 @@ TEST_CASE("a refused split leaves no pane id behind", "[vthost][host][ids]")
 {
     auto h = HostHarness {};
     REQUIRE(h.host.createTab() != nullptr);
-    h.host.splitActivePane(vtworkspace::TabId { 4711 }, SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(vtworkspace::TabId { 4711 }, SplitState::Vertical, 0.5);
     CHECK_FALSE(h.host.objects().find(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Pane, seq(4) }));
 }
 
@@ -4327,7 +4328,7 @@ TEST_CASE("a workspace and tab a move creates are named, and the moved pane is r
     auto* const tab = h.host.createTab();
     REQUIRE(tab != nullptr);
     auto const stays = tab->rootPane()->session();
-    h.host.splitActivePane(tab->id(), SplitState::Vertical);
+    std::ignore = h.host.splitActivePane(tab->id(), SplitState::Vertical);
     REQUIRE(tab->paneCount() == 2);
     auto const dragged = tab->activePane()->session();
     auto const halved = h.host.terminal(dragged)->totalPageSize();

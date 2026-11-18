@@ -6986,7 +6986,7 @@ TEST_CASE("two clients: a SetSplitOrientation from one pushes the new axis to bo
     auto h = TwoClientHarness {};
     auto const* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
-    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     auto const* root = h.host.model().findTab(tab->id())->rootPane();
     auto const anchor = root->first()->session();
     auto const workspace = h.host.model().workspaceOfTab(tab->id()).value;
@@ -7034,7 +7034,7 @@ TEST_CASE("a SetSplitOrientation ends a layout batch, and a stale session or a s
     auto h = NativeHarness {};
     auto const* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
-    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     auto const anchor = h.host.model().findTab(tab->id())->rootPane()->first()->session();
     auto const workspace = h.host.model().workspaceOfTab(tab->id()).value;
     auto const hello =
@@ -7069,7 +7069,7 @@ TEST_CASE("a SetSplitOrientation without the move-node capability is refused",
     auto h = NativeHarness {};
     auto const* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
-    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     auto const anchor = h.host.model().findTab(tab->id())->rootPane()->first()->session();
 
     auto const received = h.exchangeUntil(
@@ -7097,7 +7097,7 @@ TEST_CASE("a MoveNode onto the only sibling's edge pushes the tab re-split along
     auto const* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
     auto const tabId = tab->id();
-    h.host.splitActivePane(tabId, vtworkspace::SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tabId, vtworkspace::SplitState::Vertical, 0.5);
     auto const* root = h.host.model().findTab(tabId)->rootPane();
     auto const left = root->first()->session();
     auto const right = root->second()->session();
@@ -7197,7 +7197,7 @@ struct ServedRestructuring
     {
         auto const* pair = h.host.createTab();
         REQUIRE(pair != nullptr);
-        h.host.splitActivePane(pair->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = h.host.splitActivePane(pair->id(), vtworkspace::SplitState::Vertical, 0.5);
         left = pair->rootPane()->first()->session();
         right = pair->rootPane()->second()->session();
         auto const* alone = h.host.createTab();
@@ -7581,7 +7581,7 @@ struct PaneIntoOtherWorkspace
     {
         auto const* tab = h.host.createTab();
         REQUIRE(tab != nullptr);
-        h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+        std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         dragged = h.host.model().findTab(tab->id())->activePane()->session();
         auto const* other = h.host.createWorkspace();
         REQUIRE(other != nullptr);

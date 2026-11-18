@@ -1288,7 +1288,8 @@ struct CreateTab
 };
 
 /// Client→server: split the pane hosting @p session (the daemon activates it
-/// first), backing the new leaf with a fresh session.
+/// first), backing the new leaf with a fresh session. A split the daemon refuses -- a pane an extension
+/// serves, a spawn that failed -- has no answer of its own: no layout push follows, and the daemon logs why.
 struct SplitPane
 {
     uint64_t session = 0;    ///< The pane to split, by the session it hosts.

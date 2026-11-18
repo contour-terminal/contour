@@ -12,6 +12,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <expected>
 #include <filesystem>
@@ -24,6 +25,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -38,6 +40,8 @@
 #include <vthost/control/ControlService.hpp>
 #include <vthost/testing/ControlHarness.hpp>
 #include <vthost/testing/FakeDaemonWorldHosting.hpp>
+#include <vthost/testing/FakeExtensionHosting.hpp>
+#include <vthost/testing/ServedTesting.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/SessionModel.hpp>
@@ -101,7 +105,7 @@ TEST_CASE("workspace.list mirrors the model with registry ids", "[vthost][contro
     auto h = ControlHarness {};
     auto const first = h.openTab();
     auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
-    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     auto const second = tab->activePane()->session();
 
     auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
@@ -234,7 +238,7 @@ TEST_CASE("a stale caller pane is NotFound, never another pane", "[vthost][contr
     auto h = ControlHarness {};
     auto const kept = h.openTab();
     auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
-    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     auto const gone = tab->activePane()->session();
     auto const goneId = h.paneId(gone);
     h.context.callerPane = goneId;
@@ -2500,3 +2504,214 @@ TEST_CASE("without daemon-world hosting every extension.* verb is unsupported", 
               .code
           == ControlErrorCode::Unsupported);
 }
+
+// {{{ Served panes
+
+static_assert(vthost::control::paneUseOf<vtcontrol::SendRequest>() == vthost::control::PaneUse::Content);
+static_assert(vthost::control::paneUseOf<vtcontrol::CaptureRequest>() == vthost::control::PaneUse::Content);
+static_assert(vthost::control::paneUseOf<vtcontrol::BlockListRequest>() == vthost::control::PaneUse::Content);
+static_assert(vthost::control::paneUseOf<vtcontrol::BlockReadRequest>() == vthost::control::PaneUse::Content);
+static_assert(vthost::control::paneUseOf<vtcontrol::WaitRequest>() == vthost::control::PaneUse::Content);
+static_assert(vthost::control::paneUseOf<vtcontrol::ReportStatusRequest>()
+              == vthost::control::PaneUse::Content);
+static_assert(vthost::control::paneUseOf<vtcontrol::ClearStatusRequest>()
+              == vthost::control::PaneUse::Content);
+static_assert(vthost::control::paneUseOf<vtcontrol::ClosePaneRequest>() == vthost::control::PaneUse::Address);
+static_assert(vthost::control::paneUseOf<vtcontrol::MovePaneRequest>() == vthost::control::PaneUse::Address);
+
+namespace
+{
+
+/// The error a call answered with, which it must answer at once with one.
+template <typename Reply, typename Request>
+[[nodiscard]] ControlError refusalOf(ControlHarness& h, Request const& request)
+{
+    auto const reply = callSync<Reply>(h.service, h.context, request);
+    REQUIRE_FALSE(reply.has_value());
+    return reply.error();
+}
+
+/// @return Whether @p error is the refusal of a served pane, naming the fake extension.
+[[nodiscard]] bool refusesServed(ControlError const& error)
+{
+    return error.code == ControlErrorCode::Forbidden && error.message.contains("extension 'stub'");
+}
+
+} // namespace
+
+TEST_CASE("the control API cannot read or drive a served pane", "[vthost][control][served]")
+{
+    auto h = ControlHarness {};
+    auto const shell = h.openTab();
+    auto const opened = vthost::testing::openServedTab(h.host);
+    REQUIRE(opened.has_value());
+    auto const served = h.paneId(*opened);
+
+    CHECK(refusesServed(
+        refusalOf<vtcontrol::SendReply>(h, vtcontrol::SendRequest { .pane = served, .text = "x" })));
+    CHECK(refusesServed(refusalOf<vtcontrol::SendReply>(
+        h,
+        vtcontrol::SendRequest {
+            .pane = served, .text = "x\r", .wait = vtcontrol::SendWait::CommandFinished })));
+    CHECK(refusesServed(refusalOf<vtcontrol::CaptureReply>(h, vtcontrol::CaptureRequest { .pane = served })));
+    CHECK(refusesServed(
+        refusalOf<vtcontrol::BlockListReply>(h, vtcontrol::BlockListRequest { .pane = served })));
+    CHECK(refusesServed(
+        refusalOf<vtcontrol::BlockReadReply>(h, vtcontrol::BlockReadRequest { .pane = served })));
+    CHECK(refusesServed(refusalOf<vtcontrol::WaitReply>(h, vtcontrol::WaitRequest { .pane = served })));
+
+    // A shell pane beside it is read and driven as ever.
+    CHECK(callSync<vtcontrol::CaptureReply>(
+              h.service, h.context, vtcontrol::CaptureRequest { .pane = h.paneId(shell) })
+              .has_value());
+    CHECK(callSync<vtcontrol::SendReply>(
+              h.service, h.context, vtcontrol::SendRequest { .pane = h.paneId(shell), .text = "ls\r" })
+              .has_value());
+}
+
+TEST_CASE("every name of the served-content table is a method of the catalog", "[vthost][control][served]")
+{
+    // The table is the one source: a name that matches no method would protect nothing, silently.
+    auto const content = std::apply(
+        [](auto const&... method) {
+            return (0 + ...
+                    + (vthost::control::paneUseOf<typename std::remove_cvref_t<decltype(method)>::Request>()
+                               == vthost::control::PaneUse::Content
+                           ? 1
+                           : 0));
+        },
+        vtcontrol::Methods);
+    CHECK(std::cmp_equal(content, vthost::control::ServedPaneContentMethods.size()));
+}
+
+TEST_CASE("pane status cannot be reported on a served pane", "[vthost][control][served]")
+{
+    auto h = ControlHarness {};
+    auto const opened = vthost::testing::openServedTab(h.host);
+    REQUIRE(opened.has_value());
+    auto const served = h.paneId(*opened);
+    CHECK(refusesServed(refusalOf<vtcontrol::EmptyReply>(
+        h, vtcontrol::ReportStatusRequest { .pane = served, .integration = "agent", .state = "working" })));
+    CHECK(refusesServed(refusalOf<vtcontrol::EmptyReply>(
+        h, vtcontrol::ClearStatusRequest { .pane = served, .integration = "agent" })));
+}
+
+TEST_CASE("the control API cannot restructure a served tab, but lists and closes it",
+          "[vthost][control][served]")
+{
+    auto h = ControlHarness {};
+    auto const shell = h.openTab();
+    auto const opened = vthost::testing::openServedTab(h.host);
+    REQUIRE(opened.has_value());
+    auto const served = h.paneId(*opened);
+    auto const servedTab = std::get<1>(h.host.model().findSessionLeaf(*opened));
+    REQUIRE(servedTab != nullptr);
+    auto const servedTabId = vtcontrol::toString(vtcontrol::ObjectRef {
+        .kind = vtcontrol::ObjectKind::Tab, .uuid = *h.host.objects().uuidOf(servedTab->id()) });
+    auto const sessions = h.host.sessionCount();
+
+    auto const shellTab = std::get<1>(h.host.model().findSessionLeaf(shell));
+    REQUIRE(shellTab != nullptr);
+    auto const shellTabId = vtcontrol::toString(vtcontrol::ObjectRef {
+        .kind = vtcontrol::ObjectKind::Tab, .uuid = *h.host.objects().uuidOf(shellTab->id()) });
+
+    auto const split = refusalOf<vtcontrol::SplitReply>(h, vtcontrol::SplitRequest { .pane = served });
+    CHECK(refusesServed(split));
+    CHECK(split.message.contains("cannot be split"));
+    // Each refusal names the pane that is served: the moved one, or the tab it would enter.
+    auto const out = refusalOf<vtcontrol::MovePaneReply>(
+        h,
+        vtcontrol::MovePaneRequest {
+            .pane = served, .to = vtcontrol::PaneDestination::Tab, .toTab = shellTabId });
+    CHECK(refusesServed(out));
+    CHECK(out.message.contains(std::format("pane '{}' is served", served)));
+    auto const into = refusalOf<vtcontrol::MovePaneReply>(
+        h,
+        vtcontrol::MovePaneRequest {
+            .pane = h.paneId(shell), .to = vtcontrol::PaneDestination::Tab, .toTab = servedTabId });
+    CHECK(refusesServed(into));
+    CHECK(into.message.contains("the target tab is served"));
+    CHECK(h.host.sessionCount() == sessions);
+    CHECK(servedTab->paneCount() == 1);
+    CHECK(std::get<1>(h.host.model().findSessionLeaf(*opened)) == servedTab);
+
+    // Listed like any pane.
+    auto const listed = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
+    REQUIRE(listed.has_value());
+    auto const lists = [&](std::string const& pane) {
+        return std::ranges::any_of(listed->workspaces, [&](auto const& workspace) {
+            return std::ranges::any_of(workspace.tabs, [&](auto const& tab) {
+                return std::ranges::any_of(tab.panes,
+                                           [&](auto const& listedPane) { return listedPane.id == pane; });
+            });
+        });
+    };
+    CHECK(lists(served));
+
+    // Its one pane moved to a new workspace takes the whole tab along: it stays whole.
+    auto const moved = callSync<vtcontrol::MovePaneReply>(
+        h.service,
+        h.context,
+        vtcontrol::MovePaneRequest { .pane = served, .to = vtcontrol::PaneDestination::NewWorkspace });
+    REQUIRE(moved.has_value());
+    CHECK(std::get<1>(h.host.model().findSessionLeaf(*opened)) == servedTab);
+    CHECK(h.host.servedBy(*opened) != nullptr);
+
+    // And closed like any pane.
+    REQUIRE(
+        callSync<vtcontrol::EmptyReply>(h.service, h.context, vtcontrol::ClosePaneRequest { .pane = served })
+            .has_value());
+    CHECK(h.host.servedBy(*opened) == nullptr);
+    CHECK(h.host.sessionCount() == sessions - 1);
+}
+
+TEST_CASE("an extension's control call cannot drive a served pane either",
+          "[vthost][control][served][extension][threading]")
+{
+    using namespace std::chrono_literals;
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
+    auto wall = core::platform::ManualWallClock {};
+    auto const extensions = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    auto host = vthost::SessionHost {
+        loop,
+        [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const& /*spawn*/) {
+            return std::make_unique<vtpty::MockPty>(size);
+        },
+        vtbackend::Settings {},
+        core::defaultEnvironment(),
+        vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                    .extensions = extensions,
+                                    .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>() }
+    };
+    auto const service = ControlService {
+        host, vthost::control::ControlServiceConfig { .version = "1", .socketPath = "", .clock = wall }
+    };
+    REQUIRE(host.createTab() != nullptr);
+    REQUIRE_FALSE(extensions->sessions.empty());
+    // The status-line extensions of the shell pane, which the host hands a callControl hook.
+    auto const& statusLine = *extensions->sessions.front();
+    auto const opened = vthost::testing::openServedTab(host);
+    REQUIRE(opened.has_value());
+    auto const served = vtcontrol::toString(vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Pane,
+                                                                   .uuid = *host.objects().uuidOf(*opened) });
+
+    auto reply = std::optional<std::expected<std::string, ControlError>> {};
+    auto done = std::atomic<bool> { false };
+    auto worker = std::thread { [&] {
+        reply = statusLine.callControl("pane.send",
+                                       std::format(R"({{"pane":"{}","text":"x"}})", served),
+                                       vtcontrol::ControlGrants::all(),
+                                       10s);
+        done.store(true, std::memory_order_release);
+    } };
+    while (!done.load(std::memory_order_acquire))
+        std::ignore = loop.runOnce(1ms);
+    worker.join();
+
+    REQUIRE(reply.has_value());
+    REQUIRE_FALSE(reply->has_value());
+    CHECK(refusesServed(reply->error()));
+}
+
+// }}}

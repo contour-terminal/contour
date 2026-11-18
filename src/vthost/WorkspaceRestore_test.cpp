@@ -153,8 +153,8 @@ TEST_CASE("a captured workspace comes back with the same shape", "[vthost][snaps
     auto* first = source->createTab();
     auto* second = source->createTab();
     REQUIRE((first != nullptr && second != nullptr));
-    source->splitActivePane(second->id(), SplitState::Vertical, 0.3);
-    source->splitActivePane(second->id(), SplitState::Horizontal, 0.5);
+    std::ignore = source->splitActivePane(second->id(), SplitState::Vertical, 0.3);
+    std::ignore = source->splitActivePane(second->id(), SplitState::Horizontal, 0.5);
     source->model().toggleActivePaneZoom(second->id());
     vthost::RegistryTabNames { source->objects() }.setName(second->id(), "build");
     source->model().setTabColor(
@@ -433,7 +433,7 @@ TEST_CASE("restored workspaces, tabs and panes keep the UUIDs and labels they we
     auto source = h.makeHost({});
     auto* tab = source->createTab();
     REQUIRE(tab != nullptr);
-    source->splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    std::ignore = source->splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     REQUIRE(source->createWorkspace() != nullptr);
     auto& objects = source->objects();
     auto const firstPane = tab->rootPane()->first()->session();

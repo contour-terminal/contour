@@ -16,6 +16,7 @@
 #include <chrono>
 #include <memory>
 #include <string>
+#include <tuple>
 
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/LastSessionWatcher.hpp>
@@ -80,7 +81,7 @@ TEST_CASE("a session exit with a sibling left keeps the daemon serving", "[vthos
     auto h = WatcherHarness {};
     auto* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
-    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Horizontal, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Horizontal, 0.5);
     REQUIRE(h.host.sessionCount() == 2);
 
     h.host.handleSessionExit(tab->rootPane()->first()->session());
@@ -124,7 +125,7 @@ TEST_CASE("the shutdown is requested once across several exits", "[vthost][lifec
     auto h = WatcherHarness {};
     auto* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
-    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+    std::ignore = h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     REQUIRE(h.host.sessionCount() == 2);
 
     auto const first = tab->rootPane()->first()->session();

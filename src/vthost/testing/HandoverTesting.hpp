@@ -127,7 +127,7 @@ struct LiveHost
     {
         auto* const tab = host.createTab();
         REQUIRE(tab != nullptr);
-        host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
+        std::ignore = host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
         REQUIRE(host.sessionCount() == 2);
     }
 

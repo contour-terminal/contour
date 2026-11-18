@@ -270,6 +270,18 @@ A connection holds at most 64 subscriptions and 256 pending waits; one more is r
 (exit status 1). Each verb opens a connection of its own, so only a script driving `contour api call` over one
 connection meets it.
 
+### Served panes
+
+A tab that a daemon extension draws, such as the agent dashboard, is a served pane. It is listed like any
+pane, and `pane.close`, `tab.close` and `tab.move` of the whole tab work on it. Its content belongs to the
+extension: `pane.send` (and so MCP's `pane_type`), `pane.capture`, `block.list`, `block.read` and
+`block.wait`, and the status verbs `pane.reportStatus` and `pane.clearStatus`, are refused as forbidden (exit
+status 1), naming the extension. A served tab also stays whole: `pane.split` of its pane, and `pane.move` of its
+pane into another tab or of another pane into its tab, are refused the same way, as are the same changes dragged
+in a window; its one pane moved to a workspace takes the whole tab along. A window attached over the native
+protocol, or a tmux control-mode client, still reads and types into a served pane: it is an interactive front
+end, whose user is the one the extension draws for, so the keys reach the extension.
+
 ## Reporting a pane's status
 
 An integration, such as a coding agent's hook, tells the daemon what a pane's program is doing with two

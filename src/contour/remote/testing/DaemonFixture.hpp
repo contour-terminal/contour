@@ -895,7 +895,7 @@ struct DaemonFixture
     {
         onDaemon([this, state, ratio] {
             auto* tab = host->model().workspace(host->workspaceId())->activeTab();
-            host->splitActivePane(tab->id(), state, ratio);
+            std::ignore = host->splitActivePane(tab->id(), state, ratio);
             return 0;
         });
     }
