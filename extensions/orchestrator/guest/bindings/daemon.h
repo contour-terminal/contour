@@ -47,7 +47,7 @@ typedef uint8_t terminal_extensions_daemon_host_file_error_t;
 #define TERMINAL_EXTENSIONS_DAEMON_HOST_FILE_ERROR_NOT_GRANTED 0
 // The path is not relative, normalised and free of `..`.
 #define TERMINAL_EXTENSIONS_DAEMON_HOST_FILE_ERROR_BAD_ARGUMENT 1
-// The root's directory no longer exists.
+// A directory on the path does not exist: the root's own, or one beneath it.
 #define TERMINAL_EXTENSIONS_DAEMON_HOST_FILE_ERROR_DIRECTORY_GONE 2
 // The path names no regular file.
 #define TERMINAL_EXTENSIONS_DAEMON_HOST_FILE_ERROR_NOT_REGULAR 3
@@ -453,9 +453,10 @@ extern bool terminal_extensions_daemon_host_tab_close(daemon_string_t *tab, term
 extern bool terminal_extensions_daemon_host_tab_reveal(daemon_string_t *tab, terminal_extensions_daemon_host_origin_t origin, terminal_extensions_daemon_host_host_error_t *err);
 // Lists the served tabs.
 extern bool terminal_extensions_daemon_host_tabs(terminal_extensions_daemon_host_list_tab_info_t *ret, terminal_extensions_daemon_host_host_error_t *err);
-// Reads what the user typed into a served tab since the last read.
+// Reads what the user typed into a served tab since the last read: at most 64 KiB, in whole chunks.
 extern bool terminal_extensions_daemon_host_tab_read(daemon_string_t *tab, daemon_list_u8_t *ret, terminal_extensions_daemon_host_host_error_t *err);
-// Writes output to a served tab.
+// Writes output to a served tab: at most 64 KiB per call (more answers `limit`); write a larger frame in
+// pieces.
 extern bool terminal_extensions_daemon_host_tab_write(daemon_string_t *tab, daemon_list_u8_t *bytes, terminal_extensions_daemon_host_host_error_t *err);
 // Takes the actions the user invoked since the last call.
 extern bool terminal_extensions_daemon_host_actions_take(terminal_extensions_daemon_host_list_action_t *ret, terminal_extensions_daemon_host_host_error_t *err);
