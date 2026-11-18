@@ -5,6 +5,7 @@
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/DefaultBindings.hpp>
+#include <contour/config/ModifierNames.hpp>
 
 #include <vtbackend/input/InputBinding.hpp>
 
@@ -224,6 +225,84 @@ void appendFallbacks(std::string& out, char const* table, std::vector<FallbackMa
     return result;
 }
 
+/// A row of any built-in table, written or fallback.
+template <typename Input>
+using AnyRow = vtbackend::InputBinding<Input, ActionList>;
+
+/// Every key row @p kind carries: both editions' written defaults, then the fallbacks.
+[[nodiscard]] std::vector<AnyRow<vtbackend::Key>> keyRowsOf(KeyboardPlatformKind kind)
+{
+    auto rows = std::vector<AnyRow<vtbackend::Key>> {};
+    for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        std::ranges::copy(makeDefaultInputMappings(edition, kind).keyMappings, std::back_inserter(rows));
+    std::ranges::copy(builtinFallbackKeyMappings(kind) | std::views::transform(&FallbackKeyMapping::mapping),
+                      std::back_inserter(rows));
+    return rows;
+}
+
+/// The character fallback rows of @p kind, as plain bindings.
+[[nodiscard]] std::vector<AnyRow<char32_t>> fallbackCharRowsOf(KeyboardPlatformKind kind)
+{
+    auto rows = std::vector<AnyRow<char32_t>> {};
+    std::ranges::copy(builtinFallbackCharMappings(kind)
+                          | std::views::transform(&FallbackCharMapping::mapping),
+                      std::back_inserter(rows));
+    return rows;
+}
+
+/// Every character row @p kind carries: both editions' written defaults, then the fallbacks.
+[[nodiscard]] std::vector<AnyRow<char32_t>> charRowsOf(KeyboardPlatformKind kind)
+{
+    auto rows = std::vector<AnyRow<char32_t>> {};
+    for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        std::ranges::copy(makeDefaultInputMappings(edition, kind).charMappings, std::back_inserter(rows));
+    std::ranges::copy(fallbackCharRowsOf(kind), std::back_inserter(rows));
+    return rows;
+}
+
+/// Whether some row of @p rows binds @p modifiers with @p input.
+template <typename Input>
+[[nodiscard]] bool isBound(std::vector<AnyRow<Input>> const& rows,
+                           vtbackend::Modifiers modifiers,
+                           Input input)
+{
+    return std::ranges::any_of(
+        rows, [&](auto const& row) { return row.modifiers == modifiers && row.input == input; });
+}
+
+/// Whether every one of @p rows binding @p modifiers with @p input runs @p action alone, and there is one.
+template <typename Action, typename Input>
+[[nodiscard]] bool isBoundOnlyTo(std::vector<AnyRow<Input>> const& rows,
+                                 vtbackend::Modifiers modifiers,
+                                 Input input)
+{
+    auto matching = rows | std::views::filter([&](auto const& row) {
+                        return row.modifiers == modifiers && row.input == input;
+                    });
+    return !std::ranges::empty(matching) && std::ranges::all_of(matching, [](auto const& row) {
+        return row.binding.size() == 1 && std::holds_alternative<Action>(row.binding.front());
+    });
+}
+
+/// Whether the written defaults of every edition of @p kind bind @p modifiers with @p input to @p Action.
+template <typename Action, typename Input>
+[[nodiscard]] bool isWrittenInEveryEdition(KeyboardPlatformKind kind,
+                                           vtbackend::Modifiers modifiers,
+                                           Input input)
+{
+    return std::ranges::all_of(configEnumValues<DefaultsEdition>(),
+                               [&](ConfigEnumInfo<DefaultsEdition> const& info) {
+                                   auto const mappings = makeDefaultInputMappings(info.value, kind);
+                                   if constexpr (std::is_same_v<Input, char32_t>)
+                                       return isBoundOnlyTo<Action>(mappings.charMappings, modifiers, input);
+                                   else
+                                       return isBoundOnlyTo<Action>(mappings.keyMappings, modifiers, input);
+                               });
+}
+
+/// The platforms whose Primary is Ctrl+Shift.
+constexpr auto DesktopKinds = std::array { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32 };
+
 } // namespace
 
 TEST_CASE("default bindings on the desktop are unchanged", "[config][defaults]")
@@ -362,22 +441,165 @@ TEST_CASE("no macOS default takes a Control+Command chord the system owns", "[co
 {
     using vtbackend::Modifier;
     using vtbackend::Modifiers;
-    // macOS owns Control+Command+Q (lock screen), F (full screen), D (look up) and Space (character viewer).
+    // macOS owns Control+Command+Q (lock screen), D (look up) and Space (character viewer). It owns F (full
+    // screen) too, and a default may bind that one to what the system means by it, ToggleFullscreen, only.
     auto const controlCommand = Modifiers { Modifier::Control, Modifier::Super };
-    auto const owned = std::array { U'Q', U'F', U'D', U' ' };
-    for (auto const edition: { DefaultsEdition::Classic, DefaultsEdition::Native2026 })
+    auto const owned = std::array { U'Q', U'D', U' ' };
+    auto const rows = charRowsOf(KeyboardPlatformKind::Mac);
+    for (auto const input: owned)
+        CHECK_FALSE(isBound(rows, controlCommand, input));
+    for (auto const& row: rows)
+        if (row.modifiers == controlCommand && row.input == U'F')
+            CHECK((row.binding.size() == 1
+                   && std::holds_alternative<contour::actions::ToggleFullscreen>(row.binding.front())));
+}
+
+TEST_CASE("no default binds Shift+Left/Right", "[config][defaults]")
+{
+    // Shift+Left/Right selects a word in an editor and a line editor; they switched tabs once.
+    using vtbackend::Key;
+    auto const shift = vtbackend::Modifiers { vtbackend::Modifier::Shift };
+    for (auto const kind: AllKeyboardPlatformKinds)
     {
-        auto const mappings = makeDefaultInputMappings(edition, KeyboardPlatformKind::Mac);
-        for (auto const input: owned)
+        INFO(std::format("platform {}", std::to_underlying(kind)));
+        auto const rows = keyRowsOf(kind);
+        CHECK_FALSE(isBound(rows, shift, Key::LeftArrow));
+        CHECK_FALSE(isBound(rows, shift, Key::RightArrow));
+    }
+}
+
+TEST_CASE("Shift scrolling rows require the primary screen", "[config][defaults]")
+{
+    // An alternate-screen application (vim, less, htop) keeps Shift+arrows, Shift+PageUp and the rest.
+    using vtbackend::Key;
+    auto const shift = vtbackend::Modifiers { vtbackend::Modifier::Shift };
+    auto const primaryScreenOnly = vtbackend::MatchModes { 0, vtbackend::MatchModes::AlternateScreen };
+    for (auto const kind: AllKeyboardPlatformKinds)
+        for (auto const key:
+             { Key::UpArrow, Key::DownArrow, Key::PageUp, Key::PageDown, Key::Home, Key::End })
         {
-            CHECK_FALSE(std::ranges::any_of(mappings.charMappings, [&](auto const& row) {
-                return row.modifiers == controlCommand && row.input == input;
-            }));
-            CHECK_FALSE(std::ranges::any_of(
-                builtinFallbackCharMappings(KeyboardPlatformKind::Mac), [&](auto const& row) {
-                    return row.mapping.modifiers == controlCommand && row.mapping.input == input;
-                }));
+            INFO(std::format("platform {}, key {}", std::to_underlying(kind), key));
+            auto const rows = keyRowsOf(kind);
+            CHECK(isBound(rows, shift, key));
+            for (auto const& row: rows)
+                if (row.modifiers == shift && row.input == key)
+                    CHECK(row.modes == primaryScreenOnly);
         }
+}
+
+TEST_CASE("fullscreen is F11 on the desktop and Control+Command+F on macOS, and Alt+Enter is unbound",
+          "[config][defaults]")
+{
+    using contour::actions::ToggleFullscreen;
+    using vtbackend::Key;
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+    for (auto const kind: AllKeyboardPlatformKinds)
+    {
+        INFO(std::format("platform {}", std::to_underlying(kind)));
+        CHECK_FALSE(isBound(keyRowsOf(kind), Modifiers { Modifier::Alt }, Key::Enter));
+    }
+    for (auto const kind: DesktopKinds)
+    {
+        INFO(std::format("platform {}", std::to_underlying(kind)));
+        CHECK(isWrittenInEveryEdition<ToggleFullscreen>(kind, Modifiers {}, Key::F11));
+    }
+    auto const controlCommand = Modifiers { Modifier::Control, Modifier::Super };
+    CHECK(isWrittenInEveryEdition<ToggleFullscreen>(KeyboardPlatformKind::Mac, controlCommand, U'F'));
+    CHECK(isBoundOnlyTo<ToggleFullscreen>(charRowsOf(KeyboardPlatformKind::Mac), controlCommand, U'F'));
+    // F11 is the Mac's Show Desktop.
+    CHECK_FALSE(isBound(keyRowsOf(KeyboardPlatformKind::Mac), Modifiers {}, Key::F11));
+}
+
+TEST_CASE("font reset is Ctrl+0 on the desktop and Command+0 on macOS, never Ctrl+Shift+0",
+          "[config][defaults]")
+{
+    // Ctrl+Shift+0 cannot reset: on German, Nordic, Spanish, Italian, Portuguese and Turkish-Q layouts
+    // Shift+0 types '=', which the router finds first, so the press is Ctrl+Shift+= there and enlarges the
+    // font.
+    using contour::actions::ResetFontSize;
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+    for (auto const kind: DesktopKinds)
+    {
+        INFO(std::format("platform {}", std::to_underlying(kind)));
+        CHECK(isWrittenInEveryEdition<ResetFontSize>(kind, Modifiers { Modifier::Control }, U'0'));
+    }
+    auto const command = Modifiers { Modifier::Super };
+    CHECK(isWrittenInEveryEdition<ResetFontSize>(KeyboardPlatformKind::Mac, command, U'0'));
+    CHECK(isBoundOnlyTo<ResetFontSize>(fallbackCharRowsOf(KeyboardPlatformKind::Mac), command, U'0'));
+    for (auto const kind: AllKeyboardPlatformKinds)
+    {
+        INFO(std::format("platform {}", std::to_underlying(kind)));
+        CHECK_FALSE(isBound(charRowsOf(kind), Modifiers { Modifier::Control, Modifier::Shift }, U'0'));
+    }
+}
+
+TEST_CASE("Ctrl+Shift+X is unbound on the desktop", "[config][defaults]")
+{
+    // Terminator zooms a pane with it; Ctrl+Shift+W closes one.
+    for (auto const kind: DesktopKinds)
+    {
+        INFO(std::format("platform {}", std::to_underlying(kind)));
+        CHECK_FALSE(isBound(charRowsOf(kind),
+                            vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                            U'X'));
+    }
+}
+
+TEST_CASE("OpenConfiguration is the menu's Command+comma alone on macOS", "[config][defaults]")
+{
+    // Command+, is the menu bar's Settings, which runs OpenConfiguration itself. Control+Shift+comma, the
+    // desktop chord's literal translation, is not bound there, nor is Option+Command+comma: Option composes
+    // the comma into another character (no macOS default relies on Alt for a character key). The desktop
+    // keeps Ctrl+Shift+comma.
+    using contour::actions::OpenConfiguration;
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+    auto const isOpenConfiguration = [](auto const& row) {
+        return std::ranges::any_of(row.binding, [](auto const& action) {
+            return std::holds_alternative<OpenConfiguration>(action);
+        });
+    };
+    CHECK(std::ranges::none_of(charRowsOf(KeyboardPlatformKind::Mac), isOpenConfiguration));
+    CHECK(std::ranges::none_of(keyRowsOf(KeyboardPlatformKind::Mac), isOpenConfiguration));
+    CHECK_FALSE(isBound(
+        charRowsOf(KeyboardPlatformKind::Mac), Modifiers { Modifier::Control, Modifier::Shift }, U','));
+    for (auto const kind: DesktopKinds)
+    {
+        INFO(std::format("platform {}", std::to_underlying(kind)));
+        CHECK(isWrittenInEveryEdition<OpenConfiguration>(
+            kind, Modifiers { Modifier::Control, Modifier::Shift }, U','));
+    }
+}
+
+TEST_CASE("URL hints are Primary+Y and Primary+U is unbound", "[config][defaults]")
+{
+    // IBus takes Ctrl+Shift+U for its Unicode entry before the terminal sees it.
+    using contour::actions::HintMode;
+    for (auto const kind: AllKeyboardPlatformKinds)
+    {
+        INFO(std::format("platform {}", std::to_underlying(kind)));
+        auto const primary = primaryModifiers(kind);
+        CHECK(isWrittenInEveryEdition<HintMode>(kind, primary, U'Y'));
+        CHECK_FALSE(isBound(charRowsOf(kind), primary, U'U'));
+    }
+}
+
+TEST_CASE("no default binds ScrollMarkUp/Down", "[config][defaults]")
+{
+    // FocusPreviousCommand and FocusNextCommand step from prompt to prompt instead.
+    auto const isScrollMark = [](auto const& row) {
+        return std::ranges::any_of(row.binding, [](auto const& action) {
+            return std::holds_alternative<contour::actions::ScrollMarkUp>(action)
+                   || std::holds_alternative<contour::actions::ScrollMarkDown>(action);
+        });
+    };
+    for (auto const kind: AllKeyboardPlatformKinds)
+    {
+        INFO(std::format("platform {}", std::to_underlying(kind)));
+        CHECK(std::ranges::none_of(keyRowsOf(kind), isScrollMark));
+        CHECK(std::ranges::none_of(charRowsOf(kind), isScrollMark));
     }
 }
 

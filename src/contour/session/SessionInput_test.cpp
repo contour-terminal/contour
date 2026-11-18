@@ -684,6 +684,9 @@ TEST_CASE("a declined Ctrl+Shift+G does not reach the shell as ^G", "[session][i
 TEST_CASE("sendKeyEvent covers the whole special-key mapping table", "[session][input]")
 {
     contour::test::TestApp app;
+    // The Qt -> vtbackend::Key table is what this pins, not the defaults: without key rows, F11 (full screen
+    // on the desktop) is a key like the others.
+    app.app().config().inputMappings.value().keyMappings.clear();
     auto session = makeSession(app.app());
     auto& pty = mockPtyOf(*session);
 

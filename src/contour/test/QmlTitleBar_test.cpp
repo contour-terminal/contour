@@ -2194,7 +2194,7 @@ TEST_CASE("pane end: an ended pane shows the footer below its cells (offscreen)"
     CHECK(panes.leftSession.footerActions == 1);
 
     auto const& close = PaneTreeHost::partOf(card, "exitedFooterClose");
-    CHECK(close.property("text").toString() == QStringLiteral("Close Ctrl+Shift+X"));
+    CHECK(close.property("text").toString() == QStringLiteral("Close Ctrl+Shift+W"));
     clickOn(host, close);
     CHECK(panes.leftSession.footerDismissals == 1);
     CHECK(panes.leftSession.footerActions == 1);
@@ -2257,7 +2257,7 @@ TEST_CASE(
     // Return is not mentioned to assistive technology either, nor a chord Dismiss does not have.
     auto const description = footer.property("description").toString();
     CHECK_FALSE(description.contains(QStringLiteral("Return")));
-    CHECK_FALSE(description.contains(QStringLiteral("Ctrl+Shift+X")));
+    CHECK_FALSE(description.contains(QStringLiteral("Ctrl+Shift+W")));
 
     // Before the shell shows a prompt there is nothing to run: Dismiss alone, no dead button.
     panes.leftSession.setInterrupted(message, QString {});
@@ -2434,7 +2434,7 @@ TEST_CASE("pane end: the Terminal row's footer is one cell row with bracketed bu
     CHECK(PaneTreeHost::partOf(card, "exitedFooterRestart").property("text").toString()
           == QStringLiteral("[Restart %1]").arg(host.style().restartGlyph()));
     CHECK(PaneTreeHost::partOf(card, "exitedFooterClose").property("text").toString()
-          == QStringLiteral("[Close Ctrl+Shift+X]"));
+          == QStringLiteral("[Close Ctrl+Shift+W]"));
 }
 
 TEST_CASE("pane end: a narrow pane's footer keeps its buttons inside the pane (offscreen)",
@@ -2445,7 +2445,7 @@ TEST_CASE("pane end: a narrow pane's footer keeps its buttons inside the pane (o
     if (terminalRow)
         setup.row = contour::config::ChromeStyle::Terminal;
     CAPTURE(terminalRow);
-    // Two panes in a window too narrow for Restart and "Close Ctrl+Shift+X" side by side.
+    // Two panes in a window too narrow for Restart and "Close Ctrl+Shift+W" side by side.
     auto host = PaneTreeHost { setup, QSize { 360, 400 } };
     auto panes = TwoPanes {};
     host.show(panes.split, /*visiblePanes*/ 2);
@@ -2464,14 +2464,14 @@ TEST_CASE("pane end: a narrow pane's footer keeps its buttons inside the pane (o
 
     // Wide enough again, it names the chord.
     host.resize(QSize { 1200, 400 });
-    CHECK(close.property("text").toString().contains(QStringLiteral("Ctrl+Shift+X")));
+    CHECK(close.property("text").toString().contains(QStringLiteral("Ctrl+Shift+W")));
 }
 
 TEST_CASE("pane end: a narrow pane's footer drops Close's chord before its message (offscreen)",
           "[contour][gui][qml][paneend]")
 {
     // The order of sacrifice is the chord, then the message; the buttons stay. A pane wide enough for the
-    // message, Restart and a plain "Close" -- but not for "Close Ctrl+Shift+X" besides -- shows the
+    // message, Restart and a plain "Close" -- but not for "Close Ctrl+Shift+W" besides -- shows the
     // message whole and Close without its chord, which assistive technology still hears.
     auto host = PaneTreeHost { paneCardSetup(), QSize { 1200, 400 } };
     MockSession session;
@@ -2488,7 +2488,7 @@ TEST_CASE("pane end: a narrow pane's footer drops Close's chord before its messa
     auto const& restart = PaneTreeHost::partOf(card, "exitedFooterRestart");
     auto const& close = PaneTreeHost::partOf(card, "exitedFooterClose");
     REQUIRE(footer.isVisible());
-    REQUIRE(close.property("text").toString().contains(QStringLiteral("Ctrl+Shift+X")));
+    REQUIRE(close.property("text").toString().contains(QStringLiteral("Ctrl+Shift+W")));
     auto const chordedClose = close.width();
     auto const messageWidth = message.implicitWidth();
 
@@ -2683,7 +2683,7 @@ TEST_CASE("pane end: the footer tells assistive technology its keys, and a click
     REQUIRE(attached != nullptr);
     auto const description = attached->property("description").toString();
     CHECK(description.contains(QStringLiteral("Return")));
-    CHECK(description.contains(QStringLiteral("Ctrl+Shift+X")));
+    CHECK(description.contains(QStringLiteral("Ctrl+Shift+W")));
 
     // A click beside the buttons makes the ended pane the active one, so Return then reaches it.
     auto const before = panes.right().activateCalls;

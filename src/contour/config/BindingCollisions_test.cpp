@@ -671,8 +671,9 @@ TEST_CASE("every platform closes the active pane with Primary+W", "[bindings][pa
           == Names { "ClosePane" });
     CHECK(charActions(KeyboardPlatformKind::Mac, Modifiers { Modifier::Super, Modifier::Shift }, U'W')
           == Names { "CloseTab" });
-    // The desktop keeps Ctrl+Shift+X.
-    CHECK(charActions(KeyboardPlatformKind::Xkb, ctrlShift, U'X') == Names { "ClosePane" });
+    // Ctrl+Shift+X is not bound beside it: Terminator zooms a pane with it.
+    CHECK(charActions(KeyboardPlatformKind::Xkb, ctrlShift, U'X').empty());
+    CHECK(charActions(KeyboardPlatformKind::Win32, ctrlShift, U'X').empty());
 }
 
 TEST_CASE("the desktop copies with Ctrl+Shift+C and enlarges the font with Ctrl+Shift+=", "[bindings]")
@@ -743,17 +744,17 @@ TEST_CASE("the desktop steps between commands as VS Code does", "[bindings]")
         CHECK(clear->mapping.modes == prompt);
         CHECK(clear->declined == DeclinedInput::Consume);
     }
-    // The jump between prompts moved off Ctrl+Shift+Up/Down onto Ctrl+Alt+K/J, which must reach a
-    // configuration that predates them, or such a configuration loses the jump altogether.
+    // The command steps are the jumps between prompts too, so no default binds ScrollMarkUp/Down: the chords
+    // that once jumped, Ctrl+Alt+K/J on the desktop and Control+Shift+Up/Down on macOS, are the
+    // application's.
     for (auto const kind: { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32 })
     {
         auto const ctrlAlt = Modifiers { Modifier::Control, Modifier::Alt };
-        CHECK(fallbackCharActions(kind, ctrlAlt, U'K') == Names { "ScrollMarkUp" });
-        CHECK(fallbackCharActions(kind, ctrlAlt, U'J') == Names { "ScrollMarkDown" });
+        CHECK(charActions(kind, ctrlAlt, U'K').empty());
+        CHECK(charActions(kind, ctrlAlt, U'J').empty());
     }
-    // macOS keeps Control+Shift+Up/Down as the jump between prompts.
-    CHECK(keyActions(KeyboardPlatformKind::Mac, ctrlShift, Key::UpArrow) == Names { "ScrollMarkUp" });
-    CHECK(keyActions(KeyboardPlatformKind::Mac, ctrlShift, Key::DownArrow) == Names { "ScrollMarkDown" });
+    CHECK(keyActions(KeyboardPlatformKind::Mac, ctrlShift, Key::UpArrow).empty());
+    CHECK(keyActions(KeyboardPlatformKind::Mac, ctrlShift, Key::DownArrow).empty());
 }
 
 TEST_CASE("a configuration generated on one platform binds no chord twice on another", "[bindings][primary]")

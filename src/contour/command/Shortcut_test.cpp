@@ -13,6 +13,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <string>
 #include <string_view>
@@ -107,6 +108,13 @@ TEST_CASE("shortcutIndex names the macOS defaults by Command", "[contour][palett
     CHECK(index.at("CreateNewTab") == "Super+T");
     REQUIRE(index.contains("OpenCommandPalette"));
     CHECK(index.at("OpenCommandPalette") == "Super+P");
+    // The menus show these: Control+Command+F goes full screen, Command+Y opens the URL hints.
+    REQUIRE(index.contains("ToggleFullscreen"));
+    CHECK(index.at("ToggleFullscreen") == "Ctrl+Super+F");
+    auto const hints =
+        std::ranges::find_if(index, [](auto const& entry) { return entry.first.starts_with("HintMode"); });
+    REQUIRE(hints != index.end());
+    CHECK(hints->second == "Super+Y");
 }
 
 TEST_CASE("shortcutIndex maps commands to the chord that runs them", "[contour][palette]")
@@ -131,7 +139,7 @@ TEST_CASE("shortcutIndex maps commands to the chord that runs them", "[contour][
             CHECK(index.contains(id));
 
         REQUIRE(index.contains("ToggleFullscreen"));
-        CHECK(index.at("ToggleFullscreen") == "Alt+Enter");
+        CHECK(index.at("ToggleFullscreen") == "F11");
 
         // The palette's own chord, so opening the palette teaches you how to open the palette.
         REQUIRE(index.contains("OpenCommandPalette"));

@@ -14,7 +14,7 @@
 // the shell, Return included: the buttons are clicked.
 //
 // On the native rows it is a bar in the pane's own tone with a hairline above it; on the Terminal row it is
-// one cell row of the bar, its buttons bracketed by the chip glyphs: `[Restart ↩] [Close Ctrl+Shift+X]`.
+// one cell row of the bar, its buttons bracketed by the chip glyphs: `[Restart ↩] [Close Ctrl+Shift+W]`.
 import QtQuick
 import QtQuick.Window
 

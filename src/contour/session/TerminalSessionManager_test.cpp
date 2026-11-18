@@ -3249,14 +3249,14 @@ TEST_CASE("TerminalSessionManager: a modified Return in an ended pane is left to
     REQUIRE(ended->endAction() == contour::session::FooterAction::Restart);
     auto const ptysBefore = factory->createdPtys.size();
 
-    // Alt+Enter is the default ToggleFullscreen binding (a no-op here, with no display), and Shift+Enter
-    // a chord the user may bind: neither is Restart.
-    for (auto const chord: { vtbackend::Modifiers { vtbackend::Modifier::Alt },
-                             vtbackend::Modifiers { vtbackend::Modifier::Shift } })
-        ended->sendKeyEvent(vtbackend::Key::Enter,
-                            chord,
-                            vtbackend::KeyboardEventType::Press,
-                            std::chrono::steady_clock::now());
+    // F11 is the desktop's default ToggleFullscreen binding (a no-op here, with no display), and Alt+Enter
+    // and Shift+Enter chords the user may bind: none of them is Restart.
+    for (auto const& [key, chord]:
+         { std::pair { vtbackend::Key::F11, vtbackend::Modifiers {} },
+           std::pair { vtbackend::Key::Enter, vtbackend::Modifiers { vtbackend::Modifier::Alt } },
+           std::pair { vtbackend::Key::Enter, vtbackend::Modifiers { vtbackend::Modifier::Shift } } })
+        ended->sendKeyEvent(
+            key, chord, vtbackend::KeyboardEventType::Press, std::chrono::steady_clock::now());
 
     CHECK(factory->createdPtys.size() == ptysBefore);
     CHECK(manager.sessionForId(endedId) == ended);
@@ -3300,7 +3300,7 @@ TEST_CASE("TerminalSessionManager: a pane restarted mid-command starts with no b
 TEST_CASE("TerminalSessionManager: ClosePane closes an ended pane", "[manager][paneend]")
 {
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
-    contour::test::useDesktopBindings(app.app().config()); // Ctrl+Shift+X is the desktop's ClosePane chord
+    contour::test::useDesktopBindings(app.app().config()); // Ctrl+Shift+W is the desktop's ClosePane chord
     auto& manager = app.manager();
     contour::test::ScopedController const window { manager };
 
@@ -3317,8 +3317,8 @@ TEST_CASE("TerminalSessionManager: ClosePane closes an ended pane", "[manager][p
 
     // The default ClosePane chord: the input mappings still run while the pane waits, though text does not.
     auto const ctrlShift = vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift };
-    ended->sendCharEvent(U'X',
-                         vtbackend::KeyIdentity { .unshiftedKey = U'X' },
+    ended->sendCharEvent(U'W',
+                         vtbackend::KeyIdentity { .unshiftedKey = U'W' },
                          ctrlShift,
                          vtbackend::KeyboardEventType::Press,
                          std::chrono::steady_clock::now());

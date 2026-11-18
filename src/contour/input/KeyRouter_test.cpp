@@ -3,6 +3,7 @@
 // The router on its own: a Config built here, no session, no platform.
 
 #include <contour/config/Config.hpp>
+#include <contour/config/ConfigReader.hpp>
 #include <contour/input/KeyRouter.hpp>
 #include <contour/test/CoreFixtures.hpp>
 
@@ -135,9 +136,13 @@ TEST_CASE("routeChar retries a Shift chord under its unshifted base", "[input][r
 TEST_CASE("the generated Ctrl+Shift+Comma binding matches the '<' a US layout delivers", "[input][router]")
 {
     // A US layout turns Shift+Comma into '<' before the router sees it (#1588). The generated configuration
-    // writes the row against ',', so it is found through the unshifted-base retry.
-    auto const config = contour::test::loadConfigFromYaml(contour::config::defaultConfigString(),
-                                                          contour::config::KeyboardPlatformKind::Xkb);
+    // writes the row against ',', so it is found through the unshifted-base retry. The configuration is the
+    // one a desktop generates: a Mac writes no Ctrl+Shift+Comma row (Command+Comma opens Settings there).
+    auto desktop = contour::config::Config {};
+    contour::test::useDesktopBindings(desktop);
+    auto const config = contour::test::loadConfigFromYaml(
+        contour::config::createString<contour::config::YAMLConfigWriter>(desktop),
+        contour::config::KeyboardPlatformKind::Xkb);
     auto const ctrlShift = Modifiers { Modifier::Control, Modifier::Shift };
     for (auto const codepoint: { U',', U'<' })
     {
@@ -233,4 +238,46 @@ TEST_CASE("a user's Ctrl+Alt+Left swap binding fires instead of the built-in foc
     CHECK(route.user.actions->size() == 1);
     CHECK(firstActionOf(route.fallback.actions) == "FocusPaneLeft");
     CHECK(route.fallback.declined == DeclinedInput::PassThrough);
+}
+
+TEST_CASE("Ctrl+Shift+0 enlarges the font where Shift+0 types '='", "[input][router]")
+{
+    // On German, Nordic, Spanish, Italian, Portuguese and Turkish-Q layouts Shift+0 types '='. The router
+    // looks the produced character up first, so the press is Ctrl+Shift+= there: the reason the font reset
+    // is Ctrl+0, not Ctrl+Shift+0.
+    auto const config = configWith("    []", contour::config::KeyboardPlatformKind::Xkb);
+    auto const route =
+        contour::input::routeChar(U'=',
+                                  vtbackend::KeyIdentity { .unshiftedKey = U'0' },
+                                  KeyboardModifiers { Modifiers { Modifier::Control, Modifier::Shift } },
+                                  AppModifier::Absent,
+                                  contextOf(config));
+    CHECK(firstActionOf(route.fallback.actions) == "IncreaseFontSize");
+}
+
+TEST_CASE("Ctrl+Shift+0 does not reset the font size where Shift+0 types ')'", "[input][router]")
+{
+    // On a US layout the router retries the Shift chord under its unshifted base, Ctrl+Shift+0, which no
+    // default binds: a reset there would be one on some layouts and an enlargement on others.
+    auto const config = configWith("    []", contour::config::KeyboardPlatformKind::Xkb);
+    auto const route =
+        contour::input::routeChar(U')',
+                                  vtbackend::KeyIdentity { .unshiftedKey = U'0' },
+                                  KeyboardModifiers { Modifiers { Modifier::Control, Modifier::Shift } },
+                                  AppModifier::Absent,
+                                  contextOf(config));
+    CHECK(firstActionOf(route.user.actions) != "ResetFontSize");
+    CHECK(firstActionOf(route.fallback.actions) != "ResetFontSize");
+}
+
+TEST_CASE("on a Mac Control+Command+F goes full screen", "[input][router]")
+{
+    auto const config = configWith("    []", contour::config::KeyboardPlatformKind::Mac);
+    auto const route =
+        contour::input::routeChar(U'f',
+                                  vtbackend::KeyIdentity { .unshiftedKey = U'f' },
+                                  KeyboardModifiers { Modifiers { Modifier::Control, Modifier::Super } },
+                                  AppModifier::Held,
+                                  contextOf(config, SuperEncoding::Unrepresentable));
+    CHECK(firstActionOf(route.fallback.actions) == "ToggleFullscreen");
 }

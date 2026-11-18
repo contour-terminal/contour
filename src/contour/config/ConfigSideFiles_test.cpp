@@ -582,27 +582,12 @@ TEST_CASE("config.builtinFallbackKeyMappings", "[config]")
         CHECK(std::holds_alternative<contour::actions::SwitchToTabLeft>(backTab->front()));
     }
 
-    SECTION("Ctrl+Shift+Up and Down go from prompt to prompt on macOS, on the primary screen only")
+    SECTION("Ctrl+Shift+Up and Down are the application's on macOS")
     {
+        // No default jumps between prompts: Command+Up and Down step between commands instead.
         auto const config = Config { .keyboardPlatformKind = contour::config::KeyboardPlatformKind::Mac };
-
-        auto const* up = contour::config::applyBuiltinFallback(config, Key::UpArrow, ctrlShift, modeFlags);
-        REQUIRE(up != nullptr);
-        REQUIRE(up->size() == 1);
-        CHECK(std::holds_alternative<contour::actions::ScrollMarkUp>(up->front()));
-
-        auto const* down =
-            contour::config::applyBuiltinFallback(config, Key::DownArrow, ctrlShift, modeFlags);
-        REQUIRE(down != nullptr);
-        REQUIRE(down->size() == 1);
-        CHECK(std::holds_alternative<contour::actions::ScrollMarkDown>(down->front()));
-
-        // A full-screen application keeps the chord.
-        auto const alternateScreen = uint8_t { vtbackend::MatchModes::AlternateScreen };
-        CHECK(contour::config::applyBuiltinFallback(config, Key::UpArrow, ctrlShift, alternateScreen)
-              == nullptr);
-
-        // And the plain defaults leave it free, so a user's own binding of it is found first.
+        CHECK(contour::config::applyBuiltinFallback(config, Key::UpArrow, ctrlShift, modeFlags) == nullptr);
+        CHECK(contour::config::applyBuiltinFallback(config, Key::DownArrow, ctrlShift, modeFlags) == nullptr);
         CHECK(std::ranges::none_of(config.inputMappings.value().keyMappings, [&](auto const& mapping) {
             return (mapping.input == Key::UpArrow || mapping.input == Key::DownArrow)
                    && mapping.modifiers == ctrlShift;
@@ -611,7 +596,7 @@ TEST_CASE("config.builtinFallbackKeyMappings", "[config]")
 
     SECTION("Ctrl+Shift+Up and Down select a command's output on the desktop, on the primary screen only")
     {
-        // VS Code's chords; the desktop jumps from prompt to prompt with Ctrl+Alt+K and J.
+        // VS Code's chords.
         auto const config = Config { .keyboardPlatformKind = contour::config::KeyboardPlatformKind::Xkb };
 
         auto const* up = contour::config::applyBuiltinFallback(config, Key::UpArrow, ctrlShift, modeFlags);

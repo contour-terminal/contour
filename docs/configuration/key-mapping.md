@@ -36,8 +36,8 @@ A small number of bindings are built in and do **not** appear in `input_mapping`
 | Horizontal wheel / two-finger sideways swipe | Switch tabs |
 
 The default chords added since your configuration was generated (see [Default chords](#default-chords)) reach
-it the same way, among them `Ctrl+Shift+C`, `Ctrl+Shift+W`, the pane chords and the macOS `⌘P`, `⌘W` and `⌃⌘`
-chords.
+it the same way, among them `Ctrl+Shift+C`, `Ctrl+Shift+W`, the pane chords
+and the macOS `⌘P`, `⌘W` and `⌃⌘` chords (full screen's `⌃⌘F` too).
 
 These are consulted only when your `input_mapping` does not claim the same key or button (for the
 triple-click, the same button and click count), so binding one of them yourself replaces it.
@@ -71,10 +71,10 @@ Shift or moves, and the table says why.
 | New window (`NewTerminal`) | `Ctrl+Shift+N` | `⌘N` | |
 | New window to… (`NewWindowTo`) | `Ctrl+Shift+K` | `⇧⌘K` | `⌘K` clears to the prompt |
 | New tab (`CreateNewTab`) | `Ctrl+Shift+T` | `⌘T` | |
-| Close pane (`ClosePane`) | `Ctrl+Shift+W`, `Ctrl+Shift+X` | `⌘W` | Closes the tab with its last pane |
+| Close pane (`ClosePane`) | `Ctrl+Shift+W` | `⌘W` | Closes the tab with its last pane |
 | Close tab (`CloseTab`) | — | `⇧⌘W` | On Linux and Windows, `Ctrl+Shift` already holds Shift |
 | Select tab 1…9 (`SwitchToTab`) | `Alt+1` … `Alt+9`, `Alt+0` for the tenth | `⌘1` … `⌘9` | `⌘0` resets the font size |
-| Previous / next tab | `Ctrl+PageUp` / `Ctrl+PageDown`, `Ctrl+Shift+Tab` / `Ctrl+Tab`, `Shift+←` / `Shift+→` | the same, and `⇧⌘[` / `⇧⌘]` | |
+| Previous / next tab | `Ctrl+PageUp` / `Ctrl+PageDown`, `Ctrl+Shift+Tab` / `Ctrl+Tab` | the same, and `⇧⌘[` / `⇧⌘]` | `Shift+←` / `Shift+→` stay the editor's |
 | Move tab left / right | `Ctrl+Shift+PageUp` / `PageDown` | `⌃⇧PageUp` / `⌃⇧PageDown` | The tab chord plus Shift |
 | Previous / next workspace (`CycleWorkspace`) | `Ctrl+Alt+PageUp` / `Ctrl+Alt+PageDown` | `⌃⌘↑` / `⌃⌘↓` | The tab chords one level up; shadows Emacs's `C-M-prior`/`C-M-next` |
 | Move the workspace up / down (`MoveWorkspaceUp` / `MoveWorkspaceDown`) | `Ctrl+Shift+Alt+PageUp` / `Ctrl+Shift+Alt+PageDown` | `⌃⇧⌘↑` / `⌃⇧⌘↓` | The workspace chord plus Shift |
@@ -91,20 +91,20 @@ Shift or moves, and the table says why.
 | Next / previous match | `F3` / `Shift+F3` | `⌘G` / `⇧⌘G`, and `F3` / `Shift+F3` | |
 | Find the selection (`SearchSelection`) | — | `⌘E` | A macOS convention; `Ctrl+Shift+E` splits |
 | Clear search highlight | `Ctrl+Shift+H` | `⇧⌘H` | `⌘H` hides the application |
-| Previous / next command (`FocusPreviousCommand`) | `Ctrl+↑` / `Ctrl+↓` | `⌘↑` / `⌘↓` | At the prompt only, as in VS Code's terminal |
+| Scroll the scrollback | `Shift+↑` / `Shift+↓`, `Shift+PageUp` / `Shift+PageDown`, `Shift+Home` / `Shift+End` | the same | On the primary screen only; an alternate-screen application (an editor, a pager) keeps them |
+| Previous / next command (`FocusPreviousCommand`) | `Ctrl+↑` / `Ctrl+↓` | `⌘↑` / `⌘↓` | At the prompt only, as in VS Code's terminal; the jump between prompts too |
 | Select previous / next command's output | `Ctrl+Shift+↑` / `Ctrl+Shift+↓` | `⇧⌘↑` / `⇧⌘↓` | At the prompt only |
-| Previous / next prompt (`ScrollMarkUp`) | `Ctrl+Alt+K` / `Ctrl+Alt+J` | `⌃⇧↑` / `⌃⇧↓` | At the prompt only |
 | Open the last command's output | `Ctrl+Shift+G` | `⇧⌘O` | `⌘G` finds the next match |
 | Clear to the prompt (`ClearToPrompt`) | `Ctrl+Shift+L` | `⌘K` | The shell's `Ctrl+L`, plus Shift |
-| Open URLs by hint (`HintMode`) | `Ctrl+Shift+U` | `⌘U` | |
-| Font size larger / smaller / reset | `Ctrl+Shift+=` / `Ctrl+Shift+-` / `Ctrl+0` | `⌘+` / `⌘-` / `⌘0` | |
+| Open URLs by hint (`HintMode`) | `Ctrl+Shift+Y` | `⌘Y` | IBus takes `Ctrl+Shift+U` for Unicode input |
+| Font size larger / smaller / reset | `Ctrl+Shift+=` / `Ctrl+Shift+-` / `Ctrl+0` | `⌘+` / `⌘-` / `⌘0` | Not `Ctrl+Shift+0`: where `Shift+0` types `=` (German, Nordic, Spanish, Italian, Portuguese, Turkish-Q) it is `Ctrl+Shift+=` |
 | Toggle the status line | `Ctrl+Alt+.` | `⌃⌘.` | |
 | Open the file manager | `Ctrl+Alt+O` | `⌃⌘O` | |
 | Screenshot (`ScreenshotVT`) | `Ctrl+Alt+S` | `⌃⌘S` | |
 | Toggle input method handling | `Ctrl+Alt+,` | `⌃⌘,` | |
-| Settings (`OpenConfiguration`) | `Ctrl+Shift+,` | `⌘,` (menu bar), `⌃⇧,` | |
+| Settings (`OpenConfiguration`) | `Ctrl+Shift+,` | `⌘,` (menu bar) | Option composes the comma on a Mac, so there is no second chord |
 | Vi normal mode | `Ctrl+Shift+Space` | `⌃⇧Space` | |
-| Full screen | `Alt+Enter` | `⌥↩` | |
+| Full screen | `F11` | `⌃⌘F` | `Alt+Enter` reaches the program |
 | Speak the selection | `Ctrl+Shift+S` | — | macOS has its own Speak Selection (`⌥Esc`) |
 | Quit | `Ctrl+Shift+Q` | `⌘Q` (menu bar) | |
 

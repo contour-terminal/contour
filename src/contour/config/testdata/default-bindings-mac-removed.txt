@@ -1,3 +1,12 @@
+[defaults classic] key modes=[Any] mods=[Alt] input=Enter clicks=- -> ToggleFullscreen declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift] input=DownArrow clicks=- -> ScrollOneDown declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift] input=End clicks=- -> ScrollToBottom declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift] input=Home clicks=- -> ScrollToTop declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift] input=PageDown clicks=- -> ScrollPageDown declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift] input=PageUp clicks=- -> ScrollPageUp declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift] input=UpArrow clicks=- -> ScrollOneUp declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift] input=LeftArrow clicks=- -> SwitchToTabLeft declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift] input=RightArrow clicks=- -> SwitchToTabRight declined=pass gated=no
 [defaults classic] key modes=[Any] mods=[Alt|Control] input=LeftArrow clicks=- -> SwapPaneLeft declined=pass gated=no
 [defaults classic] key modes=[Any] mods=[Alt|Control] input=RightArrow clicks=- -> SwapPaneRight declined=pass gated=no
 [defaults classic] key modes=[Any] mods=[Alt|Control] input=UpArrow clicks=- -> SwapPaneUp declined=pass gated=no
@@ -31,6 +40,7 @@
 [defaults classic] char modes=[Any] mods=[Alt] input=U+0038 clicks=- -> SwitchToTab, position: 8 declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Alt] input=U+0039 clicks=- -> SwitchToTab, position: 9 declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Alt] input=U+0030 clicks=- -> SwitchToTab, position: 10 declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Control] input=U+002C clicks=- -> OpenConfiguration declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Shift|Control] input=U+0051 clicks=- -> Quit declined=pass gated=no
 [defaults classic] char modes=[~AltScreen] mods=[Alt|Control] input=U+004B clicks=- -> ScrollMarkUp declined=pass gated=no
 [defaults classic] char modes=[~AltScreen] mods=[Alt|Control] input=U+004A clicks=- -> ScrollMarkDown declined=pass gated=no
@@ -39,6 +49,15 @@
 [defaults classic] char modes=[Any] mods=[Shift|Control] input=U+0046 clicks=- -> SearchReverse declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Shift|Control] input=U+0048 clicks=- -> NoSearchHighlight declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Shift|Control] input=U+0055 clicks=- -> HintMode(url, 1) declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Alt] input=Enter clicks=- -> ToggleFullscreen declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift] input=DownArrow clicks=- -> ScrollOneDown declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift] input=End clicks=- -> ScrollToBottom declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift] input=Home clicks=- -> ScrollToTop declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift] input=PageDown clicks=- -> ScrollPageDown declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift] input=PageUp clicks=- -> ScrollPageUp declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift] input=UpArrow clicks=- -> ScrollOneUp declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift] input=LeftArrow clicks=- -> SwitchToTabLeft declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift] input=RightArrow clicks=- -> SwitchToTabRight declined=pass gated=no
 [defaults native2026] key modes=[Any] mods=[Alt|Control] input=LeftArrow clicks=- -> SwapPaneLeft declined=pass gated=no
 [defaults native2026] key modes=[Any] mods=[Alt|Control] input=RightArrow clicks=- -> SwapPaneRight declined=pass gated=no
 [defaults native2026] key modes=[Any] mods=[Alt|Control] input=UpArrow clicks=- -> SwapPaneUp declined=pass gated=no
@@ -72,6 +91,7 @@
 [defaults native2026] char modes=[Any] mods=[Alt] input=U+0038 clicks=- -> SwitchToTab, position: 8 declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Alt] input=U+0039 clicks=- -> SwitchToTab, position: 9 declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Alt] input=U+0030 clicks=- -> SwitchToTab, position: 10 declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+002C clicks=- -> OpenConfiguration declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0051 clicks=- -> Quit declined=pass gated=no
 [defaults native2026] char modes=[~AltScreen] mods=[Alt|Control] input=U+004B clicks=- -> ScrollMarkUp declined=pass gated=no
 [defaults native2026] char modes=[~AltScreen] mods=[Alt|Control] input=U+004A clicks=- -> ScrollMarkDown declined=pass gated=no
@@ -80,6 +100,8 @@
 [defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0046 clicks=- -> SearchReverse declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0048 clicks=- -> NoSearchHighlight declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0055 clicks=- -> HintMode(url, 1) declined=pass gated=no
+[fallbacks] key modes=[~AltScreen] mods=[Shift|Control] input=UpArrow clicks=- -> ScrollMarkUp declined=pass gated=no
+[fallbacks] key modes=[~AltScreen] mods=[Shift|Control] input=DownArrow clicks=- -> ScrollMarkDown declined=pass gated=no
 [fallbacks] key modes=[Any] mods=[Super] input=PageUp clicks=- -> MoveTabToLeft declined=pass gated=no
 [fallbacks] key modes=[Any] mods=[Super] input=PageDown clicks=- -> MoveTabToRight declined=pass gated=no
 [fallbacks] char modes=[~AltScreen] mods=[Shift|Control] input=U+0047 clicks=- -> OpenCommandOutput, target: last, placement: split declined=consume gated=no
