@@ -959,16 +959,17 @@ namespace
         {
             if (!_attachment)
                 return {};
-            return [this](ShutdownCause cause) {
 #ifndef _WIN32
+            return [this](ShutdownCause cause) {
                 // Waited for: the keeper lets go of the label before the listeners close, so a start that
                 // follows the stop at once finds the label free.
                 if (_link)
                     _link->announceShutdown(std::to_underlying(cause));
-#else
-                std::ignore = cause;
-#endif
             };
+#else
+            return [](ShutdownCause) {
+            };
+#endif
         }
 
         /// Starts the link on @p loop, and for a Recovered start rebuilds what the keeper kept
