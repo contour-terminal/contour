@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 
 #include <orchestrator/core/Run.hpp>
 
@@ -36,6 +37,15 @@ inline constexpr std::size_t MaxSummaryLineChars = 200;
 /// @return The Finished runs marked Seen::New, and the kept ones among them being checked again: a re-check
 ///         keeps the mark it had, so it neither drops out of the count nor returns to it.
 [[nodiscard]] std::size_t newFinishedCount(std::span<Run const> runs) noexcept;
+
+/// The Finished entry a run is, or is again once a re-check of its kept worktree ends.
+/// @param run The run.
+/// @return Its Finished state, or the one its Ending resumes; nullptr for a run that is neither.
+[[nodiscard]] Finished const* finishedEntryOf(Run const& run) noexcept;
+
+/// @param ended How a run ended.
+/// @return It in the words the user reads, such as "ended by you".
+[[nodiscard]] std::string_view endedText(Ended ended) noexcept;
 
 /// Where a run stands, in the words the summary's run lines use: such as "running" or "ending: verify"; for a
 /// finished run, how it ended, what became of its worktree, whether it was seen, and why it was kept.

@@ -1,0 +1,40 @@
+worktree_root: is required                                                                                              
+╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
+│ Nothing to list until the orchestrator is configured.                │ │ Nothing selected.                           │
+│ Configure daemon.extensions.orchestrator.config:                     │ │                                             │
+│ worktree_root, models, repos and tasks.                              │ │                                             │
+│ The line above says what is missing or wrong.                        │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
+ ↑↓ move · enter open · ? help · / filter · R refresh · e end run · x retry removal · del dismiss · esc back            
+                                                                                                                        

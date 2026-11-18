@@ -3,7 +3,7 @@
 # The orchestrator's WebAssembly module: a wasm32-wasip1 reactor of the daemon world
 # (`terminal-extensions:daemon`, wit/daemon/ in Contour's tree). A project of its own, like harness/, configured
 # with a WASI C++ toolchain; Contour builds it with contour_add_wasm_cxx_guest() (cmake/ContourWasiCxx.cmake)
-# when CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST is on. The core and the driver are the very sources the native
+# when CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST is on. The core, the dashboard and the driver are the very sources the native
 # build compiles and tests; only WitHost.cpp and Exports.cpp, the adapter to the generated bindings, are
 # WebAssembly-only.
 #
@@ -28,10 +28,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_compile_options(-Os -flto)
 add_link_options(-flto)
 
-# glaze, as the core's own build takes it.
+# glaze, core-cpp and libunicode, as the core's own build takes them: Contour hands over the sources it carries.
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Dependencies.cmake)
 
-# The core and the driver, from the project's own CMakeLists; only what the module links is built.
+# The core, the dashboard and the driver, from the project's own CMakeLists; only what the module links is built.
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/.. orchestrator EXCLUDE_FROM_ALL)
 
 add_executable(orchestrator
@@ -42,7 +42,8 @@ add_executable(orchestrator
     bindings/daemon.h
     ${ORCHESTRATOR_MANIFEST_SECTION_SOURCE}
 )
-target_link_libraries(orchestrator PRIVATE orchestrator_guest_driver)
+# The dashboard, built for WebAssembly from the same sources the native tests cover, for the driver to serve.
+target_link_libraries(orchestrator PRIVATE orchestrator_guest_driver orchestrator_view)
 # The generated bindings, as <bindings/daemon.h>.
 target_include_directories(orchestrator PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 # The adapter is held to Contour's warnings; the generated bindings are not edited, and not warned about.

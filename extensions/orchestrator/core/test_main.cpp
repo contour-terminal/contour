@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <core/Environment.hpp>
 #include <core/testing/SuppressWindowsDialogs.hpp>
 
 #define CATCH_CONFIG_RUNNER
@@ -9,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -27,6 +29,8 @@ namespace
             return std::filesystem::path(ORCHESTRATOR_CONTRACT_DIR) / relativePath;
         case orchestrator::FixtureRoot::Testdata:
             return std::filesystem::path(ORCHESTRATOR_TESTDATA_DIR) / relativePath;
+        case orchestrator::FixtureRoot::Screens:
+            return std::filesystem::path(ORCHESTRATOR_VIEW_TESTDATA_DIR) / relativePath;
     }
     return {};
 }
@@ -43,6 +47,31 @@ std::string readFixture(FixtureRoot root, std::string_view relativePath)
     if (!file)
         FAIL("cannot open fixture " << path.string());
     return { std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
+}
+
+std::optional<std::string> readFixtureIfPresent(FixtureRoot root, std::string_view relativePath)
+{
+    auto const path = fixturePath(root, relativePath);
+    auto error = std::error_code {};
+    if (!std::filesystem::is_regular_file(path, error))
+        return std::nullopt;
+    return readFixture(root, relativePath);
+}
+
+void writeFixture(FixtureRoot root, std::string_view relativePath, std::string_view bytes)
+{
+    auto const path = fixturePath(root, relativePath);
+    auto file = std::ofstream(path, std::ios::binary | std::ios::trunc);
+    if (!file)
+        FAIL("cannot write fixture " << path.string());
+    file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    if (!file)
+        FAIL("cannot write fixture " << path.string());
+}
+
+bool updatingGoldens()
+{
+    return core::LiveEnvironment {}.get("ORCHESTRATOR_UPDATE_GOLDENS").has_value();
 }
 
 std::vector<std::string> fixtureNames(FixtureRoot root, std::string_view relativeDirectory)

@@ -76,16 +76,6 @@ namespace
     /// The bytes the line counting the runs left out may take, its line end included.
     constexpr auto MaxTrailerBytes = std::size_t { 32 };
 
-    /// The Finished entry a run is, or is again once a re-check of its kept worktree ends.
-    [[nodiscard]] Finished const* finishedEntryOf(Run const& run) noexcept
-    {
-        if (auto const* finished = std::get_if<Finished>(&run.state))
-            return finished;
-        if (auto const* ending = std::get_if<Ending>(&run.state); ending && ending->resumedFrom)
-            return &*ending->resumedFrom;
-        return nullptr;
-    }
-
     /// How a finished run ended, what became of its worktree, whether it was seen, and why.
     [[nodiscard]] std::string describeFinished(Run const& run,
                                                Finished const& finished,
@@ -114,6 +104,20 @@ namespace
         return text;
     }
 } // namespace
+
+Finished const* finishedEntryOf(Run const& run) noexcept
+{
+    if (auto const* finished = std::get_if<Finished>(&run.state))
+        return finished;
+    if (auto const* ending = std::get_if<Ending>(&run.state); ending && ending->resumedFrom)
+        return &*ending->resumedFrom;
+    return nullptr;
+}
+
+std::string_view endedText(Ended ended) noexcept
+{
+    return nameOf(EndedNames, ended);
+}
 
 std::string runStateText(Run const& run)
 {

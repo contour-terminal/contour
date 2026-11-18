@@ -1,0 +1,97 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <core/Clock.hpp>
+#include <core/Defines.hpp>
+#include <core/tui/Buffer.hpp>
+#include <core/tui/Rect.hpp>
+#include <core/tui/Theme.hpp>
+
+#include <cstddef>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include <orchestrator/core/Engine.hpp>
+#include <orchestrator/view/Keys.hpp>
+
+namespace orchestrator::view
+{
+
+/// What ends every frame: CUP to the top-left, where the hidden cursor rests (@see Dashboard::frame).
+inline constexpr auto RestingCursor = std::string_view { "\033[H" };
+
+/// The dashboard tab: the engine's lists drawn with core::tui, laid out by breakpoint (narrowest first, the
+/// last one the tab's size meets wins: BandBreakpoints), and the keys typed into it.
+///
+/// It performs no I/O. Bytes the terminal sent go in through input(); frame() returns the bytes that bring
+/// the tab up to date, which the guest writes to it.
+class Dashboard
+{
+  public:
+    /// @param engine The engine whose lists are drawn; it must outlive the dashboard.
+    /// @param theme How the dashboard is drawn, such as dashboardTheme().
+    /// @param clock What core::tui measures hover and spinner time on, and the agents' ages are measured
+    ///        against, in the engine's monotonic milliseconds; the guest's own (GuestClock).
+    /// @param size The tab's size.
+    Dashboard(Engine const& engine,
+              core::tui::Theme theme,
+              core::IClock const& clock CORE_LIFETIMEBOUND,
+              core::tui::Size size);
+    /// A clock is kept, not copied: a temporary would dangle.
+    Dashboard(Engine const& engine,
+              core::tui::Theme theme,
+              core::IClock const&& clock,
+              core::tui::Size size) = delete;
+    ~Dashboard();
+
+    Dashboard(Dashboard const&) = delete;
+    Dashboard& operator=(Dashboard const&) = delete;
+    Dashboard(Dashboard&&) = delete;
+    Dashboard& operator=(Dashboard&&) = delete;
+
+    /// Applies what the user typed. A key whose encoding is split across two calls waits for its rest; an ESC
+    /// that ends @p bytes waits up to 50 ms for one (see pendingEscapeDeadline()), and is the Escape key
+    /// after.
+    /// @param bytes What the terminal sent, decoded by core::tui::VtParser.
+    /// @return What the engine is asked, in order.
+    [[nodiscard]] std::vector<UiAction> input(std::string_view bytes);
+
+    /// The tab was resized: the next frame repaints at the new size, in the band it chooses.
+    /// @param size The tab's size.
+    void resize(core::tui::Size size);
+
+    /// The engine's lists changed: the next frame draws them again.
+    void engineChanged();
+
+    /// @return When a lone ESC that ended the last input becomes the Escape key, unless more bytes come
+    ///         first; std::nullopt when none waits. The guest wakes by then and calls frame(), which resolves
+    ///         it.
+    [[nodiscard]] std::optional<core::SteadyTimePoint> pendingEscapeDeadline() const noexcept;
+
+    /// @return How often the rows were built from the engine: once per input(), and in frame() only after
+    ///         engineChanged() or when an agent's age moved on. For tests.
+    [[nodiscard]] std::size_t rowBuilds() const noexcept;
+
+    /// Resolves an ESC whose deadline passed (see pendingEscapeDeadline()), then draws.
+    /// @return The bytes that bring the tab up to date; empty when nothing changed since the last frame.
+    [[nodiscard]] std::string frame();
+
+    /// @return What the last frame drew: for golden tests.
+    [[nodiscard]] core::tui::Buffer const& rendered() const noexcept;
+
+    /// @return Where the user is: what is selected, open and filtered.
+    [[nodiscard]] Interaction const& interaction() const noexcept;
+
+    /// @return The index into BandBreakpoints the last frame was laid out by; std::nullopt before it.
+    [[nodiscard]] std::optional<std::size_t> breakpoint() const noexcept;
+
+    struct State;
+
+  private:
+    std::unique_ptr<State> _state;
+};
+
+} // namespace orchestrator::view

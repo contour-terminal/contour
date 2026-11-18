@@ -1,0 +1,24 @@
+worktree_root: is required                                                      
+╭─ Agents ─────────────────────────────────────────────────────────────────────╮
+│ Nothing to list until the orchestrator is configured.                        │
+│ Configure daemon.extensions.orchestrator.config:                             │
+│ worktree_root, models, repos and tasks.                                      │
+│ The line above says what is missing or wrong.                                │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Details ────────────────────────────────────────────────────────────────────╮
+│ Nothing selected.                                                            │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ↑↓ move · enter open · ? help · / filter · R refresh · e end run · x retry re… 
+                                                                                

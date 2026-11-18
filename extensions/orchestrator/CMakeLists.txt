@@ -83,6 +83,21 @@ target_include_directories(orchestrator_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
 )
 
+# The dashboard: the engine's lists drawn with core-cpp's headless terminal UI, laid out by breakpoint. Guest code
+# like the core: the guest serves it in its tab, and the native build tests it against golden screens.
+add_library(orchestrator_view STATIC
+    view/Band.hpp
+    view/Dashboard.cpp
+    view/Dashboard.hpp
+    view/Keys.cpp
+    view/Keys.hpp
+    view/Sections.cpp
+    view/Sections.hpp
+    view/Theme.cpp
+    view/Theme.hpp
+)
+target_link_libraries(orchestrator_view PUBLIC orchestrator_core core::tui_core)
+
 # The guest's driver: the engine driven through the daemon world's host calls (guest/HostCalls.hpp). Native too,
 # so that its tests run against a fake host; the WebAssembly module adds the adapter to the generated bindings.
 add_library(orchestrator_guest_driver STATIC
@@ -167,14 +182,20 @@ if(ORCHESTRATOR_TESTING)
         proto/RunRefs_test.cpp
         proto/StepQueue_test.cpp
         proto/StoreKeys_test.cpp
+        view/Dashboard_test.cpp
+        view/Keys_test.cpp
+        view/Sections_test.cpp
+        view/ViewFixtures.cpp
+        view/ViewFixtures.hpp
     )
     # glaze: GitHub_test reads the projected fixtures generically, to check them against the declared filter.
-    target_link_libraries(orchestrator_test PRIVATE orchestrator_core orchestrator_guest_driver orchestrator_proto_logic core::testing Catch2::Catch2 glaze::glaze)
+    target_link_libraries(orchestrator_test PRIVATE orchestrator_core orchestrator_guest_driver orchestrator_proto_logic orchestrator_view core::testing Catch2::Catch2 glaze::glaze)
     # Fixtures are read from the source tree: the manifest corpus Contour's host runs too, and the recorded
     # output of the tools the extension runs.
     target_compile_definitions(orchestrator_test PRIVATE
         ORCHESTRATOR_CONTRACT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/contract"
         ORCHESTRATOR_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/core/testdata"
+        ORCHESTRATOR_VIEW_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/view/testdata"
     )
     add_test(NAME orchestrator_test COMMAND orchestrator_test)
     set_tests_properties(orchestrator_test PROPERTIES LABELS daemon)
