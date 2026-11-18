@@ -189,21 +189,23 @@ struct DaemonWorldHarness
             },
             showingSummary(),
             core::defaultEnvironment(),
-            vthost::SessionHostConfig {
-                .pumping = vthost::SessionPumping::Manual,
-                .daemonWorld = [this](vthost::DaemonWorldEvents events, vthost::OwnerPost const& /*post*/) {
-                    world = std::make_shared<vthost::DaemonWorldExtensions>(
-                        runtimeConfig(),
-                        vthost::DaemonWorldServices { .backend = *backend,
-                                                      .runner = processRunner,
-                                                      .directories = directories,
-                                                      .fileSystem = fileSystem,
-                                                      .locker = locker,
-                                                      .wallClock = wallClock,
-                                                      .localTime = localTime },
-                        std::move(events));
-                    return std::shared_ptr<vthost::IDaemonWorldHosting> { world };
-                } });
+            vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                        .daemonWorld = [this](vthost::DaemonWorldEvents events,
+                                                              vthost::OwnerPost const& /*post*/,
+                                                              vthost::DaemonWorldWiring wiring) {
+                                            world = std::make_shared<vthost::DaemonWorldExtensions>(
+                                                runtimeConfig(),
+                                                vthost::DaemonWorldServices { .backend = *backend,
+                                                                              .runner = processRunner,
+                                                                              .directories = directories,
+                                                                              .fileSystem = fileSystem,
+                                                                              .locker = locker,
+                                                                              .wallClock = wallClock,
+                                                                              .localTime = localTime },
+                                                std::move(events),
+                                                wiring);
+                                            return std::shared_ptr<vthost::IDaemonWorldHosting> { world };
+                                        } });
         std::ignore = host->createTab();
         control = std::make_unique<vthost::control::ControlService>(
             *host,

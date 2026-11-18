@@ -234,6 +234,117 @@ class IExtensionActions
                                                                    Origin origin) const = 0;
 };
 
+/// Why a call about a served tab was refused.
+enum class ServedTabError : uint8_t
+{
+    NotOwned,    ///< The id names no tab this extension serves: another's, a shell pane's, or none at all.
+    Gone,        ///< The connection the call came from detached.
+    Limit,       ///< A limit is reached: too much at once, or a live upgrade runs (retry later).
+    BadArgument, ///< An argument is not what the manifest declares, or the call accepts.
+};
+
+/// Where a served tab stands, as its extension lists it. A tab closed before it was created is never listed.
+enum class ServedTabState : uint8_t
+{
+    Pending = 0, ///< Opened, and its session not created yet: written bytes wait in its device.
+    Open,        ///< Its session exists.
+};
+
+/// One served tab, as its extension lists it.
+struct ServedTabInfo
+{
+    std::string tab;                                ///< Its id: its pane's UUID.
+    std::string scheme;                             ///< What it was opened as.
+    uint32_t cols = 0;                              ///< Its width, in cells.
+    uint32_t rows = 0;                              ///< Its height, in cells.
+    ServedTabState state = ServedTabState::Pending; ///< Whether its session exists yet.
+
+    bool operator==(ServedTabInfo const&) const = default;
+};
+
+/// The tabs daemon-scoped extensions serve, one dashboard per extension and workspace.
+///
+/// Thread rules: every member may be called on any thread and never blocks on the host's loop. The
+/// implementation keeps a mutex-guarded mirror of its tabs (id → extension, workspace, state, device, input)
+/// that these read and write, and posts every model change -- creation, activation, close -- to the loop.
+/// A tab id is looked up in that mirror only: an id that is not one of the calling extension's tabs answers
+/// NotOwned, and touches nothing.
+class IServedTabs
+{
+  public:
+    IServedTabs() = default;
+    IServedTabs(IServedTabs const&) = delete;
+    IServedTabs(IServedTabs&&) = delete;
+    IServedTabs& operator=(IServedTabs const&) = delete;
+    IServedTabs& operator=(IServedTabs&&) = delete;
+    virtual ~IServedTabs() = default;
+
+    /// Opens the extension's tab in the workspace the origin's window shows, or reveals the one it has there.
+    /// Returns before the tab's session exists: it is created on the loop, activated in its workspace.
+    /// @param extension What the daemon's configuration calls it.
+    /// @param title The tab's fixed name: the manifest's `title`, else the extension's name.
+    /// @param moduleDigest The hex SHA-256 of the module that draws it, which the chrome names.
+    /// @param scheme What the tab is served as; its declaration was checked by the caller.
+    /// @param origin The connection the action that asked for it came from.
+    /// @return The tab's id; Gone for an origin that detached; Limit while a live upgrade runs.
+    [[nodiscard]] virtual std::expected<std::string, ServedTabError> open(std::string_view extension,
+                                                                          std::string_view title,
+                                                                          std::string_view moduleDigest,
+                                                                          std::string_view scheme,
+                                                                          Origin origin) = 0;
+
+    /// Closes one of the extension's tabs; one not created yet is never created.
+    /// @param extension What the daemon's configuration calls it.
+    /// @param tab The tab's id.
+    /// @return Nothing; NotOwned for an id that is not one of its tabs.
+    [[nodiscard]] virtual std::expected<void, ServedTabError> close(std::string_view extension,
+                                                                    std::string_view tab) = 0;
+
+    /// Brings one of the extension's tabs in front of the origin's window: activated where it is shown, the
+    /// window asked first when it is in another workspace. A tab not created yet is activated by its
+    /// creation.
+    /// @param extension What the daemon's configuration calls it.
+    /// @param tab The tab's id.
+    /// @param origin The connection the action that asked for it came from.
+    /// @return Nothing; NotOwned for an id that is not one of its tabs; Gone for an origin that detached.
+    [[nodiscard]] virtual std::expected<void, ServedTabError> reveal(std::string_view extension,
+                                                                     std::string_view tab,
+                                                                     Origin origin) = 0;
+
+    /// @param extension What the daemon's configuration calls it.
+    /// @return Its tabs, pending ones included, in the order they were opened.
+    [[nodiscard]] virtual std::vector<ServedTabInfo> list(std::string_view extension) const = 0;
+
+    /// Takes the input the tab's terminal wrote since the last read, at most MaxServedInputBytes.
+    /// @param extension What the daemon's configuration calls it.
+    /// @param tab The tab's id.
+    /// @return The bytes, whole chunks only; empty for a tab not created yet; NotOwned for a foreign id.
+    [[nodiscard]] virtual std::expected<std::string, ServedTabError> read(std::string_view extension,
+                                                                          std::string_view tab) = 0;
+
+    /// Draws into the tab: @p bytes reach its terminal as its program's output, once it exists.
+    /// @param extension What the daemon's configuration calls it.
+    /// @param tab The tab's id.
+    /// @param bytes At most MaxServedInputBytes.
+    /// @return Nothing; NotOwned for a foreign id; Gone for a tab whose device closed; Limit for too many
+    ///         bytes.
+    [[nodiscard]] virtual std::expected<void, ServedTabError> write(std::string_view extension,
+                                                                    std::string_view tab,
+                                                                    std::string_view bytes) = 0;
+
+    /// Closes every tab of the extension, as its grant is revoked.
+    /// @param extension What the daemon's configuration calls it.
+    virtual void closeAll(std::string_view extension) = 0;
+};
+
+/// What the daemon world reaches of its host, handed to the factory complete: the cyclic wiring of host and
+/// world resolved at construction.
+struct DaemonWorldWiring
+{
+    IServedTabs& tabs;          ///< Any thread (@see IServedTabs).
+    IExtensionActions& actions; ///< take() and connectionOf() from any thread; the rest is the host's.
+};
+
 /// What asking the windows again came to.
 enum class AskOutcome : uint8_t
 {
@@ -354,8 +465,9 @@ class IDaemonWorldHosting
 /// Makes a daemon's daemon-scoped extensions, once its loop exists.
 /// @param events What the host hears from them.
 /// @param post Where they hand jobs to the loop.
+/// @param wiring What they reach of the host; it outlives them.
 /// @return The extensions.
-using DaemonWorldFactory =
-    std::function<std::shared_ptr<IDaemonWorldHosting>(DaemonWorldEvents events, OwnerPost post)>;
+using DaemonWorldFactory = std::function<std::shared_ptr<IDaemonWorldHosting>(
+    DaemonWorldEvents events, OwnerPost post, DaemonWorldWiring wiring)>;
 
 } // namespace vthost

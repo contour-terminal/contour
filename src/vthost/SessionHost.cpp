@@ -327,8 +327,9 @@ void HostedSession::deliverOnPump(DeliveryKind kind, std::string_view bytes)
 {
     {
         auto const _ = std::scoped_lock { _pendingMutex };
-        // Never into an interrupted write's rest, which goes ahead of the terminal's replies.
-        if (!_pending.empty() && _pending.back().kind == kind
+        // Never into an interrupted write's rest, which goes ahead of the terminal's replies; and never for a
+        // served session, whose device keeps or drops each write whole: one client input, one write.
+        if (!_servedBy && !_pending.empty() && _pending.back().kind == kind
             && _pending.back().progress == DeliveryProgress::Whole)
             _pending.back().bytes.append(bytes);
         else
@@ -543,14 +544,13 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _defaultCellPixelSize(config.defaultCellPixelSize),
     _nextSessionId(config.firstSessionId),
     _extensions(std::move(config.extensions)),
+    _extensionActions(hintRaiser()),
     // Before _objects takes config.uuids over.
-    _served(config.servedIds ? std::move(config.servedIds) : config.uuids),
-    _extensionActions([&loop = _loop, gate = _gate](std::string_view extension, ServedHint hint) {
-        loop.post([gate, name = std::string(extension), hint] {
-            if (gate->host != nullptr && gate->host->_daemonWorld)
-                gate->host->_daemonWorld->hint(name, hint);
-        });
-    }),
+    _served(config.servedIds ? std::move(config.servedIds) : config.uuids,
+            _extensionActions,
+            hintRaiser(),
+            loopPost(),
+            *this),
     // Once the loop and the gate exist: the factory may post to the loop already.
     _daemonWorld(makeDaemonWorld(config.daemonWorld)),
     _announcedStatusPatience(config.announcedStatusPatience),
@@ -584,6 +584,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
                 for (auto* observer: _streamSubscribers)
                     observer->workspaceGitChanged(signal);
             });
+    _served.publishPageSize(_pageSize);
     // 0 is SessionId{}, the sentinel for none: a session minted with it could never be named.
     Require(config.firstSessionId != 0);
     Require(_defaultCellPixelSize.area() > 0);
@@ -793,6 +794,7 @@ ServedBy const* SessionHost::servedBy(SessionId session) const noexcept
 void SessionHost::closeServedSessions()
 {
     _servedAdmission = ServedAdmission::Closed;
+    _served.publishAdmission(_servedAdmission);
     // Collected first: ending a session changes the map being walked.
     auto const served = std::ranges::to<std::vector<SessionId>>(
         sessionIds() | std::views::filter([this](SessionId id) { return servedBy(id) != nullptr; }));
@@ -803,6 +805,7 @@ void SessionHost::closeServedSessions()
 void SessionHost::admitServedSessions() noexcept
 {
     _servedAdmission = ServedAdmission::Open;
+    _served.publishAdmission(_servedAdmission);
 }
 
 std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& incoming, SpawnIds const& ids)
@@ -1545,6 +1548,7 @@ void SessionHost::noteClientAttached(SessionStreamEvents* client)
         return;
     _attachedClients.push_back(client);
     _selectionSeen.insert_or_assign(client, client->selectedWorkspace());
+    publishSelection(*client);
     settleRaiseRole();
     // A window that follows shows the sidebar: bring it up to date now. The poll is armed by the refresh,
     // once a workspace's directory is known, follower or not.
@@ -1559,6 +1563,7 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client, DetachKi
         return;
     _focusSerials.erase(client);
     _selectionSeen.erase(client);
+    _served.publishWorkspace(client->connectionId(), std::nullopt);
     noteLeft(client->selectedWorkspace());
     // A window that said it closes leaves its workspace free at once, a hold from an earlier drop of the same
     // window included; a lost connection is a reconnect.
@@ -1598,7 +1603,15 @@ void SessionHost::noteSelected(SessionStreamEvents const& client)
         noteLeft(seen);
         seen = selected;
     }
+    publishSelection(client);
     settleRaiseRole();
+}
+
+void SessionHost::publishSelection(SessionStreamEvents const& client)
+{
+    auto const selected = client.selectedWorkspace();
+    _served.publishWorkspace(client.connectionId(),
+                             selected != 0 ? std::optional { WorkspaceId { selected } } : std::nullopt);
 }
 
 void SessionHost::noteLeft(uint64_t workspace)
@@ -1747,6 +1760,7 @@ SizeChange SessionHost::resolveAuthoritativeArea()
                  nameOf(_sizePolicy),
                  _clientAreas.size());
     _pageSize = *resolved;
+    _served.publishPageSize(_pageSize);
     return SizeChange::Applied;
 }
 
@@ -2255,6 +2269,7 @@ void SessionHost::eraseSession(uint64_t session)
     _animationTicks.erase(session);
     _endWaits.erase(session);
     _sessions.erase(session);
+    _served.sessionEnded(SessionId { session });
     tellStructure(&StructureEvents::sessionClosed, SessionId { session });
 }
 
@@ -2750,12 +2765,7 @@ std::shared_ptr<IDaemonWorldHosting> SessionHost::makeDaemonWorld(DaemonWorldFac
 {
     if (!factory)
         return nullptr;
-    auto post = OwnerPost { [&loop = _loop, gate = _gate](std::function<void()> job) {
-        loop.post([gate, job = std::move(job)] {
-            if (gate->host != nullptr)
-                job();
-        });
-    } };
+    auto post = loopPost();
     // A question that opens is sent to the windows that can answer it. A summary is read where it is shown,
     // and repaints the rows that show it: a burst of them costs the loop one repaint, as frames do.
     auto summaryPending = std::make_shared<std::atomic<bool>>(false);
@@ -2789,7 +2799,94 @@ std::shared_ptr<IDaemonWorldHosting> SessionHost::makeDaemonWorld(DaemonWorldFac
                 });
             },
     };
-    return factory(std::move(events), std::move(post));
+    return factory(std::move(events),
+                   std::move(post),
+                   DaemonWorldWiring { .tabs = _served, .actions = _extensionActions });
+}
+
+ServedSessions::Raise SessionHost::hintRaiser() const
+{
+    return [&loop = _loop, gate = _gate](std::string_view extension, ServedHint hint) {
+        loop.post([gate, name = std::string(extension), hint] {
+            if (gate->host != nullptr && gate->host->_daemonWorld)
+                gate->host->_daemonWorld->hint(name, hint);
+        });
+    };
+}
+
+OwnerPost SessionHost::loopPost() const
+{
+    return OwnerPost { [&loop = _loop, gate = _gate](std::function<void()> job) {
+        loop.post([gate, job = std::move(job)] {
+            if (gate->host != nullptr)
+                job();
+        });
+    } };
+}
+
+std::optional<SessionId> SessionHost::createServedTab(WorkspaceId workspace, SessionSpawnRequest request)
+{
+    auto const* const tab = createTabIn(workspace, request);
+    if (tab == nullptr)
+        return std::nullopt;
+    return tab->rootPane()->session();
+}
+
+void SessionHost::activate(SessionId session)
+{
+    auto const [workspace, tab, leaf] = _model.findSessionLeaf(session);
+    if (workspace == nullptr || tab == nullptr || leaf == nullptr)
+        return;
+    _model.activateTab(workspace->id(), tab->id());
+    _model.setActivePane(tab->id(), leaf->id());
+}
+
+void SessionHost::closeServed(SessionId session, SessionEnd cause)
+{
+    if (_sessions.contains(session.value))
+        endSession(session, cause);
+}
+
+void SessionHost::askToSwitch(ConnectionId const& connection,
+                              WorkspaceId leaving,
+                              proto::SwitchTargetWire target,
+                              SwitchCompletion done)
+{
+    requestSwitch(connection, leaving, std::move(target), std::move(done));
+}
+
+void SessionHost::revealTo(ConnectionId const& connection, SessionId session)
+{
+    for (auto* client: _attachedClients)
+        if (client->connectionId() == connection)
+            client->revealPane(session);
+}
+
+std::vector<ConnectionId> SessionHost::showing(WorkspaceId workspace) const
+{
+    auto clients = std::ranges::to<std::vector<SessionStreamEvents*>>(
+        _attachedClients | std::views::filter([&](SessionStreamEvents const* client) {
+            return client->selectedWorkspace() == workspace.value;
+        }));
+    auto const serialOf = [this](SessionStreamEvents const* client) {
+        auto const found = _focusSerials.find(client);
+        return found != _focusSerials.end() ? found->second : 0;
+    };
+    std::ranges::stable_sort(clients, std::ranges::greater {}, serialOf);
+    return std::ranges::to<std::vector<ConnectionId>>(
+        clients
+        | std::views::transform([](SessionStreamEvents const* client) { return client->connectionId(); }));
+}
+
+std::optional<WorkspaceId> SessionHost::workspaceOf(SessionId session) const
+{
+    auto const [workspace, tab, leaf] = _model.findSessionLeaf(session);
+    return workspace != nullptr ? std::optional { workspace->id() } : std::nullopt;
+}
+
+std::string SessionHost::workspaceRef(WorkspaceId workspace) const
+{
+    return vtcontrol::toString(workspaceUuid(workspace));
 }
 
 namespace
@@ -3407,6 +3504,9 @@ void SessionHost::tabMovedToWorkspace(WorkspaceId from, TabId tab, int fromIndex
 {
     // The tab lands in a workspace of another size: its shells are resized before observers advertise it.
     reprojectTab(tab);
+    // A served tab is the dashboard of the workspace it is in now: its extension's next open there finds it.
+    if (auto const* const moved = _model.findTab(tab); moved != nullptr && moved->rootPane() != nullptr)
+        _served.sessionMoved(moved->rootPane()->session(), to);
     fanOut(&vtworkspace::ModelEvents::tabMovedToWorkspace, from, tab, fromIndex, to, toIndex);
 }
 

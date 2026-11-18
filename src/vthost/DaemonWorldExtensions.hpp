@@ -26,6 +26,7 @@
 #include <vtextension/DaemonExtensionRuntime.hpp>
 #include <vtextension/ExtensionPresence.hpp>
 #include <vtextension/FileLocker.hpp>
+#include <vtextension/ServedTabService.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vthost/ExtensionHosting.hpp>
 
@@ -51,10 +52,22 @@ struct DaemonExtensionSummary
     std::string detail;    ///< The longer text; its lines are separated by `\n`.
 };
 
+/// Makes one extension's tab-and-action service on the host's served tabs and invoked actions: it refuses a
+/// scheme other than the manifest's `serve` line (`bad-argument`), names the tabs it opens with the
+/// manifest's title, and words the host's refusals as the WIT's host-error.
+/// @param owner The extension, as its manifest declares it.
+/// @param wiring What it reaches of the host; outlives the service.
+/// @return The service.
+[[nodiscard]] std::unique_ptr<vtextension::IServedTabService> servedTabServiceOf(
+    vtextension::ServedTabOwner const& owner, DaemonWorldWiring wiring);
+
 /// The production IDaemonWorldHosting: every declared daemon-scoped extension on one
 /// vtextension::DaemonExtensionRuntime, composed on construction, its problems logged. Where they show
 /// themselves is kept here, per extension and of its latest run only: where it stands, and the summary it
 /// last published (`summary-set`). What the status line shows follows from where it stands (StatusTexts).
+/// Each extension's tab and action imports reach the host's IServedTabs and IExtensionActions through an
+/// adapter of its own, which checks the scheme against the manifest's `serve` line and words the host's
+/// refusals as the WIT's host-error (ServedTabErrorRows).
 class DaemonWorldExtensions final:
     public IDaemonWorldHosting,
     private vtextension::IExtensionPresence,
@@ -65,9 +78,11 @@ class DaemonWorldExtensions final:
     /// @param config What it is.
     /// @param services What it borrows.
     /// @param events What the host hears from it.
+    /// @param wiring What it reaches of the host: the served tabs and the invoked actions; outlives it.
     DaemonWorldExtensions(vtextension::DaemonExtensionRuntimeConfig config,
                           DaemonWorldServices const& services,
-                          DaemonWorldEvents events);
+                          DaemonWorldEvents events,
+                          DaemonWorldWiring wiring);
 
     void startOnDemand(std::string_view name) override;
     [[nodiscard]] std::vector<DaemonExtensionRequest> pendingRequests() const override;
@@ -118,6 +133,7 @@ class DaemonWorldExtensions final:
     [[nodiscard]] Shown* shownAs(std::string_view name, vtextension::DaemonRunGeneration generation);
 
     DaemonWorldEvents _events;
+    DaemonWorldWiring _wiring;
     mutable std::mutex _mutex;
     std::map<std::string, Shown, std::less<>> _shown; ///< Guarded by _mutex.
     /// Last: its lane publishes into what is above, from the moment it is composed.

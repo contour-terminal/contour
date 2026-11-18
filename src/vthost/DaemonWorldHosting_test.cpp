@@ -96,7 +96,9 @@ struct SummaryHarness
     std::shared_ptr<FakeDaemonWorldHosting> world;
     std::unique_ptr<vthost::SessionHost> host = hostOn(
         loop,
-        [this](vthost::DaemonWorldEvents events, vthost::OwnerPost post) {
+        [this](vthost::DaemonWorldEvents events,
+               vthost::OwnerPost post,
+               vthost::DaemonWorldWiring const& /*wiring*/) {
             world = std::make_shared<FakeDaemonWorldHosting>(journal, std::move(post), std::move(events));
             return world;
         },
@@ -114,11 +116,14 @@ TEST_CASE("SessionHost: the daemon world is made once, and stopped before the lo
     auto const journal = std::make_shared<std::vector<std::string>>();
     auto made = std::shared_ptr<FakeDaemonWorldHosting> {};
     auto calls = 0;
-    auto host = hostOn(loop, [&](vthost::DaemonWorldEvents const& /*events*/, vthost::OwnerPost post) {
-        ++calls;
-        made = std::make_shared<FakeDaemonWorldHosting>(journal, std::move(post));
-        return made;
-    });
+    auto host = hostOn(loop,
+                       [&](vthost::DaemonWorldEvents const& /*events*/,
+                           vthost::OwnerPost post,
+                           vthost::DaemonWorldWiring const& /*wiring*/) {
+                           ++calls;
+                           made = std::make_shared<FakeDaemonWorldHosting>(journal, std::move(post));
+                           return made;
+                       });
     CHECK(calls == 1);
     REQUIRE(made != nullptr);
 
@@ -193,7 +198,9 @@ TEST_CASE("SessionHost: a session not showing the summary is not repainted for i
     auto world = std::shared_ptr<FakeDaemonWorldHosting> {};
     auto host = hostOn(
         loop,
-        [&](vthost::DaemonWorldEvents events, vthost::OwnerPost post) {
+        [&](vthost::DaemonWorldEvents events,
+            vthost::OwnerPost post,
+            vthost::DaemonWorldWiring const& /*wiring*/) {
             world = std::make_shared<FakeDaemonWorldHosting>(journal, std::move(post), std::move(events));
             return world;
         },

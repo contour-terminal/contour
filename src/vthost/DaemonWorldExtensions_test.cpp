@@ -3,7 +3,13 @@
 // The production daemon world behind vthost's interface: what it shows of an extension that could not run, on
 // the fake WebAssembly backend and fakes of the files, the locks, the processes and the directories.
 #include <vtbackend/screen/LocalTime.hpp>
+#include <vtbackend/screen/Settings.hpp>
 
+#include <vtpty/MockPty.hpp>
+
+#include <core/Environment.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/testing/ScriptedBackend.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
@@ -12,7 +18,11 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <format>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -25,6 +35,9 @@
 #include <vtextension/testing/FakeWasmBackend.hpp>
 #include <vtextension/testing/TestModules.hpp>
 #include <vthost/DaemonWorldExtensions.hpp>
+#include <vthost/ExtensionActions.hpp>
+#include <vthost/ExtensionHosting.hpp>
+#include <vthost/SessionHost.hpp>
 
 using namespace std::string_view_literals;
 
@@ -45,17 +58,90 @@ constexpr auto BrokenManifest =
     return text;
 }
 
+/// Served tabs that record what is asked of them.
+class RecordingTabs final: public vthost::IServedTabs
+{
+  public:
+    [[nodiscard]] std::expected<std::string, vthost::ServedTabError> open(std::string_view extension,
+                                                                          std::string_view title,
+                                                                          std::string_view /*moduleDigest*/,
+                                                                          std::string_view scheme,
+                                                                          vthost::Origin /*origin*/) override
+    {
+        calls.push_back(std::format("open {} {} {}", extension, title, scheme));
+        return std::string { "tab-1" };
+    }
+
+    [[nodiscard]] std::expected<void, vthost::ServedTabError> close(std::string_view extension,
+                                                                    std::string_view tab) override
+    {
+        calls.push_back(std::format("close {} {}", extension, tab));
+        return std::unexpected(vthost::ServedTabError::NotOwned);
+    }
+
+    [[nodiscard]] std::expected<void, vthost::ServedTabError> reveal(std::string_view extension,
+                                                                     std::string_view tab,
+                                                                     vthost::Origin /*origin*/) override
+    {
+        calls.push_back(std::format("reveal {} {}", extension, tab));
+        return std::unexpected(vthost::ServedTabError::Gone);
+    }
+
+    [[nodiscard]] std::vector<vthost::ServedTabInfo> list(std::string_view /*extension*/) const override
+    {
+        return {};
+    }
+
+    [[nodiscard]] std::expected<std::string, vthost::ServedTabError> read(std::string_view /*extension*/,
+                                                                          std::string_view /*tab*/) override
+    {
+        return std::unexpected(vthost::ServedTabError::Limit);
+    }
+
+    [[nodiscard]] std::expected<void, vthost::ServedTabError> write(std::string_view /*extension*/,
+                                                                    std::string_view /*tab*/,
+                                                                    std::string_view /*bytes*/) override
+    {
+        return std::unexpected(vthost::ServedTabError::BadArgument);
+    }
+
+    void closeAll(std::string_view extension) override
+    {
+        calls.push_back(std::format("closeAll {}", extension));
+    }
+
+    std::vector<std::string> calls; ///< What was asked, in order.
+};
+
+/// Whether a Fixture makes its daemon world as it is constructed.
+enum class WorldMade : uint8_t
+{
+    Later = 0, ///< A host makes it, through makeWorld().
+    Now,       ///< The fixture does, with its own events and wiring.
+};
+
 /// The daemon world of one on-demand extension, `broken`, whose module does not load.
 struct Fixture
 {
-    Fixture()
+    explicit Fixture(WorldMade made = WorldMade::Now)
     {
         directories.add("/w");
         fileSystem.addFile(
             "/ext/broken.wasm",
             textOf(vtextension::testing::withManifest(
                 vtextension::testing::toModule(vtextension::testing::StartFunctionModule), BrokenManifest)));
-        world = std::make_unique<vthost::DaemonWorldExtensions>(
+        if (made == WorldMade::Now)
+            world = makeWorld(vthost::DaemonWorldEvents { .requestsChanged = {},
+                                                          .summaryChanged = [this] { ++summaryChanges; },
+                                                          .presenceChanged = [this] { ++presenceChanges; } },
+                              vthost::DaemonWorldWiring { .tabs = tabs, .actions = actions });
+    }
+
+    /// @return The daemon world, on this fixture's fakes.
+    [[nodiscard]] std::unique_ptr<vthost::DaemonWorldExtensions> makeWorld(vthost::DaemonWorldEvents events,
+                                                                           vthost::DaemonWorldWiring wiring)
+    {
+        return std::make_unique<vthost::DaemonWorldExtensions>(
             vtextension::DaemonExtensionRuntimeConfig {
                 .declarations = { vtextension::DaemonExtensionDeclaration {
                     .name = "broken",
@@ -74,9 +160,8 @@ struct Fixture
                                           .locker = locker,
                                           .wallClock = wallClock,
                                           .localTime = localTime },
-            vthost::DaemonWorldEvents { .requestsChanged = {},
-                                        .summaryChanged = [this] { ++summaryChanges; },
-                                        .presenceChanged = [this] { ++presenceChanges; } });
+            std::move(events),
+            wiring);
     }
 
     Fixture(Fixture const&) = delete;
@@ -94,6 +179,8 @@ struct Fixture
     vtbackend::LocalTimeConverter localTime { &vtbackend::systemLocalTime };
     int summaryChanges = 0;
     int presenceChanges = 0;
+    RecordingTabs tabs;
+    vthost::ExtensionActions actions { [](std::string_view /*extension*/, vthost::ServedHint /*hint*/) {} };
     /// Made once its module is on disk.
     std::unique_ptr<vthost::DaemonWorldExtensions> world;
 };
@@ -124,8 +211,9 @@ TEST_CASE("DaemonWorldExtensions: a module that fails after consent shows that i
     CHECK(world.summaries().summaryOf("broken") == "broken failed");
     CHECK(fixture.summaryChanges > changesBefore);
 
-    // Revoked, the failure goes with the grant.
+    // Revoked, the failure goes with the grant, and its tabs with it.
     world.revoke("broken");
+    CHECK(fixture.tabs.calls == std::vector<std::string> { "closeAll broken" });
     CHECK(world.status("broken")->state == vthost::DaemonExtensionState::Stopped);
     CHECK(world.status("broken")->problem.empty());
     CHECK(world.summaries().summaryOf("broken").empty());
@@ -222,4 +310,101 @@ TEST_CASE("DaemonWorldExtensions: the palette rows are the declared actions, wit
     CHECK(world.actionRows().at(0).state == vthost::DaemonExtensionState::Pending);
     world.stop();
     CHECK(world.actionRows().empty());
+}
+
+TEST_CASE("DaemonWorldExtensions: a guest fault or a disable closes no tab", "[daemon][served]")
+{
+    auto fixture = Fixture {};
+    auto& world = *fixture.world;
+    world.presence().phaseChanged("broken", 0, vtextension::DaemonExtensionPhase::Running);
+    world.presence().phaseChanged("broken", 0, vtextension::DaemonExtensionPhase::Disabled);
+    world.restart("broken");
+    world.presence().phaseChanged("broken", 0, vtextension::DaemonExtensionPhase::Running);
+    // Its tabs stay open, as they were drawn, for the restarted guest to draw again.
+    CHECK(fixture.tabs.calls.empty());
+    world.stop();
+}
+
+TEST_CASE("DaemonWorldExtensions: a served-tab call reaches the host in the manifest's words",
+          "[daemon][served]")
+{
+    auto tabs = RecordingTabs {};
+    auto actions = vthost::ExtensionActions { [](std::string_view, vthost::ServedHint) {} };
+    auto const scheme = std::string_view { "agents" };
+    auto service = vthost::servedTabServiceOf(
+        vtextension::ServedTabOwner {
+            .extension = "orchestrator", .title = "Agents", .scheme = scheme, .moduleDigest = "3f9a" },
+        vthost::DaemonWorldWiring { .tabs = tabs, .actions = actions });
+
+    // Only the declared scheme is served, under the manifest's title.
+    CHECK(service->tabOpen("shell", 1)
+          == std::expected<std::string, vtextension::HostError> { std::unexpect,
+                                                                  vtextension::HostError::BadArgument });
+    CHECK(service->tabOpen("agents", 1) == std::expected<std::string, vtextension::HostError> { "tab-1" });
+    CHECK(tabs.calls == std::vector<std::string> { "open orchestrator Agents agents" });
+
+    // Each of the host's refusals, as the WIT words it.
+    using Unit = std::expected<void, vtextension::HostError>;
+    CHECK(service->tabClose("tab-1") == Unit { std::unexpect, vtextension::HostError::NotOwned });
+    CHECK(service->tabReveal("tab-1", 1) == Unit { std::unexpect, vtextension::HostError::Gone });
+    CHECK(service->tabRead("tab-1")
+          == std::expected<vtextension::ByteList, vtextension::HostError> { std::unexpect,
+                                                                            vtextension::HostError::Limit });
+    auto const bytes = std::array<uint8_t, 2> { 'h', 'i' };
+    CHECK(service->tabWrite("tab-1", bytes) == Unit { std::unexpect, vtextension::HostError::BadArgument });
+    CHECK(service->tabs() == std::expected<std::vector<vtextension::TabInfo>, vtextension::HostError> {});
+
+    // Actions are this extension's only, with their origin.
+    auto const origin =
+        actions.originOf(vthost::ConnectionId { .endpoint = "native", .index = 1, .peer = {} });
+    actions.deliver("orchestrator", "open", origin);
+    actions.deliver("other", "open", origin);
+    CHECK(service->actionsTake()
+          == std::expected<std::vector<vtextension::ActionInfo>, vtextension::HostError> {
+              std::vector { vtextension::ActionInfo { .id = "open", .origin = origin } } });
+
+    // An extension whose manifest serves no tab opens none.
+    auto unserving = vthost::servedTabServiceOf(
+        vtextension::ServedTabOwner {
+            .extension = "plain", .title = "plain", .scheme = std::nullopt, .moduleDigest = "" },
+        vthost::DaemonWorldWiring { .tabs = tabs, .actions = actions });
+    CHECK(unserving->tabOpen("agents", 1)
+          == std::expected<std::string, vtextension::HostError> { std::unexpect,
+                                                                  vtextension::HostError::BadArgument });
+}
+
+TEST_CASE("DaemonWorldExtensions: the first invocation starts an on-demand extension", "[daemon][served]")
+{
+    auto fixture = Fixture { WorldMade::Later };
+    auto* world = static_cast<vthost::DaemonWorldExtensions*>(nullptr);
+    core::net::testing::ScriptedBackend source;
+    core::net::EventLoop loop { source };
+    auto host =
+        vthost::SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig {
+                                  .pumping = vthost::SessionPumping::Manual,
+                                  .daemonWorld = [&](vthost::DaemonWorldEvents events,
+                                                     vthost::OwnerPost const& /*post*/,
+                                                     vthost::DaemonWorldWiring wiring) {
+                                      auto made = fixture.makeWorld(std::move(events), wiring);
+                                      world = made.get();
+                                      return std::shared_ptr<vthost::IDaemonWorldHosting> { std::move(made) };
+                                  } } };
+    REQUIRE(world != nullptr);
+    REQUIRE(world->status("broken")->state == vthost::DaemonExtensionState::Stopped);
+
+    auto const connection = vthost::ConnectionId { .endpoint = "native", .index = 1, .peer = {} };
+    CHECK(host.invokeExtensionAction(connection, "broken", "open")
+          == vthost::InvocationEffect::StartThenDeliver);
+    // Started on demand: not granted yet, it asks its user first; the action waits for it.
+    CHECK(world->status("broken")->state == vthost::DaemonExtensionState::Pending);
+    auto const taken = host.extensionActions().take("broken");
+    REQUIRE(taken.size() == 1);
+    CHECK(taken.front().first == "open");
+    CHECK(host.extensionActions().connectionOf("broken", taken.front().second) == connection);
 }

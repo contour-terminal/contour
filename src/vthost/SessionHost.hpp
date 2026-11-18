@@ -225,9 +225,6 @@ using SessionSignal = std::variant<CommandBlockFinishedSignal,
 /// state mutex held: it must neither block nor read terminal state (the host posts it to the loop).
 using SessionSignalCallback = std::function<void(SessionSignal)>;
 
-/// Told how a requested window switch ended, once.
-using SwitchCompletion = std::function<void(proto::SwitchReply const&)>;
-
 /// How an attached connection ended, as the host takes it.
 enum class DetachKind : uint8_t
 {
@@ -382,6 +379,10 @@ class SessionStreamEvents
     /// What the palette shows of the daemon-scoped extensions changed: an observer with a palette sends
     /// @p presence, the whole set. A client attaching later is sent SessionHost::extensionPresence() instead.
     virtual void extensionPresenceChanged(proto::ExtensionPresence const& /*presence*/) {}
+
+    /// A daemon-scoped extension revealed its served tab, which the daemon activated: the observer's window
+    /// raises itself and focuses @p session's pane (sends RevealPane, to a client with a palette).
+    virtual void revealPane(vtworkspace::SessionId /*session*/) {}
 };
 
 /// What a hosted session hands a desktop notification on as: its title, its body, and the occasion
@@ -466,13 +467,6 @@ struct ServedSpawn
     std::string scheme;                           ///< @see ServedBy::scheme
     std::string moduleDigest;                     ///< @see ServedBy::moduleDigest
     std::shared_ptr<vtpty::ChannelPty> device {}; ///< The device; null is refused.
-};
-
-/// Whether a host admits a served spawn.
-enum class ServedAdmission : uint8_t
-{
-    Open = 0, ///< It does.
-    Closed,   ///< A live upgrade runs: what it would have to close again is refused until it ends.
 };
 
 /// One hosted session: the terminal (owning its PTY) plus the pump thread
@@ -1243,7 +1237,10 @@ class HostGitLookups
 
 /// Owns every hosted session and the authoritative vtworkspace::SessionModel,
 /// fanning each completed model change out to subscribed observers.
-class SessionHost final: public vtworkspace::ModelEvents, public IDaemonExtensionControl
+class SessionHost final:
+    public vtworkspace::ModelEvents,
+    public IDaemonExtensionControl,
+    private ServedTabHost
 {
   public:
     /// @param loop The event loop all model mutation is confined to.
@@ -1925,7 +1922,7 @@ class SessionHost final: public vtworkspace::ModelEvents, public IDaemonExtensio
     /// @return Whether a served spawn is admitted now.
     [[nodiscard]] ServedAdmission servedAdmission() const noexcept { return _servedAdmission; }
 
-    /// @return The devices of this host's served sessions.
+    /// @return The served tabs of this host, and their devices.
     [[nodiscard]] ServedSessions& served() noexcept { return _served; }
 
     /// @param session A hosted session.
@@ -2359,6 +2356,31 @@ class SessionHost final: public vtworkspace::ModelEvents, public IDaemonExtensio
     /// @return SizeChange::Applied when `_pageSize` moved, SizeChange::Unchanged otherwise.
     [[nodiscard]] SizeChange resolveAuthoritativeArea();
 
+    // ServedTabHost: what the served tabs reach of the host, on the loop thread.
+    [[nodiscard]] std::optional<vtworkspace::SessionId> createServedTab(vtworkspace::WorkspaceId workspace,
+                                                                        SessionSpawnRequest request) override;
+    void activate(vtworkspace::SessionId session) override;
+    void closeServed(vtworkspace::SessionId session, SessionEnd cause) override;
+    void askToSwitch(ConnectionId const& connection,
+                     vtworkspace::WorkspaceId leaving,
+                     proto::SwitchTargetWire target,
+                     SwitchCompletion done) override;
+    void revealTo(ConnectionId const& connection, vtworkspace::SessionId session) override;
+    [[nodiscard]] std::vector<ConnectionId> showing(vtworkspace::WorkspaceId workspace) const override;
+    [[nodiscard]] std::optional<vtworkspace::WorkspaceId> workspaceOf(
+        vtworkspace::SessionId session) const override;
+    [[nodiscard]] std::string workspaceRef(vtworkspace::WorkspaceId workspace) const override;
+
+    /// Publishes the workspace @p client selects to the served tabs' mirror.
+    void publishSelection(SessionStreamEvents const& client);
+
+    /// @return What raises a hint for a daemon-scoped extension from any thread: posted to the loop, dropped
+    ///         once the host or its daemon world is gone.
+    [[nodiscard]] ServedSessions::Raise hintRaiser() const;
+
+    /// @return What the served tabs post to the loop through: dropped once the host is gone.
+    [[nodiscard]] OwnerPost loopPost() const;
+
     /// Makes the daemon-scoped extensions, their jobs run on the loop while the host lives.
     /// @param factory What makes them; empty for none.
     /// @return The extensions; null for none.
@@ -2609,14 +2631,15 @@ class SessionHost final: public vtworkspace::ModelEvents, public IDaemonExtensio
     /// The extensions every session runs; null for none. Declared before _sessions, so that it is destroyed
     /// after every session's extensions: its runtime joins the threads their runners lived on.
     std::shared_ptr<IExtensionHosting> _extensions;
-    /// The devices of the served sessions. Before _daemonWorld, whose extensions serve them, and before
+    /// The actions the user invoked, queued per daemon-scoped extension, and each connection's origin. Before
+    /// _served, which reads the origins, and _daemonWorld, which takes them; its hints reach the world
+    /// through the loop and the gate.
+    ExtensionActions _extensionActions;
+    /// The served tabs and their devices. Before _daemonWorld, whose extensions serve them, and before
     /// _sessions, which hold the devices it made.
     ServedSessions _served;
     /// Whether a served spawn is admitted (@see closeServedSessions). Loop thread.
     ServedAdmission _servedAdmission = ServedAdmission::Open;
-    /// The actions the user invoked, queued per daemon-scoped extension, and each connection's origin. Before
-    /// _daemonWorld, which takes them; its hints reach the world through the loop and the gate.
-    ExtensionActions _extensionActions;
     /// The daemon-scoped extensions; null for none. Made by SessionHostConfig::daemonWorld in the
     /// constructor, stopped by the destructor before it drains the loop. @see makeDaemonWorld
     std::shared_ptr<IDaemonWorldHosting> _daemonWorld;

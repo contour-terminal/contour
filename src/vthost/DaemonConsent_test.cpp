@@ -334,7 +334,8 @@ struct ConsentHarness
                                vthost::SessionHostConfig {
                                    .pumping = vthost::SessionPumping::Manual,
                                    .daemonWorld = [this](vthost::DaemonWorldEvents events,
-                                                         vthost::OwnerPost const& /*post*/) {
+                                                         vthost::OwnerPost const& /*post*/,
+                                                         vthost::DaemonWorldWiring const& /*wiring*/) {
                                        world = std::make_shared<FakeDaemonWorldHosting>(
                                            journal,
                                            [](std::function<void()> const& /*job*/) {},

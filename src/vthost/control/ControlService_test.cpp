@@ -2318,18 +2318,19 @@ struct ExtensionControlHarness
     std::shared_ptr<vthost::testing::FakeDaemonWorldHosting> world =
         std::make_shared<vthost::testing::FakeDaemonWorldHosting>(
             journal, [](std::function<void()> const& /*job*/) {});
-    vthost::SessionHost host { loop,
-                               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
-                                   return std::make_unique<vtpty::MockPty>(size);
-                               },
-                               vtbackend::Settings {},
-                               core::defaultEnvironment(),
-                               vthost::SessionHostConfig {
-                                   .pumping = vthost::SessionPumping::Manual,
-                                   .daemonWorld = [world = world](vthost::DaemonWorldEvents const& /*events*/,
-                                                                  vthost::OwnerPost const& /*post*/) {
-                                       return world;
-                                   } } };
+    vthost::SessionHost host {
+        loop,
+        [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+            return std::make_unique<vtpty::MockPty>(size);
+        },
+        vtbackend::Settings {},
+        core::defaultEnvironment(),
+        vthost::SessionHostConfig {
+            .pumping = vthost::SessionPumping::Manual,
+            .daemonWorld = [world = world](vthost::DaemonWorldEvents const& /*events*/,
+                                           vthost::OwnerPost const& /*post*/,
+                                           vthost::DaemonWorldWiring const& /*wiring*/) { return world; } }
+    };
     ControlService service { host,
                              vthost::control::ControlServiceConfig { .version = "9.8.7",
                                                                      .socketPath = "/run/test.sock",

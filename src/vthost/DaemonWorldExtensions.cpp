@@ -5,8 +5,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <format>
+#include <optional>
+#include <ranges>
+#include <span>
 #include <string_view>
 #include <utility>
 
@@ -17,23 +21,139 @@ namespace vthost
 
 namespace
 {
+    /// One reason the host refused a served-tab call, as the guest is told it.
+    struct ServedTabErrorRow
+    {
+        ServedTabError error;
+        vtextension::HostError hostError;
+    };
+
+    /// One row per ServedTabError, indexed by value.
+    inline constexpr auto ServedTabErrorRows = std::array {
+        ServedTabErrorRow { .error = ServedTabError::NotOwned,
+                            .hostError = vtextension::HostError::NotOwned },
+        ServedTabErrorRow { .error = ServedTabError::Gone, .hostError = vtextension::HostError::Gone },
+        ServedTabErrorRow { .error = ServedTabError::Limit, .hostError = vtextension::HostError::Limit },
+        ServedTabErrorRow { .error = ServedTabError::BadArgument,
+                            .hostError = vtextension::HostError::BadArgument },
+    };
+
+    static_assert(ServedTabErrorRows.size() == std::to_underlying(ServedTabError::BadArgument) + 1U,
+                  "every ServedTabError has a row");
+    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ServedTabErrorRows.size()),
+                                      [](std::size_t index) {
+                                          return std::to_underlying(ServedTabErrorRows.at(index).error)
+                                                 == index;
+                                      }),
+                  "ServedTabErrorRows is indexed by the enumerator's value");
+
+    /// @return @p error as the guest is told it.
+    [[nodiscard]] constexpr vtextension::HostError hostErrorOf(ServedTabError error) noexcept
+    {
+        return ServedTabErrorRows.at(std::to_underlying(error)).hostError;
+    }
+
+    /// One extension's tab and action imports, on the host's served tabs and invoked actions.
+    class ServedTabAdapter final: public vtextension::IServedTabService
+    {
+      public:
+        ServedTabAdapter(vtextension::ServedTabOwner const& owner, DaemonWorldWiring wiring):
+            _extension { owner.extension },
+            _title { owner.title },
+            _scheme { owner.scheme.transform([](std::string_view scheme) { return std::string(scheme); }) },
+            _moduleDigest { owner.moduleDigest },
+            _wiring { wiring }
+        {
+        }
+
+        [[nodiscard]] std::expected<std::string, vtextension::HostError> tabOpen(
+            std::string_view scheme, vtextension::Origin origin) override
+        {
+            // Only the scheme the manifest declares, which the user granted it to serve.
+            if (!_scheme || *_scheme != scheme)
+                return std::unexpected(vtextension::HostError::BadArgument);
+            return _wiring.tabs.open(_extension, _title, _moduleDigest, scheme, origin)
+                .transform_error(hostErrorOf);
+        }
+
+        [[nodiscard]] std::expected<void, vtextension::HostError> tabClose(std::string_view tab) override
+        {
+            return _wiring.tabs.close(_extension, tab).transform_error(hostErrorOf);
+        }
+
+        [[nodiscard]] std::expected<void, vtextension::HostError> tabReveal(
+            std::string_view tab, vtextension::Origin origin) override
+        {
+            return _wiring.tabs.reveal(_extension, tab, origin).transform_error(hostErrorOf);
+        }
+
+        [[nodiscard]] std::expected<std::vector<vtextension::TabInfo>, vtextension::HostError> tabs() override
+        {
+            return std::ranges::to<std::vector<vtextension::TabInfo>>(
+                _wiring.tabs.list(_extension) | std::views::transform([](ServedTabInfo const& info) {
+                    return vtextension::TabInfo {
+                        .tab = info.tab, .scheme = info.scheme, .cols = info.cols, .rows = info.rows
+                    };
+                }));
+        }
+
+        [[nodiscard]] std::expected<vtextension::ByteList, vtextension::HostError> tabRead(
+            std::string_view tab) override
+        {
+            return _wiring.tabs.read(_extension, tab)
+                .transform([](std::string const& bytes) {
+                    return vtextension::ByteList(bytes.begin(), bytes.end());
+                })
+                .transform_error(hostErrorOf);
+        }
+
+        [[nodiscard]] std::expected<void, vtextension::HostError> tabWrite(
+            std::string_view tab, std::span<uint8_t const> bytes) override
+        {
+            auto const text = std::string(bytes.begin(), bytes.end());
+            return _wiring.tabs.write(_extension, tab, text).transform_error(hostErrorOf);
+        }
+
+        [[nodiscard]] std::expected<std::vector<vtextension::ActionInfo>, vtextension::HostError>
+        actionsTake() override
+        {
+            return std::ranges::to<std::vector<vtextension::ActionInfo>>(
+                _wiring.actions.take(_extension) | std::views::transform([](auto const& action) {
+                    return vtextension::ActionInfo { .id = action.first, .origin = action.second };
+                }));
+        }
+
+      private:
+        std::string _extension;
+        std::string _title;
+        std::optional<std::string> _scheme;
+        std::string _moduleDigest;
+        DaemonWorldWiring _wiring;
+    };
+
     /// @return The daemon world @p config declares, its problems logged.
     [[nodiscard]] std::unique_ptr<vtextension::DaemonExtensionRuntime> compose(
         vtextension::DaemonExtensionRuntimeConfig config,
         DaemonWorldServices const& services,
-        vtextension::IExtensionPresence& presence)
+        vtextension::IExtensionPresence& presence,
+        DaemonWorldWiring wiring)
     {
         auto composed = vtextension::DaemonExtensionRuntime::create(
             std::move(config),
-            vtextension::DaemonExtensionRuntimeServices { .backend = services.backend,
-                                                          .runner = services.runner,
-                                                          .directories = services.directories,
-                                                          .fileSystem = services.fileSystem,
-                                                          .locker = services.locker,
-                                                          .wallClock = services.wallClock,
-                                                          .localTime = services.localTime,
-                                                          .presence = presence,
-                                                          .onLog = &logExtensionMessage });
+            vtextension::DaemonExtensionRuntimeServices {
+                .backend = services.backend,
+                .runner = services.runner,
+                .directories = services.directories,
+                .fileSystem = services.fileSystem,
+                .locker = services.locker,
+                .wallClock = services.wallClock,
+                .localTime = services.localTime,
+                .presence = presence,
+                .tabsFor =
+                    [wiring](vtextension::ServedTabOwner const& owner) {
+                        return servedTabServiceOf(owner, wiring);
+                    },
+                .onLog = &logExtensionMessage });
         for (auto const& problem: composed.problems)
             errorLog()("{}", problem.message);
         return std::move(composed.runtime);
@@ -141,10 +261,19 @@ namespace
     }
 } // namespace
 
+std::unique_ptr<vtextension::IServedTabService> servedTabServiceOf(vtextension::ServedTabOwner const& owner,
+                                                                   DaemonWorldWiring wiring)
+{
+    return std::make_unique<ServedTabAdapter>(owner, wiring);
+}
+
 DaemonWorldExtensions::DaemonWorldExtensions(vtextension::DaemonExtensionRuntimeConfig config,
                                              DaemonWorldServices const& services,
-                                             DaemonWorldEvents events):
-    _events { std::move(events) }, _runtime { compose(std::move(config), services, *this) }
+                                             DaemonWorldEvents events,
+                                             DaemonWorldWiring wiring):
+    _events { std::move(events) },
+    _wiring { wiring },
+    _runtime { compose(std::move(config), services, *this, wiring) }
 {
 }
 
@@ -205,6 +334,8 @@ void DaemonWorldExtensions::revoke(std::string_view name)
     // The runtime starts a new run, which drops the old one's summary and whatever it still publishes; once
     // it returned, the summary is forgotten here too, whatever reached us meanwhile.
     changingRequests([&] { _runtime->revoke(name); });
+    // Its dashboards would sit frozen: they close with its grant.
+    _wiring.tabs.closeAll(name);
     auto const lock = std::scoped_lock { _mutex };
     if (auto const found = _shown.find(name); found != _shown.end())
         found->second.summary.reset();

@@ -1031,6 +1031,12 @@ void NativeSession::extensionPresenceChanged(proto::ExtensionPresence const& pre
         send(0, proto::DecodedPdu { presence });
 }
 
+void NativeSession::revealPane(SessionId session)
+{
+    if (showsExtensionPresence() && !_closed)
+        send(0, proto::DecodedPdu { proto::RevealPane { .session = session.value } });
+}
+
 void NativeSession::invokeExtensionAction(proto::InvokeExtensionAction const& invoke)
 {
     if (!showsExtensionPresence())
@@ -1261,6 +1267,7 @@ void NativeSession::refreshSelection()
     {
         _selectedWorkspace = 0;
         _selectedTabs = SelectedTabs::NeverHeld;
+        _host.noteSelected(*this);
         forgetUnmirroredSessions();
         announceUnmirroredPanes();
         return;

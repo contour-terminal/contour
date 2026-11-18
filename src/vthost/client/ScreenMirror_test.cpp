@@ -2782,7 +2782,9 @@ TEST_CASE("ScreenMirror.daemonExtension.summaryMirrored", "[vthost][mirror][daem
                                  settings.indicatorStatusLine.middle.clear();
                                  settings.indicatorStatusLine.right.clear();
                              },
-                             [&](vthost::DaemonWorldEvents events, vthost::OwnerPost post) {
+                             [&](vthost::DaemonWorldEvents events,
+                                 vthost::OwnerPost post,
+                                 vthost::DaemonWorldWiring const& /*wiring*/) {
                                  world = std::make_shared<vthost::testing::FakeDaemonWorldHosting>(
                                      journal, std::move(post), std::move(events));
                                  return world;

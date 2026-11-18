@@ -7176,7 +7176,9 @@ TEST_CASE("NativeController shows a daemon extension's palette rows and invokes 
                                   {},
                                   vthost::ClientSizePolicy::Latest,
                                   {},
-                                  [&](vthost::DaemonWorldEvents events, vthost::OwnerPost post) {
+                                  [&](vthost::DaemonWorldEvents events,
+                                      vthost::OwnerPost post,
+                                      vthost::DaemonWorldWiring const& /*wiring*/) {
                                       world = std::make_shared<vthost::testing::FakeDaemonWorldHosting>(
                                           journal, std::move(post), std::move(events));
                                       world->rows = { vthost::ExtensionActionRows {

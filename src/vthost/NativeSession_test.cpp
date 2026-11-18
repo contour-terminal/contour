@@ -4204,7 +4204,9 @@ TEST_CASE("NativeSession.daemonExtension.summaryMirrored", "[vthost][native][dae
     auto world = std::shared_ptr<vthost::testing::FakeDaemonWorldHosting> {};
     auto h = NativeHarness { HarnessOptions {
         .daemonWorld =
-            [&](vthost::DaemonWorldEvents events, vthost::OwnerPost post) {
+            [&](vthost::DaemonWorldEvents events,
+                vthost::OwnerPost post,
+                vthost::DaemonWorldWiring const& /*wiring*/) {
                 world = std::make_shared<vthost::testing::FakeDaemonWorldHosting>(
                     journal, std::move(post), std::move(events));
                 return world;

@@ -346,6 +346,8 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// Sends the daemon-scoped extensions' palette rows, if this client shares
     /// proto::Capability::ExtensionPresence.
     void extensionPresenceChanged(proto::ExtensionPresence const& presence) override;
+    /// Sends RevealPane, to a client that shows the extensions' palette rows.
+    void revealPane(vtworkspace::SessionId session) override;
 
     /// Adapts the host's model-change fan-out into a "layout changed" callback naming the workspace or the
     /// tab the change is in: every structural change re-pushes the whole LayoutState of a workspace. It is a
