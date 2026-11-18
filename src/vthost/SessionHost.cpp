@@ -1709,11 +1709,114 @@ std::vector<ConnectionView> SessionHost::connectionViews() const
           }));
 }
 
+std::optional<std::string> SessionHost::servedRestructuring(Restructure kind,
+                                                            SessionId source,
+                                                            std::optional<TabId> targetTab) const
+{
+    // Every kind changes the source's tab: a served pane neither splits nor leaves its tab.
+    if (auto const* served = servedBy(source))
+        return served->extension;
+    auto const entersTarget = [kind] {
+        switch (kind)
+        {
+            case Restructure::Split:
+            case Restructure::MoveOut: return false;
+            case Restructure::MergeInto:
+            case Restructure::MoveInto: return true;
+        }
+        return true;
+    }();
+    auto const* const tab = entersTarget && targetTab ? _model.findTab(*targetTab) : nullptr;
+    if (tab == nullptr)
+        return std::nullopt;
+    // Nothing enters a served tab either.
+    for (auto const session: tab->leafSessions())
+        if (auto const* served = servedBy(session))
+            return served->extension;
+    return std::nullopt;
+}
+
+std::expected<void, TabMergeError> SessionHost::mergeTabIntoSplit(proto::MergeTabIntoSplit const& request)
+{
+    auto const source = SessionId { request.tabSessions.empty() ? 0 : request.tabSessions.front() };
+    auto const target = std::get<1>(_model.findSessionLeaf(SessionId { request.targetSession }));
+    if (auto const served =
+            servedRestructuring(Restructure::MergeInto,
+                                source,
+                                target != nullptr ? std::optional { target->id() } : std::nullopt))
+    {
+        errorLog()("refusing to merge a tab into a split: extension '{}' serves the tab", *served);
+        return std::unexpected { TabMergeError::Served };
+    }
+    return applyTabMerge(_model, request);
+}
+
+std::expected<vtworkspace::MoveResult, NodeMoveFailure> SessionHost::moveNode(
+    vtworkspace::MoveSource const& source,
+    vtworkspace::MoveTarget const& target,
+    MoveWorkspaceHooks const& hooks)
+{
+    // A pane, or one pane of a tab: a served tab has but the one.
+    auto const* const tabSource = std::get_if<vtworkspace::TabSource>(&source);
+    auto const* const sourceTab = tabSource != nullptr ? _model.findTab(tabSource->tab) : nullptr;
+    auto sourceSession = SessionId {};
+    if (tabSource == nullptr)
+        sourceSession = std::get<vtworkspace::PaneSource>(source).session;
+    else if (sourceTab != nullptr)
+        sourceSession = sourceTab->activePane()->session();
+    // The tab the source enters; none for a tab well or a new workspace, where a whole tab stays whole.
+    auto const tabOf = [this](SessionId pane) -> std::optional<TabId> {
+        auto const* const tab = std::get<1>(_model.findSessionLeaf(pane));
+        return tab != nullptr ? std::optional { tab->id() } : std::nullopt;
+    };
+    auto const targetTab = std::visit(
+        [&]<typename Target>(Target const& where) -> std::optional<TabId> {
+            if constexpr (std::is_same_v<Target, vtworkspace::EdgeTarget>
+                          || std::is_same_v<Target, vtworkspace::SwapTarget>)
+                return tabOf(where.pane);
+            else if constexpr (std::is_same_v<Target, vtworkspace::TabTarget>)
+                return where.tab;
+            else
+                return std::nullopt;
+        },
+        target);
+    if (tabSource != nullptr && !targetTab)
+        return applyMove(_model, source, target, hooks); // a whole tab to a tab well: it stays whole
+    // A served tab's one pane, to a tab well or a new workspace, is its whole tab: moved as the tab, so the
+    // served tabs follow it to the workspace it lands in (tabMovedToWorkspace).
+    if (!targetTab && servedBy(sourceSession) != nullptr)
+    {
+        auto const [workspace, tab, leaf] = _model.findSessionLeaf(sourceSession);
+        if (workspace != nullptr && tab != nullptr && tab->paneCount() == 1)
+            return applyMove(_model,
+                             vtworkspace::TabSource { .workspace = workspace->id(), .tab = tab->id() },
+                             target,
+                             hooks);
+    }
+    if (auto served = servedRestructuring(
+            targetTab ? Restructure::MoveInto : Restructure::MoveOut, sourceSession, targetTab))
+    {
+        errorLog()("refusing to move a pane: extension '{}' serves its tab or the target's", *served);
+        return std::unexpected { NodeMoveFailure {
+            .error = NodeMoveError::Served, .model = std::nullopt, .extension = std::move(*served) } };
+    }
+    return applyMove(_model, source, target, hooks);
+}
+
 void SessionHost::splitActivePane(TabId tab,
                                   SplitState orientation,
                                   double ratio,
                                   SessionSpawnRequest const& request)
 {
+    if (auto const* const splitting = _model.findTab(tab); splitting != nullptr)
+    {
+        if (auto const served =
+                servedRestructuring(Restructure::Split, splitting->activePane()->session(), std::nullopt))
+        {
+            errorLog()("refusing to split a pane: extension '{}' serves it", *served);
+            return;
+        }
+    }
     auto const pane = paneUuidFor(request);
     auto const seeded = seedSession(request,
                                     SpawnIds { .workspace = workspaceUuid(_model.workspaceOfTab(tab)),
@@ -2296,11 +2399,19 @@ namespace
     ///
     /// Or a light/dark preference to re-seed the session's palette under, which needs the host's profiles.
     /// @see SessionHost::applyColorPreference()
+    /// What an operation does to a served session, whose grid only its extension draws.
+    enum class OnServed : uint8_t
+    {
+        Refused = 0, ///< It writes to the grid, or resets what the extension set: refused.
+        Performed,   ///< It changes only how the grid is shown.
+    };
+
     using OperationPerform = std::variant<LoopPerform, DeliveryKind, vtbackend::ColorPreference>;
 
     /// One engine operation a client may ask the host to perform.
     struct OperationRow
     {
+        OnServed onServed = OnServed::Refused;
         proto::EngineOperation operation;
         OperationPerform perform;
     };
@@ -2351,9 +2462,11 @@ namespace
                            placeUserMark(terminal, request, vtbackend::UserMarkChange::Removed);
                        } } },
         OperationRow { .operation = proto::EngineOperation::UseDarkColors,
-                       .perform = vtbackend::ColorPreference::Dark },
+                       .perform = vtbackend::ColorPreference::Dark,
+                       .onServed = OnServed::Performed },
         OperationRow { .operation = proto::EngineOperation::UseLightColors,
-                       .perform = vtbackend::ColorPreference::Light },
+                       .perform = vtbackend::ColorPreference::Light,
+                       .onServed = OnServed::Performed },
     };
 } // namespace
 
@@ -2364,6 +2477,8 @@ std::expected<void, OperationError> SessionHost::performOperation(proto::Perform
     if (hosted == _sessions.end())
         return std::unexpected(OperationError::UnknownSession);
     auto const row = std::ranges::find(OperationTable, request.operation, &OperationRow::operation);
+    if (row->onServed == OnServed::Refused && servedBy(session) != nullptr)
+        return std::unexpected(OperationError::Served);
     if (row == OperationTable.end())
         return std::unexpected(OperationError::UnknownOperation);
 

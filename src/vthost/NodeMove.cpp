@@ -100,18 +100,24 @@ namespace
     }
 } // namespace
 
+std::expected<NodeMoveRequest, NodeMoveFailure> readMoveNode(vtworkspace::SessionModel& model,
+                                                             proto::MoveNode const& move)
+{
+    return sourceOf(model, move).and_then([&](vtworkspace::MoveSource const& source) {
+        return targetOf(model, move).transform([&](vtworkspace::MoveTarget const& target) {
+            return NodeMoveRequest { .source = source, .target = target };
+        });
+    });
+}
+
 std::expected<vtworkspace::MoveResult, NodeMoveFailure> applyMoveNode(vtworkspace::SessionModel& model,
                                                                       proto::MoveNode const& move,
                                                                       MoveWorkspaceHooks const& workspaces)
 {
     // Both ends are read before the model is touched, so a refusal changes nothing.
-    auto const source = sourceOf(model, move);
-    if (!source)
-        return std::unexpected { source.error() };
-    auto const target = targetOf(model, move);
-    if (!target)
-        return std::unexpected { target.error() };
-    return applyMove(model, *source, *target, workspaces);
+    return readMoveNode(model, move).and_then([&](NodeMoveRequest const& request) {
+        return applyMove(model, request.source, request.target, workspaces);
+    });
 }
 
 std::expected<vtworkspace::MoveResult, NodeMoveFailure> applyMove(vtworkspace::SessionModel& model,

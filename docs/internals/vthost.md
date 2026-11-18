@@ -2072,6 +2072,25 @@ A served session is **disposable**: nothing of it survives the daemon, and its e
   and remaps the workspace's active tab to the captured ones: an active served tab maps to the tab that would
   become active were it closed -- the one after it, else the one before.
 
+What reaches a served session is held to what the extension means it to be:
+
+- **It executes only what draws.** `seedSession` gives its terminal `SequenceAllowance::ServedTab`, and the
+  terminal drops every function, DEC private mode and C0 control that `vt/ServedTabSequences.hpp` does not list:
+  no title, clipboard, notification, working directory, image, bell, reply or character set reaches past the grid.
+- **Its tab stays whole.** `SessionHost::servedRestructuring` is the one place a split, a merge or a move is
+  judged, and `splitActivePane`, `mergeTabIntoSplit` and `moveNode` -- the only paths the native protocol, the
+  control API and tmux control mode take -- ask it first. A served pane neither splits nor leaves its tab, and no
+  pane enters one; the whole tab still moves to another workspace, and so does its one pane, which moves as the
+  tab. `performOperation` refuses the operations that write to its grid (`OperationError::Served`).
+- **The control API cannot read or drive it** (`ServedPaneContentMethods`): `pane.send`, `pane.capture`, the
+  block verbs and the status verbs answer `Forbidden`. That API is the automation surface -- a script, an
+  agent, another extension's `callControl` -- and the extension's content is not theirs to read or type into.
+- **A tmux control-mode client still reads and types into it**, as a native client does: `capture-pane` and
+  `send-keys` stay allowed. Such a client is an interactive front end -- iTerm2 or `contour client --tmux`
+  showing the session to the user the extension draws for -- and its keys are that user's, just as a native
+  client's are. Refusing them would make the dashboard unusable from that front end while protecting nothing
+  the user does not already see.
+
 ## Binary imsg IPC (the real tmux binary as a client)
 
 The daemon's third endpoint, `<control-socket>-tmux`, speaks tmux's binary

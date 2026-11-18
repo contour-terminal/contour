@@ -2545,7 +2545,7 @@ NativeSession::TabVerb NativeSession::serveTabVerb(proto::DecodedFrame const& fr
         }
         // Applied to the model, so the layout push that reaches every client, this one included, is the
         // answer: the dragged tab's sessions move into the target tab and none is spawned or closed.
-        if (auto const merged = applyTabMerge(_host.model(), *merge); !merged)
+        if (auto const merged = _host.mergeTabIntoSplit(*merge); !merged)
         {
             errorLog()("{}: ignoring {}: {}", _id, proto::describe(frame.pdu), describe(merged.error()));
             // Said, so the user whose drop did nothing is told: no layout push follows a refusal.
@@ -2568,13 +2568,16 @@ NativeSession::TabVerb NativeSession::serveTabVerb(proto::DecodedFrame const& fr
         // open names this request, so the client can tell its move landed.
         _servingMove = frame.serial;
         auto const moved =
-            applyMoveNode(_host.model(),
-                          *move,
-                          MoveWorkspaceHooks { .create = [this] { return _host.createEmptyWorkspace().id(); },
-                                               .discard =
-                                                   [this](vtworkspace::WorkspaceId workspace) {
-                                                       _host.discardWorkspace(workspace);
-                                                   } });
+            readMoveNode(_host.model(), *move).and_then([this](NodeMoveRequest const& request) {
+                return _host.moveNode(
+                    request.source,
+                    request.target,
+                    MoveWorkspaceHooks { .create = [this] { return _host.createEmptyWorkspace().id(); },
+                                         .discard =
+                                             [this](vtworkspace::WorkspaceId workspace) {
+                                                 _host.discardWorkspace(workspace);
+                                             } });
+            });
         _servingMove = 0;
         if (!moved)
         {

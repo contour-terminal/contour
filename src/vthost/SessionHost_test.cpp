@@ -81,6 +81,7 @@
 #include <vthost/ViewRouting.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/FakeProfileCatalog.hpp>
+#include <vthost/testing/ServedTesting.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -1813,8 +1814,8 @@ TEST_CASE("a failing PTY factory is reported", "[vthost][host][diagnostics]")
 }
 
 TEST_CASE("reaping an orphaned session after a model refusal is reported", "[vthost][host][diagnostics]")
-{
     auto capture = core::log::ScopedCapture {};
+{
     auto h = HostHarness {};
     REQUIRE(h.host.createTab() != nullptr);
 
@@ -6017,4 +6018,41 @@ TEST_CASE("a start directory that is no directory here names no workspace", "[vt
     REQUIRE(workspace != nullptr);
     CHECK(h.seen.back().workingDirectory.empty());
     CHECK(nameOfWorkspace(h.host, workspace->id()).empty());
+}
+
+TEST_CASE("an operation that writes to a served session's grid is refused", "[vthost][served]")
+{
+    auto h = HostHarness {};
+    auto const opened = vthost::testing::openServedTab(h.host);
+    REQUIRE(opened.has_value());
+    auto const perform = [&](vthost::proto::EngineOperation operation) {
+        return h.host.performOperation(vthost::proto::PerformOperation {
+            .session = opened->value, .operation = operation, .text = std::string { "text" }, .row = {} });
+    };
+    using vthost::proto::EngineOperation;
+    for (auto const operation: { EngineOperation::ClearToPrompt,
+                                 EngineOperation::ClearHistoryAndReset,
+                                 EngineOperation::SoftReset,
+                                 EngineOperation::WriteScreen,
+                                 EngineOperation::SetUserMark,
+                                 EngineOperation::ClearUserMark })
+    {
+        INFO(std::to_underlying(operation));
+        auto const performed = perform(operation);
+        REQUIRE_FALSE(performed.has_value());
+        CHECK(performed.error() == vthost::OperationError::Served);
+    }
+    // How the grid is shown is the viewer's.
+    CHECK(perform(EngineOperation::UseDarkColors).has_value());
+    CHECK(perform(EngineOperation::UseLightColors).has_value());
+
+    // An ordinary session performs them all.
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    CHECK(h.host
+              .performOperation(vthost::proto::PerformOperation { .session = tab->rootPane()->session().value,
+                                                                  .operation = EngineOperation::SoftReset,
+                                                                  .text = {},
+                                                                  .row = {} })
+              .has_value());
 }

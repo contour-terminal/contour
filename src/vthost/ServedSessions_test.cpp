@@ -913,6 +913,37 @@ TEST_CASE("a dashboard moved to another workspace is that workspace's", "[daemon
     CHECK(bench.served().size() == 2);
 }
 
+TEST_CASE("a dashboard's one pane dragged to another workspace moves as its tab", "[daemon][served]")
+{
+    auto bench = ServedBench {};
+    auto const second = bench.newWorkspace();
+    auto one = FakeWindow { 1 };
+    auto two = FakeWindow { 2 };
+    auto const originOne = bench.attach(one, bench.first);
+    auto const originTwo = bench.attach(two, second);
+    auto const opened = bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, originOne);
+    REQUIRE(opened.has_value());
+    auto const session = bench.sessionOf(*opened);
+
+    // Dragged as a pane, as a window drags a tab's only pane: a served tab stays whole, so it moves as the
+    // tab.
+    auto& host = bench.live.host;
+    auto const moved =
+        host.moveNode(vtworkspace::PaneSource { session },
+                      vtworkspace::TabWellTarget { .workspace = second, .index = 0 },
+                      vthost::MoveWorkspaceHooks {
+                          .create = [&] { return host.createEmptyWorkspace().id(); },
+                          .discard = [&](vtworkspace::WorkspaceId id) { host.discardWorkspace(id); } });
+    REQUIRE(moved.has_value());
+    REQUIRE(bench.workspaceOf(session) == second);
+    CHECK(host.servedBy(session) != nullptr);
+
+    // Tracked: opened from the second workspace, it is the one there, and revealed there.
+    CHECK(bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, originTwo) == opened);
+    CHECK(bench.live.eventually([&] { return two.reveals == std::vector { session }; }));
+    CHECK(bench.served().size() == 1);
+}
+
 TEST_CASE("an extension cannot act through another one's origin", "[daemon][served]")
 {
     auto bench = ServedBench {};

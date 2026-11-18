@@ -69,6 +69,7 @@
 #include <vthost/ExtensionActions.hpp>
 #include <vthost/ExtensionHosting.hpp>
 #include <vthost/HistorySeed.hpp>
+#include <vthost/NodeMove.hpp>
 #include <vthost/ObjectRegistry.hpp>
 #include <vthost/PermissionWire.hpp>
 #include <vthost/ProfileCatalog.hpp>
@@ -78,6 +79,7 @@
 #include <vthost/SessionSettings.hpp>
 #include <vthost/SessionSnapshot.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
+#include <vthost/TabMerge.hpp>
 #include <vthost/ViewRouting.hpp>
 #include <vthost/WorkspaceGit.hpp>
 #include <vthost/WorkspaceVisibility.hpp>
@@ -137,6 +139,7 @@ enum class OperationError : uint8_t
 {
     UnknownSession = 0, ///< No hosted session has that id: it exited, or never existed.
     UnknownOperation,   ///< The operation is not one this host knows, as from a newer client.
+    Served,             ///< It would write to a served session's grid, which only its extension draws.
 };
 
 /// Why the host closed no workspace.
@@ -189,6 +192,7 @@ struct TitleChangedSignal
 };
 
 /// The application reported a working directory different from the one before.
+        case OperationError::Served: return "an extension draws the session";
 struct WorkingDirectoryChangedSignal
 {
 };
@@ -457,6 +461,16 @@ struct ServedBy
     std::string moduleDigest; ///< The hex SHA-256 of the module that draws it; empty when unknown.
 
     bool operator==(ServedBy const&) const = default;
+};
+
+/// A change to the pane tree that would take a pane out of its tab or put one into another: what a served
+/// tab, which stays whole, refuses (@see SessionHost::servedRestructuring).
+enum class Restructure : uint8_t
+{
+    Split,     ///< The source pane splits, so a new pane enters its tab.
+    MergeInto, ///< The source's whole tab is grafted into the target tab.
+    MoveOut,   ///< The source pane leaves its tab, for a tab well or a new workspace.
+    MoveInto,  ///< The source pane or tab enters the target tab.
 };
 
 /// A served spawn: no program, but the device ServedSessions::makeDevice() built, which the session adopts.
@@ -1519,7 +1533,8 @@ class SessionHost final:
     ///         nullopt with none attached. @see raiseHolder
     [[nodiscard]] std::optional<ConnectionId> raiseHolderNow() const;
 
-    /// Splits @p tab's active pane, backing the new leaf with a fresh session.
+    /// Splits @p tab's active pane, backing the new leaf with a fresh session. Refused, logged and nothing
+    /// changed, when that pane is served (@see servedRestructuring).
     /// @param tab The tab whose active pane splits.
     /// @param orientation The split axis.
     /// @param ratio The first child's share.
@@ -1528,6 +1543,36 @@ class SessionHost final:
                          vtworkspace::SplitState orientation,
                          double ratio = 0.5,
                          SessionSpawnRequest const& request = {});
+
+    /// The one place a restructuring is judged against served tabs, which every front end -- the native
+    /// protocol, the control API, tmux control mode -- reaches through splitActivePane(), mergeTabIntoSplit()
+    /// and moveNode(). A whole served tab may still move to another workspace: it stays whole.
+    /// @param kind What would change.
+    /// @param source The pane that would split, leave its tab or enter another; for a tab, any of its panes.
+    /// @param targetTab The tab a MergeInto or MoveInto enters; ignored for the other kinds.
+    /// @return Nothing when allowed; the served extension's name when it would split a served pane, merge or
+    ///         move a foreign pane into a served tab, or move a served pane out of its tab.
+    [[nodiscard]] std::optional<std::string> servedRestructuring(
+        Restructure kind, vtworkspace::SessionId source, std::optional<vtworkspace::TabId> targetTab) const;
+
+    /// Grafts the tab a client's MergeTabIntoSplit names beside its target pane (@see applyTabMerge), unless
+    /// either is served.
+    /// @param request The client's request.
+    /// @return Success, or why nothing changed; TabMergeError::Served for a served tab or target.
+    [[nodiscard]] std::expected<void, TabMergeError> mergeTabIntoSplit(
+        proto::MergeTabIntoSplit const& request);
+
+    /// Moves @p source to @p target (@see applyMove), unless it would take a served pane out of its tab or
+    /// put a pane into a served tab. A whole tab moving to a tab well or a new workspace stays whole, served
+    /// or not; so does a served tab's one pane, which moves as its tab.
+    /// @param source What moves.
+    /// @param target Where it goes.
+    /// @param hooks Makes the workspace of a NewWorkspace target, and removes a workspace the move empties.
+    /// @return Where focus landed, or why nothing changed; NodeMoveError::Served naming the extension.
+    [[nodiscard]] std::expected<vtworkspace::MoveResult, NodeMoveFailure> moveNode(
+        vtworkspace::MoveSource const& source,
+        vtworkspace::MoveTarget const& target,
+        MoveWorkspaceHooks const& hooks);
 
     /// @return The terminal backing @p session, or nullptr if unknown.
     [[nodiscard]] vtbackend::Terminal* terminal(vtworkspace::SessionId session) noexcept;

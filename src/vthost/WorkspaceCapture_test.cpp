@@ -159,10 +159,10 @@ TEST_CASE("a snapshot leaves served tabs out", "[vthost][snapshot][capture][serv
     auto* const shell = h.host.createTab();
     REQUIRE(shell != nullptr);
     std::ignore = openServed(h.host);
-    // A served leaf at any depth: a tab that holds one is left out whole.
-    auto& split = openServed(h.host);
-    h.host.splitActivePane(split.id(), SplitState::Vertical, 0.5);
-    REQUIRE(split.paneCount() == 2);
+    // A served tab stays whole (the host refuses to split one), so each served tab is one leaf.
+    auto& refused = openServed(h.host);
+    h.host.splitActivePane(refused.id(), SplitState::Vertical, 0.5);
+    REQUIRE(refused.paneCount() == 1);
 
     auto const snapshot = captureWorkspace(h.host, {}, Now);
     REQUIRE(snapshot.workspaces.size() == 1);
