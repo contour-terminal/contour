@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -48,6 +49,9 @@ struct SplitChrome
     int stackedGap = DefaultPaneGap;
     /// The height each leaf of a split spends on its header, above its grid.
     int leafHeader = 0;
+    /// The height a leaf whose header always shows (LeafHeader::Always) spends on it, alone or in a split:
+    /// the row's own header height, which no density takes away.
+    int alwaysHeader = 0;
     /// How far a split tree's cards sit in from each edge of the content area.
     int rootInset = 0;
     /// How far each leaf's grid sits in from every edge of its card, so that no cell reaches the card's
@@ -64,6 +68,13 @@ struct SplitChrome
 /// ingested layout string — which only holds for exactly one cell. Single-sourced so a projection
 /// (layoutInCells) and any composition of one cannot drift apart.
 inline constexpr int CellDividerThickness = 1;
+
+/// Whether a leaf's header shows only inside a split, or always.
+enum class LeafHeader : uint8_t
+{
+    InSplit = 0, ///< As every pane's: inside a split only, at SplitChrome::leafHeader.
+    Always,      ///< A served pane's: alone too, at SplitChrome::alwaysHeader.
+};
 
 /// Computes the root (content-area) size required so @p leaf receives AT LEAST @p requiredLeafSize,
 /// keeping every split ratio fixed.
@@ -93,22 +104,29 @@ inline constexpr int CellDividerThickness = 1;
 /// @param requiredLeafSize The extent the leaf must receive.
 /// @param chrome           What the split tree spends around its leaves, in the same unit.
 /// @param layoutRoot       The node occupying the whole content area (Tab::layoutRoot).
+/// @param header           Whether the leaf's header shows inside a split only, or always (a served pane's,
+///                         which a leaf that is its own layout root then spends too).
 /// @pre @p layoutRoot must be an ancestor of @p leaf, or @p leaf itself — otherwise the leaf is not on
 ///      screen at all and there is no content size to solve for.
 /// @return The required content-area extent; equals @p requiredLeafSize when @p leaf is the layout root.
 [[nodiscard]] inline LayoutSize contentSizeForLeaf(Pane const& leaf,
                                                    LayoutSize requiredLeafSize,
                                                    SplitChrome const& chrome,
-                                                   Pane const& layoutRoot) noexcept
+                                                   Pane const& layoutRoot,
+                                                   LeafHeader header) noexcept
 {
     Require(layoutRoot.contains(&leaf) && "the leaf must lie inside the layout root it is solved against");
 
     if (&leaf == &layoutRoot)
-        return requiredLeafSize;
+        return header == LeafHeader::Always
+                   ? LayoutSize { .width = requiredLeafSize.width,
+                                  .height = requiredLeafSize.height + chrome.alwaysHeader }
+                   : requiredLeafSize;
 
     auto const cardInset = 2.0 * chrome.leafInset;
     auto width = static_cast<double>(requiredLeafSize.width) + cardInset;
-    auto height = static_cast<double>(requiredLeafSize.height) + chrome.leafHeader + cardInset;
+    auto height = static_cast<double>(requiredLeafSize.height)
+                  + (header == LeafHeader::Always ? chrome.alwaysHeader : chrome.leafHeader) + cardInset;
 
     for (auto const* node = &leaf; node != &layoutRoot; node = node->parent())
     {
@@ -139,6 +157,15 @@ inline constexpr int CellDividerThickness = 1;
         return static_cast<int>(std::min(value, static_cast<double>(std::numeric_limits<int>::max())));
     };
     return { .width = toExtent(width), .height = toExtent(height) };
+}
+
+/// contentSizeForLeaf() for a leaf whose header shows inside a split only (LeafHeader::InSplit).
+[[nodiscard]] inline LayoutSize contentSizeForLeaf(Pane const& leaf,
+                                                   LayoutSize requiredLeafSize,
+                                                   SplitChrome const& chrome,
+                                                   Pane const& layoutRoot) noexcept
+{
+    return contentSizeForLeaf(leaf, requiredLeafSize, chrome, layoutRoot, LeafHeader::InSplit);
 }
 
 /// One leaf pane's resolved rectangle in CELL space, as produced by layoutInCells().

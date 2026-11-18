@@ -645,6 +645,59 @@ TEST_CASE("attach realizes a split daemon layout as a 2-pane tab", "[attach][con
     ac->stop();
 }
 
+TEST_CASE("attach marks the tab a daemon extension serves, and that tab alone",
+          "[attach][controller][served]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("shell");
+    daemon.onDaemon([&daemon] {
+        auto& host = *daemon.host;
+        auto const device = host.served().makeDevice(
+            vtbackend::PageSize { vtbackend::LineCount(24), vtbackend::ColumnCount(80) });
+        std::ignore = host.createTabIn(host.workspaceId(),
+                                       { .served = vthost::ServedSpawn { .extension = "orchestrator",
+                                                                         .scheme = "agents",
+                                                                         .moduleDigest = "3f9a0c1d2e4b5a69",
+                                                                         .device = device,
+                                                                         .title = "Agents" } });
+        return 0;
+    });
+
+    auto timeline = TestTimeline {};
+    auto acOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    requireConnected(*ac);
+    for (auto i = 0; i < 200; ++i)
+    {
+        auto const l = ac->settledLayout();
+        if (l && l->tabs.size() == 2 && l->served.size() == 1)
+            break;
+        std::this_thread::sleep_for(5ms);
+    }
+    auto const settled = ac->settledLayout();
+    REQUIRE(settled != nullptr);
+    REQUIRE(settled->served.size() == 1);
+
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
+
+    using Roles = contour::window::WindowController::Roles;
+    auto const roleOf = [&](int row, Roles role) {
+        return win.controller->data(win.controller->index(row), static_cast<int>(role)).toString();
+    };
+    REQUIRE(win.controller->rowCount() == 2);
+    // The shell's tab first, as the daemon opened it, then the extension's.
+    CHECK(roleOf(0, Roles::ServedByRole).isEmpty());
+    CHECK(roleOf(0, Roles::ServedStripRole).isEmpty());
+    CHECK(roleOf(1, Roles::ServedByRole) == QStringLiteral("Served by Agents"));
+    CHECK(roleOf(1, Roles::ServedStripRole)
+          == QStringLiteral("◈ Agents · orchestrator, module 3f9a0c1d2e4b · draws this tab"));
+
+    ac->stop();
+}
+
 // B3-Qt: a split authored on the daemon AFTER attach reconciles into the already-
 // shown tab as a second pane (intra-tab incremental reconciliation), rather than
 // only whole new tabs.

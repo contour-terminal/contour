@@ -37,6 +37,8 @@
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneState.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
+#include <contour/window/ServedChrome.hpp>
+#include <contour/window/ServedChromeText.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
 #include <contour/window/StickyHeaderChrome.hpp>
 #include <contour/window/StickyHeaderPlacement.hpp>
@@ -300,6 +302,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // Whether the pane shows the lock (a window::SecureIndicator's value): the program in it hides what is
     // typed. An int, not the enum, for the QML-facing exception paneState takes.
     Q_PROPERTY(int secureIndicator READ secureIndicator NOTIFY secureIndicatorChanged)
+    // Who draws the pane, for its header's strip (window::servedChromeOf): empty for a pane whose terminal
+    // runs a program, which is every pane but a daemon-scoped extension's served tab.
+    Q_PROPERTY(QString servedStrip READ servedStrip NOTIFY servedChanged)
     // How the session ended while its pane waits (an EndReason's value; 0 while it runs) and what the pane's
     // footer says about it. Ints, not the enums, until they are registered with the meta-object system
     // (AGENT.md, QML-facing exception).
@@ -983,6 +988,22 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// ignores it.
     /// @param state Where the connection stands now.
     void setHostConnection(vthost::client::ConnectionState state);
+
+    /// Tells a pane that mirrors a remote session which daemon-scoped extension draws it, as the daemon's
+    /// layout says. Runtime state, not configuration: the daemon says so with each layout it pushes. A local
+    /// session is never served and ignores it. GUI thread.
+    /// @param mark Who draws the pane; nullopt for a pane whose terminal runs a program.
+    void setServedMark(std::optional<window::ServedMark> mark);
+
+    /// @return Who draws the pane, as the daemon last said; nullopt for a program's pane. GUI thread.
+    [[nodiscard]] std::optional<window::ServedMark> const& servedMark() const noexcept { return _servedMark; }
+
+    /// @return The pane header's served strip, translated (window::servedStripText); empty for a program's
+    ///         pane.
+    [[nodiscard]] QString servedStrip() const
+    {
+        return window::servedStripText(window::servedChromeOf(_servedMark));
+    }
 
     /// How the session ended, while its pane waits for Restart or Close, as an EndReason's value for QML;
     /// 0 (None) while it runs. GUI thread only (see _end).
@@ -2086,6 +2107,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void sessionEndChanged();
     /// secureIndicator() may have changed: the echo, or the configured `secure_input`. GUI thread.
     void secureIndicatorChanged();
+    /// servedMark() and servedStrip() changed. GUI thread.
+    void servedChanged();
     /// What paneFooter() and the footer's message and buttons say changed: the session ended, a restart's
     /// stopped command was noted or went, or its Run Again became possible. GUI thread.
     void paneFooterChanged();
@@ -2638,6 +2661,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     QTimer _inputEchoPollTimer;
     /// Where the connection to the host stands, for a mirrored pane. @see setHostConnection
     vthost::client::ConnectionState _hostConnection = vthost::client::ConnectionState::Connected;
+    /// Who draws the pane, for a mirrored one a daemon-scoped extension serves. @see setServedMark
+    std::optional<window::ServedMark> _servedMark;
     /// When the resync grace ends -- armed at construction for a mirrored pane, and by each return of the
     /// connection to Connected: live-looking output before then repaints the mirror and is not news
     /// (window::outputOriginOf). The fallback behind the mirror's own marking (screenReplayed(), a pty's

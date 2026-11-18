@@ -1810,6 +1810,7 @@ if(CONTOUR_TESTING)
         window/SplitChrome_test.cpp
         window/ProgramStatusBadge_test.cpp
         window/RemoteChrome_test.cpp
+        window/ServedChrome_test.cpp
         window/SecureInputPolicy_test.cpp
         window/SecureLockPlacement_test.cpp
         window/HostChipState_test.cpp

@@ -115,6 +115,7 @@ struct MainWindowScene
     /// the band (macOS's traffic lights); 0 under the native frame, which draws them in a bar of its own.
     qreal nativeControlsInset = 0;
     snapshot::SecureDecor secure = snapshot::SecureDecor::None; ///< Which tabs wait for a password.
+    snapshot::ServedDecor served = snapshot::ServedDecor::None; ///< Which tab a daemon extension draws.
     /// Whether the band draws its own window controls.
     ClientFrameAffordances affordances = ClientFrameAffordances::None;
     /// How the window's chords are spelled (shortcutText()): the row's host spelling.
@@ -125,6 +126,14 @@ struct MainWindowScene
     /// Whether that daemon runs on this machine; a window attached to a host is remote whatever this says.
     window::DaemonLocality daemonLocality = window::DaemonLocality::Local;
 };
+
+/// @return The mark the served tab of a snapshot::ServedDecor::FirstTab scene carries.
+[[nodiscard]] inline window::ServedMark servedSampleMark()
+{
+    return window::ServedMark { .extension = std::string { snapshot::ServedSampleExtension },
+                                .title = std::string { snapshot::ServedSampleTitle },
+                                .moduleDigest = std::string { snapshot::ServedSampleDigest } };
+}
 
 /// The client and daemon releases a drifted scene reports, as DaemonDriftModel_test assesses them.
 inline constexpr auto DriftClientVersion = std::string_view { "0.8.2" };
@@ -221,6 +230,8 @@ class MockMainController: public MainWindowControllerMock
         BadgeTextRole = Qt::UserRole + 11,
         BadgeProgressRole = Qt::UserRole + 12,
         SecureRole = Qt::UserRole + 13,
+        ServedByRole = Qt::UserRole + 14,
+        ServedStripRole = Qt::UserRole + 15,
     };
 
     /// @param scene What the window holds; see MainWindowScene. Its pointers must outlive the mock.
@@ -860,6 +871,13 @@ class MockMainController: public MainWindowControllerMock
             case Roles::BadgeTextRole: return QString {};
             case Roles::BadgeProgressRole: return badge.progress;
             case Roles::SecureRole: return isLocked(index.row()) ? 1 : 0;
+            // As WindowController says them: the description, and the strip window::servedChromeOf decides.
+            case Roles::ServedByRole:
+                return window::servedByText(window::servedChromeOf(
+                    isServed(index.row()) ? std::optional { servedSampleMark() } : std::nullopt));
+            case Roles::ServedStripRole:
+                return window::servedStripText(window::servedChromeOf(
+                    isServed(index.row()) ? std::optional { servedSampleMark() } : std::nullopt));
             default: return {};
         }
     }
@@ -880,6 +898,8 @@ class MockMainController: public MainWindowControllerMock
             { static_cast<int>(Roles::BadgeTextRole), "badgeText" },
             { static_cast<int>(Roles::BadgeProgressRole), "badgeProgress" },
             { static_cast<int>(Roles::SecureRole), "tabSecure" },
+            { static_cast<int>(Roles::ServedByRole), "servedBy" },
+            { static_cast<int>(Roles::ServedStripRole), "servedStrip" },
         };
     }
     // }}}
@@ -956,6 +976,9 @@ class MockMainController: public MainWindowControllerMock
     {
         if (_scene.decor == snapshot::TabDecor::LongTitle && row == 0)
             return { DecorLongTitleLength, QChar(u'w') };
+        // A served tab is named by its extension's title, as the daemon names it.
+        if (isServed(row))
+            return QString::fromUtf8(snapshot::ServedSampleTitle);
         auto const id = static_cast<std::size_t>(tabIdAt(row));
         if (id < shownWorkspaceTabTitles.size())
             return shownWorkspaceTabTitles[id];
@@ -985,6 +1008,17 @@ class MockMainController: public MainWindowControllerMock
         {
             case snapshot::SecureDecor::None: break;
             case snapshot::SecureDecor::Locked: return row == _scene.activeTab || row == _scene.tabCount - 1;
+        }
+        return false;
+    }
+
+    /// @return Whether tab @p row is the scene's served tab: the first, under ServedDecor::FirstTab.
+    [[nodiscard]] bool isServed(int row) const noexcept
+    {
+        switch (_scene.served)
+        {
+            case snapshot::ServedDecor::None: break;
+            case snapshot::ServedDecor::FirstTab: return row == 0;
         }
         return false;
     }

@@ -32,6 +32,8 @@ Item {
     // Keyboard focus in the chrome moves a real active focus here (TabStrip.focusTab), so an assistive
     // client hears the focused tab, not only the selected one.
     Accessible.focused: root.keyboardFocused
+    // Who draws the tab, when a daemon-scoped extension does: "served by …", built and translated in C++.
+    Accessible.description: root.servedBy
 
     required property var controller
     required property var window          // ApplicationWindow, for restoring terminal focus after rename
@@ -57,6 +59,10 @@ Item {
     // QML-facing carve-out: the role says only yes or no. Not required, so a TabItem built on its own shows no
     // lock.
     property bool locked: false
+    // "served by {title}" for a tab a daemon-scoped extension draws (WindowController's ServedByRole), empty
+    // for any other; the served marker shows exactly when it is not empty. Not required, so a TabItem built
+    // on its own is not marked.
+    property string servedBy: ""
     // What the lock says (a window::SecureIndicator's value); the model's SecureRole, the strongest of the
     // tab's panes.
     property int secureState: locked ? chromeStyle.secureInputs.locked : chromeStyle.secureInputs.none
@@ -134,7 +140,7 @@ Item {
     // like. A joined tab is the same at s6 and s4.
     readonly property real naturalWidth: root.kitTab
         ? root.leadingInset + icon.width + root.kitGap + lock.room + label.implicitWidth
-          + root.partGap + badgeSlot.width + badgeSlot.gapAfter
+          + root.partGap + servedMarker.room + badgeSlot.width + badgeSlot.gapAfter
           + zoomBadge.width + zoomBadge.anchors.rightMargin
           + (root.closeReserved ? chromeStyle.size.tabClose : 0) + chromeStyle.space.s4
         : lock.room + label.implicitWidth + chromeStyle.labelPadding
@@ -142,7 +148,7 @@ Item {
           + chromeStyle.trailingPadding
           + separator.width + chromeStyle.tabSlack
           + zoomBadge.width + zoomBadge.anchors.rightMargin
-          + badgeSlot.width + badgeSlot.gapAfter
+          + servedMarker.room + badgeSlot.width + badgeSlot.gapAfter
           + colorCell.width
     // Snapped UP to the quantum (snapToCells): rounding to the nearest cell would take back up to half a
     // cell the label needs, and elide a title that fits.
@@ -575,7 +581,10 @@ Item {
     /// says where any of them was started, and the tab label is usually the application's name.
     function buildHoverTooltip() {
         var lines = []
-        // What the badge says, first: it is the reason to hover over a badged tab.
+        // Who draws a served tab, first: it is what its marker means, and an inactive tab shows nothing else.
+        if (root.servedBy !== "")
+            lines.push(root.servedBy)
+        // What the badge says, then: it is the reason to hover over a badged tab.
         if (root.hasBadge && root.tabBadgeText !== "")
             lines.push(root.tabBadgeText)
         // A title the tab already shows in full adds nothing; repeating it is just noise.
@@ -677,7 +686,7 @@ Item {
         objectName: "tabLabel"   // findChild() handle for the GUI test
         anchors.left: lock.visible ? lock.right : root.kitTab ? icon.right : colorCell.right
         anchors.leftMargin: lock.visible ? root.partGap : root.kitTab ? root.kitGap : chromeStyle.labelPadding
-        anchors.right: badgeSlot.left
+        anchors.right: servedMarker.left
         anchors.rightMargin: root.partGap
         anchors.verticalCenter: parent.verticalCenter
         // The chrome font: the platform UI font natively, the terminal's monospace font in the
@@ -688,6 +697,31 @@ Item {
         color: root.foreground
         elide: Text.ElideRight
         visible: !renameLoader.active && !root.iconOnly
+    }
+
+    // The served marker, in the badge row just before the badge slot and drawn as the slot draws a glyph: a
+    // daemon-scoped extension draws this tab. Decorative -- the tab's description says it -- and collapsing to
+    // nothing on any other tab, and in an icon-only pill, which has no room for it.
+    Text {
+        id: servedMarker
+        objectName: "tabServedMarker"   // findChild() handle for the GUI test
+        readonly property bool shown: root.servedBy !== "" && !root.iconOnly
+        // The gap between it and what follows it -- the badge, the zoom badge or the close button.
+        readonly property real gapAfter: shown ? root.partGap : 0
+        // What it takes from the title's row: itself and that gap, nothing while hidden.
+        readonly property real room: shown ? width + gapAfter : 0
+        // Hidden, it stands where the slot does, so the title ends where it would without it.
+        x: shown ? badgeSlot.x - gapAfter - width : badgeSlot.x
+        anchors.verticalCenter: parent.verticalCenter
+        visible: shown
+        // The badge's extent, as the zoom badge takes it: a glyph's own width would loop through its layout.
+        width: shown ? chromeStyle.badgeWidth : 0
+        horizontalAlignment: Text.AlignHCenter
+        textFormat: Text.PlainText
+        text: chromeStyle.servedGlyph
+        font: chromeStyle.badgeFont
+        color: root.foreground
+        Accessible.ignored: true
     }
 
     // The badge slot, between the label and the zoom badge, collapsing to nothing the way the zoom badge
@@ -749,7 +783,7 @@ Item {
         // width between the icon and the badge.
         anchors.left: root.iconOnly ? parent.left : root.kitTab ? icon.right : colorCell.right
         anchors.leftMargin: root.iconOnly ? chromeStyle.space.s1 : label.anchors.leftMargin
-        anchors.right: root.iconOnly ? parent.right : badgeSlot.left
+        anchors.right: root.iconOnly ? parent.right : servedMarker.left
         anchors.rightMargin: root.iconOnly ? chromeStyle.space.s1 : root.partGap
         anchors.verticalCenter: parent.verticalCenter
         function start() { active = true }

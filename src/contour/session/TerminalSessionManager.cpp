@@ -3576,6 +3576,24 @@ void TerminalSessionManager::noteInputEchoChanged(TerminalSession const& session
     refreshSecureInput();
 }
 
+void TerminalSessionManager::noteServedTab(vtworkspace::Tab const& tab,
+                                           std::optional<window::ServedMark> const& mark)
+{
+    auto changed = false;
+    for (auto const session: tab.leafSessions())
+        if (auto* terminal = sessionForId(session); terminal != nullptr && terminal->servedMark() != mark)
+        {
+            terminal->setServedMark(mark);
+            changed = true;
+        }
+    if (!changed)
+        return;
+    if (auto* c = controllerDisplaying(_model->workspaceOfTab(tab.id())))
+        c->notifyTabRowChanged(tab.id(),
+                               { window::WindowController::Roles::ServedByRole,
+                                 window::WindowController::Roles::ServedStripRole });
+}
+
 void TerminalSessionManager::notifySecureTab(TerminalSession const& session)
 {
     if (auto* tab = findTabHostingSession(session.modelSessionId()))

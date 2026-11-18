@@ -308,6 +308,7 @@ class ChromeSnapshotScene
             // measureBand() gives the macOS host's band its inset, from the row's surface; none elsewhere.
             .nativeControlsInset = 0,
             .secure = scriptRow(variant.script).secure,
+            .served = scriptRow(variant.script).served,
             .affordances = affordancesFor(variantHost(variant), scriptRow(variant.script).frame),
             .shortcutStyle = command::shortcutStyleFor(variantHost(variant)),
             .daemonName = scriptRow(variant.script).connection == HostConnection::LocalDaemon
@@ -915,6 +916,9 @@ class ChromeSnapshotScene
             // The active pane waits for a password, as the scene's tabs say (MockMainController::isLocked).
             if (leaf == ActiveLeaf && script.secure == SecureDecor::Locked)
                 session->setSecureIndicator(static_cast<int>(window::SecureIndicator::Locked));
+            // The served tab is the first: while it is the one shown, its pane says who draws it.
+            if (leaf == ActiveLeaf && script.served == ServedDecor::FirstTab && script.activeTab == 0)
+                session->setServedStrip(window::servedStripText(window::servedChromeOf(servedSampleMark())));
             switch (script.paneEnd)
             {
                 case SnapshotPaneEnd::None: break;

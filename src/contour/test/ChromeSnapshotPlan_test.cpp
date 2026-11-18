@@ -181,11 +181,12 @@ TEST_CASE("snapshot.scriptTable.densityAndPaneEnd", "[snapshot]")
     for (auto const& row: SnapshotScripts)
     {
         CAPTURE(row.name);
-        // Every row names a density, and only the three Minimal rows leave Comfortable.
+        // Every row names a density, and only the four Minimal rows leave Comfortable.
         CHECK(static_cast<std::size_t>(row.density) < contour::config::ChromeDensityCount);
         CHECK((row.density == ChromeDensity::Minimal)
               == (row.script == SnapshotScript::SplitMinimal || row.script == SnapshotScript::SingleTabMinimal
-                  || row.script == SnapshotScript::QuickTerminal));
+                  || row.script == SnapshotScript::QuickTerminal
+                  || row.script == SnapshotScript::ServedTabMinimal));
         // Only pane-exited ends a pane and only pane-interrupted restores one over a stopped command; either
         // is one of several.
         CHECK((row.paneEnd == SnapshotPaneEnd::Exited) == (row.script == SnapshotScript::PaneExited));
@@ -923,7 +924,6 @@ TEST_CASE("ChromeSnapshotPlan: the daemon consent dialog is pictured held, armed
           "[snapshot][consent]")
 {
     using namespace contour::test::snapshot;
-    CHECK(SnapshotScripts.back().script == SnapshotScript::DaemonConsentLong);
     for (auto const& [script, consent]: std::array {
              std::pair { SnapshotScript::DaemonConsentHeld, SnapshotDaemonConsent::Held },
              std::pair { SnapshotScript::DaemonConsentArmed, SnapshotDaemonConsent::Armed },
@@ -934,4 +934,24 @@ TEST_CASE("ChromeSnapshotPlan: the daemon consent dialog is pictured held, armed
         CHECK(scriptRow(script).daemonConsent == consent);
         CHECK(scriptRow(script).connection == HostConnection::LocalDaemon);
     }
+}
+
+TEST_CASE("ChromeSnapshotPlan: a served tab is pictured active and at rest, beside a shell tab",
+          "[snapshot][served]")
+{
+    using namespace contour::test::snapshot;
+    CHECK(SnapshotScripts.back().script == SnapshotScript::ServedTabMinimal);
+    for (auto const& [script, active]: std::array { std::pair { SnapshotScript::ServedTab, 0 },
+                                                    std::pair { SnapshotScript::ServedTabInactive, 1 },
+                                                    std::pair { SnapshotScript::ServedTabMinimal, 0 } })
+    {
+        CHECK(scriptRow(script).served == ServedDecor::FirstTab);
+        CHECK(scriptRow(script).tabCount == 2);
+        CHECK(scriptRow(script).activeTab == active);
+        CHECK(scriptRow(script).panes == PaneShape::SingleLeaf);
+    }
+    // Every other script serves no tab.
+    CHECK(std::ranges::count_if(SnapshotScripts,
+                                [](SnapshotScriptRow const& row) { return row.served != ServedDecor::None; })
+          == 3);
 }

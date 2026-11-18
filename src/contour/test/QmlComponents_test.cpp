@@ -28,6 +28,7 @@
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/ServedChromeText.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabIcon.hpp>
 #include <contour/window/UiStyleProvider.hpp>
@@ -1835,6 +1836,89 @@ TEST_CASE("A TabItem shows its badge and gives it back its width when there is n
     CHECK_FALSE(badge->isVisible());
     CHECK(badge->width() == 0.0);
     CHECK(label->x() + label->width() == bareLabelRight);
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("The served strip and description are phrased from the decision's parts", "[contour][gui][served]")
+{
+    using contour::window::servedByText;
+    using contour::window::servedChromeOf;
+    using contour::window::ServedMark;
+    using contour::window::servedStripText;
+    auto const agents = servedChromeOf(ServedMark {
+        .extension = "orchestrator", .title = "Agents", .moduleDigest = "3f9a0c1d2e4b5a6978e1c0ffee001122" });
+    CHECK(servedStripText(agents)
+          == QStringLiteral("◈ Agents · orchestrator, module 3f9a0c1d2e4b · draws this tab"));
+    CHECK(servedByText(agents) == QStringLiteral("Served by Agents"));
+    // An unknown module is left out, not named by an empty digest.
+    CHECK(servedStripText(servedChromeOf(ServedMark { .extension = "stub", .title = "", .moduleDigest = "" }))
+          == QStringLiteral("◈ stub · stub · draws this tab"));
+    // A title that looks like a placeholder stays itself.
+    CHECK(
+        servedStripText(servedChromeOf(ServedMark { .extension = "x", .title = "%2 %1", .moduleDigest = "" }))
+        == QStringLiteral("◈ %2 %1 · x · draws this tab"));
+    // A program's tab: nothing.
+    CHECK(servedStripText(servedChromeOf(std::nullopt)).isEmpty());
+    CHECK(servedByText(servedChromeOf(std::nullopt)).isEmpty());
+}
+
+TEST_CASE("A TabItem shows the served marker exactly while it is served", "[contour][gui][qml][served]")
+{
+    // The marker sits in the badge row before the badge slot: like the badge, it costs the label nothing
+    // while the tab is not served, and a program's title never brings it.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabItem.qml")));
+    REQUIRE(component.isReady());
+
+    QVariantMap initial;
+    initial.insert("controller", QVariant::fromValue(&controller));
+    initial.insert("window", QVariant::fromValue(static_cast<QObject*>(&controller)));
+    initial.insert("tabIndex", 0);
+    initial.insert("tabTitle", QStringLiteral("◈ Agents"));
+    initial.insert("tabName", QString {});
+    initial.insert("tabColor", QColor(Qt::transparent));
+    initial.insert("tabActive", true);
+    initial.insert("tabPaneCount", 1);
+    initial.insert("tabZoomed", false);
+    initial.insert("tabProgressState", 0);
+    initial.insert("tabProgressPercentage", 0);
+    std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
+    REQUIRE(tab != nullptr);
+
+    auto* marker = tab->findChild<QQuickItem*>(QStringLiteral("tabServedMarker"));
+    REQUIRE(marker != nullptr);
+    auto* label = tab->findChild<QQuickItem*>(QStringLiteral("tabLabel"));
+    REQUIRE(label != nullptr);
+
+    // Titled like a served tab, but not one: no marker.
+    CHECK_FALSE(marker->isVisible());
+    CHECK(marker->width() == 0.0);
+    auto const bareLabelRight = label->x() + label->width();
+
+    tab->setProperty("servedBy", QStringLiteral("Served by Agents"));
+    CHECK(marker->isVisible());
+    CHECK(marker->width() > 0.0);
+    CHECK(marker->property("text").toString() == QStringLiteral("◈"));
+    // After the title, never over it.
+    CHECK(marker->x() >= label->x() + label->width());
+
+    // Its hover tooltip says who draws it first: an inactive tab shows nothing else of it.
+    QVariant composed;
+    REQUIRE(QMetaObject::invokeMethod(tab.get(), "buildHoverTooltip", Q_RETURN_ARG(QVariant, composed)));
+    CHECK(composed.toString().split(QLatin1Char('\n')).front() == QStringLiteral("Served by Agents"));
+
+    tab->setProperty("servedBy", QString {});
+    CHECK_FALSE(marker->isVisible());
+    CHECK(marker->width() == 0.0);
+    CHECK(label->x() + label->width() == bareLabelRight);
+    REQUIRE(QMetaObject::invokeMethod(tab.get(), "buildHoverTooltip", Q_RETURN_ARG(QVariant, composed)));
+    CHECK_FALSE(composed.toString().contains(QStringLiteral("Served by")));
 
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }

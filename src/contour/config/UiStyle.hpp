@@ -67,6 +67,12 @@ enum class ChromeFontSource : uint8_t
     TerminalProfile, //!< The default profile's regular font, so the chrome matches the grid.
 };
 
+/// The mark of a tab a daemon-scoped extension draws, on every row: one glyph names one thing, and the
+/// pane's served strip (window::servedStripText) leads with the same one, so the two read as one mark. A
+/// diamond within a diamond: unlike a dot it is not "New output" (•) at a cell's size, and unlike a hexagon
+/// (which the orchestrator writes into its own status text) monospace fonts draw it themselves.
+inline constexpr auto ServedTabGlyph = std::string_view { "◈" };
+
 /// The shape, metrics and glyph vocabulary one @c ChromeStyle paints its chrome with.
 ///
 /// Every corner radius, inset and decorative glyph the chrome QML used to carry as a literal lives
@@ -254,6 +260,7 @@ struct UiStyleTokens
 
     std::string_view closeGlyph;   ///< The per-tab close affordance.
     std::string_view zoomGlyph;    ///< Marks a tab whose active pane is zoomed (see vtmux::Tab).
+    std::string_view servedGlyph;  ///< Marks a tab a daemon-scoped extension draws (see ServedTabGlyph).
     std::string_view newTabGlyph;  ///< The "new tab" button.
     std::string_view menuGlyph;    ///< The "new tab with profile" dropdown button.
     std::string_view submenuGlyph; ///< Marks a menu row that opens a sub-menu.
@@ -473,6 +480,7 @@ namespace detail
         .colorWellGlyph = "",
         .closeGlyph = "✕",
         .zoomGlyph = "Z",
+        .servedGlyph = ServedTabGlyph,
         .newTabGlyph = "+",
         .menuGlyph = "▾",
         .submenuGlyph = "▸",
@@ -571,6 +579,7 @@ namespace detail
         .colorWellGlyph = "██",
         .closeGlyph = "×",
         .zoomGlyph = "Z",
+        .servedGlyph = ServedTabGlyph,
         .newTabGlyph = "+",
         .menuGlyph = "▾",
         .submenuGlyph = "▸",

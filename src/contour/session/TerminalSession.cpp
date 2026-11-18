@@ -534,6 +534,14 @@ void TerminalSession::setHostConnection(vthost::client::ConnectionState state)
         emit paneStateChanged();
 }
 
+void TerminalSession::setServedMark(std::optional<window::ServedMark> mark)
+{
+    if (_hosting != SessionHosting::Remote || _servedMark == mark)
+        return;
+    _servedMark = std::move(mark);
+    emit servedChanged();
+}
+
 TerminalSession::~TerminalSession()
 {
     sessionLog()("Destroying terminal session.");

@@ -31,6 +31,8 @@
 #include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
+#include <contour/window/ServedChrome.hpp>
+#include <contour/window/ServedChromeText.hpp>
 #include <contour/window/SidebarMenuState.hpp>
 #include <contour/window/SidebarModel.hpp>
 #include <contour/window/SidebarToggle.hpp>
@@ -326,6 +328,13 @@ class WindowController:
         //!< (`chromeStyle.tabIconKinds`), and the initial of a Monogram or the file URL of an Image. Re-read
         //!< with the title, as is the program name it comes from.
         IconRole = Qt::UserRole + 14,
+        //!< "Served by {title}" for a tab a daemon-scoped extension draws (window::servedByText: translated;
+        //!< its accessible description and its tooltip's first line), empty for any other: the tab shows the
+        //!< served marker exactly when it is not empty.
+        ServedByRole = Qt::UserRole + 15,
+        //!< The served pane's header strip (window::servedStripText); empty for a tab whose panes run
+        //!< programs.
+        ServedStripRole = Qt::UserRole + 16,
     };
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
@@ -1900,6 +1909,13 @@ class WindowController:
     [[nodiscard]] TabBadge tabBadge(vtworkspace::Tab const& tab) const;
     /// @return Whether any pane of @p tab shows the lock.
     [[nodiscard]] SecureIndicator tabSecureIndicator(vtworkspace::Tab const& tab) const;
+
+    /// @param tab A tab of this window.
+    /// @return Who draws @p tab, as the daemon said of its panes; nullopt for a tab whose panes run programs.
+    [[nodiscard]] std::optional<ServedMark> tabServedMark(vtworkspace::Tab const& tab) const;
+    /// @param leaf A pane of this window.
+    /// @return Whether a daemon-scoped extension draws @p leaf, as the daemon said.
+    [[nodiscard]] bool isServedLeaf(vtworkspace::Pane const& leaf) const;
     /// @p session's foreground process name, asked once until the next TitleRole refresh (@ref
     /// _processNames). Only a TitleRole change re-reads it, so a tab keeps the name of the process it first
     /// found until its title changes; Step 2's foreground poll is what invalidates it on a process change.

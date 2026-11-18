@@ -26,6 +26,7 @@
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/PaneKey.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
+#include <contour/window/ServedChrome.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
 #include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SwitcherRows.hpp>
@@ -1451,6 +1452,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// the lock on the tab hosting it, and re-decides the OS's secure input. GUI thread.
     /// @param session The session whose echo changed.
     void noteInputEchoChanged(TerminalSession const& session);
+
+    /// Tells every pane of @p tab which daemon-scoped extension draws it, as the daemon's layout says, and
+    /// repaints the tab's marker (WindowController::Roles::ServedByRole and ServedStripRole) when that
+    /// changed. GUI thread.
+    /// @param tab A tab of this manager's model.
+    /// @param mark Who draws it; nullopt for a tab whose panes run programs.
+    void noteServedTab(vtworkspace::Tab const& tab, std::optional<window::ServedMark> const& mark);
 
     /// Moves the OS's secure input to what window::desiredSecureInput says for the configured mode, whether
     /// one of our windows has focus, and the focused session's echo. Called at every change of the three:

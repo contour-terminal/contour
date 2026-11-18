@@ -2727,13 +2727,20 @@ window::ChromeInputs ContourGuiApp::chromeInputs() const
 
 vtworkspace::SplitChrome ContourGuiApp::splitChrome(double devicePixelRatio) const
 {
-    if (_chromeStyleHost)
-    {
-        auto const& provider = _chromeStyleHost->provider();
-        return window::splitChromeOf(
-            provider.resolvedRow(), provider.units().horizontal, provider.units().vertical, devicePixelRatio);
-    }
-    return window::splitChromeOf(resolvedChromeTokens(), 1.0, 1.0, devicePixelRatio);
+    auto const unitWidth = _chromeStyleHost ? _chromeStyleHost->provider().units().horizontal : 1.0;
+    auto const unitHeight = _chromeStyleHost ? _chromeStyleHost->provider().units().vertical : 1.0;
+    auto chrome = window::splitChromeOf(_chromeStyleHost ? _chromeStyleHost->provider().resolvedRow()
+                                                         : resolvedChromeTokens(),
+                                        unitWidth,
+                                        unitHeight,
+                                        devicePixelRatio);
+    // A served pane's header keeps the row's own height in every density: the row before the density applied.
+    chrome.alwaysHeader = window::splitChromeOf(config::ChromeTokenRows[static_cast<size_t>(_chromeStyle)],
+                                                unitWidth,
+                                                unitHeight,
+                                                devicePixelRatio)
+                              .leafHeader;
+    return chrome;
 }
 
 std::chrono::milliseconds ContourGuiApp::headerRevealDelay() const

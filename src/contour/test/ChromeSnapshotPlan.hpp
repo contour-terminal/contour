@@ -142,6 +142,9 @@ enum class SnapshotScript : uint8_t
     DaemonConsentHeld,  //!< A daemon extension's question just shown: Allow held, a root created if missing.
     DaemonConsentArmed, //!< The same once the hold passed: Allow armed.
     DaemonConsentLong,  //!< A question with long roots and a long module path, wrapping.
+    ServedTab,          //!< A served tab, active, beside a shell tab: its marker and its pane's strip.
+    ServedTabInactive,  //!< The same with the shell tab active: the served tab's marker at rest.
+    ServedTabMinimal,   //!< served-tab under Minimal: the strip keeps its row's height, the grid below it.
 };
 
 /// The daemon extension's question a script's window asks (ScriptAction::OpenDaemonConsent).
@@ -251,6 +254,19 @@ enum class TabDecor : uint8_t
     EveryBadge, //!< Row 0 coloured, one row per badge kind after it (see MockMainController).
     LongTitle,  //!< Row 0's title is long enough to elide in any tab.
 };
+
+/// Whether one of a script's tabs is a served tab, drawn by a daemon-scoped extension.
+enum class ServedDecor : uint8_t
+{
+    None = 0, //!< Every tab runs a program.
+    FirstTab, //!< The first tab is the orchestrator's (ServedSampleMark): marked, and its pane's strip shown.
+};
+
+/// The mark the served tab of a ServedDecor::FirstTab script carries.
+inline constexpr auto ServedSampleExtension = std::string_view { "orchestrator" };
+inline constexpr auto ServedSampleTitle = std::string_view { "Agents" };
+inline constexpr auto ServedSampleDigest =
+    std::string_view { "3f9a0c1d2e4b5a6978e1c0ffee00112233445566778899aabbccddeeff001122" };
 
 /// Whether a script's panes wait for a password (the secure-input lock).
 enum class SecureDecor : uint8_t
@@ -569,6 +585,7 @@ struct SnapshotScriptRow
     config::SidebarRowSpacing rowSpacing = config::SidebarRowSpacing::Comfortable;
     /// The daemon extension's question the window asks.
     SnapshotDaemonConsent daemonConsent = SnapshotDaemonConsent::None;
+    ServedDecor served = ServedDecor::None; ///< Whether a tab is served.
 };
 
 /// The rows of the script table, in enumerator order.
@@ -2464,6 +2481,25 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::OpenDaemonConsent,
                         .connection = HostConnection::LocalDaemon,
                         .daemonConsent = SnapshotDaemonConsent::LongRoots },
+    SnapshotScriptRow { .script = SnapshotScript::ServedTab,
+                        .name = "served-tab",
+                        .tabCount = 2,
+                        .connection = HostConnection::LocalDaemon,
+                        .activeTab = 0,
+                        .served = ServedDecor::FirstTab },
+    SnapshotScriptRow { .script = SnapshotScript::ServedTabInactive,
+                        .name = "served-tab-inactive",
+                        .tabCount = 2,
+                        .connection = HostConnection::LocalDaemon,
+                        .activeTab = 1,
+                        .served = ServedDecor::FirstTab },
+    SnapshotScriptRow { .script = SnapshotScript::ServedTabMinimal,
+                        .name = "served-tab-minimal",
+                        .tabCount = 2,
+                        .connection = HostConnection::LocalDaemon,
+                        .activeTab = 0,
+                        .density = config::ChromeDensity::Minimal,
+                        .served = ServedDecor::FirstTab },
 };
 
 static_assert(std::ranges::all_of(SnapshotScripts,

@@ -1107,6 +1107,8 @@ QHash<int, QByteArray> WindowController::roleNames() const
         { static_cast<int>(Roles::BadgeProgressRole), "badgeProgress" },
         { static_cast<int>(Roles::SecureRole), "tabSecure" },
         { static_cast<int>(Roles::IconRole), "tabIcon" },
+        { static_cast<int>(Roles::ServedByRole), "servedBy" },
+        { static_cast<int>(Roles::ServedStripRole), "servedStrip" },
     };
 }
 
@@ -1159,6 +1161,10 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
         case Roles::SecureRole: return tab != nullptr ? static_cast<int>(tabSecureIndicator(*tab)) : 0;
         case Roles::IconRole:
             return session != nullptr ? tabIconVariant(tabIconFor(*session)) : QVariantMap {};
+        case Roles::ServedByRole:
+            return servedByText(servedChromeOf(tab != nullptr ? tabServedMark(*tab) : std::nullopt));
+        case Roles::ServedStripRole:
+            return servedStripText(servedChromeOf(tab != nullptr ? tabServedMark(*tab) : std::nullopt));
         default: return {};
     }
 }
@@ -1285,6 +1291,21 @@ SecureIndicator WindowController::tabSecureIndicator(vtworkspace::Tab const& tab
                 strongest = std::max(strongest, static_cast<SecureIndicator>(session->secureIndicator()));
         });
     return strongest;
+}
+
+bool WindowController::isServedLeaf(vtworkspace::Pane const& leaf) const
+{
+    auto const* terminal = leaf.isLeaf() ? _manager.sessionForId(leaf.session()) : nullptr;
+    return terminal != nullptr && terminal->servedMark().has_value();
+}
+
+std::optional<ServedMark> WindowController::tabServedMark(vtworkspace::Tab const& tab) const
+{
+    for (auto const session: tab.leafSessions())
+        if (auto const* terminal = _manager.sessionForId(session);
+            terminal != nullptr && terminal->servedMark())
+            return terminal->servedMark();
+    return std::nullopt;
 }
 
 std::string const& WindowController::cachedProcessName(session::TerminalSession const& session) const
@@ -4545,7 +4566,9 @@ bool WindowController::applyContentDrivenResize(session::DisplaySurface& request
         *leaf,
         vtworkspace::LayoutSize { .width = leafContentLogical.width, .height = leafContentLogical.height },
         _manager.app().splitChrome(osWindow->devicePixelRatio()),
-        *layoutRoot);
+        *layoutRoot,
+        // A served pane shows its header alone too (window::resolvePaneHeader), and the window makes room.
+        isServedLeaf(*leaf) ? vtworkspace::LeafHeader::Always : vtworkspace::LeafHeader::InSplit);
 
     display::displayLog()("Content-driven window resize: leaf {}x{} -> content {}x{} + {} chrome.",
                           leafContentLogical.width,
