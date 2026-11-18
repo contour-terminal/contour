@@ -546,7 +546,8 @@ if(VTHOST_TESTING)
         add_dependencies(vthost_test spawner_wasm)
     endif()
     # The daemon world end to end, with the agent orchestrator's module (extensions/orchestrator, added after
-    # src/; its target is resolved at generation) and its recorded fixtures, where the C++ guests are built.
+    # src/; its target is resolved at generation) and its recorded fixtures, where the C++ guests are built: here
+    # and in ServedSession_test.cpp, whose dashboard cases cross a live upgrade and a keeper recovery (POSIX).
     if(CONTOUR_EXTENSIONS AND CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST)
         target_sources(vthost_test PRIVATE DaemonWorldE2E_test.cpp testing/OrchestratorWorld.hpp)
         target_compile_definitions(vthost_test PRIVATE

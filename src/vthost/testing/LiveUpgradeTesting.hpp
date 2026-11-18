@@ -130,9 +130,11 @@ struct UpgradeBench
 {
     /// @param devices The device of each session the host spawns.
     /// @param settings The sessions' terminal settings.
-    explicit UpgradeBench(LiveHost::Devices devices, vtbackend::Settings settings = {}):
-        live { std::make_unique<LiveHost>(
-            std::move(devices), LiveHost::sequentialIds(), std::move(settings)) }
+    /// @param config How the host is set up.
+    explicit UpgradeBench(LiveHost::Devices devices,
+                          vtbackend::Settings settings = {},
+                          SessionHostConfig config = LiveHost::sequentialIds()):
+        live { std::make_unique<LiveHost>(std::move(devices), std::move(config), std::move(settings)) }
     {
         hooks.host = &live->host;
         std::ignore = files.writeFile("/home/u/Contour.AppImage", "ELF");

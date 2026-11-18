@@ -35,6 +35,7 @@
 #include <vtextension/testing/FakeDirectoryOpener.hpp>
 #include <vtextension/testing/FakeFileLocker.hpp>
 #include <vtextension/testing/FixtureProcessRunner.hpp>
+#include <vtextension/testing/GuestSlowdown.hpp>
 #include <vtextension/wasm/DefaultBackend.hpp>
 #include <vthost/ConnectionId.hpp>
 #include <vthost/DaemonConsentKey.hpp>
@@ -89,7 +90,7 @@ inline constexpr auto OrchestratorConfig =
 enum class ClientKind : uint8_t
 {
     Cli = 0, ///< Offers nothing to answer with: the CLI's native clients.
-    Window,  ///< Offers DaemonExtensionConsent and ExtensionPresence, and proves the daemon's key.
+    Window,  ///< Offers DaemonExtensionConsent, ExtensionPresence and AttachIntent; proves the daemon's key.
 };
 
 /// What a test's client was told.
@@ -117,13 +118,17 @@ struct ClientLog
         });
 }
 
-/// @return The handshake of a window: it offers DaemonExtensionConsent and ExtensionPresence, and proves the
-///         daemon's key.
-[[nodiscard]] inline client::NativeClient::HandshakeOptions windowHandshake()
+/// @param intent Which of the daemon's workspaces it asks to be shown.
+/// @return The handshake of a window: it offers DaemonExtensionConsent, ExtensionPresence and AttachIntent,
+/// and
+///         proves the daemon's key.
+[[nodiscard]] inline client::NativeClient::HandshakeOptions windowHandshake(proto::AttachIntent intent)
 {
     auto handshake = client::NativeClient::HandshakeOptions {};
-    handshake.capabilities = proto::CapabilitySet::of(
-        { proto::Capability::DaemonExtensionConsent, proto::Capability::ExtensionPresence });
+    handshake.capabilities = proto::CapabilitySet::of({ proto::Capability::DaemonExtensionConsent,
+                                                        proto::Capability::ExtensionPresence,
+                                                        proto::Capability::AttachIntent });
+    handshake.attachIntent = intent;
     handshake.consentProver = [](uint64_t instance, ConsentNonce const& nonce) {
         return std::optional { consentProofOf(
             orchestratorConsentKey(),
@@ -210,10 +215,13 @@ struct OrchestratorWorld
                                       });
     }
 
-    /// @return A new connection to @p host on @p loop, of a client of @p kind.
+    /// @return A new connection to @p host on @p loop, of a client of @p kind; a window asks for the
+    /// workspace
+    ///         @p intent names.
     [[nodiscard]] std::unique_ptr<Connection> connect(core::net::EventLoop& loop,
                                                       SessionHost& host,
-                                                      ClientKind kind)
+                                                      ClientKind kind,
+                                                      proto::AttachIntent intent = {})
     {
         auto pair = *core::net::testing::makeSocketPair(loop);
         auto connection = std::make_unique<Connection>();
@@ -243,7 +251,7 @@ struct OrchestratorWorld
         connection->client = std::make_unique<client::NativeClient>(
             loop,
             std::move(pair.second),
-            kind == ClientKind::Window ? windowHandshake() : client::NativeClient::HandshakeOptions {},
+            kind == ClientKind::Window ? windowHandshake(intent) : client::NativeClient::HandshakeOptions {},
             vtbackend::CommandBlockStoreLimits {},
             client::NativeClient::UpdateHandler {},
             client::NativeClient::ImageHandler {},
@@ -266,9 +274,11 @@ struct OrchestratorWorld
     }
 
     /// @return The daemon configuration's orchestrator: started with the daemon, its module and grants in the
-    ///         files.
+    ///         files, under the daemon world's limits (their deadlines stretched by
+    ///         vtextension::testing::GuestSlowdown).
     [[nodiscard]] static vtextension::DaemonExtensionRuntimeConfig runtimeConfig()
     {
+        auto const limits = vtextension::testing::guestTestLimits();
         return vtextension::DaemonExtensionRuntimeConfig {
             .declarations = { vtextension::DaemonExtensionDeclaration {
                 .name = std::string(OrchestratorName),
@@ -280,6 +290,7 @@ struct OrchestratorWorld
             .home = std::string(OrchestratorHome),
             .inheritedEnvironment = { "PATH=/usr/bin" },
             .bundledDirectories = {},
+            .limits = limits,
         };
     }
 
