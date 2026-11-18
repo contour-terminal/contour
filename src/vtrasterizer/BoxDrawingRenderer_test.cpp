@@ -1479,3 +1479,118 @@ TEST_CASE("BoxDrawingRenderer: a style change never aliases another tile of the 
     if (tileCount == 2)
         CHECK(after[0].bitmap != after[1].bitmap);
 }
+
+namespace
+{
+/// A side of a cell.
+enum class Edge : uint8_t
+{
+    Left,
+    Right,
+    Top,
+    Bottom,
+};
+
+/// The side of the neighbouring cell that touches @p edge.
+[[nodiscard]] constexpr Edge facing(Edge edge) noexcept
+{
+    switch (edge)
+    {
+        case Edge::Left: return Edge::Right;
+        case Edge::Right: return Edge::Left;
+        case Edge::Top: return Edge::Bottom;
+        case Edge::Bottom: return Edge::Top;
+    }
+    return edge;
+}
+
+/// The outermost pixels of a glyph along one side of its cell.
+/// @param buffer The glyph's alpha buffer, bottom-up.
+/// @param size The glyph's size.
+/// @param edge The side to read.
+/// @return The alpha of each pixel along @p edge, bottom to top or left to right.
+[[nodiscard]] std::vector<uint8_t> edgeAlphas(atlas::Buffer const& buffer, ImageSize size, Edge edge)
+{
+    auto const width = unbox<size_t>(size.width);
+    auto const height = unbox<size_t>(size.height);
+    auto const vertical = edge == Edge::Left || edge == Edge::Right;
+    auto const pixelAt = [&](size_t index) -> uint8_t {
+        switch (edge)
+        {
+            case Edge::Left: return buffer[index * width];
+            case Edge::Right: return buffer[(index * width) + width - 1];
+            // Atlas buffers run bottom-up: row 0 is the cell's bottom, the last row its top.
+            case Edge::Top: return buffer[((height - 1) * width) + index];
+            case Edge::Bottom: return buffer[index];
+        }
+        return 0;
+    };
+    return std::ranges::to<std::vector<uint8_t>>(
+        std::views::transform(std::views::iota(0zu, vertical ? height : width), pixelAt));
+}
+} // namespace
+
+TEST_CASE("BoxDrawingRenderer.arcsMeetTheirLines", "[boxdrawing]")
+{
+    // A rounded corner is drawn in one cell and the line it continues into in the next: on the edge the two
+    // cells share, the arc's end must lie exactly over the line's end, or the box shows a step or a notch.
+    struct Corner
+    {
+        char32_t codepoint;
+        Edge towardsHorizontal; ///< The edge it shares with the ─ it continues into.
+        Edge towardsVertical;   ///< The edge it shares with the │ it continues into.
+    };
+    // ╭ ╮ ╯ ╰, in that order.
+    static constexpr auto Corners = std::array {
+        Corner { .codepoint = 0x256D, .towardsHorizontal = Edge::Right, .towardsVertical = Edge::Bottom },
+        Corner { .codepoint = 0x256E, .towardsHorizontal = Edge::Left, .towardsVertical = Edge::Bottom },
+        Corner { .codepoint = 0x256F, .towardsHorizontal = Edge::Left, .towardsVertical = Edge::Top },
+        Corner { .codepoint = 0x2570, .towardsHorizontal = Edge::Right, .towardsVertical = Edge::Top },
+    };
+    static constexpr auto ArcStyles = std::array { ArcStyle::Elliptic, ArcStyle::Round };
+    // The cell's light line thickness, which grows with the DPR and doubles on DECDWL/DECDHL rows; both
+    // arc styles draw with it.
+    static constexpr auto Thicknesses = std::array { 1, 2, 3 };
+    // 1×, an odd size, 2× and 3× device pixel ratios.
+    static constexpr auto CellSizes = std::array {
+        ImageSize { Width(8), Height(16) },
+        ImageSize { Width(10), Height(21) },
+        ImageSize { Width(16), Height(32) },
+        ImageSize { Width(24), Height(48) },
+    };
+    auto constexpr Supersampling = size_t { 4 };     // As the renderer draws arcs.
+    auto constexpr Horizontal = char32_t { 0x2500 }; // ─
+    auto constexpr Vertical = char32_t { 0x2502 };   // │
+
+    for (auto const arcStyle: ArcStyles)
+        for (auto const size: CellSizes)
+            for (auto const thickness: Thicknesses)
+            {
+                auto const style = BoxDrawingStyle { .arcStyle = arcStyle };
+                auto const build = [&](char32_t codepoint) {
+                    return BoxDrawingRendererTest::buildBoxElements(
+                        style, codepoint, size, thickness, Supersampling);
+                };
+                auto const horizontal = build(Horizontal);
+                auto const vertical = build(Vertical);
+                REQUIRE(horizontal);
+                REQUIRE(vertical);
+
+                for (auto const& corner: Corners)
+                {
+                    CAPTURE(static_cast<int>(arcStyle),
+                            unbox<int>(size.width),
+                            unbox<int>(size.height),
+                            thickness,
+                            static_cast<uint32_t>(corner.codepoint));
+                    auto const arc = build(corner.codepoint);
+                    REQUIRE(arc);
+
+                    // Exact alphas, not a coverage threshold: a faint extra row is a half-step too.
+                    CHECK(edgeAlphas(*arc, size, corner.towardsHorizontal)
+                          == edgeAlphas(*horizontal, size, facing(corner.towardsHorizontal)));
+                    CHECK(edgeAlphas(*arc, size, corner.towardsVertical)
+                          == edgeAlphas(*vertical, size, facing(corner.towardsVertical)));
+                }
+            }
+}
