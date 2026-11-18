@@ -380,6 +380,12 @@ class Engine
     [[nodiscard]] std::optional<CheckoutUnknown> unknownCheckout(Run const& run) const noexcept;
     /// @return Whether Claude Code's status hooks are installed.
     [[nodiscard]] HooksState hooks() const noexcept { return _hooks; }
+    /// @return The summary last published, as its PublishSummary carried it; empty before the first.
+    [[nodiscard]] Summary const& published() const noexcept { return _published; }
+    /// @return The configured repositories' names, in the configured order; empty when unconfigured.
+    [[nodiscard]] std::span<std::string const> repositories() const noexcept { return _repositoryNames; }
+    /// @return The configuration the engine runs with; nullptr when it was refused (a problem line says why).
+    [[nodiscard]] Config const* config() const noexcept { return _config ? &*_config : nullptr; }
 
   private:
     /// Who a queued command is for: a run's go ahead of the polls.
@@ -513,6 +519,7 @@ class Engine
     [[nodiscard]] uint32_t failingChangeRequests() const noexcept;
 
     std::optional<Config> _config;
+    std::vector<std::string> _repositoryNames; ///< The configured repositories' names, in order.
     HostInfo _host;
     std::vector<Run> _runs;       ///< The runs inside the configuration first, then the ones outside it.
     std::size_t _insideCount = 0; ///< The runs the engine works on: those of this configuration, and the ones

@@ -249,6 +249,8 @@ class Harness
     [[nodiscard]] uint64_t now() const { return _now; }
     /// @return The last wake asked for.
     [[nodiscard]] uint64_t wakeAt() const { return _wakeAt; }
+    /// @return The last PublishSummary carried out; std::nullopt before the first.
+    [[nodiscard]] std::optional<PublishSummary> const& lastSummary() const { return _lastSummary; }
 
     std::vector<Effect> feed(Input const& input)
     {
@@ -473,6 +475,7 @@ class Harness
                         _stored[set.key.substr(4)] = set.value;
                     },
                     [&](StoreRemove const& remove) { _stored.erase(remove.key.substr(4)); },
+                    [&](PublishSummary const& summary) { _lastSummary = summary; },
                     [&](WakeAt const& wake) {
                         _wakeAt = wake.monoMs;
                         // A wake at or before now would come back at once, and again.
@@ -579,6 +582,7 @@ class Harness
     std::map<std::string, uint64_t, std::less<>> _deadlines;
     uint64_t _now = 0;
     uint64_t _wakeAt = 0;
+    std::optional<PublishSummary> _lastSummary;
 };
 
 [[nodiscard]] Harness booted(Settings const& settings = {})
@@ -687,6 +691,34 @@ TEST_CASE("start checks the login and the hooks before any list", "[orchestrator
     auto const other = Harness { std::move(missingRoot) };
     CHECK(commandsIn(other.last()) == first);
     CHECK(other.engine().problems().empty());
+}
+
+TEST_CASE("published() is the last summary", "[orchestrator][engine]")
+{
+    auto const harness = booted();
+    REQUIRE(harness.lastSummary());
+    CHECK(harness.engine().published().shortText == harness.lastSummary()->shortText);
+    CHECK(harness.engine().published().detail == harness.lastSummary()->detail);
+    CHECK(harness.engine().published().shortText.contains("✗2"));
+}
+
+TEST_CASE("repositories() lists the configured names in order", "[orchestrator][engine]")
+{
+    auto const settings = Settings {
+        .repos = R"([ { "name": "zeta", "path": "~/projects/contour", "forge": "github", "issues": [] },
+                      { "name": "alpha", "path": "~/projects/other", "forge": "github", "issues": [] } ])",
+        .repoPaths = { ContourPath, OtherPath },
+    };
+    auto const harness = Harness { contextFor(settings) };
+    CHECK(std::ranges::equal(harness.engine().repositories(), std::array { "zeta"sv, "alpha"sv }));
+    REQUIRE(harness.engine().config() != nullptr);
+    CHECK(harness.engine().config()->maxAgents() == DefaultMaxAgents);
+
+    auto unconfigured = contextFor({});
+    unconfigured.configJson = "{}";
+    auto const refused = Harness { std::move(unconfigured) };
+    CHECK(refused.engine().repositories().empty());
+    CHECK(refused.engine().config() == nullptr);
 }
 
 // }}}

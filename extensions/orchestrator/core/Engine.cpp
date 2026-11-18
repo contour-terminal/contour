@@ -107,6 +107,9 @@ std::string runKey(std::string_view runId)
 
 Engine::Engine(std::optional<Config> config, HostInfo host, uint64_t monoMs, uint64_t wallMs):
     _config { std::move(config) },
+    _repositoryNames { _config ? std::ranges::to<std::vector<std::string>>(
+                                     _config->repos() | std::views::transform(&Repo::name))
+                               : std::vector<std::string> {} },
     _host { std::move(host) },
     _nextPollMs { monoMs },
     _monoMs { monoMs },
