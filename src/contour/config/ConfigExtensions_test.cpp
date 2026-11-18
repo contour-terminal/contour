@@ -2789,3 +2789,50 @@ profiles:
     // rejected. The document loads regardless.
     CHECK(config.profile("main") != nullptr);
 }
+
+TEST_CASE("Config: an ExtensionAction binding names its extension and action, and round-trips",
+          "[config][presence]")
+{
+    using namespace contour::actions;
+
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control, Shift], key: F8, action: ExtensionAction, extension: orchestrator, id: open }
+    - { mods: [Control, Shift], key: F9, action: ExtensionAction, extension: orchestrator }
+    - { mods: [Control, Shift], key: F10, action: ExtensionAction, id: open }
+)"sv);
+
+    // A binding missing either name is dropped, as every other parameterized action's is.
+    auto const& mappings = config.inputMappings.value().keyMappings;
+    auto const invocations = std::ranges::count_if(
+        mappings, [](auto const& m) { return std::holds_alternative<ExtensionAction>(m.binding.at(0)); });
+    CHECK(invocations == 1);
+    auto const bound = std::ranges::find_if(
+        mappings, [](auto const& m) { return std::holds_alternative<ExtensionAction>(m.binding.at(0)); });
+    REQUIRE(bound != mappings.end());
+    auto const& action = std::get<ExtensionAction>(bound->binding.at(0));
+    CHECK(action == ExtensionAction { .extension = "orchestrator", .id = "open" });
+
+    // What the writer spells reads back the same, a comma and a '#' in it too.
+    auto const written = ExtensionAction { .extension = "orchestrator", .id = "open, #now" };
+    QTemporaryDir again;
+    auto const reread = loadFromYaml(again,
+                                     std::format(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - {{ mods: [Control, Shift], key: F8, action: {} }}
+)",
+                                                 Action { written }));
+    auto const& rereadMappings = reread.inputMappings.value().keyMappings;
+    REQUIRE(rereadMappings.size() == 1);
+    REQUIRE(std::holds_alternative<ExtensionAction>(rereadMappings.at(0).binding.at(0)));
+    CHECK(std::get<ExtensionAction>(rereadMappings.at(0).binding.at(0)) == written);
+}

@@ -29,6 +29,13 @@ namespace contour::session
 /// Why UpgradeDaemon does nothing in a window that has no daemon behind it.
 inline constexpr std::string_view NoDaemonToUpgrade = "this window has no daemon to upgrade";
 
+/// Whether a binding sent a daemon extension's action on to its daemon.
+enum class ExtensionInvocation : uint8_t
+{
+    NoDaemon = 0, ///< Nothing was sent: no daemon is behind the binding.
+    Sent,         ///< Sent; the daemon decides what it does (an older one ignores it).
+};
+
 /// What a window opened beside another on a daemon shows (WindowBinding::openSiblingWindow).
 enum class SiblingShows : uint8_t
 {
@@ -95,6 +102,16 @@ class WindowBinding
     [[nodiscard]] virtual std::expected<void, std::string> upgradeDaemonOnCommand()
     {
         return std::unexpected(std::string { NoDaemonToUpgrade });
+    }
+
+    /// Invokes a daemon extension's palette row on the daemon behind the binding. GUI thread.
+    /// @param extension What the daemon's configuration calls the extension.
+    /// @param id The declared action's id; empty for the row that asks for a grant or restarts.
+    /// @return Sent, or NoDaemon for a binding with no daemon behind it.
+    [[nodiscard]] virtual ExtensionInvocation invokeExtensionAction(std::string const& /*extension*/,
+                                                                    std::string const& /*id*/)
+    {
+        return ExtensionInvocation::NoDaemon;
     }
 
     /// Tells the binding that @p window, which it served, was closed: what it showed is no longer shown here

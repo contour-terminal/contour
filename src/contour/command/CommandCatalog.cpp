@@ -173,6 +173,7 @@ namespace
         ActionCategory { .name = "ShowSwitcher", .category = CommandCategory::Daemons },
         ActionCategory { .name = "NewDaemon", .category = CommandCategory::Daemons },
         ActionCategory { .name = "UpgradeDaemon", .category = CommandCategory::Daemons },
+        ActionCategory { .name = "ExtensionAction", .category = CommandCategory::Daemons },
     };
 
     // A missing row would make commandCategory() read past the end; a misplaced one is the test's to catch.

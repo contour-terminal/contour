@@ -1691,6 +1691,7 @@ constexpr StringLiteral InputMappingsConfig {
     "{comment} - ShowSwitcher      Opens the daemon and workspace switcher.\n"
     "{comment} - SwitchToDaemon    Shows a daemon in this window. Parameter: name or host.\n"
     "{comment} - SwitchToWorkspace Shows a workspace of this daemon here. Parameter: index (1-based).\n"
+    "{comment} - ExtensionAction   Invokes a daemon extension's action. Parameters: extension, id.\n"
     "{comment} - ToggleSidebar     Shows or hides the workspace sidebar.\n"
     "{comment} - FocusSidebar      Moves keyboard focus into the workspace sidebar.\n"
     "{comment} - FilterWorkspaces  Opens the workspace sidebar's filter.\n"

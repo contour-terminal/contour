@@ -5613,6 +5613,17 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
             return std::nullopt;
         }
 
+        if (holds_alternative<actions::ExtensionAction>(action))
+        {
+            // Neither the extension nor its action has a default.
+            auto extension = node["extension"];
+            auto id = node["id"];
+            if (!extension || !extension.IsScalar() || !id || !id.IsScalar())
+                return std::nullopt;
+            return actions::ExtensionAction { .extension = extension.as<std::string>(),
+                                              .id = id.as<std::string>() };
+        }
+
         if (holds_alternative<actions::MoveToTab>(action))
         {
             // Both places count from 1, and neither has a default.

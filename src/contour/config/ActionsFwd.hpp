@@ -125,6 +125,7 @@ struct OpenDaemon;
 struct ShowSwitcher;
 struct NewDaemon;
 struct UpgradeDaemon;
+struct ExtensionAction;
 struct OpenContextMenu;
 struct SelectAll;
 struct SoftReset;

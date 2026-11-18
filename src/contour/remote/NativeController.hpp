@@ -322,6 +322,12 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @return The events, as the daemon sent them.
     [[nodiscard]] std::vector<vthost::client::NativeClient::DaemonConsentEvent> takeDaemonConsentEvents();
 
+    /// Invokes a daemon extension's palette row (InvokeExtensionAction): sent only to a daemon sharing
+    /// Capability::ExtensionPresence. A no-op once disconnected.
+    /// @param extension WireExtensionPresence::extension.
+    /// @param action WireActionRow::id; empty for the row that asks for a grant or restarts.
+    void invokeExtensionAction(std::string extension, std::string action);
+
     /// Answers a daemon-scoped extension's question takeDaemonConsentEvents() handed out. A no-op once
     /// detached.
     /// @param name ExtensionPermissionRequest::name.

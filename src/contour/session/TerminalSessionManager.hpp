@@ -603,6 +603,15 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// a refusal is shown to that window as a notice and logged, as is a window with no daemon.
     /// @param acting The session that triggered the action.
     void upgradeDaemon(TerminalSession const& acting);
+
+    /// Invokes a daemon extension's palette row on the daemon of the window hosting @p acting
+    /// (WindowBinding::invokeExtensionAction); a window with no daemon logs it and does nothing.
+    /// @param acting The session that triggered the action.
+    /// @param extension What the daemon's configuration calls the extension.
+    /// @param id The declared action's id; empty for the row that asks for a grant or restarts.
+    void invokeExtensionAction(TerminalSession const& acting,
+                               std::string const& extension,
+                               std::string const& id);
     /// @}
 
     /// Re-reads the master configuration from disk once (picking up any GUI side-file changes) into

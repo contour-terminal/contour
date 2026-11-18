@@ -372,6 +372,17 @@ command's environment is judged as the command gets it, `command-env-for` laid o
 A conformance corpus of valid and invalid version-2 manifests, which Contour's parser is tested
 against, lives in [`extensions/orchestrator/contract/manifest-v2`][corpus].
 
+Each `action` line is a row of the command palette of every window attached to the daemon. What choosing
+it does follows where the extension stands: a running one is handed the action (`actions-take`), a stopped
+one is started first, one waiting for its grant asks the window for it again (the palette shows that row as
+"*title*: grant access…"), and a disabled one is restarted ("*title*: restart extension"). A key binding
+invokes the same row, naming the extension as the daemon's configuration does and the action's id:
+
+```yaml
+input_mapping:
+    - { mods: [Control, Shift], key: A, action: ExtensionAction, extension: orchestrator, id: open }
+```
+
 ### The daemon world
 
 An extension with `placement daemon` implements `terminal-extensions:daemon`, at

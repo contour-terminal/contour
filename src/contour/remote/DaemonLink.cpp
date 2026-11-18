@@ -569,6 +569,15 @@ void DaemonLink::showDaemonDrift()
                 offer);
 }
 
+session::ExtensionInvocation DaemonLink::invokeExtensionAction(std::string const& extension,
+                                                               std::string const& id)
+{
+    if (!_controller)
+        return session::ExtensionInvocation::NoDaemon;
+    _controller->invokeExtensionAction(extension, id);
+    return session::ExtensionInvocation::Sent;
+}
+
 std::expected<void, std::string> DaemonLink::upgradeDaemonOnCommand()
 {
     requireGuiThread();

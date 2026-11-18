@@ -343,6 +343,8 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     }
     /// Upgrades the daemon in place when window::upgradeVerdictFor() allows it for this link's daemon.
     [[nodiscard]] std::expected<void, std::string> upgradeDaemonOnCommand() override;
+    [[nodiscard]] session::ExtensionInvocation invokeExtensionAction(std::string const& extension,
+                                                                     std::string const& id) override;
 
     /// Looks at the connect the constructor began, with what remains of @p budget, and returns at once, so
     /// the event loop serves whatever the connect needs the GUI thread for (ssh's prompts). On failure the

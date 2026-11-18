@@ -2315,6 +2315,18 @@ void TerminalSessionManager::upgradeDaemon(TerminalSession const& acting)
     postNotice(window::upgradeFailedNotice(started.error()), &acting);
 }
 
+void TerminalSessionManager::invokeExtensionAction(TerminalSession const& acting,
+                                                   std::string const& extension,
+                                                   std::string const& id)
+{
+    auto const* const window = hostOf(&acting).window;
+    auto* const binding = window != nullptr ? mutableBindingOf(window->id()) : nullptr;
+    auto const invoked =
+        binding != nullptr ? binding->invokeExtensionAction(extension, id) : ExtensionInvocation::NoDaemon;
+    if (invoked == ExtensionInvocation::NoDaemon)
+        managerLog()("ExtensionAction {} {}: this window has no daemon behind it.", extension, id);
+}
+
 void TerminalSessionManager::openSwitcherOver(TerminalSession const& acting,
                                               window::SwitcherPrompt prompt,
                                               std::string_view what,

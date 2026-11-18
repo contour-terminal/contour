@@ -186,6 +186,7 @@ struct OpenDaemon{ DaemonRef daemon; };     // show the named daemon in a new wi
 struct ShowSwitcher{};                      // open the daemon & workspace switcher popup
 struct NewDaemon{};                         // start a new local daemon of a name asked for, and show it here
 struct UpgradeDaemon{};                     // upgrade this window's local daemon in place, keeping every program
+struct ExtensionAction{ std::string extension; std::string id; bool operator==(ExtensionAction const&) const = default; }; // invoke a daemon extension's declared action (its palette row)
 struct OpenContextMenu{};        // open the terminal pane's context menu (bound to the right button)
 struct SelectAll{};              // select the whole scrollback and screen
 struct SoftReset{};              // DECSTR: reset modes/rendition/cursor, keeping content and history
@@ -398,7 +399,8 @@ using ActionVariant = std::variant<CancelSelection,
                                    OpenDaemon,
                                    ShowSwitcher,
                                    NewDaemon,
-                                   UpgradeDaemon>;
+                                   UpgradeDaemon,
+                                   ExtensionAction>;
 
 /// What a key, a character or a mouse button is bound to; the user's actions, one command's worth.
 ///
@@ -589,7 +591,8 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     OpenDaemon,
                                                     ShowSwitcher,
                                                     NewDaemon,
-                                                    UpgradeDaemon>;
+                                                    UpgradeDaemon,
+                                                    ExtensionAction>;
 
 /// The actions that need a daemon behind the window: a window whose sessions run in-process hides them from
 /// the palette and menus; bound there, they do nothing (UpgradeDaemon says why in a notice).
@@ -603,7 +606,8 @@ concept DaemonActionConcept = core::oneOf<T,
                                           OpenDaemon,
                                           ShowSwitcher,
                                           NewDaemon,
-                                          UpgradeDaemon>;
+                                          UpgradeDaemon,
+                                          ExtensionAction>;
 
 /// @returns true if @p action needs a daemon behind the window (DaemonActionConcept).
 [[nodiscard]] bool needsDaemon(Action const& action) noexcept;
@@ -639,6 +643,8 @@ concept DaemonActionConcept = core::oneOf<T,
 /// reach the palette through the saved-layout source. AttachToHost likewise, through the saved-host source.
 /// SwitchToWorkspace, SwitchToDaemon and OpenDaemon likewise name nothing bare; their rows come from the
 /// daemon source. GoToPane names no pane bare: it is a row of the sidebar's pane menu, which knows which.
+/// ExtensionAction names no extension bare: its rows come from the extension source, as the daemon declares
+/// them.
 template <typename T>
 concept ParameterizedActionConcept = core::oneOf<T,
                                                  ChangeProfile,
@@ -658,6 +664,7 @@ concept ParameterizedActionConcept = core::oneOf<T,
                                                  GoToPane,
                                                  SwitchToDaemon,
                                                  OpenDaemon,
+                                                 ExtensionAction,
                                                  ToggleFoldAt>;
 
 /// @returns true if @p action requires an argument that a bare catalog entry cannot supply (a
@@ -1040,6 +1047,11 @@ namespace documentation
     constexpr inline std::string_view OpenDaemon {
         "Shows the daemon named by `name` (a local daemon) or `host` (a saved host, see `hosts:`) in a new "
         "window. A binding that names neither, or both, is dropped."
+    };
+    constexpr inline std::string_view ExtensionAction {
+        "Invokes the action `id` that the daemon extension `extension` declares, as its row in the command "
+        "palette does: a stopped extension is started first, one waiting for its grant asks for it again, a "
+        "disabled one is restarted. Does nothing for a window that runs its sessions in-process."
     };
     constexpr inline std::string_view ShowSwitcher { "Opens the popup to switch this window to another "
                                                      "daemon or workspace, or to open one in a new window." };

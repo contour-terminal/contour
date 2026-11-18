@@ -1837,6 +1837,14 @@ std::vector<vthost::client::NativeClient::DaemonConsentEvent> NativeController::
     return std::exchange(_daemonConsentEvents, {});
 }
 
+void NativeController::invokeExtensionAction(std::string extension, std::string action)
+{
+    _reactor.post([this, extension = std::move(extension), action = std::move(action)]() mutable {
+        if (_client != nullptr)
+            _client->invokeExtensionAction(std::move(extension), std::move(action));
+    });
+}
+
 void NativeController::answerDaemonExtension(std::string name,
                                              std::string grantDigest,
                                              vthost::GrantState answer)

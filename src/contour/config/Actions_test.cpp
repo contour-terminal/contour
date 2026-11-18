@@ -602,3 +602,18 @@ TEST_CASE("actions: assignment replaces the held alternative, string-carrying on
     target = actions::Action { actions::ResizePane { actions::Direction::Left } }; // same-type-slot reuse
     REQUIRE(std::holds_alternative<actions::ResizePane>(target));
 }
+
+TEST_CASE("Actions: ExtensionAction is parameterized and formats both of its names",
+          "[actions][config][presence]")
+{
+    using namespace contour::actions;
+    auto const action = fromString("ExtensionAction");
+    REQUIRE(action.has_value());
+    CHECK(std::holds_alternative<ExtensionAction>(*action));
+    // Bare it names no extension: the palette offers it only per declared action.
+    CHECK(isParameterized(*action));
+    CHECK(needsDaemon(*action));
+    CHECK(isNonRepeatable(Action { ExtensionAction { .extension = "orchestrator", .id = "open" } }));
+    CHECK(std::format("{}", Action { ExtensionAction { .extension = "orchestrator", .id = "open" } })
+          == "ExtensionAction, extension: 'orchestrator', id: 'open'");
+}
