@@ -40,3 +40,8 @@ whole key (`config:repos/*/path`), never part of one.
 
 The `inbox` line kind is reserved: both sides refuse it (`invalid/inbox-reserved.manifest`) until a
 version of the manifest supports it.
+
+A `title = <text>` line (version 2) names the extension where Contour shows it: its served tab, its
+palette rows and its frames; without one, the `name` stands in. A title is given once, holds at most 40
+characters and no control character (`invalid/title-too-long.manifest`,
+`invalid/title-control-character.manifest`, `invalid/title-repeated.manifest`).

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
@@ -284,6 +285,8 @@ enum class Fault : uint8_t
     SurroundingBlank,         ///< A line that begins or ends with a blank, which is never trimmed.
     ControlCharacter,         ///< A control character other than a tab, or a CR not right before the LF.
     UnsupportedLine,          ///< An `inbox` line: the kind is reserved, and no version supports it yet.
+    BadTitle, ///< A `title` or `action` title longer than MaxTitleLength characters, or one that disguises
+              ///< text.
 };
 
 enum class Valued : uint8_t
@@ -349,7 +352,65 @@ constexpr auto LineKinds = std::array {
         .keyword = "serve", .headWords = 2, .keyWords = 2, .valued = Valued::No, .since = 2, .rootAt = 0 },
     LineKind {
         .keyword = "action", .headWords = 2, .keyWords = 2, .valued = Valued::Yes, .since = 2, .rootAt = 0 },
+    LineKind {
+        .keyword = "title", .headWords = 1, .keyWords = 1, .valued = Valued::Yes, .since = 2, .rootAt = 0 },
 };
+
+/// The most characters (code points) a `title` line's value, or an `action` line's title, may hold.
+constexpr auto MaxTitleLength = std::size_t { 40 };
+
+/// A range of code points, both ends included.
+struct CodePointRange
+{
+    char32_t first;
+    char32_t last;
+};
+
+/// What a title may not hold: what renders as nothing or as something else, and what reorders or breaks the
+/// text around it. The host refuses the same (vtextension's DisguisingCodePoints).
+constexpr auto DisguisingCodePoints = std::array {
+    CodePointRange { .first = 0x0000, .last = 0x001F },   // C0 controls
+    CodePointRange { .first = 0x007F, .last = 0x009F },   // DEL, C1 controls
+    CodePointRange { .first = 0x00AD, .last = 0x00AD },   // soft hyphen
+    CodePointRange { .first = 0x061C, .last = 0x061C },   // Arabic letter mark
+    CodePointRange { .first = 0x180E, .last = 0x180E },   // Mongolian vowel separator
+    CodePointRange { .first = 0x200B, .last = 0x200F },   // zero-width space/joiners, LRM, RLM
+    CodePointRange { .first = 0x2028, .last = 0x202E },   // line/paragraph separators, embeddings
+    CodePointRange { .first = 0x2060, .last = 0x2064 },   // word joiner, invisible operators
+    CodePointRange { .first = 0x2066, .last = 0x206F },   // isolates, deprecated format characters
+    CodePointRange { .first = 0xFEFF, .last = 0xFEFF },   // zero-width no-break space
+    CodePointRange { .first = 0xFFF9, .last = 0xFFFB },   // interlinear annotation
+    CodePointRange { .first = 0xE0000, .last = 0xE007F }, // tag characters
+};
+
+/// The code points of @p text, which is UTF-8 (a test of this file's own corpus, so never malformed).
+[[nodiscard]] std::vector<char32_t> codePointsOf(std::string_view text)
+{
+    auto codePoints = std::vector<char32_t> {};
+    while (!text.empty())
+    {
+        auto const lead = static_cast<unsigned char>(text.front());
+        // A lead byte's leading ones count its sequence's bytes; an ASCII byte has none and is one.
+        auto const length = std::max(1U, static_cast<unsigned>(std::countl_one(lead)));
+        auto codePoint = static_cast<char32_t>(length == 1 ? lead : lead & (0x7FU >> length));
+        for (auto const byte: text.substr(1, length - 1))
+            codePoint = (codePoint << 6U) | (static_cast<unsigned char>(byte) & 0x3FU);
+        codePoints.push_back(codePoint);
+        text.remove_prefix(std::min<std::size_t>(length, text.size()));
+    }
+    return codePoints;
+}
+
+/// Whether @p title is shown as written: at most MaxTitleLength code points, none of them disguising.
+[[nodiscard]] bool isShownAsWritten(std::string_view title)
+{
+    auto const codePoints = codePointsOf(title);
+    return codePoints.size() <= MaxTitleLength && std::ranges::none_of(codePoints, [](char32_t codePoint) {
+               return std::ranges::any_of(DisguisingCodePoints, [codePoint](CodePointRange const& range) {
+                   return codePoint >= range.first && codePoint <= range.last;
+               });
+           });
+}
 
 constexpr auto PlainKinds = std::array { "number"sv, "uuid"sv, "name"sv, "ref"sv, "text"sv };
 
@@ -462,6 +523,8 @@ struct ManifestLine
     if ((keyword == "command-env-for" && !state.isDeclared("command", head[1]))
         || (keyword == "pane-env" && !state.isDeclared("pane", head[1])))
         return Fault::UndeclaredTarget;
+    if ((keyword == "title" || keyword == "action") && !isShownAsWritten(line.value))
+        return Fault::BadTitle;
     if (keyword == "command" || keyword == "pane")
         return checkArgv(line.value, state.declared);
     return Fault::None;
@@ -606,6 +669,39 @@ constexpr auto CorpusRows = std::array {
     CorpusRow { .file = "invalid/unknown-line.manifest", .expected = Fault::UnknownLine },
     CorpusRow { .file = "invalid/version-not-first.manifest", .expected = Fault::MissingHeader },
     CorpusRow { .file = "invalid/version-1-with-v2-line.manifest", .expected = Fault::VersionMismatch },
+};
+
+/// One manifest written inline and the verdict it pins: the boundaries and placements the corpus files leave
+/// out.
+struct InlineRow
+{
+    std::string_view text;
+    Fault expected;
+};
+
+constexpr auto InlineRows = std::array {
+    InlineRow { .text = "name = agents\nversion = 2\ntitle = Agents\n", .expected = Fault::None },
+    InlineRow { .text = "name = agents\ntitle = Agents\nversion = 2\n", .expected = Fault::MissingHeader },
+    InlineRow { .text =
+                    "name = agents\nversion = 2\ntitle = Agents \xC2\xB7 exactly forty characters, it is\n",
+                .expected = Fault::None },
+    InlineRow { .text =
+                    "name = agents\nversion = 2\ntitle = Agents \xC2\xB7 forty-one characters, every one!\n",
+                .expected = Fault::BadTitle },
+    InlineRow { .text = "name = agents\nversion = 2\ntitle = Agents\x07\n",
+                .expected = Fault::ControlCharacter },
+    InlineRow { .text = "name = agents\nversion = 2\ntitle = Agents\ntitle = Others\n",
+                .expected = Fault::Duplicate },
+    InlineRow { .text = "name = agents\nversion = 1\ntitle = Agents\n", .expected = Fault::VersionMismatch },
+    InlineRow { .text = "name = agents\nversion = 2\ntitle = Age\xE2\x80\x8Bnts\n",
+                .expected = Fault::BadTitle },
+    InlineRow { .text = "name = agents\nversion = 2\ntitle = Agents\xC2\x85\n", .expected = Fault::BadTitle },
+    InlineRow { .text = "name = agents\nversion = 2\naction open = Open \xE2\x81\xA6"
+                        "Agents\n",
+                .expected = Fault::BadTitle },
+    InlineRow {
+        .text = "name = agents\nversion = 2\naction open = Open Agents \xC2\xB7 exactly forty characters!!\n",
+        .expected = Fault::None },
 };
 
 // }}}
@@ -910,6 +1006,15 @@ TEST_CASE("the manifest-v2 corpus", "[orchestrator][commands][manifest][corpus]"
     {
         CHECK(manifestText()
               == readFixture(FixtureRoot::Contract, "manifest-v2/valid/orchestrator.manifest"));
+    }
+}
+
+TEST_CASE("the line-grammar checker reads a title line", "[orchestrator][commands][manifest]")
+{
+    for (auto const& row: InlineRows)
+    {
+        CAPTURE(row.text, row.expected);
+        CHECK(checkManifest(row.text) == row.expected);
     }
 }
 
