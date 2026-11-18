@@ -531,16 +531,18 @@ class MemoryStore final: public IExtensionStore
     std::map<std::string, std::string, std::less<>> _values;
 };
 
-/// The one tab the measured guest serves: its size and its input set by the test, its output counted.
+/// The tabs the measured guest serves: the first one's size and input set by the test, every tab's output
+/// counted together.
 class MeasuredTab final: public IServedTabService
 {
   public:
     TabInfo info {
         .tab = "tab-1", .scheme = "orchestrator", .cols = 120, .rows = 40
-    }; ///< What tabs() lists.
-    ByteList input;          ///< What the next tabRead() answers.
-    std::size_t written = 0; ///< The bytes written to the tab.
-    std::string firstFrame;  ///< The first write, when it came.
+    }; ///< The first tab tabs() lists.
+    std::vector<TabInfo> alsoServed; ///< The tabs tabs() lists after it: other workspaces' dashboards.
+    ByteList input;                  ///< What the next tabRead() answers.
+    std::size_t written = 0;         ///< The bytes written to the tab.
+    std::string firstFrame;          ///< The first write, when it came.
 
     [[nodiscard]] std::expected<std::string, HostError> tabOpen(std::string_view /*scheme*/,
                                                                 Origin /*origin*/) override
@@ -558,7 +560,9 @@ class MeasuredTab final: public IServedTabService
 
     [[nodiscard]] std::expected<std::vector<TabInfo>, HostError> tabs() override
     {
-        return std::vector { info };
+        auto listed = std::vector { info };
+        listed.insert(listed.end(), alsoServed.begin(), alsoServed.end());
+        return listed;
     }
 
     [[nodiscard]] std::expected<ByteList, HostError> tabRead(std::string_view /*tab*/) override
@@ -868,6 +872,30 @@ TEST_CASE("DaemonGuest: [.measure] the callback that receives the largest reply"
     REQUIRE(withDisk.storeWrites >= seed.runs.size() * MeasuredRounds);
     // (a) runs under the deadline; (b), whose durable writes the deadline pauses across, is recorded only.
     REQUIRE(withoutDisk.spread.max < deadline);
+}
+
+TEST_CASE("DaemonGuest: [.measure] the largest callback with two dashboards open",
+          "[.measure][guest-measure]")
+{
+    // Two workspaces, each with its own dashboard (D12), both at the largest size measured.
+    auto const seed = measuredSeed();
+    auto memory = MemoryStore {};
+    auto tabs = MeasuredTab {};
+    tabs.alsoServed.push_back(TabInfo { .tab = "tab-2", .scheme = "orchestrator", .cols = 120, .rows = 40 });
+    auto const callback = measureLargestCallback(memory, seed, &tabs);
+
+    auto const deadline = daemonWorldLimits().callDeadline;
+    std::println(
+        "update(procs) delivering prs-100.json and {} runs' calls, two 120x40 dashboards open, {} calls:",
+        seed.runs.size(),
+        MeasuredRounds);
+    std::println("  min {} median {} max {}; headroom {} of {}",
+                 callback.spread.min,
+                 callback.spread.median,
+                 callback.spread.max,
+                 std::chrono::duration_cast<std::chrono::microseconds>(deadline) - callback.spread.max,
+                 deadline);
+    REQUIRE(callback.spread.max < deadline);
 }
 
 TEST_CASE("DaemonGuest: the guest draws its tab and moves on a key", "[daemon][guest][orchestrator]")
