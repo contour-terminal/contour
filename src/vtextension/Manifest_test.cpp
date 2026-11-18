@@ -612,6 +612,7 @@ TEST_CASE("Manifest v2: the orchestrator's manifest", "[vtextension][manifest][c
     REQUIRE(parsed.has_value());
     auto const& manifest = *parsed;
     CHECK(manifest.name == "orchestrator");
+    CHECK(manifest.title == "Agents");
     CHECK(manifest.version == 2);
     CHECK(manifest.placement == vtextension::ManifestPlacement::Daemon);
     CHECK(manifest.digest.empty());
