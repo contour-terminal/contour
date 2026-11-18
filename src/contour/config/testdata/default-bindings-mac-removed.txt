@@ -1,3 +1,13 @@
+[defaults classic] key modes=[Any] mods=[Alt|Control] input=LeftArrow clicks=- -> SwapPaneLeft declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Alt|Control] input=RightArrow clicks=- -> SwapPaneRight declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Alt|Control] input=UpArrow clicks=- -> SwapPaneUp declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Alt|Control] input=DownArrow clicks=- -> SwapPaneDown declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift|Alt|Control] input=LeftArrow clicks=- -> ResizePane, direction: Left, percent: 5 declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift|Alt|Control] input=RightArrow clicks=- -> ResizePane, direction: Right, percent: 5 declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift|Alt|Control] input=UpArrow clicks=- -> ResizePane, direction: Up, percent: 5 declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift|Alt|Control] input=DownArrow clicks=- -> ResizePane, direction: Down, percent: 5 declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Super] input=PageUp clicks=- -> MoveTabToLeft declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Super] input=PageDown clicks=- -> MoveTabToRight declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Alt|Control] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Shift|Control] input=U+002D clicks=- -> DecreaseFontSize declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Shift|Control] input=U+005F clicks=- -> DecreaseFontSize declined=pass gated=no
@@ -29,6 +39,16 @@
 [defaults classic] char modes=[Any] mods=[Shift|Control] input=U+0046 clicks=- -> SearchReverse declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Shift|Control] input=U+0048 clicks=- -> NoSearchHighlight declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Shift|Control] input=U+0055 clicks=- -> HintMode(url, 1) declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Alt|Control] input=LeftArrow clicks=- -> SwapPaneLeft declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Alt|Control] input=RightArrow clicks=- -> SwapPaneRight declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Alt|Control] input=UpArrow clicks=- -> SwapPaneUp declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Alt|Control] input=DownArrow clicks=- -> SwapPaneDown declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift|Alt|Control] input=LeftArrow clicks=- -> ResizePane, direction: Left, percent: 5 declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift|Alt|Control] input=RightArrow clicks=- -> ResizePane, direction: Right, percent: 5 declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift|Alt|Control] input=UpArrow clicks=- -> ResizePane, direction: Up, percent: 5 declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift|Alt|Control] input=DownArrow clicks=- -> ResizePane, direction: Down, percent: 5 declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Super] input=PageUp clicks=- -> MoveTabToLeft declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Super] input=PageDown clicks=- -> MoveTabToRight declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Alt|Control] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+002D clicks=- -> DecreaseFontSize declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+005F clicks=- -> DecreaseFontSize declined=pass gated=no
@@ -60,5 +80,7 @@
 [defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0046 clicks=- -> SearchReverse declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0048 clicks=- -> NoSearchHighlight declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0055 clicks=- -> HintMode(url, 1) declined=pass gated=no
+[fallbacks] key modes=[Any] mods=[Super] input=PageUp clicks=- -> MoveTabToLeft declined=pass gated=no
+[fallbacks] key modes=[Any] mods=[Super] input=PageDown clicks=- -> MoveTabToRight declined=pass gated=no
 [fallbacks] char modes=[~AltScreen] mods=[Shift|Control] input=U+0047 clicks=- -> OpenCommandOutput, target: last, placement: split declined=consume gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+0057 clicks=- -> CloseTab declined=pass gated=no

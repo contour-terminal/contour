@@ -254,9 +254,10 @@ TEST_CASE("the daemon and workspace switching actions are bound by no default ch
 TEST_CASE("every edition and platform cycles workspaces one level up from the tab chords",
           "[bindings][switch]")
 {
-    // Ctrl+PageUp/PageDown cycle the tabs; Shift and Alt added cycle the workspaces (Ctrl+Alt alone is
-    // Emacs's C-M-prior/next). macOS takes Control+Command with the vertical arrows. In the written defaults
-    // and the fallbacks alike, so a configuration that predates them still has them.
+    // Ctrl+PageUp/PageDown cycle the tabs; Alt added cycles the workspaces. That shadows Emacs's
+    // C-M-prior/next, a cost the owner accepted so that Shift is free to carry the workspace (see the next
+    // test). macOS takes Control+Command with the vertical arrows. In the written defaults and the fallbacks
+    // alike, so a configuration that predates them still has them.
     using actions::CycleDirection;
     using actions::CycleWorkspace;
     using vtbackend::Key;
@@ -271,7 +272,7 @@ TEST_CASE("every edition and platform cycles workspaces one level up from the ta
     {
         auto const mac = kind == KeyboardPlatformKind::Mac;
         auto const mods = mac ? Modifiers { Modifier::Control, Modifier::Super }
-                              : Modifiers { Modifier::Control, Modifier::Shift, Modifier::Alt };
+                              : Modifiers { Modifier::Control, Modifier::Alt };
         auto const nextKey = mac ? Key::DownArrow : Key::PageDown;
         auto const previousKey = mac ? Key::UpArrow : Key::PageUp;
         INFO("platform " << std::to_underlying(kind));
@@ -285,6 +286,39 @@ TEST_CASE("every edition and platform cycles workspaces one level up from the ta
         auto const fallbacks = mappingsOf(builtinFallbackKeyMappings(kind));
         CHECK(cycles(fallbacks, mods, nextKey, CycleDirection::Next));
         CHECK(cycles(fallbacks, mods, previousKey, CycleDirection::Previous));
+    }
+}
+
+TEST_CASE("every edition and platform moves the workspace with the cycle chord plus Shift",
+          "[bindings][switch]")
+{
+    // Shift carries: the chord that goes to the next workspace, with Shift added, takes the current one
+    // there. In the written defaults and the fallbacks alike.
+    using vtbackend::Key;
+    auto const binds = [](auto const& mappings, Modifiers mods, Key key, std::string_view action) {
+        return std::ranges::any_of(mappings, [&](auto const& mapping) {
+            return mapping.modifiers == mods && mapping.input == key && mapping.binding.size() == 1
+                   && actions::name(mapping.binding.front()) == action;
+        });
+    };
+    for (auto const kind: AllKinds)
+    {
+        auto const mac = kind == KeyboardPlatformKind::Mac;
+        auto const mods = mac ? Modifiers { Modifier::Control, Modifier::Shift, Modifier::Super }
+                              : Modifiers { Modifier::Control, Modifier::Shift, Modifier::Alt };
+        auto const downKey = mac ? Key::DownArrow : Key::PageDown;
+        auto const upKey = mac ? Key::UpArrow : Key::PageUp;
+        INFO(std::format("platform {}", std::to_underlying(kind)));
+        for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        {
+            INFO("edition " << token);
+            auto const& mappings = defaultInputMappings(edition, kind).keyMappings;
+            CHECK(binds(mappings, mods, downKey, "MoveWorkspaceDown"));
+            CHECK(binds(mappings, mods, upKey, "MoveWorkspaceUp"));
+        }
+        auto const fallbacks = mappingsOf(builtinFallbackKeyMappings(kind));
+        CHECK(binds(fallbacks, mods, downKey, "MoveWorkspaceDown"));
+        CHECK(binds(fallbacks, mods, upKey, "MoveWorkspaceUp"));
     }
 }
 
@@ -408,6 +442,92 @@ TEST_CASE("every platform can focus all four neighbours and split both ways", "[
         CHECK(has(keys, actions::FocusPaneDown {}));
         CHECK(has(chars, actions::SplitVertical {}));
         CHECK(has(chars, actions::SplitHorizontal {}));
+
+        // The focus chord: Ctrl+Alt+Arrow on the desktop, Option+Command+Arrow on a Mac.
+        auto const focusMods = kind == KeyboardPlatformKind::Mac
+                                   ? Modifiers { Modifier::Super, Modifier::Alt }
+                                   : Modifiers { Modifier::Control, Modifier::Alt };
+        CHECK(keyActions(kind, focusMods, vtbackend::Key::LeftArrow) == Names { "FocusPaneLeft" });
+        CHECK(keyActions(kind, focusMods, vtbackend::Key::RightArrow) == Names { "FocusPaneRight" });
+        CHECK(keyActions(kind, focusMods, vtbackend::Key::UpArrow) == Names { "FocusPaneUp" });
+        CHECK(keyActions(kind, focusMods, vtbackend::Key::DownArrow) == Names { "FocusPaneDown" });
+    }
+}
+
+TEST_CASE("swap is the focus chord plus Shift on every platform", "[bindings][panes]")
+{
+    // Shift carries: the chord that focuses the neighbour, with Shift added, swaps the pane with it.
+    struct Direction
+    {
+        std::string_view focus;
+        std::string_view swap;
+    };
+    auto const directions = std::array {
+        Direction { .focus = "FocusPaneLeft", .swap = "SwapPaneLeft" },
+        Direction { .focus = "FocusPaneRight", .swap = "SwapPaneRight" },
+        Direction { .focus = "FocusPaneUp", .swap = "SwapPaneUp" },
+        Direction { .focus = "FocusPaneDown", .swap = "SwapPaneDown" },
+    };
+    for (auto const kind: AllKinds)
+        for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        {
+            auto const& keys = defaultInputMappings(edition, kind).keyMappings;
+            auto const rowOf = [&](std::string_view action) {
+                auto const found = std::ranges::find_if(keys, [&](auto const& mapping) {
+                    return mapping.binding.size() == 1 && actions::name(mapping.binding.front()) == action;
+                });
+                REQUIRE(found != keys.end());
+                return *found;
+            };
+            for (auto const& [focus, swap]: directions)
+            {
+                INFO(std::format("platform {}, edition {}, {}", std::to_underlying(kind), token, swap));
+                auto const focusRow = rowOf(focus);
+                auto const swapRow = rowOf(swap);
+                CHECK(swapRow.input == focusRow.input);
+                CHECK(swapRow.modifiers == focusRow.modifiers.with(Modifier::Shift));
+            }
+        }
+}
+
+TEST_CASE("resize is Alt+Shift+Arrow on the desktop and Control+Option+Command+Arrow on macOS",
+          "[bindings][panes]")
+{
+    // Written rows only: a configuration that leaves them out has chosen not to resize from the keyboard.
+    auto const directions = std::array {
+        std::pair { actions::Direction::Left, vtbackend::Key::LeftArrow },
+        std::pair { actions::Direction::Right, vtbackend::Key::RightArrow },
+        std::pair { actions::Direction::Up, vtbackend::Key::UpArrow },
+        std::pair { actions::Direction::Down, vtbackend::Key::DownArrow },
+    };
+    auto const isResize = [](actions::Action const& action) {
+        return std::holds_alternative<actions::ResizePane>(action);
+    };
+    for (auto const kind: AllKinds)
+    {
+        auto const expected = kind == KeyboardPlatformKind::Mac
+                                  ? Modifiers { Modifier::Control, Modifier::Alt, Modifier::Super }
+                                  : Modifiers { Modifier::Alt, Modifier::Shift };
+        CHECK(std::ranges::none_of(builtinFallbackKeyMappings(kind),
+                                   [&](auto const& row) { return isResize(row.mapping.binding.front()); }));
+        for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        {
+            auto const& keys = defaultInputMappings(edition, kind).keyMappings;
+            for (auto const& [direction, key]: directions)
+            {
+                INFO(std::format("platform {}, edition {}, direction {}",
+                                 std::to_underlying(kind),
+                                 token,
+                                 std::to_underlying(direction)));
+                auto const found = std::ranges::find_if(keys, [&](auto const& mapping) {
+                    return mapping.binding.size() == 1 && isResize(mapping.binding.front())
+                           && std::get<actions::ResizePane>(mapping.binding.front()).direction == direction;
+                });
+                REQUIRE(found != keys.end());
+                CHECK(found->modifiers == expected);
+                CHECK(found->input == key);
+            }
+        }
     }
 }
 
@@ -423,7 +543,8 @@ TEST_CASE("every platform moves the active tab with the browsers' chords", "[bin
               .modifiers = Modifiers { Modifier::Control, Modifier::Shift } },
         Row { .kind = KeyboardPlatformKind::Win32,
               .modifiers = Modifiers { Modifier::Control, Modifier::Shift } },
-        Row { .kind = KeyboardPlatformKind::Mac, .modifiers = Modifiers { Modifier::Super } },
+        Row { .kind = KeyboardPlatformKind::Mac,
+              .modifiers = Modifiers { Modifier::Control, Modifier::Shift } },
     };
     for (auto const& [kind, modifiers]: rows)
     {

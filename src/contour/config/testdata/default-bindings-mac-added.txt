@@ -1,5 +1,17 @@
 [defaults classic] key modes=[Any] mods=[Control|Super] input=DownArrow clicks=- -> CycleWorkspace, direction: next declined=pass gated=no
 [defaults classic] key modes=[Any] mods=[Control|Super] input=UpArrow clicks=- -> CycleWorkspace, direction: previous declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift|Control|Super] input=DownArrow clicks=- -> MoveWorkspaceDown declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift|Control|Super] input=UpArrow clicks=- -> MoveWorkspaceUp declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift|Alt|Super] input=LeftArrow clicks=- -> SwapPaneLeft declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift|Alt|Super] input=RightArrow clicks=- -> SwapPaneRight declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift|Alt|Super] input=UpArrow clicks=- -> SwapPaneUp declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift|Alt|Super] input=DownArrow clicks=- -> SwapPaneDown declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Alt|Control|Super] input=LeftArrow clicks=- -> ResizePane, direction: Left, percent: 5 declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Alt|Control|Super] input=RightArrow clicks=- -> ResizePane, direction: Right, percent: 5 declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Alt|Control|Super] input=UpArrow clicks=- -> ResizePane, direction: Up, percent: 5 declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Alt|Control|Super] input=DownArrow clicks=- -> ResizePane, direction: Down, percent: 5 declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift|Control] input=PageUp clicks=- -> MoveTabToLeft declined=pass gated=no
+[defaults classic] key modes=[Any] mods=[Shift|Control] input=PageDown clicks=- -> MoveTabToRight declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Control|Super] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Super] input=U+003D clicks=- -> IncreaseFontSize declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Super] input=U+002B clicks=- -> IncreaseFontSize declined=pass gated=no
@@ -22,6 +34,18 @@
 [defaults classic] char modes=[Any] mods=[Shift|Super] input=U+0057 clicks=- -> CloseTab declined=pass gated=no
 [defaults native2026] key modes=[Any] mods=[Control|Super] input=DownArrow clicks=- -> CycleWorkspace, direction: next declined=pass gated=no
 [defaults native2026] key modes=[Any] mods=[Control|Super] input=UpArrow clicks=- -> CycleWorkspace, direction: previous declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift|Control|Super] input=DownArrow clicks=- -> MoveWorkspaceDown declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift|Control|Super] input=UpArrow clicks=- -> MoveWorkspaceUp declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift|Alt|Super] input=LeftArrow clicks=- -> SwapPaneLeft declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift|Alt|Super] input=RightArrow clicks=- -> SwapPaneRight declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift|Alt|Super] input=UpArrow clicks=- -> SwapPaneUp declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift|Alt|Super] input=DownArrow clicks=- -> SwapPaneDown declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Alt|Control|Super] input=LeftArrow clicks=- -> ResizePane, direction: Left, percent: 5 declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Alt|Control|Super] input=RightArrow clicks=- -> ResizePane, direction: Right, percent: 5 declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Alt|Control|Super] input=UpArrow clicks=- -> ResizePane, direction: Up, percent: 5 declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Alt|Control|Super] input=DownArrow clicks=- -> ResizePane, direction: Down, percent: 5 declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift|Control] input=PageUp clicks=- -> MoveTabToLeft declined=pass gated=no
+[defaults native2026] key modes=[Any] mods=[Shift|Control] input=PageDown clicks=- -> MoveTabToRight declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Control|Super] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Super] input=U+003D clicks=- -> IncreaseFontSize declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Super] input=U+002B clicks=- -> IncreaseFontSize declined=pass gated=no
@@ -47,11 +71,15 @@
 [defaults native2026] char modes=[Any] mods=[Shift|Super] input=U+0057 clicks=- -> CloseTab declined=pass gated=no
 [fallbacks] key modes=[Any] mods=[Control|Super] input=DownArrow clicks=- -> CycleWorkspace, direction: next declined=pass gated=no
 [fallbacks] key modes=[Any] mods=[Control|Super] input=UpArrow clicks=- -> CycleWorkspace, direction: previous declined=pass gated=no
+[fallbacks] key modes=[Any] mods=[Shift|Control|Super] input=DownArrow clicks=- -> MoveWorkspaceDown declined=pass gated=no
+[fallbacks] key modes=[Any] mods=[Shift|Control|Super] input=UpArrow clicks=- -> MoveWorkspaceUp declined=pass gated=no
 [fallbacks] key modes=[~AltScreen] mods=[Alt] input=LeftArrow clicks=- -> SendChars("\u{1b}b") declined=pass gated=no
 [fallbacks] key modes=[~AltScreen] mods=[Alt] input=RightArrow clicks=- -> SendChars("\u{1b}f") declined=pass gated=no
 [fallbacks] key modes=[~AltScreen] mods=[Super] input=LeftArrow clicks=- -> SendChars("\u{1}") declined=pass gated=no
 [fallbacks] key modes=[~AltScreen] mods=[Super] input=RightArrow clicks=- -> SendChars("\u{5}") declined=pass gated=no
 [fallbacks] key modes=[~AltScreen] mods=[Super] input=Backspace clicks=- -> SendChars("\u{15}") declined=pass gated=no
+[fallbacks] key modes=[Any] mods=[Shift|Control] input=PageUp clicks=- -> MoveTabToLeft declined=pass gated=no
+[fallbacks] key modes=[Any] mods=[Shift|Control] input=PageDown clicks=- -> MoveTabToRight declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Control|Super] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+003D clicks=- -> IncreaseFontSize declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+002B clicks=- -> IncreaseFontSize declined=pass gated=no

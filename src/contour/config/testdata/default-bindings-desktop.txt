@@ -15,16 +15,18 @@ key modes=[Any] mods=[Control] input=PageUp clicks=- -> SwitchToTabLeft declined
 key modes=[Any] mods=[Control] input=PageDown clicks=- -> SwitchToTabRight declined=pass gated=no
 key modes=[Any] mods=[Control] input=Tab clicks=- -> SwitchToTabRight declined=pass gated=no
 key modes=[Any] mods=[Shift|Control] input=Tab clicks=- -> SwitchToTabLeft declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt|Control] input=PageDown clicks=- -> CycleWorkspace, direction: next declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt|Control] input=PageUp clicks=- -> CycleWorkspace, direction: previous declined=pass gated=no
-key modes=[Any] mods=[Alt|Control] input=LeftArrow clicks=- -> SwapPaneLeft declined=pass gated=no
-key modes=[Any] mods=[Alt|Control] input=RightArrow clicks=- -> SwapPaneRight declined=pass gated=no
-key modes=[Any] mods=[Alt|Control] input=UpArrow clicks=- -> SwapPaneUp declined=pass gated=no
-key modes=[Any] mods=[Alt|Control] input=DownArrow clicks=- -> SwapPaneDown declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt|Control] input=LeftArrow clicks=- -> ResizePane, direction: Left, percent: 5 declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt|Control] input=RightArrow clicks=- -> ResizePane, direction: Right, percent: 5 declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt|Control] input=UpArrow clicks=- -> ResizePane, direction: Up, percent: 5 declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt|Control] input=DownArrow clicks=- -> ResizePane, direction: Down, percent: 5 declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=PageDown clicks=- -> CycleWorkspace, direction: next declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=PageUp clicks=- -> CycleWorkspace, direction: previous declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=PageDown clicks=- -> MoveWorkspaceDown declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=PageUp clicks=- -> MoveWorkspaceUp declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=LeftArrow clicks=- -> SwapPaneLeft declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=RightArrow clicks=- -> SwapPaneRight declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=UpArrow clicks=- -> SwapPaneUp declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=DownArrow clicks=- -> SwapPaneDown declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=LeftArrow clicks=- -> ResizePane, direction: Left, percent: 5 declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=RightArrow clicks=- -> ResizePane, direction: Right, percent: 5 declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=UpArrow clicks=- -> ResizePane, direction: Up, percent: 5 declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=DownArrow clicks=- -> ResizePane, direction: Down, percent: 5 declined=pass gated=no
 key modes=[BlockFocus] mods=[Control] input=Enter clicks=- -> OpenBlockMenu declined=pass gated=no
 key modes=[BlockFocus] mods=[Shift] input=F10 clicks=- -> OpenBlockMenu declined=pass gated=no
 key modes=[BlockFocus] mods=[] input=Enter clicks=- -> ToggleFold declined=pass gated=no
@@ -33,10 +35,10 @@ key modes=[~AltScreen] mods=[Control] input=UpArrow clicks=- -> FocusPreviousCom
 key modes=[~AltScreen] mods=[Control] input=DownArrow clicks=- -> FocusNextCommand declined=pass gated=no
 key modes=[~AltScreen] mods=[Shift|Control] input=UpArrow clicks=- -> SelectPreviousCommandOutput declined=pass gated=no
 key modes=[~AltScreen] mods=[Shift|Control] input=DownArrow clicks=- -> SelectNextCommandOutput declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt] input=LeftArrow clicks=- -> FocusPaneLeft declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt] input=RightArrow clicks=- -> FocusPaneRight declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt] input=UpArrow clicks=- -> FocusPaneUp declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt] input=DownArrow clicks=- -> FocusPaneDown declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=LeftArrow clicks=- -> FocusPaneLeft declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=RightArrow clicks=- -> FocusPaneRight declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=UpArrow clicks=- -> FocusPaneUp declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=DownArrow clicks=- -> FocusPaneDown declined=pass gated=no
 key modes=[Any] mods=[Shift|Control] input=PageUp clicks=- -> MoveTabToLeft declined=pass gated=no
 key modes=[Any] mods=[Shift|Control] input=PageDown clicks=- -> MoveTabToRight declined=pass gated=no
 char modes=[Any] mods=[Alt|Control] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
@@ -111,16 +113,18 @@ key modes=[Any] mods=[Control] input=PageUp clicks=- -> SwitchToTabLeft declined
 key modes=[Any] mods=[Control] input=PageDown clicks=- -> SwitchToTabRight declined=pass gated=no
 key modes=[Any] mods=[Control] input=Tab clicks=- -> SwitchToTabRight declined=pass gated=no
 key modes=[Any] mods=[Shift|Control] input=Tab clicks=- -> SwitchToTabLeft declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt|Control] input=PageDown clicks=- -> CycleWorkspace, direction: next declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt|Control] input=PageUp clicks=- -> CycleWorkspace, direction: previous declined=pass gated=no
-key modes=[Any] mods=[Alt|Control] input=LeftArrow clicks=- -> SwapPaneLeft declined=pass gated=no
-key modes=[Any] mods=[Alt|Control] input=RightArrow clicks=- -> SwapPaneRight declined=pass gated=no
-key modes=[Any] mods=[Alt|Control] input=UpArrow clicks=- -> SwapPaneUp declined=pass gated=no
-key modes=[Any] mods=[Alt|Control] input=DownArrow clicks=- -> SwapPaneDown declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt|Control] input=LeftArrow clicks=- -> ResizePane, direction: Left, percent: 5 declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt|Control] input=RightArrow clicks=- -> ResizePane, direction: Right, percent: 5 declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt|Control] input=UpArrow clicks=- -> ResizePane, direction: Up, percent: 5 declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt|Control] input=DownArrow clicks=- -> ResizePane, direction: Down, percent: 5 declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=PageDown clicks=- -> CycleWorkspace, direction: next declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=PageUp clicks=- -> CycleWorkspace, direction: previous declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=PageDown clicks=- -> MoveWorkspaceDown declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=PageUp clicks=- -> MoveWorkspaceUp declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=LeftArrow clicks=- -> SwapPaneLeft declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=RightArrow clicks=- -> SwapPaneRight declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=UpArrow clicks=- -> SwapPaneUp declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=DownArrow clicks=- -> SwapPaneDown declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=LeftArrow clicks=- -> ResizePane, direction: Left, percent: 5 declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=RightArrow clicks=- -> ResizePane, direction: Right, percent: 5 declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=UpArrow clicks=- -> ResizePane, direction: Up, percent: 5 declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=DownArrow clicks=- -> ResizePane, direction: Down, percent: 5 declined=pass gated=no
 key modes=[Any] mods=[Control] input=F6 clicks=- -> FocusNextArea declined=pass gated=no
 key modes=[Any] mods=[Shift|Control] input=F6 clicks=- -> FocusPreviousArea declined=pass gated=no
 key modes=[BlockFocus] mods=[Control] input=Enter clicks=- -> OpenBlockMenu declined=pass gated=no
@@ -131,10 +135,10 @@ key modes=[~AltScreen] mods=[Control] input=UpArrow clicks=- -> FocusPreviousCom
 key modes=[~AltScreen] mods=[Control] input=DownArrow clicks=- -> FocusNextCommand declined=pass gated=no
 key modes=[~AltScreen] mods=[Shift|Control] input=UpArrow clicks=- -> SelectPreviousCommandOutput declined=pass gated=no
 key modes=[~AltScreen] mods=[Shift|Control] input=DownArrow clicks=- -> SelectNextCommandOutput declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt] input=LeftArrow clicks=- -> FocusPaneLeft declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt] input=RightArrow clicks=- -> FocusPaneRight declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt] input=UpArrow clicks=- -> FocusPaneUp declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt] input=DownArrow clicks=- -> FocusPaneDown declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=LeftArrow clicks=- -> FocusPaneLeft declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=RightArrow clicks=- -> FocusPaneRight declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=UpArrow clicks=- -> FocusPaneUp declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=DownArrow clicks=- -> FocusPaneDown declined=pass gated=no
 key modes=[Any] mods=[Shift|Control] input=PageUp clicks=- -> MoveTabToLeft declined=pass gated=no
 key modes=[Any] mods=[Shift|Control] input=PageDown clicks=- -> MoveTabToRight declined=pass gated=no
 char modes=[Any] mods=[Alt|Control] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
@@ -200,8 +204,10 @@ key modes=[Any] mods=[Control] input=PageUp clicks=- -> SwitchToTabLeft declined
 key modes=[Any] mods=[Control] input=PageDown clicks=- -> SwitchToTabRight declined=pass gated=no
 key modes=[Any] mods=[Control] input=Tab clicks=- -> SwitchToTabRight declined=pass gated=no
 key modes=[Any] mods=[Shift|Control] input=Tab clicks=- -> SwitchToTabLeft declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt|Control] input=PageDown clicks=- -> CycleWorkspace, direction: next declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt|Control] input=PageUp clicks=- -> CycleWorkspace, direction: previous declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=PageDown clicks=- -> CycleWorkspace, direction: next declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=PageUp clicks=- -> CycleWorkspace, direction: previous declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=PageDown clicks=- -> MoveWorkspaceDown declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=PageUp clicks=- -> MoveWorkspaceUp declined=pass gated=no
 key modes=[BlockFocus] mods=[Control] input=Enter clicks=- -> OpenBlockMenu declined=pass gated=no
 key modes=[BlockFocus] mods=[Shift] input=F10 clicks=- -> OpenBlockMenu declined=pass gated=no
 key modes=[BlockFocus] mods=[] input=Enter clicks=- -> ToggleFold declined=pass gated=no
@@ -210,10 +216,10 @@ key modes=[~AltScreen] mods=[Control] input=UpArrow clicks=- -> FocusPreviousCom
 key modes=[~AltScreen] mods=[Control] input=DownArrow clicks=- -> FocusNextCommand declined=pass gated=no
 key modes=[~AltScreen] mods=[Shift|Control] input=UpArrow clicks=- -> SelectPreviousCommandOutput declined=pass gated=no
 key modes=[~AltScreen] mods=[Shift|Control] input=DownArrow clicks=- -> SelectNextCommandOutput declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt] input=LeftArrow clicks=- -> FocusPaneLeft declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt] input=RightArrow clicks=- -> FocusPaneRight declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt] input=UpArrow clicks=- -> FocusPaneUp declined=pass gated=no
-key modes=[Any] mods=[Shift|Alt] input=DownArrow clicks=- -> FocusPaneDown declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=LeftArrow clicks=- -> FocusPaneLeft declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=RightArrow clicks=- -> FocusPaneRight declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=UpArrow clicks=- -> FocusPaneUp declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=DownArrow clicks=- -> FocusPaneDown declined=pass gated=no
 key modes=[Any] mods=[Shift|Control] input=PageUp clicks=- -> MoveTabToLeft declined=pass gated=no
 key modes=[Any] mods=[Shift|Control] input=PageDown clicks=- -> MoveTabToRight declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+003D clicks=- -> IncreaseFontSize declined=pass gated=no

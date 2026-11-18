@@ -220,7 +220,7 @@ connection, so a window on a remote host does not tie up, or depend on, the othe
 window somewhere else without closing it, and its panes are swapped in place:
 
 - **To another workspace of the same daemon**, with `SwitchToWorkspace` or `CycleWorkspace`
-  (`Ctrl+Shift+Alt+PageDown` / `PageUp`, `⌃⌘↓` / `⌃⌘↑` on macOS, for the next / previous one).
+  (`Ctrl+Alt+PageDown` / `PageUp`, `⌃⌘↓` / `⌃⌘↑` on macOS, for the next / previous one).
 - **To another daemon**: a local one by its name (`contour daemon --name`), or a saved
   [host](remote-hosts.md), with `SwitchToDaemon` or `CycleDaemon`. The window lands on that
   daemon's only workspace, on a new one when it has none, and asks which when it has several. A workspace

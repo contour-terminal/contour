@@ -57,9 +57,18 @@ namespace
         ChordSpec { .extra = Modifiers { Modifier::Control, Modifier::Shift, Modifier::Alt } };
     constexpr auto SuperShift = ChordSpec { .extra = Modifiers { Modifier::Super, Modifier::Shift } };
     constexpr auto SuperAlt = ChordSpec { .extra = Modifiers { Modifier::Super, Modifier::Alt } };
+    /// Shift+Option+Command: the Mac's pane focus chord with Shift, which carries the pane along.
+    constexpr auto SuperShiftAlt =
+        ChordSpec { .extra = Modifiers { Modifier::Super, Modifier::Shift, Modifier::Alt } };
+    /// Control+Option+Command: the Mac's pane resize chord, where the desktop resizes with Alt+Shift.
+    constexpr auto CtrlSuperAlt =
+        ChordSpec { .extra = Modifiers { Modifier::Control, Modifier::Super, Modifier::Alt } };
     /// Control+Command: the macOS counterpart of a desktop Ctrl+Alt row. Option composes characters, so an
     /// Option chord on a character cannot fire; Control+Command is the Mac's own second tier.
     constexpr auto CtrlSuper = ChordSpec { .extra = Modifiers { Modifier::Control, Modifier::Super } };
+    /// Control+Shift+Command: the Mac's workspace cycle chord with Shift, which carries the workspace along.
+    constexpr auto CtrlShiftSuper =
+        ChordSpec { .extra = Modifiers { Modifier::Control, Modifier::Shift, Modifier::Super } };
     /// The host's Primary set: Command on macOS, Ctrl+Shift elsewhere.
     constexpr auto Primary = ChordSpec { .primary = PrimaryUse::Present };
     /// Primary plus Shift: Shift+Command on macOS, which is where macOS spells these chords, and still
@@ -176,16 +185,18 @@ namespace
             both(All, Ctrl, Key::PageDown, Any, { actions::SwitchToTabRight {} }),
             both(All, Ctrl, Key::Tab, Any, { actions::SwitchToTabRight {} }),
             both(All, CtrlShift, Key::Tab, Any, { actions::SwitchToTabLeft {} }),
-            // One level up from the tabs: the next and previous workspace of the window's daemon. Ctrl+Alt
-            // alone would shadow Emacs's C-M-next/prior, so Shift joins it; macOS takes Control+Command with
-            // the vertical arrows, free there. Fallbacks too, so a configuration that predates them has them.
+            // One level up from the tabs: the next and previous workspace of the window's daemon, Ctrl+Alt
+            // with the tab chords' PageUp/PageDown (Emacs's C-M-prior/next, a cost accepted so that Shift is
+            // free to carry); macOS takes Control+Command with the vertical arrows, free there. Shift
+            // carries: the same chord with Shift moves the current workspace up or down the list. Fallbacks
+            // too, so a configuration that predates them has them.
             both(DesktopOnly,
-                 CtrlShiftAlt,
+                 CtrlAlt,
                  Key::PageDown,
                  Any,
                  { actions::CycleWorkspace { .direction = actions::CycleDirection::Next } }),
             both(DesktopOnly,
-                 CtrlShiftAlt,
+                 CtrlAlt,
                  Key::PageUp,
                  Any,
                  { actions::CycleWorkspace { .direction = actions::CycleDirection::Previous } }),
@@ -199,34 +210,64 @@ namespace
                  Key::UpArrow,
                  Any,
                  { actions::CycleWorkspace { .direction = actions::CycleDirection::Previous } }),
-            written(All, CtrlAlt, Key::LeftArrow, Any, { actions::SwapPaneLeft {} }),
-            written(All, CtrlAlt, Key::RightArrow, Any, { actions::SwapPaneRight {} }),
-            written(All, CtrlAlt, Key::UpArrow, Any, { actions::SwapPaneUp {} }),
-            written(All, CtrlAlt, Key::DownArrow, Any, { actions::SwapPaneDown {} }),
-            written(All,
-                    CtrlShiftAlt,
+            both(DesktopOnly, CtrlShiftAlt, Key::PageDown, Any, { actions::MoveWorkspaceDown {} }),
+            both(DesktopOnly, CtrlShiftAlt, Key::PageUp, Any, { actions::MoveWorkspaceUp {} }),
+            both(MacOnly, CtrlShiftSuper, Key::DownArrow, Any, { actions::MoveWorkspaceDown {} }),
+            both(MacOnly, CtrlShiftSuper, Key::UpArrow, Any, { actions::MoveWorkspaceUp {} }),
+            // Shift carries: the pane focus chord (below) with Shift swaps the pane with its neighbour.
+            // Resizing takes Alt+Shift on the desktop and Control+Option+Command on a Mac.
+            written(DesktopOnly, CtrlShiftAlt, Key::LeftArrow, Any, { actions::SwapPaneLeft {} }),
+            written(DesktopOnly, CtrlShiftAlt, Key::RightArrow, Any, { actions::SwapPaneRight {} }),
+            written(DesktopOnly, CtrlShiftAlt, Key::UpArrow, Any, { actions::SwapPaneUp {} }),
+            written(DesktopOnly, CtrlShiftAlt, Key::DownArrow, Any, { actions::SwapPaneDown {} }),
+            written(MacOnly, SuperShiftAlt, Key::LeftArrow, Any, { actions::SwapPaneLeft {} }),
+            written(MacOnly, SuperShiftAlt, Key::RightArrow, Any, { actions::SwapPaneRight {} }),
+            written(MacOnly, SuperShiftAlt, Key::UpArrow, Any, { actions::SwapPaneUp {} }),
+            written(MacOnly, SuperShiftAlt, Key::DownArrow, Any, { actions::SwapPaneDown {} }),
+            written(DesktopOnly,
+                    AltShift,
                     Key::LeftArrow,
                     Any,
                     { actions::ResizePane { .direction = actions::Direction::Left } }),
-            written(All,
-                    CtrlShiftAlt,
+            written(DesktopOnly,
+                    AltShift,
                     Key::RightArrow,
                     Any,
                     { actions::ResizePane { .direction = actions::Direction::Right } }),
-            written(All,
-                    CtrlShiftAlt,
+            written(DesktopOnly,
+                    AltShift,
                     Key::UpArrow,
                     Any,
                     { actions::ResizePane { .direction = actions::Direction::Up } }),
-            written(All,
-                    CtrlShiftAlt,
+            written(DesktopOnly,
+                    AltShift,
+                    Key::DownArrow,
+                    Any,
+                    { actions::ResizePane { .direction = actions::Direction::Down } }),
+            written(MacOnly,
+                    CtrlSuperAlt,
+                    Key::LeftArrow,
+                    Any,
+                    { actions::ResizePane { .direction = actions::Direction::Left } }),
+            written(MacOnly,
+                    CtrlSuperAlt,
+                    Key::RightArrow,
+                    Any,
+                    { actions::ResizePane { .direction = actions::Direction::Right } }),
+            written(MacOnly,
+                    CtrlSuperAlt,
+                    Key::UpArrow,
+                    Any,
+                    { actions::ResizePane { .direction = actions::Direction::Up } }),
+            written(MacOnly,
+                    CtrlSuperAlt,
                     Key::DownArrow,
                     Any,
                     { actions::ResizePane { .direction = actions::Direction::Down } }),
             // Beside the browsers' Ctrl+PageUp/PageDown tab switching above, which the fallbacks carry too:
             // the jumps from one command's prompt to the next, as Ghostty's jump_to_prompt binds them. Bound
-            // nowhere in the defaults when they were added -- Shift alone scrolls a line, Alt+Shift focuses a
-            // pane, Ctrl+Alt swaps one, Ctrl+Shift+Alt resizes one. On the primary screen only, where the
+            // nowhere in the defaults when they were added -- Shift alone scrolls a line, Ctrl+Alt focuses a
+            // pane, Ctrl+Shift+Alt swaps one, Alt+Shift resizes one. On the primary screen only, where the
             // prompts are; an alternate-screen application keeps the chord. macOS only since the desktop gave
             // the chord to VS Code's SelectCommandOutput (below); the desktop jumps with Ctrl+Alt+K/J.
             fallback(MacOnly, CtrlShift, Key::UpArrow, PrimaryScreenOnly, { actions::ScrollMarkUp {} }),
@@ -312,23 +353,22 @@ namespace
                      Key::Backspace,
                      PrimaryScreenOnly,
                      { actions::SendChars { .chars = "\025" } }),
-            // The chords that move between panes (and zoom one) and move the active tab. Alt+Shift+Arrow, not
-            // a bare Alt+Arrow: that one is the shell's word motion. Some desktops and layout switchers grab
-            // Alt+Shift; a binding of the chord in input_mapping: wins over these rows. On a Mac, the Command
-            // chords iTerm2 and Terminal users already know.
-            both(DesktopOnly, AltShift, Key::LeftArrow, Any, { actions::FocusPaneLeft {} }),
-            both(DesktopOnly, AltShift, Key::RightArrow, Any, { actions::FocusPaneRight {} }),
-            both(DesktopOnly, AltShift, Key::UpArrow, Any, { actions::FocusPaneUp {} }),
-            both(DesktopOnly, AltShift, Key::DownArrow, Any, { actions::FocusPaneDown {} }),
-            both(DesktopOnly, CtrlShift, Key::PageUp, Any, { actions::MoveTabToLeft {} }),
-            both(DesktopOnly, CtrlShift, Key::PageDown, Any, { actions::MoveTabToRight {} }),
+            // The chords that move between panes (and zoom one) and move the active tab. Ctrl+Alt+Arrow, not
+            // a bare Alt+Arrow: that one is the shell's word motion. A binding of the chord in input_mapping:
+            // wins over these rows, so a configuration that bound it to the swap keeps its swap. On a Mac,
+            // the Command chords iTerm2 and Terminal users already know. Shift carries: Ctrl+Shift+PageUp/
+            // PageDown, the tab switching chord with Shift, moves the active tab, on every platform.
+            both(DesktopOnly, CtrlAlt, Key::LeftArrow, Any, { actions::FocusPaneLeft {} }),
+            both(DesktopOnly, CtrlAlt, Key::RightArrow, Any, { actions::FocusPaneRight {} }),
+            both(DesktopOnly, CtrlAlt, Key::UpArrow, Any, { actions::FocusPaneUp {} }),
+            both(DesktopOnly, CtrlAlt, Key::DownArrow, Any, { actions::FocusPaneDown {} }),
+            both(All, CtrlShift, Key::PageUp, Any, { actions::MoveTabToLeft {} }),
+            both(All, CtrlShift, Key::PageDown, Any, { actions::MoveTabToRight {} }),
             both(PlatformScope::MacOnly, SuperAlt, Key::LeftArrow, Any, { actions::FocusPaneLeft {} }),
             both(PlatformScope::MacOnly, SuperAlt, Key::RightArrow, Any, { actions::FocusPaneRight {} }),
             both(PlatformScope::MacOnly, SuperAlt, Key::UpArrow, Any, { actions::FocusPaneUp {} }),
             both(PlatformScope::MacOnly, SuperAlt, Key::DownArrow, Any, { actions::FocusPaneDown {} }),
             both(PlatformScope::MacOnly, SuperShift, Key::Enter, Any, { actions::TogglePaneZoom {} }),
-            both(PlatformScope::MacOnly, Super, Key::PageUp, Any, { actions::MoveTabToLeft {} }),
-            both(PlatformScope::MacOnly, Super, Key::PageDown, Any, { actions::MoveTabToRight {} }),
         };
         return rows;
     }

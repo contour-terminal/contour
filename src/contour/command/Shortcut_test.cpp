@@ -305,8 +305,8 @@ TEST_CASE("the palette names the workspace-cycling chords in every defaults edit
             auto const index = spelled(kind);
             REQUIRE(index.contains(next));
             REQUIRE(index.contains(previous));
-            CHECK(index.at(next) == "Ctrl+Alt+Shift+PageDown");
-            CHECK(index.at(previous) == "Ctrl+Alt+Shift+PageUp");
+            CHECK(index.at(next) == "Ctrl+Alt+PageDown");
+            CHECK(index.at(previous) == "Ctrl+Alt+PageUp");
         }
         auto const mac = spelled(KeyboardPlatformKind::Mac);
         REQUIRE(mac.contains(next));

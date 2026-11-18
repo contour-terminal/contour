@@ -216,3 +216,21 @@ TEST_CASE("on a Mac Control+Command with a vertical arrow routes to CycleWorkspa
     CHECK(firstActionOf(down.fallback.actions) == "CycleWorkspace, direction: next");
     CHECK(firstActionOf(up.fallback.actions) == "CycleWorkspace, direction: previous");
 }
+
+TEST_CASE("a user's Ctrl+Alt+Left swap binding fires instead of the built-in focus row", "[input][router]")
+{
+    // A configuration written before Ctrl+Alt+Arrow focused panes bound it to swap them. The user's row is
+    // found first, and a swap always claims the press (TerminalSession's SwapPane* handlers return true), so
+    // the built-in focus row, tried only after a declined user row, never runs.
+    auto const config = configWith("    - { mods: [Control, Alt], key: LeftArrow, action: SwapPaneLeft }",
+                                   contour::config::KeyboardPlatformKind::Xkb);
+    auto const route = contour::input::routeKey(Key::LeftArrow,
+                                                Modifiers { Modifier::Control, Modifier::Alt },
+                                                AppModifier::Absent,
+                                                contextOf(config));
+    CHECK(firstActionOf(route.user.actions) == "SwapPaneLeft");
+    REQUIRE(route.user.actions != nullptr);
+    CHECK(route.user.actions->size() == 1);
+    CHECK(firstActionOf(route.fallback.actions) == "FocusPaneLeft");
+    CHECK(route.fallback.declined == DeclinedInput::PassThrough);
+}
