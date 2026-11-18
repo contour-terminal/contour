@@ -31,6 +31,7 @@
 #include <vtextension/CompiledExtension.hpp>
 #include <vtextension/DaemonImports.hpp>
 #include <vtextension/DaemonInstance.hpp>
+#include <vtextension/DaemonLimits.hpp>
 #include <vtextension/DaemonWorld.hpp>
 #include <vtextension/DeadlineGuard.hpp>
 #include <vtextension/Engine.hpp>
@@ -135,16 +136,14 @@ constexpr auto UnservedRows = std::array {
     UnservedRow { DaemonImport::PaneClose, &holdsNotSupportedYet<HostResult> },
     UnservedRow { DaemonImport::Panes,
                   &holdsNotSupportedYet<std::expected<std::vector<PaneInfo>, HostError>> },
-    UnservedRow { DaemonImport::TabOpen, &holdsNotSupportedYet<std::expected<std::string, HostError>> },
-    UnservedRow { DaemonImport::TabClose, &holdsNotSupportedYet<HostResult> },
-    UnservedRow { DaemonImport::TabReveal, &holdsNotSupportedYet<HostResult> },
-    UnservedRow { DaemonImport::Tabs, &holdsNotSupportedYet<std::expected<std::vector<TabInfo>, HostError>> },
-    UnservedRow { DaemonImport::TabRead, &holdsNotSupportedYet<std::expected<ByteList, HostError>> },
-    UnservedRow { DaemonImport::TabWrite, &holdsNotSupportedYet<HostResult> },
-    UnservedRow { DaemonImport::ActionsTake,
-                  &holdsNotSupportedYet<std::expected<std::vector<ActionInfo>, HostError>> },
     UnservedRow { DaemonImport::PaneReveal, &holdsNotSupportedYet<HostResult> },
     UnservedRow { DaemonImport::FileRead, &holdsNotSupportedYet<std::expected<FileContent, FileError>> },
+};
+
+/// The imports this host serves for served tabs and invoked actions.
+constexpr auto TabAndActionImports = std::array {
+    DaemonImport::TabOpen, DaemonImport::TabClose, DaemonImport::TabReveal,   DaemonImport::Tabs,
+    DaemonImport::TabRead, DaemonImport::TabWrite, DaemonImport::ActionsTake,
 };
 
 /// Records what is armed and disarmed, in one log with the service calls the test adds to it.
@@ -339,4 +338,112 @@ TEST_CASE("DaemonInstance: a durable host call that throws traps the guest and r
     auto const deadline = std::format("arm {}", guest.limits.callDeadline.count());
     CHECK(events == std::vector<std::string> { deadline, "disarm", "store-set", deadline, "disarm" });
     CHECK(guest.services.storeWrites.empty());
+}
+
+TEST_CASE("DaemonInstance: the tab and action imports are served", "[daemon][instance]")
+{
+    for (auto const import: TabAndActionImports)
+    {
+        CAPTURE(DaemonImportRows.at(std::to_underlying(import)).name);
+        CHECK(DaemonImportRows.at(std::to_underlying(import)).availability == ImportAvailability::Served);
+    }
+    // Every row is served exactly when its handler serves it (a static_assert in DaemonInstance.cpp); of the
+    // 24, only the five below wait for a later phase.
+    CHECK(std::ranges::count(DaemonImportRows, ImportAvailability::Served, &DaemonImportRow::availability)
+          == static_cast<std::ptrdiff_t>(DaemonImportRows.size() - UnservedRows.size()));
+
+    constexpr auto ResultAddress = uint32_t { 2048 };
+    constexpr auto TabAddress = uint32_t { 100 };
+    constexpr auto BytesAddress = uint32_t { 200 };
+    auto guest = FakeDaemonGuest {};
+    guest.services.servedTabs = { TabInfo { .tab = "tab-1", .scheme = "agents", .cols = 80, .rows = 24 } };
+    guest.services.tabInput = { 'j', 'k' };
+    guest.services.actions = { ActionInfo { .id = "open", .origin = 7 } };
+    auto instance = guest.start();
+    REQUIRE(instance.has_value());
+
+    auto opened = std::optional<std::expected<std::string, HostError>> {};
+    auto listed = std::optional<std::expected<std::vector<TabInfo>, HostError>> {};
+    auto read = std::optional<std::expected<ByteList, HostError>> {};
+    auto taken = std::optional<std::expected<std::vector<ActionInfo>, HostError>> {};
+    guest.onUpdate = [&](std::span<uint32_t>) -> std::expected<void, wasm::CallFailure> {
+        auto memory = FakeInstanceMemory { guest.guest() };
+        guest.put(TabAddress, "agents");
+        REQUIRE(guest.call(DaemonImport::TabOpen, { TabAddress, 6, 7, ResultAddress }).has_value());
+        opened = *abi::Codec<std::expected<std::string, HostError>>::load(memory, ResultAddress);
+        guest.put(TabAddress, "tab-1");
+        guest.put(BytesAddress, "drawn");
+        REQUIRE(guest.call(DaemonImport::TabWrite, { TabAddress, 5, BytesAddress, 5, ResultAddress })
+                    .has_value());
+        REQUIRE(guest.call(DaemonImport::TabReveal, { TabAddress, 5, 7, ResultAddress }).has_value());
+        REQUIRE(guest.call(DaemonImport::Tabs, { ResultAddress }).has_value());
+        listed = *abi::Codec<std::expected<std::vector<TabInfo>, HostError>>::load(memory, ResultAddress);
+        REQUIRE(guest.call(DaemonImport::TabRead, { TabAddress, 5, ResultAddress }).has_value());
+        read = *abi::Codec<std::expected<ByteList, HostError>>::load(memory, ResultAddress);
+        REQUIRE(guest.call(DaemonImport::ActionsTake, { ResultAddress }).has_value());
+        taken = *abi::Codec<std::expected<std::vector<ActionInfo>, HostError>>::load(memory, ResultAddress);
+        REQUIRE(guest.call(DaemonImport::TabClose, { TabAddress, 5, ResultAddress }).has_value());
+        return {};
+    };
+    REQUIRE((*instance)->update(DaemonHint::Actions).has_value());
+
+    CHECK(guest.services.calls
+          == std::vector { DaemonImport::TabOpen,
+                           DaemonImport::TabWrite,
+                           DaemonImport::TabReveal,
+                           DaemonImport::Tabs,
+                           DaemonImport::TabRead,
+                           DaemonImport::ActionsTake,
+                           DaemonImport::TabClose });
+    CHECK(guest.services.tabOpens == std::vector { std::pair { std::string { "agents" }, Origin { 7 } } });
+    CHECK(opened == std::expected<std::string, HostError> { "tab-1" });
+    REQUIRE(guest.services.tabWrites.size() == 1);
+    CHECK(guest.services.tabWrites.front().first == "tab-1");
+    CHECK(guest.services.tabWrites.front().second == ByteList { 'd', 'r', 'a', 'w', 'n' });
+    CHECK(guest.services.tabReveals == std::vector { std::pair { std::string { "tab-1" }, Origin { 7 } } });
+    CHECK(listed == std::expected<std::vector<TabInfo>, HostError> { guest.services.servedTabs });
+    CHECK(read == std::expected<ByteList, HostError> { ByteList { 'j', 'k' } });
+    CHECK(taken
+          == std::expected<std::vector<ActionInfo>, HostError> {
+              std::vector { ActionInfo { .id = "open", .origin = 7 } } });
+    CHECK(guest.services.tabCloses == std::vector<std::string> { "tab-1" });
+}
+
+TEST_CASE("DaemonInstance: a tab-write of one whole input page passes the call budget", "[daemon][instance]")
+{
+    constexpr auto TabAddress = uint32_t { 100 };
+    constexpr auto BytesAddress = uint32_t { 4096 };
+    constexpr auto ResultAddress = uint32_t { 2048 };
+    auto guest = FakeDaemonGuest { daemonWorldLimits() };
+    auto instance = guest.start();
+    REQUIRE(instance.has_value());
+    // Room for more than the budget, so that only the budget can refuse.
+    guest.guest().linearMemory.resize(std::size_t { 256 } * 1024);
+    auto const tab = std::string(36, 't');
+    guest.put(TabAddress, tab);
+
+    auto const writeOf = [&](uint32_t bytes) {
+        guest.onUpdate = [&, bytes](std::span<uint32_t>) -> std::expected<void, wasm::CallFailure> {
+            auto const called = guest.call(
+                DaemonImport::TabWrite,
+                { TabAddress, static_cast<uint32_t>(tab.size()), BytesAddress, bytes, ResultAddress });
+            if (!called)
+                return std::unexpected(wasm::CallFailure::HostFailure);
+            return {};
+        };
+        return (*instance)->update(DaemonHint::Tabs);
+    };
+
+    SECTION("65 536 bytes, beside a tab id, are written")
+    {
+        CHECK(writeOf(65'536).has_value());
+        REQUIRE(guest.services.tabWrites.size() == 1);
+        CHECK(guest.services.tabWrites.front().second.size() == 65'536);
+    }
+    SECTION("65 665 bytes trap")
+    {
+        CHECK_FALSE(writeOf(65'665).has_value());
+        CHECK(guest.services.tabWrites.empty());
+        CHECK((*instance)->fault().has_value());
+    }
 }

@@ -48,6 +48,7 @@
 #include <vtextension/RootPointer.hpp>
 #include <vtextension/RootResolution.hpp>
 #include <vtextension/Runner.hpp>
+#include <vtextension/ServedTabService.hpp>
 #include <vtextension/SessionExtensions.hpp>
 #include <vtextension/StatusLineAdapter.hpp>
 #include <vtextension/StatuslineWorld.hpp>

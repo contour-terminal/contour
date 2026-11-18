@@ -148,13 +148,14 @@ TEST_CASE("DaemonImports: the table stays within the backend's caps", "[daemon][
     }
 }
 
-TEST_CASE("DaemonImports: phase 1 serves these imports and no others", "[daemon][wit]")
+TEST_CASE("DaemonImports: these imports are served and no others", "[daemon][wit]")
 {
     static constexpr auto Served = std::array {
-        DaemonImport::Log,         DaemonImport::Wake,      DaemonImport::Now,
-        DaemonImport::ProcStart,   DaemonImport::Procs,     DaemonImport::ProcTake,
-        DaemonImport::ProcRelease, DaemonImport::StoreGet,  DaemonImport::StoreSet,
-        DaemonImport::StoreRemove, DaemonImport::StoreKeys, DaemonImport::SummarySet,
+        DaemonImport::Log,      DaemonImport::Wake,        DaemonImport::Now,         DaemonImport::ProcStart,
+        DaemonImport::Procs,    DaemonImport::ProcTake,    DaemonImport::ProcRelease, DaemonImport::StoreGet,
+        DaemonImport::StoreSet, DaemonImport::StoreRemove, DaemonImport::StoreKeys,   DaemonImport::TabOpen,
+        DaemonImport::TabClose, DaemonImport::TabReveal,   DaemonImport::Tabs,        DaemonImport::TabRead,
+        DaemonImport::TabWrite, DaemonImport::ActionsTake, DaemonImport::SummarySet,
     };
     for (auto const& row: DaemonImportRows)
     {

@@ -26,6 +26,7 @@
 #include <vtextension/IHostServices.hpp>
 #include <vtextension/ProcessService.hpp>
 #include <vtextension/Runner.hpp>
+#include <vtextension/ServedTabService.hpp>
 
 namespace vtextension
 {
@@ -50,6 +51,7 @@ struct DaemonServices
     IProcessService& processes;     ///< The extension's declared processes.
     IExtensionStore& store;         ///< Its durable store.
     IExtensionPresence& presence;   ///< Where its summary is shown.
+    IServedTabService& tabs;        ///< The tabs it serves, and the actions its user invoked.
     IExtensionScheduler& scheduler; ///< The lane it lives on, its timers, and its monotonic clock.
     core::platform::IWallClock const& wallClock; ///< The wall-clock time `now` answers with.
     /// The time zone: `load` tells the UTC offset at the wall-clock time of each load.
@@ -93,6 +95,8 @@ struct DaemonRunnerStatus
 ///   config's DurableBudget.
 /// - **Presence.** The runner tells its presence where the extension stands, with its config's generation:
 ///   Running as it is made and when a disabled one is restarted, Disabled once it faulted too often.
+/// - **Tabs and actions** (`tab-open` … `tab-write`, `actions-take`) forward to the IServedTabService, which
+///   answers in the WIT's own host-error.
 /// - **`summary-set`** refuses a summary over MaxSummaryShortChars characters or a detail over
 ///   MaxSummaryDetailBytes bytes with `limit`, publishing nothing; otherwise it publishes both through
 ///   neutralizedForDisplay(), the detail line by line so that its line breaks remain.

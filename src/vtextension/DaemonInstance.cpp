@@ -173,6 +173,71 @@ struct DaemonInstance::HostCalls
         return answer(instance, arguments, instance._services.storeKeys(*prefix));
     }
 
+    /// `tab-open: func(scheme: string, origin: origin) -> result<string, host-error>`.
+    static abi::Result<void> tabOpen(DaemonInstance& instance, std::span<uint32_t const> arguments)
+    {
+        auto reader = abi::FlatReader(arguments.first(2));
+        auto const scheme = lift<std::string>(instance, reader);
+        if (!scheme)
+            return std::unexpected(scheme.error());
+        return answer(instance, arguments, instance._services.tabOpen(*scheme, arguments[2]));
+    }
+
+    /// `tab-close: func(tab: string) -> result<_, host-error>`.
+    static abi::Result<void> tabClose(DaemonInstance& instance, std::span<uint32_t const> arguments)
+    {
+        auto reader = abi::FlatReader(arguments);
+        auto const tab = lift<std::string>(instance, reader);
+        if (!tab)
+            return std::unexpected(tab.error());
+        return answer(instance, arguments, instance._services.tabClose(*tab));
+    }
+
+    /// `tab-reveal: func(tab: string, origin: origin) -> result<_, host-error>`.
+    static abi::Result<void> tabReveal(DaemonInstance& instance, std::span<uint32_t const> arguments)
+    {
+        auto reader = abi::FlatReader(arguments.first(2));
+        auto const tab = lift<std::string>(instance, reader);
+        if (!tab)
+            return std::unexpected(tab.error());
+        return answer(instance, arguments, instance._services.tabReveal(*tab, arguments[2]));
+    }
+
+    /// `tabs: func() -> result<list<tab-info>, host-error>`.
+    static abi::Result<void> tabs(DaemonInstance& instance, std::span<uint32_t const> arguments)
+    {
+        return answer(instance, arguments, instance._services.tabs());
+    }
+
+    /// `tab-read: func(tab: string) -> result<list<u8>, host-error>`.
+    static abi::Result<void> tabRead(DaemonInstance& instance, std::span<uint32_t const> arguments)
+    {
+        auto reader = abi::FlatReader(arguments);
+        auto const tab = lift<std::string>(instance, reader);
+        if (!tab)
+            return std::unexpected(tab.error());
+        return answer(instance, arguments, instance._services.tabRead(*tab));
+    }
+
+    /// `tab-write: func(tab: string, bytes: list<u8>) -> result<_, host-error>`.
+    static abi::Result<void> tabWrite(DaemonInstance& instance, std::span<uint32_t const> arguments)
+    {
+        auto reader = abi::FlatReader(arguments);
+        auto const tab = lift<std::string>(instance, reader);
+        if (!tab)
+            return std::unexpected(tab.error());
+        auto const bytes = lift<ByteList>(instance, reader);
+        if (!bytes)
+            return std::unexpected(bytes.error());
+        return answer(instance, arguments, instance._services.tabWrite(*tab, *bytes));
+    }
+
+    /// `actions-take: func() -> result<list<action>, host-error>`.
+    static abi::Result<void> actionsTake(DaemonInstance& instance, std::span<uint32_t const> arguments)
+    {
+        return answer(instance, arguments, instance._services.actionsTake());
+    }
+
     /// `summary-set: func(short: string, detail: string) -> result<_, host-error>`.
     static abi::Result<void> summarySet(DaemonInstance& instance, std::span<uint32_t const> arguments)
     {
@@ -199,43 +264,41 @@ struct DaemonInstance::HostCalls
     using StringResult = std::expected<std::string, HostError>;
     using UnitResult = std::expected<void, HostError>;
     using PanesResult = std::expected<std::vector<PaneInfo>, HostError>;
-    using TabsResult = std::expected<std::vector<TabInfo>, HostError>;
-    using BytesResult = std::expected<ByteList, HostError>;
-    using ActionsResult = std::expected<std::vector<ActionInfo>, HostError>;
     using FileResult = std::expected<FileContent, FileError>;
 
     /// What runs each import, indexed by DaemonImport.
     static constexpr auto Handlers = std::array<Handler, DaemonImportRows.size()> {
-        &log,                            // log
-        &wake,                           // wake
-        &now,                            // now
-        &procStart,                      // proc-start
-        &procs,                          // procs
-        &procTake,                       // proc-take
-        &procRelease,                    // proc-release
-        &storeGet,                       // store-get
-        &storeSet,                       // store-set
-        &storeRemove,                    // store-remove
-        &storeKeys,                      // store-keys
-        &notSupportedYet<StringResult>,  // pane-open
-        &notSupportedYet<UnitResult>,    // pane-close
-        &notSupportedYet<PanesResult>,   // panes
-        &notSupportedYet<StringResult>,  // tab-open
-        &notSupportedYet<UnitResult>,    // tab-close
-        &notSupportedYet<UnitResult>,    // tab-reveal
-        &notSupportedYet<TabsResult>,    // tabs
-        &notSupportedYet<BytesResult>,   // tab-read
-        &notSupportedYet<UnitResult>,    // tab-write
-        &notSupportedYet<ActionsResult>, // actions-take
-        &summarySet,                     // summary-set
-        &notSupportedYet<UnitResult>,    // pane-reveal
-        &notSupportedYet<FileResult>,    // file-read
+        &log,                           // log
+        &wake,                          // wake
+        &now,                           // now
+        &procStart,                     // proc-start
+        &procs,                         // procs
+        &procTake,                      // proc-take
+        &procRelease,                   // proc-release
+        &storeGet,                      // store-get
+        &storeSet,                      // store-set
+        &storeRemove,                   // store-remove
+        &storeKeys,                     // store-keys
+        &notSupportedYet<StringResult>, // pane-open
+        &notSupportedYet<UnitResult>,   // pane-close
+        &notSupportedYet<PanesResult>,  // panes
+        &tabOpen,                       // tab-open
+        &tabClose,                      // tab-close
+        &tabReveal,                     // tab-reveal
+        &tabs,                          // tabs
+        &tabRead,                       // tab-read
+        &tabWrite,                      // tab-write
+        &actionsTake,                   // actions-take
+        &summarySet,                    // summary-set
+        &notSupportedYet<UnitResult>,   // pane-reveal
+        &notSupportedYet<FileResult>,   // file-read
     };
 
     /// Every handler that answers `not-supported-yet`.
-    static constexpr auto NotSupportedYetHandlers = std::array<Handler, 7> {
-        &notSupportedYet<StringResult>, &notSupportedYet<UnitResult>,  &notSupportedYet<PanesResult>,
-        &notSupportedYet<TabsResult>,   &notSupportedYet<BytesResult>, &notSupportedYet<ActionsResult>,
+    static constexpr auto NotSupportedYetHandlers = std::array<Handler, 4> {
+        &notSupportedYet<StringResult>,
+        &notSupportedYet<UnitResult>,
+        &notSupportedYet<PanesResult>,
         &notSupportedYet<FileResult>,
     };
 

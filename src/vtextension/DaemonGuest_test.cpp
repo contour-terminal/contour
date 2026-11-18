@@ -150,6 +150,7 @@ class GuestRig
                 .processes = *_processes,
                 .store = *_store,
                 .presence = presence,
+                .tabs = tabs,
                 .scheduler = scheduler,
                 .wallClock = wallClock,
                 .localTime = localTime,
@@ -201,6 +202,7 @@ class GuestRig
     InMemoryFileSystem fileSystem;
     FakeFileLocker locker;
     RecordingPresence presence;
+    UnservedTabs tabs; ///< This guest serves no tab here: its tab imports answer not-supported-yet.
     ManualScheduler scheduler;
     core::platform::ManualWallClock wallClock { std::chrono::system_clock::time_point {
         std::chrono::hours { 500'000 } } };
@@ -420,6 +422,41 @@ class MeasuredServices final: public IDaemonHostServices
         return _store.keys(prefix).transform_error([](StoreError) { return HostError::Gone; });
     }
 
+    // The measured guest serves no tab here: as a host that serves none would answer.
+    [[nodiscard]] std::expected<std::string, HostError> tabOpen(std::string_view scheme,
+                                                                Origin origin) override
+    {
+        return _tabs.tabOpen(scheme, origin);
+    }
+
+    [[nodiscard]] std::expected<void, HostError> tabClose(std::string_view tab) override
+    {
+        return _tabs.tabClose(tab);
+    }
+
+    [[nodiscard]] std::expected<void, HostError> tabReveal(std::string_view tab, Origin origin) override
+    {
+        return _tabs.tabReveal(tab, origin);
+    }
+
+    [[nodiscard]] std::expected<std::vector<TabInfo>, HostError> tabs() override { return _tabs.tabs(); }
+
+    [[nodiscard]] std::expected<ByteList, HostError> tabRead(std::string_view tab) override
+    {
+        return _tabs.tabRead(tab);
+    }
+
+    [[nodiscard]] std::expected<void, HostError> tabWrite(std::string_view tab,
+                                                          std::span<uint8_t const> bytes) override
+    {
+        return _tabs.tabWrite(tab, bytes);
+    }
+
+    [[nodiscard]] std::expected<std::vector<ActionInfo>, HostError> actionsTake() override
+    {
+        return _tabs.actionsTake();
+    }
+
     [[nodiscard]] std::expected<void, HostError> summarySet(std::string_view /*shortText*/,
                                                             std::string_view /*detail*/) override
     {
@@ -427,6 +464,7 @@ class MeasuredServices final: public IDaemonHostServices
     }
 
   private:
+    UnservedTabs _tabs;
     static constexpr auto PageBytes = std::size_t { 64 } * 1024;
 
     /// A process the guest has not released.

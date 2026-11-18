@@ -103,6 +103,44 @@ class IDaemonHostServices
     [[nodiscard]] virtual std::expected<std::vector<std::string>, HostError> storeKeys(
         std::string_view prefix) = 0;
 
+    /// `tab-open`: opens the extension's served tab where the origin's window is (IServedTabService).
+    /// @param scheme What the tab is served as.
+    /// @param origin The connection the invoked action came from.
+    /// @return The tab's id; or why it was not opened.
+    [[nodiscard]] virtual std::expected<std::string, HostError> tabOpen(std::string_view scheme,
+                                                                        Origin origin) = 0;
+
+    /// `tab-close`: closes one of the extension's served tabs.
+    /// @param tab Its id.
+    /// @return Nothing; or why it was not closed.
+    [[nodiscard]] virtual std::expected<void, HostError> tabClose(std::string_view tab) = 0;
+
+    /// `tab-reveal`: brings one of the extension's served tabs in front of the origin's window.
+    /// @param tab Its id.
+    /// @param origin The connection the invoked action came from.
+    /// @return Nothing; or why it was not revealed.
+    [[nodiscard]] virtual std::expected<void, HostError> tabReveal(std::string_view tab, Origin origin) = 0;
+
+    /// `tabs`: the extension's served tabs.
+    /// @return Each with its scheme and size; or why they cannot be listed.
+    [[nodiscard]] virtual std::expected<std::vector<TabInfo>, HostError> tabs() = 0;
+
+    /// `tab-read`: the input a served tab's terminal wrote since the last read.
+    /// @param tab Its id.
+    /// @return The bytes; or why there are none.
+    [[nodiscard]] virtual std::expected<ByteList, HostError> tabRead(std::string_view tab) = 0;
+
+    /// `tab-write`: draws into a served tab.
+    /// @param tab Its id.
+    /// @param bytes Its terminal's output.
+    /// @return Nothing; or why it was not written.
+    [[nodiscard]] virtual std::expected<void, HostError> tabWrite(std::string_view tab,
+                                                                  std::span<uint8_t const> bytes) = 0;
+
+    /// `actions-take`: the actions the user invoked since the last take, oldest first.
+    /// @return Each with its origin; or why they cannot be taken.
+    [[nodiscard]] virtual std::expected<std::vector<ActionInfo>, HostError> actionsTake() = 0;
+
     /// `summary-set`: what the extension shows of itself.
     /// @param shortText The one-line summary.
     /// @param detail The longer text.

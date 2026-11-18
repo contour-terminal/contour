@@ -36,6 +36,7 @@
 #include <vtextension/ExtensionStore.hpp>
 #include <vtextension/ProcessService.hpp>
 #include <vtextension/World.hpp>
+#include <vtextension/testing/FakeServedTabService.hpp>
 #include <vtextension/testing/FakeWasmBackend.hpp>
 #include <vtextension/testing/ManualScheduler.hpp>
 #include <vtextension/testing/RunnerHarness.hpp>
@@ -269,6 +270,7 @@ class DaemonRunnerHarness
             .processes = processes,
             .store = store,
             .presence = presence,
+            .tabs = tabs,
             .scheduler = laneScheduler,
             .wallClock = wallClock,
             .localTime = localTime,
@@ -334,6 +336,7 @@ class DaemonRunnerHarness
     FakeProcessService processes;
     FakeExtensionStore store;
     RecordingPresence presence;
+    FakeServedTabService tabs;
     core::platform::ManualWallClock wallClock;
     std::vector<std::string> logged; ///< Every message logged, in order.
     /// The time zone `load` reads its UTC offset in.

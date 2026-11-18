@@ -126,6 +126,54 @@ class FakeDaemonHostServices final: public IDaemonHostServices
         return std::vector<std::string> {};
     }
 
+    [[nodiscard]] std::expected<std::string, HostError> tabOpen(std::string_view scheme,
+                                                                Origin origin) override
+    {
+        called(DaemonImport::TabOpen);
+        tabOpens.emplace_back(std::string(scheme), origin);
+        return tabId;
+    }
+
+    [[nodiscard]] std::expected<void, HostError> tabClose(std::string_view tab) override
+    {
+        called(DaemonImport::TabClose);
+        tabCloses.emplace_back(tab);
+        return tabAnswer;
+    }
+
+    [[nodiscard]] std::expected<void, HostError> tabReveal(std::string_view tab, Origin origin) override
+    {
+        called(DaemonImport::TabReveal);
+        tabReveals.emplace_back(std::string(tab), origin);
+        return tabAnswer;
+    }
+
+    [[nodiscard]] std::expected<std::vector<TabInfo>, HostError> tabs() override
+    {
+        called(DaemonImport::Tabs);
+        return servedTabs;
+    }
+
+    [[nodiscard]] std::expected<ByteList, HostError> tabRead(std::string_view /*tab*/) override
+    {
+        called(DaemonImport::TabRead);
+        return tabInput;
+    }
+
+    [[nodiscard]] std::expected<void, HostError> tabWrite(std::string_view tab,
+                                                          std::span<uint8_t const> bytes) override
+    {
+        called(DaemonImport::TabWrite);
+        tabWrites.emplace_back(std::string(tab), ByteList(bytes.begin(), bytes.end()));
+        return tabAnswer;
+    }
+
+    [[nodiscard]] std::expected<std::vector<ActionInfo>, HostError> actionsTake() override
+    {
+        called(DaemonImport::ActionsTake);
+        return std::exchange(actions, {});
+    }
+
     [[nodiscard]] std::expected<void, HostError> summarySet(std::string_view shortText,
                                                             std::string_view detail) override
     {
@@ -148,6 +196,15 @@ class FakeDaemonHostServices final: public IDaemonHostServices
     std::vector<std::string> storeRemovals;                    ///< Every storeRemove().
     std::expected<void, HostError> storeAnswer;                ///< What storeSet() and storeRemove() answer.
     std::pair<std::string, std::string> summary;               ///< The last summarySet().
+    std::vector<std::pair<std::string, Origin>> tabOpens;      ///< Every tabOpen().
+    std::expected<std::string, HostError> tabId = std::string { "tab-1" }; ///< What tabOpen() answers.
+    std::vector<std::string> tabCloses;                                    ///< Every tabClose().
+    std::vector<std::pair<std::string, Origin>> tabReveals;                ///< Every tabReveal().
+    std::vector<TabInfo> servedTabs;                                       ///< What tabs() answers.
+    ByteList tabInput;                                                     ///< What tabRead() answers.
+    std::vector<std::pair<std::string, ByteList>> tabWrites;               ///< Every tabWrite().
+    std::expected<void, HostError> tabAnswer; ///< What tabClose(), tabReveal(), tabWrite() answer.
+    std::vector<ActionInfo> actions;          ///< What the next actionsTake() answers.
 
   private:
     void called(DaemonImport import)

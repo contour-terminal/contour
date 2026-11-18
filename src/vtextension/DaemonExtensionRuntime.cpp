@@ -138,6 +138,7 @@ struct DaemonExtensionRuntime::Extension
     std::shared_ptr<HintRelay> relay = std::make_shared<HintRelay>();
     DeclaredProcessesConfig processesConfig; ///< What @ref processes was made from, to make them anew.
     std::unique_ptr<DeclaredProcesses> processes;
+    std::unique_ptr<IServedTabService> tabs; ///< The tabs it serves and the actions it takes; never null.
     std::unique_ptr<DaemonExtensionRunner> runner; ///< Null until it runs; last, as it reaches the rest.
 };
 
@@ -258,6 +259,14 @@ std::expected<std::unique_ptr<DaemonExtensionRuntime::Extension>, DeclarationPro
                                   .inheritedEnvironment = config.inheritedEnvironment,
                                   .hostId = extension->hostId,
                                   .grantDigest = extension->grantDigest };
+    auto const& declared = extension->processesConfig.manifest;
+    auto const owner = ServedTabOwner { .extension = extension->name,
+                                        .title = displayTitleOf(declared),
+                                        .scheme = declared.servedScheme,
+                                        .moduleDigest = declared.digest };
+    extension->tabs = _services.tabsFor ? _services.tabsFor(owner) : nullptr;
+    if (!extension->tabs)
+        extension->tabs = std::make_unique<UnservedTabs>();
     if (auto made = makeProcesses(*extension); !made)
         return std::unexpected(
             problemOf(name, DaemonExtensionProblem::RootUnresolvable, textOf(RootErrorTexts, made.error())));
@@ -313,6 +322,7 @@ std::expected<void, DeclarationProblem> DaemonExtensionRuntime::run(Extension& e
                                                 DaemonServices { .processes = *extension.processes,
                                                                  .store = *extension.store,
                                                                  .presence = _services.presence,
+                                                                 .tabs = *extension.tabs,
                                                                  .scheduler = _pool,
                                                                  .wallClock = _services.wallClock,
                                                                  .localTime = _services.localTime,

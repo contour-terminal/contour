@@ -88,6 +88,7 @@ set(vtextension_HEADERS
     RootResolution.hpp
     Runner.hpp
     SettableEnvironment.hpp
+    ServedTabService.hpp
     SessionExtensions.hpp
     StatusLineAdapter.hpp
     StatuslineWorld.hpp
@@ -166,6 +167,7 @@ if(VTEXTENSION_TESTING)
         testing/FakeDirectoryOpener.hpp
         testing/FakeGuestMemory.hpp
         testing/FakeProcessRunner.hpp
+        testing/FakeServedTabService.hpp
         testing/FakeWasmBackend.hpp
         testing/FixtureProcessRunner.hpp
         testing/GuestModuleCheck.hpp

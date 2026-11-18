@@ -417,6 +417,45 @@ class DaemonExtensionRunner::Core final: public IDaemonHostServices, public std:
             [](StoreError error) { return toHostError(error); });
     }
 
+    // A closed runner -- revoked, or going -- reaches no tab: what its guest still asks mid-callback, after
+    // the host closed its tabs, would otherwise open one again.
+    [[nodiscard]] std::expected<std::string, HostError> tabOpen(std::string_view scheme,
+                                                                Origin origin) override
+    {
+        return servedUnlessClosed([&] { return _services.tabs.tabOpen(scheme, origin); });
+    }
+
+    [[nodiscard]] std::expected<void, HostError> tabClose(std::string_view tab) override
+    {
+        return servedUnlessClosed([&] { return _services.tabs.tabClose(tab); });
+    }
+
+    [[nodiscard]] std::expected<void, HostError> tabReveal(std::string_view tab, Origin origin) override
+    {
+        return servedUnlessClosed([&] { return _services.tabs.tabReveal(tab, origin); });
+    }
+
+    [[nodiscard]] std::expected<std::vector<TabInfo>, HostError> tabs() override
+    {
+        return servedUnlessClosed([&] { return _services.tabs.tabs(); });
+    }
+
+    [[nodiscard]] std::expected<ByteList, HostError> tabRead(std::string_view tab) override
+    {
+        return servedUnlessClosed([&] { return _services.tabs.tabRead(tab); });
+    }
+
+    [[nodiscard]] std::expected<void, HostError> tabWrite(std::string_view tab,
+                                                          std::span<uint8_t const> bytes) override
+    {
+        return servedUnlessClosed([&] { return _services.tabs.tabWrite(tab, bytes); });
+    }
+
+    [[nodiscard]] std::expected<std::vector<ActionInfo>, HostError> actionsTake() override
+    {
+        return servedUnlessClosed([&] { return _services.tabs.actionsTake(); });
+    }
+
     [[nodiscard]] std::expected<void, HostError> summarySet(std::string_view shortText,
                                                             std::string_view detail) override
     {
@@ -446,6 +485,15 @@ class DaemonExtensionRunner::Core final: public IDaemonHostServices, public std:
     [[nodiscard]] core::platform::IClock& clock() const noexcept { return _services.scheduler.clock(); }
 
     [[nodiscard]] bool isClosed() const noexcept { return _stop.stop_requested(); }
+
+    /// @return What @p call answers; `gone` once the runner is closed, without calling it.
+    template <typename Call>
+    [[nodiscard]] auto servedUnlessClosed(Call call) -> decltype(call())
+    {
+        if (isClosed())
+            return std::unexpected(HostError::Gone);
+        return call();
+    }
 
     /// Tells the presence where the extension now stands, as this run.
     void reportPhase(DaemonExtensionPhase phase) noexcept

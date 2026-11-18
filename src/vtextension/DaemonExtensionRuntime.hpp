@@ -34,6 +34,7 @@
 #include <vtextension/FileLocker.hpp>
 #include <vtextension/IHostServices.hpp>
 #include <vtextension/RootResolution.hpp>
+#include <vtextension/ServedTabService.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension
@@ -147,6 +148,9 @@ struct DaemonExtensionRuntimeServices
     core::platform::IWallClock const& wallClock;    ///< The wall-clock time `now` answers with.
     vtbackend::LocalTimeConverter const& localTime; ///< The time zone each `load` reads its UTC offset in.
     IExtensionPresence& presence;                   ///< Where summaries are shown.
+    /// Makes the tab-and-action service of one extension, as it composes; empty for a host that serves no
+    /// tabs, whose extensions are answered `not-supported-yet` (UnservedTabs).
+    std::function<std::unique_ptr<IServedTabService>(ServedTabOwner const& owner)> tabsFor {};
     /// Called for every message an extension logs, on its lane; must be cheap.
     std::function<void(std::string_view name, LogLevel level, std::string_view message)> onLog;
 };

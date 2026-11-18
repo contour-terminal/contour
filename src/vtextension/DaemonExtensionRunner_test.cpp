@@ -667,3 +667,96 @@ TEST_CASE("DaemonExtensionRunner: hints raised from another thread while the lan
     }));
     CHECK(harness.retirement.count() == 1);
 }
+
+TEST_CASE(
+    "DaemonExtensionRunner: a guest fault leaves the tab open and blank, and the restarted guest redraws",
+    "[daemon][runner][served]")
+{
+    // The tab is the host's, not the instance's: a fault drops the instance and closes nothing, so the tab
+    // stays open, showing what was last drawn into it (blank, as far as the guest knows), until the restarted
+    // guest finds it in `tabs` and draws again.
+    auto harness = DaemonRunnerHarness {};
+    auto tabId = std::optional<std::expected<std::string, HostError>> {};
+    auto const draw = [&](std::string_view tab, std::string_view frame) {
+        harness.put(FirstText, tab);
+        harness.put(SecondText, frame);
+        return harness.call(DaemonImport::TabWrite,
+                            { FirstText,
+                              static_cast<uint32_t>(tab.size()),
+                              SecondText,
+                              static_cast<uint32_t>(frame.size()),
+                              ResultAddress });
+    };
+    harness.onLoad = [&] {
+        if (harness.loadedConfigs.size() == 1)
+            return returned();
+        // The restarted guest: it finds its tab and draws it anew.
+        if (auto const called = harness.call(DaemonImport::Tabs, { ResultAddress }); !called)
+            return passOn(called);
+        auto const listed = harness.read<std::expected<std::vector<TabInfo>, HostError>>(ResultAddress);
+        REQUIRE(listed.has_value());
+        REQUIRE(listed->has_value());
+        REQUIRE((*listed)->size() == 1);
+        return passOn(draw((*listed)->front().tab, "frame 2"));
+    };
+    harness.onUpdate = [&] {
+        if (harness.updates.back() == DaemonHint::Actions)
+        {
+            harness.put(FirstText, "agents");
+            if (auto const called = harness.call(DaemonImport::TabOpen, { FirstText, 6, 1, ResultAddress });
+                !called)
+                return passOn(called);
+            auto read = harness.read<std::expected<std::string, HostError>>(ResultAddress);
+            REQUIRE(read.has_value());
+            tabId = *read;
+            REQUIRE(tabId->has_value());
+            return passOn(draw(**tabId, "frame 1"));
+        }
+        return std::expected<void, wasm::CallFailure> { std::unexpect, wasm::CallFailure::Trap };
+    };
+    harness.start();
+    harness.runner->hint(DaemonHint::Actions);
+    harness.scheduler.runPending();
+    REQUIRE(tabId.has_value());
+    REQUIRE(harness.tabs.openTabs.size() == 1);
+
+    harness.runner->hint(DaemonHint::Wake);
+    harness.scheduler.runPending();
+    CHECK(harness.runner->status().state == DaemonRunnerState::BackingOff);
+    // The fault closed nothing.
+    CHECK(harness.tabs.openTabs.size() == 1);
+    CHECK(harness.tabs.closes == 0);
+
+    harness.scheduler.advance(DaemonRunnerHarness::defaultConfig().limits.initialBackoff);
+    REQUIRE(harness.loadedConfigs.size() == 2);
+    CHECK(harness.runner->status().state == DaemonRunnerState::Running);
+    CHECK(harness.tabs.openTabs.size() == 1);
+    CHECK(harness.tabs.written == std::vector<std::string> { "frame 1", "frame 2" });
+    CHECK(harness.tabs.opens == 1);
+}
+
+TEST_CASE("DaemonExtensionRunner: a tab-open during a revoke leaves no tab", "[daemon][runner][served]")
+{
+    // The revoke closes the runner while its guest is mid-update, then the host closes the extension's tabs;
+    // what the guest asks after the close must not open one again.
+    auto harness = DaemonRunnerHarness {};
+    auto answer = std::optional<std::expected<std::string, HostError>> {};
+    harness.onUpdate = [&] {
+        harness.runner.reset();
+        harness.put(FirstText, "agents");
+        if (auto const called = harness.call(DaemonImport::TabOpen, { FirstText, 6, 1, ResultAddress });
+            !called)
+            return passOn(called);
+        auto read = harness.read<std::expected<std::string, HostError>>(ResultAddress);
+        REQUIRE(read.has_value());
+        answer = *read;
+        return returned();
+    };
+    harness.start();
+    harness.runner->hint(DaemonHint::Actions);
+    harness.scheduler.runPending();
+
+    CHECK(answer == std::expected<std::string, HostError> { std::unexpect, HostError::Gone });
+    CHECK(harness.tabs.opens == 0);
+    CHECK(harness.tabs.openTabs.empty());
+}
