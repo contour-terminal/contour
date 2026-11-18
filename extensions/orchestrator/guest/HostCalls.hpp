@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <optional>
@@ -18,6 +19,9 @@
 /// calls the driver is written against.
 namespace orchestrator::guest
 {
+
+/// The most bytes one IGuestHost::tabWrite() carries: a host call's limit.
+inline constexpr std::size_t MaxTabWriteBytes = std::size_t { 64 } * 1024;
 
 /// Why the host calls `update`, in the order the host delivers pending hints.
 enum class Hint : uint8_t
@@ -121,6 +125,22 @@ struct PaneInfo
     ProgramLiveness program = ProgramLiveness::Gone; ///< Whether the spawned program is still its program.
 };
 
+/// A tab the guest serves, as the host lists it.
+struct TabInfo
+{
+    std::string tab;    ///< The tab's id.
+    std::string scheme; ///< The scheme it was opened with.
+    uint32_t cols = 0;  ///< Its width, in cells.
+    uint32_t rows = 0;  ///< Its height, in cells.
+};
+
+/// An action the user invoked; it carries no arguments.
+struct ActionInfo
+{
+    std::string id;      ///< The action's declared id.
+    uint32_t origin = 0; ///< The connection that invoked it: where a tab it opens is placed.
+};
+
 /// The daemon world's imports as the driver uses them; WitHost.cpp adapts the generated bindings, and the
 /// tests a fake.
 class IGuestHost
@@ -219,6 +239,37 @@ class IGuestHost
     /// @return Its bytes, or why they could not be read.
     [[nodiscard]] virtual std::expected<std::string, FileError> fileRead(std::string_view root,
                                                                          std::string_view path) = 0;
+
+    /// Opens a served tab in the origin's workspace; the host reveals the one already open there instead.
+    /// @param scheme The declared scheme it serves.
+    /// @param origin The connection the action that asked came from.
+    /// @return The tab's id, or why it was not opened.
+    [[nodiscard]] virtual std::expected<std::string, HostError> tabOpen(std::string_view scheme,
+                                                                        uint32_t origin) = 0;
+
+    /// Activates a served tab already open in the origin's workspace.
+    /// @param tab The tab's id.
+    /// @param origin The connection to reveal it to.
+    /// @return Nothing, or why it was not revealed.
+    [[nodiscard]] virtual std::expected<void, HostError> tabReveal(std::string_view tab, uint32_t origin) = 0;
+
+    /// @return The tabs the guest serves.
+    [[nodiscard]] virtual std::expected<std::vector<TabInfo>, HostError> tabs() = 0;
+
+    /// Reads what the user typed into a served tab since the last read: whole chunks the terminal sent.
+    /// @param tab The tab's id.
+    /// @return The bytes, or why they could not be read.
+    [[nodiscard]] virtual std::expected<std::string, HostError> tabRead(std::string_view tab) = 0;
+
+    /// Writes output to a served tab.
+    /// @param tab The tab's id.
+    /// @param bytes At most MaxTabWriteBytes of it.
+    /// @return Nothing, or why it was not written.
+    [[nodiscard]] virtual std::expected<void, HostError> tabWrite(std::string_view tab,
+                                                                  std::string_view bytes) = 0;
+
+    /// @return The actions the user invoked since the last call, oldest first.
+    [[nodiscard]] virtual std::expected<std::vector<ActionInfo>, HostError> actionsTake() = 0;
 
     /// Sets the guest's summary.
     /// @param shortText One line for a status line.

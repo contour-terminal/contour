@@ -551,3 +551,57 @@ TEST_CASE("a second frame with nothing changed emits nothing", "[orchestrator][v
 }
 
 // }}}
+
+TEST_CASE("select picks a run's row, dropping a filter that hides it", "[orchestrator][view]")
+{
+    constexpr auto BlockedId = "pr-2379-20261113-151500"sv;
+    auto fixture =
+        Fixture { World { .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }),
+                                      storedRun(Blocked {}, BlockedId, ChangeRequestRef { 2379 }) } } };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.selectedRun().empty());
+
+    fixture.dashboard.select(BlockedId);
+    CHECK(fixture.dashboard.selectedRun() == BlockedId);
+    CHECK(!fixture.dashboard.frame().empty());
+
+    // A filter that hides the row is dropped; an unknown run selects nothing else.
+    CHECK(fixture.dashboard.input("/2375\r").empty());
+    REQUIRE(fixture.dashboard.interaction().filter == "2375");
+    fixture.dashboard.select(BlockedId);
+    CHECK(fixture.dashboard.selectedRun() == BlockedId);
+    CHECK(fixture.dashboard.interaction().filter.empty());
+    fixture.dashboard.select("no-such-run");
+    CHECK(fixture.dashboard.selectedRun() == BlockedId);
+
+    // An end that waits for its confirmation is dropped: it was asked of another row.
+    fixture.dashboard.select(RunningId);
+    CHECK(fixture.dashboard.input("e").empty());
+    REQUIRE(fixture.dashboard.interaction().pendingEnd == RunningId);
+    fixture.dashboard.select(BlockedId);
+    CHECK(fixture.dashboard.interaction().pendingEnd.empty());
+}
+
+TEST_CASE("an agent's age is drawn again when it moves on", "[orchestrator][view]")
+{
+    auto const at = [](uint64_t sinceStartMs) {
+        return core::SteadyTimePoint { std::chrono::milliseconds { StartMonoMs + sinceStartMs } };
+    };
+    auto const engine =
+        bootEngine(World { .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }) } });
+    auto clock = core::ManualClock { at(45'000) };
+    auto dashboard = Dashboard { engine, dashboardTheme(), clock, Wide };
+    REQUIRE_FALSE(dashboard.frame().empty());
+    CHECK(core::tui::test::canvasToString(dashboard.rendered()).contains("working 45s"));
+    CHECK(dashboard.nextRepaintDue() == at(46'000));
+
+    // The engine does not change; the age does.
+    clock.advance(std::chrono::seconds { 15 });
+    CHECK_FALSE(dashboard.frame().empty());
+    CHECK(core::tui::test::canvasToString(dashboard.rendered()).contains("working 1m"));
+    CHECK(dashboard.nextRepaintDue() == at(120'000));
+
+    // Within the minute it shows, nothing is drawn.
+    clock.advance(std::chrono::seconds { 30 });
+    CHECK(dashboard.frame().empty());
+}

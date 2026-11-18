@@ -7,9 +7,11 @@
 #include <expected>
 #include <initializer_list>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace std::string_view_literals;
@@ -56,21 +58,17 @@ namespace
     /// Only the worktrees are readable: nothing under the user's repositories is.
     constexpr auto ReadableRoots = std::array { Root::Worktrees };
 
-    /// The scheme of the tabs the extension serves.
-    constexpr auto ServedScheme = "orchestrator"sv;
-
-    /// A palette row: the id the guest receives and the title the user sees.
-    struct ActionDecl
-    {
-        std::string_view id;
-        std::string_view title;
-    };
-
     constexpr auto ActionTable = std::array {
-        ActionDecl { .id = "open", .title = "Open Agents" },
-        ActionDecl { .id = "refresh", .title = "Agents: Refresh now" },
-        ActionDecl { .id = "show-blocked", .title = "Agents: Show blocked agent" },
+        ActionDecl { .kind = ActionKind::Open, .id = "open", .title = "Open Agents" },
+        ActionDecl { .kind = ActionKind::Refresh, .id = "refresh", .title = "Agents: Refresh now" },
+        ActionDecl {
+            .kind = ActionKind::ShowBlocked, .id = "show-blocked", .title = "Agents: Show blocked agent" },
     };
+    static_assert(ActionTable.size() == std::to_underlying(ActionKind::ShowBlocked) + 1U);
+    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ActionTable.size()),
+                                      [](std::size_t index) {
+                                          return std::to_underlying(ActionTable[index].kind) == index;
+                                      }));
 
     // }}}
     // {{{ environments
@@ -397,6 +395,17 @@ PaneDecl const* findPaneTemplate(std::string_view name) noexcept
 {
     auto const found = std::ranges::find(PaneTable, name, &PaneDecl::name);
     return found == PaneTable.end() ? nullptr : &*found;
+}
+
+std::span<ActionDecl const> actionDecls() noexcept
+{
+    return ActionTable;
+}
+
+ActionDecl const* findAction(std::string_view id) noexcept
+{
+    auto const found = std::ranges::find(ActionTable, id, &ActionDecl::id);
+    return found == ActionTable.end() ? nullptr : &*found;
 }
 
 std::expected<std::vector<std::string>, SubstituteError> substitute(std::span<std::string_view const> argv,

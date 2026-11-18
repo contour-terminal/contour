@@ -34,6 +34,10 @@ namespace
     static_assert(alignof(terminal_extensions_daemon_host_chunk_t) == 4);
     static_assert(sizeof(terminal_extensions_daemon_host_file_content_t) == 16);
     static_assert(alignof(terminal_extensions_daemon_host_file_content_t) == 8);
+    static_assert(sizeof(terminal_extensions_daemon_host_tab_info_t) == 24);
+    static_assert(alignof(terminal_extensions_daemon_host_tab_info_t) == 4);
+    static_assert(sizeof(terminal_extensions_daemon_host_action_t) == 12);
+    static_assert(alignof(terminal_extensions_daemon_host_action_t) == 4);
 
     using HostErrorCode = terminal_extensions_daemon_host_host_error_t;
     using FileErrorCode = terminal_extensions_daemon_host_file_error_t;
@@ -290,7 +294,7 @@ namespace
             auto tagText = borrowed(tag);
             auto pane = daemon_string_t {};
             auto error = HostErrorCode {};
-            // No tab is served yet, so the pane opens in no tab's workspace.
+            // No `near` tab is named: the agents' panes are not placed beside the dashboard yet.
             if (!terminal_extensions_daemon_host_pane_open(
                     &templateText, &list, &cwdText, &titleText, &tagText, nullptr, &pane, &error))
                 return std::unexpected(hostErrorOf(error));
@@ -334,6 +338,82 @@ namespace
             auto bytes = copied(content.bytes);
             terminal_extensions_daemon_host_file_content_free(&content);
             return bytes;
+        }
+
+        [[nodiscard]] std::expected<std::string, HostError> tabOpen(std::string_view scheme,
+                                                                    uint32_t origin) override
+        {
+            auto schemeText = borrowed(scheme);
+            auto tab = daemon_string_t {};
+            auto error = HostErrorCode {};
+            if (!terminal_extensions_daemon_host_tab_open(&schemeText, origin, &tab, &error))
+                return std::unexpected(hostErrorOf(error));
+            auto id = copied(tab);
+            daemon_string_free(&tab);
+            return id;
+        }
+
+        [[nodiscard]] std::expected<void, HostError> tabReveal(std::string_view tab, uint32_t origin) override
+        {
+            auto tabText = borrowed(tab);
+            auto error = HostErrorCode {};
+            if (!terminal_extensions_daemon_host_tab_reveal(&tabText, origin, &error))
+                return std::unexpected(hostErrorOf(error));
+            return {};
+        }
+
+        [[nodiscard]] std::expected<std::vector<TabInfo>, HostError> tabs() override
+        {
+            auto listed = terminal_extensions_daemon_host_list_tab_info_t {};
+            auto error = HostErrorCode {};
+            if (!terminal_extensions_daemon_host_tabs(&listed, &error))
+                return std::unexpected(hostErrorOf(error));
+            auto tabs = std::vector<TabInfo> {};
+            tabs.reserve(listed.len);
+            for (auto const& info: std::span(listed.ptr, listed.len))
+                tabs.push_back(TabInfo { .tab = copied(info.tab),
+                                         .scheme = copied(info.scheme),
+                                         .cols = info.cols,
+                                         .rows = info.rows });
+            terminal_extensions_daemon_host_list_tab_info_free(&listed);
+            return tabs;
+        }
+
+        [[nodiscard]] std::expected<std::string, HostError> tabRead(std::string_view tab) override
+        {
+            auto tabText = borrowed(tab);
+            auto bytes = daemon_list_u8_t {};
+            auto error = HostErrorCode {};
+            if (!terminal_extensions_daemon_host_tab_read(&tabText, &bytes, &error))
+                return std::unexpected(hostErrorOf(error));
+            auto input = copied(bytes);
+            daemon_list_u8_free(&bytes);
+            return input;
+        }
+
+        [[nodiscard]] std::expected<void, HostError> tabWrite(std::string_view tab,
+                                                              std::string_view bytes) override
+        {
+            auto tabText = borrowed(tab);
+            auto output = borrowedBytes(bytes);
+            auto error = HostErrorCode {};
+            if (!terminal_extensions_daemon_host_tab_write(&tabText, &output, &error))
+                return std::unexpected(hostErrorOf(error));
+            return {};
+        }
+
+        [[nodiscard]] std::expected<std::vector<ActionInfo>, HostError> actionsTake() override
+        {
+            auto listed = terminal_extensions_daemon_host_list_action_t {};
+            auto error = HostErrorCode {};
+            if (!terminal_extensions_daemon_host_actions_take(&listed, &error))
+                return std::unexpected(hostErrorOf(error));
+            auto actions = std::vector<ActionInfo> {};
+            actions.reserve(listed.len);
+            for (auto const& action: std::span(listed.ptr, listed.len))
+                actions.push_back(ActionInfo { .id = copied(action.id), .origin = action.origin });
+            terminal_extensions_daemon_host_list_action_free(&listed);
+            return actions;
         }
 
         [[nodiscard]] std::expected<void, HostError> summarySet(std::string_view shortText,

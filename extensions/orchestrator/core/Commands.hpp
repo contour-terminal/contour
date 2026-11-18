@@ -111,6 +111,33 @@ enum class SubstituteError : uint8_t
 /// The pane template an agent runs in.
 inline constexpr std::string_view AgentPaneTemplate = "agent";
 
+/// The scheme of the tabs the extension serves: the manifest's `serve` line, and what the guest opens its tab
+/// as.
+inline constexpr std::string_view ServedScheme = "orchestrator";
+
+/// What a declared action does: a palette row the user invokes.
+enum class ActionKind : uint8_t
+{
+    Open,        ///< Open the dashboard's tab, or reveal the one open.
+    Refresh,     ///< Read the lists again now.
+    ShowBlocked, ///< Open the dashboard's tab on the first blocked agent.
+};
+
+/// A palette row: what it does, the id the guest receives and the title the user sees.
+struct ActionDecl
+{
+    ActionKind kind = ActionKind::Open; ///< What it does.
+    std::string_view id;                ///< The id the manifest declares and the host hands back.
+    std::string_view title;             ///< What the palette shows.
+};
+
+/// @return The declared actions, in manifest order: one per ActionKind, in its order.
+[[nodiscard]] std::span<ActionDecl const> actionDecls() noexcept;
+
+/// @param id An action's id, as the host hands it back.
+/// @return Its declaration, or nullptr if no action has that id.
+[[nodiscard]] ActionDecl const* findAction(std::string_view id) noexcept;
+
 /// @param name A pane template's name.
 /// @return Its declaration, or nullptr if no pane template has that name.
 [[nodiscard]] PaneDecl const* findPaneTemplate(std::string_view name) noexcept;

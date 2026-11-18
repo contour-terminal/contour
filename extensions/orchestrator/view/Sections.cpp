@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <format>
 #include <iterator>
+#include <limits>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -115,23 +117,50 @@ namespace
         return task != nullptr ? std::string_view { task->label } : std::string_view { run.task };
     }
 
+    constexpr auto SecondMs = uint64_t { 1000 };
+    constexpr auto MinuteMs = 60 * SecondMs;
+    constexpr auto HourMs = 60 * MinuteMs;
+
+    /// The unit an age is shown in: ages below @ref below count @ref unitMs, suffixed @ref suffix.
+    struct AgeUnit
+    {
+        uint64_t below = 0;           ///< The first age shown in a larger unit.
+        uint64_t unitMs = 0;          ///< What one step of the shown number is.
+        std::string_view suffix = {}; ///< Such as `s`.
+    };
+
+    /// The units ages are shown in, smallest first; the last takes every age.
+    constexpr auto AgeUnits = std::array {
+        AgeUnit { .below = MinuteMs, .unitMs = SecondMs, .suffix = "s" },
+        AgeUnit { .below = HourMs, .unitMs = MinuteMs, .suffix = "m" },
+        AgeUnit { .below = std::numeric_limits<uint64_t>::max(), .unitMs = HourMs, .suffix = "h" },
+    };
+
+    [[nodiscard]] constexpr AgeUnit const& ageUnitOf(uint64_t ms) noexcept
+    {
+        return *std::ranges::find_if(AgeUnits, [ms](AgeUnit const& unit) { return ms < unit.below; });
+    }
+
     /// @return Such as `45s`, `6m` or `3h`.
     [[nodiscard]] std::string ageText(uint64_t ms)
     {
-        constexpr auto Second = uint64_t { 1000 };
-        constexpr auto Minute = 60 * Second;
-        constexpr auto Hour = 60 * Minute;
-        if (ms < Minute)
-            return std::format("{}s", ms / Second);
-        if (ms < Hour)
-            return std::format("{}m", ms / Minute);
-        return std::format("{}h", ms / Hour);
+        auto const& unit = ageUnitOf(ms);
+        return std::format("{}{}", ms / unit.unitMs, unit.suffix);
+    }
+
+    /// @return Whether the run's row shows its age at @p nowMonoMs: it runs or is blocked, and its age is
+    /// known.
+    [[nodiscard]] bool showsAge(Run const& run, uint64_t nowMonoMs) noexcept
+    {
+        auto const ages =
+            std::holds_alternative<Running>(run.state) || std::holds_alternative<Blocked>(run.state);
+        return ages && run.runningSinceMs != 0 && nowMonoMs >= run.runningSinceMs;
     }
 
     /// @return The run's age since its tab opened, after a space; empty when that is not known.
     [[nodiscard]] std::string ageOf(Run const& run, uint64_t nowMonoMs)
     {
-        if (run.runningSinceMs == 0 || nowMonoMs < run.runningSinceMs)
+        if (!showsAge(run, nowMonoMs))
             return {};
         return std::format(" {}", ageText(nowMonoMs - run.runningSinceMs));
     }
@@ -334,6 +363,21 @@ namespace
         return !std::ranges::search(haystack, needle, {}, lower, lower).empty();
     }
 } // namespace
+
+std::optional<uint64_t> nextAgeChange(Engine const& engine, uint64_t nowMonoMs)
+{
+    auto earliest = std::optional<uint64_t> {};
+    for (auto const& run: engine.runs())
+    {
+        if (!showsAge(run, nowMonoMs))
+            continue;
+        auto const age = nowMonoMs - run.runningSinceMs;
+        auto const unitMs = ageUnitOf(age).unitMs;
+        auto const changesAt = run.runningSinceMs + (((age / unitMs) + 1) * unitMs);
+        earliest = earliest ? std::min(*earliest, changesAt) : changesAt;
+    }
+    return earliest;
+}
 
 std::vector<Row> buildRows(Engine const& engine, uint64_t nowMonoMs)
 {

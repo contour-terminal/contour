@@ -98,14 +98,16 @@ add_library(orchestrator_view STATIC
 )
 target_link_libraries(orchestrator_view PUBLIC orchestrator_core core::tui_core)
 
-# The guest's driver: the engine driven through the daemon world's host calls (guest/HostCalls.hpp). Native too,
-# so that its tests run against a fake host; the WebAssembly module adds the adapter to the generated bindings.
+# The guest's driver: the engine driven through the daemon world's host calls (guest/HostCalls.hpp), and the
+# dashboard served in its tabs. Native too, so that its tests run against a fake host; the WebAssembly module adds
+# the adapter to the generated bindings.
 add_library(orchestrator_guest_driver STATIC
     guest/Driver.cpp
     guest/Driver.hpp
+    guest/GuestClock.hpp
     guest/HostCalls.hpp
 )
-target_link_libraries(orchestrator_guest_driver PUBLIC orchestrator_core)
+target_link_libraries(orchestrator_guest_driver PUBLIC orchestrator_core orchestrator_view)
 
 # Prints the manifest the declared tables make: the module's custom section is generated from it, and a test
 # compares it with the corpus. A host tool; never installed.

@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -74,6 +75,12 @@ struct Row
 ///        measured against.
 /// @return The rows; the configuration's absence is a notice row that says what to configure.
 [[nodiscard]] std::vector<Row> buildRows(Engine const& engine, uint64_t nowMonoMs);
+
+/// @param engine The engine.
+/// @param nowMonoMs Now, as buildRows() takes it.
+/// @return When the first agent's age, as its row shows it, changes next (`45s` becomes `46s`, `59s` becomes
+///         `1m`); std::nullopt when no row shows an age.
+[[nodiscard]] std::optional<uint64_t> nextAgeChange(Engine const& engine, uint64_t nowMonoMs);
 
 /// The rows a filter and a layout keep.
 /// @param rows Every row.

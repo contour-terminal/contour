@@ -3,11 +3,13 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <format>
 #include <limits>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -15,6 +17,7 @@
 #include <vector>
 
 #include <orchestrator/core/Overloaded.hpp>
+#include <orchestrator/view/Theme.hpp>
 
 namespace orchestrator::guest
 {
@@ -156,6 +159,41 @@ namespace
         };
     }
 
+    /// @return The engine input a dashboard's action is stepped as, arriving at @p monoMs.
+    [[nodiscard]] Input inputOf(view::UiAction const& action, uint64_t monoMs)
+    {
+        return std::visit(
+            Overloaded {
+                [&](view::RefreshNowAction const&) -> Input { return RefreshNow { .monoMs = monoMs }; },
+                [&](view::EndRunAction const& end) -> Input {
+                    return EndRun { .run = end.run, .monoMs = monoMs };
+                },
+                [&](view::RetryRemovalAction const& retry) -> Input {
+                    return RetryRemovalOf { .run = retry.run, .monoMs = monoMs };
+                },
+                [&](view::DismissAction const& dismiss) -> Input {
+                    return DismissRun { .run = dismiss.run, .monoMs = monoMs };
+                },
+                [&](view::MarkSeenAction const& seen) -> Input {
+                    return MarkRunSeen { .run = seen.run, .monoMs = monoMs };
+                },
+            },
+            action);
+    }
+
+    /// @return A listed tab's size, as the dashboard takes it.
+    [[nodiscard]] core::tui::Size sizeOf(TabInfo const& tab) noexcept
+    {
+        return core::tui::Size { .width = static_cast<int>(tab.cols), .height = static_cast<int>(tab.rows) };
+    }
+
+    /// @return @p time in the host's monotonic milliseconds, rounded up: a wake then never comes early.
+    [[nodiscard]] uint64_t monoMsOf(core::SteadyTimePoint time) noexcept
+    {
+        return static_cast<uint64_t>(
+            std::chrono::ceil<std::chrono::milliseconds>(time.time_since_epoch()).count());
+    }
+
     [[nodiscard]] PaneFact paneFactOf(PaneInfo const& pane)
     {
         return PaneFact {
@@ -208,11 +246,14 @@ std::optional<uint64_t> WakeTimer::takeDue(uint64_t nowMs) noexcept
     return std::exchange(_due, std::nullopt);
 }
 
-std::optional<uint64_t> WakeTimer::unasked() const noexcept
+std::optional<uint64_t> WakeTimer::unasked(std::optional<uint64_t> alsoDueMs) const noexcept
 {
-    if (!_due || _asked == _due)
+    auto due = _due;
+    if (alsoDueMs)
+        due = due ? std::min(*due, *alsoDueMs) : *alsoDueMs;
+    if (!due || _asked == due)
         return std::nullopt;
-    return _due;
+    return due;
 }
 
 uint32_t WakeTimer::delayUntil(uint64_t dueMs, uint64_t nowMs) noexcept
@@ -225,11 +266,18 @@ uint32_t WakeTimer::delayUntil(uint64_t dueMs, uint64_t nowMs) noexcept
 // }}}
 // {{{ Driver
 
+std::array<Driver::ActionHandler, 3> const Driver::ActionHandlers {
+    &Driver::openDashboard, // ActionKind::Open
+    &Driver::refreshNow,    // ActionKind::Refresh
+    &Driver::showBlocked,   // ActionKind::ShowBlocked
+};
+
 Driver::Driver(IGuestHost& host, IDriverObserver& observer, std::string worktreeRoot, Engine engine):
     _host { host },
     _observer { observer },
     _worktreeRoot { std::move(worktreeRoot) },
-    _engine { std::move(engine) }
+    _engine { std::make_unique<Engine>(std::move(engine)) },
+    _clock { std::make_unique<GuestClock>() }
 {
 }
 
@@ -301,6 +349,10 @@ Driver Driver::load(IGuestHost& host,
     for (auto const handle: taken)
         driver.release(handle);
     driver.stepReplies();
+    // A restarted guest finds its tabs open, and draws each in full; actions invoked while it was away wait.
+    driver.followTabs();
+    driver.takeActions();
+    driver.drawTabs();
     driver.askForWake();
     return driver;
 }
@@ -311,20 +363,182 @@ void Driver::update(Hint hint)
     {
         case Hint::Wake: wake(); break;
         case Hint::Procs: consumeFinished(); break;
-        // Served from phase 2 on: panes with the host's pane-to-tag registry, tabs and actions with the view.
-        case Hint::Panes:
         case Hint::Tabs:
-        case Hint::Actions: break;
+            followTabs();
+            readTabs();
+            break;
+        case Hint::Actions: takeActions(); break;
+        // Served from phase 3 on, with the host's pane-to-tag registry.
+        case Hint::Panes: break;
     }
+    drawTabs();
     askForWake();
 }
+
+view::Dashboard const* Driver::dashboard(std::string_view tab) const noexcept
+{
+    auto const found = _dashboards.find(tab);
+    return found != _dashboards.end() ? found->second.get() : nullptr;
+}
+
+// {{{ the served tabs
+
+void Driver::takeActions()
+{
+    static_assert(ActionHandlers.size() == std::to_underlying(ActionKind::ShowBlocked) + 1U);
+    auto taken = _host.actionsTake();
+    if (!taken)
+    {
+        if (taken.error() != HostError::NotSupportedYet)
+            _host.log(LogLevel::Warn, std::format("actions-take: {}", nameOf(taken.error())));
+        return;
+    }
+    for (auto const& action: *taken)
+    {
+        auto const* const declared = findAction(action.id);
+        if (declared == nullptr)
+        {
+            _host.log(LogLevel::Warn, std::format("unknown action {}", action.id));
+            continue;
+        }
+        (this->*ActionHandlers[std::to_underlying(declared->kind)])(action.origin);
+    }
+}
+
+void Driver::openDashboard(uint32_t origin)
+{
+    static_cast<void>(openTab(origin));
+}
+
+void Driver::refreshNow(uint32_t /*origin*/)
+{
+    step(RefreshNow { .monoMs = nowMs() });
+    stepReplies();
+}
+
+void Driver::showBlocked(uint32_t origin)
+{
+    auto const tab = openTab(origin);
+    if (!tab)
+        return;
+    auto const dashboard = _dashboards.find(*tab);
+    if (dashboard == _dashboards.end())
+        return;
+    auto const runs = _engine->runs();
+    auto const blocked =
+        std::ranges::find_if(runs, [](Run const& run) { return std::holds_alternative<Blocked>(run.state); });
+    if (blocked != runs.end())
+        dashboard->second->select(blocked->id);
+}
+
+std::optional<std::string> Driver::openTab(uint32_t origin)
+{
+    // The host reveals the tab already open in the origin's workspace, and answers its id.
+    auto tab = _host.tabOpen(ServedScheme, origin);
+    if (!tab)
+    {
+        _host.log(LogLevel::Warn, std::format("tab-open: {}", nameOf(tab.error())));
+        return std::nullopt;
+    }
+    if (!_dashboards.contains(*tab))
+        followTabs();
+    return std::move(*tab);
+}
+
+void Driver::followTabs()
+{
+    auto listed = _host.tabs();
+    if (!listed)
+    {
+        // A host that serves no tab has none open; any other failure keeps the dashboards as they are.
+        if (listed.error() != HostError::NotSupportedYet)
+            _host.log(LogLevel::Warn, std::format("tabs: {}", nameOf(listed.error())));
+        return;
+    }
+    std::erase_if(_dashboards, [&](auto const& entry) {
+        return std::ranges::none_of(*listed, [&](TabInfo const& tab) { return tab.tab == entry.first; });
+    });
+    for (auto const& tab: *listed)
+    {
+        if (auto const found = _dashboards.find(tab.tab); found != _dashboards.end())
+            found->second->resize(sizeOf(tab));
+        else
+            _dashboards.emplace(
+                tab.tab,
+                std::make_unique<view::Dashboard>(*_engine, view::dashboardTheme(), *_clock, sizeOf(tab)));
+    }
+}
+
+void Driver::readTabs()
+{
+    for (auto const& [tab, dashboard]: _dashboards)
+    {
+        auto const bytes = _host.tabRead(tab);
+        if (!bytes)
+        {
+            _host.log(LogLevel::Debug, std::format("tab-read {}: {}", tab, nameOf(bytes.error())));
+            continue;
+        }
+        // Nothing typed is not an input: it would end the wait of an ESC held for the rest of its sequence.
+        if (bytes->empty())
+            continue;
+        static_cast<void>(readClock());
+        for (auto const& action: dashboard->input(*bytes))
+        {
+            step(inputOf(action, nowMs()));
+            stepReplies();
+        }
+    }
+}
+
+void Driver::drawTabs()
+{
+    if (_dashboards.empty())
+        return;
+    // The frame resolves an ESC held past its deadline, and measures the agents' ages, by the time now.
+    static_cast<void>(readClock());
+    for (auto const& [tab, dashboard]: _dashboards)
+        if (auto const bytes = dashboard->frame(); !bytes.empty())
+            write(tab, bytes);
+}
+
+void Driver::write(std::string const& tab, std::string_view bytes)
+{
+    while (!bytes.empty())
+    {
+        auto const piece = bytes.substr(0, MaxTabWriteBytes);
+        if (auto const written = _host.tabWrite(tab, piece); !written)
+        {
+            // The rest of the frame is dropped; the other tabs are drawn still.
+            _host.log(LogLevel::Debug, std::format("tab-write {}: {}", tab, nameOf(written.error())));
+            return;
+        }
+        bytes.remove_prefix(piece.size());
+    }
+}
+
+std::optional<uint64_t> Driver::dashboardsDueMs() const
+{
+    // A held ESC becomes the Escape key, and an agent's shown age moves on, only in a frame.
+    auto earliest = std::optional<uint64_t> {};
+    for (auto const& dashboard: _dashboards | std::views::values)
+        for (auto const due: { dashboard->pendingEscapeDeadline(), dashboard->nextRepaintDue() })
+            if (due)
+            {
+                auto const dueMs = monoMsOf(*due);
+                earliest = earliest ? std::min(*earliest, dueMs) : dueMs;
+            }
+    return earliest;
+}
+
+// }}}
 
 void Driver::wake()
 {
     _timer.requestUsed();
     // A lost Procs hint only delays a result: a wake takes it in first.
     consumeFinished();
-    auto const clock = _host.now();
+    auto const clock = readClock();
     if (!_timer.takeDue(clock.monoMs))
         return;
     step(Wake { .monoMs = clock.monoMs, .wallMs = clock.wallMs });
@@ -370,7 +584,7 @@ void Driver::consumeFinished()
 
 void Driver::step(Input const& input)
 {
-    auto const effects = _engine.step(input);
+    auto const effects = _engine->step(input);
     _observer.stepped(input, effects);
     carryOut(effects);
 }
@@ -396,7 +610,7 @@ void Driver::release(uint32_t handle)
 
 void Driver::askForWake()
 {
-    auto const due = _timer.unasked();
+    auto const due = _timer.unasked(dashboardsDueMs());
     if (!due)
         return;
     _host.wake(WakeTimer::delayUntil(*due, nowMs()));
@@ -405,7 +619,14 @@ void Driver::askForWake()
 
 uint64_t Driver::nowMs()
 {
-    return _host.now().monoMs;
+    return readClock().monoMs;
+}
+
+ClockReading Driver::readClock()
+{
+    auto const clock = _host.now();
+    _clock->set(clock.monoMs);
+    return clock;
 }
 
 void Driver::carryOut(std::span<Effect const> effects)
@@ -458,8 +679,11 @@ void Driver::carryOut(std::span<Effect const> effects)
                         _host.log(LogLevel::Warn, std::format("summary-set: {}", nameOf(set.error())));
                 },
                 [&](WakeAt const& wake) { _timer.set(wake.monoMs); },
-                // The dashboard arrives in phase 2.
-                [&](Redraw const&) {},
+                // Drawn once, when the update ends.
+                [&](Redraw const&) {
+                    for (auto const& dashboard: _dashboards | std::views::values)
+                        dashboard->engineChanged();
+                },
                 [&](DispatchRefused const& refused) {
                     _host.log(LogLevel::Info,
                               std::format("dispatch for {} refused: {}",

@@ -11,8 +11,13 @@ with no window attached.
   the processes and the panes into a `StartContext`; `update` serves the hints. It keeps the engine's
   driver contract (one reply per `RunCommand`, `ReadFile` and `OpenPane`; the time read on arrival on every
   input; the panes listed after a `Wake`) and releases a finished process's result only once the step
-  that consumed it carried out its store writes. Built natively too, as `orchestrator_guest_driver`, and
+  that consumed it carried out its store writes. It serves the dashboard (`view/`) in every tab the host
+  lists: one `Dashboard` per tab, kept across updates so that a key split over two reads is decoded once,
+  drawn at the end of every update and written in pieces of at most 64 KiB; the `open`, `refresh` and
+  `show-blocked` actions are rows of one table. Built natively too, as `orchestrator_guest_driver`, and
   tested against a fake host in `Driver_test.cpp` (`orchestrator_test "[guest]"`).
+- `GuestClock.hpp` — the `core::IClock` the dashboards read: the monotonic time the driver last read from the
+  host, never a clock of its own.
 - `WitHost.cpp`, `Exports.cpp` — the WebAssembly-only adapter: `IGuestHost` over the generated bindings,
   and the world's exports `load` and `update`, which keep one `Driver`.
 - `bindings/` — generated, committed, never edited, and left out of the format check.

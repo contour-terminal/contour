@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
+#include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <span>
@@ -11,7 +16,9 @@
 
 #include <orchestrator/core/Config.hpp>
 #include <orchestrator/core/Engine.hpp>
+#include <orchestrator/guest/GuestClock.hpp>
 #include <orchestrator/guest/HostCalls.hpp>
+#include <orchestrator/view/Dashboard.hpp>
 
 namespace orchestrator::guest
 {
@@ -57,8 +64,11 @@ class WakeTimer
     /// The host delivered its wake: its request is used up.
     void requestUsed() noexcept { _asked = std::nullopt; }
 
-    /// @return The time, if the host was not asked for it yet.
-    [[nodiscard]] std::optional<uint64_t> unasked() const noexcept;
+    /// @param alsoDueMs Another time the guest must wake by, such as a held ESC's deadline; std::nullopt:
+    /// none.
+    /// @return The earlier of the time set and @p alsoDueMs, if the host was not asked for it yet.
+    [[nodiscard]] std::optional<uint64_t> unasked(
+        std::optional<uint64_t> alsoDueMs = std::nullopt) const noexcept;
 
     /// The host was asked for a time.
     /// @param dueMs The time.
@@ -74,7 +84,8 @@ class WakeTimer
     std::optional<uint64_t> _asked; ///< The time the host's pending request is for.
 };
 
-/// The orchestrator's engine, driven through the daemon world's host calls.
+/// The orchestrator's engine, driven through the daemon world's host calls, and its dashboard served in every
+/// tab the host lists.
 ///
 /// It keeps the engine's driver contract (Engine::step()): every RunCommand, ReadFile and OpenPane gets
 /// exactly one reply, which the driver makes itself when the host refuses the call; replies are queued and
@@ -82,6 +93,10 @@ class WakeTimer
 /// arrived; after a Wake's effects, the panes are listed. A finished process's result is released only once
 /// the step that consumed it carried out its effects, its store writes included, so that a guest that faults
 /// in between finds it again when it is loaded.
+///
+/// Each served tab has one view::Dashboard, made when the tab is first listed and kept across updates, so
+/// that a key whose bytes arrive in two reads is decoded once. Every update ends with a frame of each
+/// dashboard, written to its tab when anything changed.
 class Driver
 {
   public:
@@ -104,16 +119,40 @@ class Driver
                                      HostInfo hostInfo,
                                      IDriverObserver& observer);
 
-    /// Serves a hint: Wake consumes finished processes, steps a due Wake and lists the panes; Procs
-    /// consumes finished processes. Panes, Tabs and Actions are not served yet.
+    /// Serves a hint, then draws every served tab: Wake consumes finished processes, steps a due Wake and
+    /// lists the panes; Procs consumes finished processes; Tabs follows the listed tabs and applies what was
+    /// typed into each; Actions carries out the actions the user invoked. Panes is not served yet.
     /// @param hint Why the host called.
     void update(Hint hint);
 
     /// @return The engine.
-    [[nodiscard]] Engine const& engine() const noexcept { return _engine; }
+    [[nodiscard]] Engine const& engine() const noexcept { return *_engine; }
+
+    /// @param tab A tab's id.
+    /// @return The dashboard served in it; nullptr if the tab is not served.
+    [[nodiscard]] view::Dashboard const* dashboard(std::string_view tab) const noexcept;
+
+    /// @return How many tabs are served.
+    [[nodiscard]] std::size_t servedTabs() const noexcept { return _dashboards.size(); }
 
   private:
     Driver(IGuestHost& host, IDriverObserver& observer, std::string worktreeRoot, Engine engine);
+
+    /// What an action the user invoked does.
+    using ActionHandler = void (Driver::*)(uint32_t origin);
+    /// What each declared action does, indexed by its ActionKind (actionDecls() holds the ids).
+    static std::array<ActionHandler, 3> const ActionHandlers;
+
+    void openDashboard(uint32_t origin);
+    void refreshNow(uint32_t origin);
+    void showBlocked(uint32_t origin);
+    /// @return The tab opened or revealed; std::nullopt when the host refused.
+    std::optional<std::string> openTab(uint32_t origin);
+    void takeActions();
+    void followTabs();
+    void readTabs();
+    void drawTabs();
+    void write(std::string const& tab, std::string_view bytes);
 
     void consumeFinished();
     void wake();
@@ -124,11 +163,16 @@ class Driver
     void release(uint32_t handle);
     void askForWake();
     [[nodiscard]] uint64_t nowMs();
+    [[nodiscard]] ClockReading readClock();
+    [[nodiscard]] std::optional<uint64_t> dashboardsDueMs() const;
 
     IGuestHost& _host;
     IDriverObserver& _observer;
     std::string _worktreeRoot; ///< What ReadFile paths are made relative to.
-    Engine _engine;
+    // Held by pointer: the dashboards keep references to both, and the driver moves.
+    std::unique_ptr<Engine> _engine;
+    std::unique_ptr<GuestClock> _clock; ///< The time last read from the host, which the dashboards read.
+    std::map<std::string, std::unique_ptr<view::Dashboard>, std::less<>> _dashboards; ///< By tab id.
     std::deque<Input> _replies;   ///< The replies the driver made itself, stepped after their batch.
     std::set<uint32_t> _consumed; ///< The finished processes stepped whose release failed.
     WakeTimer _timer;

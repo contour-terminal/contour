@@ -66,10 +66,23 @@ class Dashboard
     /// The engine's lists changed: the next frame draws them again.
     void engineChanged();
 
+    /// Selects the row of a run, dropping the filter when it hides that row and an end waiting for its
+    /// confirmation; does nothing when no row stands for the run.
+    /// @param run The run's id.
+    void select(std::string_view run);
+
+    /// @return The run the selected row stands for; empty when it stands for none, or nothing is selected.
+    [[nodiscard]] std::string_view selectedRun() const noexcept;
+
     /// @return When a lone ESC that ended the last input becomes the Escape key, unless more bytes come
     ///         first; std::nullopt when none waits. The guest wakes by then and calls frame(), which resolves
     ///         it.
     [[nodiscard]] std::optional<core::SteadyTimePoint> pendingEscapeDeadline() const noexcept;
+
+    /// @return When an agent's age, as the tab shows it, changes next: the guest wakes by then and calls
+    /// frame(),
+    ///         which draws it; std::nullopt when no age is shown. Valid after a frame or an input.
+    [[nodiscard]] std::optional<core::SteadyTimePoint> nextRepaintDue() const noexcept;
 
     /// @return How often the rows were built from the engine: once per input(), and in frame() only after
     ///         engineChanged() or when an agent's age moved on. For tests.

@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <expected>
 #include <filesystem>
 #include <format>
@@ -13,6 +14,7 @@
 #include <map>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -24,6 +26,9 @@
 #include <orchestrator/core/Fixtures.hpp>
 #include <orchestrator/guest/Driver.hpp>
 #include <orchestrator/guest/HostCalls.hpp>
+#include <orchestrator/view/Band.hpp>
+#include <orchestrator/view/Dashboard.hpp>
+#include <orchestrator/view/ViewFixtures.hpp>
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;
@@ -45,6 +50,13 @@ constexpr auto StartMonoMs = uint64_t { 1'000 };
 constexpr auto Minute = uint64_t { 60'000 };
 /// What one procTake() returns at most.
 constexpr auto PageBytes = std::size_t { 65'536 };
+/// What a frame starts with: the synchronized-output bracket.
+constexpr auto SynchronizedOutput = "\x1b[?2026h"sv;
+/// What a frame ends with.
+constexpr auto SynchronizedOutputEnd = "\x1b[?2026l"sv;
+/// The size the fake opens a tab at, unless a test says otherwise.
+constexpr auto OpenCols = uint32_t { 120 };
+constexpr auto OpenRows = uint32_t { 40 };
 
 /// The configuration: one repository, with a `base` when @p base is given.
 [[nodiscard]] std::string configJson(std::string_view base = {})
@@ -132,6 +144,31 @@ class FakeGuestHost final: public IGuestHost
     std::vector<std::pair<std::string, std::string>> summaries; ///< Every summarySet().
     std::vector<std::string> started;   ///< The command of every procStart() that started.
     std::vector<std::string> paneOpens; ///< The tag of every paneOpen().
+
+    std::vector<TabInfo> tabList;                                  ///< What tabs() lists.
+    std::pair<uint32_t, uint32_t> openSize { OpenCols, OpenRows }; ///< The size tabOpen() opens at.
+    std::map<std::string, std::deque<std::string>, std::less<>>
+        typed;                                               ///< Per tab, what each tabRead() answers.
+    std::set<std::string, std::less<>> failingWrites;        ///< The tabs whose tabWrite() fails.
+    std::vector<ActionInfo> queuedActions;                   ///< What the next actionsTake() answers.
+    std::vector<std::pair<std::string, uint32_t>> tabOpens;  ///< Every tabOpen(): scheme and origin.
+    std::vector<std::pair<std::string, std::string>> writes; ///< Every tabWrite() that succeeded.
+
+    /// @return Everything written to @p tab, in order.
+    [[nodiscard]] std::string writtenTo(std::string_view tab) const
+    {
+        auto text = std::string {};
+        for (auto const& [to, bytes]: writes)
+            if (to == tab)
+                text += bytes;
+        return text;
+    }
+
+    /// @return How many writes reached @p tab.
+    [[nodiscard]] std::size_t writesTo(std::string_view tab) const
+    {
+        return static_cast<std::size_t>(std::ranges::count(writes | std::views::keys, tab));
+    }
 
     /// Adds a finished process.
     uint32_t addFinished(std::string_view tag,
@@ -338,6 +375,52 @@ class FakeGuestHost final: public IGuestHost
         return {};
     }
 
+    [[nodiscard]] std::expected<std::string, HostError> tabOpen(std::string_view scheme,
+                                                                uint32_t origin) override
+    {
+        tabOpens.emplace_back(std::string(scheme), origin);
+        // The host reveals the tab already open, and answers its id.
+        if (auto const open = std::ranges::find(tabList, scheme, &TabInfo::scheme); open != tabList.end())
+            return open->tab;
+        auto& tab = tabList.emplace_back(TabInfo { .tab = std::format("tab-{}", _nextTab++),
+                                                   .scheme = std::string(scheme),
+                                                   .cols = openSize.first,
+                                                   .rows = openSize.second });
+        return tab.tab;
+    }
+
+    [[nodiscard]] std::expected<void, HostError> tabReveal(std::string_view /*tab*/,
+                                                           uint32_t /*origin*/) override
+    {
+        return {};
+    }
+
+    [[nodiscard]] std::expected<std::vector<TabInfo>, HostError> tabs() override { return tabList; }
+
+    [[nodiscard]] std::expected<std::string, HostError> tabRead(std::string_view tab) override
+    {
+        auto const found = typed.find(tab);
+        if (found == typed.end() || found->second.empty())
+            return std::string {};
+        auto bytes = std::move(found->second.front());
+        found->second.pop_front();
+        return bytes;
+    }
+
+    [[nodiscard]] std::expected<void, HostError> tabWrite(std::string_view tab,
+                                                          std::string_view bytes) override
+    {
+        if (failingWrites.contains(tab))
+            return std::unexpected(HostError::Gone);
+        writes.emplace_back(std::string(tab), std::string(bytes));
+        return {};
+    }
+
+    [[nodiscard]] std::expected<std::vector<ActionInfo>, HostError> actionsTake() override
+    {
+        return std::exchange(queuedActions, {});
+    }
+
   private:
     [[nodiscard]] FakeProcess const* find(uint32_t handle) const
     {
@@ -346,6 +429,7 @@ class FakeGuestHost final: public IGuestHost
     }
 
     uint32_t _nextHandle = 1;
+    uint32_t _nextTab = 1;
 };
 
 /// Records what the driver feeds the engine and what the engine asks for.
@@ -587,6 +671,70 @@ constexpr auto MeasuredConfig =
             "run\t{}\t{}\t{}\t{}\n", key, worktree.tag, worktree.command, store.find(key)->second);
     }
     return text;
+}
+
+// }}}
+// {{{ the served tab
+
+/// A driver loaded on a fake whose every poll is answered, so that the dashboard has rows.
+struct Served
+{
+    Served() { host.answers = pollAnswers(); }
+
+    /// Loads the driver and answers its poll.
+    void load()
+    {
+        driver.emplace(Driver::load(host, configJson(), hostInfo(), observer));
+        while (host.completeRunning() > 0)
+            driver->update(Hint::Procs);
+    }
+
+    /// Invokes an action, as the user does from the palette.
+    void invoke(std::string_view action, uint32_t origin = 7)
+    {
+        host.queuedActions.push_back(ActionInfo { .id = std::string(action), .origin = origin });
+        driver->update(Hint::Actions);
+    }
+
+    /// Types @p bytes into @p tab, as one chunk the next tabRead() answers, and tells the driver.
+    void type(std::string_view bytes, std::string_view tab = "tab-1")
+    {
+        host.typed[std::string(tab)].emplace_back(bytes);
+        driver->update(Hint::Tabs);
+    }
+
+    [[nodiscard]] view::Dashboard const& dashboard(std::string_view tab = "tab-1") const
+    {
+        auto const* const found = driver->dashboard(tab);
+        REQUIRE(found != nullptr);
+        return *found;
+    }
+
+    FakeGuestHost host;
+    RecordingObserver observer;
+    std::optional<Driver> driver;
+};
+
+/// @return How often @p needle occurs in @p text.
+[[nodiscard]] std::size_t countOf(std::string_view text, std::string_view needle)
+{
+    auto count = std::size_t { 0 };
+    auto at = text.find(needle);
+    while (at != std::string_view::npos)
+    {
+        ++count;
+        at = text.find(needle, at + needle.size());
+    }
+    return count;
+}
+
+/// @return The index into BandBreakpoints of a band with its furniture shown.
+[[nodiscard]] std::size_t shownBreakpointOf(view::Band band)
+{
+    auto const found = std::ranges::find_if(view::BandBreakpoints, [&](view::BandBreakpoint const& row) {
+        return row.band == band && row.furniture == view::Furniture::Shown;
+    });
+    return static_cast<std::size_t>(std::ranges::distance(view::BandBreakpoints.begin(), found));
 }
 
 // }}}
@@ -967,3 +1115,290 @@ TEST_CASE("regenerate the measured store", "[guest][.regenerate]")
     REQUIRE(file);
     file << measuredStoreText();
 }
+
+// {{{ the served tab
+
+TEST_CASE("open opens one tab and draws it", "[guest]")
+{
+    auto served = Served {};
+    served.load();
+    REQUIRE(served.host.writes.empty());
+
+    served.invoke("open", 7);
+
+    CHECK(served.host.tabOpens == std::vector { std::pair { "orchestrator"s, uint32_t { 7 } } });
+    CHECK(served.driver->servedTabs() == 1);
+    // One frame, in as many pieces as a host call carries: core::tui positions the cursor per cell, so that a
+    // full frame at 120x40 is just over 64 KiB.
+    REQUIRE(served.host.writesTo("tab-1") == served.host.writes.size());
+    auto const frame = served.host.writtenTo("tab-1");
+    CHECK(frame.starts_with(SynchronizedOutput));
+    // Then the hidden cursor comes to rest, which draws nothing (@see view::RestingCursor).
+    CHECK(frame.ends_with(std::format("{}{}", SynchronizedOutputEnd, view::RestingCursor)));
+    CHECK(countOf(frame, SynchronizedOutput) == 1);
+}
+
+TEST_CASE("a second open reveals instead of opening", "[guest]")
+{
+    auto served = Served {};
+    served.load();
+    served.invoke("open", 7);
+    auto const* const first = served.driver->dashboard("tab-1");
+    REQUIRE(first != nullptr);
+    served.host.writes.clear();
+
+    served.invoke("open", 9);
+
+    CHECK(served.host.tabOpens.size() == 2);
+    CHECK(served.driver->servedTabs() == 1);
+    CHECK(served.driver->dashboard("tab-1") == first);
+    CHECK(served.host.writes.empty());
+}
+
+TEST_CASE("actions queued before load are taken by it", "[guest]")
+{
+    auto served = Served {};
+    served.host.queuedActions.push_back(ActionInfo { .id = "open", .origin = 3 });
+    served.host.queuedActions.push_back(ActionInfo { .id = "no-such-action", .origin = 3 });
+
+    served.load();
+
+    CHECK(served.host.tabOpens.size() == 1);
+    CHECK(served.driver->servedTabs() == 1);
+    CHECK(served.host.writtenTo("tab-1").starts_with(SynchronizedOutput));
+    CHECK(std::ranges::any_of(served.host.logged, [](auto const& entry) {
+        return entry.first == LogLevel::Warn && entry.second.contains("no-such-action");
+    }));
+}
+
+TEST_CASE("refresh reads the lists again", "[guest]")
+{
+    auto served = Served {};
+    served.load();
+    REQUIRE(served.host.startsOf("gh-prs") == 1);
+
+    served.invoke("refresh");
+    while (served.host.completeRunning() > 0)
+        served.driver->update(Hint::Procs);
+
+    CHECK(served.observer.inputsOf<RefreshNow>().size() == 1);
+    CHECK(served.host.startsOf("gh-prs") == 2);
+    // No tab is opened for it.
+    CHECK(served.host.tabOpens.empty());
+}
+
+TEST_CASE("show-blocked opens the tab on the first blocked agent", "[guest]")
+{
+    constexpr auto RunningId = "pr-2375-20261113-150847"sv;
+    constexpr auto BlockedId = "pr-2379-20261113-151500"sv;
+    auto served = Served {};
+    auto const runs = std::array {
+        view::test::storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }),
+        view::test::storedRun(Blocked {}, BlockedId, ChangeRequestRef { 2379 }),
+    };
+    auto listing = std::vector<PaneInfo> {};
+    for (auto const& run: runs)
+    {
+        served.host.store.insert_or_assign(runKey(run.id), toJson(run));
+        listing.push_back(PaneInfo { .pane = *run.pane,
+                                     .tag = run.id,
+                                     .status = std::holds_alternative<Blocked>(run.state)
+                                                   ? AgentStatus::Blocked
+                                                   : AgentStatus::Working,
+                                     .program = ProgramLiveness::Alive });
+    }
+    served.host.paneListing = listing;
+    served.load();
+    served.invoke("open");
+    REQUIRE(served.dashboard().selectedRun() != BlockedId);
+
+    served.invoke("show-blocked");
+
+    CHECK(served.host.tabOpens.size() == 2);
+    CHECK(served.driver->servedTabs() == 1);
+    CHECK(served.dashboard().selectedRun() == BlockedId);
+}
+
+TEST_CASE("every declared action is carried out", "[guest]")
+{
+    auto served = Served {};
+    served.load();
+
+    for (auto const& action: actionDecls())
+        served.invoke(action.id);
+
+    CHECK(served.host.tabOpens.size() == 2); // open and show-blocked
+    CHECK(served.observer.inputsOf<RefreshNow>().size() == 1);
+    CHECK(std::ranges::none_of(served.host.logged,
+                               [](auto const& entry) { return entry.second.starts_with("unknown action"); }));
+}
+
+TEST_CASE("an agent's age is redrawn by the wake it asks for", "[guest]")
+{
+    auto served = Served {};
+    auto const run = view::test::storedRun(Running {}, "pr-2375-20261113-150847", ChangeRequestRef { 2375 });
+    served.host.store.insert_or_assign(runKey(run.id), toJson(run));
+    served.host.paneListing = std::vector { PaneInfo { .pane = *run.pane,
+                                                       .tag = run.id,
+                                                       .status = AgentStatus::Working,
+                                                       .program = ProgramLiveness::Alive } };
+    served.load();
+    served.invoke("open");
+    served.host.writes.clear();
+    REQUIRE_FALSE(served.host.wakes.empty());
+    auto const asked = served.host.wakes.back();
+    CHECK(asked <= 1'000);
+
+    served.host.clock.monoMs += asked;
+    served.driver->update(Hint::Wake);
+
+    CHECK(served.host.writtenTo("tab-1").starts_with(SynchronizedOutput));
+}
+
+TEST_CASE("input reaches the engine", "[guest]")
+{
+    auto served = Served {};
+    served.load();
+    served.invoke("open");
+    REQUIRE(served.host.startsOf("gh-prs") == 1);
+
+    served.type("R");
+    while (served.host.completeRunning() > 0)
+        served.driver->update(Hint::Procs);
+
+    CHECK(served.observer.inputsOf<RefreshNow>().size() == 1);
+    CHECK(served.host.startsOf("gh-prs") == 2);
+}
+
+TEST_CASE("a resize redraws at the new band", "[guest]")
+{
+    auto served = Served {};
+    served.host.openSize = { 80, 24 };
+    served.load();
+    served.invoke("open");
+    CHECK(served.dashboard().breakpoint() == shownBreakpointOf(view::Band::Medium));
+    served.host.writes.clear();
+
+    served.host.tabList.front().cols = 120;
+    served.host.tabList.front().rows = 40;
+    served.driver->update(Hint::Tabs);
+
+    CHECK(served.dashboard().breakpoint() == shownBreakpointOf(view::Band::Wide));
+    CHECK(served.host.writtenTo("tab-1").starts_with(SynchronizedOutput));
+}
+
+TEST_CASE("a closed tab drops its dashboard", "[guest]")
+{
+    auto served = Served {};
+    served.load();
+    served.invoke("open");
+    served.host.writes.clear();
+
+    served.host.tabList.clear();
+    served.driver->update(Hint::Tabs);
+
+    CHECK(served.driver->servedTabs() == 0);
+    CHECK(served.driver->dashboard("tab-1") == nullptr);
+    CHECK(served.host.writes.empty());
+}
+
+TEST_CASE("a key split across two tab reads moves once", "[guest]")
+{
+    auto served = Served {};
+    served.load();
+    served.invoke("open");
+    REQUIRE(served.dashboard().interaction().selected == 0);
+
+    served.type("\x1b[");
+    CHECK(served.dashboard().interaction().selected == 0);
+    served.type("B");
+
+    CHECK(served.dashboard().interaction().selected == 1);
+    CHECK(served.dashboard().interaction().filter.empty());
+    CHECK(served.dashboard().interaction().filtering == view::Filtering::Off);
+}
+
+TEST_CASE("a held ESC is the Escape key once the wake it asked for comes", "[guest]")
+{
+    auto served = Served {};
+    served.load();
+    served.invoke("open");
+    served.type("/x\x1b");
+    REQUIRE(served.dashboard().interaction().filtering == view::Filtering::Typing);
+    REQUIRE_FALSE(served.host.wakes.empty());
+    auto const asked = served.host.wakes.back();
+    CHECK(asked <= 50);
+
+    served.host.clock.monoMs += asked;
+    served.driver->update(Hint::Wake);
+
+    CHECK(served.dashboard().interaction().filtering == view::Filtering::Off);
+    CHECK(served.dashboard().interaction().filter.empty());
+}
+
+TEST_CASE("a restarted guest redraws every open tab", "[guest]")
+{
+    auto served = Served {};
+    served.host.tabList = {
+        TabInfo { .tab = "tab-1", .scheme = "orchestrator", .cols = 120, .rows = 40 },
+        TabInfo { .tab = "tab-2", .scheme = "orchestrator", .cols = 50, .rows = 20 },
+    };
+    served.load();
+    REQUIRE(served.driver->servedTabs() == 2);
+    served.host.writes.clear();
+
+    served.driver.reset();
+    served.driver.emplace(Driver::load(served.host, configJson(), hostInfo()));
+
+    for (auto const tab: { "tab-1"sv, "tab-2"sv })
+    {
+        CAPTURE(tab);
+        CHECK(served.host.writtenTo(tab).starts_with(SynchronizedOutput));
+    }
+}
+
+TEST_CASE("nothing changed writes nothing", "[guest]")
+{
+    auto served = Served {};
+    served.load();
+    served.invoke("open");
+    served.host.writes.clear();
+
+    served.driver->update(Hint::Tabs);
+    served.driver->update(Hint::Procs);
+    served.driver->update(Hint::Panes);
+    served.type("k");
+
+    CHECK(served.host.writes.empty());
+}
+
+TEST_CASE("a frame is written in pieces a host call carries", "[guest]")
+{
+    auto served = Served {};
+    served.host.openSize = { 400, 200 };
+    served.load();
+    served.invoke("open");
+
+    REQUIRE(served.host.writesTo("tab-1") > 1);
+    for (auto const& bytes: served.host.writes | std::views::values)
+        CHECK(bytes.size() <= MaxTabWriteBytes);
+    CHECK(served.host.writtenTo("tab-1").starts_with(SynchronizedOutput));
+}
+
+TEST_CASE("a failed write drops nothing else", "[guest]")
+{
+    auto served = Served {};
+    served.host.tabList = {
+        TabInfo { .tab = "tab-1", .scheme = "orchestrator", .cols = 120, .rows = 40 },
+        TabInfo { .tab = "tab-2", .scheme = "orchestrator", .cols = 120, .rows = 40 },
+    };
+    served.host.failingWrites.insert("tab-1");
+
+    served.load();
+
+    CHECK(served.host.writesTo("tab-1") == 0);
+    CHECK(served.host.writtenTo("tab-2").starts_with(SynchronizedOutput));
+    CHECK(served.driver->servedTabs() == 2);
+}
+
+// }}}

@@ -172,6 +172,8 @@ struct Dashboard::State
     Rows rowsState = Rows::Stale;                  ///< Whether @ref rows must be built again.
     uint64_t rowsBuiltAtMs = 0; ///< When @ref rows was built, in the engine's monotonic milliseconds.
     std::size_t rowBuilds = 0;  ///< How often @ref rows was built.
+    std::optional<uint64_t>
+        ageChangeMs; ///< When an age the rows show changes next; std::nullopt: none shown.
     std::optional<core::SteadyTimePoint> escapeHeldSince; ///< When a lone ESC that ended an input arrived.
     std::size_t scrollTop = 0;                            ///< The first visible row the list shows.
     Component const* shownLayout = nullptr; ///< The layout @ref toggled and @ref problems belong to.
@@ -513,6 +515,7 @@ void Dashboard::State::ensureRows()
     if (rowsState == Rows::Current && now - rowsBuiltAtMs < AgeTickMs)
         return;
     rows = buildRows(engine, now);
+    ageChangeMs = nextAgeChange(engine, now);
     rowsState = Rows::Current;
     rowsBuiltAtMs = now;
     ++rowBuilds;
@@ -631,6 +634,13 @@ std::optional<core::SteadyTimePoint> Dashboard::pendingEscapeDeadline() const no
     return held ? std::optional { *held + EscapeTimeout } : std::nullopt;
 }
 
+std::optional<core::SteadyTimePoint> Dashboard::nextRepaintDue() const noexcept
+{
+    auto const& due = _state->ageChangeMs;
+    return due ? std::optional { core::SteadyTimePoint { std::chrono::milliseconds { *due } } }
+               : std::nullopt;
+}
+
 std::size_t Dashboard::rowBuilds() const noexcept
 {
     return _state->rowBuilds;
@@ -652,11 +662,55 @@ void Dashboard::engineChanged()
     _state->repaint = State::Repaint::Needed;
 }
 
+void Dashboard::select(std::string_view run)
+{
+    auto& state = *_state;
+    state.ensureRows();
+    auto const selectableIndexOf = [&]() -> std::optional<std::size_t> {
+        auto seen = std::size_t { 0 };
+        for (auto const index: state.visible)
+        {
+            if (!state.rows[index].isSelectable())
+                continue;
+            if (state.rows[index].run == run)
+                return seen;
+            ++seen;
+        }
+        return std::nullopt;
+    };
+    auto found = selectableIndexOf();
+    if (!found && !state.interaction.filter.empty())
+    {
+        state.interaction.filter.clear();
+        state.interaction.filtering = Filtering::Off;
+        state.refilter();
+        found = selectableIndexOf();
+    }
+    if (!found)
+        return;
+    state.interaction.selected = *found;
+    // An end that waited for its confirmation was for the row selected before.
+    state.interaction.pendingEnd.clear();
+    state.repaint = State::Repaint::Needed;
+}
+
+std::string_view Dashboard::selectedRun() const noexcept
+{
+    auto const* const row = _state->selectedRow();
+    return row != nullptr ? std::string_view { row->run } : std::string_view {};
+}
+
 std::string Dashboard::frame()
 {
     auto& state = *_state;
     // An Escape key resolved here asks the engine nothing: it only closes what is open.
     static_cast<void>(state.resolveOverdueEscape());
+    // An age the rows show moved on: they are built and drawn again, though the engine did not change.
+    if (state.ageChangeMs && state.nowMonoMs() >= *state.ageChangeMs)
+    {
+        state.rowsState = State::Rows::Stale;
+        state.repaint = State::Repaint::Needed;
+    }
     if (state.repaint == State::Repaint::Clean)
         return {};
     state.ensureRows();

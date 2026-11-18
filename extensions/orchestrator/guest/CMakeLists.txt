@@ -42,8 +42,8 @@ add_executable(orchestrator
     bindings/daemon.h
     ${ORCHESTRATOR_MANIFEST_SECTION_SOURCE}
 )
-# The dashboard, built for WebAssembly from the same sources the native tests cover, for the driver to serve.
-target_link_libraries(orchestrator PRIVATE orchestrator_guest_driver orchestrator_view)
+# The driver and the dashboard it serves, built for WebAssembly from the same sources the native tests cover.
+target_link_libraries(orchestrator PRIVATE orchestrator_guest_driver)
 # The generated bindings, as <bindings/daemon.h>.
 target_include_directories(orchestrator PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 # The adapter is held to Contour's warnings; the generated bindings are not edited, and not warned about.
