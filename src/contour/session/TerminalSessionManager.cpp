@@ -3035,6 +3035,9 @@ void TerminalSessionManager::tabAboutToBeMoved(vtworkspace::WorkspaceId window, 
 
 void TerminalSessionManager::tabMoved(vtworkspace::WorkspaceId window, vtworkspace::TabId, int, int)
 {
+    // What an in-process window lists is in the model's order; a move that leaves the active tab's index
+    // as it was brings no activeTabChanged to refresh it.
+    notifyDirectoriesChanged();
     if (auto* c = controllerDisplaying(window))
         c->onTabMoved();
 }

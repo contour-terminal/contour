@@ -6428,6 +6428,40 @@ TEST_CASE("TerminalSessionManager: an in-process window's sidebar reaches the wo
     CHECK(model.workspace(f.second)->tabAt(2)->id().value == firstTabs[0]);
 }
 
+TEST_CASE("TerminalSessionManager: reordering an inactive tab reorders the sidebar's tab rows",
+          "[manager][workspace][sidebar]")
+{
+    using contour::window::SidebarRowKind;
+    auto f = TwoWorkspaces {};
+    // A third tab, the active one: the two reordered in front of it leave its index as it was, so the move is
+    // not also an active-tab change, which would refresh the sidebar on its own.
+    f.controller().createNewTab();
+    drainPosted();
+    auto& sidebar = f.controller().sidebar();
+    sidebar.refreshNow();
+    auto const tabs = std::ranges::to<std::vector<uint64_t>>(
+        f.controller().directorySource()->directory().workspaces[0].tabs
+        | std::views::transform(&contour::window::DirectoryTab::id));
+    REQUIRE(tabs.size() == 3);
+    REQUIRE(f.manager().model().workspace(f.first)->activeTab()->id().value == tabs[2]);
+
+    // A sidebar drag within the workspace (or tab.move): the first tab to the second place.
+    f.manager().moveTabToWorkspace(f.controller(), tabs[0], f.first.value, 1);
+    REQUIRE(f.manager().model().workspace(f.first)->tabAt(1)->id().value == tabs[0]);
+    REQUIRE(f.manager().model().workspace(f.first)->activeTab()->id().value == tabs[2]);
+    CHECK(sidebar.isRebuildPending());
+    sidebar.refreshNow();
+    CHECK(sidebarRowOf(sidebar, SidebarRowKind::Tab, f.first.value, tabs[1])
+          < sidebarRowOf(sidebar, SidebarRowKind::Tab, f.first.value, tabs[0]));
+
+    // And back: the original order returns.
+    f.manager().moveTabToWorkspace(f.controller(), tabs[0], f.first.value, 0);
+    CHECK(sidebar.isRebuildPending());
+    sidebar.refreshNow();
+    CHECK(sidebarRowOf(sidebar, SidebarRowKind::Tab, f.first.value, tabs[0])
+          < sidebarRowOf(sidebar, SidebarRowKind::Tab, f.first.value, tabs[1]));
+}
+
 TEST_CASE("TerminalSessionManager: an in-process window's CloseWorkspace action closes the shown workspace",
           "[manager][workspace][sidebar]")
 {
