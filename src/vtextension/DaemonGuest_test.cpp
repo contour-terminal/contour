@@ -55,6 +55,7 @@
 #include <vtextension/testing/FakeFileLocker.hpp>
 #include <vtextension/testing/FixtureProcessRunner.hpp>
 #include <vtextension/testing/GuestModuleCheck.hpp>
+#include <vtextension/testing/GuestSlowdown.hpp>
 #include <vtextension/testing/ManualScheduler.hpp>
 #include <vtextension/testing/RunnerHarness.hpp>
 #include <vtextension/testing/TestModules.hpp>
@@ -308,14 +309,15 @@ struct MeasuredSeed
 
 /// The daemon world's served imports for one measured `update(procs)`: at `load`, the pull request list and
 /// every seeded run's call run; before the update they all finish, the list with the 100 pull requests and
-/// each call with exit 0. Store calls go to the store given.
+/// each call with exit 0. Store calls go to the store given, tab calls to the tabs given.
 class MeasuredServices final: public IDaemonHostServices
 {
   public:
     MeasuredServices(std::string pullRequests,
                      std::span<MeasuredSeed::Run const> runs,
-                     IExtensionStore& store):
-        _store { store }
+                     IExtensionStore& store,
+                     IServedTabService& tabs):
+        _tabs { tabs }, _store { store }
     {
         _processes.push_back(Process {
             .handle = 1, .tag = "poll/contour/prs", .command = "gh-prs", .output = std::move(pullRequests) });
@@ -422,7 +424,6 @@ class MeasuredServices final: public IDaemonHostServices
         return _store.keys(prefix).transform_error([](StoreError) { return HostError::Gone; });
     }
 
-    // The measured guest serves no tab here: as a host that serves none would answer.
     [[nodiscard]] std::expected<std::string, HostError> tabOpen(std::string_view scheme,
                                                                 Origin origin) override
     {
@@ -464,7 +465,7 @@ class MeasuredServices final: public IDaemonHostServices
     }
 
   private:
-    UnservedTabs _tabs;
+    IServedTabService& _tabs;
     static constexpr auto PageBytes = std::size_t { 64 } * 1024;
 
     /// A process the guest has not released.
@@ -529,6 +530,59 @@ class MemoryStore final: public IExtensionStore
     std::map<std::string, std::string, std::less<>> _values;
 };
 
+/// The one tab the measured guest serves: its size and its input set by the test, its output counted.
+class MeasuredTab final: public IServedTabService
+{
+  public:
+    TabInfo info {
+        .tab = "tab-1", .scheme = "orchestrator", .cols = 120, .rows = 40
+    }; ///< What tabs() lists.
+    ByteList input;          ///< What the next tabRead() answers.
+    std::size_t written = 0; ///< The bytes written to the tab.
+    std::string firstFrame;  ///< The first write, when it came.
+
+    [[nodiscard]] std::expected<std::string, HostError> tabOpen(std::string_view /*scheme*/,
+                                                                Origin /*origin*/) override
+    {
+        return info.tab;
+    }
+
+    [[nodiscard]] std::expected<void, HostError> tabClose(std::string_view /*tab*/) override { return {}; }
+
+    [[nodiscard]] std::expected<void, HostError> tabReveal(std::string_view /*tab*/,
+                                                           Origin /*origin*/) override
+    {
+        return {};
+    }
+
+    [[nodiscard]] std::expected<std::vector<TabInfo>, HostError> tabs() override
+    {
+        return std::vector { info };
+    }
+
+    [[nodiscard]] std::expected<ByteList, HostError> tabRead(std::string_view /*tab*/) override
+    {
+        return std::exchange(input, {});
+    }
+
+    [[nodiscard]] std::expected<void, HostError> tabWrite(std::string_view /*tab*/,
+                                                          std::span<uint8_t const> bytes) override
+    {
+        if (written == 0)
+            firstFrame.assign(bytes.begin(), bytes.end());
+        written += bytes.size();
+        return {};
+    }
+
+    [[nodiscard]] std::expected<std::vector<ActionInfo>, HostError> actionsTake() override { return {}; }
+
+    /// Types @p text into the tab, as one chunk.
+    void type(std::string_view text) { input.assign(text.begin(), text.end()); }
+
+    /// @return The bytes written since the last call.
+    [[nodiscard]] std::size_t takeWritten() noexcept { return std::exchange(written, 0); }
+};
+
 /// Min, median and max of a series of durations.
 struct Spread
 {
@@ -572,9 +626,14 @@ constexpr auto MeasuredRounds = 20;
 
 /// Times MeasuredRounds `update(procs)` calls, each in a fresh instance over a freshly seeded @p store,
 /// delivering the projected 100 pull requests and every seeded run's call; the seeding and the `load` are
-/// outside the timed span.
-[[nodiscard]] Measured measureLargestCallback(IExtensionStore& store, MeasuredSeed const& seed)
+/// outside the timed span. With @p servedTab, each callback must end with the tab's repaint; without, the
+/// guest serves no tab, as a host that serves none answers.
+[[nodiscard]] Measured measureLargestCallback(IExtensionStore& store,
+                                              MeasuredSeed const& seed,
+                                              MeasuredTab* servedTab)
 {
+    auto unserved = UnservedTabs {};
+    auto& tabs = servedTab != nullptr ? static_cast<IServedTabService&>(*servedTab) : unserved;
     auto const backend = wasm::makeDefaultBackend();
     auto const limits = daemonWorldLimits();
     auto const engine = Engine::create(*backend, World::Daemon, limits);
@@ -597,23 +656,109 @@ constexpr auto MeasuredRounds = 20;
         for (auto const& run: seed.runs)
             REQUIRE(store.set(run.key, run.value).has_value());
 
-        auto services = MeasuredServices { pullRequests, seed.runs, store };
+        auto services = MeasuredServices { pullRequests, seed.runs, store, tabs };
         auto instance = DaemonInstance::create(*compiled, services, clock, **engine, limits);
         REQUIRE(instance.has_value());
         REQUIRE((*instance)->load(seed.configJson, info).has_value());
         services.finish();
         std::ignore = services.takeStoreWrites();
+        if (servedTab != nullptr)
+            std::ignore = servedTab->takeWritten();
         auto const started = std::chrono::steady_clock::now();
         auto const updated = (*instance)->update(DaemonHint::Procs);
         auto const elapsed = std::chrono::steady_clock::now() - started;
         CAPTURE(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed),
                 updated ? -1 : static_cast<int>(updated.error()));
         REQUIRE(updated.has_value());
+        if (servedTab != nullptr)
+            REQUIRE(servedTab->takeWritten() > 0);
         samples.push_back(std::chrono::duration_cast<std::chrono::microseconds>(elapsed));
         measured.storeWrites += services.takeStoreWrites();
     }
     measured.spread = spreadOf(std::move(samples));
     return measured;
+}
+
+/// @return @p made, which must hold a value.
+template <typename T>
+[[nodiscard]] T required(std::expected<T, ExtensionError> made)
+{
+    REQUIRE(made.has_value());
+    return std::move(*made);
+}
+
+/// The orchestrator loaded over a MeasuredTab, the pull requests and the seeded runs' calls taken in.
+class RepaintRig
+{
+  public:
+    /// @param seed The configuration and the runs taken in.
+    /// @param pullRequestsFixture The pull requests listed.
+    /// @param limits The guest's limits: the daemon world's, which a measurement times against.
+    explicit RepaintRig(MeasuredSeed const& seed,
+                        std::string_view pullRequestsFixture = "github/prs-100.json",
+                        ExtensionLimits limits = daemonWorldLimits()):
+        _limits { limits },
+        _backend { wasm::makeDefaultBackend() },
+        _engine { required(Engine::create(*_backend, World::Daemon, _limits)) },
+        _compiled { required(CompiledExtension::load(*_engine, orchestratorModule())) },
+        _services { readTestdata(pullRequestsFixture), seed.runs, _store, tab },
+        _instance { required(DaemonInstance::create(_compiled, _services, _clock, *_engine, _limits)) }
+    {
+        for (auto const& run: seed.runs)
+            REQUIRE(_store.set(run.key, run.value).has_value());
+        REQUIRE(_instance
+                    ->load(seed.configJson,
+                           DaemonHostInfo {
+                               .roots = orchestratorRoots(), .home = "/home/u", .utcOffsetMinutes = 0 })
+                    .has_value());
+        _services.finish();
+        REQUIRE(_instance->update(DaemonHint::Procs).has_value());
+    }
+
+    /// Times one `update(hint)`; the tab must have been drawn by it.
+    [[nodiscard]] std::chrono::microseconds timed(DaemonHint hint)
+    {
+        std::ignore = tab.takeWritten();
+        auto const started = std::chrono::steady_clock::now();
+        auto const updated = _instance->update(hint);
+        auto const elapsed = std::chrono::steady_clock::now() - started;
+        CAPTURE(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed),
+                updated ? -1 : static_cast<int>(updated.error()));
+        REQUIRE(updated.has_value());
+        REQUIRE(tab.takeWritten() > 0);
+        return std::chrono::duration_cast<std::chrono::microseconds>(elapsed);
+    }
+
+    /// Runs one `update(hint)` untimed.
+    void update(DaemonHint hint) { REQUIRE(_instance->update(hint).has_value()); }
+
+    MeasuredTab tab; ///< The tab it serves.
+
+  private:
+    ExtensionLimits _limits;
+    MemoryStore _store;
+    core::platform::SteadyClock _clock;
+    std::unique_ptr<wasm::IWasmBackend> _backend;
+    std::shared_ptr<Engine> _engine;
+    std::shared_ptr<CompiledExtension> _compiled;
+    MeasuredServices _services;
+    std::unique_ptr<DaemonInstance> _instance;
+};
+
+/// The escape sequence of the down-arrow key, as a terminal sends it.
+constexpr auto DownKey = "\x1b[B"sv;
+/// The escape sequence of the up-arrow key.
+constexpr auto UpKey = "\x1b[A"sv;
+/// How many keys the multi-key chunk carries: a paste-speed burst, or a key held down.
+constexpr auto KeysPerChunk = 50;
+
+/// @return @p key, @p count times over.
+[[nodiscard]] std::string repeated(std::string_view key, int count)
+{
+    auto text = std::string {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, count))
+        text += key;
+    return text;
 }
 
 // }}}
@@ -691,7 +836,7 @@ TEST_CASE("DaemonGuest: [.measure] the callback that receives the largest reply"
 {
     auto const seed = measuredSeed();
     auto memory = MemoryStore {};
-    auto const withoutDisk = measureLargestCallback(memory, seed);
+    auto const withoutDisk = measureLargestCallback(memory, seed, nullptr);
 
     auto const directory = std::filesystem::path(VTEXTENSION_MEASURE_STORE_DIR);
     std::filesystem::remove_all(directory);
@@ -699,7 +844,7 @@ TEST_CASE("DaemonGuest: [.measure] the callback that receives the largest reply"
     auto const locker = NativeFileLocker {};
     auto disk = FileExtensionStore::open(fileSystem, locker, directory, StoreLimits {});
     REQUIRE(disk.has_value());
-    auto const withDisk = measureLargestCallback(*disk, seed);
+    auto const withDisk = measureLargestCallback(*disk, seed, nullptr);
 
     auto const deadline = daemonWorldLimits().callDeadline;
     std::println("update(procs) delivering prs-100.json and {} runs' calls, {} calls each:",
@@ -723,6 +868,88 @@ TEST_CASE("DaemonGuest: [.measure] the callback that receives the largest reply"
     REQUIRE(withDisk.storeWrites >= seed.runs.size() * MeasuredRounds);
     // (a) runs under the deadline; (b), whose durable writes the deadline pauses across, is recorded only.
     REQUIRE(withoutDisk.spread.max < deadline);
+}
+
+TEST_CASE("DaemonGuest: the guest draws its tab and moves on a key", "[daemon][guest][orchestrator]")
+{
+    // The five-PR list: the deadline holds under AddressSanitizer too; ThreadSanitizer stretches it.
+    auto rig = RepaintRig { MeasuredSeed { .configJson = std::string(OrchestratorConfig), .runs = {} },
+                            "github/prs-open.json",
+                            vtextension::testing::guestTestLimits() };
+    CHECK(rig.tab.firstFrame.starts_with("\x1b[?2026h"));
+    std::ignore = rig.tab.takeWritten();
+
+    rig.tab.type(DownKey);
+    rig.update(DaemonHint::Tabs);
+    CHECK(rig.tab.takeWritten() > 0);
+
+    // Nothing typed, nothing changed: nothing is written.
+    rig.update(DaemonHint::Tabs);
+    CHECK(rig.tab.takeWritten() == 0);
+}
+
+TEST_CASE("DaemonGuest: [.measure] the dashboard's repaint", "[.measure][guest-measure]")
+{
+    auto const seed = measuredSeed();
+    auto rig = RepaintRig { seed };
+    auto const deadline =
+        std::chrono::duration_cast<std::chrono::microseconds>(daemonWorldLimits().callDeadline);
+
+    // (a) A full repaint: the tab grows from 80x24 (Medium) to 120x40 (Wide).
+    auto resized = std::vector<std::chrono::microseconds> {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, MeasuredRounds))
+    {
+        rig.tab.info.cols = 80;
+        rig.tab.info.rows = 24;
+        rig.update(DaemonHint::Tabs);
+        rig.tab.info.cols = 120;
+        rig.tab.info.rows = 40;
+        resized.push_back(rig.timed(DaemonHint::Tabs));
+    }
+
+    // (b) An incremental one: one down-arrow; then a chunk of KeysPerChunk, down and back up in turn.
+    auto oneKey = std::vector<std::chrono::microseconds> {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, MeasuredRounds))
+    {
+        rig.tab.type(DownKey);
+        oneKey.push_back(rig.timed(DaemonHint::Tabs));
+    }
+    rig.tab.type("\x1b[H"sv);
+    rig.update(DaemonHint::Tabs);
+    auto manyKeys = std::vector<std::chrono::microseconds> {};
+    for (auto const round: std::views::iota(0, MeasuredRounds))
+    {
+        rig.tab.type(repeated(round % 2 == 0 ? DownKey : UpKey, KeysPerChunk));
+        manyKeys.push_back(rig.timed(DaemonHint::Tabs));
+    }
+
+    // (c) The largest callback with the tab open: the reply taken in, the store in memory, and the repaint.
+    auto memory = MemoryStore {};
+    auto tab = MeasuredTab {};
+    auto const callback = measureLargestCallback(memory, seed, &tab);
+
+    auto const rows = std::array {
+        std::pair { "(a) update(tabs) after a resize 80x24 -> 120x40", spreadOf(std::move(resized)) },
+        std::pair { "(b) update(tabs) after one down-arrow", spreadOf(std::move(oneKey)) },
+        std::pair { "(b) update(tabs) after a chunk of 50 arrows", spreadOf(std::move(manyKeys)) },
+        std::pair { "(c) update(procs) delivering prs-100.json, tab open", callback.spread },
+    };
+    std::println("the dashboard's repaint, 120x40, prs-100.json and {} runs, {} calls each:",
+                 seed.runs.size(),
+                 MeasuredRounds);
+    for (auto const& [name, spread]: rows)
+        std::println("  {}: min {} median {} max {}; headroom {} of {}",
+                     name,
+                     spread.min,
+                     spread.median,
+                     spread.max,
+                     deadline - spread.max,
+                     deadline);
+    for (auto const& [name, spread]: rows)
+    {
+        CAPTURE(name);
+        REQUIRE(spread.max < deadline);
+    }
 }
 
 #endif

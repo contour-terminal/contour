@@ -171,6 +171,7 @@ if(VTEXTENSION_TESTING)
         testing/FakeWasmBackend.hpp
         testing/FixtureProcessRunner.hpp
         testing/GuestModuleCheck.hpp
+        testing/GuestSlowdown.hpp
         testing/Harness.hpp
         testing/LaneReport.hpp
         testing/ManualScheduler.hpp
