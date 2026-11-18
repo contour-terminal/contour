@@ -470,7 +470,7 @@ std::vector<std::string> manifestLines()
 
 std::string manifestText()
 {
-    auto text = std::string("name = orchestrator\nversion = 2\nplacement daemon\n");
+    auto text = std::string("name = orchestrator\nversion = 2\ntitle = Agents\nplacement daemon\n");
     for (auto const& line: manifestLines())
         (text += line) += '\n';
     return text;

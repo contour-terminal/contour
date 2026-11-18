@@ -125,11 +125,11 @@ inline constexpr std::string_view AgentPaneTemplate = "agent";
 
 /// The manifest lines the tables declare: every root, read, arg, command-env, command, command-env-for,
 /// pane, pane-env, serve and action line, in that order and each kind in table order. The manifest is these
-/// lines after its fixed `name`, `version` and `placement` lines.
+/// lines after its fixed `name`, `version`, `title` and `placement` lines.
 /// @return One string per line, without line ends.
 [[nodiscard]] std::vector<std::string> manifestLines();
 
-/// The whole manifest: its `name`, `version` and `placement` lines, then manifestLines().
+/// The whole manifest: its `name`, `version`, `title` and `placement` lines, then manifestLines().
 /// @return The manifest's text, each line ended by `\n`.
 [[nodiscard]] std::string manifestText();
 

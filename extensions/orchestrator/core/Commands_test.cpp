@@ -1028,7 +1028,7 @@ TEST_CASE("manifestText declares the worktree root as created on demand and post
           "[orchestrator][commands][manifest]")
 {
     auto const text = manifestText();
-    CHECK(text.starts_with("name = orchestrator\nversion = 2\nplacement daemon\n"));
+    CHECK(text.starts_with("name = orchestrator\nversion = 2\ntitle = Agents\nplacement daemon\n"));
     CHECK(text.ends_with('\n'));
     CHECK(text.contains("\nroot worktrees create = config:worktree_root\n"));
     CHECK(text.contains("\nroot repos = config:repos/*/path\n"));

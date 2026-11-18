@@ -1,5 +1,6 @@
 name = orchestrator
 version = 2
+title = Agents
 placement daemon
 root worktrees create = config:worktree_root
 root repos = config:repos/*/path
