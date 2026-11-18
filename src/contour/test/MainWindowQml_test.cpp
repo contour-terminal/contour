@@ -3458,6 +3458,88 @@ TEST_CASE("a tab still fading in stays whole when the tab before it closes (offs
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("a tab closed while it fades in leaves the others whole (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    using contour::config::MotionPreference;
+
+    auto const motion = GENERATE(MotionPreference::Full, MotionPreference::Reduced);
+    auto const look = GENERATE(contour::config::TabLook::Pill, contour::config::TabLook::Flat);
+    auto const waitMs = GENERATE(0, 30, 80);
+    auto const closed = GENERATE(0, 1); // the first tab, or the new one
+    CAPTURE(static_cast<int>(motion), static_cast<int>(look), waitMs, closed);
+    auto setup = rowSetup(ChromeStyle::Fluent);
+    setup.accessibility.motion = motion;
+    setup.tabStyle = { .shape = look, .material = contour::config::TabBarMaterial::Glass };
+
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 1 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+    showWindow(*root);
+    QTest::qWait(styleGroup(engine, "motion").property("standard").toInt() + 150);
+
+    auto const id = controller.insertTab(1, MockMainController::TabActivation::Activate);
+    QCoreApplication::processEvents();
+    QTest::qWait(waitMs);
+    controller.closeTabAtIndex(closed);
+    QCoreApplication::processEvents();
+    // The new tab's title arrives as it slides into the place the first one left, as a shell's does.
+    controller.shownWorkspaceTabTitles.resize(static_cast<std::size_t>(id) + 1);
+    controller.shownWorkspaceTabTitles[static_cast<std::size_t>(id)] =
+        QStringLiteral("contour - PowerShell 7.7.0 - a title that has just arrived");
+    emit controller.dataChanged(controller.index(0, 0), controller.index(0, 0));
+    QTest::qWait(styleGroup(engine, "motion").property("standard").toInt() + 150);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 1);
+    auto const& tab = *tabs[0];
+    CHECK(tab.isVisible());
+    CHECK(tab.opacity() == 1.0);
+    CHECK(tab.scale() == 1.0);
+    CHECK(tab.width() > 0.0);
+    // In view: the strip has not been left scrolled to where the closed tab stood.
+    auto const& list = named(*root, QStringLiteral("tabList"));
+    INFO("tab " << tab.x() << "+" << tab.width() << " contentX " << list.property("contentX").toReal()
+                << " list " << list.width());
+    CHECK(tab.x() - list.property("contentX").toReal() >= -0.5);
+    CHECK(tab.x() + tab.width() - list.property("contentX").toReal() <= list.width() + 0.5);
+    CHECK(tab.width() == tab.implicitWidth());
+    CHECK(list.property("contentWidth").toReal() >= tab.x() + tab.width() - 0.5);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a tab whose fade in is stopped short is shown whole (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 1 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+    showWindow(*root);
+
+    std::ignore = controller.insertTab(1, MockMainController::TabActivation::Activate);
+    QCoreApplication::processEvents();
+    QTest::qWait(styleGroup(engine, "motion").property("standard").toInt() / 4);
+
+    auto tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 2);
+    std::ranges::sort(tabs, {}, [](QQuickItem const* tab) { return tab->x(); });
+    auto* const fade = tabs[1]->findChild<QObject*>(QStringLiteral("tabAppear"));
+    REQUIRE(fade != nullptr);
+    REQUIRE(fade->property("running").toBool());
+    CHECK(tabs[1]->opacity() < 1.0); // on its way in
+
+    // Whatever stops it -- here the test, in the app whatever cut it short -- the tab is left whole.
+    QMetaObject::invokeMethod(fade, "stop");
+    QCoreApplication::processEvents();
+    CHECK(tabs[1]->opacity() == 1.0);
+    CHECK(tabs[1]->scale() == 1.0);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("a tab whose title grows while it fades in keeps the strip wide enough for it (offscreen)",
           "[contour][gui][qml][mainwindow][joinedtabs]")
 {

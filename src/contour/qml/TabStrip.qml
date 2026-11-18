@@ -340,14 +340,53 @@ Row {
                     locked: (model.tabSecure ?? 0) !== 0
                     secureState: model.tabSecure ?? 0
                     iconInfo: model.tabIcon ?? ({})
-                    // The tabs from the slot's gap on make room for it, animated as a reorder is.
-                    transform: Translate {
-                        x: index >= root.slotGap ? root.roomMade : 0
-                        Behavior on x {
-                            NumberAnimation { duration: chromeStyle.motion.standard }
-                        }
+                    // The tabs from the slot's gap on make room for it, animated as a reorder is; and a tab
+                    // whose row changed slides from where it stood (rowSlide).
+                    transform: [
+                        Translate {
+                            x: index >= root.slotGap ? root.roomMade : 0
+                            Behavior on x {
+                                NumberAnimation { duration: chromeStyle.motion.standard }
+                            }
+                        },
+                        Translate { x: tabDelegate.rowSlide }
+                    ]
+
+                    // A tab whose row a tab opened, closed or moved before it changed slides from where it stood
+                    // to where the view puts it, as an offset of its own rather than the view's displaced
+                    // transition: the view does not lay out again when its first tab is resized while a
+                    // transition holds it (QQuickListViewPrivate::itemGeometryChanged), so a tab sliding into
+                    // the place a closed first tab left, its title arriving as it went, was left wider than
+                    // the strip -- cut off, or scrolled wholly out of it. The view always has the tab where it
+                    // stands. Under Reduce Motion nothing slides.
+                    /// How far from where the view puts it the tab is drawn, while it slides there.
+                    property real rowSlide: 0
+                    /// Where the tab was drawn when its row changed, until the view places it anew.
+                    property real slideFromX: NaN
+                    /// Whether the view has placed the tab once: a tab being made has no place to slide from.
+                    property bool isPlaced: false
+                    Component.onCompleted: Qt.callLater(() => { tabDelegate.isPlaced = true })
+                    onIndexChanged: {
+                        if (isPlaced && chromeStyle.motion.animates && isNaN(slideFromX))
+                            slideFromX = x + rowSlide
                     }
-                    onXChanged: root.scheduleSpans()
+                    onXChanged: {
+                        root.scheduleSpans()
+                        if (isNaN(slideFromX))
+                            return
+                        rowSlide = slideFromX - x
+                        slideFromX = NaN
+                        rowSlideAnimation.restart()
+                    }
+                    onRowSlideChanged: root.scheduleGlassShapes()
+                    NumberAnimation {
+                        id: rowSlideAnimation
+                        target: tabDelegate
+                        property: "rowSlide"
+                        to: 0
+                        duration: chromeStyle.motion.standard
+                        easing.type: Easing.OutCubic
+                    }
                     onWidthChanged: root.scheduleSpans()
                     onHeightChanged: root.scheduleGlassShapes()
                     onGlassTintChanged: root.scheduleGlassShapes()
@@ -360,19 +399,28 @@ Row {
                     // -- and at startup the window's first tab is resized just then, its title arriving as it
                     // fades in -- which left the strip at the old width, the + standing over the tab's end. Only
                     // a tab the model adds fades: one the view creates as the strip scrolls does not.
+                    //
+                    // The fade drives values of its own, which the tab shows only while the fade runs: a fade
+                    // stopped short, by whatever stops it, leaves the tab whole rather than at the opacity it
+                    // had reached -- which once left a tab invisible for good, still holding its place.
+                    property real appearOpacity: 1
+                    property real appearScale: 1
+                    opacity: appear.running ? appearOpacity : 1
+                    scale: appear.running ? appearScale : 1
                     ListView.onAdd: appear.restart()
                     ParallelAnimation {
                         id: appear
+                        objectName: "tabAppear"   // findChild() handle for the GUI test
                         NumberAnimation {
                             target: tabDelegate
-                            property: "opacity"
+                            property: "appearOpacity"
                             from: 0
                             to: 1
                             duration: chromeStyle.motion.standard
                         }
                         NumberAnimation {
                             target: tabDelegate
-                            property: "scale"
+                            property: "appearScale"
                             from: chromeStyle.motion.animates ? 0.92 : 1
                             to: 1
                             duration: chromeStyle.motion.standard
@@ -381,17 +429,9 @@ Row {
                     }
                 }
 
-                // Animate reordering when a tab is moved, and the tabs making room for one opened or closing
-                // the gap one leaves. Under Reduce Motion nothing slides. A closed tab goes at once, so what the
-                // strip holds is always what the model holds.
-                moveDisplaced: Transition {
-                    enabled: chromeStyle.motion.animates
-                    NumberAnimation { properties: "x"; duration: chromeStyle.motion.standard }
-                }
-                displaced: Transition {
-                    enabled: chromeStyle.motion.animates
-                    NumberAnimation { properties: "x"; duration: chromeStyle.motion.standard; easing.type: Easing.OutCubic }
-                }
+                // No view transitions: the tabs making room for one opened, closing the gap one leaves, or
+                // reordering slide themselves (rowSlide). A closed tab goes at once, so what the strip holds is
+                // always what the model holds.
 
                 // The active tab's indicator line, one for the strip, so that it slides from the tab it leaves to
                 // the tab it marks; under Reduce Motion it moves at once. A tab draws its own line where this
@@ -402,7 +442,7 @@ Row {
                     parent: list.contentItem
                     z: 2
                     readonly property Item tab: list.currentItem
-                    readonly property real targetX: tab ? tab.x + tab.indicatorInset : 0
+                    readonly property real targetX: tab ? tab.x + tab.rowSlide + tab.indicatorInset : 0
                     readonly property real targetWidth: tab ? tab.indicatorWidth : 0
                     // The slide runs from the tab the line leaves, and only when the active tab changes: at
                     // startup, and as tabs resize or scroll, the line stays on its tab. A tab that closed has
@@ -413,7 +453,7 @@ Row {
                     property real travel: 1
                     onTabChanged: {
                         if (chromeStyle.motion.animates && lastTab !== null && tab !== null) {
-                            fromX = lastTab.x + lastTab.indicatorInset
+                            fromX = lastTab.x + lastTab.rowSlide + lastTab.indicatorInset
                             fromWidth = lastTab.indicatorWidth
                             slide.restart()
                         }
