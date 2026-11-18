@@ -11,6 +11,7 @@
 
 #include <vthost/FlushPolicy.hpp>
 
+using vthost::CursorVisibility;
 using vthost::decideFlush;
 using vthost::flushDeadline;
 using vthost::FlushInputs;
@@ -53,6 +54,12 @@ TEST_CASE("decideFlush follows the echo, first-output and coalesce rules", "[vth
         Row { "echo wins over first output",
               { t0, t0 - 1ms, std::nullopt, IncrementHistory::NoneSinceSnapshot },
               FlushReason::Echo },
+        Row { "input 1 ms ago, unanswered, cursor hidden: a redraw under way",
+              { t0, t0 - 1ms, std::nullopt, IncrementHistory::SomeSinceSnapshot, CursorVisibility::Hidden },
+              FlushReason::AwaitRedraw },
+        Row { "a redraw under way waits even as the first output",
+              { t0, t0 - 1ms, std::nullopt, IncrementHistory::NoneSinceSnapshot, CursorVisibility::Hidden },
+              FlushReason::AwaitRedraw },
     };
     for (auto const& row: rows)
     {
@@ -61,11 +68,13 @@ TEST_CASE("decideFlush follows the echo, first-output and coalesce rules", "[vth
     }
 }
 
-TEST_CASE("flushDeadline is now for an immediate reason and now + 20 ms to coalesce", "[vthost][flush]")
+TEST_CASE("flushDeadline is now for an immediate reason, now + 5 ms for a redraw, now + 20 ms to coalesce",
+          "[vthost][flush]")
 {
     using namespace std::chrono_literals;
     auto const t0 = core::platform::SteadyTimePoint {} + 1s;
     CHECK(flushDeadline(FlushPolicy {}, FlushReason::Echo, t0) == t0);
     CHECK(flushDeadline(FlushPolicy {}, FlushReason::FirstOutput, t0) == t0);
+    CHECK(flushDeadline(FlushPolicy {}, FlushReason::AwaitRedraw, t0) == t0 + 5ms);
     CHECK(flushDeadline(FlushPolicy {}, FlushReason::Coalesce, t0) == t0 + 20ms);
 }
