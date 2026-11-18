@@ -943,6 +943,13 @@ std::optional<SwitchTarget> TerminalSessionManager::daemonTargetOf(vtworkspace::
     return binding->daemonTarget();
 }
 
+vthost::proto::ExtensionPresence TerminalSessionManager::extensionPresenceOf(
+    vtworkspace::WorkspaceId window) const
+{
+    auto const* const binding = bindingOf(window);
+    return binding != nullptr ? binding->extensionPresence() : vthost::proto::ExtensionPresence {};
+}
+
 std::string TerminalSessionManager::daemonNameOf(vtworkspace::WorkspaceId window) const
 {
     if (auto const target = daemonTargetOf(window))

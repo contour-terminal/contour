@@ -93,6 +93,7 @@
 #include <vthost/client/LayoutReconstruction.hpp>
 #include <vthost/proto/Negotiation.hpp>
 #include <vthost/testing/FakeDaemonControl.hpp>
+#include <vthost/testing/FakeDaemonWorldHosting.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/FakeProfileCatalog.hpp>
 #include <vthost/testing/SoftwareKeySource.hpp>
@@ -7160,4 +7161,69 @@ TEST_CASE("only NativeController advertises daemon-extension consent", "[attach]
     // A NativeClient's hello offers what its composition root names, which the CLI never does.
     CHECK_FALSE(vthost::client::NativeClient::HandshakeOptions {}.capabilities.contains(
         vthost::proto::Capability::DaemonExtensionConsent));
+}
+
+TEST_CASE("NativeController shows a daemon extension's palette rows and invokes them",
+          "[attach][controller][remote][presence]")
+{
+    auto const journal = std::make_shared<std::vector<std::string>>();
+    auto world = std::shared_ptr<vthost::testing::FakeDaemonWorldHosting> {};
+    auto daemon = DaemonFixture { {},
+                                  {},
+                                  1,
+                                  {},
+                                  std::nullopt,
+                                  {},
+                                  vthost::ClientSizePolicy::Latest,
+                                  {},
+                                  [&](vthost::DaemonWorldEvents events, vthost::OwnerPost post) {
+                                      world = std::make_shared<vthost::testing::FakeDaemonWorldHosting>(
+                                          journal, std::move(post), std::move(events));
+                                      world->rows = { vthost::ExtensionActionRows {
+                                          .extension = "orchestrator",
+                                          .title = "Agents",
+                                          .state = vthost::DaemonExtensionState::Running,
+                                          .rows = { { "open", "Open Agents" } } } };
+                                      return world;
+                                  } };
+    std::ignore = daemon.seedSession("first");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline, ControllerOptions {});
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+
+    // The window's hello offers to show the rows; the daemon sends them as it attaches.
+    auto const hellos = daemon.clientFrames.hellos();
+    REQUIRE(hellos.size() == 1);
+    CHECK(hellos.front().capabilities.contains(vthost::proto::Capability::ExtensionPresence));
+    REQUIRE(waitUntil([&] { return !controller.extensionPresence().extensions.empty(); }));
+    CHECK(controller.extensionPresence()
+          == vthost::proto::ExtensionPresence {
+              .extensions = { vthost::proto::WireExtensionPresence {
+                  .extension = "orchestrator",
+                  .title = "Agents",
+                  .state = vthost::proto::WirePresenceState::Running,
+                  .rows = { vthost::proto::WireActionRow { .id = "open", .title = "Open Agents" } } } } });
+
+    // A change reaches the window too.
+    std::ignore = daemon.onDaemon([&] {
+        world->changePresence({ vthost::ExtensionActionRows { .extension = "orchestrator",
+                                                              .title = "Agents",
+                                                              .state = vthost::DaemonExtensionState::Disabled,
+                                                              .rows = { { "open", "Open Agents" } } } });
+        return true;
+    });
+    REQUIRE(waitUntil([&] {
+        auto const presence = controller.extensionPresence();
+        return !presence.extensions.empty()
+               && presence.extensions.front().state == vthost::proto::WirePresenceState::Disabled;
+    }));
+
+    // Invoking a row sends one InvokeExtensionAction.
+    controller.invokeExtensionAction("orchestrator", "open");
+    REQUIRE(waitUntil(
+        [&] { return daemon.clientFrames.count(vthost::proto::PduType::InvokeExtensionAction) == 1; }));
+    CHECK_FALSE(waitUntil(
+        [&] { return daemon.clientFrames.count(vthost::proto::PduType::InvokeExtensionAction) > 1; }, 100));
 }

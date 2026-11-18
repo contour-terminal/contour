@@ -251,11 +251,11 @@ class ClientFrameCounts
 {
   public:
     /// The PDU kinds counted.
-    static constexpr auto Kinds = std::array { vthost::proto::PduType::ResizeRequest,
-                                               vthost::proto::PduType::Heartbeat,
-                                               vthost::proto::PduType::ResizePane,
-                                               vthost::proto::PduType::OpenFirstTab,
-                                               vthost::proto::PduType::SetWorkspaceColor };
+    static constexpr auto Kinds = std::array {
+        vthost::proto::PduType::ResizeRequest,     vthost::proto::PduType::Heartbeat,
+        vthost::proto::PduType::ResizePane,        vthost::proto::PduType::OpenFirstTab,
+        vthost::proto::PduType::SetWorkspaceColor, vthost::proto::PduType::InvokeExtensionAction
+    };
 
     /// @param type A counted kind.
     /// @return How many PDUs of @p type arrived so far; 0 for a kind that is not counted.
@@ -588,6 +588,8 @@ struct DaemonFixture
     vtworkspace::Layout startupLayout;
     /// How the host resolves one client area from several clients' reports.
     vthost::ClientSizePolicy sizePolicy = vthost::ClientSizePolicy::Latest;
+    /// Makes the host's daemon-scoped extensions; none by default.
+    vthost::DaemonWorldFactory daemonWorld;
 
     /// @return A host of the fixture's run @c instance, serving MockPty sessions.
     [[nodiscard]] std::unique_ptr<vthost::SessionHost> makeHost()
@@ -603,6 +605,7 @@ struct DaemonFixture
                                         .sizePolicy = sizePolicy,
                                         .startupLayout = startupLayout,
                                         .extensions = extensions,
+                                        .daemonWorld = daemonWorld,
                                         .profiles = profiles,
                                         .instance = instance,
                                         .restore = std::exchange(restore, std::nullopt) });
@@ -618,6 +621,7 @@ struct DaemonFixture
     /// @param sizePolicy How the host resolves one client area from several; the latest report by default.
     /// @param authorizedKeys The keys the daemon authenticates by (keys only, no token); none for the token
     ///        guard @p services states. Such a daemon is served without the fixture's socket decorators.
+    /// @param daemonWorld Makes the host's daemon-scoped extensions; none by default.
     explicit DaemonFixture(std::shared_ptr<vthost::IExtensionHosting> extensions = {},
                            vthost::NativeSessionServices services = {},
                            uint64_t instance = 1,
@@ -625,14 +629,16 @@ struct DaemonFixture
                            std::optional<vthost::WorkspaceRestore> restore = std::nullopt,
                            vtworkspace::Layout startupLayout = {},
                            vthost::ClientSizePolicy sizePolicy = vthost::ClientSizePolicy::Latest,
-                           std::vector<vthost::AuthorizedKey> authorizedKeys = {}):
+                           std::vector<vthost::AuthorizedKey> authorizedKeys = {},
+                           vthost::DaemonWorldFactory daemonWorld = {}):
         extensions(std::move(extensions)),
         services(std::move(services)),
         instance(instance),
         profiles(std::move(profiles)),
         restore(std::move(restore)),
         startupLayout(std::move(startupLayout)),
-        sizePolicy(sizePolicy)
+        sizePolicy(sizePolicy),
+        daemonWorld(std::move(daemonWorld))
     {
         host = makeHost();
         auto listener = core::net::listen(loop, "127.0.0.1", 0);

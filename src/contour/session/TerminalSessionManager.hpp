@@ -1672,6 +1672,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] std::optional<SwitchTarget> daemonTargetOf(vtworkspace::WorkspaceId window) const;
 
     /// @param window A window of this manager.
+    /// @return The daemon extensions and their palette rows of @p window's daemon
+    ///         (WindowBinding::extensionPresence); empty for a window no binding serves.
+    [[nodiscard]] vthost::proto::ExtensionPresence extensionPresenceOf(vtworkspace::WorkspaceId window) const;
+
+    /// @param window A window of this manager.
     /// @return What the location chip calls @p window's daemon (window::locationDaemonName, from
     ///         daemonTargetOf() and hostLabelOf()); the host label for a window attached to a host that is
     ///         no daemon (a tmux attach); empty for a window whose sessions run in-process.

@@ -287,6 +287,15 @@ class DaemonNamedBinding final: public contour::session::WindowBinding
         return {};
     }
 
+    [[nodiscard]] vthost::proto::ExtensionPresence extensionPresence() const override { return presence; }
+    /// Records the invocation, as a daemon link sends it.
+    [[nodiscard]] contour::session::ExtensionInvocation invokeExtensionAction(std::string const& extension,
+                                                                              std::string const& id) override
+    {
+        invocations.emplace_back(extension, id);
+        return contour::session::ExtensionInvocation::Sent;
+    }
+
     [[nodiscard]] vthost::proto::RaiseRole raiseRole() const noexcept override { return role; }
     [[nodiscard]] unsigned tabsWaitingElsewhere() const override { return waitingElsewhere; }
     [[nodiscard]] std::optional<uint64_t> daemonKey() const override { return key; }
@@ -297,6 +306,10 @@ class DaemonNamedBinding final: public contour::session::WindowBinding
     unsigned waitingElsewhere = 0;
     /// What daemonKey() reports: bindings sharing one count their daemon once.
     std::optional<uint64_t> key = std::nullopt;
+    /// What extensionPresence() reports: the daemon extensions' palette rows, as the daemon last sent them.
+    vthost::proto::ExtensionPresence presence {};
+    /// Every invokeExtensionAction() call, as (extension, id), in order.
+    std::vector<std::pair<std::string, std::string>> invocations;
 
     /// One openSiblingWindow() call.
     struct OpenedWindow

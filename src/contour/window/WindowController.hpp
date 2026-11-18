@@ -156,6 +156,7 @@ class WindowController:
     public QAbstractListModel,
     public command::TabTitleProvider,
     public command::DaemonRowsProvider,
+    public command::ExtensionRowsProvider,
     public SwitcherHost,
     public display::WindowHost,
     public session::InProcessWindow
@@ -1009,6 +1010,10 @@ class WindowController:
     /// The daemons and workspaces the palette lists for this window (command::DaemonRowsProvider). Starts
     /// refreshing the local daemon discovery behind it, and answers from what it knew before.
     [[nodiscard]] command::DaemonRowsState daemonRows() const override;
+
+    /// The daemon extensions' palette rows of this window's daemon, from what it last sent
+    /// (command::ExtensionRowsProvider); none for a window with no daemon behind it.
+    [[nodiscard]] std::vector<command::ExtensionRow> extensionRows() const override;
 
     /// The label the strip shows for one tab, read as tabTitles() reads each row. Resolving a label
     /// takes that tab's terminal lock, so naming one tab this way waits on no other tab's parser.
@@ -2299,6 +2304,7 @@ class WindowController:
     command::LayoutCommandSource _layoutCommands;
     command::HostCommandSource _hostCommands;
     command::DaemonCommandSource _daemonCommands;
+    command::ExtensionCommandSource _extensionCommands;
     command::BoundCommandSource _boundCommands;
     command::ActionCommandSource _actionCommands;
     // The two sources that offer actions without knowing the window, minus the switching actions a window

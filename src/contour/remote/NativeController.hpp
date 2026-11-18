@@ -322,6 +322,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @return The events, as the daemon sent them.
     [[nodiscard]] std::vector<vthost::client::NativeClient::DaemonConsentEvent> takeDaemonConsentEvents();
 
+    /// @return The daemon extensions and their palette rows, as the daemon last sent them
+    ///         (Capability::ExtensionPresence); empty before it did, or from a daemon that does not. Any
+    ///         thread.
+    [[nodiscard]] vthost::proto::ExtensionPresence extensionPresence() const;
+
     /// Invokes a daemon extension's palette row (InvokeExtensionAction): sent only to a daemon sharing
     /// Capability::ExtensionPresence. A no-op once disconnected.
     /// @param extension WireExtensionPresence::extension.
@@ -976,6 +981,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     void onPermissionRequest(vthost::proto::PermissionRequest const& request);
     /// Queues a daemon-scoped extension's question, or its settling, for the GUI. Reactor thread.
     void onDaemonConsent(vthost::client::NativeClient::DaemonConsentEvent const& event);
+    /// Keeps the daemon extensions' palette rows for the GUI. Reactor thread.
+    void onExtensionEvent(vthost::client::NativeClient::ExtensionEvent const& event);
 
     /// Reactor-side: keeps a daemon's switch request for the GUI, and tells it.
     void onSwitchRequest(vthost::proto::SwitchRequest const& request);
@@ -1163,6 +1170,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     std::vector<vthost::proto::SwitchRequest> _switchRequestQueue;
     /// What onDaemonConsent() queued for the GUI, oldest first. Under _mutex.
     std::vector<vthost::client::NativeClient::DaemonConsentEvent> _daemonConsentEvents;
+    /// The daemon extensions' palette rows, as the daemon last sent them. Under _mutex.
+    vthost::proto::ExtensionPresence _extensionPresence;
     /// Guards the geometry bookkeeping below, and ONLY that.
     ///
     /// A lock of its own because the resize sink is reached from inside a `_mutex`-holding frame:

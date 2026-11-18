@@ -14,10 +14,13 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <ranges>
 #include <string>
 #include <unordered_set>
 #include <vector>
+
+#include <vthost/proto/Pdu.hpp>
 
 using namespace contour;
 using namespace contour::command;
@@ -684,4 +687,105 @@ TEST_CASE("every new sidebar action has a catalog entry and a palette category",
     }
     CHECK(commandCategory(Action { ToggleSidebar {} }) == CommandCategory::View);
     CHECK(commandCategory(Action { JumpToNextAttention {} }) == CommandCategory::Window);
+}
+
+namespace
+{
+/// A window's daemon extension rows, as a test sets them.
+class FixedExtensionRows final: public ExtensionRowsProvider
+{
+  public:
+    [[nodiscard]] std::vector<ExtensionRow> extensionRows() const override { return rows; }
+
+    std::vector<ExtensionRow> rows;
+};
+
+/// @return The orchestrator as its daemon reports it in @p state, declaring open, refresh and show-blocked.
+[[nodiscard]] vthost::proto::WireExtensionPresence orchestratorIn(vthost::proto::WirePresenceState state)
+{
+    return vthost::proto::WireExtensionPresence {
+        .extension = "orchestrator",
+        .title = "Agents",
+        .state = state,
+        .rows = { vthost::proto::WireActionRow { .id = "open", .title = "Open Agents" },
+                  vthost::proto::WireActionRow { .id = "refresh", .title = "Refresh Agents" },
+                  vthost::proto::WireActionRow { .id = "show-blocked", .title = "Show blocked runs" } },
+    };
+}
+} // namespace
+
+TEST_CASE("extensionRowsOf: the rows follow the extension's state", "[contour][palette][command][presence]")
+{
+    using vthost::proto::WirePresenceState;
+    auto const declared = std::vector<ExtensionRow> {
+        { .extension = "orchestrator", .id = "open", .title = "Open Agents" },
+        { .extension = "orchestrator", .id = "refresh", .title = "Refresh Agents" },
+        { .extension = "orchestrator", .id = "show-blocked", .title = "Show blocked runs" },
+    };
+    struct Row
+    {
+        WirePresenceState state;
+        std::vector<ExtensionRow> rows;
+    };
+    for (auto const& row:
+         { Row { .state = WirePresenceState::Running, .rows = declared },
+           Row { .state = WirePresenceState::Stopped, .rows = declared },
+           Row { .state = WirePresenceState::AwaitingGrant,
+                 .rows = { { .extension = "orchestrator", .id = "", .title = "Agents: grant access…" } } },
+           Row {
+               .state = WirePresenceState::Disabled,
+               .rows = { { .extension = "orchestrator", .id = "", .title = "Agents: restart extension" } } },
+           Row { .state = WirePresenceState::Unavailable, .rows = {} } })
+    {
+        INFO(static_cast<int>(row.state));
+        CHECK(extensionRowsOf(orchestratorIn(row.state)) == row.rows);
+    }
+}
+
+TEST_CASE("the palette shows one row per declared action and none without the capability",
+          "[contour][palette][command][presence]")
+{
+    auto rows = FixedExtensionRows {};
+    // A window whose daemon sent no rows -- it shares no capability, or has none -- shows none.
+    CHECK(ExtensionCommandSource { rows }.commands().empty());
+
+    rows.rows = extensionRowsOf(orchestratorIn(vthost::proto::WirePresenceState::Running));
+    auto const commands = ExtensionCommandSource { rows }.commands();
+    CHECK(titlesOf(commands)
+          == std::vector<std::string> { "Open Agents", "Refresh Agents", "Show blocked runs" });
+    auto const* open = find(commands, "ExtensionAction:orchestrator:open");
+    REQUIRE(open != nullptr);
+    CHECK(std::get<actions::ExtensionAction>(open->action)
+          == actions::ExtensionAction { .extension = "orchestrator", .id = "open" });
+    CHECK(open->category == CommandCategory::Daemons);
+    // Each a row of its own under the title its extension gave it, saying whose it is.
+    CHECK(std::ranges::all_of(
+        commands, [](Command const& command) { return command.placement == PalettePlacement::OnItsOwn; }));
+    CHECK(open->description == "From the orchestrator daemon extension.");
+}
+
+TEST_CASE("a bound extension action collapses onto the extension's own row, whatever the sources' order",
+          "[contour][palette][command][presence]")
+{
+    auto rows = FixedExtensionRows {};
+    rows.rows = extensionRowsOf(orchestratorIn(vthost::proto::WirePresenceState::Running));
+    auto const extension = ExtensionCommandSource { rows };
+    auto mappings = config::InputMappings {};
+    mappings.keyMappings.push_back(config::KeyInputMapping {
+        .modes { vtbackend::MatchModes {} },
+        .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift } },
+        .input = vtbackend::Key::F12,
+        .binding = { { actions::ExtensionAction { .extension = "orchestrator", .id = "open" } } } });
+    auto const bound = BoundCommandSource { mappings };
+
+    for (auto const& sources: { std::array<CommandSource const*, 2> { &extension, &bound },
+                                std::array<CommandSource const*, 2> { &bound, &extension } })
+    {
+        auto const commands = collectCommands(sources);
+        CHECK(std::ranges::count(commands, "ExtensionAction:orchestrator:open", &Command::id) == 1);
+        auto const* open = find(commands, "ExtensionAction:orchestrator:open");
+        REQUIRE(open != nullptr);
+        CHECK(open->title == "Open Agents");
+        CHECK(open->placement == PalettePlacement::OnItsOwn);
+    }
 }

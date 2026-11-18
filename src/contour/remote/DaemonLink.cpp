@@ -569,6 +569,11 @@ void DaemonLink::showDaemonDrift()
                 offer);
 }
 
+vthost::proto::ExtensionPresence DaemonLink::extensionPresence() const
+{
+    return _controller ? _controller->extensionPresence() : vthost::proto::ExtensionPresence {};
+}
+
 session::ExtensionInvocation DaemonLink::invokeExtensionAction(std::string const& extension,
                                                                std::string const& id)
 {

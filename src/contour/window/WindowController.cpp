@@ -75,6 +75,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <iterator>
 #include <limits>
 #include <mutex>
 #include <ranges>
@@ -235,6 +236,7 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     _layoutCommands { manager.app().config() },
     _hostCommands { manager.app().config() },
     _daemonCommands { *this },
+    _extensionCommands { *this },
     _boundCommands { manager.app().config().inputMappings.value() },
     _gatedBoundCommands { _boundCommands, *this },
     _gatedActionCommands { _actionCommands, *this },
@@ -245,6 +247,7 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
                                                      &_layoutCommands,
                                                      &_hostCommands,
                                                      &_daemonCommands,
+                                                     &_extensionCommands,
                                                      &_gatedBoundCommands,
                                                      &_gatedActionCommands },
         command::shortcutStyleFor(manager.app().config().keyboardPlatformKind),
@@ -928,6 +931,14 @@ command::DaemonSwitching WindowController::switchingAvailability() const
 {
     return _manager.daemonTargetOf(_displayed) ? command::DaemonSwitching::Available
                                                : command::DaemonSwitching::Unavailable;
+}
+
+std::vector<command::ExtensionRow> WindowController::extensionRows() const
+{
+    auto rows = std::vector<command::ExtensionRow> {};
+    for (auto const& extension: _manager.extensionPresenceOf(_displayed).extensions)
+        std::ranges::move(command::extensionRowsOf(extension), std::back_inserter(rows));
+    return rows;
 }
 
 command::DaemonRowsState WindowController::daemonRows() const

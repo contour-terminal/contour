@@ -12,6 +12,11 @@
 #include <string_view>
 #include <vector>
 
+namespace vthost::proto
+{
+struct WireExtensionPresence;
+} // namespace vthost::proto
+
 namespace contour::command
 {
 
@@ -20,6 +25,9 @@ namespace contour::command
 /// De-duplicated by command id, first source wins. That ordering is what lets a specific source
 /// override a generic one: a SwitchToTab bound in the config and the same tab's dynamically
 /// synthesized entry collapse onto a single row rather than showing the user the command twice.
+/// One exception, independent of the order: a command placed PalettePlacement::OnItsOwn -- a row its
+/// source named itself -- beats an UnderItsAction one of the same id, so a key binding of a daemon
+/// extension's action can never turn its named row back into a drill-in child.
 ///
 /// @param sources The sources to merge, in precedence order.
 /// @return Every distinct command, in no particular order (the palette sorts it).
@@ -208,6 +216,61 @@ class SwitchingGatedSource final: public CommandSource
     CommandSource const& _inner;
     DaemonRowsProvider const& _rows;
 };
+
+/// One palette row of a daemon extension: what invoking it sends, and what the palette shows.
+struct ExtensionRow
+{
+    std::string extension; ///< What the daemon's configuration calls the extension.
+    std::string id;        ///< The declared action's id; empty for the row that asks for a grant or restarts.
+    std::string title;     ///< What the palette shows.
+
+    bool operator==(ExtensionRow const&) const = default;
+};
+
+/// Where the daemon extensions' palette rows come from. An interface so ExtensionCommandSource is tested
+/// without a window or a daemon; the window implements it from its daemon's last ExtensionPresence. Never
+/// blocks: it answers from what the daemon last sent. Empty for a window whose daemon shows no rows -- one
+/// without the capability, or none behind it.
+class ExtensionRowsProvider
+{
+  public:
+    ExtensionRowsProvider() = default;
+    ExtensionRowsProvider(ExtensionRowsProvider const&) = delete;
+    ExtensionRowsProvider(ExtensionRowsProvider&&) = delete;
+    ExtensionRowsProvider& operator=(ExtensionRowsProvider const&) = delete;
+    ExtensionRowsProvider& operator=(ExtensionRowsProvider&&) = delete;
+    virtual ~ExtensionRowsProvider() = default;
+
+    /// @return Every daemon extension's palette rows, in the daemon's order.
+    [[nodiscard]] virtual std::vector<ExtensionRow> extensionRows() const = 0;
+};
+
+/// The description of a daemon extension's palette row, shown in the palette's footer: names the extension
+/// whose row it is, so a row whose title a built-in command shares can be told apart. `{}` is what the
+/// daemon's configuration calls the extension.
+inline constexpr auto ExtensionRowDescriptionFormat = std::string_view { "From the {} daemon extension." };
+
+/// One ExtensionAction command per daemon extension palette row, each a row of its own
+/// (PalettePlacement::OnItsOwn) under the title the extension gave it.
+class ExtensionCommandSource final: public CommandSource
+{
+  public:
+    /// @param rows Where the rows come from. Must outlive this source.
+    explicit ExtensionCommandSource(ExtensionRowsProvider const& rows) noexcept: _rows { rows } {}
+
+    [[nodiscard]] std::vector<Command> commands() const override;
+
+  private:
+    ExtensionRowsProvider const& _rows;
+};
+
+/// The palette rows of one daemon extension, by where it stands, from one table: running or stopped, each
+/// declared action under its own title (a stopped one is started when invoked); waiting for its grant, one
+/// row "{title}: grant access…"; disabled, one row "{title}: restart extension" -- those two naming no
+/// action; unavailable (denied, or failed), none.
+/// @param presence The extension as its daemon reported it.
+/// @return Its rows.
+[[nodiscard]] std::vector<ExtensionRow> extensionRowsOf(vthost::proto::WireExtensionPresence const& presence);
 
 /// One LaunchLayout command per saved layout.
 class LayoutCommandSource final: public CommandSource

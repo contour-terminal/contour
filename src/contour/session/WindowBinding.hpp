@@ -104,6 +104,10 @@ class WindowBinding
         return std::unexpected(std::string { NoDaemonToUpgrade });
     }
 
+    /// @return The daemon extensions and their palette rows, as the daemon last sent them; empty for a
+    ///         binding with no daemon, or one whose daemon sends none. GUI thread.
+    [[nodiscard]] virtual vthost::proto::ExtensionPresence extensionPresence() const { return {}; }
+
     /// Invokes a daemon extension's palette row on the daemon behind the binding. GUI thread.
     /// @param extension What the daemon's configuration calls the extension.
     /// @param id The declared action's id; empty for the row that asks for a grant or restarts.

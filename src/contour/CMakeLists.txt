@@ -1163,6 +1163,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/QmlToolTip_test.cpp
             test/QmlDialogs_test.cpp
             window/CommandPaletteModel_test.cpp
+            window/ExtensionPaletteRows_test.cpp
             window/SettingsController_test.cpp
             window/SettingsPreview_test.cpp
             window/SettingsBackdrop_test.cpp

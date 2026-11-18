@@ -343,6 +343,7 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     }
     /// Upgrades the daemon in place when window::upgradeVerdictFor() allows it for this link's daemon.
     [[nodiscard]] std::expected<void, std::string> upgradeDaemonOnCommand() override;
+    [[nodiscard]] vthost::proto::ExtensionPresence extensionPresence() const override;
     [[nodiscard]] session::ExtensionInvocation invokeExtensionAction(std::string const& extension,
                                                                      std::string const& id) override;
 

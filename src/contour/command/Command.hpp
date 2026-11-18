@@ -36,6 +36,17 @@ enum class CommandCategory : std::uint8_t
 /// The number of CommandCategory values.
 inline constexpr std::size_t CommandCategoryCount = static_cast<std::size_t>(CommandCategory::Contour) + 1;
 
+/// Where the palette lists a command.
+enum class PalettePlacement : std::uint8_t
+{
+    /// A parameterised action's instance is a child of its action's drill-in row, found by its argument
+    /// ("Change Profile › dark"); any other command is a row of its own.
+    UnderItsAction = 0,
+    /// A row of its own, found by its title, whatever its action: a source that names each row itself
+    /// ("Open Agents", over an ExtensionAction) would otherwise hide it behind the action's generic name.
+    OnItsOwn,
+};
+
 /// One entry the command palette can offer.
 ///
 /// A Command is an action made CONCRETE and nameable: the action itself plus the identity, title and
@@ -50,6 +61,7 @@ struct Command
     actions::Action action;                           ///< What to run.
     CommandCategory category = CommandCategory::Pane; ///< The palette group, from the action's catalogue row.
     std::string argument {}; ///< The title's argument suffix ("dark", "3: vim"); empty when there is none.
+    PalettePlacement placement = PalettePlacement::UnderItsAction; ///< Where the palette lists it.
 };
 
 /// A contributor of commands to the palette.
