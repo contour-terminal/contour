@@ -365,7 +365,11 @@ Row {
                     property real slideFromX: NaN
                     /// Whether the view has placed the tab once: a tab being made has no place to slide from.
                     property bool isPlaced: false
-                    Component.onCompleted: Qt.callLater(() => { tabDelegate.isPlaced = true })
+                    // The delegate may be gone by the time the call runs -- its tab closed, or the strip torn down.
+                    Component.onCompleted: Qt.callLater(() => {
+                        if (tabDelegate)
+                            tabDelegate.isPlaced = true
+                    })
                     onIndexChanged: {
                         if (isPlaced && chromeStyle.motion.animates && isNaN(slideFromX))
                             slideFromX = x + rowSlide
