@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtrasterizer/OutlineRasterizer.hpp>
+#include <vtrasterizer/PathCoverage.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <optional>
 #include <ranges>
-#include <span>
 #include <utility>
 
 using namespace vtbackend;
@@ -16,23 +14,7 @@ namespace vtrasterizer
 
 namespace
 {
-    struct Point
-    {
-        float x = 0;
-        float y = 0;
-    };
-
-    [[nodiscard]] constexpr Point midpoint(Point a, Point b) noexcept
-    {
-        return { .x = (a.x + b.x) / 2, .y = (a.y + b.y) / 2 };
-    }
-
-    /// The most line segments one curve is flattened into, however large it is drawn.
-    constexpr auto MaxCurveSegments = 64;
-
-    /// Accumulates the signed area each edge of a path sweeps over the pixels of a window. Summing a row
-    /// left to right then gives each pixel's winding-weighted coverage, which is how font rasterizers get
-    /// exact antialiasing out of one pass over the edges.
+    /// Accumulates the signed area each edge of a path sweeps over the pixels of a window.
     class CoverageAccumulator
     {
       public:
@@ -46,59 +28,48 @@ namespace
         {
         }
 
-        void moveTo(Point to) noexcept { _pen = to; }
-
-        void lineTo(Point to) noexcept
+        /// Adds the edges of a polygon, the one from its last point back to its first included.
+        void addPolygon(std::span<PathPoint const> points) noexcept
         {
-            addClipped(_pen, to);
-            _pen = to;
+            if (points.size() < 2)
+                return;
+            for (auto const index: std::views::iota(size_t { 0 }, points.size()))
+                addClipped(points[index], points[(index + 1) % points.size()]);
         }
 
-        void quadTo(Point control, Point to) noexcept
+        /// @return The share of every pixel that is inside by @p rule, top row first.
+        [[nodiscard]] std::vector<float> coverage(VectorFillRule rule) const
         {
-            // How far the curve strays from its chord decides how many lines stand in for it.
-            auto const dx = _pen.x - (2 * control.x) + to.x;
-            auto const dy = _pen.y - (2 * control.y) + to.y;
-            auto const deviation = (dx * dx) + (dy * dy);
-            auto const from = _pen;
-            if (deviation >= 0.333F)
-            {
-                auto const segments =
-                    std::min(MaxCurveSegments, 1 + static_cast<int>(std::sqrt(std::sqrt(3 * deviation))));
-                for (auto const step: std::views::iota(1, segments))
-                {
-                    auto const t = static_cast<float>(step) / static_cast<float>(segments);
-                    auto const u = 1 - t;
-                    lineTo({ .x = (u * u * from.x) + (2 * u * t * control.x) + (t * t * to.x),
-                             .y = (u * u * from.y) + (2 * u * t * control.y) + (t * t * to.y) });
-                }
-            }
-            lineTo(to);
-        }
-
-        /// @return The coverage of every pixel of the window, top row first.
-        [[nodiscard]] std::vector<uint8_t> coverage() const
-        {
-            auto pixels = std::vector<uint8_t>(_width * _height);
+            auto pixels = std::vector<float>(_width * _height);
             for (auto const row: std::views::iota(size_t { 0 }, _height))
             {
                 auto winding = 0.0F;
                 for (auto const column: std::views::iota(size_t { 0 }, _width))
                 {
                     winding += _area[(row * _stride) + column];
-                    pixels[(row * _width) + column] =
-                        static_cast<uint8_t>(std::lround(std::min(std::abs(winding), 1.0F) * 255.0F));
+                    pixels[(row * _width) + column] = insideShare(winding, rule);
                 }
             }
             return pixels;
         }
 
       private:
+        /// @return How much of a pixel is inside, given its area-weighted winding.
+        [[nodiscard]] static float insideShare(float winding, VectorFillRule rule) noexcept
+        {
+            auto const turns = std::abs(winding);
+            if (rule == VectorFillRule::NonZero)
+                return std::min(turns, 1.0F);
+            // Inside where the winding is odd: a triangle wave over it, 1 at every odd number.
+            auto const phase = std::fmod(turns, 2.0F);
+            return phase <= 1.0F ? phase : 2.0F - phase;
+        }
+
         /// Adds the edge from @p from to @p to, cut down to the window. The part above or below it sweeps no
         /// pixel and is dropped; the part left or right of it is moved onto the border it is beyond, which
         /// keeps what it contributes to the pixels inside -- everything, from the left, and nothing, from
         /// the right.
-        void addClipped(Point from, Point to) noexcept
+        void addClipped(PathPoint from, PathPoint to) noexcept
         {
             if (!(std::isfinite(from.x) && std::isfinite(from.y) && std::isfinite(to.x)
                   && std::isfinite(to.y))
@@ -114,7 +85,7 @@ namespace
                 return;
 
             // An edge wholly right of the window sweeps none of its pixels: the tiles left of a wide glyph's
-            // last one skip most of the outline here.
+            // last one skip most of the path here.
             auto const right = static_cast<float>(_width);
             if (from.x >= right && to.x >= right)
                 return;
@@ -157,7 +128,7 @@ namespace
         }
 
         /// Adds an edge that lies inside the window, running downwards from @p from to @p to.
-        void accumulate(Point from, Point to, float direction) noexcept
+        void accumulate(PathPoint from, PathPoint to, float direction) noexcept
         {
             auto const slope = (to.x - from.x) / (to.y - from.y);
             auto x = from.x;
@@ -215,78 +186,15 @@ namespace
         size_t _height;
         size_t _stride;
         std::vector<float> _area;
-        Point _pen {};
     };
-
-    /// Walks one closed contour by the TrueType rules.
-    void walkContour(std::span<GlyphOutlinePoint const> points,
-                     GlyphSpanTransform const& transform,
-                     OutlineWindowOrigin origin,
-                     CoverageAccumulator& path)
-    {
-        if (points.empty())
-            return;
-
-        auto const place = [&](GlyphOutlinePoint const& point) {
-            return Point { .x = transform.tx + (static_cast<float>(point.x) * transform.sx)
-                                - static_cast<float>(origin.x),
-                           .y = transform.ty - (static_cast<float>(point.y) * transform.sy)
-                                - static_cast<float>(origin.y) };
-        };
-        auto const onCurve = [](GlyphOutlinePoint const& point) {
-            return point.kind == GlyphPointKind::OnCurve;
-        };
-
-        // A contour may open with an off-curve point. It then starts at its last point, when that one is
-        // on the curve, and halfway between its first and last otherwise.
-        auto const& first = points.front();
-        auto const& last = points.back();
-        auto const start = onCurve(first)  ? place(first)
-                           : onCurve(last) ? place(last)
-                                           : midpoint(place(first), place(last));
-        // The point the contour starts at is not walked again: the first, or the last when that is it.
-        auto const walked = onCurve(first)  ? points.subspan(1)
-                            : onCurve(last) ? points.first(points.size() - 1)
-                                            : points;
-
-        path.moveTo(start);
-        auto control = std::optional<Point> {};
-        for (auto const& point: walked)
-        {
-            auto const position = place(point);
-            if (onCurve(point))
-            {
-                if (control)
-                    path.quadTo(*control, position);
-                else
-                    path.lineTo(position);
-                control.reset();
-            }
-            else
-            {
-                // Two off-curve points in a row imply an on-curve one halfway between them.
-                if (control)
-                    path.quadTo(*control, midpoint(*control, position));
-                control = position;
-            }
-        }
-        // Close the contour: with the curve still pending, or with a line.
-        if (control)
-            path.quadTo(*control, start);
-        else
-            path.lineTo(start);
-    }
 } // namespace
 
-std::vector<uint8_t> rasterizeOutline(GlyphOutline const& outline,
-                                      GlyphSpanTransform const& transform,
-                                      ImageSize window,
-                                      OutlineWindowOrigin origin)
+std::vector<float> pathCoverage(std::span<Polyline const> polygons, VectorFillRule rule, ImageSize window)
 {
-    auto path = CoverageAccumulator { unbox<size_t>(window.width), unbox<size_t>(window.height) };
-    for (auto const index: std::views::iota(size_t { 0 }, outline.contourEnds.size()))
-        walkContour(outline.contour(index), transform, origin, path);
-    return path.coverage();
+    auto accumulator = CoverageAccumulator { unbox<size_t>(window.width), unbox<size_t>(window.height) };
+    for (auto const& polygon: polygons)
+        accumulator.addPolygon(polygon.points);
+    return accumulator.coverage(rule);
 }
 
 } // namespace vtrasterizer

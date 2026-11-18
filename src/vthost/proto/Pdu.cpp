@@ -1077,27 +1077,13 @@ namespace
             record.u8(glyph.registered);
             if (glyph.registered != 0)
             {
-                record.u16(glyph.unitsPerEm);
-                record.u8(glyph.extentFields);
-                record.u16(glyph.advanceWidth);
-                record.u16(glyph.lineHeight);
-                record.svarint(glyph.extentBottom);
-                record.u8(glyph.size);
+                for (auto const bits: glyph.viewBox)
+                    record.u32(bits);
+                record.u8(glyph.fit);
                 record.u8(glyph.horizontal);
                 record.u8(glyph.vertical);
                 record.u8(glyph.span);
-                for (auto const bits: glyph.padding)
-                    record.u32(bits);
-                record.varint(glyph.contourEnds.size());
-                for (auto const end: glyph.contourEnds)
-                    record.u16(end);
-                record.varint(glyph.points.size());
-                for (auto const& point: glyph.points)
-                {
-                    record.svarint(point.x);
-                    record.svarint(point.y);
-                    record.u8(point.onCurve);
-                }
+                record.string(glyph.payload);
             }
             out.blob(record.view());
         }
@@ -2417,30 +2403,8 @@ namespace
         return Goodbye {};
     }
 
-    /// Reads a signed value that must fit @p Integer, which a svarint on the wire need not.
-    template <std::signed_integral Integer>
-    [[nodiscard]] std::expected<Integer, DecodeError> decodeSigned(Reader& in)
-    {
-        auto const value = in.svarint();
-        if (!value)
-            return std::unexpected(value.error());
-        if (!std::in_range<Integer>(*value))
-            return std::unexpected(DecodeError::MalformedPdu);
-        return static_cast<Integer>(*value);
-    }
-
-    [[nodiscard]] std::expected<WireGlyphPoint, DecodeError> decodeGlyphPoint(Reader& in)
-    {
-        auto point = WireGlyphPoint {};
-        auto error = DecodeError {};
-        if (!assign(decodeSigned<int32_t>(in), point.x, error)
-            || !assign(decodeSigned<int32_t>(in), point.y, error) || !assign(in.u8(), point.onCurve, error))
-            return std::unexpected(error);
-        return point;
-    }
-
     /// Reads one slot of a glossary. Only its shape is judged here; whether the glyph is one the Glyph
-    /// Protocol could have registered is the receiver's to say (@see stageGlyphUpdates).
+    /// Protocol could have registered is the receiver's to say (@see stageGlyphUpdate).
     [[nodiscard]] std::expected<WireRegisteredGlyph, DecodeError> decodeRegisteredGlyph(Reader& outer)
     {
         auto const record = outer.blob();
@@ -2453,21 +2417,13 @@ namespace
             return std::unexpected(error);
         if (glyph.registered == 0)
             return glyph;
-        if (!assign(in.u16(), glyph.unitsPerEm, error) || !assign(in.u8(), glyph.extentFields, error)
-            || !assign(in.u16(), glyph.advanceWidth, error) || !assign(in.u16(), glyph.lineHeight, error)
-            || !assign(decodeSigned<int16_t>(in), glyph.extentBottom, error)
-            || !assign(in.u8(), glyph.size, error) || !assign(in.u8(), glyph.horizontal, error)
-            || !assign(in.u8(), glyph.vertical, error) || !assign(in.u8(), glyph.span, error))
-            return std::unexpected(error);
-        for (auto& bits: glyph.padding)
+        for (auto& bits: glyph.viewBox)
             if (!assign(in.u32(), bits, error))
                 return std::unexpected(error);
-        if (auto const decoded =
-                decodeVector(in, glyph.contourEnds, [](Reader& reader) { return reader.u16(); });
-            !decoded)
-            return std::unexpected(decoded.error());
-        if (auto const decoded = decodeVector(in, glyph.points, decodeGlyphPoint); !decoded)
-            return std::unexpected(decoded.error());
+        if (!assign(in.u8(), glyph.fit, error) || !assign(in.u8(), glyph.horizontal, error)
+            || !assign(in.u8(), glyph.vertical, error) || !assign(in.u8(), glyph.span, error)
+            || !assign(in.string(), glyph.payload, error))
+            return std::unexpected(error);
         return glyph;
     }
 

@@ -2223,21 +2223,16 @@ TEST_CASE("Renderer.registeredGlyph.isDrawnInPlaceOfItsCellsText", "[renderer][g
     fixture.attachRenderTarget();
     auto& backend = fixture.renderTarget.getMockBackend();
 
-    // The whole em, stretched over the render span: every tile of it is solid ink.
-    auto const on = [](int x, int y) {
-        return vtbackend::GlyphOutlinePoint { .x = x, .y = y, .kind = vtbackend::GlyphPointKind::OnCurve };
-    };
-    auto glyphs = std::make_unique<vtbackend::RegisteredGlyphs>();
-    glyphs->front() = std::make_shared<vtbackend::RegisteredGlyph const>(vtbackend::RegisteredGlyph {
-        .id = crispy::StrongHash { 0x47, 0x4C, 0x59, 1 },
-        .layout = vtbackend::GlyphLayout { .advanceWidth = 1000,
-                                           .lineHeight = 1000,
-                                           .extentBottom = 0,
-                                           .size = vtbackend::GlyphSizeMode::Stretch,
-                                           .span = vtbackend::GlyphRenderSpan::TwoCells },
-        .outline = vtbackend::GlyphOutline { .points = { on(0, 0), on(0, 1000), on(1000, 1000), on(1000, 0) },
-                                             .contourEnds = { 3 },
-                                             .bounds = {} } });
+    // The whole viewBox, stretched over the render span: every tile of it is solid ink.
+    auto glossary = vtbackend::GlyphGlossary {};
+    glossary.registerGlyph(0x100000,
+                           vtbackend::parseGlyphDefinition(
+                               vtbackend::GlyphStatement { .viewBox = "0,0,8,8",
+                                                           .fit = "stretch",
+                                                           .width = "2",
+                                                           .payload = "fill=nonzero,fg:M0 0H8V8H0Z" })
+                               .value());
+    auto const glyphs = glossary.snapshot();
 
     auto header = vtbackend::RenderStickyHeader { .kind = StickyHeaderKind::Command,
                                                   .block = CommandBlockId { 1 },

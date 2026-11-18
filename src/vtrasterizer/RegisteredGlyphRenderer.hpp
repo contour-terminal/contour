@@ -23,10 +23,11 @@ enum class RegisteredGlyphDraw : uint8_t
     Drawn,     ///< The glyph was drawn.
 };
 
-/// Draws the glyphs an application registered through the Glyph Protocol, as alpha tiles: the atlas holds
-/// coverage only, and the foreground colour is applied at draw time, so one tile serves every colour the
-/// glyph is shown in. A glyph is rasterized one cell-sized tile at a time, which is also what clips it to
-/// its render span.
+/// Draws the glyphs an application registered through the Glyph Protocol, from atlas tiles. A glyph whose
+/// colours are all the foreground is kept as coverage and tinted at draw time, so one tile serves every
+/// colour it is shown in; any other is kept in colour, once for each foreground it is shown in when it
+/// uses the foreground at all. A glyph is rasterized one cell-sized tile at a time, which is also what
+/// clips it to its render span.
 class RegisteredGlyphRenderer: public Renderable
 {
   public:
@@ -51,11 +52,13 @@ class RegisteredGlyphRenderer: public Renderable
     void inspect(std::ostream& output) const override;
 
   private:
-    /// One tile of a glyph: which glyph, how it is laid out on its row, and which cell of its span.
+    /// One tile of a glyph: which glyph, how it is laid out on its row, which cell of its span, and the
+    /// foreground it is drawn for.
     struct Tile
     {
         vtbackend::RegisteredGlyph const& glyph;
         vtbackend::LineFlags flags;
+        vtbackend::RGBColor foreground;
         int tileCount = 1; ///< How many cell-sized tiles the span is cut into.
         int index = 0;     ///< Which of them, from the left.
     };

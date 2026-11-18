@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/vt/GlyphOutline.hpp>
+#include <vtbackend/vt/VectorGlyph.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <optional>
@@ -12,9 +13,9 @@
 
 /// The Glyph Protocol's wire format: what an `APC 25a1 ; ...` body says, and how its replies are phrased.
 ///
-/// Specification: https://github.com/raphamorim/rio/blob/main/specs/glyph-protocol.md (v1.16). Of its
-/// payload formats only `glyf` is read here; `colrv0` and `colrv1` are refused as malformed payloads, which
-/// is what the specification asks of a terminal that does not advertise them.
+/// Specification: https://github.com/raphamorim/rio/blob/main/specs/glyph-protocol.md (v1.17). Every
+/// payload format is optional there. This terminal takes `vg`, the recommended one (@see VectorGlyph.hpp),
+/// and refuses the font-table formats (`glyf`, `colrv0`, `colrv1`) as formats it does not list.
 namespace vtbackend
 {
 
@@ -23,6 +24,9 @@ inline constexpr char32_t FirstGlyphRegistrationCodepoint = 0x100000;
 
 /// How many codepoints the registration block holds, and so how many glyphs a session can register.
 inline constexpr size_t GlyphRegistrationSlots = 1024;
+
+/// The largest payload a registration may carry, in bytes.
+inline constexpr size_t MaxGlyphPayloadBytes = size_t { 32 } * 1024;
 
 /// @param codepoint Any codepoint.
 /// @return Whether a glyph may be registered at @p codepoint.
@@ -42,31 +46,35 @@ inline constexpr std::string_view GlyphProtocolIdentifier = "25a1;";
     return body.starts_with(GlyphProtocolIdentifier);
 }
 
-/// How a glyph is scaled into its render span (`size=`).
-enum class GlyphSizeMode : uint8_t
+/// Why a registration is refused; each is one `reason=` of the `r` reply.
+enum class GlyphRegisterError : uint8_t
 {
-    Contain, ///< The whole extent fits the span on both axes.
-    Height,  ///< The line height fills the span's height.
-    Advance, ///< The advance width fills the span's width.
-    Cover,   ///< The extent covers the span on both axes.
+    OutOfNamespace,    ///< The codepoint is outside the registration block.
+    UnsupportedFormat, ///< `fmt` names a format this terminal does not list in its `s` reply.
+    MalformedPayload,  ///< The payload is not what its format allows, or a placement key is invalid.
+    PayloadTooLarge,   ///< The payload is over MaxGlyphPayloadBytes.
+    OutlineTooLarge,   ///< The payload is past one of its format's limits.
+};
+
+/// @return The `reason=` value that names @p error on the wire.
+[[nodiscard]] std::string_view toString(GlyphRegisterError error) noexcept;
+
+/// How a glyph's viewBox is scaled into its render span (`fit=`), as SVG's `preserveAspectRatio` scales a
+/// viewBox into a viewport.
+enum class GlyphFit : uint8_t
+{
+    Contain, ///< The whole viewBox fits the span on both axes.
+    Cover,   ///< The viewBox covers the span on both axes.
     Stretch, ///< Each axis fills the span independently.
 };
 
-/// Where the scaled extent sits in the span horizontally (`align=`, first half).
-enum class GlyphHorizontalAlignment : uint8_t
+/// Where the scaled viewBox sits in the span on one axis (`align=`). Horizontally the start is the left;
+/// vertically it is the top, as SVG's `xMin` and `yMin`.
+enum class GlyphAlignment : uint8_t
 {
     Center,
     Start,
     End,
-};
-
-/// Where the scaled extent sits in the span vertically (`align=`, second half).
-enum class GlyphVerticalAlignment : uint8_t
-{
-    Center,
-    Start,    ///< The extent's bottom on the span's bottom.
-    End,      ///< The extent's top on the span's top.
-    Baseline, ///< The outline's y = 0 on the text baseline.
 };
 
 /// How many cells of pixels a glyph is drawn across (`width=`). The codepoint's own width stays one.
@@ -76,42 +84,18 @@ enum class GlyphRenderSpan : uint8_t
     TwoCells = 2,
 };
 
-/// Insets from the render span's edges (`pad=`), as fractions of the span's height (top, bottom) and width
-/// (left, right). Never degenerate: a pad that would leave no span is read as none.
-struct GlyphPadding
-{
-    float top = 0;
-    float right = 0;
-    float bottom = 0;
-    float left = 0;
-
-    bool operator==(GlyphPadding const&) const = default;
-};
-
-/// How a registered outline is sized and placed in its cell.
+/// How a registered glyph is sized and placed in its cell.
 struct GlyphLayout
 {
-    uint16_t unitsPerEm = 1000;           ///< The coordinate space of the outline (`upm=`).
-    std::optional<uint16_t> advanceWidth; ///< The authored extent's width (`aw=`).
-    std::optional<uint16_t> lineHeight;   ///< The authored extent's height (`lh=`).
-    std::optional<int16_t> extentBottom;  ///< The authored extent's bottom (`ymin=`).
-    GlyphSizeMode size = GlyphSizeMode::Contain;
-    GlyphHorizontalAlignment horizontal = GlyphHorizontalAlignment::Center;
-    GlyphVerticalAlignment vertical = GlyphVerticalAlignment::Center;
-    GlyphPadding padding {};
+    GlyphFit fit = GlyphFit::Contain;
+    GlyphAlignment horizontal = GlyphAlignment::Center;
+    GlyphAlignment vertical = GlyphAlignment::Center;
     GlyphRenderSpan span = GlyphRenderSpan::OneCell;
-
-    /// @return Whether the sender declared the extent, by sending any of `aw`, `lh` and `ymin`. An
-    ///         undeclared extent is the outline's own bounds.
-    [[nodiscard]] constexpr bool declaresExtent() const noexcept
-    {
-        return advanceWidth || lineHeight || extentBottom;
-    }
 
     bool operator==(GlyphLayout const&) const = default;
 };
 
-/// Which replies a registration asks for (`reply=`).
+/// Which replies a registration or a clear asks for (`reply=`).
 enum class GlyphReplyMode : uint8_t
 {
     All,        ///< Success and failure (`reply=1`, the default).
@@ -141,13 +125,40 @@ struct GlyphGraphemeQuery
     bool operator==(GlyphGraphemeQuery const&) const = default;
 };
 
-/// `r`: register an outline at a codepoint of the registration block.
+/// The keys of a registration that state a glyph, as they were sent: everything but where it goes.
+struct GlyphStatement
+{
+    std::optional<std::string_view> viewBox; ///< `vb=`; required.
+    std::optional<std::string_view> fit;     ///< `fit=`.
+    std::optional<std::string_view> align;   ///< `align=`.
+    std::optional<std::string_view> width;   ///< `width=`.
+    std::string_view payload;                ///< The `vg` payload.
+};
+
+/// A glyph as an application stated it, judged: nothing in it is unread.
+struct GlyphDefinition
+{
+    GlyphLayout layout {};
+    VectorGlyph glyph {};
+    /// The payload as it was sent, which is how a glyph travels on (to a daemon's clients): whoever
+    /// receives it reads it with this same parser, and so judges it by the same rules.
+    std::string payload;
+
+    bool operator==(GlyphDefinition const&) const = default;
+};
+
+/// Reads a glyph from the keys that state it.
+/// @param statement The keys and the payload.
+/// @return The glyph, or why it is refused.
+[[nodiscard]] std::expected<GlyphDefinition, GlyphRegisterError> parseGlyphDefinition(
+    GlyphStatement const& statement);
+
+/// `r`: register a glyph at a codepoint of the registration block.
 struct GlyphRegistration
 {
     char32_t codepoint = 0;
     GlyphReplyMode reply = GlyphReplyMode::All;
-    GlyphLayout layout {};
-    GlyphOutline outline {};
+    GlyphDefinition definition {};
 
     bool operator==(GlyphRegistration const&) const = default;
 };

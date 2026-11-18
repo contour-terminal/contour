@@ -3119,21 +3119,12 @@ TEST_CASE("RegisteredGlyphState round-trips, registered and cleared slots alike"
     auto const glyph = WireRegisteredGlyph {
         .slot = 1023,
         .registered = 1,
-        .unitsPerEm = 2048,
-        .extentFields = 0x05,
-        .advanceWidth = 1200,
-        .lineHeight = 0,
-        .extentBottom = -400,
-        .size = 4,
+        .viewBox = { 0xBFC00000, 0x40000000, 0x41C00000, 0x41C80000 },
+        .fit = 2,
         .horizontal = 2,
-        .vertical = 3,
+        .vertical = 1,
         .span = 2,
-        .padding = { 0x3DCCCCCD, 0, 0x3E99999A, 0 },
-        .contourEnds = { 2, 3 },
-        .points = { WireGlyphPoint { .x = -5, .y = 70000, .onCurve = 1 },
-                    WireGlyphPoint { .x = 0, .y = 0, .onCurve = 0 },
-                    WireGlyphPoint { .x = 2147483647, .y = -2147483647 - 1, .onCurve = 1 },
-                    WireGlyphPoint { .x = 9, .y = 9, .onCurve = 1 } },
+        .payload = "fill=nonzero,fg:M4 4h16v16H4Z|stroke=2/butt/miter,#e5534bff:M6 12h12",
     };
     auto const state = RegisteredGlyphState { .session = 4,
                                               .replace = 1,
@@ -3153,13 +3144,12 @@ TEST_CASE("RegisteredGlyphState round-trips, registered and cleared slots alike"
     CHECK(sessionOf(*event) == 4);
 }
 
-TEST_CASE("a RegisteredGlyphState cut short, or with a coordinate too wide, is malformed",
-          "[vthost][pdu][glyph]")
+TEST_CASE("a RegisteredGlyphState cut short is malformed", "[vthost][pdu][glyph]")
 {
     auto const decodes = [](std::span<std::byte const> body) {
         return decodePdu(frameOf(PduType::RegisteredGlyphState, body)).has_value();
     };
-    // session, replace, one glyph: a record of slot 0, registered, and the layout -- but no outline.
+    // session, replace, one glyph: a record of slot 0, registered -- and nothing of the glyph.
     auto record = Writer {};
     record.u16(0);
     record.u8(1);
@@ -3170,31 +3160,29 @@ TEST_CASE("a RegisteredGlyphState cut short, or with a coordinate too wide, is m
     body.blob(record.view());
     CHECK_FALSE(decodes(body.view()));
 
-    // A whole glyph of one point, whose x does not fit 32 bits.
-    auto wide = Writer {};
-    wide.u16(0);
-    wide.u8(1);
-    wide.u16(1000);
-    wide.u8(0);
-    wide.u16(0);
-    wide.u16(0);
-    wide.svarint(0);
+    // The viewBox and the placement, and a payload that says it is longer than what follows.
     for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
-        wide.u8(0);
+        record.u32(0);
     for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
-        wide.u32(0);
-    wide.varint(1);
-    wide.u16(0);
-    wide.varint(1);
-    wide.svarint(int64_t { 1 } << 40);
-    wide.svarint(0);
-    wide.u8(1);
-    auto tooWide = Writer {};
-    tooWide.varint(4);
-    tooWide.u8(0);
-    tooWide.varint(1);
-    tooWide.blob(wide.view());
-    CHECK_FALSE(decodes(tooWide.view()));
+        record.u8(0);
+    record.varint(100);
+    auto shortPayload = Writer {};
+    shortPayload.varint(4);
+    shortPayload.u8(0);
+    shortPayload.varint(1);
+    shortPayload.blob(record.view());
+    CHECK_FALSE(decodes(shortPayload.view()));
+
+    // A cleared slot is the two fields alone, and whole.
+    auto cleared = Writer {};
+    cleared.u16(7);
+    cleared.u8(0);
+    auto clearedBody = Writer {};
+    clearedBody.varint(4);
+    clearedBody.u8(0);
+    clearedBody.varint(1);
+    clearedBody.blob(cleared.view());
+    CHECK(decodes(clearedBody.view()));
 }
 
 TEST_CASE("a SoftFontState glyph that does not fit its bitmap is malformed", "[vthost][pdu][softfont]")

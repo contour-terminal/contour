@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/vt/GlyphProtocol.hpp>
 
-#include <vtbackend/vt/Base64Validation.hpp>
-
-#include <core/Base64.hpp>
-
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -27,7 +23,7 @@ namespace
     constexpr auto MaxGraphemeCodepoints = size_t { 32 };
 
     /// The payload formats this terminal takes, as the `s` reply lists them.
-    constexpr auto SupportedFormats = string_view { "glyf" };
+    constexpr auto SupportedFormats = string_view { "vg" };
 
     [[nodiscard]] constexpr string_view trim(string_view text) noexcept
     {
@@ -45,25 +41,17 @@ namespace
         Value value;
     };
 
-    constexpr auto SizeModes = std::array {
-        Named { .name = "contain", .value = GlyphSizeMode::Contain },
-        Named { .name = "height", .value = GlyphSizeMode::Height },
-        Named { .name = "advance", .value = GlyphSizeMode::Advance },
-        Named { .name = "cover", .value = GlyphSizeMode::Cover },
-        Named { .name = "stretch", .value = GlyphSizeMode::Stretch },
+    constexpr auto Fits = std::array {
+        Named { .name = "contain", .value = GlyphFit::Contain },
+        Named { .name = "cover", .value = GlyphFit::Cover },
+        Named { .name = "stretch", .value = GlyphFit::Stretch },
     };
 
-    constexpr auto HorizontalAlignments = std::array {
-        Named { .name = "start", .value = GlyphHorizontalAlignment::Start },
-        Named { .name = "center", .value = GlyphHorizontalAlignment::Center },
-        Named { .name = "end", .value = GlyphHorizontalAlignment::End },
-    };
-
-    constexpr auto VerticalAlignments = std::array {
-        Named { .name = "start", .value = GlyphVerticalAlignment::Start },
-        Named { .name = "center", .value = GlyphVerticalAlignment::Center },
-        Named { .name = "end", .value = GlyphVerticalAlignment::End },
-        Named { .name = "baseline", .value = GlyphVerticalAlignment::Baseline },
+    // A viewBox has no baseline, so there is no such alignment.
+    constexpr auto Alignments = std::array {
+        Named { .name = "start", .value = GlyphAlignment::Start },
+        Named { .name = "center", .value = GlyphAlignment::Center },
+        Named { .name = "end", .value = GlyphAlignment::End },
     };
 
     constexpr auto RenderSpans = std::array {
@@ -135,33 +123,6 @@ namespace
         return static_cast<char32_t>(*value);
     }
 
-    /// Reads a fraction between 0 and 1.
-    [[nodiscard]] std::optional<float> parseFraction(string_view text) noexcept
-    {
-        // Digits and at most one point, checked by hand: std::from_chars for float is not in every standard
-        // library this builds with, and the protocol's fractions are plain decimals.
-        auto const point = text.find('.');
-        auto const whole = text.substr(0, point);
-        auto const decimals = point == string_view::npos ? string_view {} : text.substr(point + 1);
-        auto const isDigit = [](char ch) {
-            return ch >= '0' && ch <= '9';
-        };
-        if ((whole.empty() && decimals.empty()) || !std::ranges::all_of(whole, isDigit)
-            || !std::ranges::all_of(decimals, isDigit) || whole.size() > 9)
-            return std::nullopt;
-
-        auto value = 0.0;
-        for (auto const digit: whole)
-            value = value * 10.0 + (digit - '0');
-        auto scale = 0.1;
-        for (auto const digit: decimals)
-        {
-            value += (digit - '0') * scale;
-            scale *= 0.1;
-        }
-        return value <= 1.0 ? std::optional { static_cast<float>(value) } : std::nullopt;
-    }
-
     /// Splits @p text at commas into exactly N trimmed parts.
     template <size_t N>
     [[nodiscard]] std::optional<std::array<string_view, N>> splitList(string_view text) noexcept
@@ -175,103 +136,6 @@ namespace
             parts[count++] = trim(string_view { part.begin(), part.end() });
         }
         return count == N ? std::optional { parts } : std::nullopt;
-    }
-
-    /// Reads an optional extent parameter, which is a positive number of units.
-    /// @return The value, absent when the parameter is; no value at all when it is invalid.
-    [[nodiscard]] std::optional<std::optional<uint16_t>> parseExtent(Parameters const& parameters,
-                                                                     string_view key) noexcept
-    {
-        auto const text = parameters.get(key);
-        if (!text)
-            return std::optional<uint16_t> {};
-        auto const value = parseNumber<uint16_t>(*text);
-        if (!value || *value == 0)
-            return std::nullopt;
-        return std::optional<std::optional<uint16_t>> { std::in_place, value };
-    }
-
-    [[nodiscard]] std::optional<GlyphPadding> parsePadding(string_view text) noexcept
-    {
-        auto const parts = splitList<4>(text);
-        if (!parts)
-            return std::nullopt;
-        auto const top = parseFraction((*parts)[0]);
-        auto const right = parseFraction((*parts)[1]);
-        auto const bottom = parseFraction((*parts)[2]);
-        auto const left = parseFraction((*parts)[3]);
-        if (!top || !right || !bottom || !left)
-            return std::nullopt;
-        // A pad that leaves no span is read as no padding at all.
-        if (*left + *right >= 1.0F || *top + *bottom >= 1.0F)
-            return GlyphPadding {};
-        return GlyphPadding { .top = *top, .right = *right, .bottom = *bottom, .left = *left };
-    }
-
-    /// Reads the sizing and placement parameters of a registration.
-    /// @return The layout, or nothing when any of them has an invalid value.
-    [[nodiscard]] std::optional<GlyphLayout> parseLayout(Parameters const& parameters) noexcept
-    {
-        auto layout = GlyphLayout {};
-
-        if (auto const text = parameters.get("upm"))
-        {
-            auto const unitsPerEm = parseNumber<uint16_t>(*text);
-            if (!unitsPerEm || *unitsPerEm == 0)
-                return std::nullopt;
-            layout.unitsPerEm = *unitsPerEm;
-        }
-
-        auto const advanceWidth = parseExtent(parameters, "aw");
-        auto const lineHeight = parseExtent(parameters, "lh");
-        if (!advanceWidth || !lineHeight)
-            return std::nullopt;
-        layout.advanceWidth = *advanceWidth;
-        layout.lineHeight = *lineHeight;
-
-        if (auto const text = parameters.get("ymin"))
-        {
-            layout.extentBottom = parseNumber<int16_t>(*text);
-            if (!layout.extentBottom)
-                return std::nullopt;
-        }
-
-        if (auto const text = parameters.get("width"))
-        {
-            auto const span = named(RenderSpans, *text);
-            if (!span)
-                return std::nullopt;
-            layout.span = *span;
-        }
-
-        if (auto const text = parameters.get("size"))
-        {
-            auto const size = named(SizeModes, *text);
-            if (!size)
-                return std::nullopt;
-            layout.size = *size;
-        }
-
-        if (auto const text = parameters.get("align"))
-        {
-            auto const parts = splitList<2>(*text);
-            auto const horizontal = parts ? named(HorizontalAlignments, (*parts)[0]) : std::nullopt;
-            auto const vertical = parts ? named(VerticalAlignments, (*parts)[1]) : std::nullopt;
-            if (!horizontal || !vertical)
-                return std::nullopt;
-            layout.horizontal = *horizontal;
-            layout.vertical = *vertical;
-        }
-
-        if (auto const text = parameters.get("pad"))
-        {
-            auto const padding = parsePadding(*text);
-            if (!padding)
-                return std::nullopt;
-            layout.padding = *padding;
-        }
-
-        return layout;
     }
 
     /// @return The `reply=` of a registration or a clear; the default when it is absent or names no mode.
@@ -323,8 +187,8 @@ namespace
 
     [[nodiscard]] ParseResult parseRegister(string_view rest)
     {
-        // The payload is the last field, by its position and not by what it holds: base64 has no `;`, and
-        // its padding is an `=`, so a field cannot be told from a parameter by its content.
+        // The payload is the last field, by its position and not by what it holds: a `vg` payload has no
+        // `;`, and it does hold `=`, so a field cannot be told from a parameter by its content.
         auto const lastSeparator = rest.rfind(';');
         auto const control =
             lastSeparator == string_view::npos ? string_view {} : rest.substr(0, lastSeparator);
@@ -348,33 +212,22 @@ namespace
         if (!isGlyphRegistrationCodepoint(*codepoint))
             return refused(GlyphRegisterError::OutOfNamespace);
 
-        if (parameters.get("fmt").value_or("glyf") != "glyf")
-            return refused(GlyphRegisterError::MalformedPayload);
+        // A registration without `fmt` is `glyf`, as it was before formats were negotiated; that and every
+        // other format this terminal does not list has a reason of its own, so that a client can tell a
+        // format it cannot use here from a payload that is wrong.
+        if (parameters.get("fmt").value_or("glyf") != SupportedFormats)
+            return refused(GlyphRegisterError::UnsupportedFormat);
 
-        auto const layout = parseLayout(parameters);
-        if (!layout)
-            return refused(GlyphRegisterError::MalformedPayload);
-
-        auto const encoded = trim(payload);
-        auto const digits = base64DigitCount(encoded);
-        if (!digits || *digits == 0)
-            return refused(GlyphRegisterError::MalformedPayload);
-        // Judged from the digit count, before a byte is decoded.
-        if (*digits / 4 * 3 > MaxGlyphPayloadBytes)
-            return refused(GlyphRegisterError::PayloadTooLarge);
-
-        auto record = std::vector<uint8_t>(core::base64::decodeLength(encoded));
-        record.resize(core::base64::decode(encoded, record.data()));
-        if (record.size() > MaxGlyphPayloadBytes)
-            return refused(GlyphRegisterError::PayloadTooLarge);
-
-        auto outline = decodeGlyf(record);
-        if (!outline)
-            return refused(outline.error());
-
-        return GlyphRegistration {
-            .codepoint = *codepoint, .reply = reply, .layout = *layout, .outline = std::move(*outline)
-        };
+        auto definition = parseGlyphDefinition(GlyphStatement { .viewBox = parameters.get("vb"),
+                                                                .fit = parameters.get("fit"),
+                                                                .align = parameters.get("align"),
+                                                                .width = parameters.get("width"),
+                                                                .payload = payload });
+        if (!definition)
+            return refused(definition.error());
+        return GlyphRegistration { .codepoint = *codepoint,
+                                   .reply = reply,
+                                   .definition = std::move(*definition) };
     }
 
     [[nodiscard]] ParseResult parseClear(string_view rest)
@@ -429,6 +282,67 @@ namespace
         return glossary ? "glossary" : "";
     }
 } // namespace
+
+std::string_view toString(GlyphRegisterError error) noexcept
+{
+    switch (error)
+    {
+        case GlyphRegisterError::OutOfNamespace: return "out_of_namespace";
+        case GlyphRegisterError::UnsupportedFormat: return "unsupported_format";
+        case GlyphRegisterError::MalformedPayload: return "malformed_payload";
+        case GlyphRegisterError::PayloadTooLarge: return "payload_too_large";
+        case GlyphRegisterError::OutlineTooLarge: return "outline_too_large";
+    }
+    std::unreachable();
+}
+
+std::expected<GlyphDefinition, GlyphRegisterError> parseGlyphDefinition(GlyphStatement const& statement)
+{
+    auto const malformed = std::unexpected { GlyphRegisterError::MalformedPayload };
+    auto layout = GlyphLayout {};
+
+    if (statement.width)
+    {
+        auto const span = named(RenderSpans, *statement.width);
+        if (!span)
+            return malformed;
+        layout.span = *span;
+    }
+    if (statement.fit)
+    {
+        auto const fit = named(Fits, *statement.fit);
+        if (!fit)
+            return malformed;
+        layout.fit = *fit;
+    }
+    if (statement.align)
+    {
+        auto const parts = splitList<2>(*statement.align);
+        auto const horizontal = parts ? named(Alignments, (*parts)[0]) : std::nullopt;
+        auto const vertical = parts ? named(Alignments, (*parts)[1]) : std::nullopt;
+        if (!horizontal || !vertical)
+            return malformed;
+        layout.horizontal = *horizontal;
+        layout.vertical = *vertical;
+    }
+
+    auto const payload = trim(statement.payload);
+    if (payload.size() > MaxGlyphPayloadBytes)
+        return std::unexpected { GlyphRegisterError::PayloadTooLarge };
+    auto const viewBox = statement.viewBox.and_then(parseVectorViewBox);
+    if (!viewBox)
+        return malformed;
+    return parseVectorGlyph(payload, *viewBox)
+        .transform([&](VectorGlyph glyph) {
+            return GlyphDefinition { .layout = layout,
+                                     .glyph = std::move(glyph),
+                                     .payload = std::string { payload } };
+        })
+        .transform_error([](VectorGlyphError error) {
+            return error == VectorGlyphError::TooLarge ? GlyphRegisterError::OutlineTooLarge
+                                                       : GlyphRegisterError::MalformedPayload;
+        });
+}
 
 std::expected<GlyphCommand, GlyphCommandError> parseGlyphCommand(std::string_view body)
 {

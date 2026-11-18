@@ -919,9 +919,9 @@ std::optional<NativeSession::GlyphChanges> NativeSession::collectRegisteredGlyph
 
 void NativeSession::emitRegisteredGlyphs(SessionId session, GlyphChanges const& changes)
 {
-    /// How many outline points one push carries at most, a slot counting as one more: some 300 KiB on the
-    /// wire, where a whole glossary of the largest outlines would be tens of megabytes in one frame.
-    static constexpr auto PushWeight = size_t { 32 } * 1024;
+    /// How many payload bytes one push carries at most, a slot counting as one more. A whole glossary of
+    /// the largest payloads is some thirty megabytes, which is not one frame's worth.
+    static constexpr auto PushWeight = size_t { 256 } * 1024;
 
     auto const replaces = changes.mode == GlyphUpdateMode::Replace;
     auto pdu = proto::RegisteredGlyphState { .session = session.value,

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
-#include <vtbackend/testing/GlyfRecordBuilder.hpp>
 
 #include <vtpty/MockPty.hpp>
 
@@ -44,13 +43,12 @@ using namespace std::chrono_literals;
 namespace
 {
 
-/// @return What an application writes to register the square at @p codepoint, with @p parameters.
+/// @return What an application writes to register a square at @p codepoint, with @p parameters.
 std::string registerSquare(std::string_view codepoint, std::string_view parameters = "reply=0")
 {
-    return std::format("\033_25a1;r;cp={};{};{}\033\\",
+    return std::format("\033_25a1;r;cp={};fmt=vg;vb=0,0,24,24;{};fill=nonzero,fg:M4 4h16v16H4Z\033\\",
                        codepoint,
-                       parameters,
-                       vtbackend::glyf_test::base64(vtbackend::glyf_test::squareRecord()));
+                       parameters);
 }
 
 /// Whether the offered capabilities of the client include Capability::RegisteredGlyphs.
@@ -188,10 +186,9 @@ TEST_CASE("a glyph registered before attach reaches the client", "[vthost][glyph
         auto const mirrorGlyph = h->mirrored(0x100000);
         REQUIRE(serverGlyph != nullptr);
         REQUIRE(mirrorGlyph != nullptr);
-        // The same content on both ends: the same layout, outline, and so atlas id.
+        // The same content on both ends: the same payload, read the same way, and so the same atlas id.
         CHECK(mirrorGlyph->id == serverGlyph->id);
-        CHECK(mirrorGlyph->layout == serverGlyph->layout);
-        CHECK(mirrorGlyph->outline == serverGlyph->outline);
+        CHECK(mirrorGlyph->definition == serverGlyph->definition);
 
         // And the mirror's frame carries it, which is what its window draws from.
         h->mirror->markScreenDirty();
@@ -217,12 +214,12 @@ TEST_CASE("registering, replacing and clearing after attach follow on the client
         auto const first = h->mirrored(0x100000);
 
         // Registered again with another layout: the client's glyph is the new one.
-        h->serverWrites(session, registerSquare("100000", "reply=0;size=stretch"));
+        h->serverWrites(session, registerSquare("100000", "reply=0;fit=stretch"));
         co_await requireUntil(&h->loop, [&] {
             auto const now = h->mirrored(0x100000);
             return now != nullptr && now->id != first->id;
         });
-        CHECK(h->mirrored(0x100000)->layout.size == vtbackend::GlyphSizeMode::Stretch);
+        CHECK(h->mirrored(0x100000)->definition.layout.fit == vtbackend::GlyphFit::Stretch);
         // The slot that did not change was not sent again, and is still there.
         CHECK(h->mirrored(0x100001) != nullptr);
 
@@ -294,36 +291,34 @@ TEST_CASE("a client that does not mirror glyphs is sent none", "[vthost][glyph][
 
 TEST_CASE("a glossary too large for one push arrives in several, whole", "[vthost][glyph][daemon]")
 {
-    // Every slot of the block, each with an outline of 512 points: more than one push carries.
+    // Every slot of the block, each with a payload of some 2 KiB: two megabytes, more than one push
+    // carries.
     auto h = GlyphHarness {};
     auto const session = newSession(h.host);
+    auto payload = std::string { "fill=nonzero,fg:M1 1" };
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 250))
+        payload += "h0.01v0.01";
     {
-        auto outline = vtbackend::GlyphOutline {};
-        for (auto const index: std::views::iota(0, 512))
-            outline.points.push_back(vtbackend::GlyphOutlinePoint {
-                .x = index, .y = index * 2, .kind = vtbackend::GlyphPointKind::OnCurve });
-        outline.contourEnds = { 511 };
-        outline.bounds = vtbackend::boundsOf(outline.points);
-
+        auto const definition = vtbackend::parseGlyphDefinition(
+                                    vtbackend::GlyphStatement { .viewBox = "0,0,24,24", .payload = payload })
+                                    .value();
         auto* const terminal = h.serverTerminal(session);
         auto const guard = std::lock_guard { *terminal };
         for (auto const slot: std::views::iota(size_t { 0 }, vtbackend::GlyphRegistrationSlots))
             terminal->glyphGlossary().registerGlyph(
-                static_cast<char32_t>(vtbackend::FirstGlyphRegistrationCodepoint + slot),
-                vtbackend::GlyphLayout {},
-                outline);
+                static_cast<char32_t>(vtbackend::FirstGlyphRegistrationCodepoint + slot), definition);
     }
     h.connect();
 
-    auto scenario = [](GlyphHarness* h) -> Task<void> {
+    auto scenario = [](GlyphHarness* h, std::string const* payload) -> Task<void> {
         co_await requireUntil(&h->loop, [&] { return h->mirrored(0x1003FF) != nullptr; });
         auto const frame = std::as_const(*h->mirror).glyphGlossary().snapshot();
         REQUIRE(frame != nullptr);
         CHECK(std::ranges::none_of(*frame, [](auto const& glyph) { return glyph == nullptr; }));
-        CHECK(h->mirrored(0x100200)->outline.points.size() == 512);
+        CHECK(h->mirrored(0x100200)->definition.payload == *payload);
         CHECK(h->glyphPushes > 1);
         h->client->detach();
-    }(&h);
+    }(&h, &payload);
 
     h.loop.blockOn(drive(&h, std::move(scenario)));
 }

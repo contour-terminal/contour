@@ -8,13 +8,14 @@
 #include <algorithm>
 #include <optional>
 
-/// Where a glyph registered through the Glyph Protocol lands in its cell: the protocol's sizing and
-/// placement model (specification section 8.5), free of any render target so it can be tested by itself.
+/// Where a glyph registered through the Glyph Protocol lands in its cell: its viewBox placed in the
+/// render span the way SVG's `preserveAspectRatio` places a viewBox in a viewport (specification section
+/// 8.9.3), free of any render target so it can be tested by itself.
 namespace vtrasterizer
 {
 
-/// Maps a point of an outline, in authored units with Y up, onto the pixels of its render span, Y down
-/// from the span's top-left corner: `(x, y)` lands on `(tx + x * sx, ty - y * sy)`.
+/// Maps a point of a glyph's viewBox onto the pixels of its render span, both with Y down and the span's
+/// top-left corner at the origin: `(x, y)` lands on `(tx + x * sx, ty + y * sy)`.
 struct GlyphSpanTransform
 {
     float sx = 1;
@@ -25,92 +26,56 @@ struct GlyphSpanTransform
     bool operator==(GlyphSpanTransform const&) const = default;
 };
 
-/// The pixels a glyph is scaled into.
+/// The pixels a glyph is scaled into: one or two cells wide, one cell tall.
 struct GlyphSpanGeometry
 {
-    float width = 0;    ///< The span's width: one or two cells.
-    float height = 0;   ///< The span's height: one cell.
-    float baseline = 0; ///< The text baseline, down from the span's top.
+    float width = 0;
+    float height = 0;
 };
 
-/// Places an outline in its render span: pad, then size, then align, all on the authored extent.
-/// @param layout The registration's sizing and placement.
-/// @param bounds The outline's own bounds, which are the extent of a registration that declares none.
+/// Places a glyph's viewBox in its render span: scaled by `fit`, then positioned by `align`.
+/// @param layout The registration's placement.
+/// @param viewBox The glyph's viewBox, which is its extent.
 /// @param span The pixels to place it in.
-/// @return The transform, or nothing when there is nothing to draw: an empty span, or an extent without
-///         width or height.
+/// @return The transform, or nothing when there is nothing to draw into: an empty span.
 [[nodiscard]] constexpr std::optional<GlyphSpanTransform> placeRegisteredGlyph(
     vtbackend::GlyphLayout const& layout,
-    vtbackend::GlyphOutlineBounds const& bounds,
+    vtbackend::VectorViewBox const& viewBox,
     GlyphSpanGeometry const& span) noexcept
 {
-    using vtbackend::GlyphHorizontalAlignment;
-    using vtbackend::GlyphSizeMode;
-    using vtbackend::GlyphVerticalAlignment;
+    using vtbackend::GlyphAlignment;
+    using vtbackend::GlyphFit;
 
-    // The authored extent: declared, or the outline's bounds.
-    auto const declared = layout.declaresExtent();
-    auto const unitsPerEm = static_cast<float>(layout.unitsPerEm);
-    auto const left = declared ? 0.0F : static_cast<float>(bounds.xMin);
-    auto const bottom =
-        declared ? static_cast<float>(layout.extentBottom.value_or(0)) : static_cast<float>(bounds.yMin);
-    auto const width = declared ? static_cast<float>(layout.advanceWidth.value_or(layout.unitsPerEm))
-                                : static_cast<float>(bounds.xMax - bounds.xMin);
-    auto const height = declared ? static_cast<float>(layout.lineHeight.value_or(layout.unitsPerEm))
-                                 : static_cast<float>(bounds.yMax - bounds.yMin);
-    if (width <= 0 || height <= 0 || span.width <= 0 || span.height <= 0 || unitsPerEm <= 0)
+    if (!(viewBox.width > 0 && viewBox.height > 0 && span.width > 0 && span.height > 0))
         return std::nullopt;
 
-    // The effective span, inside the padding.
-    auto const& pad = layout.padding;
-    auto const insetX = span.width * pad.left;
-    auto const insetY = span.height * pad.top;
-    auto const innerWidth = span.width * (1 - pad.left - pad.right);
-    auto const innerHeight = span.height * (1 - pad.top - pad.bottom);
-
-    auto const fitWidth = innerWidth / width;
-    auto const fitHeight = innerHeight / height;
-    // Without a declared extent the em keeps a set in proportion: a period stays smaller than an M.
-    auto const contain =
-        declared ? std::min(fitWidth, fitHeight)
-                 : std::min({ fitWidth, fitHeight, std::min(innerWidth, innerHeight) / unitsPerEm });
-    auto const cover = std::max(fitWidth, fitHeight);
-
+    auto const fitWidth = span.width / viewBox.width;
+    auto const fitHeight = span.height / viewBox.height;
     auto transform = GlyphSpanTransform {};
-    switch (layout.size)
+    switch (layout.fit)
     {
-        case GlyphSizeMode::Contain: transform.sx = transform.sy = contain; break;
-        case GlyphSizeMode::Height: transform.sx = transform.sy = fitHeight; break;
-        case GlyphSizeMode::Advance: transform.sx = transform.sy = fitWidth; break;
-        case GlyphSizeMode::Cover: transform.sx = transform.sy = cover; break;
-        case GlyphSizeMode::Stretch:
+        case GlyphFit::Contain: transform.sx = transform.sy = std::min(fitWidth, fitHeight); break;
+        case GlyphFit::Cover: transform.sx = transform.sy = std::max(fitWidth, fitHeight); break;
+        case GlyphFit::Stretch:
             transform.sx = fitWidth;
             transform.sy = fitHeight;
             break;
     }
 
-    auto const slackX = innerWidth - (width * transform.sx);
-    transform.tx = insetX - (left * transform.sx);
-    switch (layout.horizontal)
-    {
-        case GlyphHorizontalAlignment::Start: break;
-        case GlyphHorizontalAlignment::Center: transform.tx += slackX / 2; break;
-        case GlyphHorizontalAlignment::End: transform.tx += slackX; break;
-    }
-
-    // Where the outline's y = 0 lands when the extent's bottom sits on the span's.
-    auto const onBottom = insetY + innerHeight + (bottom * transform.sy);
-    auto const slackY = innerHeight - (height * transform.sy);
-    // A stretched extent is the span, so there is nothing for an alignment to choose.
-    auto const vertical =
-        layout.size == GlyphSizeMode::Stretch ? GlyphVerticalAlignment::Start : layout.vertical;
-    switch (vertical)
-    {
-        case GlyphVerticalAlignment::Start: transform.ty = onBottom; break;
-        case GlyphVerticalAlignment::Center: transform.ty = onBottom - (slackY / 2); break;
-        case GlyphVerticalAlignment::End: transform.ty = onBottom - slackY; break;
-        case GlyphVerticalAlignment::Baseline: transform.ty = span.baseline; break;
-    }
+    // What the span has left over on an axis, or lacks, once the scaled viewBox is in it.
+    auto const offsetFor = [](GlyphAlignment alignment, float slack) {
+        switch (alignment)
+        {
+            case GlyphAlignment::Start: return 0.0F;
+            case GlyphAlignment::Center: return slack / 2;
+            case GlyphAlignment::End: return slack;
+        }
+        return 0.0F;
+    };
+    transform.tx = offsetFor(layout.horizontal, span.width - (viewBox.width * transform.sx))
+                   - (viewBox.x * transform.sx);
+    transform.ty = offsetFor(layout.vertical, span.height - (viewBox.height * transform.sy))
+                   - (viewBox.y * transform.sy);
     return transform;
 }
 
@@ -127,7 +92,7 @@ struct GlyphSpanGeometry
     vtbackend::RenderCell const* next) noexcept
 {
     using vtbackend::GlyphRenderSpan;
-    if (glyph.layout.span == GlyphRenderSpan::OneCell || next == nullptr)
+    if (glyph.definition.layout.span == GlyphRenderSpan::OneCell || next == nullptr)
         return GlyphRenderSpan::OneCell;
 
     auto const columnsPerCell = cell.attributes.lineFlags.test(vtbackend::LineFlag::DoubleWidth) ? 2 : 1;

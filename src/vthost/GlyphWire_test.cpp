@@ -6,53 +6,48 @@
 #include <bit>
 #include <cstdint>
 #include <limits>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include <vthost/GlyphWire.hpp>
 
 using namespace vthost;
+using vtbackend::GlyphDefinition;
 using vtbackend::GlyphGlossary;
-using vtbackend::GlyphLayout;
-using vtbackend::GlyphOutline;
-using vtbackend::GlyphOutlinePoint;
-using vtbackend::GlyphPointKind;
+using vtbackend::GlyphStatement;
 
 namespace
 {
 
-/// A layout that uses every field, so a round trip that drops one is seen.
-[[nodiscard]] GlyphLayout fullLayout()
+/// A two-layer glyph with a colour of its own, so a round trip that drops a layer or a colour is seen.
+constexpr auto Badge = std::string_view {
+    "fill=nonzero,fg:M4 4h16v16H4Z|fill=evenodd,#e5534bff:M17 13a4 4 0 1 0 0 8a4 4 0 1 0 0-8Z"
+};
+
+/// @return A glyph that uses every placement key, with a viewBox that is not the default one.
+[[nodiscard]] GlyphDefinition fullDefinition()
 {
-    return GlyphLayout { .unitsPerEm = 2048,
-                         .advanceWidth = 1200,
-                         .lineHeight = std::nullopt,
-                         .extentBottom = -400,
-                         .size = vtbackend::GlyphSizeMode::Cover,
-                         .horizontal = vtbackend::GlyphHorizontalAlignment::End,
-                         .vertical = vtbackend::GlyphVerticalAlignment::Baseline,
-                         .padding = { .top = 0.1F, .right = 0.2F, .bottom = 0.3F, .left = 0.4F },
-                         .span = vtbackend::GlyphRenderSpan::TwoCells };
+    return vtbackend::parseGlyphDefinition(GlyphStatement { .viewBox = "-1.5,2,24,25",
+                                                            .fit = "cover",
+                                                            .align = "end,start",
+                                                            .width = "2",
+                                                            .payload = Badge })
+        .value();
 }
 
-/// Two contours: a triangle with a control point, and a single point.
-[[nodiscard]] GlyphOutline twoContours()
+[[nodiscard]] GlyphDefinition plainDefinition()
 {
-    auto outline =
-        GlyphOutline { .points = { GlyphOutlinePoint { .x = -10, .y = 0, .kind = GlyphPointKind::OnCurve },
-                                   GlyphOutlinePoint { .x = 500, .y = 900, .kind = GlyphPointKind::OffCurve },
-                                   GlyphOutlinePoint { .x = 1000, .y = 0, .kind = GlyphPointKind::OnCurve },
-                                   GlyphOutlinePoint { .x = 7, .y = 7, .kind = GlyphPointKind::OnCurve } },
-                       .contourEnds = { 2, 3 },
-                       .bounds = {} };
-    outline.bounds = vtbackend::boundsOf(outline.points);
-    return outline;
+    return vtbackend::parseGlyphDefinition(
+               GlyphStatement { .viewBox = "0,0,24,24", .payload = "stroke=2,fg:M6 12h12" })
+        .value();
 }
 
 /// @return The wire form of a glossary holding the full glyph at U+100005.
 [[nodiscard]] std::vector<proto::WireRegisteredGlyph> sampleWire()
 {
     auto glossary = GlyphGlossary {};
-    glossary.registerGlyph(0x100005, fullLayout(), twoContours());
+    glossary.registerGlyph(0x100005, fullDefinition());
     return glyphsToWire(glossary.changesSince(0));
 }
 
@@ -68,8 +63,8 @@ namespace
 TEST_CASE("GlyphWire: a glossary crosses the wire whole", "[vthost][glyph]")
 {
     auto source = GlyphGlossary {};
-    source.registerGlyph(0x100005, fullLayout(), twoContours());
-    source.registerGlyph(0x1003FF, GlyphLayout {}, twoContours());
+    source.registerGlyph(0x100005, fullDefinition());
+    source.registerGlyph(0x1003FF, plainDefinition());
 
     auto const staged = stageGlyphUpdates(glyphsToWire(source.changesSince(0)));
     REQUIRE(staged.has_value());
@@ -81,8 +76,8 @@ TEST_CASE("GlyphWire: a glossary crosses the wire whole", "[vthost][glyph]")
         auto const original = source.find(codepoint);
         auto const copy = mirror.find(codepoint);
         REQUIRE(copy != nullptr);
-        CHECK(copy->layout == original->layout);
-        CHECK(copy->outline == original->outline); // the bounds too, which the receiver computes
+        // The payload, and what it was read into: the layers, the viewBox, the placement.
+        CHECK(copy->definition == original->definition);
         // The same content, so the same atlas tiles on either side.
         CHECK(copy->id == original->id);
     }
@@ -92,8 +87,8 @@ TEST_CASE("GlyphWire: a glossary crosses the wire whole", "[vthost][glyph]")
 TEST_CASE("GlyphWire: a cleared slot clears, and a replace clears the rest", "[vthost][glyph]")
 {
     auto source = GlyphGlossary {};
-    source.registerGlyph(0x100001, GlyphLayout {}, twoContours());
-    source.registerGlyph(0x100002, GlyphLayout {}, twoContours());
+    source.registerGlyph(0x100001, plainDefinition());
+    source.registerGlyph(0x100002, plainDefinition());
 
     auto mirror = GlyphGlossary {};
     applyGlyphUpdates(
@@ -134,55 +129,46 @@ TEST_CASE("GlyphWire: a daemon cannot send what an application could not registe
         CHECK(refusalOf(proto::WireRegisteredGlyph { .slot = 65535 }) == GlyphWireError::Slot);
     }
 
-    SECTION("a layout the protocol's parser would have refused")
+    SECTION("a placement no key spells")
     {
-        CHECK(with([](auto& g) { g.unitsPerEm = 0; }) == GlyphWireError::Layout);
-        CHECK(with([](auto& g) { g.advanceWidth = 0; }) == GlyphWireError::Layout); // declared, and zero
-        CHECK(with([](auto& g) { g.extentFields = 0x08; }) == GlyphWireError::Layout);
-        CHECK(with([](auto& g) { g.size = 5; }) == GlyphWireError::Layout);
+        CHECK(with([](auto& g) { g.fit = 3; }) == GlyphWireError::Layout);
         CHECK(with([](auto& g) { g.horizontal = 3; }) == GlyphWireError::Layout);
-        CHECK(with([](auto& g) { g.vertical = 4; }) == GlyphWireError::Layout);
+        CHECK(with([](auto& g) { g.vertical = 3; }) == GlyphWireError::Layout);
         CHECK(with([](auto& g) { g.span = 0; }) == GlyphWireError::Layout);
         CHECK(with([](auto& g) { g.span = 3; }) == GlyphWireError::Layout);
-        CHECK(with([&](auto& g) { g.padding[0] = bitsOf(1.5F); }) == GlyphWireError::Layout);
-        CHECK(with([&](auto& g) { g.padding[1] = bitsOf(-0.1F); }) == GlyphWireError::Layout);
-        CHECK(with([&](auto& g) { g.padding[2] = bitsOf(std::numeric_limits<float>::quiet_NaN()); })
+    }
+
+    SECTION("a viewBox `vb=` would have refused")
+    {
+        CHECK(with([&](auto& g) { g.viewBox[2] = bitsOf(0); }) == GlyphWireError::Layout);
+        CHECK(with([&](auto& g) { g.viewBox[3] = bitsOf(-24); }) == GlyphWireError::Layout);
+        CHECK(with([&](auto& g) { g.viewBox[0] = bitsOf(1e7F); }) == GlyphWireError::Layout);
+        CHECK(with([&](auto& g) { g.viewBox[1] = bitsOf(std::numeric_limits<float>::quiet_NaN()); })
               == GlyphWireError::Layout);
-        CHECK(with([&](auto& g) { g.padding[3] = bitsOf(std::numeric_limits<float>::infinity()); })
-              == GlyphWireError::Layout);
-        // Each within range, together leaving no span.
-        CHECK(with([&](auto& g) { g.padding = { 0, bitsOf(0.5F), 0, bitsOf(0.5F) }; })
+        CHECK(with([&](auto& g) { g.viewBox[2] = bitsOf(std::numeric_limits<float>::infinity()); })
               == GlyphWireError::Layout);
     }
 
-    SECTION("an outline whose contours do not partition its points")
+    SECTION("a payload the protocol's parser refuses")
     {
-        CHECK(with([](auto& g) { g.contourEnds = { 3, 2 }; }) == GlyphWireError::Outline);
-        CHECK(with([](auto& g) { g.contourEnds = { 2, 2 }; }) == GlyphWireError::Outline);
-        CHECK(with([](auto& g) { g.contourEnds = { 2 }; }) == GlyphWireError::Outline); // a point left over
-        CHECK(with([](auto& g) { g.contourEnds = { 2, 9 }; }) == GlyphWireError::Outline); // one past the end
-        CHECK(with([](auto& g) { g.contourEnds.clear(); }) == GlyphWireError::Outline);
-        CHECK(with([](auto& g) { g.points[1].onCurve = 2; }) == GlyphWireError::Outline);
-        CHECK(with([](auto& g) { g.points[0].x = std::numeric_limits<int32_t>::min(); })
-              == GlyphWireError::Outline);
-        CHECK(with([](auto& g) { g.points[0].y = (1 << 28) + 1; }) == GlyphWireError::Outline);
+        // Read again here by the parser an application's is read by: malformed, past a limit, or just
+        // too long, it is refused as it would have been.
+        CHECK(with([](auto& g) { g.payload = "fill=nonzero,fg:L1 1"; }) == GlyphWireError::Payload);
+        CHECK(with([](auto& g) { g.payload.clear(); }) == GlyphWireError::Payload);
+        CHECK(with([](auto& g) { g.payload = "fill=nonzero,fg:M0 0L999 999"; }) == GlyphWireError::Payload);
+        CHECK(with([](auto& g) { g.payload = "fill=nonzero,fg:M1 1\x01"; }) == GlyphWireError::Payload);
+        CHECK(with([](auto& g) {
+                  g.payload =
+                      "fill=nonzero,fg:M1 1" + std::string(vtbackend::MaxGlyphPayloadBytes, ' ') + "h1";
+              })
+              == GlyphWireError::Payload);
     }
 
-    SECTION("more points than a registration may decode to")
+    SECTION("the payload is judged against the viewBox it travels with")
     {
-        auto const refused = with([](auto& g) {
-            g.points.assign(vtbackend::MaxGlyphOutlinePoints + 1, proto::WireGlyphPoint { .onCurve = 1 });
-            g.contourEnds = { static_cast<uint16_t>(vtbackend::MaxGlyphOutlinePoints) };
-        });
-        CHECK(refused == GlyphWireError::Outline);
-    }
-
-    SECTION("a glyph without contours is a blank one, as a record without contours is")
-    {
-        CHECK_FALSE(with([](auto& g) {
-                        g.points.clear();
-                        g.contourEnds.clear();
-                    }).has_value());
+        // The same path, in a viewBox too small to hold it.
+        CHECK(with([&](auto& g) { g.viewBox = { bitsOf(0), bitsOf(0), bitsOf(2), bitsOf(2) }; })
+              == GlyphWireError::Payload);
     }
 }
 

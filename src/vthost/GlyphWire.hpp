@@ -4,8 +4,9 @@
 /// The glyphs of a Glyph Protocol glossary as they travel on the native protocol
 /// (proto::RegisteredGlyphState).
 ///
-/// The wire carries a glyph as the glossary holds it, decoded: the layout's fields and the outline's points.
-/// The mirror rebuilds it through vtbackend's own GlyphGlossary, which derives its atlas id and bounds.
+/// A glyph travels as the application stated it: its `vg` payload, its viewBox and its placement. The
+/// mirror reads the payload with vtbackend's own parser, the one the daemon read it with, so what it holds
+/// was judged by the Glyph Protocol's rules whatever the daemon sent.
 
 #include <vtbackend/vt/GlyphGlossary.hpp>
 
@@ -24,22 +25,15 @@ namespace vthost
 enum class GlyphWireError : uint8_t
 {
     Slot,    ///< A slot outside the registration block.
-    Layout,  ///< A layout the Glyph Protocol's `r` could not have produced.
-    Outline, ///< Contours that do not partition the points, a point of no kind, or too many of them.
+    Layout,  ///< A viewBox or a placement the Glyph Protocol's `r` could not have produced.
+    Payload, ///< A payload the Glyph Protocol's `r` would have refused.
 };
 
 /// One slot of a glossary as a mirror applies it: a glyph to register, or a slot to clear.
 struct GlyphUpdate
 {
-    /// A glyph to register.
-    struct Definition
-    {
-        vtbackend::GlyphLayout layout {};
-        vtbackend::GlyphOutline outline {};
-    };
-
-    char32_t codepoint = 0;               ///< In the registration block.
-    std::optional<Definition> definition; ///< Absent: the slot is cleared.
+    char32_t codepoint = 0;                               ///< In the registration block.
+    std::optional<vtbackend::GlyphDefinition> definition; ///< Absent: the slot is cleared.
 };
 
 /// Captures one change of a glossary for the wire.
@@ -53,23 +47,23 @@ struct GlyphUpdate
 [[nodiscard]] std::vector<proto::WireRegisteredGlyph> glyphsToWire(
     std::span<vtbackend::GlyphChange const> changes);
 
-/// Judges one slot a peer sent (@see stageGlyphUpdates).
+/// @param glyph One slot as it travels.
+/// @return What it weighs in a push: its payload's bytes, and one for the slot.
+[[nodiscard]] inline size_t wireGlyphWeight(proto::WireRegisteredGlyph const& glyph) noexcept
+{
+    return glyph.payload.size() + 1;
+}
+
+/// Judges one slot a peer sent.
+///
+/// A daemon is not trusted to send only what an application could have registered: the payload is read
+/// again here, by the parser that reads an application's, and every limit it enforces is enforced again.
 /// @param glyph The slot.
 /// @return What a glossary takes for it, or why it is refused.
 [[nodiscard]] std::expected<GlyphUpdate, GlyphWireError> stageGlyphUpdate(
     proto::WireRegisteredGlyph const& glyph);
 
-/// @param glyph One slot as it travels.
-/// @return How many outline points it carries, which is what makes a push large.
-[[nodiscard]] constexpr size_t wireGlyphWeight(proto::WireRegisteredGlyph const& glyph) noexcept
-{
-    return glyph.points.size() + 1;
-}
-
-/// Judges the glyphs a peer sent, and turns them into what a glossary takes.
-///
-/// A daemon is not trusted to send only what an application could have registered: every limit the Glyph
-/// Protocol's own parser enforces is enforced again here. Nothing is applied by this; a refused set leaves
+/// Judges the glyphs a peer sent (@see stageGlyphUpdate). Nothing is applied by this; a refused set leaves
 /// the mirror's glossary as it was.
 /// @param glyphs The slots a RegisteredGlyphState carried.
 /// @return The updates, in the order sent, or why the set was refused.

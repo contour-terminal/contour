@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/vt/GlyphGlossary.hpp>
 
+#include <bit>
 #include <ranges>
 #include <utility>
 
@@ -9,37 +10,28 @@ namespace vtbackend
 
 namespace
 {
-    /// Tags registered glyph ids apart from every other tile keyed in the atlas ('GLYF').
-    constexpr auto IdTag = uint32_t { 0x474C'5946 };
+    /// Tags registered glyph ids apart from every other tile keyed in the atlas ('GLVG').
+    constexpr auto IdTag = uint32_t { 0x474C'5647 };
 
-    /// @return A hash of everything that decides what the glyph's tiles look like.
-    [[nodiscard]] crispy::StrongHash hashGlyph(GlyphLayout const& layout,
-                                               GlyphOutline const& outline) noexcept
+    /// @return A hash of everything that decides what the glyph's tiles look like: the payload, which is
+    ///         the glyph, and where it is placed.
+    [[nodiscard]] crispy::StrongHash hashGlyph(GlyphDefinition const& definition) noexcept
     {
-        auto hash =
-            crispy::StrongHash { IdTag,
-                                 layout.unitsPerEm,
-                                 (uint32_t { layout.advanceWidth.value_or(0) } << 16)
-                                     | layout.lineHeight.value_or(0),
-                                 static_cast<uint32_t>(
-                                     // One past the widest int16, so "absent" is not a value.
-                                     layout.extentBottom ? int32_t { *layout.extentBottom } : 0x10000) };
-        hash = hash
-               * crispy::StrongHash { static_cast<uint32_t>(layout.size),
-                                      static_cast<uint32_t>(layout.horizontal),
-                                      static_cast<uint32_t>(layout.vertical),
-                                      static_cast<uint32_t>(layout.span) };
-        hash = hash * crispy::StrongHash::compute(&layout.padding, sizeof(layout.padding));
-        // Field by field: a point has padding bytes, which hold nothing in particular.
-        for (auto const& point: outline.points)
-            hash = hash
-                   * crispy::StrongHash { static_cast<uint32_t>(point.x),
-                                          static_cast<uint32_t>(point.y),
-                                          static_cast<uint32_t>(point.kind),
-                                          0 };
-        return hash
-               * crispy::StrongHash::compute(outline.contourEnds.data(),
-                                             outline.contourEnds.size() * sizeof(uint16_t));
+        auto const& layout = definition.layout;
+        auto const& viewBox = definition.glyph.viewBox;
+        auto const bitsOf = [](float value) {
+            return std::bit_cast<uint32_t>(value);
+        };
+        return crispy::StrongHash { IdTag,
+                                    static_cast<uint32_t>(layout.fit),
+                                    (static_cast<uint32_t>(layout.horizontal) << 8)
+                                        | static_cast<uint32_t>(layout.vertical),
+                                    static_cast<uint32_t>(layout.span) }
+               * crispy::StrongHash { bitsOf(viewBox.x),
+                                      bitsOf(viewBox.y),
+                                      bitsOf(viewBox.width),
+                                      bitsOf(viewBox.height) }
+               * crispy::StrongHash::compute(definition.payload.data(), definition.payload.size());
     }
 
     /// Composes the reply to each kind of request, carrying it out on the way.
@@ -70,8 +62,7 @@ namespace
 
         [[nodiscard]] std::string operator()(GlyphRegistration&& registration) const
         {
-            glossary.registerGlyph(
-                registration.codepoint, registration.layout, std::move(registration.outline));
+            glossary.registerGlyph(registration.codepoint, std::move(registration.definition));
             return registration.reply == GlyphReplyMode::All ? glyph_reply::registered(registration.codepoint)
                                                              : std::string {};
         }
@@ -112,12 +103,12 @@ namespace
     };
 } // namespace
 
-void GlyphGlossary::registerGlyph(char32_t codepoint, GlyphLayout const& layout, GlyphOutline outline)
+void GlyphGlossary::registerGlyph(char32_t codepoint, GlyphDefinition definition)
 {
-    auto const id = hashGlyph(layout, outline);
+    auto const id = hashGlyph(definition);
     put(codepoint,
         std::make_shared<RegisteredGlyph const>(
-            RegisteredGlyph { .id = id, .layout = layout, .outline = std::move(outline) }));
+            RegisteredGlyph { .id = id, .definition = std::move(definition) }));
 }
 
 void GlyphGlossary::clear(char32_t codepoint)
@@ -192,7 +183,7 @@ std::string executeGlyphProtocol(GlyphGlossary& glossary,
     auto command = parseGlyphCommand(body);
     if (!command)
         return std::visit(Refuser {}, command.error());
-    // Moved from: a registration hands its outline to the glossary instead of copying it.
+    // Moved from: a registration hands its glyph to the glossary instead of copying it.
     return std::visit(Executor { .glossary = glossary, .coverage = coverage }, std::move(*command));
 }
 

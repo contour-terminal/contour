@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <bit>
-#include <cmath>
 #include <ranges>
 #include <utility>
 
@@ -12,16 +11,6 @@ namespace vthost
 
 namespace
 {
-    // The bits of proto::WireRegisteredGlyph::extentFields.
-    constexpr auto HasAdvanceWidth = uint8_t { 0x01 };
-    constexpr auto HasLineHeight = uint8_t { 0x02 };
-    constexpr auto HasExtentBottom = uint8_t { 0x04 };
-    constexpr auto ExtentFieldsMask = uint8_t { HasAdvanceWidth | HasLineHeight | HasExtentBottom };
-
-    /// The farthest from the origin a point may lie. A `glyf` record's points are sums of 16-bit deltas, so
-    /// the most its 5,461 points can reach is some 1.8e8; nothing an application registered lies beyond.
-    constexpr auto MaxCoordinate = int32_t { 1 } << 28;
-
     /// @return @p value as @p Enum when it is at most @p last, the enumeration's greatest enumerator.
     template <typename Enum>
     [[nodiscard]] constexpr std::optional<Enum> enumerator(uint8_t value, Enum last) noexcept
@@ -29,85 +18,20 @@ namespace
         return value <= std::to_underlying(last) ? std::optional { static_cast<Enum>(value) } : std::nullopt;
     }
 
-    [[nodiscard]] std::optional<vtbackend::GlyphPadding> paddingFromWire(std::array<uint32_t, 4> const& bits)
-    {
-        auto const fraction = [](uint32_t value) {
-            return std::bit_cast<float>(value);
-        };
-        auto const padding = vtbackend::GlyphPadding { .top = fraction(bits[0]),
-                                                       .right = fraction(bits[1]),
-                                                       .bottom = fraction(bits[2]),
-                                                       .left = fraction(bits[3]) };
-        // What the `pad=` parser leaves: fractions of the span, never the whole of it. The negated
-        // comparison refuses a NaN too.
-        auto const inRange = [](float value) {
-            return value >= 0.0F && value <= 1.0F;
-        };
-        if (!inRange(padding.top) || !inRange(padding.right) || !inRange(padding.bottom)
-            || !inRange(padding.left) || !(padding.left + padding.right < 1.0F)
-            || !(padding.top + padding.bottom < 1.0F))
-            return std::nullopt;
-        return padding;
-    }
-
     [[nodiscard]] std::optional<vtbackend::GlyphLayout> layoutFromWire(proto::WireRegisteredGlyph const& wire)
     {
         using namespace vtbackend;
-        auto const size = enumerator(wire.size, GlyphSizeMode::Stretch);
-        auto const horizontal = enumerator(wire.horizontal, GlyphHorizontalAlignment::End);
-        auto const vertical = enumerator(wire.vertical, GlyphVerticalAlignment::Baseline);
-        auto const padding = paddingFromWire(wire.padding);
-        auto const declares = [&](uint8_t field) {
-            return (wire.extentFields & field) != 0;
-        };
-        if (!size || !horizontal || !vertical || !padding || wire.unitsPerEm == 0
-            || (wire.extentFields & ~ExtentFieldsMask) != 0
+        auto const fit = enumerator(wire.fit, GlyphFit::Stretch);
+        auto const horizontal = enumerator(wire.horizontal, GlyphAlignment::End);
+        auto const vertical = enumerator(wire.vertical, GlyphAlignment::End);
+        if (!fit || !horizontal || !vertical
             || (wire.span != std::to_underlying(GlyphRenderSpan::OneCell)
-                && wire.span != std::to_underlying(GlyphRenderSpan::TwoCells))
-            || (declares(HasAdvanceWidth) && wire.advanceWidth == 0)
-            || (declares(HasLineHeight) && wire.lineHeight == 0))
+                && wire.span != std::to_underlying(GlyphRenderSpan::TwoCells)))
             return std::nullopt;
-
-        return GlyphLayout {
-            .unitsPerEm = wire.unitsPerEm,
-            .advanceWidth = declares(HasAdvanceWidth) ? std::optional { wire.advanceWidth } : std::nullopt,
-            .lineHeight = declares(HasLineHeight) ? std::optional { wire.lineHeight } : std::nullopt,
-            .extentBottom = declares(HasExtentBottom) ? std::optional { wire.extentBottom } : std::nullopt,
-            .size = *size,
-            .horizontal = *horizontal,
-            .vertical = *vertical,
-            .padding = *padding,
-            .span = static_cast<GlyphRenderSpan>(wire.span),
-        };
-    }
-
-    [[nodiscard]] std::optional<vtbackend::GlyphOutline> outlineFromWire(
-        proto::WireRegisteredGlyph const& wire)
-    {
-        using namespace vtbackend;
-        if (wire.points.size() > MaxGlyphOutlinePoints)
-            return std::nullopt;
-        // The contours partition the points: each ends after the one before, and the last ends the list.
-        auto const increasing =
-            std::ranges::adjacent_find(wire.contourEnds, std::greater_equal {}) == wire.contourEnds.end();
-        auto const covered = wire.contourEnds.empty() ? size_t { 0 } : size_t { wire.contourEnds.back() } + 1;
-        if (!increasing || covered != wire.points.size())
-            return std::nullopt;
-
-        auto outline = GlyphOutline { .points = {}, .contourEnds = wire.contourEnds, .bounds = {} };
-        outline.points.reserve(wire.points.size());
-        for (auto const& point: wire.points)
-        {
-            if (point.onCurve > 1 || std::abs(int64_t { point.x }) > MaxCoordinate
-                || std::abs(int64_t { point.y }) > MaxCoordinate)
-                return std::nullopt;
-            outline.points.push_back(GlyphOutlinePoint {
-                .x = point.x,
-                .y = point.y,
-                .kind = point.onCurve != 0 ? GlyphPointKind::OnCurve : GlyphPointKind::OffCurve });
-        }
-        outline.bounds = boundsOf(outline.points);
-        return outline;
+        return GlyphLayout { .fit = *fit,
+                             .horizontal = *horizontal,
+                             .vertical = *vertical,
+                             .span = static_cast<GlyphRenderSpan>(wire.span) };
     }
 } // namespace
 
@@ -117,31 +41,18 @@ proto::WireRegisteredGlyph glyphToWire(vtbackend::GlyphChange const& change)
     if (!change.glyph)
         return wire;
 
-    auto const& layout = change.glyph->layout;
-    auto const& outline = change.glyph->outline;
+    auto const& definition = change.glyph->definition;
+    auto const& viewBox = definition.glyph.viewBox;
     wire.registered = 1;
-    wire.unitsPerEm = layout.unitsPerEm;
-    wire.extentFields = static_cast<uint8_t>((layout.advanceWidth ? HasAdvanceWidth : 0)
-                                             | (layout.lineHeight ? HasLineHeight : 0)
-                                             | (layout.extentBottom ? HasExtentBottom : 0));
-    wire.advanceWidth = layout.advanceWidth.value_or(0);
-    wire.lineHeight = layout.lineHeight.value_or(0);
-    wire.extentBottom = layout.extentBottom.value_or(0);
-    wire.size = std::to_underlying(layout.size);
-    wire.horizontal = std::to_underlying(layout.horizontal);
-    wire.vertical = std::to_underlying(layout.vertical);
-    wire.span = std::to_underlying(layout.span);
-    wire.padding = { std::bit_cast<uint32_t>(layout.padding.top),
-                     std::bit_cast<uint32_t>(layout.padding.right),
-                     std::bit_cast<uint32_t>(layout.padding.bottom),
-                     std::bit_cast<uint32_t>(layout.padding.left) };
-    wire.contourEnds = outline.contourEnds;
-    wire.points.reserve(outline.points.size());
-    for (auto const& point: outline.points)
-        wire.points.push_back(proto::WireGlyphPoint {
-            .x = point.x,
-            .y = point.y,
-            .onCurve = point.kind == vtbackend::GlyphPointKind::OnCurve ? uint8_t { 1 } : uint8_t { 0 } });
+    wire.viewBox = { std::bit_cast<uint32_t>(viewBox.x),
+                     std::bit_cast<uint32_t>(viewBox.y),
+                     std::bit_cast<uint32_t>(viewBox.width),
+                     std::bit_cast<uint32_t>(viewBox.height) };
+    wire.fit = std::to_underlying(definition.layout.fit);
+    wire.horizontal = std::to_underlying(definition.layout.horizontal);
+    wire.vertical = std::to_underlying(definition.layout.vertical);
+    wire.span = std::to_underlying(definition.layout.span);
+    wire.payload = definition.payload;
     return wire;
 }
 
@@ -160,13 +71,21 @@ std::expected<GlyphUpdate, GlyphWireError> stageGlyphUpdate(proto::WireRegistere
     if (glyph.registered == 0)
         return update;
 
-    auto layout = layoutFromWire(glyph);
-    if (!layout)
+    auto const layout = layoutFromWire(glyph);
+    auto const viewBox = vtbackend::VectorViewBox { .x = std::bit_cast<float>(glyph.viewBox[0]),
+                                                    .y = std::bit_cast<float>(glyph.viewBox[1]),
+                                                    .width = std::bit_cast<float>(glyph.viewBox[2]),
+                                                    .height = std::bit_cast<float>(glyph.viewBox[3]) };
+    if (!layout || !vtbackend::isValidVectorViewBox(viewBox))
         return std::unexpected { GlyphWireError::Layout };
-    auto outline = outlineFromWire(glyph);
-    if (!outline)
-        return std::unexpected { GlyphWireError::Outline };
-    update.definition = GlyphUpdate::Definition { .layout = *layout, .outline = std::move(*outline) };
+    if (glyph.payload.size() > vtbackend::MaxGlyphPayloadBytes)
+        return std::unexpected { GlyphWireError::Payload };
+    auto parsed = vtbackend::parseVectorGlyph(glyph.payload, viewBox);
+    if (!parsed)
+        return std::unexpected { GlyphWireError::Payload };
+    update.definition = vtbackend::GlyphDefinition { .layout = *layout,
+                                                     .glyph = std::move(*parsed),
+                                                     .payload = glyph.payload };
     return update;
 }
 
@@ -194,8 +113,7 @@ void applyGlyphUpdates(vtbackend::GlyphGlossary& glossary,
     for (auto& update: updates)
     {
         if (update.definition)
-            glossary.registerGlyph(
-                update.codepoint, update.definition->layout, std::move(update.definition->outline));
+            glossary.registerGlyph(update.codepoint, std::move(*update.definition));
         else
             glossary.clear(update.codepoint);
     }

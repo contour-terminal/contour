@@ -12,7 +12,8 @@ set(_header_files
     GridMetrics.hpp
     GutterCells.hpp
     ImageRenderer.hpp
-    OutlineRasterizer.hpp
+    PathCoverage.hpp
+    PathGeometry.hpp
     Pixmap.hpp
     RailGeometry.hpp
     RegisteredGlyphPlacement.hpp
@@ -25,6 +26,7 @@ set(_header_files
     TextureAtlas.hpp
     UnderlineGeometry.hpp
     Utils.hpp
+    VectorGlyphRasterizer.hpp
 )
 
 set(_source_files
@@ -35,7 +37,8 @@ set(_source_files
     CursorRenderer.cpp
     DecorationRenderer.cpp
     ImageRenderer.cpp
-    OutlineRasterizer.cpp
+    PathCoverage.cpp
+    PathGeometry.cpp
     Pixmap.cpp
     RegisteredGlyphRenderer.cpp
     RenderTarget.cpp
@@ -44,6 +47,7 @@ set(_source_files
     TextClusterGrouper.cpp
     TextRenderer.cpp
     Utils.cpp
+    VectorGlyphRasterizer.cpp
 )
 
 set(_test_files
@@ -61,10 +65,12 @@ set(_test_files
     GridMetrics_test.cpp
     GutterCells_test.cpp
     ImageRenderer_test.cpp
-    OutlineRasterizer_test.cpp
+    PathCoverage_test.cpp
+    PathGeometry_test.cpp
     RailGeometry_test.cpp
     RegisteredGlyphPlacement_test.cpp
     RegisteredGlyphRenderer_test.cpp
+    VectorGlyphRasterizer_test.cpp
     ReGISFontRasterizer_test.cpp
     TextRenderer_test.cpp
     UnderlineGeometry_test.cpp

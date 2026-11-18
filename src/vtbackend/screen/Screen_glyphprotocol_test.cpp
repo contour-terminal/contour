@@ -2,7 +2,6 @@
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
 #include <vtbackend/screen/Screen.hpp>
-#include <vtbackend/testing/GlyfRecordBuilder.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/vt/GlyphGlossary.hpp>
 
@@ -15,17 +14,17 @@
 #include <vector>
 
 using namespace vtbackend;
-using namespace vtbackend::glyf_test;
 
 namespace
 {
 
 constexpr auto TestPage = PageSize { LineCount(2), ColumnCount(10) };
 
-/// @return The message, as an application writes it, that registers the square at @p codepoint.
+/// @return The message, as an application writes it, that registers a square at @p codepoint.
 [[nodiscard]] std::string registerSquare(std::string_view codepoint)
 {
-    return std::format("\033_25a1;r;cp={};{}\033\\", codepoint, base64(squareRecord()));
+    return std::format("\033_25a1;r;cp={};fmt=vg;vb=0,0,24,24;fill=nonzero,fg:M4 4h16v16H4Z\033\\",
+                       codepoint);
 }
 
 } // namespace
@@ -35,7 +34,7 @@ TEST_CASE("GlyphProtocol.Screen: support is answered before DA1", "[screen][glyp
     // How an application detects the protocol: `s`, then DA1; an `s` reply ahead of the DA1 one means yes.
     auto mock = MockTerm { TestPage };
     mock.writeToScreen("\033_25a1;s\033\\\033[c");
-    CHECK(mock.terminal.peekInput().starts_with("\033_25a1;s;fmt=glyf\033\\\033[?"));
+    CHECK(mock.terminal.peekInput().starts_with("\033_25a1;s;fmt=vg\033\\\033[?"));
 }
 
 TEST_CASE("GlyphProtocol.Screen: another APC is not taken for it", "[screen][glyphprotocol]")
@@ -112,13 +111,19 @@ TEST_CASE("GlyphProtocol.Screen: RIS clears the glossary", "[screen][glyphprotoc
 
 TEST_CASE("GlyphProtocol.Screen: a payload of the full size gets through", "[screen][glyphprotocol]")
 {
-    // 32 KiB is 43,692 bytes of base64, which with its parameters fits the body an APC may have. A record
-    // of zeroes is a glyph without contours, which is a valid (blank) one, so the reply tells the message
-    // arrived whole.
+    // 32 KiB of payload, with its parameters, fits the body an APC may have: the reply tells the message
+    // arrived whole. The payload is a square followed by spaces, which path data may end with.
     auto mock = MockTerm { TestPage };
-    auto const blank = std::vector<uint8_t>(MaxGlyphPayloadBytes, uint8_t { 0 });
-    mock.writeToScreen(std::format("\033_25a1;r;cp=100000;{}\033\\", base64(blank)));
-    CHECK(mock.terminal.peekInput() == "\033_25a1;r;cp=100000;status=0\033\\");
+    auto payload = std::string { "fill=nonzero,fg:M4 4h16v16H4Z" };
+    payload.resize(MaxGlyphPayloadBytes, ' ');
+    mock.writeToScreen(std::format("\033_25a1;r;cp=100000;fmt=vg;vb=0,0,24,24;{}x\033\\", payload));
+    // One byte more than the cap is refused for its size, by the registration and not by the APC's cap.
+    CHECK(mock.terminal.peekInput() == "\033_25a1;r;cp=100000;status=1;reason=payload_too_large\033\\");
+    CHECK(mock.terminal.glyphGlossary().empty());
+
+    // Trailing spaces are not payload; what is left is the square, and is taken.
+    mock.writeToScreen(std::format("\033_25a1;r;cp=100001;fmt=vg;vb=0,0,24,24;reply=2;{}\033\\", payload));
+    CHECK(mock.terminal.glyphGlossary().find(0x100001) != nullptr);
 }
 
 TEST_CASE("GlyphProtocol.Screen: a message past its cap is refused, not ignored", "[screen][glyphprotocol]")
@@ -127,13 +132,13 @@ TEST_CASE("GlyphProtocol.Screen: a message past its cap is refused, not ignored"
     auto mock = MockTerm { TestPage };
     auto const huge = std::string(Sequence::MaxOscLength + 1024, 'A');
 
-    mock.writeToScreen(std::format("\033_25a1;r;cp=100000;{}\033\\", huge));
+    mock.writeToScreen(std::format("\033_25a1;r;cp=100000;fmt=vg;vb=0,0,24,24;{}\033\\", huge));
     CHECK(mock.terminal.peekInput() == "\033_25a1;r;cp=100000;status=1;reason=payload_too_large\033\\");
     CHECK(mock.terminal.glyphGlossary().empty());
 
     // Byte by byte, as a slow sender delivers it, the cap and the answer are the same.
     auto slow = MockTerm { TestPage };
-    for (auto const ch: std::format("\033_25a1;r;cp=100001;{}\033\\", huge))
+    for (auto const ch: std::format("\033_25a1;r;cp=100001;fmt=vg;{}\033\\", huge))
         slow.writeToScreen(std::string_view { &ch, 1 });
     CHECK(slow.terminal.peekInput() == "\033_25a1;r;cp=100001;status=1;reason=payload_too_large\033\\");
 }

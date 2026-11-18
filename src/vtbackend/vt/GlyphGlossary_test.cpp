@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/testing/GlyfRecordBuilder.hpp>
 #include <vtbackend/vt/GlyphGlossary.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -12,7 +11,6 @@
 #include <vector>
 
 using namespace vtbackend;
-using namespace vtbackend::glyf_test;
 
 namespace
 {
@@ -27,9 +25,19 @@ class BranchIconOnly final: public SystemGlyphCoverage
     }
 };
 
-[[nodiscard]] GlyphOutline square()
+/// A square, as path data in a 24-unit viewBox.
+constexpr auto Square = std::string_view { "fill=nonzero,fg:M4 4h16v16H4Z" };
+
+/// @return A glyph of @p payload in a 24-unit viewBox, placed by @p fit.
+[[nodiscard]] GlyphDefinition glyphOf(std::string_view payload = Square, std::string_view fit = "contain")
 {
-    return decodeGlyf(squareRecord()).value();
+    return parseGlyphDefinition(GlyphStatement { .viewBox = "0,0,24,24", .fit = fit, .payload = payload })
+        .value();
+}
+
+[[nodiscard]] GlyphDefinition square()
+{
+    return glyphOf();
 }
 
 /// Sends @p body to @p glossary, with no font behind it.
@@ -40,8 +48,11 @@ class BranchIconOnly final: public SystemGlyphCoverage
 
 [[nodiscard]] std::string registerSquareAt(std::string_view codepoint, std::string_view parameters = {})
 {
-    return std::format(
-        "25a1;r;cp={}{}{};{}", codepoint, parameters.empty() ? "" : ";", parameters, base64(squareRecord()));
+    return std::format("25a1;r;cp={};fmt=vg;vb=0,0,24,24{}{};{}",
+                       codepoint,
+                       parameters.empty() ? "" : ";",
+                       parameters,
+                       Square);
 }
 
 } // namespace
@@ -52,11 +63,11 @@ TEST_CASE("GlyphGlossary: register, find, clear", "[GlyphGlossary]")
     CHECK(glossary.empty());
     CHECK(glossary.find(0x100000) == nullptr);
 
-    glossary.registerGlyph(0x100000, GlyphLayout {}, square());
-    glossary.registerGlyph(0x1003FF, GlyphLayout {}, square());
+    glossary.registerGlyph(0x100000, square());
+    glossary.registerGlyph(0x1003FF, square());
     CHECK_FALSE(glossary.empty());
     REQUIRE(glossary.find(0x100000) != nullptr);
-    CHECK(glossary.find(0x100000)->outline.points.size() == 4);
+    CHECK(glossary.find(0x100000)->definition.glyph.layers.size() == 1);
     CHECK(glossary.find(0x100001) == nullptr);
     CHECK(glossary.find(U'a') == nullptr);
 
@@ -82,7 +93,7 @@ TEST_CASE("GlyphGlossary: clearing what is clear is not a change", "[GlyphGlossa
     glossary.clear(0x100000);
     CHECK(glossary.generation() == generation);
 
-    glossary.registerGlyph(0x100000, GlyphLayout {}, square());
+    glossary.registerGlyph(0x100000, square());
     glossary.clear(0x100001); // another slot, empty
     CHECK(glossary.generation() == generation + 1);
     glossary.clear(0x100000);
@@ -103,7 +114,7 @@ TEST_CASE("GlyphGlossary: a glossary nothing is registered in holds no slots", "
     glossary.clear();
     CHECK(glossary.generation() == 0);
 
-    glossary.registerGlyph(0x100000, GlyphLayout {}, square());
+    glossary.registerGlyph(0x100000, square());
     glossary.clear();
     CHECK(glossary.find(0x100000) == nullptr);
     CHECK(glossary.snapshot() == nullptr);
@@ -113,21 +124,19 @@ TEST_CASE("GlyphGlossary: a glossary nothing is registered in holds no slots", "
 TEST_CASE("GlyphGlossary: a glyph's id follows its content", "[GlyphGlossary]")
 {
     auto glossary = GlyphGlossary {};
-    glossary.registerGlyph(0x100000, GlyphLayout {}, square());
-    glossary.registerGlyph(0x100001, GlyphLayout {}, square());
-    glossary.registerGlyph(0x100002, GlyphLayout { .size = GlyphSizeMode::Stretch }, square());
-    glossary.registerGlyph(0x100003, GlyphLayout { .extentBottom = 0 }, square());
-
-    auto other = square();
-    other.points[2].x = 900;
-    glossary.registerGlyph(0x100004, GlyphLayout {}, other);
+    glossary.registerGlyph(0x100000, square());
+    glossary.registerGlyph(0x100001, square());
+    glossary.registerGlyph(0x100002, glyphOf(Square, "stretch"));
+    glossary.registerGlyph(0x100003, glyphOf("fill=nonzero,fg:M4 4h16v16H5Z"));
+    auto other = parseGlyphDefinition(GlyphStatement { .viewBox = "0,0,24,25", .payload = Square }).value();
+    glossary.registerGlyph(0x100004, std::move(other));
 
     // The same content shares its tiles, wherever it is registered ...
     CHECK(glossary.find(0x100000)->id == glossary.find(0x100001)->id);
     // ... and anything that changes what is drawn does not: a stale tile is never served.
-    CHECK(glossary.find(0x100000)->id != glossary.find(0x100002)->id);
-    CHECK(glossary.find(0x100000)->id != glossary.find(0x100003)->id);
-    CHECK(glossary.find(0x100000)->id != glossary.find(0x100004)->id);
+    CHECK(glossary.find(0x100000)->id != glossary.find(0x100002)->id); // the placement
+    CHECK(glossary.find(0x100000)->id != glossary.find(0x100003)->id); // the payload
+    CHECK(glossary.find(0x100000)->id != glossary.find(0x100004)->id); // the viewBox
 }
 
 TEST_CASE("GlyphGlossary: a snapshot does not change under a frame", "[GlyphGlossary]")
@@ -135,7 +144,7 @@ TEST_CASE("GlyphGlossary: a snapshot does not change under a frame", "[GlyphGlos
     auto glossary = GlyphGlossary {};
     CHECK(glossary.snapshot() == nullptr); // nothing registered, nothing for a frame to carry
 
-    glossary.registerGlyph(0x100000, GlyphLayout {}, square());
+    glossary.registerGlyph(0x100000, square());
     auto const frame = glossary.snapshot();
     REQUIRE(frame != nullptr);
     auto const* const drawn = registeredGlyphOf(frame.get(), U"\U00100000");
@@ -161,15 +170,15 @@ TEST_CASE("GlyphGlossary: changes since an earlier state", "[GlyphGlossary]")
     auto glossary = GlyphGlossary {};
     CHECK(glossary.changesSince(0).empty());
 
-    glossary.registerGlyph(0x100002, GlyphLayout {}, square());
-    glossary.registerGlyph(0x100000, GlyphLayout {}, square());
+    glossary.registerGlyph(0x100002, square());
+    glossary.registerGlyph(0x100000, square());
     auto const first = glossary.generation();
     // Everything, ascending, for one that holds nothing.
     CHECK(slotsOf(glossary.changesSince(0)) == std::vector<uint16_t> { 0, 2 });
     CHECK(glossary.changesSince(first).empty());
 
     // A replaced slot and a cleared one, and not the slot left alone.
-    glossary.registerGlyph(0x100005, GlyphLayout {}, square());
+    glossary.registerGlyph(0x100005, square());
     glossary.clear(0x100002);
     auto const changes = glossary.changesSince(first);
     REQUIRE(slotsOf(changes) == std::vector<uint16_t> { 2, 5 });
@@ -187,7 +196,7 @@ TEST_CASE("GlyphGlossary: changes since an earlier state", "[GlyphGlossary]")
 TEST_CASE("registeredGlyphOf: only a cell that is one codepoint of the block", "[GlyphGlossary]")
 {
     auto glossary = GlyphGlossary {};
-    glossary.registerGlyph(0x100000, GlyphLayout {}, square());
+    glossary.registerGlyph(0x100000, square());
     auto const frame = glossary.snapshot();
 
     CHECK(registeredGlyphOf(frame.get(), U"\U00100000") != nullptr);
@@ -201,7 +210,7 @@ TEST_CASE("registeredGlyphOf: only a cell that is one codepoint of the block", "
 TEST_CASE("executeGlyphProtocol: support and query", "[GlyphGlossary]")
 {
     auto glossary = GlyphGlossary {};
-    CHECK(send(glossary, "25a1;s") == "\033_25a1;s;fmt=glyf\033\\");
+    CHECK(send(glossary, "25a1;s") == "\033_25a1;s;fmt=vg\033\\");
 
     CHECK(send(glossary, "25a1;q;cp=100000") == "\033_25a1;q;cp=100000;status=\033\\");
     CHECK(send(glossary, registerSquareAt("100000")) == "\033_25a1;r;cp=100000;status=0\033\\");
@@ -243,10 +252,10 @@ TEST_CASE("executeGlyphProtocol: a second registration overwrites the first", "[
     auto glossary = GlyphGlossary {};
     REQUIRE_FALSE(send(glossary, registerSquareAt("100000")).empty());
     auto const first = glossary.find(0x100000);
-    REQUIRE_FALSE(send(glossary, registerSquareAt("100000", "size=stretch")).empty());
+    REQUIRE_FALSE(send(glossary, registerSquareAt("100000", "fit=stretch")).empty());
     auto const second = glossary.find(0x100000);
     REQUIRE(second != nullptr);
-    CHECK(second->layout.size == GlyphSizeMode::Stretch);
+    CHECK(second->definition.layout.fit == GlyphFit::Stretch);
     CHECK(second->id != first->id);
 }
 
@@ -286,8 +295,7 @@ TEST_CASE("executeGlyphProtocol: every slot of the block can be held at once", "
 {
     auto glossary = GlyphGlossary {};
     for (auto const slot: std::views::iota(size_t { 0 }, GlyphRegistrationSlots))
-        glossary.registerGlyph(
-            static_cast<char32_t>(FirstGlyphRegistrationCodepoint + slot), GlyphLayout {}, square());
+        glossary.registerGlyph(static_cast<char32_t>(FirstGlyphRegistrationCodepoint + slot), square());
     auto const frame = glossary.snapshot();
     REQUIRE(frame != nullptr);
     CHECK(std::ranges::none_of(*frame, [](auto const& glyph) { return glyph == nullptr; }));

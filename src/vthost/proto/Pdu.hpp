@@ -1196,37 +1196,21 @@ struct SoftFontState
     bool operator==(SoftFontState const&) const = default;
 };
 
-/// One point of a registered glyph's outline on the wire.
-struct WireGlyphPoint
-{
-    int32_t x = 0;
-    int32_t y = 0;
-    uint8_t onCurve = 0; ///< 1 on the curve, 0 a control point.
-    bool operator==(WireGlyphPoint const&) const = default;
-};
-
 /// One slot of a session's Glyph Protocol glossary on the wire: the glyph registered there, or that the
-/// slot is clear. Nothing about identity travels: a glyph's atlas id is a hash of its content, and the
-/// receiver derives it, as it does the outline's bounds.
+/// slot is clear. A glyph travels as the application stated it -- the `vg` payload and where it is placed
+/// -- and the receiver reads it with the parser the daemon read it with, so it is judged by the same rules
+/// on both ends. Nothing about identity travels: a glyph's atlas id is a hash of its content.
 struct WireRegisteredGlyph
 {
-    uint16_t slot = 0;       ///< The codepoint minus U+100000; below 1024.
-    uint8_t registered = 0;  ///< 1 a glyph is registered; 0 the slot is clear, and nothing below is read.
-    uint16_t unitsPerEm = 0; ///< vtbackend::GlyphLayout::unitsPerEm.
-    /// Which of the three extent fields the sender declared: bit 0 advanceWidth, bit 1 lineHeight, bit 2
-    /// extentBottom. A field whose bit is clear is absent, not zero.
-    uint8_t extentFields = 0;
-    uint16_t advanceWidth = 0;
-    uint16_t lineHeight = 0;
-    int16_t extentBottom = 0;
-    uint8_t size = 0;       ///< vtbackend::GlyphSizeMode.
-    uint8_t horizontal = 0; ///< vtbackend::GlyphHorizontalAlignment.
-    uint8_t vertical = 0;   ///< vtbackend::GlyphVerticalAlignment.
+    uint16_t slot = 0;      ///< The codepoint minus U+100000; below 1024.
+    uint8_t registered = 0; ///< 1 a glyph is registered; 0 the slot is clear, and nothing below is read.
+    /// The viewBox as x, y, width, height: each float's bits, so the values arrive as they were.
+    std::array<uint32_t, 4> viewBox = {};
+    uint8_t fit = 0;        ///< vtbackend::GlyphFit.
+    uint8_t horizontal = 0; ///< vtbackend::GlyphAlignment.
+    uint8_t vertical = 0;   ///< vtbackend::GlyphAlignment.
     uint8_t span = 0;       ///< vtbackend::GlyphRenderSpan: 1 or 2.
-    /// The padding as top, right, bottom, left: each float's bits, so the fractions arrive as they were.
-    std::array<uint32_t, 4> padding = {};
-    std::vector<uint16_t> contourEnds = {};  ///< Per contour, the index of its last point.
-    std::vector<WireGlyphPoint> points = {}; ///< Every contour's points, one contour after another.
+    std::string payload = {}; ///< The `vg` payload: printable ASCII.
     bool operator==(WireRegisteredGlyph const&) const = default;
 };
 

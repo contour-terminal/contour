@@ -19,7 +19,6 @@ set(vtbackend_HEADERS
     testing/Deflate.hpp
     testing/DetectingTerm.hpp
     testing/FakeStatusLineExtensions.hpp
-    testing/GlyfRecordBuilder.hpp
     testing/InMemoryGitFileSystem.hpp
     core/CellFlags.hpp
     grid/CellProxy.hpp
@@ -63,6 +62,7 @@ set(vtbackend_HEADERS
     vt/ProgramStatus.hpp
     vt/SemanticBlockQuery.hpp
     vt/UserVar.hpp
+    vt/VectorGlyph.hpp
     screen/ProgramStatusSet.hpp
     vt/JsonString.hpp
     input/vi/HintModeHandler.hpp
@@ -101,7 +101,6 @@ set(vtbackend_HEADERS
     screen/PrintedLinks.hpp
     Logging.hpp
     vt/GlyphGlossary.hpp
-    vt/GlyphOutline.hpp
     vt/GlyphProtocol.hpp
     vt/MacroDefinition.hpp
     vt/SoftFont.hpp
@@ -204,6 +203,7 @@ set(vtbackend_SOURCES
     vt/PresentationState.cpp
     vt/ProgramStatus.cpp
     vt/UserVar.cpp
+    vt/VectorGlyph.cpp
     screen/ProgramStatusSet.cpp
     vt/JsonString.cpp
     core/WorkingDirectory.cpp
@@ -232,7 +232,6 @@ set(vtbackend_SOURCES
     shell/LivePromptMarks.cpp
     screen/LocalTime.cpp
     vt/GlyphGlossary.cpp
-    vt/GlyphOutline.cpp
     vt/GlyphProtocol.cpp
     vt/MacroDefinition.cpp
     vt/SoftFont.cpp
@@ -378,6 +377,7 @@ if(LIBTERMINAL_TESTING)
         vt/PresentationState_test.cpp
         vt/ProgramStatus_test.cpp
         vt/UserVar_test.cpp
+        vt/VectorGlyph_test.cpp
         screen/ProgramStatusSet_test.cpp
         screen/Terminal_programStatus_test.cpp
         vt/JsonString_test.cpp
@@ -435,7 +435,6 @@ if(LIBTERMINAL_TESTING)
         vt/ClipboardSelection_test.cpp
         vt/KittyClipboard_test.cpp
         vt/GlyphGlossary_test.cpp
-        vt/GlyphOutline_test.cpp
         vt/GlyphProtocol_test.cpp
         vt/MacroDefinition_test.cpp
         vt/SoftFont_test.cpp

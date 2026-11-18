@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/vt/GlyphOutline.hpp>
 #include <vtbackend/vt/GlyphProtocol.hpp>
 
 #include <crispy/StrongHash.hpp>
@@ -16,14 +15,13 @@
 namespace vtbackend
 {
 
-/// One glyph an application registered: an outline and how it is placed in its cell.
+/// One glyph an application registered: what it draws and how it is placed in its cell.
 struct RegisteredGlyph
 {
-    /// Content hash of the layout and the outline; the atlas key. A registration that replaces another
-    /// with different content has a different id, so a tile rasterized for the old one is never served.
+    /// Content hash of the definition; the atlas key. A registration that replaces another with different
+    /// content has a different id, so a tile rasterized for the old one is never served.
     crispy::StrongHash id {};
-    GlyphLayout layout {};
-    GlyphOutline outline {};
+    GlyphDefinition definition {};
 };
 
 /// The glyphs of a glossary by slot (codepoint minus FirstGlyphRegistrationCodepoint); null = none.
@@ -77,11 +75,10 @@ struct GlyphChange
 class GlyphGlossary
 {
   public:
-    /// Registers @p outline at @p codepoint, replacing what was there.
+    /// Registers a glyph at @p codepoint, replacing what was there.
     /// @param codepoint A codepoint of the registration block.
-    /// @param layout How the glyph is sized and placed.
-    /// @param outline The glyph.
-    void registerGlyph(char32_t codepoint, GlyphLayout const& layout, GlyphOutline outline);
+    /// @param definition The glyph.
+    void registerGlyph(char32_t codepoint, GlyphDefinition definition);
 
     /// Clears the registration at @p codepoint, if there is one.
     /// @param codepoint A codepoint of the registration block.

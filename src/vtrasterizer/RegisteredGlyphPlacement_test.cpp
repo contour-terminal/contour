@@ -16,11 +16,11 @@ namespace
     return Catch::Approx(value).margin(0.001);
 }
 
-/// A cell 10 pixels wide and 20 high, its baseline 15 down.
-constexpr auto OneCell = GlyphSpanGeometry { .width = 10, .height = 20, .baseline = 15 };
+/// A cell 10 pixels wide and 20 high.
+constexpr auto OneCell = GlyphSpanGeometry { .width = 10, .height = 20 };
 
-/// An outline occupying x 100..600 and y -200..800.
-constexpr auto Bounds = GlyphOutlineBounds { .xMin = 100, .yMin = -200, .xMax = 600, .yMax = 800 };
+/// A square viewBox that does not start at the origin: x 100..124, y 200..224.
+constexpr auto Box = VectorViewBox { .x = 100, .y = 200, .width = 24, .height = 24 };
 
 /// A pixel of the span.
 struct Pixel
@@ -29,157 +29,95 @@ struct Pixel
     float y = 0;
 };
 
-/// @return Where @p transform puts the outline point (@p x, @p y).
+/// @return Where @p transform puts the viewBox point (@p x, @p y).
 [[nodiscard]] constexpr Pixel at(GlyphSpanTransform const& transform, float x, float y) noexcept
 {
-    return { .x = transform.tx + (x * transform.sx), .y = transform.ty - (y * transform.sy) };
+    return { .x = transform.tx + (x * transform.sx), .y = transform.ty + (y * transform.sy) };
 }
 
-/// A layout declaring the extent x 0..1000, y -250..750 (an em square with a descender).
-[[nodiscard]] constexpr GlyphLayout declared(GlyphSizeMode size) noexcept
+[[nodiscard]] constexpr GlyphLayout layoutOf(GlyphFit fit,
+                                             GlyphAlignment horizontal = GlyphAlignment::Center,
+                                             GlyphAlignment vertical = GlyphAlignment::Center) noexcept
 {
-    return { .advanceWidth = 1000, .lineHeight = 1000, .extentBottom = -250, .size = size };
+    return { .fit = fit, .horizontal = horizontal, .vertical = vertical };
 }
 
 } // namespace
 
-TEST_CASE("placeRegisteredGlyph: size modes on a declared extent", "[RegisteredGlyphPlacement]")
+TEST_CASE("placeRegisteredGlyph: fit", "[RegisteredGlyphPlacement]")
 {
-    // The extent is 1000 x 1000 and the cell 10 x 20, so the width fits at 0.01 and the height at 0.02.
-    struct Case
-    {
-        GlyphSizeMode size;
-        float sx;
-        float sy;
-    };
-    for (auto const& [size, sx, sy]: {
-             Case { .size = GlyphSizeMode::Contain, .sx = 0.01F, .sy = 0.01F },
-             Case { .size = GlyphSizeMode::Advance, .sx = 0.01F, .sy = 0.01F },
-             Case { .size = GlyphSizeMode::Height, .sx = 0.02F, .sy = 0.02F },
-             Case { .size = GlyphSizeMode::Cover, .sx = 0.02F, .sy = 0.02F },
-             Case { .size = GlyphSizeMode::Stretch, .sx = 0.01F, .sy = 0.02F },
-         })
-    {
-        auto const transform = placeRegisteredGlyph(declared(size), Bounds, OneCell);
-        REQUIRE(transform.has_value());
-        CHECK(transform->sx == approx(sx));
-        CHECK(transform->sy == approx(sy));
-    }
+    // The viewBox is 24 x 24 and the cell 10 x 20: the width fits at 10/24 and the height at 20/24.
+    auto const contain = placeRegisteredGlyph(layoutOf(GlyphFit::Contain), Box, OneCell).value();
+    CHECK(contain.sx == approx(10.0 / 24));
+    CHECK(contain.sy == approx(10.0 / 24));
+
+    auto const cover = placeRegisteredGlyph(layoutOf(GlyphFit::Cover), Box, OneCell).value();
+    CHECK(cover.sx == approx(20.0 / 24));
+    CHECK(cover.sy == approx(20.0 / 24));
+
+    auto const stretch = placeRegisteredGlyph(layoutOf(GlyphFit::Stretch), Box, OneCell).value();
+    CHECK(stretch.sx == approx(10.0 / 24));
+    CHECK(stretch.sy == approx(20.0 / 24));
 }
 
-TEST_CASE("placeRegisteredGlyph: a declared extent ignores the outline's bounds",
+TEST_CASE("placeRegisteredGlyph: stretched, the viewBox's corners are the span's",
           "[RegisteredGlyphPlacement]")
 {
-    // What keeps the glyphs of a set from shifting against each other.
-    auto const layout = declared(GlyphSizeMode::Contain);
-    auto const other = GlyphOutlineBounds { .xMin = 400, .yMin = 0, .xMax = 450, .yMax = 10 };
-    CHECK(placeRegisteredGlyph(layout, Bounds, OneCell) == placeRegisteredGlyph(layout, other, OneCell));
+    // Y points down in both, so the viewBox's top-left is the span's.
+    auto const transform = placeRegisteredGlyph(layoutOf(GlyphFit::Stretch), Box, OneCell).value();
+    CHECK(at(transform, 100, 200).x == approx(0));
+    CHECK(at(transform, 100, 200).y == approx(0));
+    CHECK(at(transform, 124, 224).x == approx(10));
+    CHECK(at(transform, 124, 224).y == approx(20));
 }
 
-TEST_CASE("placeRegisteredGlyph: alignment of a contained extent", "[RegisteredGlyphPlacement]")
+TEST_CASE("placeRegisteredGlyph: alignment of a contained viewBox", "[RegisteredGlyphPlacement]")
 {
-    // Contained, the extent is 10 x 10 pixels in a cell 10 x 20: no slack across, 10 pixels of it down.
-    auto layout = declared(GlyphSizeMode::Contain);
+    // Contained, the viewBox is 10 x 10 pixels in a cell 10 x 20: no slack across, 10 pixels of it down.
+    using enum GlyphAlignment;
+    auto const topOf = [](GlyphAlignment vertical) {
+        return at(placeRegisteredGlyph(layoutOf(GlyphFit::Contain, Center, vertical), Box, OneCell).value(),
+                  100,
+                  200)
+            .y;
+    };
+    CHECK(topOf(Start) == approx(0)); // the top, as SVG's yMin
+    CHECK(topOf(Center) == approx(5));
+    CHECK(topOf(End) == approx(10));
 
-    SECTION("centered by default")
-    {
-        auto const transform = placeRegisteredGlyph(layout, Bounds, OneCell).value();
-        CHECK(at(transform, 0, -250).y == approx(15)); // the extent's bottom
-        CHECK(at(transform, 0, 750).y == approx(5));   // its top
-        CHECK(at(transform, 0, 0).x == approx(0));
-        CHECK(at(transform, 1000, 0).x == approx(10));
-    }
-
-    SECTION("start is the bottom")
-    {
-        layout.vertical = GlyphVerticalAlignment::Start;
-        auto const transform = placeRegisteredGlyph(layout, Bounds, OneCell).value();
-        CHECK(at(transform, 0, -250).y == approx(20));
-        CHECK(at(transform, 0, 750).y == approx(10));
-    }
-
-    SECTION("end is the top")
-    {
-        layout.vertical = GlyphVerticalAlignment::End;
-        auto const transform = placeRegisteredGlyph(layout, Bounds, OneCell).value();
-        CHECK(at(transform, 0, 750).y == approx(0));
-        CHECK(at(transform, 0, -250).y == approx(10));
-    }
-
-    SECTION("baseline puts y = 0 on the text baseline")
-    {
-        layout.vertical = GlyphVerticalAlignment::Baseline;
-        auto const transform = placeRegisteredGlyph(layout, Bounds, OneCell).value();
-        CHECK(at(transform, 0, 0).y == approx(15));
-        CHECK(at(transform, 0, -250).y == approx(17.5)); // the descender hangs below it
-    }
+    // In a span two cells wide the slack is across: a 20 x 20 viewBox in 40 x 20.
+    auto const wide = GlyphSpanGeometry { .width = 40, .height = 20 };
+    auto const leftOf = [&](GlyphAlignment horizontal) {
+        return at(placeRegisteredGlyph(layoutOf(GlyphFit::Contain, horizontal, Center), Box, wide).value(),
+                  100,
+                  200)
+            .x;
+    };
+    CHECK(leftOf(Start) == approx(0));
+    CHECK(leftOf(Center) == approx(10));
+    CHECK(leftOf(End) == approx(20));
 }
 
-TEST_CASE("placeRegisteredGlyph: horizontal alignment", "[RegisteredGlyphPlacement]")
+TEST_CASE("placeRegisteredGlyph: alignment of a covering viewBox picks what is cut off",
+          "[RegisteredGlyphPlacement]")
 {
-    // Sized by height in a two-cell span: the extent is 20 pixels square in 20 x 20, so widen the span.
-    auto const wide = GlyphSpanGeometry { .width = 40, .height = 20, .baseline = 15 };
-    auto layout = declared(GlyphSizeMode::Height);
-
-    layout.horizontal = GlyphHorizontalAlignment::Start;
-    CHECK(at(placeRegisteredGlyph(layout, Bounds, wide).value(), 0, 0).x == approx(0));
-    layout.horizontal = GlyphHorizontalAlignment::Center;
-    CHECK(at(placeRegisteredGlyph(layout, Bounds, wide).value(), 0, 0).x == approx(10));
-    layout.horizontal = GlyphHorizontalAlignment::End;
-    CHECK(at(placeRegisteredGlyph(layout, Bounds, wide).value(), 1000, 0).x == approx(40));
+    // Covering, the viewBox is 20 x 20 pixels in a cell 10 wide: 10 pixels of it do not fit across.
+    using enum GlyphAlignment;
+    auto const leftOf = [](GlyphAlignment horizontal) {
+        return at(placeRegisteredGlyph(layoutOf(GlyphFit::Cover, horizontal, Center), Box, OneCell).value(),
+                  100,
+                  200)
+            .x;
+    };
+    CHECK(leftOf(Start) == approx(0)); // its left edge on the cell's, its right half cut off
+    CHECK(leftOf(Center) == approx(-5));
+    CHECK(leftOf(End) == approx(-10)); // its right edge on the cell's
 }
 
-TEST_CASE("placeRegisteredGlyph: stretch fills the span whatever the alignment", "[RegisteredGlyphPlacement]")
+TEST_CASE("placeRegisteredGlyph: nothing to draw into", "[RegisteredGlyphPlacement]")
 {
-    auto layout = declared(GlyphSizeMode::Stretch);
-    layout.vertical = GlyphVerticalAlignment::Baseline;
-    layout.horizontal = GlyphHorizontalAlignment::End;
-    auto const transform = placeRegisteredGlyph(layout, Bounds, OneCell).value();
-    CHECK(at(transform, 0, -250).x == approx(0));
-    CHECK(at(transform, 0, -250).y == approx(20));
-    CHECK(at(transform, 1000, 750).x == approx(10));
-    CHECK(at(transform, 1000, 750).y == approx(0));
-}
-
-TEST_CASE("placeRegisteredGlyph: padding shrinks the span", "[RegisteredGlyphPlacement]")
-{
-    auto layout = declared(GlyphSizeMode::Stretch);
-    layout.padding = { .top = 0.1F, .right = 0.2F, .bottom = 0.3F, .left = 0.4F };
-    auto const transform = placeRegisteredGlyph(layout, Bounds, OneCell).value();
-    CHECK(at(transform, 0, -250).x == approx(4));   // 0.4 of 10 from the left
-    CHECK(at(transform, 1000, 750).x == approx(8)); // 0.2 of 10 from the right
-    CHECK(at(transform, 0, 750).y == approx(2));    // 0.1 of 20 from the top
-    CHECK(at(transform, 0, -250).y == approx(14));  // 0.3 of 20 from the bottom
-}
-
-TEST_CASE("placeRegisteredGlyph: an undeclared extent is the outline's bounds", "[RegisteredGlyphPlacement]")
-{
-    // Bounds of 500 x 1000 units, stretched: the bounds' corners land on the span's.
-    auto const stretched =
-        placeRegisteredGlyph(GlyphLayout { .size = GlyphSizeMode::Stretch }, Bounds, OneCell).value();
-    CHECK(at(stretched, 100, -200).x == approx(0));
-    CHECK(at(stretched, 100, -200).y == approx(20));
-    CHECK(at(stretched, 600, 800).x == approx(10));
-    CHECK(at(stretched, 600, 800).y == approx(0));
-
-    // Contained, it is capped by the em: 10 pixels (the cell's smaller side) per 1000 units, so a small
-    // outline stays small instead of growing to fill the cell.
-    auto const dot = GlyphOutlineBounds { .xMin = 0, .yMin = 0, .xMax = 100, .yMax = 100 };
-    auto const contained = placeRegisteredGlyph(GlyphLayout {}, dot, OneCell).value();
-    CHECK(contained.sx == approx(0.01F));
-    CHECK(contained.sy == approx(0.01F));
-    // And centered: a 1 x 1 pixel dot in the middle of the cell.
-    CHECK(at(contained, 0, 0).x == approx(4.5));
-    CHECK(at(contained, 0, 0).y == approx(10.5));
-}
-
-TEST_CASE("placeRegisteredGlyph: nothing to draw", "[RegisteredGlyphPlacement]")
-{
-    auto const flat = GlyphOutlineBounds { .xMin = 0, .yMin = 5, .xMax = 100, .yMax = 5 };
-    CHECK_FALSE(placeRegisteredGlyph(GlyphLayout {}, flat, OneCell).has_value());
-    CHECK_FALSE(placeRegisteredGlyph(GlyphLayout {}, GlyphOutlineBounds {}, OneCell).has_value());
-    CHECK_FALSE(
-        placeRegisteredGlyph(declared(GlyphSizeMode::Contain), Bounds, GlyphSpanGeometry {}).has_value());
+    CHECK_FALSE(placeRegisteredGlyph(GlyphLayout {}, Box, GlyphSpanGeometry {}).has_value());
+    CHECK_FALSE(placeRegisteredGlyph(GlyphLayout {}, VectorViewBox {}, OneCell).has_value());
 }
 
 TEST_CASE("registeredGlyphSpan: two cells only where the next one is blank", "[RegisteredGlyphPlacement]")
@@ -190,7 +128,8 @@ TEST_CASE("registeredGlyphSpan: two cells only where the next one is blank", "[R
         cell.codepoints = std::move(text);
         return cell;
     };
-    auto const wide = RegisteredGlyph { .layout = GlyphLayout { .span = GlyphRenderSpan::TwoCells } };
+    auto wide = RegisteredGlyph {};
+    wide.definition.layout.span = GlyphRenderSpan::TwoCells;
     auto const narrow = RegisteredGlyph {};
     auto const cell = cellAt(4, U"\U00100000");
 
