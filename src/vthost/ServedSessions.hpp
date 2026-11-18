@@ -43,6 +43,28 @@ struct SessionSpawnRequest;
 /// tab's id.
 inline constexpr std::size_t MaxServedTransferBytes = std::size_t { 64 } * 1024;
 
+/// The host's own frame in a tab whose extension stopped after repeated faults, as bytes its terminal draws:
+/// a rounded box centred at @p size reading "{title} stopped after repeated errors", @p lastFault, and the
+/// palette row that restarts it (proto::RestartExtensionRowFormat), each line cut with "…" to fit. It resets
+/// what the extension may have left on (margins, rendition, cursor, mouse and focus reports) and erases the
+/// page from its home, without pushing a copy into the scrollback; it uses only sequences a served session
+/// executes (vtbackend::ServedTabFunctions), so it passes the same allowlist the extension's own output does.
+/// A page too small for the box shows the lines alone, as many as fit.
+/// @param size The tab's size.
+/// @param title The extension's title.
+/// @param lastFault Its last fault, neutralized; empty for none.
+/// @return The frame.
+[[nodiscard]] std::string stoppedFrame(vtbackend::PageSize size,
+                                       std::string_view title,
+                                       std::string_view lastFault);
+
+/// The host's frame in a tab whose stopped extension restarts, until it draws: one line, "{title}
+/// restarting…", in a box drawn as stoppedFrame() draws its own.
+/// @param size The tab's size.
+/// @param title The extension's title.
+/// @return The frame.
+[[nodiscard]] std::string restartingFrame(vtbackend::PageSize size, std::string_view title);
+
 /// Whether a host admits a served spawn.
 enum class ServedAdmission : uint8_t
 {
@@ -182,6 +204,8 @@ class ServedSessions final: public IServedTabs
                                                             std::string_view tab,
                                                             std::string_view bytes) override;
     void closeAll(std::string_view extension) override;
+    void drawStopped(std::string_view extension, std::string_view title, std::string_view lastFault) override;
+    void resumeDrawing(std::string_view extension) override;
 
   private:
     struct DeviceState;

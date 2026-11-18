@@ -191,7 +191,7 @@ struct DaemonWorldHarness
             core::defaultEnvironment(),
             vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
                                         .daemonWorld = [this](vthost::DaemonWorldEvents events,
-                                                              vthost::OwnerPost const& /*post*/,
+                                                              vthost::OwnerPost const& post,
                                                               vthost::DaemonWorldWiring wiring) {
                                             world = std::make_shared<vthost::DaemonWorldExtensions>(
                                                 runtimeConfig(),
@@ -203,6 +203,7 @@ struct DaemonWorldHarness
                                                                               .wallClock = wallClock,
                                                                               .localTime = localTime },
                                                 std::move(events),
+                                                post,
                                                 wiring);
                                             return std::shared_ptr<vthost::IDaemonWorldHosting> { world };
                                         } });

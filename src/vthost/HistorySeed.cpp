@@ -16,6 +16,7 @@
 
 #include <vthost/CommandBlockWire.hpp>
 #include <vthost/GridWire.hpp>
+#include <vthost/RepeatedText.hpp>
 
 namespace vthost
 {
@@ -24,12 +25,6 @@ namespace
 {
     /// The glyph the divider's rules are made of.
     constexpr std::string_view DividerRule = "─";
-
-    /// @return @p glyph written @p count times.
-    [[nodiscard]] std::string repeated(std::string_view glyph, size_t count)
-    {
-        return std::ranges::to<std::string>(std::views::repeat(glyph, count) | std::views::join);
-    }
 
     /// @return The number of cells @p text takes, for text whose every glyph is one cell wide: its code
     /// points.
@@ -175,7 +170,7 @@ std::string restoredDivider(RestoreDivider const& divider, vtbackend::ColumnCoun
     auto const leftover = available - width - 2;
     auto const left = leftover / 2;
     auto const right = leftover - left;
-    return std::format("{} {} {}", repeated(DividerRule, left), text, repeated(DividerRule, right));
+    return std::format("{} {} {}", repeatedText(DividerRule, left), text, repeatedText(DividerRule, right));
 }
 
 } // namespace vthost

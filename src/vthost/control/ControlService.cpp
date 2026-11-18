@@ -1812,7 +1812,8 @@ void ControlService::handle(vtcontrol::CallContext& /*context*/,
                                            .state = stateNameOf(status->state),
                                            .summary = std::move(status->summary),
                                            .detail = std::move(status->detail),
-                                           .problem = std::move(status->problem) });
+                                           .problem = std::move(status->problem),
+                                           .lastFault = std::move(status->lastFault) });
 }
 
 } // namespace vthost::control

@@ -1228,7 +1228,7 @@ namespace
                 config::daemonExtensionDeclarationOf(extension, store.value_or(std::filesystem::path {})));
         }
         return [&services, config = std::move(config)](vthost::DaemonWorldEvents events,
-                                                       vthost::OwnerPost const& /*post*/,
+                                                       vthost::OwnerPost const& post,
                                                        vthost::DaemonWorldWiring wiring) {
             return std::shared_ptr<vthost::IDaemonWorldHosting> {
                 std::make_shared<vthost::DaemonWorldExtensions>(
@@ -1241,6 +1241,7 @@ namespace
                                                   .wallClock = services.wallClock,
                                                   .localTime = services.localTime },
                     std::move(events),
+                    post,
                     wiring)
             };
         };

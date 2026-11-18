@@ -78,10 +78,12 @@ class DaemonWorldExtensions final:
     /// @param config What it is.
     /// @param services What it borrows.
     /// @param events What the host hears from it.
+    /// @param post Hands a job to the host's loop: the owner's thread, where the runtime is asked.
     /// @param wiring What it reaches of the host: the served tabs and the invoked actions; outlives it.
     DaemonWorldExtensions(vtextension::DaemonExtensionRuntimeConfig config,
                           DaemonWorldServices const& services,
                           DaemonWorldEvents events,
+                          OwnerPost post,
                           DaemonWorldWiring wiring);
 
     void startOnDemand(std::string_view name) override;
@@ -115,6 +117,12 @@ class DaemonWorldExtensions final:
 
     [[nodiscard]] std::string summaryOf(std::string_view name) const override;
 
+    /// Draws the host's frame into @p name's tabs, if it is still disabled. On the owner's thread.
+    void drawStoppedIfDisabled(std::string const& name);
+
+    /// @return The latest fault of @p name's run, neutralized; empty if none. On the owner's thread.
+    [[nodiscard]] std::string lastFaultOf(std::string_view name) const;
+
     /// Runs @p change on the runtime, and tells the host when the questions waiting changed with it.
     template <typename Change>
     void changingRequests(Change change);
@@ -133,6 +141,7 @@ class DaemonWorldExtensions final:
     [[nodiscard]] Shown* shownAs(std::string_view name, vtextension::DaemonRunGeneration generation);
 
     DaemonWorldEvents _events;
+    OwnerPost _post;
     DaemonWorldWiring _wiring;
     mutable std::mutex _mutex;
     std::map<std::string, Shown, std::less<>> _shown; ///< Guarded by _mutex.

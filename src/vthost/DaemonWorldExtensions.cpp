@@ -14,6 +14,8 @@
 #include <string_view>
 #include <utility>
 
+#include <vtextension/ExtensionConsent.hpp>
+#include <vtextension/ExtensionError.hpp>
 #include <vthost/DaemonExtensions.hpp>
 
 namespace vthost
@@ -171,11 +173,20 @@ namespace
         return request;
     }
 
-    /// One phase of vtextension's, as vthost names it.
+    /// Who draws an extension's served tabs, by where it stands.
+    enum class TabsDrawn : uint8_t
+    {
+        Unchanged = 0, ///< Whoever did before.
+        ByHost,        ///< The host's frame: it stopped after repeated faults (IServedTabs::drawStopped).
+        ByGuest,       ///< The extension again: it runs (IServedTabs::resumeDrawing).
+    };
+
+    /// One phase of vtextension's, as vthost names it, and who draws its tabs once it is there.
     struct PhaseRow
     {
         vtextension::DaemonExtensionPhase phase;
         DaemonExtensionState state;
+        TabsDrawn tabs = TabsDrawn::Unchanged;
     };
 
     inline constexpr auto PhaseRows = std::array {
@@ -186,9 +197,11 @@ namespace
         PhaseRow { .phase = vtextension::DaemonExtensionPhase::Denied,
                    .state = DaemonExtensionState::Denied },
         PhaseRow { .phase = vtextension::DaemonExtensionPhase::Running,
-                   .state = DaemonExtensionState::Running },
+                   .state = DaemonExtensionState::Running,
+                   .tabs = TabsDrawn::ByGuest },
         PhaseRow { .phase = vtextension::DaemonExtensionPhase::Disabled,
-                   .state = DaemonExtensionState::Disabled },
+                   .state = DaemonExtensionState::Disabled,
+                   .tabs = TabsDrawn::ByHost },
         PhaseRow { .phase = vtextension::DaemonExtensionPhase::Failed,
                    .state = DaemonExtensionState::Failed },
     };
@@ -198,6 +211,13 @@ namespace
     {
         auto const row = std::ranges::find(PhaseRows, phase, &PhaseRow::phase);
         return row != PhaseRows.end() ? row->state : DaemonExtensionState::Stopped;
+    }
+
+    /// @return Who draws the served tabs of an extension that reached @p phase.
+    [[nodiscard]] TabsDrawn tabsDrawnIn(vtextension::DaemonExtensionPhase phase) noexcept
+    {
+        auto const row = std::ranges::find(PhaseRows, phase, &PhaseRow::phase);
+        return row != PhaseRows.end() ? row->tabs : TabsDrawn::Unchanged;
     }
 
     /// What the status line shows of an extension, by where it stands.
@@ -270,8 +290,10 @@ std::unique_ptr<vtextension::IServedTabService> servedTabServiceOf(vtextension::
 DaemonWorldExtensions::DaemonWorldExtensions(vtextension::DaemonExtensionRuntimeConfig config,
                                              DaemonWorldServices const& services,
                                              DaemonWorldEvents events,
+                                             OwnerPost post,
                                              DaemonWorldWiring wiring):
     _events { std::move(events) },
+    _post { std::move(post) },
     _wiring { wiring },
     _runtime { compose(std::move(config), services, *this, wiring) }
 {
@@ -351,6 +373,7 @@ std::optional<DaemonExtensionStatus> DaemonWorldExtensions::status(std::string_v
         DaemonExtensionStatus { .state = listed->state, .summary = {}, .detail = {}, .problem = {} };
     if (status.state == DaemonExtensionState::Failed)
         status.problem = listed->problem;
+    status.lastFault = lastFaultOf(name);
     if (auto published = summary(name))
     {
         status.summary = std::move(published->shortText);
@@ -415,6 +438,27 @@ void DaemonWorldExtensions::stop() noexcept
     _runtime->stop();
 }
 
+std::string DaemonWorldExtensions::lastFaultOf(std::string_view name) const
+{
+    auto const status = _runtime->status(name);
+    if (!status || !status->lastFault)
+        return {};
+    return vtextension::neutralizedForDisplay(vtextension::errorText(*status->lastFault));
+}
+
+void DaemonWorldExtensions::drawStoppedIfDisabled(std::string const& name)
+{
+    // Restarted since the run was disabled: the extension draws again.
+    auto const status = _runtime->status(name);
+    if (!status || status->state != vtextension::DaemonRunnerState::Disabled)
+        return;
+    auto const entries = _runtime->entries();
+    auto const entry = std::ranges::find(entries, name, &vtextension::DaemonExtensionEntry::name);
+    if (entry == entries.end())
+        return;
+    _wiring.tabs.drawStopped(name, entry->title, lastFaultOf(name));
+}
+
 std::optional<DaemonExtensionSummary> DaemonWorldExtensions::summary(std::string_view name) const
 {
     auto const lock = std::scoped_lock { _mutex };
@@ -472,6 +516,15 @@ void DaemonWorldExtensions::phaseChanged(std::string_view extension,
         if (shown == nullptr)
             return;
         shown->phase = phase;
+    }
+    switch (tabsDrawnIn(phase))
+    {
+        case TabsDrawn::Unchanged: break;
+        // The runtime, which knows its title and fault, is asked on its owner's thread.
+        case TabsDrawn::ByHost:
+            _post([this, name = std::string(extension)] { drawStoppedIfDisabled(name); });
+            break;
+        case TabsDrawn::ByGuest: _wiring.tabs.resumeDrawing(extension); break;
     }
     // Every phase change repaints: what the status line and the palette show follows from it.
     if (_events.summaryChanged)

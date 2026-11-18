@@ -351,8 +351,11 @@ namespace
     struct ExtensionStateNote
     {
         std::string_view state;
-        std::string_view note; ///< A format of the extension's name and its problem; empty for none.
+        /// A format of the extension's name and, where `detail` names one, that field of the reply; empty for
+        /// no note.
+        std::string_view note;
         ExitStatus status;
+        std::string vtcontrol::ExtensionStatusReply::* detail = nullptr; ///< What the note says why with.
     };
 
     inline constexpr auto ExtensionStateNotes = std::array {
@@ -364,10 +367,38 @@ namespace
         ExtensionStateNote {
             .state = "denied", .note = "{} was denied its grant", .status = ExitStatus::Failed },
         ExtensionStateNote { .state = "disabled",
-                             .note = "{} faulted too often, and is disabled",
-                             .status = ExitStatus::Failed },
-        ExtensionStateNote { .state = "failed", .note = "{} failed: {}", .status = ExitStatus::Failed },
+                             .note = "{} faulted too often, and is disabled; its last fault: {}",
+                             .status = ExitStatus::Failed,
+                             .detail = &vtcontrol::ExtensionStatusReply::lastFault },
+        ExtensionStateNote { .state = "failed",
+                             .note = "{} failed: {}",
+                             .status = ExitStatus::Failed,
+                             .detail = &vtcontrol::ExtensionStatusReply::problem },
     };
+
+    /// The most bytes of a reason a status note shows: one line of a terminal, give or take.
+    constexpr auto MaxNoteDetailBytes = std::size_t { 200 };
+
+    /// @return @p text as one line of a note: up to its first line break, at most MaxNoteDetailBytes bytes,
+    ///         never cut inside a UTF-8 sequence, "…" where it was cut; "unknown" when empty. The daemon
+    ///         neutralized it already; this only keeps the note one line however the reply was made.
+    [[nodiscard]] std::string oneLineDetail(std::string_view text)
+    {
+        if (text.empty())
+            return "unknown";
+        auto const lineEnd = text.find_first_of("\r\n");
+        auto line = text.substr(0, lineEnd);
+        auto const cut = lineEnd != std::string_view::npos || line.size() > MaxNoteDetailBytes;
+        if (line.size() > MaxNoteDetailBytes)
+        {
+            auto end = MaxNoteDetailBytes;
+            // Back to the start of the sequence the bound fell into.
+            while (end > 0 && (static_cast<unsigned char>(line[end]) & 0b1100'0000U) == 0b1000'0000U)
+                --end;
+            line = line.substr(0, end);
+        }
+        return cut ? std::string(line) + "\u2026" : std::string(line);
+    }
 
     /// `extension status` succeeds only for an extension that runs; for any other it says why on @p err.
     int extensionStatusExitStatus(std::string_view replyJson, std::ostream& err)
@@ -385,7 +416,11 @@ namespace
             return exitCode(ExitStatus::Failed);
         }
         if (!row->note.empty())
-            err << std::vformat(row->note, std::make_format_args(reply->name, reply->problem)) << '\n';
+        {
+            auto const detail =
+                row->detail != nullptr ? oneLineDetail((*reply).*(row->detail)) : std::string {};
+            err << std::vformat(row->note, std::make_format_args(reply->name, detail)) << '\n';
+        }
         return exitCode(row->status);
     }
 

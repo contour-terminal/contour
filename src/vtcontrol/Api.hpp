@@ -720,7 +720,8 @@ struct ExtensionStatusReply
     std::string summary {}; ///< Its one-line summary, neutralized; empty before the first.
     std::string
         detail {}; ///< Its longer text, neutralized, `\n` between its lines; at most 16 KiB as published.
-    std::string problem {}; ///< Why it could not run, neutralized, while it is `failed`; empty otherwise.
+    std::string problem {};   ///< Why it could not run, neutralized, while it is `failed`; empty otherwise.
+    std::string lastFault {}; ///< Its latest fault, neutralized, one line; empty if its run never faulted.
 };
 
 /// `object.rename` request.

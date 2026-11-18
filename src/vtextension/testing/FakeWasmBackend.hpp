@@ -307,6 +307,10 @@ class FakeWasmBackend final: public wasm::IWasmBackend
     /// How every instance created from now on behaves.
     FakeGuest guest;
 
+    /// Runs before every instance is created; an error refuses it, as a module that fails to instantiate.
+    /// Set before the first instance: it is read on whichever thread instantiates.
+    std::function<std::expected<void, ExtensionError>()> onInstantiate;
+
     /// The instance created last; null before the first. Valid only while that instance lives.
     FakeWasmInstance* lastInstance = nullptr;
 
@@ -393,6 +397,9 @@ inline FakeWasmModule::FakeWasmModule(std::shared_ptr<wasm::IWasmRuntime> runtim
 inline std::expected<std::unique_ptr<wasm::IWasmInstance>, ExtensionError> FakeWasmModule::instantiate(
     wasm::IHostContext& context)
 {
+    if (_backend.onInstantiate)
+        if (auto refused = _backend.onInstantiate(); !refused)
+            return std::unexpected(refused.error());
     auto names = std::ranges::to<std::vector<std::string>>(
         _exports | std::views::filter([](wasm::ExportDescription const& entry) {
             return entry.kind == wasm::ExternKind::Function;

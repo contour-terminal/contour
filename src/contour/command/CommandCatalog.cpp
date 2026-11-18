@@ -393,7 +393,7 @@ namespace
                            .format = "{}: grant access…" },
         ExtensionRowText { .state = vthost::proto::WirePresenceState::Disabled,
                            .shown = ExtensionRowsShown::Single,
-                           .format = "{}: restart extension" },
+                           .format = vthost::proto::RestartExtensionRowFormat },
         ExtensionRowText { .state = vthost::proto::WirePresenceState::Unavailable,
                            .shown = ExtensionRowsShown::None,
                            .format = {} },

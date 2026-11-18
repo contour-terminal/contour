@@ -1,14 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/ServedSessions.hpp>
 
+#include <vtbackend/grid/GraphemeClusters.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <format>
 #include <optional>
+#include <ranges>
+#include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 
 #include <vthost/Logging.hpp>
+#include <vthost/RepeatedText.hpp>
 #include <vthost/SessionHost.hpp>
 
 namespace vthost
@@ -46,11 +53,115 @@ namespace
         auto const row = std::ranges::find(SwitchedReveals, outcome, &SwitchedRevealRow::outcome);
         return row != SwitchedReveals.end() ? row->reveal : SwitchedReveal::Nothing;
     }
+
+    /// What a host frame starts with: synchronized output on, scrolling margins, rendition, cursor and the
+    /// mouse and focus reports the extension may have turned on reset, and the page erased from its home --
+    /// ED 0, not ED 2, which would push a copy of the page into the scrollback with every frame.
+    constexpr auto HostFrameOpening = std::string_view {
+        "\x1b[?2026h\x1b[r\x1b[0m\x1b[?25l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[H\x1b[J"
+    };
+
+    /// What it ends with: synchronized output off, which presents it.
+    constexpr auto HostFrameClosing = std::string_view { "\x1b[?2026l" };
+
+    /// The lines of the host's frames, each a format of the extension's title. The stopped frame's middle
+    /// line is its fault, as it is; its last names the palette row
+    /// (vthost::proto::RestartExtensionRowFormat).
+    constexpr auto StoppedFrameTitle = std::string_view { "{} stopped after repeated errors" };
+    constexpr auto StoppedFrameRestart =
+        std::string_view { "Restart it from the command palette: \u201C{}\u201D." };
+    constexpr auto RestartingFrameTitle = std::string_view { "{} restarting\u2026" };
+
+    /// The columns a box adds around a line: a border and a space on each side.
+    constexpr auto HostBoxPadding = vtbackend::ColumnCount(4);
+
+    /// The lines a box adds: its top and bottom border.
+    constexpr auto HostBoxBorders = vtbackend::LineCount(2);
+
+    /// How a host frame measures what it writes: as a served session's screen does, whose grapheme
+    /// clustering (DEC mode 2027) is on and cannot be turned off from the allowlist -- an emoji with VS16
+    /// takes two columns.
+    constexpr auto HostFrameWidths = vtbackend::ClusterWidthPolicy::ClusterAware;
+
+    /// @return The cursor moved to @p line and @p column, both counted from zero.
+    [[nodiscard]] std::string cursorTo(int line, int column)
+    {
+        return std::format("\x1b[{};{}H", line + 1, column + 1);
+    }
+
+    /// @return The host's frame of @p lines on a page of @p size: a rounded box, centred, each line cut with
+    ///         "…" to fit; the lines alone from the top where no box fits.
+    [[nodiscard]] std::string hostFrame(vtbackend::PageSize size, std::span<std::string const> lines)
+    {
+        using vtbackend::ColumnCount;
+        using vtbackend::LineCount;
+
+        auto const textLines = LineCount::cast_from(lines.size());
+        auto frame = std::string(HostFrameOpening);
+
+        if (size.columns <= HostBoxPadding || size.lines < textLines + HostBoxBorders)
+        {
+            // No room for a box: the lines alone, from the top.
+            auto line = 0;
+            for (auto const& text: lines | std::views::take(unbox<std::size_t>(size.lines)))
+            {
+                frame += cursorTo(line++, 0);
+                frame += vtbackend::elideEnd(text, size.columns, HostFrameWidths);
+            }
+            frame += HostFrameClosing;
+            return frame;
+        }
+
+        auto widest = ColumnCount(0);
+        for (auto const& text: lines)
+            widest = std::max(widest, vtbackend::columnsOnTheGrid(text, HostFrameWidths));
+        auto const inner = std::min(widest, size.columns - HostBoxPadding);
+        auto line = unbox<int>(size.lines - textLines - HostBoxBorders) / 2;
+        auto const left = unbox<int>(size.columns - inner - HostBoxPadding) / 2;
+        auto const rule = repeatedText("\u2500", unbox<std::size_t>(inner) + 2);
+
+        frame += cursorTo(line++, left) + "\u256D" + rule + "\u256E";
+        for (auto const& text: lines)
+        {
+            auto const shown = vtbackend::elideEnd(text, inner, HostFrameWidths);
+            auto const pad = inner - vtbackend::columnsOnTheGrid(shown, HostFrameWidths);
+            frame += cursorTo(line++, left) + "\u2502 " + shown + std::string(unbox<std::size_t>(pad), ' ')
+                     + " \u2502";
+        }
+        frame += cursorTo(line, left) + "\u2570" + rule + "\u256F";
+        frame += HostFrameClosing;
+        return frame;
+    }
 } // namespace
+
+std::string stoppedFrame(vtbackend::PageSize size, std::string_view title, std::string_view lastFault)
+{
+    auto const row = std::vformat(proto::RestartExtensionRowFormat, std::make_format_args(title));
+    auto const lines = std::array {
+        std::vformat(StoppedFrameTitle, std::make_format_args(title)),
+        std::string(lastFault),
+        std::vformat(StoppedFrameRestart, std::make_format_args(row)),
+    };
+    return hostFrame(size, lines);
+}
+
+std::string restartingFrame(vtbackend::PageSize size, std::string_view title)
+{
+    auto const lines = std::array { std::vformat(RestartingFrameTitle, std::make_format_args(title)) };
+    return hostFrame(size, lines);
+}
 
 /// What one device's sinks record. Shared by the sinks, which may outlive the ServedSessions that made them.
 struct ServedSessions::DeviceState
 {
+    /// What the host draws into the tab instead of its extension.
+    enum class HostFrame : std::uint8_t
+    {
+        None = 0,   ///< Nothing: the extension draws it.
+        Stopped,    ///< The stopped frame: the extension stopped after repeated faults.
+        Restarting, ///< One line saying it restarts, until the restarted extension draws.
+    };
+
     /// Whether the input is dropping what does not fit: one episode is logged once.
     enum class InputOverflow : std::uint8_t
     {
@@ -66,7 +177,8 @@ struct ServedSessions::DeviceState
     }
 
     /// Appends @p chunk to the input, whole, if it fits; drops it whole otherwise. The first chunk into an
-    /// empty buffer tells the extension.
+    /// empty buffer tells the extension. While the host draws the tab, what is typed into its frame is
+    /// dropped: it was meant for no extension, and must not reach the one that restarts.
     /// @param chunk One write of the terminal's.
     void accept(std::string_view chunk)
     {
@@ -80,6 +192,8 @@ struct ServedSessions::DeviceState
         auto wasEmpty = false;
         {
             auto const lock = std::lock_guard { mutex };
+            if (frame != HostFrame::None)
+                return;
             if (input.size() + chunk.size() > MaxServedTransferBytes)
             {
                 if (std::exchange(overflow, InputOverflow::Dropping) == InputOverflow::None)
@@ -94,22 +208,50 @@ struct ServedSessions::DeviceState
             changed();
     }
 
-    /// Records the device's new size, and tells the extension.
-    void resized(vtbackend::PageSize cells)
+    /// Records the device's new size, draws the host's frame into @p device again at that size while the host
+    /// draws the tab, and tells the extension.
+    void resized(vtbackend::PageSize cells, vtpty::ChannelPty& device)
     {
         {
             auto const lock = std::lock_guard { mutex };
             size = cells;
+            drawFrameInto(device);
         }
         if (changed)
             changed();
+    }
+
+    /// Has the host draw the tab: @p shown, with @p lastFault; what was typed and not read yet is dropped.
+    /// Call holding `mutex`.
+    void showFrame(vtpty::ChannelPty& device, HostFrame shown, std::string_view lastFault)
+    {
+        frame = shown;
+        fault = std::string(lastFault);
+        input.clear();
+        overflow = InputOverflow::None;
+        drawFrameInto(device);
+    }
+
+    /// Feeds @p device the host's frame at the current size, if the host draws the tab. Call holding `mutex`:
+    /// a frame composed for one size is fed before a resize can compose one for the next.
+    void drawFrameInto(vtpty::ChannelPty& device) const
+    {
+        switch (frame)
+        {
+            case HostFrame::None: break;
+            case HostFrame::Stopped: device.feed(stoppedFrame(size, title, fault)); break;
+            case HostFrame::Restarting: device.feed(restartingFrame(size, title)); break;
+        }
     }
 
     mutable std::mutex mutex; ///< Guards everything below but `changed`.
     std::string input;
     vtbackend::PageSize size;
     InputOverflow overflow = InputOverflow::None;
-    std::function<void()> changed; ///< Fixed at construction; called holding no lock.
+    HostFrame frame = HostFrame::None; ///< What the host draws into the tab, if anything.
+    std::string title;                 ///< The extension's title, while the host draws the tab.
+    std::string fault;                 ///< Its last fault, while the host draws the stopped frame.
+    std::function<void()> changed;     ///< Fixed at construction; called holding no lock.
 };
 
 ServedSessions::ServedSessions(std::shared_ptr<vtcontrol::UuidSource> ids,
@@ -131,9 +273,12 @@ ServedSessions::Tracked ServedSessions::track(vtbackend::PageSize size, std::fun
     auto state = std::make_shared<DeviceState>(size, std::move(changed));
     device->setWriteSink(
         [state](std::string_view chunk, vtpty::InputKind /*kind*/) { state->accept(chunk); });
-    device->setResizeSink([state](vtbackend::PageSize cells, std::optional<vtpty::ImageSize> /*pixels*/) {
-        state->resized(cells);
-    });
+    // The device calls its own sink: it is alive for the call, and holding it here would keep it alive
+    // forever.
+    device->setResizeSink(
+        [state, pty = device.get()](vtbackend::PageSize cells, std::optional<vtpty::ImageSize> /*pixels*/) {
+            state->resized(cells, *pty);
+        });
     // The entries of devices nobody holds any more go as a new one comes.
     std::erase_if(_devices, [](Entry const& entry) { return entry.device.expired(); });
     _devices.push_back(Entry { .device = device, .state = state });
@@ -474,17 +619,23 @@ std::expected<void, ServedTabError> ServedSessions::write(std::string_view exten
                                                           std::string_view bytes)
 {
     auto device = std::shared_ptr<vtpty::ChannelPty> {};
+    auto state = std::shared_ptr<DeviceState> {};
     {
         auto const lock = std::lock_guard { _mutex };
         auto const* const found = ownedBy(extension, tab);
         if (found == nullptr)
             return std::unexpected(ServedTabError::NotOwned);
         device = found->device;
+        state = found->state;
     }
     if (bytes.size() > MaxServedTransferBytes)
         return std::unexpected(ServedTabError::Limit);
     if (device->isClosed())
         return std::unexpected(ServedTabError::Gone);
+    // The extension draws: whatever frame the host drew is its to cover, and no resize draws it again. Fed
+    // holding the lock, so that a resize's frame never lands after what the extension drew.
+    auto const lock = std::lock_guard { state->mutex };
+    state->frame = DeviceState::HostFrame::None;
     device->feed(bytes);
     return {};
 }
@@ -510,6 +661,35 @@ void ServedSessions::closeAll(std::string_view extension)
             for (auto const session: sessions)
                 _host.closeServed(session, SessionEnd::Requested);
         });
+}
+
+void ServedSessions::drawStopped(std::string_view extension,
+                                 std::string_view title,
+                                 std::string_view lastFault)
+{
+    auto const lock = std::lock_guard { _mutex };
+    for (auto const& tab: _tabs)
+    {
+        if (tab.extension != extension || tab.phase == TabPhase::Cancelled)
+            continue;
+        auto const stateLock = std::lock_guard { tab.state->mutex };
+        tab.state->title = std::string(title);
+        tab.state->showFrame(*tab.device, DeviceState::HostFrame::Stopped, lastFault);
+    }
+}
+
+void ServedSessions::resumeDrawing(std::string_view extension)
+{
+    auto const lock = std::lock_guard { _mutex };
+    for (auto const& tab: _tabs)
+    {
+        if (tab.extension != extension)
+            continue;
+        auto const stateLock = std::lock_guard { tab.state->mutex };
+        // Only a tab the host drew stopped says that it restarts: one its extension draws stays as it is.
+        if (tab.state->frame == DeviceState::HostFrame::Stopped)
+            tab.state->showFrame(*tab.device, DeviceState::HostFrame::Restarting, {});
+    }
 }
 
 } // namespace vthost

@@ -103,6 +103,7 @@ add_library(vthost STATIC
     GracefulClose.hpp
     HistorySeed.cpp
     HistorySeed.hpp
+    RepeatedText.hpp
     HostIdentity.cpp
     HostIdentity.hpp
     LoopDrain.hpp

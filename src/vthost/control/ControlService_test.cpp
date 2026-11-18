@@ -2472,6 +2472,22 @@ TEST_CASE("extension.status shows what an extension published of itself", "[vtho
         CHECK(status->problem == "daemon.extensions.stats: its module does not load");
     }
 
+    SECTION("one disabled after repeated faults names its last fault")
+    {
+        h.world->statuses.emplace(
+            "stats",
+            vthost::DaemonExtensionStatus { .state = vthost::DaemonExtensionState::Disabled,
+                                            .summary = {},
+                                            .detail = {},
+                                            .problem = {},
+                                            .lastFault = "extension trapped" });
+        auto const status = statusOf("stats");
+        REQUIRE(status.has_value());
+        CHECK(status->state == "disabled");
+        CHECK(status->lastFault == "extension trapped");
+        CHECK(status->problem.empty());
+    }
+
     SECTION("an unknown name is not found")
     {
         auto const status = statusOf("nope");

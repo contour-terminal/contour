@@ -1204,7 +1204,10 @@ TEST_CASE("extension status exits and notes by state", "[contour][cli][control][
         Row {
             .state = "pending", .exit = 1, .note = "orchestrator waits for its grant in a Contour window\n" },
         Row { .state = "denied", .exit = 1, .note = "orchestrator was denied its grant\n" },
-        Row { .state = "disabled", .exit = 1, .note = "orchestrator faulted too often, and is disabled\n" },
+        Row { .state = "disabled",
+              .exit = 1,
+              .note =
+                  "orchestrator faulted too often, and is disabled; its last fault: extension trapped\n" },
         Row { .state = "failed", .exit = 1, .note = "orchestrator failed: why\n" },
         Row { .state = "sideways",
               .exit = 1,
@@ -1215,7 +1218,7 @@ TEST_CASE("extension status exits and notes by state", "[contour][cli][control][
         INFO(row.state);
         auto run = Run {};
         auto channel = ScriptedChannel { std::format(
-            R"({{"name":"orchestrator","state":"{}","summary":"","detail":"","problem":"why"}})",
+            R"({{"name":"orchestrator","state":"{}","summary":"","detail":"","problem":"why","lastFault":"extension trapped"}})",
             row.state) };
         CHECK(contour::cli::runControlVerb(verbNamed("extension.status"),
                                            parseFlags({ "extension", "status", "orchestrator" }),
@@ -1223,6 +1226,38 @@ TEST_CASE("extension status exits and notes by state", "[contour][cli][control][
                                            run.io())
               == row.exit);
         CHECK(run.err.str() == row.note);
+    }
+}
+
+TEST_CASE("extension status keeps a disabled extension's last fault to one bounded line",
+          "[contour][cli][control][summary]")
+{
+    struct Row
+    {
+        std::string lastFault;
+        std::string shown;
+    };
+    for (auto const& row: std::array {
+             Row { .lastFault = "", .shown = "unknown" },
+             Row { .lastFault = "first\\nsecond", .shown = "first\u2026" },
+             // 199 bytes, then a two-byte sequence the bound falls into: cut before it, never inside.
+             Row { .lastFault = std::string(199, 'a') + "\u00e9tail",
+                   .shown = std::string(199, 'a') + "\u2026" },
+         })
+    {
+        INFO(row.lastFault);
+        auto run = Run {};
+        auto channel = ScriptedChannel { std::format(
+            R"({{"name":"orchestrator","state":"disabled","summary":"","detail":"","problem":"","lastFault":"{}"}})",
+            row.lastFault) };
+        CHECK(contour::cli::runControlVerb(verbNamed("extension.status"),
+                                           parseFlags({ "extension", "status", "orchestrator" }),
+                                           channel,
+                                           run.io())
+              == 1);
+        CHECK(run.err.str()
+              == std::format("orchestrator faulted too often, and is disabled; its last fault: {}\n",
+                             row.shown));
     }
 }
 

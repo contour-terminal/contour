@@ -40,8 +40,13 @@
 
 using namespace std::chrono_literals;
 using namespace vthost;
+using vthost::testing::expectedStoppedBox;
+using vthost::testing::FakeWindow;
 using vthost::testing::LiveHost;
 using vthost::testing::openServedTab;
+using vthost::testing::pageLines;
+using vthost::testing::ServedUuids;
+using vthost::testing::showsBox;
 using vtworkspace::SessionId;
 
 namespace
@@ -175,52 +180,6 @@ namespace
 /// The extension the tests serve tabs for, and its scheme.
 constexpr auto Orchestrator = std::string_view { "orchestrator" };
 constexpr auto AgentsScheme = std::string_view { "agents" };
-
-/// A thread-safe source of served-tab UUIDs, apart from the host's own: theirs start with 0x5e.
-class ServedUuids final: public vtcontrol::UuidSource
-{
-  public:
-    [[nodiscard]] vtcontrol::Uuid next() override
-    {
-        auto const lock = std::lock_guard { _mutex };
-        auto uuid = vtcontrol::Uuid {};
-        uuid.bytes[0] = 0x5e;
-        uuid.bytes[6] = 0x70;
-        uuid.bytes[8] = 0x80;
-        uuid.bytes[15] = ++_counter;
-        return uuid;
-    }
-
-  private:
-    std::mutex _mutex;
-    uint8_t _counter = 0;
-};
-
-/// A window on a connection of its own: it selects one workspace, follows the daemon, can be asked to switch,
-/// and records what it was asked and told.
-class FakeWindow final: public SessionStreamEvents
-{
-  public:
-    explicit FakeWindow(uint64_t index):
-        _id { ConnectionId { .endpoint = "native", .index = index, .peer = {} } }
-    {
-    }
-
-    [[nodiscard]] bool mirrorsScreens() const noexcept override { return false; }
-    [[nodiscard]] uint64_t selectedWorkspace() const noexcept override { return selected; }
-    [[nodiscard]] ConnectionId connectionId() const override { return _id; }
-    [[nodiscard]] bool followsDaemon() const noexcept override { return true; }
-    [[nodiscard]] bool canSwitch() const noexcept override { return true; }
-    void requestSwitch(proto::SwitchRequest const& request) override { switches.push_back(request); }
-    void revealPane(SessionId session) override { reveals.push_back(session); }
-
-    uint64_t selected = 0;                      ///< What it selects.
-    std::vector<proto::SwitchRequest> switches; ///< Every switch it was asked for.
-    std::vector<SessionId> reveals;             ///< Every pane it was told to reveal.
-
-  private:
-    ConnectionId _id;
-};
 
 /// A host whose shell sessions pump on devices that never end by themselves, with a fake daemon world that
 /// journals the hints it is raised, and windows that attach to it.
@@ -966,4 +925,199 @@ TEST_CASE("an extension cannot act through another one's origin", "[daemon][serv
     CHECK(failedWith(bench.tabs->reveal("other", *opened, origin), ServedTabError::Gone));
     bench.turn();
     CHECK(window.reveals.empty());
+}
+
+namespace
+{
+/// What the stopped frame of the orchestrator says, its fault a trap.
+constexpr auto StoppedTitle = std::string_view { "Agents stopped after repeated errors" };
+constexpr auto StoppedFault = std::string_view { "extension trapped" };
+constexpr auto StoppedRestart =
+    std::string_view { "Restart it from the command palette: \u201CAgents: restart extension\u201D." };
+
+/// @return The page size of @p session's terminal.
+[[nodiscard]] vtbackend::PageSize pageSizeOf(LiveHost& live, SessionId session)
+{
+    auto& terminal = live.host.hostedSession(session)->terminal();
+    auto const lock = std::lock_guard { terminal };
+    return terminal.pageSize();
+}
+} // namespace
+
+TEST_CASE("the stopped frame is a box centred on the page, naming the fault and the restart row",
+          "[daemon][served]")
+{
+    auto bench = ServedBench {};
+    auto window = FakeWindow { 1 };
+    auto const origin = bench.attach(window, bench.first);
+    auto const opened = bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, origin);
+    REQUIRE(opened.has_value());
+    auto const session = bench.sessionOf(*opened);
+    REQUIRE(bench.tabs->write(Orchestrator, *opened, "\x1b[2J\x1b[H\x1b[31mdashboard").has_value());
+    REQUIRE(bench.live.eventually([&] { return bench.live.pageText(session).contains("dashboard"); }));
+
+    bench.tabs->drawStopped(Orchestrator, "Agents", StoppedFault);
+    // 80 wide: the restart line is the widest, 65 columns; the box is 69 wide and 5 high, centred.
+    auto const inner = std::size_t { 65 };
+    auto const box = expectedStoppedBox(pageSizeOf(bench.live, session),
+                                        { { StoppedTitle, StoppedTitle.size() },
+                                          { StoppedFault, StoppedFault.size() },
+                                          { StoppedRestart, inner } },
+                                        inner);
+    auto const drawn = bench.live.eventually([&] { return showsBox(bench.live.pageText(session), box); });
+    INFO(bench.live.pageText(session));
+    REQUIRE(drawn);
+    auto const lines = pageLines(bench.live.pageText(session));
+    // Nothing else is left of what the extension drew, and the cursor is hidden: every sequence of the frame
+    // passed the served session's allowlist.
+    CHECK(std::ranges::all_of(lines | std::views::take(box.top),
+                              [](std::string const& line) { return line.empty(); }));
+    CHECK(std::ranges::all_of(lines | std::views::drop(box.top + box.lines.size()),
+                              [](std::string const& line) { return line.empty(); }));
+    auto& terminal = bench.live.host.hostedSession(session)->terminal();
+    auto const lock = std::lock_guard { terminal };
+    CHECK_FALSE(terminal.isModeEnabled(vtbackend::DECMode::VisibleCursor));
+}
+
+TEST_CASE("the host's frame follows a resize until the extension draws again", "[daemon][served]")
+{
+    auto bench = ServedBench {};
+    auto window = FakeWindow { 1 };
+    auto const origin = bench.attach(window, bench.first);
+    auto const opened = bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, origin);
+    REQUIRE(opened.has_value());
+    auto const session = bench.sessionOf(*opened);
+    bench.tabs->drawStopped(Orchestrator, "Agents", StoppedFault);
+    REQUIRE(bench.live.eventually([&] { return bench.live.pageText(session).contains(StoppedTitle); }));
+
+    // 50 wide: the box fills the width, 46 columns inside; the restart line is cut with an ellipsis.
+    std::ignore = bench.live.host.applyClientSize(
+        &window, vtpty::PageSize { vtbackend::LineCount(20), vtbackend::ColumnCount(50) }, std::nullopt);
+    REQUIRE(bench.live.eventually(
+        [&] { return pageSizeOf(bench.live, session).columns == vtbackend::ColumnCount(50); }));
+    auto const inner = std::size_t { 46 };
+    auto const cut = std::string_view { "Restart it from the command palette: \u201CAgents:\u2026" };
+    auto const box = expectedStoppedBox(
+        pageSizeOf(bench.live, session),
+        { { StoppedTitle, StoppedTitle.size() }, { StoppedFault, StoppedFault.size() }, { cut, inner } },
+        inner);
+    auto const redrawn = bench.live.eventually([&] { return showsBox(bench.live.pageText(session), box); });
+    INFO(bench.live.pageText(session));
+    CHECK(redrawn);
+
+    // Restarting: one line says so, drawn again at every new size, until the extension draws.
+    bench.tabs->resumeDrawing(Orchestrator);
+    auto const restarting = std::string_view { "Agents restarting\u2026" };
+    auto const restartingBox = [&] {
+        return expectedStoppedBox(pageSizeOf(bench.live, session), { { restarting, 18 } }, 18);
+    };
+    REQUIRE(bench.live.eventually([&] { return showsBox(bench.live.pageText(session), restartingBox()); }));
+    CHECK_FALSE(bench.live.pageText(session).contains(StoppedTitle));
+    std::ignore = bench.live.host.applyClientSize(
+        &window, vtpty::PageSize { vtbackend::LineCount(20), vtbackend::ColumnCount(56) }, std::nullopt);
+    REQUIRE(bench.live.eventually(
+        [&] { return pageSizeOf(bench.live, session).columns == vtbackend::ColumnCount(56); }));
+    CHECK(bench.live.eventually([&] { return showsBox(bench.live.pageText(session), restartingBox()); }));
+
+    // The extension draws, and a resize leaves what it drew.
+    REQUIRE(bench.tabs->write(Orchestrator, *opened, "\x1b[2J\x1b[Hdashboard").has_value());
+    REQUIRE(bench.live.eventually([&] { return bench.live.pageText(session).contains("dashboard"); }));
+    std::ignore = bench.live.host.applyClientSize(
+        &window, vtpty::PageSize { vtbackend::LineCount(22), vtbackend::ColumnCount(60) }, std::nullopt);
+    REQUIRE(bench.live.eventually([&] {
+        auto const listed = bench.tabs->list(Orchestrator);
+        return listed.size() == 1 && listed.front().cols == 60;
+    }));
+    // A mark written after the resize: what the resize would have drawn reached the terminal before it.
+    REQUIRE(bench.tabs->write(Orchestrator, *opened, "\x1b[22;1Hend").has_value());
+    REQUIRE(bench.live.eventually([&] { return bench.live.pageText(session).contains("end"); }));
+    CHECK(bench.live.pageText(session).contains("dashboard"));
+    CHECK_FALSE(bench.live.pageText(session).contains(StoppedTitle));
+    CHECK_FALSE(bench.live.pageText(session).contains(restarting));
+}
+
+TEST_CASE("the stopped frame measures an emoji title as the screen lays it out", "[daemon][served]")
+{
+    auto bench = ServedBench {};
+    auto window = FakeWindow { 1 };
+    auto const origin = bench.attach(window, bench.first);
+    auto const opened = bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, origin);
+    REQUIRE(opened.has_value());
+    auto const session = bench.sessionOf(*opened);
+    // 50 wide: the box takes the whole width, so a column measured short would wrap its right border.
+    std::ignore = bench.live.host.applyClientSize(
+        &window, vtpty::PageSize { vtbackend::LineCount(20), vtbackend::ColumnCount(50) }, std::nullopt);
+    REQUIRE(bench.live.eventually(
+        [&] { return pageSizeOf(bench.live, session).columns == vtbackend::ColumnCount(50); }));
+
+    // U+2764 U+FE0F: one cluster, two columns where its first codepoint alone takes one.
+    bench.tabs->drawStopped(Orchestrator, "Agents \u2764\uFE0F", StoppedFault);
+    auto const title = std::string_view { "Agents \u2764\uFE0F stopped after repeated errors" };
+    auto const cut = std::string_view { "Restart it from the command palette: \u201CAgents \u2026" };
+    auto const box = expectedStoppedBox(pageSizeOf(bench.live, session),
+                                        { { title, 39 }, { StoppedFault, StoppedFault.size() }, { cut, 46 } },
+                                        46);
+    auto const drawn = bench.live.eventually([&] { return showsBox(bench.live.pageText(session), box); });
+    INFO(bench.live.pageText(session));
+    CHECK(drawn);
+    // Nothing spilled onto the line below the box.
+    auto const lines = pageLines(bench.live.pageText(session));
+    REQUIRE(lines.size() > box.top + box.lines.size());
+    CHECK(lines[box.top + box.lines.size()].empty());
+}
+
+TEST_CASE("the host's frames leave the scrollback as it was", "[daemon][served]")
+{
+    auto bench = ServedBench {};
+    auto window = FakeWindow { 1 };
+    auto const origin = bench.attach(window, bench.first);
+    auto const opened = bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, origin);
+    REQUIRE(opened.has_value());
+    auto const session = bench.sessionOf(*opened);
+    auto const historyOf = [&] {
+        auto& terminal = bench.live.host.hostedSession(session)->terminal();
+        auto const lock = std::lock_guard { terminal };
+        return terminal.primaryScreen().historyLineCount();
+    };
+    bench.tabs->drawStopped(Orchestrator, "Agents", StoppedFault);
+    REQUIRE(bench.live.eventually([&] { return bench.live.pageText(session).contains(StoppedTitle); }));
+    auto const history = historyOf();
+
+    // Each wider page draws the frame again -- and an erase of the whole page would push a copy of it into
+    // the scrollback every time. Widening alone rewraps nothing.
+    auto const lines = pageSizeOf(bench.live, session).lines;
+    for (auto const columns: { 90, 100, 110 })
+    {
+        std::ignore = bench.live.host.applyClientSize(
+            &window, vtpty::PageSize { lines, vtbackend::ColumnCount(columns) }, std::nullopt);
+        REQUIRE(bench.live.eventually([&] {
+            auto const page = pageLines(bench.live.pageText(session));
+            return pageSizeOf(bench.live, session).columns == vtbackend::ColumnCount(columns)
+                   && std::ranges::any_of(page, [&](std::string const& line) {
+                          // Centred anew: its left border moved with the width.
+                          return line.contains(StoppedTitle)
+                                 && line.starts_with(
+                                     std::string(static_cast<std::size_t>((columns - 69) / 2), ' ')
+                                     + "\u2502");
+                      });
+        }));
+    }
+    bench.tabs->resumeDrawing(Orchestrator);
+    REQUIRE(bench.live.eventually([&] { return bench.live.pageText(session).contains("restarting"); }));
+    CHECK(historyOf() == history);
+}
+
+TEST_CASE("a page too small for the stopped box shows its lines alone, cut", "[daemon][served]")
+{
+    auto const frame = stoppedFrame(
+        vtbackend::PageSize { vtbackend::LineCount(2), vtbackend::ColumnCount(8) }, "Agents", "trap");
+    CHECK_FALSE(frame.contains("\u256D"));
+    CHECK(frame.contains("\x1b[1;1HAgents \u2026"));
+    CHECK(frame.contains("\x1b[2;1Htrap"));
+    // Two lines fit: the third is not drawn.
+    CHECK_FALSE(frame.contains("Restart"));
+    CHECK_FALSE(frame.contains("\x1b[3;1H"));
+    // Drawn in one synchronized update, from a cleared screen.
+    CHECK(frame.starts_with("\x1b[?2026h"));
+    CHECK(frame.ends_with("\x1b[?2026l"));
 }

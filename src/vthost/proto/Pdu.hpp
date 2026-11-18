@@ -31,6 +31,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -1506,6 +1507,10 @@ enum class WirePresenceState : uint8_t
     Disabled,      ///< It faulted too often and was disabled; an invocation restarts it.
     Unavailable,   ///< Denied, or failed to load: nothing an invocation could do. Also any unknown byte.
 };
+
+/// The palette row that restarts a disabled daemon extension (WirePresenceState::Disabled), as a format of
+/// its title. One wording for the row and for the host's frame in its served tabs, which names the row.
+inline constexpr auto RestartExtensionRowFormat = std::string_view { "{}: restart extension" };
 
 /// One declared `action` line of a daemon extension: a palette row.
 struct WireActionRow

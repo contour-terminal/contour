@@ -176,9 +176,10 @@ struct DaemonExtensionListing
 struct DaemonExtensionStatus
 {
     DaemonExtensionState state = DaemonExtensionState::Stopped; ///< Where it stands.
-    std::string summary; ///< The one-line summary it last published, neutralized; empty for none.
-    std::string detail;  ///< The longer text it last published, neutralized, `\n` between its lines.
-    std::string problem; ///< Why it could not run, neutralized, while it is Failed; empty otherwise.
+    std::string summary;      ///< The one-line summary it last published, neutralized; empty for none.
+    std::string detail;       ///< The longer text it last published, neutralized, `\n` between its lines.
+    std::string problem;      ///< Why it could not run, neutralized, while it is Failed; empty otherwise.
+    std::string lastFault {}; ///< Its run's latest fault, neutralized; empty if it never faulted.
 
     bool operator==(DaemonExtensionStatus const&) const = default;
 };
@@ -335,6 +336,21 @@ class IServedTabs
     /// Closes every tab of the extension, as its grant is revoked.
     /// @param extension What the daemon's configuration calls it.
     virtual void closeAll(std::string_view extension) = 0;
+
+    /// Draws the host's own frame into every tab of the extension, once it stopped after repeated faults: a
+    /// rounded box, centred, that names it, its last fault, and the palette row that restarts it. Each tab
+    /// is drawn again at its new size on every resize, until resumeDrawing().
+    /// @param extension What the daemon's configuration calls it.
+    /// @param title Its manifest's `title`, else its name.
+    /// @param lastFault Its last fault, neutralized; empty for none.
+    virtual void drawStopped(std::string_view extension,
+                             std::string_view title,
+                             std::string_view lastFault) = 0;
+
+    /// Hands the extension's tabs back to it as it runs again: a resize no longer draws the host's frame, and
+    /// what the extension draws covers it.
+    /// @param extension What the daemon's configuration calls it.
+    virtual void resumeDrawing(std::string_view extension) = 0;
 };
 
 /// What the daemon world reaches of its host, handed to the factory complete: the cyclic wiring of host and

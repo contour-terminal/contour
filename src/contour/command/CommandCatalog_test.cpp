@@ -789,3 +789,17 @@ TEST_CASE("a bound extension action collapses onto the extension's own row, what
         CHECK(open->placement == PalettePlacement::OnItsOwn);
     }
 }
+
+TEST_CASE("a disabled extension's one palette row restarts it", "[contour][palette][command][presence]")
+{
+    auto rows = FixedExtensionRows {};
+    rows.rows = extensionRowsOf(orchestratorIn(vthost::proto::WirePresenceState::Disabled));
+    auto const commands = ExtensionCommandSource { rows }.commands();
+    // The declared rows give way to the one the stopped frame names.
+    CHECK(titlesOf(commands) == std::vector<std::string> { "Agents: restart extension" });
+    REQUIRE(commands.size() == 1);
+    // It names no action: the daemon restarts a disabled extension, whatever it declares.
+    CHECK(std::get<actions::ExtensionAction>(commands.front().action)
+          == actions::ExtensionAction { .extension = "orchestrator", .id = "" });
+    CHECK(commands.front().category == CommandCategory::Daemons);
+}
