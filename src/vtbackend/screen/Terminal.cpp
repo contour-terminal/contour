@@ -6622,6 +6622,32 @@ std::string foldC1ControlsToEightBit(std::string_view sevenBit)
     return out;
 }
 
+void Terminal::processGlyphProtocol(std::string_view body)
+{
+    /// Asks the listener what the fonts in use draw.
+    class ListenerCoverage final: public SystemGlyphCoverage
+    {
+      public:
+        explicit ListenerCoverage(Events& listener) noexcept: _listener { listener } {}
+
+        [[nodiscard]] GlyphSources::System systemCoverage(char32_t codepoint) const override
+        {
+            return _listener.systemGlyphCoverage(codepoint);
+        }
+
+      private:
+        Events& _listener;
+    };
+
+    auto const generation = _glyphGlossary.generation();
+    auto const answer = executeGlyphProtocol(_glyphGlossary, ListenerCoverage { _eventListener }, body);
+    if (!answer.empty())
+        reply(answer);
+    // A cell already on screen may show the glyph that was just registered, replaced or cleared.
+    if (_glyphGlossary.generation() != generation)
+        markScreenDirty();
+}
+
 void Terminal::reply(string_view text)
 {
     // Under S8C1T the terminal transmits its C1 control introducers as single 8-bit bytes (CSI -> 0x9B,
@@ -8479,6 +8505,9 @@ void Terminal::hardReset()
     // ReallyReset clears its UDKs and Windows Terminal's HardReset its soft font -- on RIS alone.
     clearUDKs();
     _softFonts.clear();
+    // The Glyph Protocol lets a reset clear the glossary; a program that died mid-run then leaves no glyph
+    // behind for the next one to trip over.
+    _glyphGlossary.clear();
 
     // A pointer shape is application state like any other, so RIS withdraws it: a program that dies
     // holding a hand cursor must not leave the user with one. The stack keeps its bottom entry -- the

@@ -195,6 +195,7 @@ RenderBufferBuilder::RenderBufferBuilder(Terminal const& terminal,
     _rapidBlinkOpacity { terminal.rapidBlinkState() }
 {
     output.frameID = terminal.lastFrameID();
+    output.registeredGlyphs = terminal.glyphGlossary().snapshot();
 
     if (_cursorPosition)
         output.cursor = renderCursor();
@@ -643,8 +644,14 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
     auto const isMarked =
         takesTheMainPagesMarks()
         && ((_includeSelection && _terminal->isSelected(gridLine)) || _terminal->isHighlighted(gridLine));
+    // A registered glyph (Glyph Protocol) is drawn per cell, in place of the cell's text, so a line holding
+    // one of the block's codepoints takes the per-cell path -- while a glyph is registered at all, which is
+    // what keeps a session that never used the protocol from scanning its text.
+    auto const showsRegisteredGlyph =
+        _output->registeredGlyphs && std::ranges::any_of(textOverride, isGlyphRegistrationCodepoint);
     bool const canRenderViaSimpleLine = !isMarked && !gridLineContainsCursor(lineOffset)
-                                        && linkRole == LinkDecorationRole::None && _rowLinkRoles.empty();
+                                        && linkRole == LinkDecorationRole::None && _rowLinkRoles.empty()
+                                        && !showsRegisteredGlyph;
 
     if (canRenderViaSimpleLine)
     {

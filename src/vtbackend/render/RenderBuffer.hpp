@@ -14,6 +14,7 @@
 #include <vtbackend/core/TextScale.hpp>
 #include <vtbackend/grid/Grid.hpp>
 #include <vtbackend/grid/Line.hpp>
+#include <vtbackend/vt/GlyphGlossary.hpp>
 #include <vtbackend/vt/SoftFont.hpp>
 
 #include <core/Flags.hpp>
@@ -308,6 +309,12 @@ struct RenderBuffer
     /// uses: RenderCell has no room to spare, and a frame of plain text leaves this empty.
     std::vector<RenderSoftGlyph> softGlyphs {};
 
+    /// The glyphs the application registered through the Glyph Protocol, as they stood when this frame was
+    /// built; null when there are none. A cell whose text is one codepoint of the registration block draws
+    /// the glyph registered there in place of that text (@see registeredGlyphOf). The frame shares the
+    /// glyphs, so one that is replaced or cleared lives for as long as this frame is on display.
+    std::shared_ptr<RegisteredGlyphs const> registeredGlyphs {};
+
     /// The indicator status line's bar, edge to edge. Absent for a host-writable status line: that one is
     /// the application's, gets no wider than the main page, and leaves the strip beside it to the default
     /// background.
@@ -357,6 +364,7 @@ struct RenderBuffer
         lines.clear();
         gutter.clear();
         softGlyphs.clear();
+        registeredGlyphs.reset();
         statusBar.reset();
         annotations.clear();
         chipBands.clear();

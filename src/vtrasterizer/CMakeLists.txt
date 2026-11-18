@@ -12,8 +12,11 @@ set(_header_files
     GridMetrics.hpp
     GutterCells.hpp
     ImageRenderer.hpp
+    OutlineRasterizer.hpp
     Pixmap.hpp
     RailGeometry.hpp
+    RegisteredGlyphPlacement.hpp
+    RegisteredGlyphRenderer.hpp
     RenderTarget.hpp
     ReGISFontRasterizer.hpp
     Renderer.hpp
@@ -32,7 +35,9 @@ set(_source_files
     CursorRenderer.cpp
     DecorationRenderer.cpp
     ImageRenderer.cpp
+    OutlineRasterizer.cpp
     Pixmap.cpp
+    RegisteredGlyphRenderer.cpp
     RenderTarget.cpp
     ReGISFontRasterizer.cpp
     Renderer.cpp
@@ -56,7 +61,10 @@ set(_test_files
     GridMetrics_test.cpp
     GutterCells_test.cpp
     ImageRenderer_test.cpp
+    OutlineRasterizer_test.cpp
     RailGeometry_test.cpp
+    RegisteredGlyphPlacement_test.cpp
+    RegisteredGlyphRenderer_test.cpp
     ReGISFontRasterizer_test.cpp
     TextRenderer_test.cpp
     UnderlineGeometry_test.cpp

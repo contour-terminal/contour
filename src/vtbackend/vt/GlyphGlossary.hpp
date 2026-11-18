@@ -1,0 +1,120 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <vtbackend/vt/GlyphOutline.hpp>
+#include <vtbackend/vt/GlyphProtocol.hpp>
+
+#include <crispy/StrongHash.hpp>
+
+#include <array>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <string_view>
+
+namespace vtbackend
+{
+
+/// One glyph an application registered: an outline and how it is placed in its cell.
+struct RegisteredGlyph
+{
+    /// Content hash of the layout and the outline; the atlas key. A registration that replaces another
+    /// with different content has a different id, so a tile rasterized for the old one is never served.
+    crispy::StrongHash id {};
+    GlyphLayout layout {};
+    GlyphOutline outline {};
+};
+
+/// The glyphs of a glossary by slot (codepoint minus FirstGlyphRegistrationCodepoint); null = none.
+using RegisteredGlyphs = std::array<std::shared_ptr<RegisteredGlyph const>, GlyphRegistrationSlots>;
+
+/// @param glyphs A frame's registered glyphs; null when the session has none.
+/// @param codepoints The text of one cell.
+/// @return The glyph that cell draws in place of its text, or null.
+[[nodiscard]] inline RegisteredGlyph const* registeredGlyphOf(RegisteredGlyphs const* glyphs,
+                                                              std::u32string_view codepoints) noexcept
+{
+    // A registered glyph is a single codepoint and never joins with its neighbours.
+    if (glyphs == nullptr || codepoints.size() != 1 || !isGlyphRegistrationCodepoint(codepoints.front()))
+        return nullptr;
+    return (*glyphs)[codepoints.front() - FirstGlyphRegistrationCodepoint].get();
+}
+
+/// Answers whether the fonts in use draw a codepoint: what a `q` reply reports as `system`.
+class SystemGlyphCoverage
+{
+  public:
+    virtual ~SystemGlyphCoverage() = default;
+
+    /// @param codepoint A Unicode scalar value.
+    /// @return Whether some font in the fallback chain has a glyph for @p codepoint.
+    [[nodiscard]] virtual GlyphSources::System systemCoverage(char32_t codepoint) const = 0;
+};
+
+/// A SystemGlyphCoverage that knows of no font: every codepoint is absent.
+class NoSystemGlyphCoverage final: public SystemGlyphCoverage
+{
+  public:
+    [[nodiscard]] GlyphSources::System systemCoverage(char32_t /*codepoint*/) const override
+    {
+        return GlyphSources::System::Absent;
+    }
+};
+
+/// The glyphs one terminal session has registered through the Glyph Protocol, one slot per codepoint of
+/// the registration block.
+///
+/// Glyphs are immutable once registered: a registration makes a fresh RegisteredGlyph, so pointers held
+/// elsewhere (render buffers) stay valid and unchanged.
+class GlyphGlossary
+{
+  public:
+    /// Registers @p outline at @p codepoint, replacing what was there.
+    /// @param codepoint A codepoint of the registration block.
+    /// @param layout How the glyph is sized and placed.
+    /// @param outline The glyph.
+    void registerGlyph(char32_t codepoint, GlyphLayout const& layout, GlyphOutline outline);
+
+    /// Clears the registration at @p codepoint, if there is one.
+    /// @param codepoint A codepoint of the registration block.
+    void clear(char32_t codepoint) noexcept;
+
+    /// Clears every registration (the `c` verb without a codepoint, and RIS).
+    void clear() noexcept;
+
+    /// @return Whether no glyph is registered.
+    [[nodiscard]] bool empty() const noexcept { return _count == 0; }
+
+    /// @param codepoint Any codepoint.
+    /// @return The glyph registered at @p codepoint, or null.
+    [[nodiscard]] std::shared_ptr<RegisteredGlyph const> find(char32_t codepoint) const noexcept;
+
+    /// @return A counter that increases on every registration and every clear.
+    [[nodiscard]] uint64_t generation() const noexcept { return _generation; }
+
+    /// @return The registered glyphs as a frame holds them: unchanged by later registrations. Null when
+    ///         nothing is registered, so a frame of a session that never used the protocol pays nothing.
+    [[nodiscard]] std::shared_ptr<RegisteredGlyphs const> snapshot() const;
+
+  private:
+    void put(char32_t codepoint, std::shared_ptr<RegisteredGlyph const> glyph) noexcept;
+
+    RegisteredGlyphs _glyphs {};
+    size_t _count = 0;
+    uint64_t _generation = 0;
+    /// What snapshot() last returned, dropped by every change: a run of registrations between two frames
+    /// costs one copy, not one each.
+    mutable std::shared_ptr<RegisteredGlyphs const> _snapshot;
+};
+
+/// Carries out one Glyph Protocol message against a session's glossary.
+/// @param glossary The session's glossary.
+/// @param coverage What the fonts in use draw, for `q`.
+/// @param body The APC body, starting with `25a1;` (@see isGlyphProtocol).
+/// @return The reply to send to the application, a complete APC sequence; empty when the message asks for
+///         none, or cannot be answered.
+[[nodiscard]] std::string executeGlyphProtocol(GlyphGlossary& glossary,
+                                               SystemGlyphCoverage const& coverage,
+                                               std::string_view body);
+
+} // namespace vtbackend

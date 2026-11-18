@@ -19,6 +19,7 @@ set(vtbackend_HEADERS
     testing/Deflate.hpp
     testing/DetectingTerm.hpp
     testing/FakeStatusLineExtensions.hpp
+    testing/GlyfRecordBuilder.hpp
     testing/InMemoryGitFileSystem.hpp
     core/CellFlags.hpp
     grid/CellProxy.hpp
@@ -99,6 +100,9 @@ set(vtbackend_HEADERS
     screen/LocalTime.hpp
     screen/PrintedLinks.hpp
     Logging.hpp
+    vt/GlyphGlossary.hpp
+    vt/GlyphOutline.hpp
+    vt/GlyphProtocol.hpp
     vt/MacroDefinition.hpp
     vt/SoftFont.hpp
     vt/SoftFontStore.hpp
@@ -227,6 +231,9 @@ set(vtbackend_SOURCES
     grid/LineSoA.cpp
     shell/LivePromptMarks.cpp
     screen/LocalTime.cpp
+    vt/GlyphGlossary.cpp
+    vt/GlyphOutline.cpp
+    vt/GlyphProtocol.cpp
     vt/MacroDefinition.cpp
     vt/SoftFont.cpp
     vt/SoftFontStore.cpp
@@ -427,6 +434,9 @@ if(LIBTERMINAL_TESTING)
         vt/RectangularAreaChecksum_test.cpp
         vt/ClipboardSelection_test.cpp
         vt/KittyClipboard_test.cpp
+        vt/GlyphGlossary_test.cpp
+        vt/GlyphOutline_test.cpp
+        vt/GlyphProtocol_test.cpp
         vt/MacroDefinition_test.cpp
         vt/SoftFont_test.cpp
         vt/SoftFontStore_test.cpp
@@ -443,6 +453,7 @@ if(LIBTERMINAL_TESTING)
         screen/Screen_rect_test.cpp
         screen/Screen_modes_test.cpp
         screen/Screen_osc_test.cpp
+        screen/Screen_glyphprotocol_test.cpp
         screen/Screen_softfont_test.cpp
         screen/Screen_macros_test.cpp
         screen/Screen_multipage_test.cpp
