@@ -242,8 +242,20 @@ TEST_CASE("executeGlyphProtocol: clear", "[GlyphGlossary]")
     // Clearing an empty slot succeeds.
     CHECK(send(glossary, "25a1;c;cp=100000") == "\033_25a1;c;cp=100000;status=0\033\\");
 
-    CHECK(send(glossary, "25a1;c;cp=e0a0") == "\033_25a1;c;status=1;reason=out_of_namespace\033\\");
+    CHECK(send(glossary, "25a1;c;cp=e0a0") == "\033_25a1;c;cp=e0a0;status=1;reason=out_of_namespace\033\\");
     CHECK(glossary.find(0x100001) != nullptr);
+
+    // The reply mode, as for a registration: 2 keeps refusals only, 0 nothing -- and the clear is carried
+    // out all the same.
+    CHECK(send(glossary, "25a1;c;cp=e0a0;reply=2")
+          == "\033_25a1;c;cp=e0a0;status=1;reason=out_of_namespace\033\\");
+    CHECK(send(glossary, "25a1;c;cp=e0a0;reply=0").empty());
+    CHECK(send(glossary, "25a1;c;cp=100001;reply=2").empty());
+    CHECK(glossary.find(0x100001) == nullptr);
+    REQUIRE_FALSE(send(glossary, registerSquareAt("100001")).empty());
+    CHECK(send(glossary, "25a1;c;reply=0").empty());
+    CHECK(glossary.empty());
+    REQUIRE_FALSE(send(glossary, registerSquareAt("100001")).empty());
 
     CHECK(send(glossary, "25a1;c") == "\033_25a1;c;status=0\033\\");
     CHECK(glossary.empty());

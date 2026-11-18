@@ -12,7 +12,7 @@
 
 /// The Glyph Protocol's wire format: what an `APC 25a1 ; ...` body says, and how its replies are phrased.
 ///
-/// Specification: https://github.com/raphamorim/rio/blob/main/specs/glyph-protocol.md (v1.15). Of its
+/// Specification: https://github.com/raphamorim/rio/blob/main/specs/glyph-protocol.md (v1.16). Of its
 /// payload formats only `glyf` is read here; `colrv0` and `colrv1` are refused as malformed payloads, which
 /// is what the specification asks of a terminal that does not advertise them.
 namespace vtbackend
@@ -41,10 +41,6 @@ inline constexpr std::string_view GlyphProtocolIdentifier = "25a1;";
 {
     return body.starts_with(GlyphProtocolIdentifier);
 }
-
-/// The longest Glyph Protocol message taken. A registration's payload of MaxGlyphPayloadBytes is 87,384
-/// bytes of base64, and its parameters come before that.
-inline constexpr size_t MaxGlyphMessageLength = size_t { 96 } * 1024;
 
 /// How a glyph is scaled into its render span (`size=`).
 enum class GlyphSizeMode : uint8_t
@@ -160,6 +156,7 @@ struct GlyphRegistration
 struct GlyphClearRequest
 {
     std::optional<char32_t> codepoint; ///< The one to clear; absent clears every registration.
+    GlyphReplyMode reply = GlyphReplyMode::All;
 
     bool operator==(GlyphClearRequest const&) const = default;
 };
@@ -191,6 +188,9 @@ struct GlyphRegistrationRefused
 /// A clear naming a codepoint outside the registration block.
 struct GlyphClearRefused
 {
+    char32_t codepoint = 0;
+    GlyphReplyMode reply = GlyphReplyMode::All;
+
     bool operator==(GlyphClearRefused const&) const = default;
 };
 
@@ -209,7 +209,7 @@ using GlyphCommandError =
 /// @return The request, or why there is none.
 [[nodiscard]] std::expected<GlyphCommand, GlyphCommandError> parseGlyphCommand(std::string_view body);
 
-/// Answers a message that was cut off for being longer than MaxGlyphMessageLength.
+/// Answers a message that was cut off for being longer than an APC body may be.
 /// @param front The start of the message, as much of it as arrived: the verb and the parameters, which
 ///              precede the payload.
 /// @return The refusal of a registration, `reason=payload_too_large`, as a complete APC sequence; empty when
@@ -270,8 +270,9 @@ namespace glyph_reply
     /// @return The reply to a clear that was carried out.
     [[nodiscard]] std::string cleared(std::optional<char32_t> codepoint);
 
+    /// @param codepoint The codepoint the clear named.
     /// @return The reply to a clear naming a codepoint outside the registration block.
-    [[nodiscard]] std::string clearRefused();
+    [[nodiscard]] std::string clearRefused(char32_t codepoint);
 } // namespace glyph_reply
 
 } // namespace vtbackend

@@ -70,6 +70,11 @@ TEST_CASE("GlyphProtocol: verbs", "[GlyphProtocol]")
     CHECK(parseGlyphCommand("25a1;s") == GlyphCommand { GlyphSupportRequest {} });
     CHECK(parseGlyphCommand("25a1;s;future=1") == GlyphCommand { GlyphSupportRequest {} });
     CHECK(parseGlyphCommand("25a1;c") == GlyphCommand { GlyphClearRequest {} });
+    CHECK(parseGlyphCommand("25a1;c;reply=2")
+          == GlyphCommand {
+              GlyphClearRequest { .codepoint = std::nullopt, .reply = GlyphReplyMode::ErrorsOnly } });
+    CHECK(parseGlyphCommand("25a1;c;cp=100000;reply=0")
+          == GlyphCommand { GlyphClearRequest { .codepoint = 0x100000, .reply = GlyphReplyMode::None } });
     CHECK(parseGlyphCommand("25a1;c;cp=1003ff")
           == GlyphCommand { GlyphClearRequest { .codepoint = 0x1003FF } });
     CHECK(parseGlyphCommand("25a1;q;cp=E0A0")
@@ -104,7 +109,11 @@ TEST_CASE("GlyphProtocol: a query names one codepoint or one cluster", "[GlyphPr
 TEST_CASE("GlyphProtocol: a clear outside the block is refused", "[GlyphProtocol]")
 {
     CHECK(parseGlyphCommand("25a1;c;cp=e0a0")
-          == std::unexpected { GlyphCommandError { GlyphClearRefused {} } });
+          == std::unexpected { GlyphCommandError { GlyphClearRefused { .codepoint = 0xE0A0 } } });
+    // The refusal carries the reply mode, as a registration's does.
+    CHECK(parseGlyphCommand("25a1;c;cp=e0a0;reply=0")
+          == std::unexpected { GlyphCommandError {
+              GlyphClearRefused { .codepoint = 0xE0A0, .reply = GlyphReplyMode::None } } });
 }
 
 TEST_CASE("GlyphProtocol: a registration carries its outline and the default layout", "[GlyphProtocol]")
@@ -196,11 +205,10 @@ TEST_CASE("GlyphProtocol: why a registration is refused", "[GlyphProtocol]")
     SECTION("no payload, or one that is not base64")
     {
         CHECK(refusalOf("25a1;r;cp=100000;")->reason == GlyphRegisterError::MalformedPayload);
-        CHECK(refusalOf("25a1;r;cp=100000")->reason == GlyphRegisterError::MalformedPayload);
         CHECK(refusalOf("25a1;r;cp=100000;!!!!")->reason == GlyphRegisterError::MalformedPayload);
     }
 
-    SECTION("a payload over 64 KiB")
+    SECTION("a payload over the cap")
     {
         auto const large = std::vector<uint8_t>(MaxGlyphPayloadBytes + 3, uint8_t { 0 });
         auto const refused = refusalOf(std::format("25a1;r;cp=100000;{}", base64(large)));
@@ -208,10 +216,10 @@ TEST_CASE("GlyphProtocol: why a registration is refused", "[GlyphProtocol]")
         CHECK(refused->reason == GlyphRegisterError::PayloadTooLarge);
     }
 
-    SECTION("a payload one byte over 64 KiB, which only decoding it can tell")
+    SECTION("a payload one byte over the cap, which only decoding it can tell")
     {
-        // 65,537 bytes and 65,536 share their count of base64 quartets, so the size judged from the
-        // digits lets this one through to the decoded size.
+        // A payload of the cap's size and one a byte longer share their count of base64 quartets, so the
+        // size judged from the digits lets this one through to the decoded size.
         auto const large = std::vector<uint8_t>(MaxGlyphPayloadBytes + 1, uint8_t { 0 });
         auto const refused = refusalOf(std::format("25a1;r;cp=100000;{}", base64(large)));
         REQUIRE(refused.has_value());
@@ -221,11 +229,11 @@ TEST_CASE("GlyphProtocol: why a registration is refused", "[GlyphProtocol]")
         CHECK(parseGlyphCommand(std::format("25a1;r;cp=100000;{}", base64(largest))).has_value());
     }
 
-    SECTION("a message sent without its payload still names its codepoint")
+    SECTION("the payload is the last field, whatever it holds")
     {
-        // The last part is a parameter, not a payload, wherever the codepoint stands among them.
-        for (auto const body:
-             { "25a1;r;reply=1;cp=100000", "25a1;r;cp=100000;upm=1000", "25a1;r;cp=100000;=" })
+        // By position, not by content: a last field that reads like a parameter is still the payload, and
+        // as one it is not base64.
+        for (auto const body: { "25a1;r;cp=100000;upm=1000", "25a1;r;cp=100000;=" })
         {
             INFO(body);
             auto const refused = refusalOf(body);
@@ -233,7 +241,11 @@ TEST_CASE("GlyphProtocol: why a registration is refused", "[GlyphProtocol]")
             CHECK(refused->codepoint == 0x100000);
             CHECK(refused->reason == GlyphRegisterError::MalformedPayload);
         }
-        // Padded base64 is still a payload.
+        // So a codepoint in the last field is not one: there is nothing to answer.
+        auto const ignored = std::unexpected { GlyphCommandError { GlyphMessageIgnored {} } };
+        CHECK(parseGlyphCommand("25a1;r;reply=1;cp=100000") == ignored);
+        CHECK(parseGlyphCommand("25a1;r;cp=100000") == ignored);
+        // Padded base64 is a payload like any other.
         CHECK(parseGlyphCommand(std::format("25a1;r;cp=100000;{}", base64(std::vector<uint8_t>(10, 0))))
                   .has_value());
     }
@@ -307,7 +319,7 @@ TEST_CASE("GlyphProtocol: replies", "[GlyphProtocol]")
 
     CHECK(glyph_reply::cleared(std::nullopt) == "\033_25a1;c;status=0\033\\");
     CHECK(glyph_reply::cleared(0x100001) == "\033_25a1;c;cp=100001;status=0\033\\");
-    CHECK(glyph_reply::clearRefused() == "\033_25a1;c;status=1;reason=out_of_namespace\033\\");
+    CHECK(glyph_reply::clearRefused(0xE0A0) == "\033_25a1;c;cp=e0a0;status=1;reason=out_of_namespace\033\\");
 }
 
 TEST_CASE("GlyphProtocol: every refusal has a reason on the wire", "[GlyphProtocol]")

@@ -82,7 +82,8 @@ namespace
                 glossary.clear(*request.codepoint);
             else
                 glossary.clear();
-            return glyph_reply::cleared(request.codepoint);
+            return request.reply == GlyphReplyMode::All ? glyph_reply::cleared(request.codepoint)
+                                                        : std::string {};
         }
     };
 
@@ -98,9 +99,10 @@ namespace
                        : glyph_reply::registrationRefused(refused.codepoint, refused.reason);
         }
 
-        [[nodiscard]] std::string operator()(GlyphClearRefused const& /*error*/) const
+        [[nodiscard]] std::string operator()(GlyphClearRefused const& refused) const
         {
-            return glyph_reply::clearRefused();
+            return refused.reply == GlyphReplyMode::None ? std::string {}
+                                                         : glyph_reply::clearRefused(refused.codepoint);
         }
 
         [[nodiscard]] std::string operator()(GlyphQueryMalformed const& /*error*/) const

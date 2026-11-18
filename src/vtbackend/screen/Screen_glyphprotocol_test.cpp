@@ -110,10 +110,11 @@ TEST_CASE("GlyphProtocol.Screen: RIS clears the glossary", "[screen][glyphprotoc
     CHECK(mock.terminal.glyphGlossary().empty());
 }
 
-TEST_CASE("GlyphProtocol.Screen: a payload of the full 64 KiB gets through", "[screen][glyphprotocol]")
+TEST_CASE("GlyphProtocol.Screen: a payload of the full size gets through", "[screen][glyphprotocol]")
 {
-    // 87,384 bytes of base64, more than an OSC may carry. A record of zeroes is a glyph without contours,
-    // which is a valid (blank) one, so the reply tells the message arrived whole.
+    // 32 KiB is 43,692 bytes of base64, which with its parameters fits the body an APC may have. A record
+    // of zeroes is a glyph without contours, which is a valid (blank) one, so the reply tells the message
+    // arrived whole.
     auto mock = MockTerm { TestPage };
     auto const blank = std::vector<uint8_t>(MaxGlyphPayloadBytes, uint8_t { 0 });
     mock.writeToScreen(std::format("\033_25a1;r;cp=100000;{}\033\\", base64(blank)));
@@ -124,7 +125,7 @@ TEST_CASE("GlyphProtocol.Screen: a message past its cap is refused, not ignored"
 {
     // The sender waits for an answer, and has no chunking to fall back on.
     auto mock = MockTerm { TestPage };
-    auto const huge = std::string(MaxGlyphMessageLength + 1024, 'A');
+    auto const huge = std::string(Sequence::MaxOscLength + 1024, 'A');
 
     mock.writeToScreen(std::format("\033_25a1;r;cp=100000;{}\033\\", huge));
     CHECK(mock.terminal.peekInput() == "\033_25a1;r;cp=100000;status=1;reason=payload_too_large\033\\");
@@ -135,12 +136,4 @@ TEST_CASE("GlyphProtocol.Screen: a message past its cap is refused, not ignored"
     for (auto const ch: std::format("\033_25a1;r;cp=100001;{}\033\\", huge))
         slow.writeToScreen(std::string_view { &ch, 1 });
     CHECK(slow.terminal.peekInput() == "\033_25a1;r;cp=100001;status=1;reason=payload_too_large\033\\");
-}
-
-TEST_CASE("GlyphProtocol.Screen: the larger cap is the Glyph Protocol's alone", "[screen][glyphprotocol]")
-{
-    // Any other APC keeps the cap an OSC has, and is dropped past it without an answer.
-    auto mock = MockTerm { TestPage };
-    mock.writeToScreen(std::format("\033_Xfoo;{}\033\\", std::string(Sequence::MaxOscLength + 1, 'A')));
-    CHECK(mock.terminal.peekInput().empty());
 }

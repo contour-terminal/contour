@@ -3,13 +3,11 @@
 
 #include <vtbackend/Logging.hpp>
 #include <vtbackend/graphics/SixelParser.hpp>
-#include <vtbackend/vt/GlyphProtocol.hpp>
 #include <vtbackend/vt/Sequence.hpp>
 
 #include <vtparser/Parser.hpp>
 #include <vtparser/ParserExtension.hpp>
 
-#include <algorithm>
 #include <concepts>
 #include <memory>
 #include <string_view>
@@ -192,7 +190,7 @@ class SequenceBuilder
     {
         // Bounded like OSC is: an APC body is attacker-controlled, and the kitty graphics protocol
         // chunks anything large anyway (`m=1`), so a single unbounded body is never legitimate.
-        if (_apcBuffer.size() < apcLimit())
+        if (_apcBuffer.size() < Sequence::MaxOscLength)
             _apcBuffer.push_back(ch);
         else
             _apcTruncated = true;
@@ -202,15 +200,7 @@ class SequenceBuilder
     /// truncated, so a body that overruns is dropped by dispatchAPC() exactly as before.
     void putAPC(std::string_view payload)
     {
-        // The cap depends on the protocol, which the body's first bytes name: those go in first, and are
-        // far below either cap.
-        auto const head = payload.substr(
-            0, GlyphProtocolIdentifier.size() - std::min(_apcBuffer.size(), GlyphProtocolIdentifier.size()));
-        _apcBuffer.append(head);
-        payload.remove_prefix(head.size());
-
-        auto const limit = apcLimit();
-        auto const room = limit - std::min(_apcBuffer.size(), limit);
+        auto const room = Sequence::MaxOscLength - std::min(_apcBuffer.size(), Sequence::MaxOscLength);
         auto const chunk = payload.substr(0, room);
         _apcBuffer.append(chunk);
         if (chunk.size() != payload.size())
@@ -228,7 +218,7 @@ class SequenceBuilder
         {
             vtParserLog()("APC body exceeded {} bytes and was dropped. Chunked transmission (m=1) is "
                           "the supported way to send a payload this large.",
-                          apcLimit());
+                          Sequence::MaxOscLength);
             // Told all the same, as a body that is not one: the Glyph Protocol has no chunking, its
             // sender waits for an answer, and the parameters that say which one are at the front.
             if constexpr (requires { _handler.processOversizedAPC(std::string_view {}); })
@@ -264,16 +254,9 @@ class SequenceBuilder
     }
 
     Sequence _sequence {};
-    /// @return The longest body the APC being accumulated may have: what an OSC may, unless it is a Glyph
-    ///         Protocol message, whose one message carries a whole payload.
-    [[nodiscard]] size_t apcLimit() const noexcept
-    {
-        return isGlyphProtocol(_apcBuffer) ? MaxGlyphMessageLength : Sequence::MaxOscLength;
-    }
-
     std::string _apcBuffer {};
 
-    /// Whether the APC body being accumulated overran its cap (@see apcLimit). @see dispatchAPC.
+    /// Whether the APC body being accumulated overran MaxOscLength. @see dispatchAPC.
     bool _apcTruncated = false;
     SequenceParameterBuilder _parameterBuilder;
     IncrementInstructionCounter _incrementInstructionCounter;

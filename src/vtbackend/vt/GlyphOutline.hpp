@@ -26,10 +26,11 @@ enum class GlyphRegisterError : uint8_t
 [[nodiscard]] std::string_view toString(GlyphRegisterError error) noexcept;
 
 /// The largest payload a registration may carry, in bytes after base64 decoding.
-inline constexpr size_t MaxGlyphPayloadBytes = size_t { 64 } * 1024;
+inline constexpr size_t MaxGlyphPayloadBytes = size_t { 32 } * 1024;
 
-/// The most points an outline may decode to: 64 KiB at the protocol's 12 bytes a point.
-inline constexpr size_t MaxGlyphOutlinePoints = MaxGlyphPayloadBytes / 12;
+/// The most points an outline may decode to: 64 KiB at the protocol's 12 bytes a point. The wire form is
+/// compressed, so this and not the payload's size is what bounds a registration's memory.
+inline constexpr size_t MaxGlyphOutlinePoints = size_t { 64 } * 1024 / 12;
 
 /// Whether an outline point lies on the curve or is the control point of a quadratic Bezier.
 enum class GlyphPointKind : uint8_t

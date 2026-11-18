@@ -274,7 +274,7 @@ namespace
         return layout;
     }
 
-    /// @return The `reply=` of a registration; the default when it is absent or names no mode.
+    /// @return The `reply=` of a registration or a clear; the default when it is absent or names no mode.
     [[nodiscard]] GlyphReplyMode replyModeOf(Parameters const& parameters) noexcept
     {
         return parameters.get("reply")
@@ -323,17 +323,12 @@ namespace
 
     [[nodiscard]] ParseResult parseRegister(string_view rest)
     {
-        // The payload is what follows the last `;`: base64 holds none, so the split is unambiguous. A last
-        // part that reads `key=value` is a parameter of a message sent without its payload -- base64 has
-        // `=` only as its padding, at the very end -- and is kept with the parameters, so the refusal can
-        // still name the codepoint.
+        // The payload is the last field, by its position and not by what it holds: base64 has no `;`, and
+        // its padding is an `=`, so a field cannot be told from a parameter by its content.
         auto const lastSeparator = rest.rfind(';');
-        auto const lastPart =
-            trim(lastSeparator == string_view::npos ? rest : rest.substr(lastSeparator + 1));
-        auto const isParameter = lastPart.find('=') < lastPart.find_last_not_of('=');
-        auto const hasPayload = lastSeparator != string_view::npos && !isParameter;
-        auto const control = hasPayload ? rest.substr(0, lastSeparator) : rest;
-        auto const payload = hasPayload ? lastPart : string_view {};
+        auto const control =
+            lastSeparator == string_view::npos ? string_view {} : rest.substr(0, lastSeparator);
+        auto const payload = lastSeparator == string_view::npos ? rest : rest.substr(lastSeparator + 1);
         auto const parameters = Parameters { control };
 
         // Without a codepoint there is nothing for a reply to echo.
@@ -384,15 +379,18 @@ namespace
 
     [[nodiscard]] ParseResult parseClear(string_view rest)
     {
-        auto const text = Parameters { rest }.get("cp");
+        auto const parameters = Parameters { rest };
+        auto const reply = replyModeOf(parameters);
+        auto const text = parameters.get("cp");
         if (!text)
-            return GlyphClearRequest {};
+            return GlyphClearRequest { .codepoint = std::nullopt, .reply = reply };
         auto const codepoint = parseCodepoint(*text);
         if (!codepoint)
             return std::unexpected { GlyphCommandError { GlyphMessageIgnored {} } };
         if (!isGlyphRegistrationCodepoint(*codepoint))
-            return std::unexpected { GlyphCommandError { GlyphClearRefused {} } };
-        return GlyphClearRequest { .codepoint = *codepoint };
+            return std::unexpected { GlyphCommandError {
+                GlyphClearRefused { .codepoint = *codepoint, .reply = reply } } };
+        return GlyphClearRequest { .codepoint = *codepoint, .reply = reply };
     }
 
     /// One verb of the protocol and the reader of what follows it.
@@ -513,9 +511,10 @@ namespace glyph_reply
         return std::format("\033_25a1;c;cp={:x};status=0\033\\", static_cast<uint32_t>(*codepoint));
     }
 
-    std::string clearRefused()
+    std::string clearRefused(char32_t codepoint)
     {
-        return "\033_25a1;c;status=1;reason=out_of_namespace\033\\";
+        return std::format("\033_25a1;c;cp={:x};status=1;reason=out_of_namespace\033\\",
+                           static_cast<uint32_t>(codepoint));
     }
 } // namespace glyph_reply
 
