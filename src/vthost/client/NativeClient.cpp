@@ -135,6 +135,7 @@ void RemoteScreen::apply(proto::SoftFontState const& fonts)
 
 void RemoteScreen::apply(proto::RegisteredGlyphState const& glyphs)
 {
+    ++registeredGlyphRevision;
     if (glyphs.replace != 0)
         registeredGlyphs.clear();
     for (auto const& glyph: glyphs.glyphs)

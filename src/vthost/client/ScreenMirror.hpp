@@ -346,12 +346,26 @@ class ScreenMirror
     /// @param generation The store generation the daemon captured it at.
     void syncSoftFonts(std::span<proto::WireSoftFont const> fonts, uint64_t generation);
 
-    /// Changes the mirror terminal's Glyph Protocol glyphs as the daemon states them, unless they are not
-    /// glyphs an application could have registered -- in which case the ones the mirror holds stand. The
-    /// caller holds the terminal lock.
+    /// Changes the mirror terminal's Glyph Protocol glyphs as the daemon states them in a push, unless they
+    /// are not glyphs an application could have registered -- in which case the ones the mirror holds
+    /// stand. The caller holds the terminal lock.
     /// @param glyphs The slots the daemon named.
     /// @param mode Whether they replace the mirror's glossary or change it.
     void syncRegisteredGlyphs(std::span<proto::WireRegisteredGlyph const> glyphs, GlyphUpdateMode mode);
+
+    /// Replaces the mirror terminal's Glyph Protocol glyphs with the ones @p screen holds, unless the
+    /// mirror was already given them as they are. The caller holds the terminal lock.
+    /// @param screen The session's screen.
+    void replayRegisteredGlyphs(RemoteScreen const& screen);
+
+    /// Logs that the daemon's glyphs are not taken.
+    /// @param reason Why.
+    void refuseRegisteredGlyphs(GlyphWireError reason) const;
+
+    /// Applies judged glyphs to the mirror terminal, and has it redrawn when that changed any.
+    /// @param updates The slots to change.
+    /// @param mode Whether the mirror's glossary is cleared first.
+    void applyRegisteredGlyphs(std::vector<GlyphUpdate> updates, GlyphUpdateMode mode);
 
     /// Places the cursor and publishes the frame. Every entry point ends here.
     void finish(RemoteScreen const& screen);
@@ -503,6 +517,10 @@ class ScreenMirror
     /// The daemon-store generation of the soft fonts the mirror holds, so a replay that finds the set
     /// unchanged rebuilds nothing. Empty until the daemon stated one.
     std::optional<uint64_t> _softFontGeneration;
+    /// The RemoteScreen::registeredGlyphRevision the mirror's glossary was last rebuilt from, so a replay
+    /// that finds the glyphs unchanged rebuilds nothing. Empty until a replay took them. A push applied in
+    /// between moves the screen's revision on, so the replay after it rebuilds once more than it must.
+    std::optional<uint64_t> _registeredGlyphRevision;
 };
 
 } // namespace vthost::client

@@ -226,6 +226,8 @@ struct RemoteScreen
     /// The session's Glyph Protocol glyphs as the daemon last stated them, by slot, kept for a mirror bound
     /// later and for a replay. Empty unless both ends negotiated Capability::RegisteredGlyphs.
     std::map<uint16_t, proto::WireRegisteredGlyph> registeredGlyphs;
+    /// Counts the changes to @ref registeredGlyphs, so a mirror can tell whether it holds them as they are.
+    uint64_t registeredGlyphRevision = 0;
     /// Fetched image pixels by pool-local image id. The id pool is per session,
     /// so this map is already session-scoped. Filled on ImageData, dropped on
     /// ImageGone.

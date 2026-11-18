@@ -73,6 +73,7 @@
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/DaemonControl.hpp>
 #include <vthost/FlushPolicy.hpp>
+#include <vthost/GlyphWire.hpp>
 #include <vthost/KeyAuth.hpp>
 #include <vthost/ObjectRegistry.hpp>
 #include <vthost/PduPump.hpp>
@@ -1059,21 +1060,40 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// fonts, and the soft-glyph cells beside the rows.
     [[nodiscard]] bool mirrorsSoftFonts() const noexcept;
 
-    /// Sends @p session's soft fonts when they differ from what this connection was last told, read under
-    /// the terminal lock. Called ahead of every delta and snapshot, so a font reaches the receiver before
-    /// the cells that use it. A Delta can still name a font the client has not received -- a font loaded
-    /// after the push, whose next push is still to come -- and such a cell renders as its text until then.
-    /// @param session The session.
-    void pushSoftFonts(vtworkspace::SessionId session);
-
     /// Whether this connection mirrors Glyph Protocol glyphs (shares Capability::RegisteredGlyphs).
     [[nodiscard]] bool mirrorsRegisteredGlyphs() const noexcept;
 
-    /// Sends the slots of @p session's Glyph Protocol glossary that changed since this connection was last
-    /// told, read under the terminal lock. Called where pushSoftFonts() is, for its reason: a glyph reaches
-    /// the receiver before the cells that show it.
+    /// The slots of a session's Glyph Protocol glossary a connection has yet to be told of.
+    struct GlyphChanges
+    {
+        std::vector<vtbackend::GlyphChange> changes;    ///< The slots, ascending.
+        GlyphUpdateMode mode = GlyphUpdateMode::Change; ///< Whether they replace what the client holds.
+    };
+
+    /// Sends what @p session's cells may draw besides text -- its soft fonts and its Glyph Protocol glyphs
+    /// -- where either differs from what this connection was last told, both read under one hold of the
+    /// terminal lock. Called ahead of every delta and snapshot, so a glyph reaches the receiver before the
+    /// cells that show it. A Delta can still name a font the client has not received -- a font loaded after
+    /// the push, whose next push is still to come -- and such a cell renders as its text until then.
     /// @param session The session.
-    void pushRegisteredGlyphs(vtworkspace::SessionId session);
+    void pushGlyphSources(vtworkspace::SessionId session);
+
+    /// @param session The session.
+    /// @param terminal Its terminal, whose lock the caller holds.
+    /// @return The session's soft fonts, when they differ from what this connection was last told.
+    [[nodiscard]] std::optional<proto::SoftFontState> collectSoftFonts(vtworkspace::SessionId session,
+                                                                       vtbackend::Terminal const& terminal);
+
+    /// @param session The session.
+    /// @param terminal Its terminal, whose lock the caller holds.
+    /// @return The slots of the session's glossary that changed since this connection was last told.
+    [[nodiscard]] std::optional<GlyphChanges> collectRegisteredGlyphs(vtworkspace::SessionId session,
+                                                                      vtbackend::Terminal const& terminal);
+
+    /// Sends @p changes, in as many pushes as their size takes.
+    /// @param session The session they belong to.
+    /// @param changes The slots that changed.
+    void emitRegisteredGlyphs(vtworkspace::SessionId session, GlyphChanges const& changes);
 
     /// Whether this connection is a viewer that mirrors the echo state (shares Capability::InputEcho).
     [[nodiscard]] bool mirrorsInputEcho() const noexcept;

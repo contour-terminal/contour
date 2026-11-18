@@ -120,7 +120,7 @@ void GlyphGlossary::registerGlyph(char32_t codepoint, GlyphLayout const& layout,
             RegisteredGlyph { .id = id, .layout = layout, .outline = std::move(outline) }));
 }
 
-void GlyphGlossary::clear(char32_t codepoint) noexcept
+void GlyphGlossary::clear(char32_t codepoint)
 {
     put(codepoint, nullptr);
 }
@@ -132,9 +132,9 @@ void GlyphGlossary::clear() noexcept
         return;
     ++_generation;
     for (auto const slot: std::views::iota(size_t { 0 }, GlyphRegistrationSlots))
-        if (_glyphs[slot])
-            _changedAt[slot] = _generation;
-    _glyphs.fill(nullptr);
+        if (_slots->glyphs[slot])
+            _slots->changedAt[slot] = _generation;
+    _slots->glyphs.fill(nullptr);
     _count = 0;
     _snapshot.reset();
 }
@@ -142,17 +142,20 @@ void GlyphGlossary::clear() noexcept
 std::vector<GlyphChange> GlyphGlossary::changesSince(uint64_t generation) const
 {
     auto changes = std::vector<GlyphChange> {};
+    if (!_slots)
+        return changes;
     for (auto const slot: std::views::iota(size_t { 0 }, GlyphRegistrationSlots))
-        if (_changedAt[slot] > generation)
-            changes.push_back(GlyphChange { .slot = static_cast<uint16_t>(slot), .glyph = _glyphs[slot] });
+        if (_slots->changedAt[slot] > generation)
+            changes.push_back(
+                GlyphChange { .slot = static_cast<uint16_t>(slot), .glyph = _slots->glyphs[slot] });
     return changes;
 }
 
 std::shared_ptr<RegisteredGlyph const> GlyphGlossary::find(char32_t codepoint) const noexcept
 {
-    if (!isGlyphRegistrationCodepoint(codepoint))
+    if (!_slots || !isGlyphRegistrationCodepoint(codepoint))
         return nullptr;
-    return _glyphs[codepoint - FirstGlyphRegistrationCodepoint];
+    return _slots->glyphs[codepoint - FirstGlyphRegistrationCodepoint];
 }
 
 std::shared_ptr<RegisteredGlyphs const> GlyphGlossary::snapshot() const
@@ -160,21 +163,25 @@ std::shared_ptr<RegisteredGlyphs const> GlyphGlossary::snapshot() const
     if (empty())
         return nullptr;
     if (!_snapshot)
-        _snapshot = std::make_shared<RegisteredGlyphs const>(_glyphs);
+        _snapshot = std::make_shared<RegisteredGlyphs const>(_slots->glyphs);
     return _snapshot;
 }
 
-void GlyphGlossary::put(char32_t codepoint, std::shared_ptr<RegisteredGlyph const> glyph) noexcept
+void GlyphGlossary::put(char32_t codepoint, std::shared_ptr<RegisteredGlyph const> glyph)
 {
-    if (!isGlyphRegistrationCodepoint(codepoint))
+    // Clearing a slot of a glossary nothing was ever registered in needs no storage either.
+    if (!isGlyphRegistrationCodepoint(codepoint) || (!_slots && !glyph))
         return;
-    auto& slot = _glyphs[codepoint - FirstGlyphRegistrationCodepoint];
+    if (!_slots)
+        _slots = std::make_unique<Slots>();
+    auto const index = codepoint - FirstGlyphRegistrationCodepoint;
+    auto& slot = _slots->glyphs[index];
     if (!slot && !glyph)
         return;
     _count += (glyph ? 1U : 0U);
     _count -= (slot ? 1U : 0U);
     slot = std::move(glyph);
-    _changedAt[codepoint - FirstGlyphRegistrationCodepoint] = ++_generation;
+    _slots->changedAt[index] = ++_generation;
     _snapshot.reset();
 }
 

@@ -89,6 +89,27 @@ TEST_CASE("GlyphGlossary: clearing what is clear is not a change", "[GlyphGlossa
     CHECK(glossary.generation() == generation + 2);
 }
 
+TEST_CASE("GlyphGlossary: a glossary nothing is registered in holds no slots", "[GlyphGlossary]")
+{
+    // Every terminal has one, and nearly none is ever used: it must not cost a slot table each.
+    STATIC_CHECK(sizeof(GlyphGlossary) < 128);
+
+    // Everything a glossary is asked works before the first registration, and after the last is cleared.
+    auto glossary = GlyphGlossary {};
+    CHECK(glossary.find(0x100000) == nullptr);
+    CHECK(glossary.snapshot() == nullptr);
+    CHECK(glossary.changesSince(0).empty());
+    glossary.clear(0x100000);
+    glossary.clear();
+    CHECK(glossary.generation() == 0);
+
+    glossary.registerGlyph(0x100000, GlyphLayout {}, square());
+    glossary.clear();
+    CHECK(glossary.find(0x100000) == nullptr);
+    CHECK(glossary.snapshot() == nullptr);
+    CHECK(glossary.changesSince(0).size() == 1);
+}
+
 TEST_CASE("GlyphGlossary: a glyph's id follows its content", "[GlyphGlossary]")
 {
     auto glossary = GlyphGlossary {};

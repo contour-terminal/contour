@@ -882,69 +882,59 @@ bool NativeSession::mirrorsSoftFonts() const noexcept
     return _negotiated && _negotiated->shared.contains(proto::Capability::SoftFonts);
 }
 
-void NativeSession::pushSoftFonts(SessionId session)
-{
-    if (!mirrorsSoftFonts())
-        return;
-    auto* const terminal = _host.terminal(session);
-    if (terminal == nullptr)
-        return;
-    auto pdu = proto::SoftFontState { .session = session.value, .generation = 0, .fonts = {} };
-    // One lookup: a session never told about fonts starts at generation 0, which is the store's own.
-    auto const sent = _softFontsSent.try_emplace(session.value, uint64_t { 0 }).first;
-    {
-        auto const guard = std::lock_guard { std::as_const(*terminal) };
-        auto const& store = terminal->softFonts();
-        pdu.generation = store.generation();
-        if (pdu.generation == sent->second)
-            return;
-        pdu.fonts = softFontsToWire(store);
-    }
-    sent->second = pdu.generation;
-    emitSessionEvent(std::move(pdu));
-}
-
 bool NativeSession::mirrorsRegisteredGlyphs() const noexcept
 {
     return _negotiated && _negotiated->shared.contains(proto::Capability::RegisteredGlyphs);
 }
 
-void NativeSession::pushRegisteredGlyphs(SessionId session)
+std::optional<proto::SoftFontState> NativeSession::collectSoftFonts(SessionId session,
+                                                                    vtbackend::Terminal const& terminal)
+{
+    // One lookup: a session never told about fonts starts at generation 0, which is the store's own.
+    auto const sent = _softFontsSent.try_emplace(session.value, uint64_t { 0 }).first;
+    auto const& store = terminal.softFonts();
+    if (store.generation() == sent->second)
+        return std::nullopt;
+    sent->second = store.generation();
+    return proto::SoftFontState { .session = session.value,
+                                  .generation = store.generation(),
+                                  .fonts = softFontsToWire(store) };
+}
+
+std::optional<NativeSession::GlyphChanges> NativeSession::collectRegisteredGlyphs(
+    SessionId session, vtbackend::Terminal const& terminal)
+{
+    auto const sent = _registeredGlyphsSent.try_emplace(session.value, uint64_t { 0 }).first;
+    auto const& glossary = terminal.glyphGlossary();
+    if (glossary.generation() == sent->second)
+        return std::nullopt;
+    // The first this connection hears of the session's glyphs replaces what its end may hold of them from
+    // an earlier connection.
+    auto changes =
+        GlyphChanges { .changes = glossary.changesSince(sent->second),
+                       .mode = sent->second == 0 ? GlyphUpdateMode::Replace : GlyphUpdateMode::Change };
+    sent->second = glossary.generation();
+    return changes;
+}
+
+void NativeSession::emitRegisteredGlyphs(SessionId session, GlyphChanges const& changes)
 {
     /// How many outline points one push carries at most, a slot counting as one more: some 300 KiB on the
     /// wire, where a whole glossary of the largest outlines would be tens of megabytes in one frame.
     static constexpr auto PushWeight = size_t { 32 } * 1024;
 
-    if (!mirrorsRegisteredGlyphs())
-        return;
-    auto* const terminal = _host.terminal(session);
-    if (terminal == nullptr)
-        return;
-    auto const sent = _registeredGlyphsSent.try_emplace(session.value, uint64_t { 0 }).first;
-    auto changes = std::vector<vtbackend::GlyphChange> {};
-    auto replaces = false;
-    {
-        auto const guard = std::lock_guard { std::as_const(*terminal) };
-        auto const& glossary = std::as_const(*terminal).glyphGlossary();
-        if (glossary.generation() == sent->second)
-            return;
-        changes = glossary.changesSince(sent->second);
-        // The first this connection hears of the session's glyphs replaces what its end may hold of them
-        // from an earlier connection.
-        replaces = sent->second == 0;
-        sent->second = glossary.generation();
-    }
-
-    // Converted outside the lock: the changes share the glyphs, which are immutable.
+    auto const replaces = changes.mode == GlyphUpdateMode::Replace;
     auto pdu = proto::RegisteredGlyphState { .session = session.value,
                                              .replace = replaces ? uint8_t { 1 } : uint8_t { 0 },
                                              .glyphs = {} };
     auto weight = size_t { 0 };
-    for (auto& glyph: glyphsToWire(changes))
+    // One slot converted at a time, so that what is held of a large glossary is one push of it.
+    for (auto const& change: changes.changes)
     {
         // A slot cleared before a replace says nothing the replace does not.
-        if (replaces && glyph.registered == 0)
+        if (replaces && !change.glyph)
             continue;
+        auto glyph = glyphToWire(change);
         if (!pdu.glyphs.empty() && weight + wireGlyphWeight(glyph) > PushWeight)
         {
             emitSessionEvent(std::exchange(
@@ -957,6 +947,34 @@ void NativeSession::pushRegisteredGlyphs(SessionId session)
     // An empty push still has something to say when it replaces: the glossary was emptied.
     if (!pdu.glyphs.empty() || pdu.replace != 0)
         emitSessionEvent(pdu);
+}
+
+void NativeSession::pushGlyphSources(SessionId session)
+{
+    auto const sharesSoftFonts = mirrorsSoftFonts();
+    auto const sharesRegisteredGlyphs = mirrorsRegisteredGlyphs();
+    if (!sharesSoftFonts && !sharesRegisteredGlyphs)
+        return;
+    auto const* const terminal = _host.terminal(session);
+    if (terminal == nullptr)
+        return;
+
+    auto fonts = std::optional<proto::SoftFontState> {};
+    auto glyphs = std::optional<GlyphChanges> {};
+    {
+        // Both under one hold of the lock: this runs ahead of every delta, and each hold is a wait behind
+        // whatever the session's parser is in the middle of.
+        auto const guard = std::lock_guard { *terminal };
+        if (sharesSoftFonts)
+            fonts = collectSoftFonts(session, *terminal);
+        if (sharesRegisteredGlyphs)
+            glyphs = collectRegisteredGlyphs(session, *terminal);
+    }
+    if (fonts)
+        emitSessionEvent(*std::move(fonts));
+    // Converted outside the lock: the changes share the glyphs, which are immutable.
+    if (glyphs)
+        emitRegisteredGlyphs(session, *glyphs);
 }
 
 bool NativeSession::mirrorsInputEcho() const noexcept
@@ -1947,8 +1965,7 @@ void NativeSession::pushDelta(SessionId session)
     // Asked before buildPush, which records the displayed page even when it bails: a follow never pushed
     // has none yet, and its bail is its first snapshot -- a tab opened after attaching -- not a resync.
     // Ahead of the delta, which may name a glyph of a font this connection has not been given.
-    pushSoftFonts(session);
-    pushRegisteredGlyphs(session);
+    pushGlyphSources(session);
     auto const followed = _followed.find(session.value);
     auto const firstPush = followed == _followed.end() || !followed->second.lastDisplayedPage;
     auto built = buildPush(session, SnapshotMode::Delta);
@@ -2095,8 +2112,7 @@ core::async::Task<void> NativeSession::streamSnapshots(SpawnedFlowClaim claim)
         if (mirrorsProgramStatus())
             pushProgramStatus(session, ProgramStatusPush::IfAny);
         // And the soft fonts, for the same reason: the rows that follow name their glyphs.
-        pushSoftFonts(session);
-        pushRegisteredGlyphs(session);
+        pushGlyphSources(session);
         // A snapshot states the echo too, for a client that attached while a prompt waits.
         pushInputEcho(session);
         // A snapshot that stated only the newest records that fit had buildPush queue the older

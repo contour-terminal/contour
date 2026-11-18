@@ -85,7 +85,7 @@ class GlyphGlossary
 
     /// Clears the registration at @p codepoint, if there is one.
     /// @param codepoint A codepoint of the registration block.
-    void clear(char32_t codepoint) noexcept;
+    void clear(char32_t codepoint);
 
     /// Clears every registration (the `c` verb without a codepoint, and RIS).
     void clear() noexcept;
@@ -111,11 +111,18 @@ class GlyphGlossary
     [[nodiscard]] std::shared_ptr<RegisteredGlyphs const> snapshot() const;
 
   private:
-    void put(char32_t codepoint, std::shared_ptr<RegisteredGlyph const> glyph) noexcept;
+    void put(char32_t codepoint, std::shared_ptr<RegisteredGlyph const> glyph);
 
-    RegisteredGlyphs _glyphs {};
-    /// Per slot, the generation its last change made; 0 for a slot never touched. @see changesSince
-    std::array<uint64_t, GlyphRegistrationSlots> _changedAt {};
+    /// What the slots hold. Apart from the glossary itself, so a session that never uses the protocol --
+    /// nearly all of them -- carries a pointer and not twenty-four kilobytes.
+    struct Slots
+    {
+        RegisteredGlyphs glyphs {};
+        /// Per slot, the generation its last change made; 0 for a slot never touched. @see changesSince
+        std::array<uint64_t, GlyphRegistrationSlots> changedAt {};
+    };
+
+    std::unique_ptr<Slots> _slots; ///< Null until the first registration.
     size_t _count = 0;
     uint64_t _generation = 0;
     /// What snapshot() last returned, dropped by every change: a run of registrations between two frames

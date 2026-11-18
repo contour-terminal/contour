@@ -113,6 +113,12 @@ namespace
             if (to.y <= top || from.y >= bottom)
                 return;
 
+            // An edge wholly right of the window sweeps none of its pixels: the tiles left of a wide glyph's
+            // last one skip most of the outline here.
+            auto const right = static_cast<float>(_width);
+            if (from.x >= right && to.x >= right)
+                return;
+
             auto const slope = (to.x - from.x) / (to.y - from.y);
             if (from.y < top)
                 from = { .x = from.x + (slope * (top - from.y)), .y = top };
@@ -122,7 +128,6 @@ namespace
             // Cut where the edge crosses the left and the right border, so each piece lies wholly on one
             // side of each and clamping it moves no part of it across a pixel.
             auto cuts = std::array { from.y, from.y, from.y, to.y };
-            auto const right = static_cast<float>(_width);
             if (slope != 0)
             {
                 auto const crossing = [&](float border) {

@@ -109,46 +109,65 @@ namespace
         outline.bounds = boundsOf(outline.points);
         return outline;
     }
-
-    [[nodiscard]] proto::WireRegisteredGlyph glyphToWire(vtbackend::GlyphChange const& change)
-    {
-        auto wire = proto::WireRegisteredGlyph { .slot = change.slot };
-        if (!change.glyph)
-            return wire;
-
-        auto const& layout = change.glyph->layout;
-        auto const& outline = change.glyph->outline;
-        wire.registered = 1;
-        wire.unitsPerEm = layout.unitsPerEm;
-        wire.extentFields = static_cast<uint8_t>((layout.advanceWidth ? HasAdvanceWidth : 0)
-                                                 | (layout.lineHeight ? HasLineHeight : 0)
-                                                 | (layout.extentBottom ? HasExtentBottom : 0));
-        wire.advanceWidth = layout.advanceWidth.value_or(0);
-        wire.lineHeight = layout.lineHeight.value_or(0);
-        wire.extentBottom = layout.extentBottom.value_or(0);
-        wire.size = std::to_underlying(layout.size);
-        wire.horizontal = std::to_underlying(layout.horizontal);
-        wire.vertical = std::to_underlying(layout.vertical);
-        wire.span = std::to_underlying(layout.span);
-        wire.padding = { std::bit_cast<uint32_t>(layout.padding.top),
-                         std::bit_cast<uint32_t>(layout.padding.right),
-                         std::bit_cast<uint32_t>(layout.padding.bottom),
-                         std::bit_cast<uint32_t>(layout.padding.left) };
-        wire.contourEnds = outline.contourEnds;
-        wire.points.reserve(outline.points.size());
-        for (auto const& point: outline.points)
-            wire.points.push_back(proto::WireGlyphPoint {
-                .x = point.x,
-                .y = point.y,
-                .onCurve =
-                    point.kind == vtbackend::GlyphPointKind::OnCurve ? uint8_t { 1 } : uint8_t { 0 } });
-        return wire;
-    }
 } // namespace
+
+proto::WireRegisteredGlyph glyphToWire(vtbackend::GlyphChange const& change)
+{
+    auto wire = proto::WireRegisteredGlyph { .slot = change.slot };
+    if (!change.glyph)
+        return wire;
+
+    auto const& layout = change.glyph->layout;
+    auto const& outline = change.glyph->outline;
+    wire.registered = 1;
+    wire.unitsPerEm = layout.unitsPerEm;
+    wire.extentFields = static_cast<uint8_t>((layout.advanceWidth ? HasAdvanceWidth : 0)
+                                             | (layout.lineHeight ? HasLineHeight : 0)
+                                             | (layout.extentBottom ? HasExtentBottom : 0));
+    wire.advanceWidth = layout.advanceWidth.value_or(0);
+    wire.lineHeight = layout.lineHeight.value_or(0);
+    wire.extentBottom = layout.extentBottom.value_or(0);
+    wire.size = std::to_underlying(layout.size);
+    wire.horizontal = std::to_underlying(layout.horizontal);
+    wire.vertical = std::to_underlying(layout.vertical);
+    wire.span = std::to_underlying(layout.span);
+    wire.padding = { std::bit_cast<uint32_t>(layout.padding.top),
+                     std::bit_cast<uint32_t>(layout.padding.right),
+                     std::bit_cast<uint32_t>(layout.padding.bottom),
+                     std::bit_cast<uint32_t>(layout.padding.left) };
+    wire.contourEnds = outline.contourEnds;
+    wire.points.reserve(outline.points.size());
+    for (auto const& point: outline.points)
+        wire.points.push_back(proto::WireGlyphPoint {
+            .x = point.x,
+            .y = point.y,
+            .onCurve = point.kind == vtbackend::GlyphPointKind::OnCurve ? uint8_t { 1 } : uint8_t { 0 } });
+    return wire;
+}
 
 std::vector<proto::WireRegisteredGlyph> glyphsToWire(std::span<vtbackend::GlyphChange const> changes)
 {
     return std::ranges::to<std::vector>(changes | std::views::transform(glyphToWire));
+}
+
+std::expected<GlyphUpdate, GlyphWireError> stageGlyphUpdate(proto::WireRegisteredGlyph const& glyph)
+{
+    if (glyph.slot >= vtbackend::GlyphRegistrationSlots)
+        return std::unexpected { GlyphWireError::Slot };
+    auto update = GlyphUpdate { .codepoint = static_cast<char32_t>(vtbackend::FirstGlyphRegistrationCodepoint
+                                                                   + glyph.slot),
+                                .definition = std::nullopt };
+    if (glyph.registered == 0)
+        return update;
+
+    auto layout = layoutFromWire(glyph);
+    if (!layout)
+        return std::unexpected { GlyphWireError::Layout };
+    auto outline = outlineFromWire(glyph);
+    if (!outline)
+        return std::unexpected { GlyphWireError::Outline };
+    update.definition = GlyphUpdate::Definition { .layout = *layout, .outline = std::move(*outline) };
+    return update;
 }
 
 std::expected<std::vector<GlyphUpdate>, GlyphWireError> stageGlyphUpdates(
@@ -156,23 +175,12 @@ std::expected<std::vector<GlyphUpdate>, GlyphWireError> stageGlyphUpdates(
 {
     auto updates = std::vector<GlyphUpdate> {};
     updates.reserve(glyphs.size());
-    for (auto const& wire: glyphs)
+    for (auto const& glyph: glyphs)
     {
-        if (wire.slot >= vtbackend::GlyphRegistrationSlots)
-            return std::unexpected { GlyphWireError::Slot };
-        auto& update = updates.emplace_back(GlyphUpdate {
-            .codepoint = static_cast<char32_t>(vtbackend::FirstGlyphRegistrationCodepoint + wire.slot),
-            .definition = std::nullopt });
-        if (wire.registered == 0)
-            continue;
-
-        auto layout = layoutFromWire(wire);
-        if (!layout)
-            return std::unexpected { GlyphWireError::Layout };
-        auto outline = outlineFromWire(wire);
-        if (!outline)
-            return std::unexpected { GlyphWireError::Outline };
-        update.definition = GlyphUpdate::Definition { .layout = *layout, .outline = std::move(*outline) };
+        auto update = stageGlyphUpdate(glyph);
+        if (!update)
+            return std::unexpected { update.error() };
+        updates.push_back(std::move(*update));
     }
     return updates;
 }

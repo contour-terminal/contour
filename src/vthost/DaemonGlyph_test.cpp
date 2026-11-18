@@ -240,6 +240,38 @@ TEST_CASE("registering, replacing and clearing after attach follow on the client
     h.loop.blockOn(drive(&h, std::move(scenario)));
 }
 
+TEST_CASE("a replay that changes no glyph leaves the client's glossary alone", "[vthost][glyph][daemon]")
+{
+    // Switching to the alternate screen and back replays the whole screen each time. The glyphs did not
+    // change, so the mirror must not rebuild them -- which would hash every outline again.
+    auto h = GlyphHarness {};
+    auto const session = newSession(h.host);
+    h.serverTerminal(session)->writeToScreen(registerSquare("100000") + "i:\U00100000");
+    h.connect();
+
+    auto scenario = [](GlyphHarness* h, vtworkspace::SessionId session) -> Task<void> {
+        co_await requireUntil(&h->loop, [&] { return mirrorShows(*h, "i:\U00100000"); });
+        REQUIRE(h->mirrored(0x100000) != nullptr);
+        auto const generation = std::as_const(*h->mirror).glyphGlossary().generation();
+        auto const glyph = h->mirrored(0x100000);
+
+        h->serverWrites(session, "\033[?1049h");
+        co_await requireUntil(&h->loop, [&] { return h->mirror->isAlternateScreen(); });
+        h->serverWrites(session, "\033[?1049l");
+        co_await requireUntil(&h->loop, [&] { return !h->mirror->isAlternateScreen(); });
+
+        CHECK(std::as_const(*h->mirror).glyphGlossary().generation() == generation);
+        CHECK(h->mirrored(0x100000) == glyph); // the very same glyph, not an equal one rebuilt
+
+        // A change after that still arrives.
+        h->serverWrites(session, registerSquare("100001"));
+        co_await requireUntil(&h->loop, [&] { return h->mirrored(0x100001) != nullptr; });
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
 TEST_CASE("a client that does not mirror glyphs is sent none", "[vthost][glyph][daemon]")
 {
     auto h = GlyphHarness { ClientOffers::NoRegisteredGlyphs };

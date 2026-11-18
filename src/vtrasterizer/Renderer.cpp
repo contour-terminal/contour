@@ -1037,7 +1037,7 @@ void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells,
             // Ordinary cells only: a cell of a scaled block (OSC 66) is sized and placed by the text path,
             // and each row of the block repeats its head's text.
             else if (auto const* const registered =
-                         cell.sizing.scale.isOrdinary()
+                         registeredGlyphs != nullptr && cell.sizing.scale.isOrdinary()
                              ? vtbackend::registeredGlyphOf(registeredGlyphs, cell.codepoints)
                              : nullptr)
                 // The cell after this one decides whether a two-cell glyph has room to overflow into.

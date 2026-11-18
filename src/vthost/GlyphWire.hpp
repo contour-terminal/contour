@@ -42,11 +42,22 @@ struct GlyphUpdate
     std::optional<Definition> definition; ///< Absent: the slot is cleared.
 };
 
+/// Captures one change of a glossary for the wire.
+/// @param change A slot that changed (@see vtbackend::GlyphGlossary::changesSince).
+/// @return The slot as it travels.
+[[nodiscard]] proto::WireRegisteredGlyph glyphToWire(vtbackend::GlyphChange const& change);
+
 /// Captures changes of a glossary for the wire.
-/// @param changes The slots that changed (@see vtbackend::GlyphGlossary::changesSince).
+/// @param changes The slots that changed.
 /// @return One entry per change, in the same order.
 [[nodiscard]] std::vector<proto::WireRegisteredGlyph> glyphsToWire(
     std::span<vtbackend::GlyphChange const> changes);
+
+/// Judges one slot a peer sent (@see stageGlyphUpdates).
+/// @param glyph The slot.
+/// @return What a glossary takes for it, or why it is refused.
+[[nodiscard]] std::expected<GlyphUpdate, GlyphWireError> stageGlyphUpdate(
+    proto::WireRegisteredGlyph const& glyph);
 
 /// @param glyph One slot as it travels.
 /// @return How many outline points it carries, which is what makes a push large.

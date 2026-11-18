@@ -152,6 +152,7 @@ void ScreenMirror::restart()
     _evictedHeads.clear();
     _images.clear();
     _softFontGeneration.reset();
+    _registeredGlyphRevision.reset();
 }
 
 vtbackend::Screen& ScreenMirror::activePage() const noexcept
@@ -626,9 +627,7 @@ void ScreenMirror::replay(RemoteScreen const& screen, LocalHistory history, Repl
         // left may be one the host has since emptied.
         syncProgramStatus(screen.programStatus, screen.programStatusTiming);
         syncSoftFonts(screen.softFonts, screen.softFontGeneration);
-        // The whole glossary, replacing the mirror's: what the daemon stated since is all in the screen.
-        syncRegisteredGlyphs(std::ranges::to<std::vector>(screen.registeredGlyphs | std::views::values),
-                             GlyphUpdateMode::Replace);
+        replayRegisteredGlyphs(screen);
         // The page has to be the right one BEFORE _screenType is adopted: activePage() reads it.
         auto const wantAlternate = screen.screenType == 1;
         if (_terminal->isAlternateScreen() != wantAlternate)
@@ -1069,19 +1068,51 @@ void ScreenMirror::syncSoftFonts(std::span<proto::WireSoftFont const> fonts, uin
     _terminal->markScreenDirty();
 }
 
+void ScreenMirror::replayRegisteredGlyphs(RemoteScreen const& screen)
+{
+    // A replay re-asserts the screen's state, but most are a resize or a switch of page with the glyphs as
+    // they were: rebuilding a glossary means hashing every outline in it.
+    if (_registeredGlyphRevision == screen.registeredGlyphRevision)
+        return;
+    auto updates = std::vector<GlyphUpdate> {};
+    updates.reserve(screen.registeredGlyphs.size());
+    for (auto const& glyph: screen.registeredGlyphs | std::views::values)
+    {
+        auto update = stageGlyphUpdate(glyph);
+        if (!update)
+        {
+            refuseRegisteredGlyphs(update.error());
+            return;
+        }
+        updates.push_back(std::move(*update));
+    }
+    applyRegisteredGlyphs(std::move(updates), GlyphUpdateMode::Replace);
+    _registeredGlyphRevision = screen.registeredGlyphRevision;
+}
+
 void ScreenMirror::syncRegisteredGlyphs(std::span<proto::WireRegisteredGlyph const> glyphs,
                                         GlyphUpdateMode mode)
 {
     auto staged = stageGlyphUpdates(glyphs);
     if (!staged)
     {
-        clientLog()("attach: refusing the daemon's registered glyphs (reason {}); keeping the ones held",
-                    std::to_underlying(staged.error()));
+        refuseRegisteredGlyphs(staged.error());
         return;
     }
+    applyRegisteredGlyphs(*std::move(staged), mode);
+}
+
+void ScreenMirror::refuseRegisteredGlyphs(GlyphWireError reason) const
+{
+    clientLog()("attach: refusing the daemon's registered glyphs (reason {}); keeping the ones held",
+                std::to_underlying(reason));
+}
+
+void ScreenMirror::applyRegisteredGlyphs(std::vector<GlyphUpdate> updates, GlyphUpdateMode mode)
+{
     auto& glossary = _terminal->glyphGlossary();
     auto const generation = glossary.generation();
-    applyGlyphUpdates(glossary, *std::move(staged), mode);
+    applyGlyphUpdates(glossary, std::move(updates), mode);
     if (glossary.generation() != generation)
         _terminal->markScreenDirty();
 }
