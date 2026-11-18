@@ -79,6 +79,14 @@ namespace
     }
 } // namespace
 
+Run outsideConfiguration(Run run)
+{
+    run.repo = "retired";
+    run.repoPath = "/home/u/projects/retired";
+    run.worktree = std::format("{}/retired/{}", WorktreeRoot, run.id);
+    return run;
+}
+
 Engine bootEngine(World const& world)
 {
     auto context = StartContext { .monoMs = StartMonoMs,

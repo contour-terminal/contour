@@ -4,8 +4,8 @@ contour: the pull request list is incomplete
 │ MY PULL REQUESTS                                                     │ │ Report the Qt macOS bug that drops Ctrl+Cm… │
 │ no open pull requests                                                │ │                                             │
 │                                                                      │ │ issue     #2356                             │
-│ ISSUES WITHOUT A PR                                                  │ │ url       https://github.com/contour-termi… │
-│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │                                             │
+│ ISSUES WITHOUT A PR                                                  │ │ url       https://github.com/contour-termin │
+│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │             al/contour/issues/2356          │
 │   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │                                             │
 │   #2253 Switch `daemon` Same `client`                                │ │                                             │
 │   #2163 OSC 133: optional nonce to reject forged command lines and … │ │                                             │

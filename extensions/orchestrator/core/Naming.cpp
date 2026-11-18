@@ -66,7 +66,12 @@ std::string branchName(RunId const& runId)
 
 std::string worktreePath(std::string_view root, std::string_view repo, RunId const& runId)
 {
-    return std::format("{}/{}/{}", root, repo, runId.text());
+    return worktreePath(root, repo, runId.text());
+}
+
+std::string worktreePath(std::string_view root, std::string_view repo, std::string_view runId)
+{
+    return std::format("{}/{}/{}", root, repo, runId);
 }
 
 } // namespace orchestrator

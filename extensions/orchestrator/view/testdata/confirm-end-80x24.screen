@@ -18,7 +18,7 @@
 │ task      fix CI                                                             │
 │ model     sonnet                                                             │
 │ state     running                                                            │
-│ branch    agent/pr-2375-20261113-150847                                      │
+│ branch    agent/pr-2375-20261113-150847…                                     │
 ╰──────────────────────────────────────────────────────────────────────────────╯
  ↑↓ move · enter open · ? help · / filter · R refresh · e end run · x retry re… 
  end pr-2375-20261113-150847? e to confirm · esc to keep                        

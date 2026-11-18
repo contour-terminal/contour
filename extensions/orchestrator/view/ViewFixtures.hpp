@@ -65,6 +65,11 @@ struct World
                             ItemRef item,
                             std::string_view task = "fix_ci");
 
+/// A run moved outside the configuration: of a repository the configuration no longer names.
+/// @param run A run, such as storedRun() makes.
+/// @return @p run, of the repository `retired`, with its checkout and worktree named after it.
+[[nodiscard]] Run outsideConfiguration(Run run);
+
 /// Compares a screen with its golden file `view/testdata/<name>.screen`. With ORCHESTRATOR_UPDATE_GOLDENS set
 /// in the environment, (re)writes the file instead.
 /// @param name The golden's name.

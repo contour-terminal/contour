@@ -95,17 +95,40 @@ struct Fixture
                      task);
 }
 
+/// A running agent that never reported a status: what a folder-trust prompt looks like from outside.
+[[nodiscard]] Run unreportedRun()
+{
+    auto run = storedRun(Running {}, RunningId, ChangeRequestRef { 2375 });
+    run.lastStatus = std::nullopt;
+    return run;
+}
+
+/// What a kept run records when its checks stopped at `common-dir`.
+constexpr auto CommonDirReason =
+    "git uses another directory than the main checkout's .git; nothing more was run there"sv;
+
 /// The worlds the golden screens are drawn from.
 struct Scene
 {
     std::string_view name = {};
     World world = {};
-    std::string_view keys = {}; ///< Typed before the screen is drawn.
+    std::string_view keys = {};                         ///< Typed before the screen is drawn.
+    std::vector<Size> sizes = { Wide, Medium, Narrow }; ///< The sizes it is drawn at.
 };
 
 [[nodiscard]] std::vector<Scene> scenes()
 {
     auto const listsOnly = World { .issues = { "github/issues-open.json" } };
+    auto const keptReasons =
+        World { .prs = { "github/prs-empty.json" },
+                .stored = { storedRun(Finished { .ended = Ended::EndedByYou,
+                                                 .fate = Fate::Kept,
+                                                 .entries = { std::string { CommonDirReason } },
+                                                 .seen = Seen::Opened,
+                                                 .endedWallMs = DispatchWallMs },
+                                      KeptId,
+                                      IssueRef { 2356 },
+                                      "issue") } };
     return {
         Scene { .name = "empty", .world = World { .configJson = "{}" } },
         Scene { .name = "lists", .world = listsOnly },
@@ -126,6 +149,27 @@ struct Scene
                                      finishedRun(KeptId, IssueRef { 2356 }, Fate::Kept, Seen::Opened, "issue"),
                                  } },
                 .keys = "\x1b[F"sv },
+        Scene { .name = "outside",
+                .world = World { .prs = { "github/prs-empty.json" },
+                                 .stored = {
+                                     outsideConfiguration(storedRun(Running {}, RunningId, ChangeRequestRef { 2375 })),
+                                     outsideConfiguration(
+                                         finishedRun(KeptId, IssueRef { 2356 }, Fate::Kept, Seen::Opened, "issue")),
+                                 } },
+                .keys = "\x1b[F"sv,
+                .sizes = { Wide, Narrow } },
+        Scene { .name = "trust-hint",
+                .world = World { .prs = { "github/prs-empty.json" }, .stored = { unreportedRun() } },
+                .keys = "\x1b[F"sv,
+                .sizes = { Medium } },
+        Scene { .name = "kept-reasons",
+                .world = keptReasons,
+                .keys = "\x1b[F"sv,
+                .sizes = { Wide } },
+        Scene { .name = "kept-reasons",
+                .world = keptReasons,
+                .keys = "\x1b[F\r"sv,
+                .sizes = { Narrow } },
     };
 }
 
@@ -184,7 +228,7 @@ TEST_CASE("the breakpoints are ordered as choose() requires", "[orchestrator][vi
 TEST_CASE("golden screens", "[orchestrator][view]")
 {
     for (auto const& scene: scenes())
-        for (auto const size: { Wide, Medium, Narrow })
+        for (auto const size: scene.sizes)
         {
             auto const name = std::format("{}-{}x{}", scene.name, size.width, size.height);
             SECTION(name)
@@ -313,6 +357,15 @@ TEST_CASE("key input", "[orchestrator][view]")
         .prs = { "github/prs-empty.json" },
         .stored = { finishedRun(KeptId, IssueRef { 2356 }, Fate::Kept, Seen::New, "issue") },
     };
+    auto const outsideRun = World {
+        .prs = { "github/prs-empty.json" },
+        .stored = { outsideConfiguration(storedRun(Running {}, RunningId, ChangeRequestRef { 2375 })) },
+    };
+    auto const outsideKept = World {
+        .prs = { "github/prs-empty.json" },
+        .stored = { outsideConfiguration(
+            finishedRun(KeptId, IssueRef { 2356 }, Fate::Kept, Seen::Opened, "issue")) },
+    };
     auto const selectableIn = [](World const& world) {
         auto fixture = Fixture { world };
         return static_cast<std::size_t>(
@@ -420,6 +473,23 @@ TEST_CASE("key input", "[orchestrator][view]")
           .keys = "\x1b[F\r",
           .expected = { .selected = selectableIn(withKept) - 1 },
           .actions = { MarkSeenAction { .run = std::string { KeptId } } } },
+        { .name = "x on a kept entry outside the configuration",
+          .world = &outsideKept,
+          .size = Wide,
+          .keys = "\x1b[Fx",
+          .expected = { .selected = selectableIn(outsideKept) - 1 } },
+        { .name = "e, e on an active run outside the configuration",
+          .world = &outsideRun,
+          .size = Wide,
+          .keys = "\x1b[Fee",
+          .expected = { .selected = selectableIn(outsideRun) - 1 },
+          .actions = { EndRunAction { .run = std::string { RunningId } } } },
+        { .name = "delete on a finished entry outside the configuration",
+          .world = &outsideKept,
+          .size = Wide,
+          .keys = "\x1b[F\x1b[3~",
+          .expected = { .selected = selectableIn(outsideKept) - 1 },
+          .actions = { DismissAction { .run = std::string { KeptId } } } },
         { .name = "delete on a finished entry",
           .world = &withKept,
           .size = Wide,
@@ -604,4 +674,81 @@ TEST_CASE("an agent's age is drawn again when it moves on", "[orchestrator][view
     // Within the minute it shows, nothing is drawn.
     clock.advance(std::chrono::seconds { 30 });
     CHECK(dashboard.frame().empty());
+}
+
+TEST_CASE("x is inert on a run outside the configuration", "[orchestrator][view]")
+{
+    auto fixture = Fixture { World { .prs = { "github/prs-empty.json" },
+                                     .stored = { outsideConfiguration(finishedRun(
+                                         KeptId, IssueRef { 2356 }, Fate::Kept, Seen::Opened, "issue")) } } };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.input("\x1b[F").empty());
+    REQUIRE(fixture.dashboard.selectedRun() == KeptId);
+    CHECK(fixture.dashboard.input("x").empty());
+    CHECK(fixture.dashboard.input("xx").empty());
+    CHECK_FALSE(fixture.screen().contains("x tries the removal again"));
+}
+
+TEST_CASE("the e prompt answered no does nothing", "[orchestrator][view]")
+{
+    auto fixture =
+        Fixture { World { .prs = { "github/prs-empty.json" },
+                          .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }) } } };
+    static_cast<void>(fixture.dashboard.frame());
+    CHECK(fixture.dashboard.input("\x1b[Fe").empty());
+    REQUIRE(fixture.dashboard.interaction().pendingEnd == RunningId);
+    CHECK(fixture.dashboard.input("n").empty());
+    CHECK(fixture.dashboard.interaction().pendingEnd.empty());
+    // Asked once, answered: a second e asks again rather than ending it.
+    CHECK(fixture.dashboard.input("e").empty());
+    CHECK(fixture.dashboard.interaction().pendingEnd == RunningId);
+}
+
+TEST_CASE("a running agent with no status after 30 s hints at a trust prompt", "[orchestrator][view]")
+{
+    auto const at = [](uint64_t sinceStartMs) {
+        return core::SteadyTimePoint { std::chrono::milliseconds { StartMonoMs + sinceStartMs } };
+    };
+    auto engine = bootEngine(World { .prs = { "github/prs-empty.json" }, .stored = { unreportedRun() } });
+    auto const statusAt = [&](uint64_t sinceStartMs) {
+        auto const rows = buildRows(engine, StartMonoMs + sinceStartMs);
+        auto const row = std::ranges::find(rows, RunningId, &Row::run);
+        REQUIRE(row != rows.end());
+        return *row;
+    };
+    auto const hint = DetailLine { .label = "",
+                                   .value = "may be waiting for a folder-trust prompt in its tab",
+                                   .role = Role::Warning };
+
+    // 29 s: no hint yet; 30 s: the row points at the tab.
+    CHECK(statusAt(29'000).status == "working 29s");
+    CHECK(!std::ranges::contains(statusAt(29'000).details, hint));
+    CHECK(statusAt(30'000).status == "waiting? see its tab");
+    CHECK(statusAt(30'000).statusRole == Role::Warning);
+    CHECK(std::ranges::contains(statusAt(30'000).details, hint));
+    // Still endable, and nothing else: the hint answers nothing.
+    CHECK(statusAt(30'000).offers == std::vector { KeyCommand::EndRun });
+
+    // The dashboard draws it at 30 s on its own, asking the engine nothing.
+    auto clock = core::ManualClock { at(29'500) };
+    auto dashboard = Dashboard { engine, dashboardTheme(), clock, Wide };
+    REQUIRE_FALSE(dashboard.frame().empty());
+    CHECK_FALSE(core::tui::test::canvasToString(dashboard.rendered()).contains("waiting? see its tab"));
+    CHECK(dashboard.nextRepaintDue() == at(30'000));
+    clock.advance(std::chrono::milliseconds { 500 });
+    CHECK_FALSE(dashboard.frame().empty());
+    CHECK(core::tui::test::canvasToString(dashboard.rendered()).contains("waiting? see its tab"));
+    // A hinted row shows no age: nothing ticks under it.
+    CHECK(dashboard.nextRepaintDue() == std::nullopt);
+
+    // The agent reports: the run records it, and the hint is gone.
+    static_cast<void>(engine.step(PanesListed { .panes = { PaneFact { .pane = std::format("p-{}", RunningId),
+                                                                      .tag = std::string { RunningId },
+                                                                      .status = AgentStatus::Working,
+                                                                      .program = ProgramLiveness::Alive } },
+                                                .requestedMonoMs = StartMonoMs + 31'000,
+                                                .listing = PaneListing::Tagged }));
+    REQUIRE(engine.runs().front().lastStatus == AgentStatus::Working);
+    CHECK(statusAt(31'000).status == "working 31s");
+    CHECK(!std::ranges::contains(statusAt(31'000).details, hint));
 }

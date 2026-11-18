@@ -139,4 +139,12 @@ inline constexpr std::string_view BranchPrefix = "agent/";
 /// @return The worktree's path.
 [[nodiscard]] std::string worktreePath(std::string_view root, std::string_view repo, RunId const& runId);
 
+/// The worktree a dispatch under @p root names for a run already made, such as a stored one: what its stored
+/// worktree is compared with. It makes no new name, so the id need not be a RunId.
+/// @param root The worktree root.
+/// @param repo The repository's name.
+/// @param runId The stored run's id.
+/// @return `<root>/<repo>/<runId>`.
+[[nodiscard]] std::string worktreePath(std::string_view root, std::string_view repo, std::string_view runId);
+
 } // namespace orchestrator

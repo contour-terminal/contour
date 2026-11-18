@@ -148,21 +148,72 @@ namespace
         return std::format("{}{}", ms / unit.unitMs, unit.suffix);
     }
 
-    /// @return Whether the run's row shows its age at @p nowMonoMs: it runs or is blocked, and its age is
-    /// known.
-    [[nodiscard]] bool showsAge(Run const& run, uint64_t nowMonoMs) noexcept
+    constexpr auto TrustPromptHintAfterMs =
+        static_cast<uint64_t>(std::chrono::milliseconds { TrustPromptHintAfter }.count());
+
+    /// @return When the run's row starts to hint at a trust prompt: it runs, its agent never reported a
+    /// status
+    ///         (Run::lastStatus, which the run keeps across a restart of the guest), and when its tab opened
+    ///         is known; std::nullopt otherwise.
+    [[nodiscard]] std::optional<uint64_t> trustHintFrom(Run const& run) noexcept
+    {
+        if (!std::holds_alternative<Running>(run.state) || run.lastStatus || run.runningSinceMs == 0)
+            return std::nullopt;
+        return run.runningSinceMs + TrustPromptHintAfterMs;
+    }
+
+    /// What an agent's row says it is doing.
+    enum class AgentLook : uint8_t
+    {
+        Reported = 0,  ///< What its agent last reported, or its state, with its age.
+        AwaitsTrust,   ///< Nothing reported for TrustPromptHintAfter: a folder-trust prompt may wait in its
+                       ///< tab.
+        OutsideConfig, ///< Outside the configuration and untouched: left alone until the user ends it.
+    };
+
+    /// @return Whether nothing has happened to the run since its agent started: it runs, is blocked or done.
+    ///         Once the user ends it, what it is doing says more than where it belongs.
+    [[nodiscard]] bool isUntouched(Run const& run) noexcept
+    {
+        return std::holds_alternative<Running>(run.state) || std::holds_alternative<Blocked>(run.state)
+               || std::holds_alternative<Done>(run.state);
+    }
+
+    [[nodiscard]] AgentLook agentLookOf(Run const& run, RunScope scope, uint64_t nowMonoMs) noexcept
+    {
+        if (scope == RunScope::Outside && isUntouched(run))
+            return AgentLook::OutsideConfig;
+        if (scope == RunScope::Outside)
+            return AgentLook::Reported;
+        auto const hintFrom = trustHintFrom(run);
+        return hintFrom && nowMonoMs >= *hintFrom ? AgentLook::AwaitsTrust : AgentLook::Reported;
+    }
+
+    /// @return Whether the run's row shows its age at @p nowMonoMs: it shows what was reported, it runs or is
+    ///         blocked, and its age is known.
+    [[nodiscard]] bool showsAge(Run const& run, RunScope scope, uint64_t nowMonoMs) noexcept
     {
         auto const ages =
             std::holds_alternative<Running>(run.state) || std::holds_alternative<Blocked>(run.state);
-        return ages && run.runningSinceMs != 0 && nowMonoMs >= run.runningSinceMs;
+        return ages && agentLookOf(run, scope, nowMonoMs) == AgentLook::Reported && run.runningSinceMs != 0
+               && nowMonoMs >= run.runningSinceMs;
     }
 
     /// @return The run's age since its tab opened, after a space; empty when that is not known.
-    [[nodiscard]] std::string ageOf(Run const& run, uint64_t nowMonoMs)
+    [[nodiscard]] std::string ageOf(Run const& run, RunScope scope, uint64_t nowMonoMs)
     {
-        if (!showsAge(run, nowMonoMs))
+        if (!showsAge(run, scope, nowMonoMs))
             return {};
         return std::format(" {}", ageText(nowMonoMs - run.runningSinceMs));
+    }
+
+    /// What a run's row says when it is outside the configuration.
+    constexpr auto OutsideStatus = "outside the configuration"sv;
+
+    /// What the details of a run outside the configuration always say, first.
+    [[nodiscard]] DetailLine outsideDetail()
+    {
+        return DetailLine { .label = "", .value = std::string { OutsideStatus }, .role = Role::Warning };
     }
 
     /// Whether rows name their repository.
@@ -175,6 +226,7 @@ namespace
     /// What every row needs to know about the lists it is part of.
     struct Lists
     {
+        Engine const* engine = nullptr;          ///< The engine, which tells a run's scope.
         Config const* config = nullptr;          ///< The configuration.
         RepoPrefix prefix = RepoPrefix::Omitted; ///< Whether rows name their repository.
         uint64_t nowMonoMs = 0;                  ///< Now.
@@ -247,11 +299,13 @@ namespace
 
     [[nodiscard]] Row agentRow(Lists const& lists, Run const& run)
     {
-        auto const age = ageOf(run, lists.nowMonoMs);
+        auto const scope = lists.engine->scopeOf(run);
+        auto const look = agentLookOf(run, scope, lists.nowMonoMs);
+        auto const age = ageOf(run, scope, lists.nowMonoMs);
         auto const reported = [&](AgentStatus fallback) {
             return agentStatusName(run.lastStatus.value_or(fallback));
         };
-        auto const [mark, role, status] =
+        auto [mark, role, status] =
             std::visit(Overloaded {
                            [&](Running const&) {
                                return std::tuple { "○"sv,
@@ -269,9 +323,32 @@ namespace
                            [&](auto const&) { return std::tuple { "◌"sv, Role::Dim, runStateText(run) }; },
                        },
                        run.state);
+        // An active run outside the configuration stays endable: its cleanup works from what the run stored.
         auto offers = std::vector<KeyCommand> {};
         if (countsAsActive(run))
             offers.push_back(KeyCommand::EndRun);
+        // What the row stands out for comes first, so that a short details panel still shows it.
+        auto details = std::vector<DetailLine> {};
+        if (scope == RunScope::Outside)
+            details.push_back(outsideDetail());
+        auto statusRole = role == Role::Text ? Role::Dim : role;
+        switch (look)
+        {
+            case AgentLook::Reported: break;
+            case AgentLook::AwaitsTrust:
+                // Only a pointer to the tab: the prompt is the user's to answer.
+                status = "waiting? see its tab";
+                statusRole = Role::Warning;
+                details.push_back(DetailLine { .label = "",
+                                               .value = "may be waiting for a folder-trust prompt in its tab",
+                                               .role = Role::Warning });
+                break;
+            case AgentLook::OutsideConfig:
+                status = OutsideStatus;
+                statusRole = Role::Warning;
+                break;
+        }
+        std::ranges::move(runDetails(lists, run), std::back_inserter(details));
         auto const text = std::format("{} · {} · {}", itemName(run), taskLabel(lists.config, run), run.model);
         return Row { .kind = RowKind::Agent,
                      .mark = std::string { mark },
@@ -279,17 +356,22 @@ namespace
                      .prefix = prefixOf(lists, run.repo),
                      .text = clean(text),
                      .status = clean(status),
-                     .statusRole = role == Role::Text ? Role::Dim : role,
+                     .statusRole = statusRole,
                      .run = run.id,
                      .offers = std::move(offers),
                      .title = clean(text),
-                     .details = runDetails(lists, run) };
+                     .details = std::move(details) };
     }
 
     [[nodiscard]] Row finishedRow(Lists const& lists, Run const& run, Finished const& finished)
     {
         auto const isChecking = !std::holds_alternative<Finished>(run.state);
         auto const kept = finished.fate == Fate::Kept;
+        // Outside the configuration a kept worktree's removal is never tried again: its checks need a
+        // configured repository.
+        auto const scope = lists.engine->scopeOf(run);
+        auto const isRetryable = kept && !isChecking && scope != RunScope::Outside;
+        // Its outcome is the row's status; where it belongs is in its details.
         auto status = std::string {};
         auto statusRole = Role::Passing;
         if (isChecking)
@@ -306,18 +388,21 @@ namespace
             status = "removed";
 
         auto offers = std::vector<KeyCommand> {};
-        if (!isChecking && kept)
+        if (isRetryable)
             offers.push_back(KeyCommand::RetryRemoval);
         if (!isChecking)
             offers.push_back(KeyCommand::Dismiss);
 
-        auto details = runDetails(lists, run);
+        auto details = std::vector<DetailLine> {};
+        if (scope == RunScope::Outside)
+            details.push_back(outsideDetail());
+        std::ranges::move(runDetails(lists, run), std::back_inserter(details));
         if (run.failure)
             details.push_back(
                 DetailLine { .label = "failure", .value = clean(run.failure->why), .role = Role::Failing });
         for (auto const& entry: finished.entries)
             details.push_back(DetailLine { .label = "", .value = clean(entry), .role = Role::Warning });
-        if (!isChecking && kept)
+        if (isRetryable)
             details.push_back(
                 DetailLine { .label = "", .value = "x tries the removal again", .role = Role::Dim });
 
@@ -362,19 +447,68 @@ namespace
         };
         return !std::ranges::search(haystack, needle, {}, lower, lower).empty();
     }
+
+    /// Appends the AGENTS and FINISHED sections: every stored run, in the engine's order.
+    void appendRunSections(std::vector<Row>& rows, Engine const& engine, Lists const& lists)
+    {
+        auto agents = std::vector<Row> {};
+        auto finished = std::vector<Row> {};
+        for (auto const& run: engine.runs())
+        {
+            if (auto const* const entry = finishedEntryOf(run))
+                finished.push_back(finishedRow(lists, run, *entry));
+            else
+                agents.push_back(agentRow(lists, run));
+        }
+        auto const active = std::ranges::count_if(engine.runs(), countsAsActive);
+        appendSection(rows,
+                      lists.config != nullptr
+                          ? std::format("AGENTS · {} OF {} RUNNING", active, lists.config->maxAgents())
+                          : std::format("AGENTS · {} RUNNING", active),
+                      "no agents",
+                      std::move(agents));
+        appendSection(rows,
+                      std::format("FINISHED · {} NEW", newFinishedCount(engine.runs())),
+                      "nothing finished",
+                      std::move(finished));
+    }
+
+    /// The rows without a configuration: what to configure, then the runs the store holds, which stay
+    /// endable while a typo keeps the configuration from loading.
+    [[nodiscard]] std::vector<Row> unconfiguredRows(Engine const& engine, uint64_t nowMonoMs)
+    {
+        auto const hasRuns = !engine.runs().empty();
+        auto rows = std::vector<Row> {
+            Row { .kind = RowKind::Notice,
+                  .text = hasRuns ? "Only the runs are listed until the orchestrator is configured."
+                                  : "Nothing to list until the orchestrator is configured." },
+            Row { .kind = RowKind::Notice, .text = "Configure daemon.extensions.orchestrator.config:" },
+            Row { .kind = RowKind::Notice, .text = "worktree_root, models, repos and tasks." },
+            Row { .kind = RowKind::Notice, .text = "The line above says what is missing or wrong." },
+        };
+        if (hasRuns)
+            appendRunSections(rows, engine, Lists { .engine = &engine, .nowMonoMs = nowMonoMs });
+        return rows;
+    }
 } // namespace
 
-std::optional<uint64_t> nextAgeChange(Engine const& engine, uint64_t nowMonoMs)
+std::optional<uint64_t> nextRowChange(Engine const& engine, uint64_t nowMonoMs)
 {
     auto earliest = std::optional<uint64_t> {};
+    auto const consider = [&](uint64_t at) {
+        earliest = earliest ? std::min(*earliest, at) : at;
+    };
     for (auto const& run: engine.runs())
     {
-        if (!showsAge(run, nowMonoMs))
+        auto const scope = engine.scopeOf(run);
+        if (auto const hintFrom = trustHintFrom(run);
+            scope != RunScope::Outside && hintFrom && nowMonoMs < *hintFrom)
+            consider(*hintFrom);
+        if (!showsAge(run, scope, nowMonoMs))
             continue;
         auto const age = nowMonoMs - run.runningSinceMs;
         auto const unitMs = ageUnitOf(age).unitMs;
-        auto const changesAt = run.runningSinceMs + (((age / unitMs) + 1) * unitMs);
-        earliest = earliest ? std::min(*earliest, changesAt) : changesAt;
+        consider(run.runningSinceMs + (((age / unitMs) + 1) * unitMs));
     }
     return earliest;
 }
@@ -383,15 +517,11 @@ std::vector<Row> buildRows(Engine const& engine, uint64_t nowMonoMs)
 {
     auto const* const config = engine.config();
     if (config == nullptr)
-        return {
-            Row { .kind = RowKind::Notice, .text = "Nothing to list until the orchestrator is configured." },
-            Row { .kind = RowKind::Notice, .text = "Configure daemon.extensions.orchestrator.config:" },
-            Row { .kind = RowKind::Notice, .text = "worktree_root, models, repos and tasks." },
-            Row { .kind = RowKind::Notice, .text = "The line above says what is missing or wrong." },
-        };
+        return unconfiguredRows(engine, nowMonoMs);
 
     auto const repos = engine.repositories();
-    auto const lists = Lists { .config = config,
+    auto const lists = Lists { .engine = &engine,
+                               .config = config,
                                .prefix = repos.size() > 1 ? RepoPrefix::Shown : RepoPrefix::Omitted,
                                .nowMonoMs = nowMonoMs };
 
@@ -405,29 +535,10 @@ std::vector<Row> buildRows(Engine const& engine, uint64_t nowMonoMs)
             issues.push_back(issueRow(lists, repo, issue));
     }
 
-    auto agents = std::vector<Row> {};
-    auto finished = std::vector<Row> {};
-    for (auto const& run: engine.runs())
-    {
-        if (auto const* const entry = finishedEntryOf(run))
-            finished.push_back(finishedRow(lists, run, *entry));
-        else
-            agents.push_back(agentRow(lists, run));
-    }
-
     auto rows = std::vector<Row> {};
     appendSection(rows, "MY PULL REQUESTS", "no open pull requests", std::move(pullRequests));
     appendSection(rows, "ISSUES WITHOUT A PR", "no issues without a pull request", std::move(issues));
-    appendSection(rows,
-                  std::format("AGENTS · {} OF {} RUNNING",
-                              std::ranges::count_if(engine.runs(), countsAsActive),
-                              config->maxAgents()),
-                  "no agents",
-                  std::move(agents));
-    appendSection(rows,
-                  std::format("FINISHED · {} NEW", newFinishedCount(engine.runs())),
-                  "nothing finished",
-                  std::move(finished));
+    appendRunSections(rows, engine, lists);
     return rows;
 }
 
@@ -467,6 +578,58 @@ std::size_t positionOfSelectable(std::span<Row const> rows,
         ++seen;
     }
     return shown.size();
+}
+
+std::vector<std::string> wrap(std::string_view text, int firstColumns, int nextColumns)
+{
+    auto lines = std::vector<std::string> {};
+    if (firstColumns <= 0)
+        return lines;
+    auto line = std::string {};
+    auto used = 0;
+    auto const limit = [&] {
+        return lines.empty() ? firstColumns : std::max(1, nextColumns);
+    };
+    auto const endLine = [&] {
+        lines.push_back(std::move(line));
+        line.clear();
+        used = 0;
+    };
+    for (auto const word: std::views::split(displayText(text, MaxCutChars), ' '))
+    {
+        auto const wordText = std::string_view { word.begin(), word.end() };
+        if (wordText.empty())
+            continue;
+        auto const width = columnsOf(wordText);
+        if (used > 0 && used + 1 + width <= limit())
+        {
+            line += ' ';
+            line += wordText;
+            used += 1 + width;
+            continue;
+        }
+        if (used > 0)
+            endLine();
+        if (width <= limit())
+        {
+            line = std::string { wordText };
+            used = width;
+            continue;
+        }
+        // Wider than a line: broken between clusters, a cluster wider than the line standing alone.
+        for (auto const& cluster: unicode::utf8_grapheme_segmenter(wordText))
+        {
+            auto const clusterWidth = core::tui::graphemeClusterWidth(cluster);
+            if (used > 0 && used + clusterWidth > limit())
+                endLine();
+            for (auto const codepoint: cluster)
+                appendUtf8(line, codepoint);
+            used += clusterWidth;
+        }
+    }
+    if (used > 0)
+        endLine();
+    return lines;
 }
 
 int columnsOf(std::string_view text)

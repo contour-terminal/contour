@@ -19,6 +19,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -173,7 +174,7 @@ struct Dashboard::State
     uint64_t rowsBuiltAtMs = 0; ///< When @ref rows was built, in the engine's monotonic milliseconds.
     std::size_t rowBuilds = 0;  ///< How often @ref rows was built.
     std::optional<uint64_t>
-        ageChangeMs; ///< When an age the rows show changes next; std::nullopt: none shown.
+        rowChangeMs; ///< When a row changes next with time alone (nextRowChange()); std::nullopt: none does.
     std::optional<core::SteadyTimePoint> escapeHeldSince; ///< When a lone ESC that ended an input arrived.
     std::size_t scrollTop = 0;                            ///< The first visible row the list shows.
     Component const* shownLayout = nullptr; ///< The layout @ref toggled and @ref problems belong to.
@@ -299,6 +300,43 @@ namespace
         Dashboard::State& _state;
     };
 
+    /// How far a detail's continuation lines are indented past its value.
+    constexpr auto ContinuationIndent = 2;
+
+    /// One drawn line of the details: a detail's first line with its label, or one of its continuations.
+    struct DetailText
+    {
+        std::string_view label = {}; ///< The detail's label on its first line; empty on a continuation.
+        std::string text = {};       ///< Sanitised and wrapped to its cells.
+        Role role = Role::Text;      ///< How it is drawn.
+        int indent = 0;              ///< The cells it starts past the value column.
+    };
+
+    /// @return The details word-wrapped to @p columns cells, continuation lines indented.
+    [[nodiscard]] std::vector<DetailText> detailLinesOf(std::span<DetailLine const> details, int columns)
+    {
+        auto lines = std::vector<DetailText> {};
+        for (auto const& detail: details)
+        {
+            auto wrapped = wrap(detail.value, columns, columns - ContinuationIndent);
+            if (wrapped.empty())
+                wrapped.emplace_back();
+            for (auto const index: std::views::iota(std::size_t { 0 }, wrapped.size()))
+                lines.push_back(DetailText { .label = index == 0 ? std::string_view { detail.label } : ""sv,
+                                             .text = std::move(wrapped[index]),
+                                             .role = detail.role,
+                                             .indent = index == 0 ? 0 : ContinuationIndent });
+        }
+        return lines;
+    }
+
+    /// @return @p text with a `…` that says more follows, cut to fit @p columns.
+    [[nodiscard]] std::string endingInEllipsis(std::string_view text, int columns)
+    {
+        auto withEllipsis = std::format("{}…", text);
+        return columnsOf(withEllipsis) <= columns ? withEllipsis : cut(withEllipsis, columns);
+    }
+
     /// The selected row's details, in a box.
     class DetailsPanel final: public Component
     {
@@ -318,15 +356,19 @@ namespace
                 return;
             }
             inside.putString(0, 1, cut(row->title, width), styleOf(theme, Role::Text));
-            auto line = 2;
-            for (auto const& detail: row->details | std::views::take(std::max(0, inside.height() - line)))
+            auto const lines = detailLinesOf(row->details, width - LabelColumns);
+            auto const room = static_cast<std::size_t>(std::max(0, inside.height() - 2));
+            for (auto const index: std::views::iota(std::size_t { 0 }, std::min(room, lines.size())))
             {
-                inside.putString(line, 1, cut(detail.label, LabelColumns - 1), styleOf(theme, Role::Dim));
-                inside.putString(line,
-                                 1 + LabelColumns,
-                                 cut(detail.value, width - LabelColumns),
-                                 styleOf(theme, detail.role));
-                ++line;
+                auto const& line = lines[index];
+                auto const y = 2 + static_cast<int>(index);
+                auto const columns = width - LabelColumns - line.indent;
+                // The last line that fits says that more follows.
+                auto const text = index + 1 == room && lines.size() > room
+                                      ? endingInEllipsis(line.text, columns)
+                                      : std::string { line.text };
+                inside.putString(y, 1, cut(line.label, LabelColumns - 1), styleOf(theme, Role::Dim));
+                inside.putString(y, 1 + LabelColumns + line.indent, text, styleOf(theme, line.role));
             }
         }
 
@@ -515,7 +557,7 @@ void Dashboard::State::ensureRows()
     if (rowsState == Rows::Current && now - rowsBuiltAtMs < AgeTickMs)
         return;
     rows = buildRows(engine, now);
-    ageChangeMs = nextAgeChange(engine, now);
+    rowChangeMs = nextRowChange(engine, now);
     rowsState = Rows::Current;
     rowsBuiltAtMs = now;
     ++rowBuilds;
@@ -636,7 +678,7 @@ std::optional<core::SteadyTimePoint> Dashboard::pendingEscapeDeadline() const no
 
 std::optional<core::SteadyTimePoint> Dashboard::nextRepaintDue() const noexcept
 {
-    auto const& due = _state->ageChangeMs;
+    auto const& due = _state->rowChangeMs;
     return due ? std::optional { core::SteadyTimePoint { std::chrono::milliseconds { *due } } }
                : std::nullopt;
 }
@@ -705,8 +747,9 @@ std::string Dashboard::frame()
     auto& state = *_state;
     // An Escape key resolved here asks the engine nothing: it only closes what is open.
     static_cast<void>(state.resolveOverdueEscape());
-    // An age the rows show moved on: they are built and drawn again, though the engine did not change.
-    if (state.ageChangeMs && state.nowMonoMs() >= *state.ageChangeMs)
+    // A row changed with time alone (an age moved on, a trust-prompt hint fell due): the rows are built and
+    // drawn again, though the engine did not change.
+    if (state.rowChangeMs && state.nowMonoMs() >= *state.rowChangeMs)
     {
         state.rowsState = State::Rows::Stale;
         state.repaint = State::Repaint::Needed;

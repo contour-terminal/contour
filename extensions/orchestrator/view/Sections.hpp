@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -16,6 +17,11 @@
 
 namespace orchestrator::view
 {
+
+/// How long a running agent may go without reporting a status before its row hints at a folder-trust prompt:
+/// Claude Code asks once per repository it was never trusted in, in the agent's tab, and reports nothing
+/// while it asks. The hint only points at the tab; nothing answers the prompt.
+inline constexpr auto TrustPromptHintAfter = std::chrono::seconds { 30 };
 
 /// What a row of the list stands for.
 enum class RowKind : uint8_t
@@ -78,9 +84,10 @@ struct Row
 
 /// @param engine The engine.
 /// @param nowMonoMs Now, as buildRows() takes it.
-/// @return When the first agent's age, as its row shows it, changes next (`45s` becomes `46s`, `59s` becomes
-///         `1m`); std::nullopt when no row shows an age.
-[[nodiscard]] std::optional<uint64_t> nextAgeChange(Engine const& engine, uint64_t nowMonoMs);
+/// @return When an agent's row, as buildRows() builds it, changes next with time alone: its age moves on
+///         (`45s` becomes `46s`, `59s` becomes `1m`), or it starts to hint at a trust prompt
+///         (TrustPromptHintAfter); std::nullopt when no row changes with time.
+[[nodiscard]] std::optional<uint64_t> nextRowChange(Engine const& engine, uint64_t nowMonoMs);
 
 /// The rows a filter and a layout keep.
 /// @param rows Every row.
@@ -117,5 +124,13 @@ struct Row
 /// @return The text sanitised (see displayText()), and when it is wider than @p columns, its longest prefix
 ///         of whole grapheme clusters that leaves a cell for the `…` that follows it.
 [[nodiscard]] std::string cut(std::string_view text, int columns);
+
+/// Text safe to draw, word-wrapped. Lines break at spaces; a word wider than a line is broken between
+/// grapheme clusters, never inside a wide character.
+/// @param text Untrusted UTF-8, sanitised as cut() does.
+/// @param firstColumns The cells the first line may take.
+/// @param nextColumns The cells each further line may take, such as @p firstColumns less an indent.
+/// @return The lines, in order; empty when @p text is or @p firstColumns is not positive.
+[[nodiscard]] std::vector<std::string> wrap(std::string_view text, int firstColumns, int nextColumns);
 
 } // namespace orchestrator::view

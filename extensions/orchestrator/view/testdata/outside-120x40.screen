@@ -1,0 +1,40 @@
+pr-2375-20261113-150847: outside the current configuration (/home/u/worktrees/retired/pr-2375-20261113-150847); left as…
+╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
+│ MY PULL REQUESTS                                                     │ │ issue-2356 · work on issue · ended by you   │
+│ no open pull requests                                                │ │                                             │
+│                                                                      │ │           outside the configuration         │
+│ ISSUES WITHOUT A PR                                                  │ │ task      work on issue                     │
+│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │ model     sonnet                            │
+│   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │ state     ended by you, worktree kept,      │
+│   #2253 Switch `daemon` Same `client`                                │ │             seen: M src/vtbackend/Grid.cpp  │
+│   #2163 OSC 133: optional nonce to reject forged command lines and … │ │ branch    agent/issue-2356-20261113-151001  │
+│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead o… │ │ worktree  /home/u/worktrees/retired/issue-2 │
+│                                                                      │ │             356-20261113-151001             │
+│ AGENTS · 1 OF 4 RUNNING                                              │ │ url       https://github.com/contour-termin │
+│ ○ pr-2375 · fix CI · sonnet                outside the configuration │ │             al/contour/issues/2356          │
+│                                                                      │ │           M src/vtbackend/Grid.cpp          │
+│ FINISHED · 0 NEW                                                     │ │           ?? notes.txt                      │
+│   issue-2356 · work on issue · ended by you          kept: 2 entries │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
+ ↑↓ move · enter open · ? help · / filter · R refresh · e end run · x retry removal · del dismiss · esc back            
+ ⬢ agents 1/4                                                                                                           

@@ -501,8 +501,9 @@ void Engine::recheckFinished(std::vector<Effect>& out)
         if (isPurgeable(run, _wallMs, _config->finishedRetention()))
             purge.push_back(run.id);
         // Until its main checkout is known (the first worktree listing), a check could only replace the
-        // kept run's reason with "not known": it waits for a poll that knows it.
-        else if (finished->fate == Fate::Kept && !unknownCheckout(run))
+        // kept run's reason with "not known": it waits for a poll that knows it. One outside the
+        // configuration, which the user ended, is never checked again: its repository is not configured.
+        else if (finished->fate == Fate::Kept && !unknownCheckout(run) && scopeOf(run) != RunScope::Outside)
             retry.push_back(run.id);
     }
     for (auto const& id: purge)

@@ -2481,6 +2481,83 @@ TEST_CASE("a run of a repository no longer configured can still be ended", "[orc
     CHECK(countOf<DispatchRefused>(harness.feed(later)) == 0);
 }
 
+TEST_CASE("a run outside the configuration is never tried again, and may be dismissed",
+          "[orchestrator][engine]")
+{
+    auto const settings =
+        Settings { .repos = R"([ { "name": "other", "path": "~/projects/other", "forge": "github" } ])",
+                   .repoPaths = { OtherPath } };
+    auto const finishedAs = [](Ended ended, Fate fate, std::string_view id) {
+        return storedRun(Finished { .ended = ended,
+                                    .fate = fate,
+                                    .entries = { " M src/a.cpp" },
+                                    .seen = Seen::New,
+                                    .endedWallMs = 0 },
+                         id);
+    };
+    // Ended by the user, so the engine works on it: only the scope keeps x from running its checks.
+    constexpr auto KeptId = "pr-2375-20261113-150848"sv;
+    constexpr auto RemovedId = "pr-2375-20261113-150849"sv;
+    auto const kept = finishedAs(Ended::EndedByYou, Fate::Kept, KeptId);
+    auto const removed = finishedAs(Ended::Completed, Fate::Removed, RemovedId);
+    auto context = contextFor(settings);
+    context.stored = { entryOf(kept), entryOf(removed) };
+    auto harness = Harness { std::move(context) };
+    harness.boot();
+    CHECK(harness.engine().scopeOf(kept) == RunScope::Outside);
+    CHECK(harness.engine().scopeOf(removed) == RunScope::Outside);
+
+    auto const retried = harness.feed(RetryRemovalOf { .run = std::string(KeptId) });
+    CHECK(countOf<RunCommand>(retried) == 0);
+    CHECK(countOf<ReadFile>(retried) == 0);
+    CHECK(holds<Finished>(harness.run(KeptId)));
+    // Nor by the poll that checks the kept worktrees inside the configuration again.
+    auto const polled = harness.wake(2 * Minute);
+    CHECK(std::ranges::none_of(all<RunCommand>(polled),
+                               [&](RunCommand const& command) { return command.tag.starts_with(KeptId); }));
+    CHECK(countOf<ReadFile>(polled) == 0);
+    harness.boot();
+    CHECK(holds<Finished>(harness.run(KeptId)));
+    CHECK(!harness.hasRead("/.git"));
+    for (auto const command: { "git-common-dir", "git-index-flags", "git-status", "git-worktree-remove" })
+        CHECK(harness.commandsIssued(command) == 0);
+
+    // Left alone by the engine, and still dismissed: a dismissal runs nothing.
+    CHECK(std::ranges::contains(all<StoreRemove>(harness.feed(DismissRun { .run = std::string(RemovedId) })),
+                                runKey(RemovedId),
+                                &StoreRemove::key));
+    CHECK(harness.run(RemovedId) == nullptr);
+}
+
+TEST_CASE("a refused configuration places no run outside it", "[orchestrator][engine]")
+{
+    auto context = contextFor({});
+    context.configJson = R"({ "worktree_root": 7 })";
+    auto const stored = storedRun(Running {});
+    context.stored = { entryOf(stored) };
+    auto harness = Harness { std::move(context) };
+    REQUIRE(harness.engine().config() == nullptr);
+    CHECK(harness.engine().scopeOf(stored) == RunScope::Unknown);
+    // With nothing configured, nothing runs: x asks for no check.
+    auto const retried = harness.feed(RetryRemovalOf { .run = std::string(PrId) });
+    CHECK(countOf<RunCommand>(retried) == 0);
+    CHECK(countOf<ReadFile>(retried) == 0);
+}
+
+TEST_CASE("a run dispatched under the configuration is inside it", "[orchestrator][engine]")
+{
+    auto harness = Harness { contextFor({}) };
+    harness.boot();
+    auto const stored = storedRun(Running {});
+    CHECK(harness.engine().scopeOf(stored) == RunScope::Inside);
+    auto moved = stored;
+    moved.worktree += "-moved";
+    CHECK(harness.engine().scopeOf(moved) == RunScope::Outside);
+    moved = stored;
+    moved.repoPath = std::string(OtherPath);
+    CHECK(harness.engine().scopeOf(moved) == RunScope::Outside);
+}
+
 // }}}
 
 // {{{ fix round 2

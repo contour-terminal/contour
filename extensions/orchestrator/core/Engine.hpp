@@ -320,6 +320,17 @@ using Effect = std::variant<RunCommand,
 /// @return `run/<runId>`.
 [[nodiscard]] std::string runKey(std::string_view runId);
 
+/// Whether a run belongs to the current configuration.
+enum class RunScope : uint8_t
+{
+    Inside = 0, ///< Its repository is configured at the path it stored, and its worktree is where a dispatch
+                ///< under this configuration puts it.
+    Outside,    ///< A configuration is loaded, and the run's repository is not in it, moved, or its worktree
+                ///< lies elsewhere.
+    Unknown,    ///< No configuration is loaded (it was refused): nothing says the run is outside, and it is
+                ///< shown and offered as one inside; the engine runs nothing until one is.
+};
+
 /// The orchestrator: every input stepped into the effects it asks for. It does no I/O and reads no clock;
 /// every time is an input.
 class Engine
@@ -386,6 +397,10 @@ class Engine
     [[nodiscard]] std::span<std::string const> repositories() const noexcept { return _repositoryNames; }
     /// @return The configuration the engine runs with; nullptr when it was refused (a problem line says why).
     [[nodiscard]] Config const* config() const noexcept { return _config ? &*_config : nullptr; }
+    /// @param run One of runs().
+    /// @return Whether @p run belongs to the current configuration. One outside it stays endable, its cleanup
+    ///         working from what the run stored, but its removal is never tried again.
+    [[nodiscard]] RunScope scopeOf(Run const& run) const noexcept;
 
   private:
     /// Who a queued command is for: a run's go ahead of the polls.
@@ -457,7 +472,6 @@ class Engine
 
     // Defined in Engine.cpp: runs, the queue and the step's end.
     [[nodiscard]] Run* findRun(std::string_view id) noexcept;
-    [[nodiscard]] bool isInside(Run const& run) const noexcept;
     [[nodiscard]] StepContext contextFor(Run const& run) const noexcept;
     void loadStore(std::span<StoredEntry const> stored);
     void resolveStaleWork(std::span<std::string const> awaited,

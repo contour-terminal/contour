@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -103,6 +104,99 @@ TEST_CASE("agent and finished rows", "[orchestrator][view]")
     CHECK(std::ranges::contains(textsOf(rows, RowKind::Heading), "FINISHED · 1 NEW"));
 }
 
+TEST_CASE("a run outside the configuration is marked and still endable", "[orchestrator][view]")
+{
+    constexpr auto RemovedId = "pr-2366-20261113-140211"sv;
+    auto const finishedAs = [](Fate fate, std::string_view id, ItemRef item) {
+        return outsideConfiguration(
+            storedRun(Finished { .ended = Ended::EndedByYou,
+                                 .fate = fate,
+                                 .entries = fate == Fate::Kept ? std::vector<std::string> { "?? notes.txt" }
+                                                               : std::vector<std::string> {},
+                                 .seen = Seen::Opened,
+                                 .endedWallMs = DispatchWallMs },
+                      id,
+                      std::move(item),
+                      "issue"));
+    };
+    auto const engine = bootEngine(
+        { .stored = { outsideConfiguration(storedRun(Running {}, RunningId, ChangeRequestRef { 2375 })),
+                      finishedAs(Fate::Kept, KeptId, IssueRef { 2356 }),
+                      finishedAs(Fate::Removed, RemovedId, ChangeRequestRef { 2366 }) } });
+    auto const rows = buildRows(engine, StartMonoMs + SixMinutes);
+
+    auto const outside =
+        DetailLine { .label = "", .value = "outside the configuration", .role = Role::Warning };
+
+    // Untouched, the row says where it belongs.
+    auto const* const active = rowOfRun(rows, RunningId);
+    REQUIRE(active != nullptr);
+    CHECK(active->status == "outside the configuration");
+    CHECK(active->offers == std::vector { KeyCommand::EndRun });
+    CHECK(active->details.front() == outside);
+
+    // Its outcome wins in the row; the details still say where it belongs.
+    struct Expected
+    {
+        std::string_view id;
+        std::string_view status;
+    };
+    for (auto const& [id, status]: { Expected { .id = KeptId, .status = "kept: 1 entry" },
+                                     Expected { .id = RemovedId, .status = "removed" } })
+    {
+        CAPTURE(id);
+        auto const* const finished = rowOfRun(rows, id);
+        REQUIRE(finished != nullptr);
+        CHECK(finished->kind == RowKind::Finished);
+        CHECK(finished->status == status);
+        CHECK(finished->offers == std::vector { KeyCommand::Dismiss });
+        CHECK(finished->details.front() == outside);
+        CHECK(std::ranges::none_of(finished->details,
+                                   [](DetailLine const& line) { return line.value.contains("x tries"); }));
+    }
+    // The entries a kept one holds are still shown.
+    CHECK(std::ranges::contains(rowOfRun(rows, KeptId)->details, "?? notes.txt", &DetailLine::value));
+}
+
+TEST_CASE("a run outside the configuration the user ended shows its progress", "[orchestrator][view]")
+{
+    auto ending = outsideConfiguration(storedRun(Ending { .step = EndStep::Status,
+                                                          .cause = Ended::EndedByYou,
+                                                          .resumedFrom = std::nullopt,
+                                                          .removal = Removal::NotIssued },
+                                                 RunningId,
+                                                 ChangeRequestRef { 2375 }));
+    auto const engine = bootEngine({ .stored = { ending } });
+    auto const rows = buildRows(engine, StartMonoMs + SixMinutes);
+    auto const* const row = rowOfRun(rows, RunningId);
+    REQUIRE(row != nullptr);
+    CHECK(row->status == runStateText(engine.runs().front()));
+    CHECK(row->status != "outside the configuration");
+    CHECK(row->details.front().value == "outside the configuration");
+}
+
+TEST_CASE("a refused configuration labels no run outside, and the trust hint still shows",
+          "[orchestrator][view]")
+{
+    auto unreported = storedRun(Running {}, RunningId, ChangeRequestRef { 2375 });
+    unreported.lastStatus = std::nullopt;
+    auto const engine = bootEngine({ .configJson = R"({ "worktree_root": 7 })", .stored = { unreported } });
+    REQUIRE(engine.config() == nullptr);
+    REQUIRE(engine.scopeOf(engine.runs().front()) == RunScope::Unknown);
+
+    auto const rows = buildRows(engine, StartMonoMs + 30'000);
+    CHECK(rows.front().kind == RowKind::Notice);
+    CHECK(std::ranges::contains(textsOf(rows, RowKind::Heading), "AGENTS · 1 RUNNING"));
+    auto const* const row = rowOfRun(rows, RunningId);
+    REQUIRE(row != nullptr);
+    CHECK(row->status == "waiting? see its tab");
+    CHECK(row->offers == std::vector { KeyCommand::EndRun });
+    CHECK(std::ranges::none_of(row->details, [](DetailLine const& line) {
+        return line.value.contains("outside the configuration");
+    }));
+    CHECK(nextRowChange(engine, StartMonoMs + 29'000) == StartMonoMs + 30'000);
+}
+
 TEST_CASE("with more than one repository a row names its own", "[orchestrator][view]")
 {
     auto const engine = bootEngine({
@@ -165,4 +259,19 @@ TEST_CASE("wide characters at the column edge", "[orchestrator][view]")
         CHECK(kept.size() % std::string_view { "語" }.size() == 0);
         CHECK(columnsOf(kept) == ((columns - 1) / 2) * 2);
     }
+}
+
+TEST_CASE("wrap: words fill each line; a word wider than a line is broken", "[orchestrator][view]")
+{
+    CHECK(wrap("git uses another directory", 10, 8)
+          == std::vector<std::string> { "git uses", "another", "director", "y" });
+    CHECK(wrap("short", 10, 8) == std::vector<std::string> { "short" });
+    CHECK(wrap("a  b", 10, 8) == std::vector<std::string> { "a b" });
+    CHECK(wrap("", 10, 8).empty());
+    CHECK(wrap("anything", 0, 8).empty());
+    CHECK(wrap("a\x1b]52;c;x\x07" "b c", 40, 40) == std::vector<std::string> { "a]52;c;xb c" });
+    // Never half a wide character: an odd width leaves a cell blank.
+    for (auto const& line: wrap("語語語語語", 5, 3))
+        CHECK(columnsOf(line) <= 5);
+    CHECK(wrap("語語語語語", 5, 3) == std::vector<std::string> { "語語", "語", "語", "語" });
 }

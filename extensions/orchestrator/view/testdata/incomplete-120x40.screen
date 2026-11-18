@@ -2,11 +2,11 @@ contour: the pull request list shows the first 100; there may be more
 ╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
 │ MY PULL REQUESTS                                                     │ │ Say why the stdio relay failed, and send a… │
 │ ● #100000 Say why the stdio relay failed, and send a hello before h… │ │                                             │
-│ ✓ #100001 examples: add donut-animation, a full-screen animation do… │ │ branch    fix/stdio-attach-starter-hello-0… │
-│ ✓ #100002 contour: tab_style — shapes, fills, materials and widths … │ │ checks    running                           │
-│ ✗ #100003 vtbackend: WIP -- DEC mode 44 and a partial margin-bell t… │ │ url       https://github.com/contour-termi… │
-│ ✗ #100004 Adds ability to set Contour as default terminal on Window… │ │                                             │
-│ ● #100005 Say why the stdio relay failed, and send a hello before h… │ │                                             │
+│ ✓ #100001 examples: add donut-animation, a full-screen animation do… │ │ branch    fix/stdio-attach-starter-hello-0  │
+│ ✓ #100002 contour: tab_style — shapes, fills, materials and widths … │ │             → master                        │
+│ ✗ #100003 vtbackend: WIP -- DEC mode 44 and a partial margin-bell t… │ │ checks    running                           │
+│ ✗ #100004 Adds ability to set Contour as default terminal on Window… │ │ url       https://github.com/contour-termin │
+│ ● #100005 Say why the stdio relay failed, and send a hello before h… │ │             al/contour/pull/100000          │
 │ ✓ #100006 examples: add donut-animation, a full-screen animation do… │ │                                             │
 │ ✓ #100007 contour: tab_style — shapes, fills, materials and widths … │ │                                             │
 │ ✗ #100008 vtbackend: WIP -- DEC mode 44 and a partial margin-bell t… │ │                                             │

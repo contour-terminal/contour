@@ -79,13 +79,14 @@ class Dashboard
     ///         it.
     [[nodiscard]] std::optional<core::SteadyTimePoint> pendingEscapeDeadline() const noexcept;
 
-    /// @return When an agent's age, as the tab shows it, changes next: the guest wakes by then and calls
-    /// frame(),
-    ///         which draws it; std::nullopt when no age is shown. Valid after a frame or an input.
+    /// @return When an agent's row changes next with time alone (see nextRowChange()): the guest wakes by
+    /// then
+    ///         and calls frame(), which draws it; std::nullopt when none does. Valid after a frame or an
+    ///         input.
     [[nodiscard]] std::optional<core::SteadyTimePoint> nextRepaintDue() const noexcept;
 
     /// @return How often the rows were built from the engine: once per input(), and in frame() only after
-    ///         engineChanged() or when an agent's age moved on. For tests.
+    ///         engineChanged() or when a row changed with time. For tests.
     [[nodiscard]] std::size_t rowBuilds() const noexcept;
 
     /// Resolves an ESC whose deadline passed (see pendingEscapeDeadline()), then draws.

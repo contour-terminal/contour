@@ -17,6 +17,7 @@
 
 #include <orchestrator/core/EngineDetail.hpp>
 #include <orchestrator/core/Finished.hpp>
+#include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Overloaded.hpp>
 #include <orchestrator/core/Sanitize.hpp>
 
@@ -201,8 +202,10 @@ std::vector<Effect> Engine::step(Input const& input)
             [&](PaneOpenFailedFor const& failed) { feed(failed.run, PaneOpenFailed { failed.why }, out); },
             [&](Dispatch const& request) { dispatch(request, out); },
             [&](RetryRemovalOf const& retry) {
-                // Its checks run git: with a bad configuration nothing runs, as for a dispatch.
-                if (_config)
+                // Its checks run git against a configured repository: with a bad configuration nothing runs,
+                // as for a dispatch, and a run outside the configuration is never tried again.
+                if (auto const* const run = findRun(retry.run);
+                    run != nullptr && scopeOf(*run) == RunScope::Inside)
                     feed(retry.run, RetryRemoval {}, out);
             },
             [&](EndRun const& end) {
@@ -216,7 +219,17 @@ std::vector<Effect> Engine::step(Input const& input)
                 }
                 feed(end.run, EndByUser {}, out);
             },
-            [&](DismissRun const& dismiss) { feed(dismiss.run, Dismiss {}, out); },
+            [&](DismissRun const& dismiss) {
+                // Dismissing runs nothing, it only forgets a removed run: one outside the configuration that
+                // the engine leaves alone may be dismissed too.
+                if (auto* const run = findRun(dismiss.run); run != nullptr && !isTracked(*run))
+                {
+                    auto const id = run->id;
+                    apply(id, advance(*run, Dismiss {}, contextFor(*run)), out);
+                }
+                else
+                    feed(dismiss.run, Dismiss {}, out);
+            },
             [&](MarkRunSeen const& seen) { feed(seen.run, MarkSeen {}, out); },
             [&](RefreshNow const&) {
                 if (!_config)
@@ -276,18 +289,17 @@ Run* Engine::findRun(std::string_view id) noexcept
     return run != _runs.end() ? &*run : nullptr;
 }
 
-bool Engine::isInside(Run const& run) const noexcept
+RunScope Engine::scopeOf(Run const& run) const noexcept
 {
+    // A refused configuration says nothing about where a run belongs.
     if (!_config)
-        return false;
+        return RunScope::Unknown;
     auto const* const repo = _config->findRepo(run.repo);
     if (repo == nullptr || repo->path != run.repoPath)
-        return false;
-    auto const root = std::string_view { _config->worktreeRoot() };
-    auto const worktree = std::string_view { run.worktree };
-    // Exactly `<worktree_root>/<repo>/<id>`, as a dispatch under this configuration names it.
-    return worktree.size() == root.size() + run.repo.size() + run.id.size() + 2 && worktree.starts_with(root)
-           && worktree.substr(root.size()) == std::format("/{}/{}", run.repo, run.id);
+        return RunScope::Outside;
+    // Exactly where a dispatch under this configuration puts it.
+    return run.worktree == worktreePath(_config->worktreeRoot(), run.repo, run.id) ? RunScope::Inside
+                                                                                   : RunScope::Outside;
 }
 
 StepContext Engine::contextFor(Run const& run) const noexcept
@@ -334,7 +346,7 @@ void Engine::loadStore(std::span<StoredEntry const> stored)
         _runs.push_back(std::move(*run));
     }
     auto const outside = std::ranges::stable_partition(
-        _runs, [this](Run const& run) { return isInside(run) || isEndedByYou(run); });
+        _runs, [this](Run const& run) { return scopeOf(run) == RunScope::Inside || isEndedByYou(run); });
     _insideCount = static_cast<std::size_t>(outside.begin() - _runs.begin());
 }
 

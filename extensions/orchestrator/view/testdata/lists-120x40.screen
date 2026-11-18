@@ -1,11 +1,11 @@
 ╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
 │ MY PULL REQUESTS                                                     │ │ Say why the stdio relay failed, and send a… │
 │ ● #2375 Say why the stdio relay failed, and send a hello before hal… │ │                                             │
-│ ✓ #2369 examples: add donut-animation, a full-screen animation done… │ │ branch    fix/stdio-attach-starter-hello →… │
-│ ✓ #2346 contour: tab_style — shapes, fills, materials and widths fo… │ │ checks    running                           │
-│ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial margin-bell tri… │ │ url       https://github.com/contour-termi… │
-│ ✗ #1847 Adds ability to set Contour as default terminal on Windows … │ │                                             │
-│                                                                      │ │                                             │
+│ ✓ #2369 examples: add donut-animation, a full-screen animation done… │ │ branch    fix/stdio-attach-starter-hello →  │
+│ ✓ #2346 contour: tab_style — shapes, fills, materials and widths fo… │ │             master                          │
+│ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial margin-bell tri… │ │ checks    running                           │
+│ ✗ #1847 Adds ability to set Contour as default terminal on Windows … │ │ url       https://github.com/contour-termin │
+│                                                                      │ │             al/contour/pull/2375            │
 │ ISSUES WITHOUT A PR                                                  │ │                                             │
 │   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │                                             │
 │   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │                                             │
