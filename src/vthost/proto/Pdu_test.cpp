@@ -3114,6 +3114,89 @@ TEST_CASE("SoftFontState round-trips, and carries each font's load rank", "[vtho
     CHECK(asSessionEvent(DecodedPdu { state }).has_value());
 }
 
+TEST_CASE("RegisteredGlyphState round-trips, registered and cleared slots alike", "[vthost][pdu][glyph]")
+{
+    auto const glyph = WireRegisteredGlyph {
+        .slot = 1023,
+        .registered = 1,
+        .unitsPerEm = 2048,
+        .extentFields = 0x05,
+        .advanceWidth = 1200,
+        .lineHeight = 0,
+        .extentBottom = -400,
+        .size = 4,
+        .horizontal = 2,
+        .vertical = 3,
+        .span = 2,
+        .padding = { 0x3DCCCCCD, 0, 0x3E99999A, 0 },
+        .contourEnds = { 2, 3 },
+        .points = { WireGlyphPoint { .x = -5, .y = 70000, .onCurve = 1 },
+                    WireGlyphPoint { .x = 0, .y = 0, .onCurve = 0 },
+                    WireGlyphPoint { .x = 2147483647, .y = -2147483647 - 1, .onCurve = 1 },
+                    WireGlyphPoint { .x = 9, .y = 9, .onCurve = 1 } },
+    };
+    auto const state = RegisteredGlyphState { .session = 4,
+                                              .replace = 1,
+                                              .glyphs = { glyph, WireRegisteredGlyph { .slot = 7 } } };
+    CHECK(roundTrip(DecodedPdu { state }) == DecodedPdu { state });
+    CHECK(roundTrip(DecodedPdu { RegisteredGlyphState { .session = 4 } })
+          == DecodedPdu { RegisteredGlyphState { .session = 4 } });
+
+    STATIC_CHECK(std::to_underlying(PduType::RegisteredGlyphState) == 62);
+    STATIC_CHECK(std::to_underlying(Capability::RegisteredGlyphs) == 33);
+    CHECK(std::ranges::any_of(CapabilityTable, [](CapabilityRow const& row) {
+        return row.capability == Capability::RegisteredGlyphs && row.name == "registered-glyphs";
+    }));
+    // A per-session push, so a mirror receives it with the other session events.
+    auto const event = asSessionEvent(DecodedPdu { state });
+    REQUIRE(event.has_value());
+    CHECK(sessionOf(*event) == 4);
+}
+
+TEST_CASE("a RegisteredGlyphState cut short, or with a coordinate too wide, is malformed",
+          "[vthost][pdu][glyph]")
+{
+    auto const decodes = [](std::span<std::byte const> body) {
+        return decodePdu(frameOf(PduType::RegisteredGlyphState, body)).has_value();
+    };
+    // session, replace, one glyph: a record of slot 0, registered, and the layout -- but no outline.
+    auto record = Writer {};
+    record.u16(0);
+    record.u8(1);
+    auto body = Writer {};
+    body.varint(4);
+    body.u8(0);
+    body.varint(1);
+    body.blob(record.view());
+    CHECK_FALSE(decodes(body.view()));
+
+    // A whole glyph of one point, whose x does not fit 32 bits.
+    auto wide = Writer {};
+    wide.u16(0);
+    wide.u8(1);
+    wide.u16(1000);
+    wide.u8(0);
+    wide.u16(0);
+    wide.u16(0);
+    wide.svarint(0);
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
+        wide.u8(0);
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
+        wide.u32(0);
+    wide.varint(1);
+    wide.u16(0);
+    wide.varint(1);
+    wide.svarint(int64_t { 1 } << 40);
+    wide.svarint(0);
+    wide.u8(1);
+    auto tooWide = Writer {};
+    tooWide.varint(4);
+    tooWide.u8(0);
+    tooWide.varint(1);
+    tooWide.blob(wide.view());
+    CHECK_FALSE(decodes(tooWide.view()));
+}
+
 TEST_CASE("a SoftFontState glyph that does not fit its bitmap is malformed", "[vthost][pdu][softfont]")
 {
     auto const accepted = [](std::vector<std::byte> const& body) {

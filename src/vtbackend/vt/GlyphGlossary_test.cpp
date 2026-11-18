@@ -131,6 +131,38 @@ TEST_CASE("GlyphGlossary: a snapshot does not change under a frame", "[GlyphGlos
     CHECK(registeredGlyphOf(frame.get(), U"\U00100000") == drawn);
 }
 
+TEST_CASE("GlyphGlossary: changes since an earlier state", "[GlyphGlossary]")
+{
+    // What the daemon sends a client that already holds the glossary as it stood.
+    auto const slotsOf = [](std::vector<GlyphChange> const& changes) {
+        return std::ranges::to<std::vector>(changes | std::views::transform(&GlyphChange::slot));
+    };
+    auto glossary = GlyphGlossary {};
+    CHECK(glossary.changesSince(0).empty());
+
+    glossary.registerGlyph(0x100002, GlyphLayout {}, square());
+    glossary.registerGlyph(0x100000, GlyphLayout {}, square());
+    auto const first = glossary.generation();
+    // Everything, ascending, for one that holds nothing.
+    CHECK(slotsOf(glossary.changesSince(0)) == std::vector<uint16_t> { 0, 2 });
+    CHECK(glossary.changesSince(first).empty());
+
+    // A replaced slot and a cleared one, and not the slot left alone.
+    glossary.registerGlyph(0x100005, GlyphLayout {}, square());
+    glossary.clear(0x100002);
+    auto const changes = glossary.changesSince(first);
+    REQUIRE(slotsOf(changes) == std::vector<uint16_t> { 2, 5 });
+    CHECK(changes[0].glyph == nullptr);
+    CHECK(changes[1].glyph == glossary.find(0x100005));
+
+    // Clearing everything is a change of every slot that held a glyph, and of no other.
+    auto const second = glossary.generation();
+    glossary.clear();
+    auto const cleared = glossary.changesSince(second);
+    CHECK(slotsOf(cleared) == std::vector<uint16_t> { 0, 5 });
+    CHECK(std::ranges::all_of(cleared, [](auto const& change) { return change.glyph == nullptr; }));
+}
+
 TEST_CASE("registeredGlyphOf: only a cell that is one codepoint of the block", "[GlyphGlossary]")
 {
     auto glossary = GlyphGlossary {};

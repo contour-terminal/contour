@@ -102,16 +102,16 @@ namespace
         }
         return {};
     }
-
-    [[nodiscard]] GlyphOutlineBounds boundsOf(std::span<GlyphOutlinePoint const> points) noexcept
-    {
-        if (points.empty())
-            return {};
-        auto const [xMin, xMax] = std::ranges::minmax(points, {}, &GlyphOutlinePoint::x);
-        auto const [yMin, yMax] = std::ranges::minmax(points, {}, &GlyphOutlinePoint::y);
-        return { .xMin = xMin.x, .yMin = yMin.y, .xMax = xMax.x, .yMax = yMax.y };
-    }
 } // namespace
+
+GlyphOutlineBounds boundsOf(std::span<GlyphOutlinePoint const> points) noexcept
+{
+    if (points.empty())
+        return {};
+    auto const [xMin, xMax] = std::ranges::minmax(points, {}, &GlyphOutlinePoint::x);
+    auto const [yMin, yMax] = std::ranges::minmax(points, {}, &GlyphOutlinePoint::y);
+    return { .xMin = xMin.x, .yMin = yMin.y, .xMax = xMax.x, .yMax = yMax.y };
+}
 
 std::string_view toString(GlyphRegisterError error) noexcept
 {

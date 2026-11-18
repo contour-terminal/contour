@@ -48,6 +48,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <vthost/GlyphWire.hpp>
 #include <vthost/GridWire.hpp>
 #include <vthost/HostIdentity.hpp>
 #include <vthost/client/NativeClient.hpp>
@@ -344,6 +345,13 @@ class ScreenMirror
     /// @param fonts The daemon's whole set.
     /// @param generation The store generation the daemon captured it at.
     void syncSoftFonts(std::span<proto::WireSoftFont const> fonts, uint64_t generation);
+
+    /// Changes the mirror terminal's Glyph Protocol glyphs as the daemon states them, unless they are not
+    /// glyphs an application could have registered -- in which case the ones the mirror holds stand. The
+    /// caller holds the terminal lock.
+    /// @param glyphs The slots the daemon named.
+    /// @param mode Whether they replace the mirror's glossary or change it.
+    void syncRegisteredGlyphs(std::span<proto::WireRegisteredGlyph const> glyphs, GlyphUpdateMode mode);
 
     /// Places the cursor and publishes the frame. Every entry point ends here.
     void finish(RemoteScreen const& screen);

@@ -274,6 +274,14 @@ namespace
         return layout;
     }
 
+    /// @return The `reply=` of a registration; the default when it is absent or names no mode.
+    [[nodiscard]] GlyphReplyMode replyModeOf(Parameters const& parameters) noexcept
+    {
+        return parameters.get("reply")
+            .and_then([](string_view text) { return named(ReplyModes, text); })
+            .value_or(GlyphReplyMode::All);
+    }
+
     using ParseResult = std::expected<GlyphCommand, GlyphCommandError>;
 
     [[nodiscard]] ParseResult parseSupport(string_view /*rest*/)
@@ -334,9 +342,7 @@ namespace
             return std::unexpected { GlyphCommandError { GlyphMessageIgnored {} } };
 
         // Read before anything that can fail, so every refusal below honours it.
-        auto const reply = parameters.get("reply")
-                               .and_then([](string_view text) { return named(ReplyModes, text); })
-                               .value_or(GlyphReplyMode::All);
+        auto const reply = replyModeOf(parameters);
         auto const refused = [&](GlyphRegisterError reason) {
             return std::unexpected { GlyphCommandError {
                 GlyphRegistrationRefused { .codepoint = *codepoint, .reason = reason, .reply = reply } } };
@@ -439,6 +445,30 @@ std::expected<GlyphCommand, GlyphCommandError> parseGlyphCommand(std::string_vie
 
     auto const verb = std::ranges::find(Verbs, name, &Verb::name);
     return verb != Verbs.end() ? verb->parse(rest) : ignored;
+}
+
+std::string answerOversizedGlyphMessage(std::string_view front)
+{
+    if (!isGlyphProtocol(front))
+        return {};
+    auto const message = front.substr(front.find(';') + 1);
+    auto const separator = message.find(';');
+    // Only a registration carries a payload, so only one can be too large.
+    if (separator == string_view::npos || trim(message.substr(0, separator)) != "r")
+        return {};
+
+    // What follows the last `;` is the payload that was cut off; the parameters are whole.
+    auto const rest = message.substr(separator + 1);
+    auto const parameters = Parameters { rest.substr(0, rest.rfind(';')) };
+    auto const codepoint = parameters.get("cp").and_then(parseCodepoint);
+    auto const reply = replyModeOf(parameters);
+    if (!codepoint || reply == GlyphReplyMode::None)
+        return {};
+    // Out of the block it would have been refused for that, whatever its size.
+    return glyph_reply::registrationRefused(*codepoint,
+                                            isGlyphRegistrationCodepoint(*codepoint)
+                                                ? GlyphRegisterError::PayloadTooLarge
+                                                : GlyphRegisterError::OutOfNamespace);
 }
 
 namespace glyph_reply

@@ -606,12 +606,12 @@ TEST_CASE("KittyGraphics.an_APC_body_past_the_cap_is_dropped_not_dispatched_trun
     auto const& screen = mock.terminal.primaryScreen();
     mock.terminal.setCellPixelSize(ImageSize { Width(2), Height(2) });
 
-    // 160x160 RGBA is 102400 bytes, whose base64 is 136536 -- past the 96 KiB cap.
-    auto pixels = std::string(160uz * 160uz * 4uz, '\xFF');
+    // 100x100 RGBA is 40000 bytes, whose base64 is 53336 -- past the 50 KiB cap.
+    auto pixels = std::string(100uz * 100uz * 4uz, '\xFF');
     auto const encoded = core::base64::encode(pixels);
-    REQUIRE(encoded.size() > MaxApcLength);
+    REQUIRE(encoded.size() > static_cast<std::size_t>(1024 * 50));
 
-    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=160,v=160,i=7;{}\033\\", encoded));
+    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=100,v=100,i=7;{}\033\\", encoded));
 
     // Nothing was placed, and nothing claimed success.
     CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(0)).imageFragment());

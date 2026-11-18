@@ -105,6 +105,7 @@ enum class PduType : uint8_t
     CloseWorkspace = 59,
     Goodbye = 60,
     OpenFirstTab = 61,
+    RegisteredGlyphState = 62,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1195,11 +1196,63 @@ struct SoftFontState
     bool operator==(SoftFontState const&) const = default;
 };
 
+/// One point of a registered glyph's outline on the wire.
+struct WireGlyphPoint
+{
+    int32_t x = 0;
+    int32_t y = 0;
+    uint8_t onCurve = 0; ///< 1 on the curve, 0 a control point.
+    bool operator==(WireGlyphPoint const&) const = default;
+};
+
+/// One slot of a session's Glyph Protocol glossary on the wire: the glyph registered there, or that the
+/// slot is clear. Nothing about identity travels: a glyph's atlas id is a hash of its content, and the
+/// receiver derives it, as it does the outline's bounds.
+struct WireRegisteredGlyph
+{
+    uint16_t slot = 0;       ///< The codepoint minus U+100000; below 1024.
+    uint8_t registered = 0;  ///< 1 a glyph is registered; 0 the slot is clear, and nothing below is read.
+    uint16_t unitsPerEm = 0; ///< vtbackend::GlyphLayout::unitsPerEm.
+    /// Which of the three extent fields the sender declared: bit 0 advanceWidth, bit 1 lineHeight, bit 2
+    /// extentBottom. A field whose bit is clear is absent, not zero.
+    uint8_t extentFields = 0;
+    uint16_t advanceWidth = 0;
+    uint16_t lineHeight = 0;
+    int16_t extentBottom = 0;
+    uint8_t size = 0;       ///< vtbackend::GlyphSizeMode.
+    uint8_t horizontal = 0; ///< vtbackend::GlyphHorizontalAlignment.
+    uint8_t vertical = 0;   ///< vtbackend::GlyphVerticalAlignment.
+    uint8_t span = 0;       ///< vtbackend::GlyphRenderSpan: 1 or 2.
+    /// The padding as top, right, bottom, left: each float's bits, so the fractions arrive as they were.
+    std::array<uint32_t, 4> padding = {};
+    std::vector<uint16_t> contourEnds = {};  ///< Per contour, the index of its last point.
+    std::vector<WireGlyphPoint> points = {}; ///< Every contour's points, one contour after another.
+    bool operator==(WireRegisteredGlyph const&) const = default;
+};
+
+/// Server→client push (Capability::RegisteredGlyphs): slots of a session's Glyph Protocol glossary that
+/// changed. Sent ahead of the rows that may show them, on attach when the session has glyphs and whenever
+/// they change. A glossary too large for one push arrives as several, the first of which may replace.
+struct RegisteredGlyphState
+{
+    uint64_t session = 0; ///< The session the glyphs belong to.
+    /// 1 the receiver first clears every slot it holds for the session; 0 the slots named are changed and
+    /// the rest stand.
+    uint8_t replace = 0;
+    std::vector<WireRegisteredGlyph> glyphs = {};
+    bool operator==(RegisteredGlyphState const&) const = default;
+};
+
 /// Any per-session push a mirror applies as it arrives -- the transient events, and the program-status set --
 /// as a type-safe alternative set: what a consumer handling "a session did something" dispatches over,
 /// without enumerating the catalog's tags itself.
-using SessionEventPdu = std::
-    variant<SessionBell, SessionNotify, SessionClipboard, ProgramStatus, SessionInputEcho, SoftFontState>;
+using SessionEventPdu = std::variant<SessionBell,
+                                     SessionNotify,
+                                     SessionClipboard,
+                                     ProgramStatus,
+                                     SessionInputEcho,
+                                     SoftFontState,
+                                     RegisteredGlyphState>;
 
 /// One node of a tab's split tree on the wire (pre-order): a leaf carries a
 /// session and no children; a split carries a ratio and exactly two children.
@@ -2015,7 +2068,8 @@ using DecodedPdu = std::variant<Invalid,
                                 SetWorkspaceName,
                                 CloseWorkspace,
                                 Goodbye,
-                                OpenFirstTab>;
+                                OpenFirstTab,
+                                RegisteredGlyphState>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

@@ -358,6 +358,10 @@ namespace
     {
         return std::to_underlying(PduType::OpenFirstTab);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(RegisteredGlyphState const&) noexcept
+    {
+        return std::to_underlying(PduType::RegisteredGlyphState);
+    }
     [[nodiscard]] constexpr uint64_t tagOf(CloseWorkspace const&) noexcept
     {
         return std::to_underlying(PduType::CloseWorkspace);
@@ -1058,6 +1062,45 @@ namespace
     void encodeBody(Writer& out, OpenFirstTab const& pdu)
     {
         out.varint(pdu.workspace);
+    }
+
+    void encodeBody(Writer& out, RegisteredGlyphState const& pdu)
+    {
+        out.varint(pdu.session);
+        out.u8(pdu.replace);
+        out.varint(pdu.glyphs.size());
+        // A record of its own, so the fields a later version appends to a glyph stay inside it.
+        for (auto const& glyph: pdu.glyphs)
+        {
+            auto record = Writer {};
+            record.u16(glyph.slot);
+            record.u8(glyph.registered);
+            if (glyph.registered != 0)
+            {
+                record.u16(glyph.unitsPerEm);
+                record.u8(glyph.extentFields);
+                record.u16(glyph.advanceWidth);
+                record.u16(glyph.lineHeight);
+                record.svarint(glyph.extentBottom);
+                record.u8(glyph.size);
+                record.u8(glyph.horizontal);
+                record.u8(glyph.vertical);
+                record.u8(glyph.span);
+                for (auto const bits: glyph.padding)
+                    record.u32(bits);
+                record.varint(glyph.contourEnds.size());
+                for (auto const end: glyph.contourEnds)
+                    record.u16(end);
+                record.varint(glyph.points.size());
+                for (auto const& point: glyph.points)
+                {
+                    record.svarint(point.x);
+                    record.svarint(point.y);
+                    record.u8(point.onCurve);
+                }
+            }
+            out.blob(record.view());
+        }
     }
 
     void encodeSoftGlyph(Writer& out, WireSoftGlyph const& glyph)
@@ -2374,6 +2417,71 @@ namespace
         return Goodbye {};
     }
 
+    /// Reads a signed value that must fit @p Integer, which a svarint on the wire need not.
+    template <std::signed_integral Integer>
+    [[nodiscard]] std::expected<Integer, DecodeError> decodeSigned(Reader& in)
+    {
+        auto const value = in.svarint();
+        if (!value)
+            return std::unexpected(value.error());
+        if (!std::in_range<Integer>(*value))
+            return std::unexpected(DecodeError::MalformedPdu);
+        return static_cast<Integer>(*value);
+    }
+
+    [[nodiscard]] std::expected<WireGlyphPoint, DecodeError> decodeGlyphPoint(Reader& in)
+    {
+        auto point = WireGlyphPoint {};
+        auto error = DecodeError {};
+        if (!assign(decodeSigned<int32_t>(in), point.x, error)
+            || !assign(decodeSigned<int32_t>(in), point.y, error) || !assign(in.u8(), point.onCurve, error))
+            return std::unexpected(error);
+        return point;
+    }
+
+    /// Reads one slot of a glossary. Only its shape is judged here; whether the glyph is one the Glyph
+    /// Protocol could have registered is the receiver's to say (@see stageGlyphUpdates).
+    [[nodiscard]] std::expected<WireRegisteredGlyph, DecodeError> decodeRegisteredGlyph(Reader& outer)
+    {
+        auto const record = outer.blob();
+        if (!record)
+            return std::unexpected(record.error());
+        auto in = Reader { *record };
+        auto glyph = WireRegisteredGlyph {};
+        auto error = DecodeError {};
+        if (!assign(in.u16(), glyph.slot, error) || !assign(in.u8(), glyph.registered, error))
+            return std::unexpected(error);
+        if (glyph.registered == 0)
+            return glyph;
+        if (!assign(in.u16(), glyph.unitsPerEm, error) || !assign(in.u8(), glyph.extentFields, error)
+            || !assign(in.u16(), glyph.advanceWidth, error) || !assign(in.u16(), glyph.lineHeight, error)
+            || !assign(decodeSigned<int16_t>(in), glyph.extentBottom, error)
+            || !assign(in.u8(), glyph.size, error) || !assign(in.u8(), glyph.horizontal, error)
+            || !assign(in.u8(), glyph.vertical, error) || !assign(in.u8(), glyph.span, error))
+            return std::unexpected(error);
+        for (auto& bits: glyph.padding)
+            if (!assign(in.u32(), bits, error))
+                return std::unexpected(error);
+        if (auto const decoded =
+                decodeVector(in, glyph.contourEnds, [](Reader& reader) { return reader.u16(); });
+            !decoded)
+            return std::unexpected(decoded.error());
+        if (auto const decoded = decodeVector(in, glyph.points, decodeGlyphPoint); !decoded)
+            return std::unexpected(decoded.error());
+        return glyph;
+    }
+
+    DecodeResult decodeRegisteredGlyphState(Reader& in)
+    {
+        auto pdu = RegisteredGlyphState {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.session, error) || !assign(in.u8(), pdu.replace, error))
+            return std::unexpected(error);
+        if (auto const decoded = decodeVector(in, pdu.glyphs, decodeRegisteredGlyph); !decoded)
+            return std::unexpected(decoded.error());
+        return pdu;
+    }
+
     DecodeResult decodeOpenFirstTab(Reader& in)
     {
         auto pdu = OpenFirstTab {};
@@ -2863,6 +2971,7 @@ namespace
         DecodeRow { PduType::CloseWorkspace, decodeCloseWorkspace },
         DecodeRow { PduType::Goodbye, decodeGoodbye },
         DecodeRow { PduType::OpenFirstTab, decodeOpenFirstTab },
+        DecodeRow { PduType::RegisteredGlyphState, decodeRegisteredGlyphState },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

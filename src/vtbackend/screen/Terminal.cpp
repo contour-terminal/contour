@@ -2982,6 +2982,7 @@ namespace
         }
 
         void processAPC(std::string_view body) { targetScreen.processAPC(body); }
+        void processOversizedAPC(std::string_view front) { targetScreen.processOversizedAPC(front); }
 
         /// Writes @p codepoint where it fits on the row, and nothing once one has not.
         /// @param codepoint The character.
@@ -10100,6 +10101,13 @@ void TraceHandler::processSequence(Sequence const& sequence)
         display->processSequence(sequence);
     else
         _pendingSequences.emplace_back(sequence);
+}
+
+void TraceHandler::processOversizedAPC(std::string_view front)
+{
+    // Not queued: nothing of it is carried out, so there is no order for it to keep, and its answer is
+    // only that it was too large.
+    _terminal->activeDisplay().processOversizedAPC(front);
 }
 
 void TraceHandler::processAPC(std::string_view body)

@@ -43,6 +43,7 @@
 #include <vthost/ContextWire.hpp>
 #include <vthost/CursorStyle.hpp>
 #include <vthost/DaemonControlWire.hpp>
+#include <vthost/GlyphWire.hpp>
 #include <vthost/GracefulClose.hpp>
 #include <vthost/GridWire.hpp>
 #include <vthost/HostIdentity.hpp>
@@ -481,6 +482,7 @@ void NativeSession::forgetSession(SessionId session)
     _inputEchoPending.erase(session.value);
     _inputEchoSent.erase(session.value);
     _softFontsSent.erase(session.value);
+    _registeredGlyphsSent.erase(session.value);
 }
 
 void NativeSession::sessionResized(SessionId session)
@@ -900,6 +902,61 @@ void NativeSession::pushSoftFonts(SessionId session)
     }
     sent->second = pdu.generation;
     emitSessionEvent(std::move(pdu));
+}
+
+bool NativeSession::mirrorsRegisteredGlyphs() const noexcept
+{
+    return _negotiated && _negotiated->shared.contains(proto::Capability::RegisteredGlyphs);
+}
+
+void NativeSession::pushRegisteredGlyphs(SessionId session)
+{
+    /// How many outline points one push carries at most, a slot counting as one more: some 300 KiB on the
+    /// wire, where a whole glossary of the largest outlines would be tens of megabytes in one frame.
+    static constexpr auto PushWeight = size_t { 32 } * 1024;
+
+    if (!mirrorsRegisteredGlyphs())
+        return;
+    auto* const terminal = _host.terminal(session);
+    if (terminal == nullptr)
+        return;
+    auto const sent = _registeredGlyphsSent.try_emplace(session.value, uint64_t { 0 }).first;
+    auto changes = std::vector<vtbackend::GlyphChange> {};
+    auto replaces = false;
+    {
+        auto const guard = std::lock_guard { std::as_const(*terminal) };
+        auto const& glossary = std::as_const(*terminal).glyphGlossary();
+        if (glossary.generation() == sent->second)
+            return;
+        changes = glossary.changesSince(sent->second);
+        // The first this connection hears of the session's glyphs replaces what its end may hold of them
+        // from an earlier connection.
+        replaces = sent->second == 0;
+        sent->second = glossary.generation();
+    }
+
+    // Converted outside the lock: the changes share the glyphs, which are immutable.
+    auto pdu = proto::RegisteredGlyphState { .session = session.value,
+                                             .replace = replaces ? uint8_t { 1 } : uint8_t { 0 },
+                                             .glyphs = {} };
+    auto weight = size_t { 0 };
+    for (auto& glyph: glyphsToWire(changes))
+    {
+        // A slot cleared before a replace says nothing the replace does not.
+        if (replaces && glyph.registered == 0)
+            continue;
+        if (!pdu.glyphs.empty() && weight + wireGlyphWeight(glyph) > PushWeight)
+        {
+            emitSessionEvent(std::exchange(
+                pdu, proto::RegisteredGlyphState { .session = session.value, .replace = 0, .glyphs = {} }));
+            weight = 0;
+        }
+        weight += wireGlyphWeight(glyph);
+        pdu.glyphs.push_back(std::move(glyph));
+    }
+    // An empty push still has something to say when it replaces: the glossary was emptied.
+    if (!pdu.glyphs.empty() || pdu.replace != 0)
+        emitSessionEvent(pdu);
 }
 
 bool NativeSession::mirrorsInputEcho() const noexcept
@@ -1891,6 +1948,7 @@ void NativeSession::pushDelta(SessionId session)
     // has none yet, and its bail is its first snapshot -- a tab opened after attaching -- not a resync.
     // Ahead of the delta, which may name a glyph of a font this connection has not been given.
     pushSoftFonts(session);
+    pushRegisteredGlyphs(session);
     auto const followed = _followed.find(session.value);
     auto const firstPush = followed == _followed.end() || !followed->second.lastDisplayedPage;
     auto built = buildPush(session, SnapshotMode::Delta);
@@ -2038,6 +2096,7 @@ core::async::Task<void> NativeSession::streamSnapshots(SpawnedFlowClaim claim)
             pushProgramStatus(session, ProgramStatusPush::IfAny);
         // And the soft fonts, for the same reason: the rows that follow name their glyphs.
         pushSoftFonts(session);
+        pushRegisteredGlyphs(session);
         // A snapshot states the echo too, for a client that attached while a prompt waits.
         pushInputEcho(session);
         // A snapshot that stated only the newest records that fit had buildPush queue the older

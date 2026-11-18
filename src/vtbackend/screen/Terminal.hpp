@@ -568,6 +568,7 @@ class TraceHandler: public SequenceHandler
     void executeControlCode(char controlCode) override;
     void processSequence(Sequence const& sequence) override;
     void processAPC(std::string_view body) override;
+    void processOversizedAPC(std::string_view front) override;
     void writeText(char32_t codepoint) override;
     void writeText(std::string_view codepoints, size_t cellCount) override;
     void writeTextEnd() override;
@@ -1265,6 +1266,7 @@ class Terminal: public IStatusLinePublishTarget
     // {{{ Glyph Protocol (APC 25a1)
     /// The glyphs the application registered through the Glyph Protocol.
     [[nodiscard]] GlyphGlossary const& glyphGlossary() const noexcept { return _glyphGlossary; }
+    [[nodiscard]] GlyphGlossary& glyphGlossary() noexcept { return _glyphGlossary; }
 
     /// Carries out one Glyph Protocol message: answers it, and redraws the screen when it changed a glyph.
     /// @param body The APC body, starting with `25a1;`.
@@ -5922,6 +5924,10 @@ class Terminal: public IStatusLinePublishTarget
             terminal.sequenceHandler().processSequence(sequence);
         }
         void processAPC(std::string_view body) { terminal.sequenceHandler().processAPC(body); }
+        void processOversizedAPC(std::string_view front)
+        {
+            terminal.sequenceHandler().processOversizedAPC(front);
+        }
         void writeText(char32_t codepoint) { terminal.sequenceHandler().writeText(codepoint); }
         void writeText(std::string_view codepoints, size_t cellCount)
         {

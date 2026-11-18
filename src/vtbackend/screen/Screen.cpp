@@ -5930,6 +5930,14 @@ void Screen::processAPC(std::string_view body)
     publishKittyAnimationDue();
 }
 
+void Screen::processOversizedAPC(std::string_view front)
+{
+    // The kitty graphics protocol has chunking for a large payload and is not answered. A Glyph Protocol
+    // registration has not, and its sender is told why nothing was registered.
+    if (auto const answer = answerOversizedGlyphMessage(front); !answer.empty())
+        reply(answer);
+}
+
 void Screen::replyKittyGraphics(kitty_graphics::Command const& command, std::string_view status)
 {
     auto const isError = !status.starts_with("OK");

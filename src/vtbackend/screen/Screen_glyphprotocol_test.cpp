@@ -119,3 +119,28 @@ TEST_CASE("GlyphProtocol.Screen: a payload of the full 64 KiB gets through", "[s
     mock.writeToScreen(std::format("\033_25a1;r;cp=100000;{}\033\\", base64(blank)));
     CHECK(mock.terminal.peekInput() == "\033_25a1;r;cp=100000;status=0\033\\");
 }
+
+TEST_CASE("GlyphProtocol.Screen: a message past its cap is refused, not ignored", "[screen][glyphprotocol]")
+{
+    // The sender waits for an answer, and has no chunking to fall back on.
+    auto mock = MockTerm { TestPage };
+    auto const huge = std::string(MaxGlyphMessageLength + 1024, 'A');
+
+    mock.writeToScreen(std::format("\033_25a1;r;cp=100000;{}\033\\", huge));
+    CHECK(mock.terminal.peekInput() == "\033_25a1;r;cp=100000;status=1;reason=payload_too_large\033\\");
+    CHECK(mock.terminal.glyphGlossary().empty());
+
+    // Byte by byte, as a slow sender delivers it, the cap and the answer are the same.
+    auto slow = MockTerm { TestPage };
+    for (auto const ch: std::format("\033_25a1;r;cp=100001;{}\033\\", huge))
+        slow.writeToScreen(std::string_view { &ch, 1 });
+    CHECK(slow.terminal.peekInput() == "\033_25a1;r;cp=100001;status=1;reason=payload_too_large\033\\");
+}
+
+TEST_CASE("GlyphProtocol.Screen: the larger cap is the Glyph Protocol's alone", "[screen][glyphprotocol]")
+{
+    // Any other APC keeps the cap an OSC has, and is dropped past it without an answer.
+    auto mock = MockTerm { TestPage };
+    mock.writeToScreen(std::format("\033_Xfoo;{}\033\\", std::string(Sequence::MaxOscLength + 1, 'A')));
+    CHECK(mock.terminal.peekInput().empty());
+}

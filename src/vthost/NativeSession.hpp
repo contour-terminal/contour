@@ -138,6 +138,7 @@ struct HandshakePolicy
                                                                    proto::Capability::ColorPreference,
                                                                    proto::Capability::ClipboardTargets,
                                                                    proto::Capability::SoftFonts,
+                                                                   proto::Capability::RegisteredGlyphs,
                                                                    proto::Capability::WorkspaceSwitch,
                                                                    proto::Capability::DaemonFollow,
                                                                    proto::Capability::WorkspaceMeta,
@@ -1065,6 +1066,15 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// @param session The session.
     void pushSoftFonts(vtworkspace::SessionId session);
 
+    /// Whether this connection mirrors Glyph Protocol glyphs (shares Capability::RegisteredGlyphs).
+    [[nodiscard]] bool mirrorsRegisteredGlyphs() const noexcept;
+
+    /// Sends the slots of @p session's Glyph Protocol glossary that changed since this connection was last
+    /// told, read under the terminal lock. Called where pushSoftFonts() is, for its reason: a glyph reaches
+    /// the receiver before the cells that show it.
+    /// @param session The session.
+    void pushRegisteredGlyphs(vtworkspace::SessionId session);
+
     /// Whether this connection is a viewer that mirrors the echo state (shares Capability::InputEcho).
     [[nodiscard]] bool mirrorsInputEcho() const noexcept;
 
@@ -1385,6 +1395,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// Per session, the soft font store generation this connection was last sent (absent: none yet, which
     /// reads as generation 0, the generation of a store nothing was ever loaded into).
     std::unordered_map<uint64_t, uint64_t> _softFontsSent;
+    /// Per session, the Glyph Protocol glossary generation this connection was last sent; absent reads as
+    /// 0, the generation of a glossary nothing was ever registered in.
+    std::unordered_map<uint64_t, uint64_t> _registeredGlyphsSent;
     /// When the idle check of the echo state is next due. @see checkInputEchoWhenDue
     core::platform::SteadyTimePoint _nextInputEchoCheck {};
     /// When this connection's hello was accepted: what the elapsed times of the attach log count from.

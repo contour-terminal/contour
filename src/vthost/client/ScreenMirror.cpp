@@ -24,6 +24,7 @@
 #include <vthost/CommandBlockWire.hpp>
 #include <vthost/ContextWire.hpp>
 #include <vthost/CursorStyle.hpp>
+#include <vthost/GlyphWire.hpp>
 #include <vthost/GridWire.hpp>
 #include <vthost/ImageWire.hpp>
 #include <vthost/Logging.hpp>
@@ -625,6 +626,9 @@ void ScreenMirror::replay(RemoteScreen const& screen, LocalHistory history, Repl
         // left may be one the host has since emptied.
         syncProgramStatus(screen.programStatus, screen.programStatusTiming);
         syncSoftFonts(screen.softFonts, screen.softFontGeneration);
+        // The whole glossary, replacing the mirror's: what the daemon stated since is all in the screen.
+        syncRegisteredGlyphs(std::ranges::to<std::vector>(screen.registeredGlyphs | std::views::values),
+                             GlyphUpdateMode::Replace);
         // The page has to be the right one BEFORE _screenType is adopted: activePage() reads it.
         auto const wantAlternate = screen.screenType == 1;
         if (_terminal->isAlternateScreen() != wantAlternate)
@@ -1065,6 +1069,23 @@ void ScreenMirror::syncSoftFonts(std::span<proto::WireSoftFont const> fonts, uin
     _terminal->markScreenDirty();
 }
 
+void ScreenMirror::syncRegisteredGlyphs(std::span<proto::WireRegisteredGlyph const> glyphs,
+                                        GlyphUpdateMode mode)
+{
+    auto staged = stageGlyphUpdates(glyphs);
+    if (!staged)
+    {
+        clientLog()("attach: refusing the daemon's registered glyphs (reason {}); keeping the ones held",
+                    std::to_underlying(staged.error()));
+        return;
+    }
+    auto& glossary = _terminal->glyphGlossary();
+    auto const generation = glossary.generation();
+    applyGlyphUpdates(glossary, *std::move(staged), mode);
+    if (glossary.generation() != generation)
+        _terminal->markScreenDirty();
+}
+
 void ScreenMirror::applyImage(RemoteScreen const& screen, uint32_t imageId)
 {
     {
@@ -1137,6 +1158,17 @@ void ScreenMirror::applyEvent(proto::SessionEventPdu const& event)
                    // The device's, not the grid's: the frontend that owns the pane's device stores it there
                    // (contour's NativeController, on its ChannelPty), and the session reads it from there.
                    [](proto::SessionInputEcho const&) {},
+                   [this](proto::RegisteredGlyphState const& glyphs) {
+                       {
+                           auto const guard = std::lock_guard { *_terminal };
+                           syncRegisteredGlyphs(glyphs.glyphs,
+                                                glyphs.replace != 0 ? GlyphUpdateMode::Replace
+                                                                    : GlyphUpdateMode::Change);
+                       }
+                       // The cells showing a glyph that was registered or cleared are not rewritten by
+                       // anything else.
+                       _terminal->screenUpdated();
+                   },
                    [this](proto::SoftFontState const& fonts) {
                        {
                            auto const guard = std::lock_guard { *_terminal };

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/vt/GlyphGlossary.hpp>
 
+#include <ranges>
 #include <utility>
 
 namespace vtbackend
@@ -127,10 +128,22 @@ void GlyphGlossary::clear() noexcept
     // Clearing what is already clear changes nothing a frame could show.
     if (empty())
         return;
+    ++_generation;
+    for (auto const slot: std::views::iota(size_t { 0 }, GlyphRegistrationSlots))
+        if (_glyphs[slot])
+            _changedAt[slot] = _generation;
     _glyphs.fill(nullptr);
     _count = 0;
-    ++_generation;
     _snapshot.reset();
+}
+
+std::vector<GlyphChange> GlyphGlossary::changesSince(uint64_t generation) const
+{
+    auto changes = std::vector<GlyphChange> {};
+    for (auto const slot: std::views::iota(size_t { 0 }, GlyphRegistrationSlots))
+        if (_changedAt[slot] > generation)
+            changes.push_back(GlyphChange { .slot = static_cast<uint16_t>(slot), .glyph = _glyphs[slot] });
+    return changes;
 }
 
 std::shared_ptr<RegisteredGlyph const> GlyphGlossary::find(char32_t codepoint) const noexcept
@@ -159,7 +172,7 @@ void GlyphGlossary::put(char32_t codepoint, std::shared_ptr<RegisteredGlyph cons
     _count += (glyph ? 1U : 0U);
     _count -= (slot ? 1U : 0U);
     slot = std::move(glyph);
-    ++_generation;
+    _changedAt[codepoint - FirstGlyphRegistrationCodepoint] = ++_generation;
     _snapshot.reset();
 }
 

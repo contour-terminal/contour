@@ -32,12 +32,19 @@ inline constexpr size_t GlyphRegistrationSlots = 1024;
            && codepoint - FirstGlyphRegistrationCodepoint < GlyphRegistrationSlots;
 }
 
+/// What every Glyph Protocol message begins with: U+25A1 in hex, and the separator.
+inline constexpr std::string_view GlyphProtocolIdentifier = "25a1;";
+
 /// @param body An APC body, without its introducer or terminator.
 /// @return Whether @p body is a Glyph Protocol message.
 [[nodiscard]] constexpr bool isGlyphProtocol(std::string_view body) noexcept
 {
-    return body.starts_with("25a1;");
+    return body.starts_with(GlyphProtocolIdentifier);
 }
+
+/// The longest Glyph Protocol message taken. A registration's payload of MaxGlyphPayloadBytes is 87,384
+/// bytes of base64, and its parameters come before that.
+inline constexpr size_t MaxGlyphMessageLength = size_t { 96 } * 1024;
 
 /// How a glyph is scaled into its render span (`size=`).
 enum class GlyphSizeMode : uint8_t
@@ -201,6 +208,13 @@ using GlyphCommandError =
 /// @param body The APC body, starting with `25a1;` (@see isGlyphProtocol).
 /// @return The request, or why there is none.
 [[nodiscard]] std::expected<GlyphCommand, GlyphCommandError> parseGlyphCommand(std::string_view body);
+
+/// Answers a message that was cut off for being longer than MaxGlyphMessageLength.
+/// @param front The start of the message, as much of it as arrived: the verb and the parameters, which
+///              precede the payload.
+/// @return The refusal of a registration, `reason=payload_too_large`, as a complete APC sequence; empty when
+///         @p front is not a Glyph Protocol registration, names no codepoint, or asked for no reply.
+[[nodiscard]] std::string answerOversizedGlyphMessage(std::string_view front);
 
 /// What draws a codepoint, as a `q` reply's `status=` lists it.
 struct GlyphSources

@@ -1279,6 +1279,7 @@ namespace
                                                        proto::Capability::CellPixelSize,
                                                        proto::Capability::ClipboardTargets,
                                                        proto::Capability::SoftFonts,
+                                                       proto::Capability::RegisteredGlyphs,
                                                        proto::Capability::WorkspaceSwitch,
                                                        proto::Capability::DaemonFollow,
                                                        proto::Capability::WorkspaceMeta,

@@ -133,6 +133,23 @@ void RemoteScreen::apply(proto::SoftFontState const& fonts)
     softFontGeneration = fonts.generation;
 }
 
+void RemoteScreen::apply(proto::RegisteredGlyphState const& glyphs)
+{
+    if (glyphs.replace != 0)
+        registeredGlyphs.clear();
+    for (auto const& glyph: glyphs.glyphs)
+    {
+        // A slot past the block is not kept: the map is bounded by the block, whatever the daemon sends.
+        // The mirror refuses the push for it (@see stageGlyphUpdates).
+        if (glyph.slot >= vtbackend::GlyphRegistrationSlots)
+            continue;
+        if (glyph.registered != 0)
+            registeredGlyphs.insert_or_assign(glyph.slot, glyph);
+        else
+            registeredGlyphs.erase(glyph.slot);
+    }
+}
+
 void RemoteScreen::apply(proto::SessionState const& state)
 {
     session = state.session;
@@ -921,6 +938,9 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
         // them.
         if (auto const* fonts = std::get_if<proto::SoftFontState>(&*event))
             screen.apply(*fonts);
+        // And so are the registered glyphs.
+        if (auto const* glyphs = std::get_if<proto::RegisteredGlyphState>(&*event))
+            screen.apply(*glyphs);
         if (_onSessionEvent)
             _onSessionEvent(screen, *event);
         return;

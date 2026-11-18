@@ -87,6 +87,7 @@ namespace
             vthost::proto::Capability::CellPixelSize,
             vthost::proto::Capability::ClipboardTargets,
             vthost::proto::Capability::SoftFonts,
+            vthost::proto::Capability::RegisteredGlyphs,
             vthost::proto::Capability::DaemonFollow,
             vthost::proto::Capability::WorkspaceMeta,
             vthost::proto::Capability::ClientGoodbye,

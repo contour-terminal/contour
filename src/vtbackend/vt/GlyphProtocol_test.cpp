@@ -262,6 +262,26 @@ TEST_CASE("GlyphProtocol: why a registration is refused", "[GlyphProtocol]")
     }
 }
 
+TEST_CASE("GlyphProtocol: a message cut off for its length is answered from its front", "[GlyphProtocol]")
+{
+    // What arrives of an over-long registration: the verb, the parameters, and the start of a payload.
+    CHECK(answerOversizedGlyphMessage("25a1;r;cp=100000;upm=1000;AAAAAAAA")
+          == "\033_25a1;r;cp=100000;status=1;reason=payload_too_large\033\\");
+    CHECK(answerOversizedGlyphMessage("25a1;r;reply=2;cp=100001;AAAAAAAA")
+          == "\033_25a1;r;cp=100001;status=1;reason=payload_too_large\033\\");
+
+    // Outside the block it is refused for that, as it would have been at any size.
+    CHECK(answerOversizedGlyphMessage("25a1;r;cp=e0a0;AAAAAAAA")
+          == "\033_25a1;r;cp=e0a0;status=1;reason=out_of_namespace\033\\");
+
+    // No reply was asked for, there is no codepoint to name, or it is not a registration at all.
+    CHECK(answerOversizedGlyphMessage("25a1;r;cp=100000;reply=0;AAAAAAAA").empty());
+    CHECK(answerOversizedGlyphMessage("25a1;r;AAAAAAAA").empty());
+    CHECK(answerOversizedGlyphMessage("25a1;q;cp=100000;AAAAAAAA").empty());
+    CHECK(answerOversizedGlyphMessage("25a1;r").empty());
+    CHECK(answerOversizedGlyphMessage("Ga=T,f=32;AAAAAAAA").empty());
+}
+
 TEST_CASE("GlyphProtocol: replies", "[GlyphProtocol]")
 {
     using Glossary = GlyphSources::Glossary;

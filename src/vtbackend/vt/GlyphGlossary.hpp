@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace vtbackend
 {
@@ -61,6 +62,13 @@ class NoSystemGlyphCoverage final: public SystemGlyphCoverage
     }
 };
 
+/// What became of one slot of a glossary: the glyph now registered there, or that it was cleared.
+struct GlyphChange
+{
+    uint16_t slot = 0;                            ///< The codepoint minus FirstGlyphRegistrationCodepoint.
+    std::shared_ptr<RegisteredGlyph const> glyph; ///< The glyph registered there; null for a cleared slot.
+};
+
 /// The glyphs one terminal session has registered through the Glyph Protocol, one slot per codepoint of
 /// the registration block.
 ///
@@ -92,6 +100,12 @@ class GlyphGlossary
     /// @return A counter that increases on every registration and every clear.
     [[nodiscard]] uint64_t generation() const noexcept { return _generation; }
 
+    /// What changed since an earlier state of the glossary, for whoever keeps a copy of it elsewhere (the
+    /// daemon, for the clients mirroring a session).
+    /// @param generation A value generation() returned earlier; 0 for the state before anything changed.
+    /// @return Every slot registered, replaced or cleared since then, ascending, as it stands now.
+    [[nodiscard]] std::vector<GlyphChange> changesSince(uint64_t generation) const;
+
     /// @return The registered glyphs as a frame holds them: unchanged by later registrations. Null when
     ///         nothing is registered, so a frame of a session that never used the protocol pays nothing.
     [[nodiscard]] std::shared_ptr<RegisteredGlyphs const> snapshot() const;
@@ -100,6 +114,8 @@ class GlyphGlossary
     void put(char32_t codepoint, std::shared_ptr<RegisteredGlyph const> glyph) noexcept;
 
     RegisteredGlyphs _glyphs {};
+    /// Per slot, the generation its last change made; 0 for a slot never touched. @see changesSince
+    std::array<uint64_t, GlyphRegistrationSlots> _changedAt {};
     size_t _count = 0;
     uint64_t _generation = 0;
     /// What snapshot() last returned, dropped by every change: a run of registrations between two frames

@@ -78,6 +78,10 @@ struct GlyphOutline
     bool operator==(GlyphOutline const&) const = default;
 };
 
+/// @param points The points of an outline.
+/// @return The box around them; all zero for none.
+[[nodiscard]] GlyphOutlineBounds boundsOf(std::span<GlyphOutlinePoint const> points) noexcept;
+
 /// Decodes an OpenType `glyf` simple-glyph record, the subset the Glyph Protocol accepts: no composite
 /// glyph, no hinting instructions, and at most MaxGlyphOutlinePoints points. The point count is read from
 /// the record's contour table and judged before any point is stored.

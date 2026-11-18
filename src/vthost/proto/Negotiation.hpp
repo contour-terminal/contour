@@ -135,6 +135,10 @@ enum class Capability : uint8_t
     /// `object.renamed`). Without it the other end speaks the old one to it (`label` keys, `object.setLabel`,
     /// `workspace.labelChanged`), through vtcontrol's legacy spelling table.
     Names = 32,
+    /// The peer mirrors the glyphs a session's application registered through the Glyph Protocol: the daemon
+    /// sends a RegisteredGlyphState whenever a session's glossary changes. Without it a client draws the
+    /// registration block's codepoints from its font, which has none.
+    RegisteredGlyphs = 33,
 };
 
 /// One row of the table naming a Capability.
@@ -176,6 +180,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::ClientGoodbye, .name = "client-goodbye" },
     CapabilityRow { .capability = Capability::LaunchFirstTab, .name = "launch-first-tab" },
     CapabilityRow { .capability = Capability::Names, .name = "names" },
+    CapabilityRow { .capability = Capability::RegisteredGlyphs, .name = "registered-glyphs" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.
