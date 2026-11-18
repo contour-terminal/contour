@@ -19,7 +19,6 @@
 
 using namespace std::string_view_literals;
 
-using std::clamp;
 using std::min;
 using std::nullopt;
 using std::optional;
@@ -28,7 +27,6 @@ using std::string_view;
 
 using crispy::Point;
 
-namespace Ranges = std::ranges;
 namespace Views = std::views;
 
 namespace vtrasterizer
@@ -114,59 +112,77 @@ namespace detail
         // As for Line: keeps the definition tables readable.
         using enum Diagonal;
 
-        void drawArcElliptic(atlas::Buffer& buffer, ImageSize imageSize, unsigned thickness, Arc arc)
+        /// The pixels a straight line's stroke covers across the cell, in buffer coordinates (row 0 is
+        /// the cell's bottom): columns [x0, x1) for a vertical line, rows [y0, y1) for a horizontal one.
+        struct StrokeBounds
         {
-            if (thickness == 0)
-                return;
+            size_t x0; ///< The first column of a vertical line's stroke.
+            size_t x1; ///< One past its last column.
+            size_t y0; ///< The first row of a horizontal line's stroke.
+            size_t y1; ///< One past its last row.
+        };
 
-            // Used to record all the pixel coordinates that have been written to per scanline.
-            //
-            // The vector index represents the y-axis.
-            //
-            // The element-array for each y-coordinate represent the x-coordinates that
-            // have been written to at that line.
-            //
-            // This is needed in order to fill the gaps.
-            using GapFills = std::vector<std::vector<unsigned>>;
-            GapFills gaps;
-            gaps.resize(unbox<size_t>(imageSize.height));
+        /// Draws a quarter-elliptic rounded corner.
+        ///
+        /// The arc is the ring between two quarter ellipses centred on the cell corner it bends around,
+        /// sized so that on each cell edge it ends on, it covers exactly the stroke of the straight line
+        /// continuing it into the neighbouring cell: no step and no notch where ─ or │ takes over. A pixel
+        /// is lit where its centre lies within the ring. The last @p straightEnd pixels at either end run
+        /// straight, as at the arc's tangent point, so the cell's edge pixels carry no anti-aliased fringe.
+        /// @param buffer The glyph's alpha buffer, bottom-up.
+        /// @param imageSize The size of @p buffer.
+        /// @param stroke The stroke of the lines the arc continues into.
+        /// @param straightEnd How many pixels at each end run straight: one device pixel when supersampled.
+        /// @param arc The corner the arc bends around.
+        void drawArcElliptic(
+            atlas::Buffer& buffer, ImageSize imageSize, StrokeBounds stroke, size_t straightEnd, Arc arc)
+        {
+            auto const width = unbox<size_t>(imageSize.width);
+            auto const height = unbox<size_t>(imageSize.height);
+            auto const onLeft = arc == Arc::BL || arc == Arc::UL;
+            auto const onBottom = arc == Arc::BL || arc == Arc::BR;
 
-            auto const w = unbox(imageSize.width);
-            auto const h = unbox(imageSize.height);
+            // Distances from the corner to the stroke's near and far side, along each axis: measured from 0
+            // for a corner at the origin, from the extent for one at the far side.
+            auto const spanFromOrigin = [](size_t from, size_t to) {
+                return std::pair { static_cast<double>(from), static_cast<double>(to) };
+            };
+            auto const spanFromExtent = [](size_t extent, size_t from, size_t to) {
+                return std::pair { static_cast<double>(extent - to), static_cast<double>(extent - from) };
+            };
+            auto const [innerX, outerX] =
+                onLeft ? spanFromOrigin(stroke.x0, stroke.x1) : spanFromExtent(width, stroke.x0, stroke.x1);
+            auto const [innerY, outerY] = onBottom ? spanFromOrigin(stroke.y0, stroke.y1)
+                                                   : spanFromExtent(height, stroke.y0, stroke.y1);
+            auto const cornerX = onLeft ? 0.0 : static_cast<double>(width);
+            auto const cornerY = onBottom ? 0.0 : static_cast<double>(height);
+            auto const hasInner = innerX > 0 && innerY > 0;
 
-            // std::cout << std::format("{}.drawArc: size={}\n", arc, imageSize);
-            auto const putpixel = [&](int x, int y, uint8_t alpha = 0xFFu) {
-                auto const fy = clamp((unsigned) y, 0u, h - 1);
-                auto const fx = clamp((unsigned) x, 0u, w - 1);
-                buffer[(fy * w) + fx] = alpha;
-                gaps[fy].push_back(fx);
+            // A point lies on an ellipse of radii (rx, ry) about the corner where (dx/rx)^2 + (dy/ry)^2 is 1.
+            auto const squared = [](double d, double r) {
+                return (d * d) / (r * r);
             };
 
-            // inner circle
-            drawEllipseArc(putpixel,
-                           imageSize,
-                           crispy::Point { // radius
-                                           .x = (unbox<int>(imageSize.width) / 2) - (int(thickness) / 2),
-                                           .y = (unbox<int>(imageSize.height) / 2) - (int(thickness) / 2) },
-                           arc);
+            // The arc ends on the two cell edges through its corner; within straightEnd of one, it is
+            // evaluated on that edge itself.
+            auto const band = static_cast<double>(straightEnd);
+            auto const offset = [band](size_t pixel, double corner) {
+                auto const d = static_cast<double>(pixel) + 0.5 - corner;
+                return std::abs(d) < band ? 0.0 : d;
+            };
 
-            // outer circle
-            drawEllipseArc(
-                putpixel,
-                imageSize,
-                crispy::Point { // radius
-                                .x = (unbox<int>(imageSize.width) / 2) + (int(thickness) / 2) - 1,
-                                .y = (unbox<int>(imageSize.height) / 2) + (int(thickness) / 2) - 1 },
-                arc);
-
-            // fill gap
-            for (size_t y = 0; y < gaps.size(); ++y)
+            for (auto const y: Views::iota(0zu, height))
             {
-                if (auto& gap = gaps[y]; !gap.empty())
+                auto const dy = offset(y, cornerY);
+                auto const outerDy = squared(dy, outerY);
+                auto const innerDy = hasInner ? squared(dy, innerY) : 0.0;
+                for (auto const x: Views::iota(0zu, width))
                 {
-                    Ranges::sort(gap);
-                    for (auto const xi: Views::iota(gap.front(), gap.back()))
-                        buffer.at((y * unbox<size_t>(imageSize.width)) + xi) = 0xFF;
+                    auto const dx = offset(x, cornerX);
+                    auto const withinOuter = squared(dx, outerX) + outerDy <= 1.0;
+                    auto const withinInner = hasInner && squared(dx, innerX) + innerDy < 1.0;
+                    if (withinOuter && !withinInner)
+                        buffer[(y * width) + x] = 0xFF;
                 }
             }
         }
@@ -3029,13 +3045,7 @@ static auto buildBox(detail::Box box,
                         : 1U;
 
     auto const getZeros = [=](detail::Line value) {
-        struct Center
-        {
-            size_t x0;
-            size_t x1;
-            size_t y0;
-            size_t y1;
-        };
+        using Center = detail::StrokeBounds;
         switch (value)
         {
             using enum detail::Line;
@@ -3123,15 +3133,27 @@ static auto buildBox(detail::Box box,
             }
         };
 
+        // The last device pixel at either end runs straight, as at the arc's tangent point, so on the cell
+        // edge the arc covers exactly the stroke of the line continuing it, with no anti-aliased fringe.
+        auto const band = static_cast<int>(ss);
+        auto const endsRight = arc == Arc::UR or arc == Arc::BR;
+        auto const endsUp = arc == Arc::UR or arc == Arc::UL;
+        auto const inXBand = [=](int xi) {
+            return endsRight ? xi >= width - band : xi < band;
+        };
+        auto const inYBand = [=](int yi) {
+            return endsUp ? yi >= height - band : yi < band;
+        };
+
         for (auto const yi: Views::iota(0, height))
         {
-            auto y = static_cast<double>(yi) - dcy + 0.5;
+            auto y = inYBand(yi) ? 0.0 : static_cast<double>(yi) - dcy + 0.5;
             if (not yQuadrant(y))
                 continue;
             y *= y;
             for (auto const xi: Views::iota(0, width))
             {
-                auto x = static_cast<double>(xi) - dcx + 0.5;
+                auto x = inXBand(xi) ? 0.0 : static_cast<double>(xi) - dcx + 0.5;
                 if (not xQuadrant(x))
                     continue;
                 x *= x;
@@ -3310,14 +3332,15 @@ static auto buildBox(detail::Box box,
 
     if (useEllipticArcs)
     {
-        if (box.arcURval != Line::NoLine)
-            detail::drawArcElliptic(image, size * double(ss), getThickness(Line::Light), Arc::UR);
-        if (box.arcULval != Line::NoLine)
-            detail::drawArcElliptic(image, size * double(ss), getThickness(Line::Light), Arc::UL);
-        if (box.arcBLval != Line::NoLine)
-            detail::drawArcElliptic(image, size * double(ss), getThickness(Line::Light), Arc::BL);
-        if (box.arcBRval != Line::NoLine)
-            detail::drawArcElliptic(image, size * double(ss), getThickness(Line::Light), Arc::BR);
+        // Elliptic arcs are drawn with a thin stroke only.
+        auto const stroke = getZeros(Line::Light);
+        auto const superSize = size * double(ss);
+        for (auto const& [arcLine, arc]: { std::pair { box.arcURval, Arc::UR },
+                                           std::pair { box.arcULval, Arc::UL },
+                                           std::pair { box.arcBLval, Arc::BL },
+                                           std::pair { box.arcBRval, Arc::BR } })
+            if (arcLine != Line::NoLine)
+                detail::drawArcElliptic(image, superSize, stroke, ss, arc);
     }
 
     return downsample(image, 1, size * double(ss), size);
