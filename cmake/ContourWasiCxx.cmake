@@ -199,10 +199,27 @@ else()
     set(_contour_wasi_glaze_args "-DORCHESTRATOR_GLAZE_INCLUDE_DIR=${_contour_wasi_glaze_include}")
 endif()
 
+# core-cpp and libunicode, for a guest's terminal UI (core::tui_core): the vendored core-cpp and libunicode's
+# source tree are handed to the guest's FetchContent, so a sub-build fetches neither. libunicode's tables are
+# generated into its source tree by a native tool when libunicode is built, which a WebAssembly sub-build
+# cannot run; it takes the tables the native build generated, and every guest's sub-build waits for that
+# build. An installed libunicode has no source tree to hand over.
+if(NOT libunicode_SOURCE_DIR OR NOT TARGET unicode::unicode)
+    message(FATAL_ERROR "CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST needs libunicode built from source (CONTOUR_USE_CPM, "
+                        "or an embedded copy): an installed one has no source tree to build a WebAssembly guest's from.")
+endif()
+get_target_property(_contour_wasi_unicode_target unicode::unicode ALIASED_TARGET)
+if(NOT _contour_wasi_unicode_target)
+    set(_contour_wasi_unicode_target unicode::unicode)
+endif()
+set(_contour_wasi_tui_args
+    "-DFETCHCONTENT_SOURCE_DIR_CORE-CPP=${PROJECT_SOURCE_DIR}/vendor/core-cpp"
+    "-DFETCHCONTENT_SOURCE_DIR_LIBUNICODE=${libunicode_SOURCE_DIR}")
+
 # contour_add_wasm_cxx_guest(NAME <name> SOURCE_DIR <dir> OUTPUT_VAR <var> [CMAKE_ARGS <args>...])
 #
 # Builds the CMake project at <dir> with the WASI C++ toolchain, offline (FETCHCONTENT_FULLY_DISCONNECTED),
-# in a sub-build of its own: ExternalProject <name>_wasm_cxx, run on every build so that it sees its own
+# with glaze, core-cpp and libunicode's sources handed over as above, in a sub-build of its own: ExternalProject <name>_wasm_cxx, run on every build so that it sees its own
 # sources change, behind the target <name>_wasm. The project builds an executable target named <name>, which
 # lands at ${CMAKE_BINARY_DIR}/wasm/<name>.wasm; that path is set in <var> in the caller's scope. Extra
 # CMAKE_ARGS go to the project's configuration last; a list value in them is joined with
@@ -221,15 +238,19 @@ function(contour_add_wasm_cxx_guest)
     ExternalProject_Add(${_ARG_NAME}_wasm_cxx
         SOURCE_DIR "${_ARG_SOURCE_DIR}"
         BINARY_DIR "${_output_dir}/${_ARG_NAME}-build"
-        # Not every guest uses glaze or FetchContent; the arguments that hand them over are no warning.
+        # Not every guest uses glaze, the terminal UI or FetchContent; the arguments that hand them over are
+        # no warning.
         CMAKE_ARGS --no-warn-unused-cli
                    ${_contour_wasi_toolchain_args}
                    -DCMAKE_BUILD_TYPE=Release
                    -DFETCHCONTENT_FULLY_DISCONNECTED=ON
                    ${_contour_wasi_glaze_args}
+                   ${_contour_wasi_tui_args}
                    "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=${_output_dir}"
                    ${_ARG_CMAKE_ARGS}
         LIST_SEPARATOR "${CONTOUR_WASM_CXX_LIST_SEPARATOR}"
+        # libunicode's generated tables, which the guest's libunicode is built from.
+        DEPENDS ${_contour_wasi_unicode_target}
         BUILD_ALWAYS ON
         BUILD_BYPRODUCTS "${_output}"
         INSTALL_COMMAND ""
