@@ -33,6 +33,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 #include <QtTest/QTest>
 
@@ -62,6 +63,124 @@ enum class HarnessWindow : uint8_t
         std::ranges::count_if(std::views::iota(std::size_t { 0 }, haystack.size()),
                               [&](std::size_t at) { return haystack.substr(at).starts_with(needle); }));
 }
+
+namespace detail
+{
+    /// A harness window's session and the PTY it runs over.
+    struct HarnessSession
+    {
+        vtpty::ChannelPty* pty = nullptr; ///< Owned by the session's terminal.
+        std::unique_ptr<contour::session::TerminalSession> session;
+    };
+
+    /// Builds a session over a fresh 80x25 vtpty::ChannelPty, reporting to @p app's session manager.
+    /// @param app The application the session runs in.
+    /// @param keyboardPlatforms Builds the session's keyboard platform; empty takes the build host's.
+    /// @return The session and its PTY.
+    [[nodiscard]] inline HarnessSession makeHarnessSession(
+        contour::ContourGuiApp& app, contour::input::KeyboardPlatformFactory keyboardPlatforms)
+    {
+        auto ptyOwned = std::make_unique<vtpty::ChannelPty>(
+            vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
+        auto* const pty = ptyOwned.get();
+        auto session =
+            keyboardPlatforms
+                ? makeTestSession(
+                      &app.sessionsManager(), std::move(ptyOwned), app, std::move(keyboardPlatforms))
+                : makeTestSession(&app.sessionsManager(), std::move(ptyOwned), app);
+        return HarnessSession { .pty = pty, .session = std::move(session) };
+    }
+
+    /// Stands @p display up as an 800x600 item showing @p session, inside a new shown window unless @p mode
+    /// is HarnessWindow::None.
+    /// @param mode    Whether to make a window for the display.
+    /// @param display The display item to stand up.
+    /// @param session The session the display attaches to.
+    /// @return The window, already shown; null under HarnessWindow::None.
+    [[nodiscard]] inline std::unique_ptr<QQuickWindow> standUpDisplay(
+        HarnessWindow mode,
+        contour::display::TerminalDisplay& display,
+        contour::session::TerminalSession& session)
+    {
+        auto window = std::unique_ptr<QQuickWindow> {};
+        if (mode != HarnessWindow::None)
+        {
+            window = std::make_unique<QQuickWindow>();
+            window->resize(800, 600);
+            // Match production: Main.qml makes the ApplicationWindow transparent so the terminal paints
+            // its own (dark) background. A bare QQuickWindow otherwise clears to Qt's default WHITE,
+            // which both mismatches the real app and weakens the pixel-change assertions (white margins
+            // swamp the grid). Clear to black so grabbed frames reflect what a user actually sees.
+            window->setColor(QColor(Qt::black));
+            display.setParentItem(window->contentItem());
+        }
+
+        display.setSize(QSizeF(800, 600));
+        display.setSession(&session);
+
+        if (window)
+            window->show();
+        return window;
+    }
+
+    /// Binds a new WindowController of @p app's session manager to @p window, with @p display focused in
+    /// so the manager records it as the controller's active display.
+    /// @param app     The application whose session manager owns the controller.
+    /// @param window  The window the controller governs.
+    /// @param display The display to focus.
+    /// @return The controller; manager-owned.
+    [[nodiscard]] inline contour::window::WindowController* bindHarnessController(
+        contour::ContourGuiApp& app, QQuickWindow* window, contour::display::TerminalDisplay* display)
+    {
+        auto* const controller = app.sessionsManager().createWindowController();
+        controller->bindWindow(window);
+        app.sessionsManager().focusOnDisplay(display);
+        return controller;
+    }
+
+    /// Forces one synchronous frame of @p window when @p mode renders, and drains the GUI queue.
+    /// @param mode   Whether the window is asked for a frame.
+    /// @param window The window to grab.
+    /// @return The grabbed image; null unless @p mode is HarnessWindow::Shown.
+    [[nodiscard]] inline QImage pumpHarnessWindow(HarnessWindow mode, QQuickWindow* window)
+    {
+        QCoreApplication::processEvents();
+        auto image = mode == HarnessWindow::Shown ? window->grabWindow() : QImage {};
+        QCoreApplication::processEvents();
+        return image;
+    }
+
+    /// Tears a harness window down in the production order: terminate the session (closes the PTY,
+    /// unblocking the reader), drop the controller before its window, destroy the display item while the
+    /// session still exists, then the session, then the window.
+    /// @param app        The application whose session manager owns @p controller.
+    /// @param session    The session to terminate and destroy.
+    /// @param controller The bound controller, if any; reset to null.
+    /// @param display    The display item to destroy.
+    /// @param window     The window to destroy; may be null.
+    inline void tearDownHarnessWindow(contour::ContourGuiApp& app,
+                                      std::unique_ptr<contour::session::TerminalSession>& session,
+                                      contour::window::WindowController*& controller,
+                                      std::unique_ptr<contour::display::TerminalDisplay>& display,
+                                      std::unique_ptr<QQuickWindow>& window)
+    {
+        session->terminate(); // closes the PTY; the blocked reader wakes and winds down
+        QCoreApplication::processEvents();
+        // Drop the controller (if bound) before its window: it holds an eventFilter/connection on
+        // the QQuickWindow. removeWindowController deleteLater()s it; drain that below.
+        if (controller != nullptr)
+        {
+            app.sessionsManager().removeWindowController(controller->windowId());
+            controller = nullptr;
+        }
+        display.reset(); // while the session still lives: ~TerminalDisplay detaches from it
+        QCoreApplication::processEvents();
+        session.reset(); // joins the session threads (PTY already closed)
+        window.reset();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents();
+    }
+} // namespace detail
 
 /// One live rendering session: app + session (vtpty::ChannelPty) + display item, in a shown window
 /// unless @ref HarnessWindow::None says otherwise.
@@ -95,35 +214,13 @@ struct DisplayHarness
         if (configure)
             configure(testApp.app().config());
 
-        auto ptyOwned = std::make_unique<vtpty::ChannelPty>(
-            vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
-        pty = ptyOwned.get();
-        session = keyboardPlatforms
-                      ? makeTestSession(&testApp.app().sessionsManager(),
-                                        std::move(ptyOwned),
-                                        testApp.app(),
-                                        std::move(keyboardPlatforms))
-                      : makeTestSession(&testApp.app().sessionsManager(), std::move(ptyOwned), testApp.app());
+        auto made = detail::makeHarnessSession(testApp.app(), std::move(keyboardPlatforms));
+        pty = made.pty;
+        session = std::move(made.session);
         if (seed)
             seed(*session);
 
-        if (windowMode != HarnessWindow::None)
-        {
-            window = std::make_unique<QQuickWindow>();
-            window->resize(800, 600);
-            // Match production: Main.qml makes the ApplicationWindow transparent so the terminal paints
-            // its own (dark) background. A bare QQuickWindow otherwise clears to Qt's default WHITE,
-            // which both mismatches the real app and weakens the pixel-change assertions (white margins
-            // swamp the grid). Clear to black so grabbed frames reflect what a user actually sees.
-            window->setColor(QColor(Qt::black));
-            display->setParentItem(window->contentItem());
-        }
-
-        display->setSize(QSizeF(800, 600));
-        display->setSession(session.get());
-
-        if (window)
-            window->show();
+        window = detail::standUpDisplay(windowMode, *display, *session);
         pump();
     }
 
@@ -133,10 +230,7 @@ struct DisplayHarness
     /// display tests don't need it; call it right after construction.
     contour::window::WindowController& bindController()
     {
-        controller = testApp.app().sessionsManager().createWindowController();
-        controller->bindWindow(window.get());
-        // Focus the display in so the manager records it as the controller's active display.
-        testApp.app().sessionsManager().focusOnDisplay(display.get());
+        controller = detail::bindHarnessController(testApp.app(), window.get(), display.get());
         return *controller;
     }
 
@@ -145,13 +239,7 @@ struct DisplayHarness
     /// Unless the window is HarnessWindow::Shown there is no scene graph to drive, so this only drains the
     /// GUI queue (what the posted display/session lambdas need) and returns a null image; pixel assertions
     /// are all display-gated.
-    QImage pump() const
-    {
-        QCoreApplication::processEvents();
-        auto image = windowMode == HarnessWindow::Shown ? window->grabWindow() : QImage {};
-        QCoreApplication::processEvents();
-        return image;
-    }
+    QImage pump() const { return detail::pumpHarnessWindow(windowMode, window.get()); }
 
     /// The device status request (DSR 5) feedAndSettle() puts after the output it feeds.
     static constexpr auto StatusRequest = std::string_view { "\033[5n" };
@@ -192,24 +280,47 @@ struct DisplayHarness
         return pty->stdinSnapshot();
     }
 
-    ~DisplayHarness()
+    ~DisplayHarness() { detail::tearDownHarnessWindow(testApp.app(), session, controller, display, window); }
+};
+
+/// A further window of a DisplayHarness's application: its own session, display, QQuickWindow and
+/// WindowController, sharing the first window's TestApp and session manager, as Ctrl+Shift+N does.
+///
+/// It is always stood up as HarnessWindow::Shown at 800x600, with its own controller bound the way
+/// DisplayHarness::bindController() binds one. It must be destroyed before the harness it was built from.
+struct SecondWindow
+{
+    /// @param first The harness whose application this window joins; must outlive this window.
+    explicit SecondWindow(DisplayHarness& first): _app(first.testApp.app())
     {
-        session->terminate(); // closes the PTY; the blocked reader wakes and winds down
-        QCoreApplication::processEvents();
-        // Drop the controller (if bound) before its window: it holds an eventFilter/connection on
-        // the QQuickWindow. removeWindowController deleteLater()s it; drain that below.
-        if (controller != nullptr)
-        {
-            testApp.app().sessionsManager().removeWindowController(controller->windowId());
-            controller = nullptr;
-        }
-        display.reset(); // while the session still lives: ~TerminalDisplay detaches from it
-        QCoreApplication::processEvents();
-        session.reset(); // joins the session threads (PTY already closed)
-        window.reset();
-        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-        QCoreApplication::processEvents();
+        auto made = detail::makeHarnessSession(_app, {});
+        pty = made.pty;
+        session = std::move(made.session);
+        window = detail::standUpDisplay(HarnessWindow::Shown, *display, *session);
+        controller = detail::bindHarnessController(_app, window.get(), display.get());
+        std::ignore = pump();
     }
+
+    /// Tears this window down in the same order as ~DisplayHarness, for its own members only.
+    ~SecondWindow() { detail::tearDownHarnessWindow(_app, session, controller, display, window); }
+
+    vtpty::ChannelPty* pty = nullptr; ///< Owned by the session's terminal.
+    std::unique_ptr<contour::session::TerminalSession> session;
+    std::unique_ptr<QQuickWindow> window; ///< Always shown.
+    /// Reset in teardown, before the session.
+    std::unique_ptr<contour::display::TerminalDisplay> display =
+        std::make_unique<contour::display::TerminalDisplay>();
+    contour::window::WindowController* controller = nullptr; ///< Manager-owned; removed in teardown.
+
+    /// Forces one synchronous frame of this window and returns the grabbed image, as DisplayHarness::pump().
+    /// @return The grabbed image.
+    [[nodiscard]] QImage pump() const
+    {
+        return detail::pumpHarnessWindow(HarnessWindow::Shown, window.get());
+    }
+
+  private:
+    contour::ContourGuiApp& _app; ///< The first window's application.
 };
 
 } // namespace contour::test

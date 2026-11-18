@@ -74,6 +74,7 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <ostream>
 #include <ranges>
 #include <span>
 #include <string>
@@ -1017,6 +1018,154 @@ TEST_CASE("display: font zoom keeps the window fixed and changes the page size i
     CHECK(h.window->size() == windowSizeBefore);
     CHECK(h.session->terminal().pageSize().lines >= pageAfter.lines);
     CHECK(h.session->terminal().pageSize().columns >= pageAfter.columns);
+}
+
+TEST_CASE("display: a second window has its own display, session and controller", "[display][multiwindow]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness a;
+    a.bindController();
+    contour::test::SecondWindow b { a };
+    CHECK(b.display.get() != a.display.get());
+    CHECK(b.session.get() != a.session.get());
+    CHECK(b.controller != a.controller);
+    CHECK(b.controller->windowId() != a.controller->windowId());
+    CHECK(b.display->fontSize().pt == a.display->fontSize().pt);
+}
+
+namespace
+{
+
+/// What a zoom elsewhere must leave alone.
+struct PaneFontState
+{
+    double fontPt;
+    vtbackend::ImageSize cellSize;
+    vtbackend::PageSize pageSize;
+    QSize windowSize;
+    bool operator==(PaneFontState const&) const = default;
+};
+
+/// The font state a window's pane shows.
+/// @param display The pane's display.
+/// @param session The session it shows.
+/// @param window  The window it sits in.
+/// @return Its font size, cell size, page size and window size.
+[[nodiscard]] PaneFontState paneFontState(contour::display::TerminalDisplay const& display,
+                                          contour::session::TerminalSession const& session,
+                                          QQuickWindow const& window)
+{
+    return PaneFontState { .fontPt = display.fontSize().pt,
+                           .cellSize = display.cellSize(),
+                           .pageSize = session.terminal().pageSize(),
+                           .windowSize = window.size() };
+}
+
+[[nodiscard]] PaneFontState paneFontState(DisplayHarness const& h)
+{
+    return paneFontState(*h.display, *h.session, *h.window);
+}
+
+[[nodiscard]] PaneFontState paneFontState(contour::test::SecondWindow const& w)
+{
+    return paneFontState(*w.display, *w.session, *w.window);
+}
+
+std::ostream& operator<<(std::ostream& os, PaneFontState const& state)
+{
+    return os << std::format("{}pt, cell {}x{}, page {}x{}, window {}x{}",
+                             state.fontPt,
+                             state.cellSize.width.as<int>(),
+                             state.cellSize.height.as<int>(),
+                             state.pageSize.columns.value,
+                             state.pageSize.lines.value,
+                             state.windowSize.width(),
+                             state.windowSize.height());
+}
+
+/// How many font steps a zoom takes: enough that a change elsewhere cannot hide in rounding.
+constexpr auto ZoomSteps = 6;
+
+/// Zooms @p session in ZoomSteps times, pumping both windows after each step and a few frames after the
+/// last, so whatever the zoom posts has run.
+void zoomIn(contour::session::TerminalSession& session,
+            DisplayHarness const& a,
+            contour::test::SecondWindow const& b)
+{
+    for ([[maybe_unused]] auto const step: std::views::iota(0, ZoomSteps))
+    {
+        CHECK(session(contour::actions::IncreaseFontSize {}));
+        a.pump();
+        std::ignore = b.pump();
+    }
+    for ([[maybe_unused]] auto const settle: std::views::iota(0, 5))
+    {
+        QTest::qWait(10);
+        a.pump();
+        std::ignore = b.pump();
+    }
+}
+
+} // namespace
+
+TEST_CASE("display: a font zoom in one window leaves another window's font alone",
+          "[display][fonts][multiwindow]")
+{
+    // Pins the contract for two windows of one application, as Ctrl+Shift+N opens them: a font zoom belongs
+    // to the pane it was issued in, so the other window's font, cell, page and window sizes stay as they
+    // were.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness a;
+    a.bindController();
+    contour::test::SecondWindow b { a };
+
+    SECTION("zoom in B")
+    {
+        auto const before = paneFontState(a);
+        zoomIn(*b.session, a, b);
+        CHECK(paneFontState(a) == before);
+        CHECK(b.display->fontSize().pt > before.fontPt);
+    }
+
+    SECTION("zoom in A")
+    {
+        auto const before = paneFontState(b);
+        zoomIn(*a.session, a, b);
+        CHECK(paneFontState(b) == before);
+        CHECK(a.display->fontSize().pt > before.fontPt);
+    }
+
+    SECTION("rejected size")
+    {
+        auto const beforeA = paneFontState(a);
+        auto const beforeB = paneFontState(b);
+        CHECK_FALSE(b.display->setFontSize(text::FontSize { 300.0 }));
+        a.pump();
+        std::ignore = b.pump();
+        CHECK(paneFontState(a) == beforeA);
+        CHECK(paneFontState(b) == beforeB);
+    }
+
+    SECTION("A hidden during the zoom")
+    {
+        auto const before = paneFontState(a);
+        a.window->hide();
+        zoomIn(*b.session, a, b);
+        a.window->show();
+        a.pump();
+        std::ignore = b.pump();
+        CHECK(paneFontState(a) == before);
+        CHECK(b.display->fontSize().pt > before.fontPt);
+    }
+
+    SECTION("window opened after a zoom")
+    {
+        zoomIn(*a.session, a, b);
+        REQUIRE(a.display->fontSize().pt > a.testApp.app().config().profile().fonts.value().size.pt);
+        contour::test::SecondWindow const c { a };
+        CHECK(c.display->fontSize().pt == a.testApp.app().config().profile().fonts.value().size.pt);
+        CHECK(c.display->fontSize().pt != a.display->fontSize().pt);
+    }
 }
 
 TEST_CASE("display: a font-size change with resize reports echoed locally does not deadlock",
