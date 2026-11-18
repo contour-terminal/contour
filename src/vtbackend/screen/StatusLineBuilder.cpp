@@ -72,30 +72,6 @@ namespace // helper functions
         core::unreachable();
     }
 
-    /// @p text, cut at its END to at most @p maxWidth columns with a trailing "…" when it is wider.
-    /// @param text The text, valid UTF-8.
-    /// @param maxWidth The widest the result may be, in columns.
-    /// @param policy How the status screen measures a grapheme cluster.
-    /// @return @p text itself, or its head and "…"; never cut inside a grapheme cluster.
-    [[nodiscard]] std::string elideEnd(std::string_view text, ColumnCount maxWidth, ClusterWidthPolicy policy)
-    {
-        if (columnsOnTheGrid(text, policy) <= maxWidth)
-            return std::string { text };
-
-        // The ellipsis is budgeted for, as elideMiddle() budgets for its own.
-        auto const budget = maxWidth - ColumnCount(1);
-        auto head = std::string {};
-        auto columns = ColumnCount(0);
-        for (auto const& cluster: graphemeClustersOf(text, policy))
-        {
-            columns += cluster.columns;
-            if (columns > budget)
-                break;
-            head += cluster.text;
-        }
-        return head + "…";
-    }
-
     /// Joins @p segments, eliding the MIDDLE when the result would exceed @p maxWidth columns.
     /// @param segments The parts, outermost first.
     /// @param separator What goes between two parts.

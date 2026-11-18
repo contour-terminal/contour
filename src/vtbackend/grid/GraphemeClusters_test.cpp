@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <string>
 #include <string_view>
 
 using namespace vtbackend;
@@ -60,5 +61,30 @@ TEST_CASE("graphemeClusters.measuresAsTheGridLaysOut", "[grid][clusters]")
         }
         CHECK(joined == row.text);
         CHECK(columns == row.clusterAware);
+    }
+}
+
+TEST_CASE("graphemeClusters.elideEndCutsWholeClustersAndBudgetsTheEllipsis", "[grid][clusters]")
+{
+    struct Row
+    {
+        std::string_view text;
+        int maxWidth;
+        std::string_view elided;
+    };
+    for (auto const& row: std::array {
+             Row { .text = "Agents", .maxWidth = 6, .elided = "Agents" },
+             Row { .text = "Agents", .maxWidth = 5, .elided = "Agen…" },
+             Row { .text = "Agents", .maxWidth = 1, .elided = "…" },
+             // A wide cluster that would straddle the budget is left out whole.
+             Row { .text = "ab界c", .maxWidth = 4, .elided = "ab…" },
+             // A base keeps its combining mark.
+             Row { .text = "éxyz", .maxWidth = 3, .elided = "éx…" },
+         })
+    {
+        INFO(row.text << " in " << row.maxWidth);
+        auto const elided = elideEnd(row.text, ColumnCount(row.maxWidth), ClusterWidthPolicy::FirstCodepoint);
+        CHECK(elided == row.elided);
+        CHECK(columnsOnTheGrid(elided, ClusterWidthPolicy::FirstCodepoint) <= ColumnCount(row.maxWidth));
     }
 }
