@@ -43,5 +43,8 @@ version of the manifest supports it.
 
 A `title = <text>` line (version 2) names the extension where Contour shows it: its served tab, its
 palette rows and its frames; without one, the `name` stands in. A title is given once, holds at most 40
-characters and no control character (`invalid/title-too-long.manifest`,
-`invalid/title-control-character.manifest`, `invalid/title-repeated.manifest`).
+characters and nothing that would disguise it -- no control character, bidirectional override or isolate,
+zero-width character or line separator (`invalid/title-too-long.manifest`,
+`invalid/title-control-character.manifest`, `invalid/title-bidi-override.manifest`,
+`invalid/title-repeated.manifest`). An `action` line's title follows the same rules
+(`invalid/action-title-too-long.manifest`).

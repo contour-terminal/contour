@@ -641,6 +641,7 @@ constexpr auto CorpusRows = std::array {
     CorpusRow { .file = "valid/root-create.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/root.manifest", .expected = Fault::None },
     CorpusRow { .file = "valid/serve.manifest", .expected = Fault::None },
+    CorpusRow { .file = "valid/title.manifest", .expected = Fault::None },
     CorpusRow { .file = "invalid/brace-inside-word.manifest", .expected = Fault::BadPlaceholder },
     CorpusRow { .file = "invalid/command-without-root.manifest", .expected = Fault::MissingRoot },
     CorpusRow { .file = "invalid/duplicate-command.manifest", .expected = Fault::Duplicate },
@@ -669,6 +670,11 @@ constexpr auto CorpusRows = std::array {
     CorpusRow { .file = "invalid/unknown-line.manifest", .expected = Fault::UnknownLine },
     CorpusRow { .file = "invalid/version-not-first.manifest", .expected = Fault::MissingHeader },
     CorpusRow { .file = "invalid/version-1-with-v2-line.manifest", .expected = Fault::VersionMismatch },
+    CorpusRow { .file = "invalid/title-too-long.manifest", .expected = Fault::BadTitle },
+    CorpusRow { .file = "invalid/title-control-character.manifest", .expected = Fault::ControlCharacter },
+    CorpusRow { .file = "invalid/title-repeated.manifest", .expected = Fault::Duplicate },
+    CorpusRow { .file = "invalid/title-bidi-override.manifest", .expected = Fault::BadTitle },
+    CorpusRow { .file = "invalid/action-title-too-long.manifest", .expected = Fault::BadTitle },
 };
 
 /// One manifest written inline and the verdict it pins: the boundaries and placements the corpus files leave

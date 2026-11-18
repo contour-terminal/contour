@@ -527,6 +527,12 @@ constexpr auto InvalidRows = std::array {
     InvalidRow { .file = "trailing-blank", .fault = ManifestFault::SurroundingBlank },
     InvalidRow { .file = "stray-cr", .fault = ManifestFault::NotUtf8 },
     InvalidRow { .file = "inbox-reserved", .fault = ManifestFault::UnsupportedLine },
+    InvalidRow { .file = "title-too-long", .fault = ManifestFault::BadTitle },
+    // The whole text is refused before any line is read: a control character never reaches the title.
+    InvalidRow { .file = "title-control-character", .fault = ManifestFault::NotUtf8 },
+    InvalidRow { .file = "title-repeated", .fault = ManifestFault::Repeated },
+    InvalidRow { .file = "title-bidi-override", .fault = ManifestFault::BadTitle },
+    InvalidRow { .file = "action-title-too-long", .fault = ManifestFault::BadTitle },
 };
 
 [[nodiscard]] std::optional<ManifestFault> faultOf(std::string_view text)

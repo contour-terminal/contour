@@ -1,0 +1,4 @@
+# An action's title is at most 40 characters, as an extension's is.
+name = titled
+version = 2
+action open = Open Agents · one character too many, ok!
