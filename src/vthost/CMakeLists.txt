@@ -548,7 +548,7 @@ if(VTHOST_TESTING)
     # The daemon world end to end, with the agent orchestrator's module (extensions/orchestrator, added after
     # src/; its target is resolved at generation) and its recorded fixtures, where the C++ guests are built.
     if(CONTOUR_EXTENSIONS AND CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST)
-        target_sources(vthost_test PRIVATE DaemonWorldE2E_test.cpp)
+        target_sources(vthost_test PRIVATE DaemonWorldE2E_test.cpp testing/OrchestratorWorld.hpp)
         target_compile_definitions(vthost_test PRIVATE
             VTHOST_TEST_ORCHESTRATOR_WASM="${CMAKE_BINARY_DIR}/wasm/orchestrator.wasm"
             VTHOST_TEST_ORCHESTRATOR_TESTDATA="${PROJECT_SOURCE_DIR}/extensions/orchestrator/core/testdata")
