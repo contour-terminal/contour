@@ -414,7 +414,8 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
                            RaiseRoleHandler onRaiseRole,
                            WorkspaceMetaHandler onWorkspaceMeta,
                            SnapshotProgressHandler onSnapshotProgress,
-                           DaemonConsentHandler onDaemonConsent):
+                           DaemonConsentHandler onDaemonConsent,
+                           ExtensionEventHandler onExtensionEvent):
     _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
@@ -436,6 +437,7 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _onWorkspaceMeta(std::move(onWorkspaceMeta)),
     _onSnapshotProgress(std::move(onSnapshotProgress)),
     _onDaemonConsent(std::move(onDaemonConsent)),
+    _onExtensionEvent(std::move(onExtensionEvent)),
     _liveness(liveness),
     _keyAuth(_handshake.keySource ? std::optional { KeyAuthenticator { _handshake.keySource } }
                                   : std::nullopt),
@@ -775,6 +777,17 @@ void NativeClient::answerDaemonExtension(std::string name, std::string grantDige
                                                                .grantState = std::to_underlying(answer) } });
 }
 
+void NativeClient::invokeExtensionAction(std::string extension, std::string action)
+{
+    if (!_negotiated || !_negotiated->shared.contains(proto::Capability::ExtensionPresence))
+    {
+        clientLog()("attach: not invoking daemon extension {}: the daemon shows no palette rows", extension);
+        return;
+    }
+    send(proto::DecodedPdu {
+        proto::InvokeExtensionAction { .extension = std::move(extension), .action = std::move(action) } });
+}
+
 void NativeClient::answerPermission(std::string hostId, std::string digest, GrantState answer)
 {
     // Only a daemon that offered to ask reads an answer; to any other it is a PDU it did not expect.
@@ -1053,6 +1066,18 @@ bool NativeClient::handleNotice(proto::DecodedFrame const& frame)
     {
         if (_onDaemonConsent)
             _onDaemonConsent(DaemonConsentEvent { *settled });
+        return true;
+    }
+    if (auto const* presence = std::get_if<proto::ExtensionPresence>(&pdu))
+    {
+        if (_onExtensionEvent)
+            _onExtensionEvent(ExtensionEvent { *presence });
+        return true;
+    }
+    if (auto const* reveal = std::get_if<proto::RevealPane>(&pdu))
+    {
+        if (_onExtensionEvent)
+            _onExtensionEvent(ExtensionEvent { *reveal });
         return true;
     }
     if (auto const* request = std::get_if<proto::PermissionRequest>(&pdu))

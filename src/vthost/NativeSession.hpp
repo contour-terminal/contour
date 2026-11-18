@@ -134,34 +134,34 @@ struct HandshakePolicy
     /// The protocol versions this endpoint speaks; the highest one shared with the client is agreed.
     proto::VersionRange versions = proto::SupportedVersions;
     /// The optional features this endpoint offers on top of the agreed version.
-    proto::CapabilitySet capabilities =
-        proto::CapabilitySet::of({ proto::Capability::ExtensionPermissions,
-                                   proto::Capability::InitialClientArea,
-                                   proto::Capability::AttachIntent,
-                                   proto::Capability::TabEdits,
-                                   proto::Capability::Heartbeat,
-                                   proto::Capability::ProgramStatus,
-                                   proto::Capability::ProgramStatusTiming,
-                                   proto::Capability::InputKinds,
-                                   proto::Capability::ControlPermissions,
-                                   proto::Capability::InputEcho,
-                                   proto::Capability::TabMerge,
-                                   proto::Capability::MoveNode,
-                                   proto::Capability::LayoutBatch,
-                                   proto::Capability::TabEditAcks,
-                                   proto::Capability::ColorPreference,
-                                   proto::Capability::ClipboardTargets,
-                                   proto::Capability::SoftFonts,
-                                   proto::Capability::WorkspaceSwitch,
-                                   proto::Capability::DaemonFollow,
-                                   proto::Capability::WorkspaceMeta,
-                                   proto::Capability::ClientGoodbye,
-                                   proto::Capability::LaunchFirstTab,
-                                   proto::Capability::WorkspaceColor,
-                                   // compat(0.9.0): Names may stay; the
-                                   // legacy branches taken without it go.
-                                   proto::Capability::Names,
-                                   proto::Capability::DaemonExtensionConsent });
+    proto::CapabilitySet capabilities = proto::CapabilitySet::of({ proto::Capability::ExtensionPermissions,
+                                                                   proto::Capability::InitialClientArea,
+                                                                   proto::Capability::AttachIntent,
+                                                                   proto::Capability::TabEdits,
+                                                                   proto::Capability::Heartbeat,
+                                                                   proto::Capability::ProgramStatus,
+                                                                   proto::Capability::ProgramStatusTiming,
+                                                                   proto::Capability::InputKinds,
+                                                                   proto::Capability::ControlPermissions,
+                                                                   proto::Capability::InputEcho,
+                                                                   proto::Capability::TabMerge,
+                                                                   proto::Capability::MoveNode,
+                                                                   proto::Capability::LayoutBatch,
+                                                                   proto::Capability::TabEditAcks,
+                                                                   proto::Capability::ColorPreference,
+                                                                   proto::Capability::ClipboardTargets,
+                                                                   proto::Capability::SoftFonts,
+                                                                   proto::Capability::WorkspaceSwitch,
+                                                                   proto::Capability::DaemonFollow,
+                                                                   proto::Capability::WorkspaceMeta,
+                                                                   proto::Capability::ClientGoodbye,
+                                                                   proto::Capability::LaunchFirstTab,
+                                                                   proto::Capability::WorkspaceColor,
+                                                                   // compat(0.9.0): Names may stay; the
+                                                                   // legacy branches taken without it go.
+                                                                   proto::Capability::Names,
+                                                                   proto::Capability::DaemonExtensionConsent,
+                                                                   proto::Capability::ExtensionPresence });
 };
 
 /// When a connection sends a session's program-status set.
@@ -342,6 +342,10 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
 
     /// Closes the question in this client's window, if it was sent it, and drops its ticket.
     void daemonExtensionSettled(proto::ExtensionPermissionSettled const& settled) override;
+
+    /// Sends the daemon-scoped extensions' palette rows, if this client shares
+    /// proto::Capability::ExtensionPresence.
+    void extensionPresenceChanged(proto::ExtensionPresence const& presence) override;
 
     /// Adapts the host's model-change fan-out into a "layout changed" callback naming the workspace or the
     /// tab the change is in: every structural change re-pushes the whole LayoutState of a workspace. It is a
@@ -1333,6 +1337,19 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
                && _negotiated->shared.contains(proto::Capability::DaemonExtensionConsent)
                && _consentStanding == ConsentStanding::Proven;
     }
+
+    /// Tells whether this client has a palette for the daemon-scoped extensions' rows: both ends offered
+    /// proto::Capability::ExtensionPresence. Only such a client is sent them, and may invoke one.
+    /// @return true once a handshake shared the capability.
+    [[nodiscard]] bool showsExtensionPresence() const noexcept
+    {
+        return _negotiated.has_value() && _negotiated->shared.contains(proto::Capability::ExtensionPresence);
+    }
+
+    /// Applies the client's choice of a daemon-scoped extension's palette row, if it shares the capability;
+    /// one waiting for its grant has this client asked again (if it may be asked at all).
+    /// @param invoke What it chose.
+    void invokeExtensionAction(proto::InvokeExtensionAction const& invoke);
 
     /// Takes the client's proof that it read the daemon's consent key; a right one has it asked the pending
     /// questions, a wrong one leaves it never asked.

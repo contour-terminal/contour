@@ -374,6 +374,18 @@ namespace
     {
         return std::to_underlying(PduType::ConsentProof);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(ExtensionPresence const&) noexcept
+    {
+        return std::to_underlying(PduType::ExtensionPresence);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(InvokeExtensionAction const&) noexcept
+    {
+        return std::to_underlying(PduType::InvokeExtensionAction);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(RevealPane const&) noexcept
+    {
+        return std::to_underlying(PduType::RevealPane);
+    }
     [[nodiscard]] constexpr uint64_t tagOf(CloseWorkspace const&) noexcept
     {
         return std::to_underlying(PduType::CloseWorkspace);
@@ -1113,6 +1125,34 @@ namespace
     void encodeBody(Writer& out, ConsentProof const& pdu)
     {
         out.bytes(pdu.mac);
+    }
+
+    void encodeBody(Writer& out, ExtensionPresence const& pdu)
+    {
+        out.varint(pdu.extensions.size());
+        for (auto const& extension: pdu.extensions)
+        {
+            out.string(extension.extension);
+            out.string(extension.title);
+            out.u8(std::to_underlying(extension.state));
+            out.varint(extension.rows.size());
+            for (auto const& row: extension.rows)
+            {
+                out.string(row.id);
+                out.string(row.title);
+            }
+        }
+    }
+
+    void encodeBody(Writer& out, InvokeExtensionAction const& pdu)
+    {
+        out.string(pdu.extension);
+        out.string(pdu.action);
+    }
+
+    void encodeBody(Writer& out, RevealPane const& pdu)
+    {
+        out.varint(pdu.session);
     }
 
     void encodeSoftGlyph(Writer& out, WireSoftGlyph const& glyph)
@@ -2521,6 +2561,55 @@ namespace
         return pdu;
     }
 
+    DecodeResult decodeExtensionPresence(Reader& in)
+    {
+        auto pdu = ExtensionPresence {};
+        auto const decodeRow = [](Reader& reader) -> std::expected<WireActionRow, DecodeError> {
+            auto row = WireActionRow {};
+            auto error = DecodeError {};
+            if (!assign(reader.string(), row.id, error) || !assign(reader.string(), row.title, error))
+                return std::unexpected(error);
+            return row;
+        };
+        auto const decodeExtension =
+            [&decodeRow](Reader& reader) -> std::expected<WireExtensionPresence, DecodeError> {
+            auto extension = WireExtensionPresence {};
+            auto error = DecodeError {};
+            auto state = uint8_t { 0 };
+            if (!assign(reader.string(), extension.extension, error)
+                || !assign(reader.string(), extension.title, error) || !assign(reader.u8(), state, error))
+                return std::unexpected(error);
+            extension.state =
+                enumOrElse(state, WirePresenceState::Unavailable, WirePresenceState::Unavailable);
+            if (auto const rows = decodeVector(reader, extension.rows, decodeRow); !rows)
+                return std::unexpected(rows.error());
+            return extension;
+        };
+        if (auto const decoded = decodeVector(in, pdu.extensions, decodeExtension); !decoded)
+            return std::unexpected(decoded.error());
+        return pdu;
+    }
+
+    DecodeResult decodeInvokeExtensionAction(Reader& in)
+    {
+        auto pdu = InvokeExtensionAction {};
+        auto error = DecodeError {};
+        // Whatever follows the two names is a newer peer's and is never read: an invocation carries no
+        // argument to the extension.
+        if (!assign(in.string(), pdu.extension, error) || !assign(in.string(), pdu.action, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeRevealPane(Reader& in)
+    {
+        auto pdu = RevealPane {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.session, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
     DecodeResult decodeSelectWorkspace(Reader& in)
     {
         auto pdu = SelectWorkspace {};
@@ -3034,6 +3123,9 @@ namespace
         DecodeRow { PduType::ExtensionPermissionReply, decodeExtensionPermissionReply },
         DecodeRow { PduType::ExtensionPermissionSettled, decodeExtensionPermissionSettled },
         DecodeRow { PduType::ConsentProof, decodeConsentProof },
+        DecodeRow { PduType::ExtensionPresence, decodeExtensionPresence },
+        DecodeRow { PduType::InvokeExtensionAction, decodeInvokeExtensionAction },
+        DecodeRow { PduType::RevealPane, decodeRevealPane },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

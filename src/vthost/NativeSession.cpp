@@ -371,6 +371,7 @@ NativeSession::~NativeSession()
 {
     _upgradeLink->session = nullptr;
     _host.noteClientDetached(this, _detachKind);
+    _host.forgetActionOrigin(_id);
     // Beside the count it mirrors, so that the event and connectedClients() never disagree; only for a
     // connection that was told attached.
     if (_phase == ConnectionPhase::Viewing)
@@ -1022,6 +1023,27 @@ void NativeSession::daemonExtensionSettled(proto::ExtensionPermissionSettled con
     });
     if (dropped != 0 && !_closed)
         send(0, proto::DecodedPdu { settled });
+}
+
+void NativeSession::extensionPresenceChanged(proto::ExtensionPresence const& presence)
+{
+    if (showsExtensionPresence() && !_closed)
+        send(0, proto::DecodedPdu { presence });
+}
+
+void NativeSession::invokeExtensionAction(proto::InvokeExtensionAction const& invoke)
+{
+    if (!showsExtensionPresence())
+    {
+        sessionLog()("{}: dropping an extension invocation from a client without a palette for it", _id);
+        return;
+    }
+    if (_host.invokeExtensionAction(_id, invoke.extension, invoke.action) != InvocationEffect::AskAgain)
+        return;
+    // Asked again here only: the invoking window. One that did not prove the consent key is sent nothing.
+    for (auto const& request: _host.pendingDaemonExtensionRequests())
+        if (request.name == invoke.extension)
+            std::ignore = daemonExtensionRequested(request, ConsentOffer::Again);
 }
 
 void NativeSession::acceptConsentProof(proto::ConsentProof const& proof)
@@ -2467,6 +2489,11 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
         acceptConsentProof(*proof);
         return;
     }
+    if (auto const* invoke = std::get_if<proto::InvokeExtensionAction>(&frame.pdu))
+    {
+        invokeExtensionAction(*invoke);
+        return;
+    }
     if (auto const* reply = std::get_if<proto::PermissionReply>(&frame.pdu))
     {
         // Read, never cast: a byte no answer has records nothing, and leaves the question open.
@@ -3379,6 +3406,8 @@ void NativeSession::attachClient(uint64_t serial,
     // A daemon-scoped extension's question belongs to no pane: every window that can answer it is asked.
     for (auto const& request: _host.pendingDaemonExtensionRequests())
         std::ignore = daemonExtensionRequested(request, ConsentOffer::IfNotSent);
+    // The daemon-scoped extensions' palette rows, to a client with a palette for them.
+    extensionPresenceChanged(_host.extensionPresence());
 }
 
 std::vector<WorkspaceSummary> NativeSession::workspaceSummaries() const

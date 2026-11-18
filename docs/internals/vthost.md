@@ -170,6 +170,8 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `LaunchFirstTab` | 31 | `launch-first-tab` | `OpenFirstTab` (tag 61, client->server, body: the workspace id the client saw empty): a launch that named a workspace holding no tab (`contour --workspace N`) asks the daemon, once its layout shows the workspace empty, to open the first tab there (only if that workspace still exists, is still selected by the connection and still holds none), in the directory the hello stated; without it (an older daemon) the launch waits for a tab, as it did, and the hello is the same `Select` either way |
 | `Names` | 32 | `names` | The peer speaks the control API's `name` spelling: `name` keys, `object.rename`, `object.renamed`, `toName`. Without it the other end speaks the old one to it (`label` keys, `object.setLabel`, `workspace.rename`, `workspace.labelChanged`, `toLabel`) through vtcontrol's legacy spelling table (`LegacySpelling.hpp`); removed before 0.9.0 |
 | `WorkspaceColor` | 33 | `workspace-color` | `SetWorkspaceColor` (tag 62, client->server, body: the workspace id, a has-colour byte and a `u32` `0xRRGGBB`, 0 when cleared) sets or clears a workspace's colour in the daemon's model, and `WorkspaceMeta`'s colour field (the fourth presence bit, after `position`) states it: in full and as a delta on each change. Without it (an older daemon) a client sends nothing and keeps the workspace uncoloured; an older client is stated no colour, so its `WorkspaceMeta` bytes are what they were |
+| `DaemonExtensionConsent` | 34 | `daemon-extension-consent` | `ExtensionPermissionRequest` / `ExtensionPermissionReply` / `ExtensionPermissionSettled` / `ConsentProof` (tags 63-66): a daemon-scoped extension's grant is asked only of a window that proved the daemon's consent key |
+| `ExtensionPresence` | 35 | `extension-presence` | The daemon extensions' palette rows and what invoking one does (see [Extension presence](#extension-presence)): `ExtensionPresence` (tag 67, server->client), `InvokeExtensionAction` (tag 68, client->server), `RevealPane` (tag 69, server->client). A client without it is never sent the rows, and an invocation from it is dropped |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -958,6 +960,42 @@ error preamble (`Refused`).
 Every failure path ends the child before `connect()` returns, and every `connect()` spawns a fresh
 ssh: a dropped connection's child is reaped when its `Connection` goes, and the next attempt starts
 anew.
+
+
+## Extension presence
+
+A window's command palette shows the actions each daemon-scoped extension declares (its manifest's
+`action <id> = title` lines), and invoking one reaches the extension, all behind `Capability::ExtensionPresence`
+(35). Three PDUs carry it:
+
+| PDU | Tag | Direction | Body |
+|-----|-----|-----------|------|
+| `ExtensionPresence` | 67 | server->client | `varint count`, per extension `string extension, string title, u8 state, varint count`, per row `string id, string title` |
+| `InvokeExtensionAction` | 68 | client->server | `string extension, string action` |
+| `RevealPane` | 69 | server->client | `varint session` |
+
+`ExtensionPresence` is the whole set each time: sent to every connection sharing the capability as it
+attaches, and again whenever an extension's state or rows change, coalesced to one per loop turn. The title
+is the manifest's `title`, else the extension's name. The state (`WirePresenceState`: `Running`, `Stopped`,
+`AwaitingGrant`, `Disabled`, `Unavailable` -- denied or failed, and any byte no enumerator has) decides the
+palette's rows: running or stopped, one per declared action; waiting for its grant, one "grant access…" row;
+disabled, one "restart extension" row; unavailable, none. The grant and restart rows name no action (their
+`action` is empty).
+
+`InvokeExtensionAction` carries no argument: the body is the two names, and bytes a newer peer appends are
+never read, so nothing but a declared action's id reaches the extension. The daemon drops an invocation for an
+unknown extension, or for an action the extension does not declare (an empty one only where the row names
+none), and otherwise does what one table (`vthost::InvocationRows`) says for the extension's state: running,
+the action is queued for its `actions-take` with the connection's origin and the extension is told; stopped,
+it is started first; waiting for its grant, the invoking window is sent the grant question again (only if it
+proved the consent key); disabled, it is restarted with a fresh fault window; denied or failed, nothing. An
+invocation needs no consent proof: a native client acts as the user, and a restarted extension runs only under
+the grant it already holds. Each connection's origin is minted once and dropped at its detach; at most 32
+actions are queued per extension, the oldest dropped first. Every delivery tells the extension (its runner
+coalesces them), and so does every change that finds it running with actions still queued: one that faulted
+before it took them is told again once it is back.
+
+`RevealPane` asks the window to raise itself and focus a pane whose tab the daemon has already made active.
 
 ## The GUI seams (`contour client`, `contour client --tmux`)
 

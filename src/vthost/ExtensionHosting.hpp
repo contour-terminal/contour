@@ -33,6 +33,7 @@
 
 #include <vtcontrol/Catalog.hpp>
 #include <vtcontrol/ControlError.hpp>
+#include <vthost/ConnectionId.hpp>
 #include <vthost/PermissionWire.hpp>
 #include <vthost/proto/Pdu.hpp>
 
@@ -132,6 +133,8 @@ struct DaemonWorldEvents
     std::function<void()> requestsChanged;
     /// What an extension shows of itself changed: it published a new summary, or it failed to start.
     std::function<void()> summaryChanged;
+    /// What the palette shows of an extension changed: where it stands, or its declared actions.
+    std::function<void()> presenceChanged {};
 };
 
 /// A daemon-scoped extension waiting for its user's grant, and the question the daemon rendered for it.
@@ -178,6 +181,57 @@ struct DaemonExtensionStatus
     std::string problem; ///< Why it could not run, neutralized, while it is Failed; empty otherwise.
 
     bool operator==(DaemonExtensionStatus const&) const = default;
+};
+
+/// Why vthost calls a daemon-scoped extension: what it raises for one, in its own words (vtextension's
+/// DaemonHint has more, which vthost never raises).
+enum class ServedHint : uint8_t
+{
+    Tabs,    ///< Its served tabs changed.
+    Actions, ///< The user invoked its actions (IExtensionActions::take()).
+};
+
+/// One daemon-scoped extension as the palette shows it: its declared `action` lines, and where it stands --
+/// which decides what invoking one of them does.
+struct ExtensionActionRows
+{
+    std::string extension;                                      ///< What the daemon's configuration calls it.
+    std::string title;                                          ///< Its manifest's `title`, else its name.
+    DaemonExtensionState state = DaemonExtensionState::Stopped; ///< Where it stands.
+    std::vector<std::pair<std::string, std::string>> rows = {}; ///< Each declared action: its id and title.
+
+    bool operator==(ExtensionActionRows const&) const = default;
+};
+
+/// Which connection an invoked action came from, as an extension is told it (the WIT `origin`, a `u32`).
+/// Minted once per connection, never reused.
+using Origin = uint32_t;
+
+/// The actions the user invoked, per extension, with the connection each came from: what an extension's
+/// `actions-take` reads.
+class IExtensionActions
+{
+  public:
+    IExtensionActions() = default;
+    IExtensionActions(IExtensionActions const&) = delete;
+    IExtensionActions(IExtensionActions&&) = delete;
+    IExtensionActions& operator=(IExtensionActions const&) = delete;
+    IExtensionActions& operator=(IExtensionActions&&) = delete;
+    virtual ~IExtensionActions() = default;
+
+    /// Takes the actions invoked for @p extension since the last take, oldest first. From any thread.
+    /// @param extension What the daemon's configuration calls it.
+    /// @return Each action's id and the origin it came from.
+    [[nodiscard]] virtual std::vector<std::pair<std::string, Origin>> take(std::string_view extension) = 0;
+
+    /// From any thread. An origin is bound to the extension it was handed to: one extension cannot act for
+    /// a window through an origin another one was given.
+    /// @param extension What the daemon's configuration calls the extension asking.
+    /// @param origin An origin take() handed out.
+    /// @return The connection it stands for; nullopt once that connection detached, or for an origin take()
+    ///         never handed @p extension.
+    [[nodiscard]] virtual std::optional<ConnectionId> connectionOf(std::string_view extension,
+                                                                   Origin origin) const = 0;
 };
 
 /// What asking the windows again came to.
@@ -277,6 +331,19 @@ class IDaemonWorldHosting
     ///         or why it failed. Readable from any thread; lives as long as this. DaemonWorldEvents's
     ///         summaryChanged tells when it changed.
     [[nodiscard]] virtual vtbackend::IDaemonExtensionSummaries const& summaries() const noexcept = 0;
+
+    /// @return Every extension that composed, in the configuration's order: its declared actions, and where
+    ///         it stands. DaemonWorldEvents's presenceChanged tells when it changed.
+    [[nodiscard]] virtual std::vector<ExtensionActionRows> actionRows() const = 0;
+
+    /// Raises @p hint for a running extension; does nothing for one that does not run. Never waits for it.
+    /// @param name What the configuration calls it.
+    /// @param hint Why it is to be called.
+    virtual void hint(std::string_view name, ServedHint hint) = 0;
+
+    /// Starts a disabled extension again, with a fresh fault window; does nothing unless it is disabled.
+    /// @param name What the configuration calls it.
+    virtual void restart(std::string_view name) = 0;
 
     /// Stops every extension for good, for a host about to go: joins the thread they run on, then cancels
     /// the processes in flight. Called by the host before it drains its loop of what they posted; after it,

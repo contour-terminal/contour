@@ -641,6 +641,29 @@ namespace
                        // A proof of a secret: never shown, not even in part.
                        return std::string { "mac=<32B>" };
                    } },
+        TraceRow { PduType::ExtensionPresence,
+                   "ExtensionPresence",
+                   +[](DecodedPdu const& pdu) {
+                       // Counted, never transcribed: the titles are the extensions' own text.
+                       auto const& value = std::get<ExtensionPresence>(pdu);
+                       auto rows = std::size_t { 0 };
+                       for (auto const& extension: value.extensions)
+                           rows += extension.rows.size();
+                       return std::format("extensions={} rows={}", value.extensions.size(), rows);
+                   } },
+        TraceRow { PduType::InvokeExtensionAction,
+                   "InvokeExtensionAction",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<InvokeExtensionAction>(pdu);
+                       return std::format(R"(extension="{}" action="{}")",
+                                          core::escape(value.extension),
+                                          core::escape(value.action));
+                   } },
+        TraceRow { PduType::RevealPane,
+                   "RevealPane",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("session={}", std::get<RevealPane>(pdu).session);
+                   } },
         TraceRow { PduType::SoftFontState,
                    "SoftFontState",
                    +[](DecodedPdu const& pdu) {

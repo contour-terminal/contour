@@ -127,15 +127,18 @@ struct Fixture
     }
 
     /// Composes the runtime from @p declarations into `runtime`.
+    /// @param limits What each extension may cost.
     /// @return The problems it reported.
-    std::vector<DeclarationProblem> create(std::vector<DaemonExtensionDeclaration> declarations)
+    std::vector<DeclarationProblem> create(std::vector<DaemonExtensionDeclaration> declarations,
+                                           ExtensionLimits limits = daemonWorldLimits())
     {
         auto composed = DaemonExtensionRuntime::create(
             DaemonExtensionRuntimeConfig { .declarations = std::move(declarations),
                                            .grantsFile = GrantsFile,
                                            .home = home,
                                            .inheritedEnvironment = { "PATH=/usr/bin" },
-                                           .bundledDirectories = {} },
+                                           .bundledDirectories = {},
+                                           .limits = limits },
             DaemonExtensionRuntimeServices { .backend = harness.backend,
                                              .runner = runner,
                                              .directories = directories,
@@ -187,6 +190,29 @@ struct Fixture
                                         .autostart = autostart,
                                         .configJson = std::string(WorkConfig),
                                         .storeDirectory = std::move(store) };
+}
+
+/// Waits, on the real lane, until @p condition holds; ten seconds at most.
+/// @return Whether it held.
+template <typename Condition>
+[[nodiscard]] bool eventually(Condition const& condition)
+{
+    auto const deadline = std::chrono::steady_clock::now() + 10s;
+    while (!condition())
+    {
+        if (std::chrono::steady_clock::now() > deadline)
+            return false;
+        std::this_thread::yield();
+    }
+    return true;
+}
+
+/// The daemon world's limits with a back-off short enough that faults follow each other at once.
+[[nodiscard]] ExtensionLimits quickRecovery()
+{
+    auto limits = daemonWorldLimits();
+    limits.initialBackoff = 1ms;
+    return limits;
 }
 
 } // namespace
@@ -643,4 +669,59 @@ TEST_CASE("DaemonExtensionRuntime: the same manifest over other code is asked ab
         fixture.create({ declared("good", "/ext/good.wasm", ExtensionAutostart::AtDaemonStart) }).empty());
     CHECK_FALSE(fixture.runtime->status("good").has_value());
     CHECK(fixture.runtime->pending().size() == 1);
+}
+
+TEST_CASE("DaemonExtensionRuntime: restart starts a disabled extension again, with a fresh fault window",
+          "[daemon][runtime][presence]")
+{
+    auto fixture = Fixture {};
+    fixture.grantGood();
+    // Loads 0-2 fault (three in the window: disabled); after the restart, loads 3 and 4 fault and 5 runs.
+    fixture.onLoad = [&]() -> std::expected<void, wasm::CallFailure> {
+        if (fixture.loads.load() == 5)
+            return {};
+        return std::unexpected(wasm::CallFailure::Trap);
+    };
+    auto const problems = fixture.create(
+        { declared("good", "/ext/good.wasm", ExtensionAutostart::AtDaemonStart) }, quickRecovery());
+    REQUIRE(problems.empty());
+    auto const stateOf = [&] {
+        auto const status = fixture.runtime->status("good");
+        return status ? status->state : DaemonRunnerState::Starting;
+    };
+    REQUIRE(eventually([&] { return stateOf() == DaemonRunnerState::Disabled; }));
+    CHECK(fixture.loads.load() == 3);
+
+    fixture.runtime->restart("good");
+    REQUIRE(eventually([&] { return fixture.loads.load() == 6 && stateOf() == DaemonRunnerState::Running; }));
+    auto const status = fixture.runtime->status("good");
+    REQUIRE(status.has_value());
+    CHECK(status->faultsInWindow == 2);
+    CHECK(fixture.runtime->entries().front().phase == DaemonExtensionPhase::Running);
+}
+
+TEST_CASE("DaemonExtensionRuntime: restart does nothing unless disabled", "[daemon][runtime][presence]")
+{
+    auto fixture = Fixture {};
+    // Not granted: it waits for its user, and a restart does not run it.
+    auto const problems =
+        fixture.create({ declared("good", "/ext/good.wasm", ExtensionAutostart::AtDaemonStart) });
+    REQUIRE(problems.empty());
+    fixture.runtime->restart("good");
+    CHECK_FALSE(fixture.runtime->status("good").has_value());
+    CHECK(fixture.runtime->pending().size() == 1);
+
+    // Granted and running: a restart loads it no second time.
+    auto const pending = fixture.runtime->pending();
+    fixture.runtime->answer("good", pending.front().grantDigest, GrantState::Granted);
+    fixture.firstLoad.wait();
+    fixture.runtime->restart("good");
+    fixture.runtime->restart("unknown");
+    fixture.runtime->hint("unknown", DaemonHint::Actions);
+    fixture.runtime->stop();
+    CHECK(fixture.loads.load() == 1);
+    // Once stopped, neither does anything.
+    fixture.runtime->restart("good");
+    fixture.runtime->hint("good", DaemonHint::Actions);
+    CHECK(fixture.loads.load() == 1);
 }

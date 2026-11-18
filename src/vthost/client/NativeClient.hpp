@@ -341,6 +341,11 @@ class NativeClient final
         std::variant<proto::ExtensionPermissionRequest, proto::ExtensionPermissionSettled>;
     /// Handler invoked for each DaemonConsentEvent; answered with answerDaemonExtension().
     using DaemonConsentHandler = std::function<void(DaemonConsentEvent const&)>;
+    /// What the daemon tells a window with a palette about the daemon-scoped extensions (Capability::
+    /// ExtensionPresence): their rows, the whole set each time, or a pane to raise and focus.
+    using ExtensionEvent = std::variant<proto::ExtensionPresence, proto::RevealPane>;
+    /// Handler invoked for each ExtensionEvent; a row is invoked with invokeExtensionAction().
+    using ExtensionEventHandler = std::function<void(ExtensionEvent const&)>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
     using HandshakeHandler = std::function<void()>;
 
@@ -423,6 +428,9 @@ class NativeClient final
     /// @param onSnapshotProgress Told of each piece of a snapshot that is not yet whole.
     /// @param onDaemonConsent Told of the daemon-scoped extensions' questions; none for a client that asks no
     ///        user in a window, which must then not offer Capability::DaemonExtensionConsent either.
+    /// @param onExtensionEvent Told of the daemon-scoped extensions' palette rows and pane reveals; none for
+    /// a
+    ///        client with no palette, which must then not offer Capability::ExtensionPresence either.
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -442,7 +450,8 @@ class NativeClient final
                  RaiseRoleHandler onRaiseRole = {},
                  WorkspaceMetaHandler onWorkspaceMeta = {},
                  SnapshotProgressHandler onSnapshotProgress = {},
-                 DaemonConsentHandler onDaemonConsent = {});
+                 DaemonConsentHandler onDaemonConsent = {},
+                 ExtensionEventHandler onExtensionEvent = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -640,6 +649,12 @@ class NativeClient final
     /// @param grantDigest ExtensionPermissionRequest::grantDigest.
     /// @param answer Granted or Denied.
     void answerDaemonExtension(std::string name, std::string grantDigest, GrantState answer);
+
+    /// Invokes a daemon-scoped extension's palette row: sent only to a daemon sharing
+    /// Capability::ExtensionPresence, which applies what the extension's state says.
+    /// @param extension WireExtensionPresence::extension.
+    /// @param action WireActionRow::id; empty for the row that asks for a grant or restarts.
+    void invokeExtensionAction(std::string extension, std::string action);
 
     /// Answers a SwitchRequest the daemon asked: sent only to a daemon sharing Capability::WorkspaceSwitch,
     /// which is the only one that asks.
@@ -867,6 +882,7 @@ class NativeClient final
     WorkspaceMetaHandler _onWorkspaceMeta;
     SnapshotProgressHandler _onSnapshotProgress;
     DaemonConsentHandler _onDaemonConsent;
+    ExtensionEventHandler _onExtensionEvent;
     /// When run() began: what the elapsed times of the attach log count from.
     core::platform::SteadyTimePoint _attachStartedAt {};
     /// Whether the first whole snapshot has been logged, once per connection.

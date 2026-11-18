@@ -76,6 +76,9 @@ class DaemonWorldExtensions final:
     void revoke(std::string_view name) override;
     [[nodiscard]] std::optional<DaemonExtensionStatus> status(std::string_view name) const override;
     [[nodiscard]] vtbackend::IDaemonExtensionSummaries const& summaries() const noexcept override;
+    [[nodiscard]] std::vector<ExtensionActionRows> actionRows() const override;
+    void hint(std::string_view name, ServedHint hint) override;
+    void restart(std::string_view name) override;
     void stop() noexcept override;
 
     /// @return Where the runtime and its runners report what the extensions show of themselves: the seam a

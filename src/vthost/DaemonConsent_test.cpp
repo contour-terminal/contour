@@ -19,11 +19,14 @@
 #include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <vthost/ConnectionId.hpp>
@@ -320,8 +323,8 @@ struct ConsentHarness
     std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
     core::net::EventLoop loop { *source };
     std::shared_ptr<std::vector<std::string>> journal = std::make_shared<std::vector<std::string>>();
-    std::shared_ptr<FakeDaemonWorldHosting> world =
-        std::make_shared<FakeDaemonWorldHosting>(journal, [](std::function<void()> const& /*job*/) {});
+    /// Made by the host's factory, which hands it what the host hears from it.
+    std::shared_ptr<FakeDaemonWorldHosting> world;
     vthost::SessionHost host { loop,
                                [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                                    return std::make_unique<vtpty::MockPty>(size);
@@ -330,8 +333,12 @@ struct ConsentHarness
                                core::defaultEnvironment(),
                                vthost::SessionHostConfig {
                                    .pumping = vthost::SessionPumping::Manual,
-                                   .daemonWorld = [world = world](vthost::DaemonWorldEvents const& /*events*/,
-                                                                  vthost::OwnerPost const& /*post*/) {
+                                   .daemonWorld = [this](vthost::DaemonWorldEvents events,
+                                                         vthost::OwnerPost const& /*post*/) {
+                                       world = std::make_shared<FakeDaemonWorldHosting>(
+                                           journal,
+                                           [](std::function<void()> const& /*job*/) {},
+                                           std::move(events));
                                        return world;
                                    } } };
     uint64_t connections = 0;
@@ -690,3 +697,312 @@ TEST_CASE("DaemonConsent: a second proof changes nothing", "[daemon][consent]")
         CHECK(w->count<proto::ExtensionPermissionRequest>() == row.asked);
     }
 }
+
+// {{{ the daemon extensions' palette rows (Capability::ExtensionPresence)
+
+namespace
+{
+
+/// @return A hello from a window with a palette for the daemon extensions' rows, which can answer their
+///         questions too.
+[[nodiscard]] proto::DecodedPdu paletteHello()
+{
+    return helloOf(proto::CapabilitySet::of({ proto::Capability::ExtensionPresence,
+                                              proto::Capability::DaemonExtensionConsent,
+                                              proto::Capability::Heartbeat }));
+}
+
+/// @return The orchestrator's palette rows, as the fake daemon world holds them, in @p state.
+[[nodiscard]] vthost::ExtensionActionRows orchestratorRows(vthost::DaemonExtensionState state)
+{
+    return vthost::ExtensionActionRows { .extension = "orchestrator",
+                                         .title = "Agents",
+                                         .state = state,
+                                         .rows = { { "open", "Open Agents" },
+                                                   { "refresh", "Refresh Agents" } } };
+}
+
+/// @return An invocation of @p action of @p extension.
+[[nodiscard]] proto::DecodedPdu invocationOf(std::string extension, std::string action)
+{
+    return proto::DecodedPdu { proto::InvokeExtensionAction { .extension = std::move(extension),
+                                                              .action = std::move(action) } };
+}
+
+/// @return Every ExtensionPresence @p client received, in order.
+[[nodiscard]] std::vector<proto::ExtensionPresence> presencesOf(Client const& client)
+{
+    auto presences = std::vector<proto::ExtensionPresence> {};
+    for (auto const& frame: client.received)
+        if (auto const* presence = std::get_if<proto::ExtensionPresence>(&frame.pdu))
+            presences.push_back(*presence);
+    return presences;
+}
+
+/// @return Whether @p journal holds @p entry.
+[[nodiscard]] bool journaled(std::vector<std::string> const& journal, std::string_view entry)
+{
+    return std::ranges::contains(journal, entry);
+}
+
+/// @return The journal's entries of what an invocation does: hints, starts and restarts.
+[[nodiscard]] std::vector<std::string> invocationEffects(std::vector<std::string> const& journal)
+{
+    auto effects = std::vector<std::string> {};
+    std::ranges::copy_if(journal, std::back_inserter(effects), [](std::string const& entry) {
+        return entry.starts_with("hint ") || entry.starts_with("start ") || entry.starts_with("restart ");
+    });
+    return effects;
+}
+
+} // namespace
+
+TEST_CASE("ExtensionPresence: a client without extension-presence is never sent ExtensionPresence",
+          "[daemon][presence]")
+{
+    auto h = ConsentHarness {};
+    h.world->rows = { orchestratorRows(vthost::DaemonExtensionState::Running) };
+    auto window = h.connect();
+    auto* const w = window.get();
+    h.loop.blockOn(core::net::testing::allOf(
+        w->server->run(),
+        runWhen(
+            &h.loop,
+            [w] { return w->attached() && w->proofRead(); },
+            [&] { h.world->changePresence({ orchestratorRows(vthost::DaemonExtensionState::Disabled) }); }),
+        play(
+            &h.loop,
+            w,
+            { Step { .when = [] { return true; }, .send = { windowHello() } } },
+            [w] { return w->attached() && w->proofRead(); },
+            QuietTicks)));
+
+    CHECK(w->attached());
+    CHECK(presencesOf(*w).empty());
+}
+
+TEST_CASE("ExtensionPresence: a client with it receives the rows at attach and on a change",
+          "[daemon][presence]")
+{
+    auto h = ConsentHarness {};
+    h.world->pending.clear();
+    h.world->rows = { orchestratorRows(vthost::DaemonExtensionState::Running) };
+    auto window = h.connect();
+    auto* const w = window.get();
+    h.loop.blockOn(core::net::testing::allOf(
+        w->server->run(),
+        runWhen(
+            &h.loop,
+            [w] { return w->attached() && presencesOf(*w).size() == 1; },
+            [&] {
+                // A burst of changes in one loop turn is sent once.
+                h.world->changePresence({ orchestratorRows(vthost::DaemonExtensionState::Disabled) });
+                h.world->changePresence({ orchestratorRows(vthost::DaemonExtensionState::Pending) });
+            }),
+        play(
+            &h.loop,
+            w,
+            { Step { .when = [] { return true; }, .send = { paletteHello() } } },
+            [w] { return presencesOf(*w).size() == 2; },
+            QuietTicks)));
+
+    auto const presences = presencesOf(*w);
+    REQUIRE(presences.size() == 2);
+    CHECK(presences[0]
+          == proto::ExtensionPresence {
+              .extensions = { proto::WireExtensionPresence {
+                  .extension = "orchestrator",
+                  .title = "Agents",
+                  .state = proto::WirePresenceState::Running,
+                  .rows = { proto::WireActionRow { .id = "open", .title = "Open Agents" },
+                            proto::WireActionRow { .id = "refresh", .title = "Refresh Agents" } } } } });
+    REQUIRE(presences[1].extensions.size() == 1);
+    CHECK(presences[1].extensions[0].state == proto::WirePresenceState::AwaitingGrant);
+}
+
+TEST_CASE("ExtensionPresence: an invocation for an unknown extension or action is dropped",
+          "[daemon][presence]")
+{
+    auto h = ConsentHarness {};
+    h.world->pending.clear();
+    h.world->rows = { orchestratorRows(vthost::DaemonExtensionState::Running) };
+    auto window = h.connect();
+    auto* const w = window.get();
+    auto const& journal = *h.journal;
+    h.loop.blockOn(
+        core::net::testing::allOf(w->server->run(),
+                                  play(
+                                      &h.loop,
+                                      w,
+                                      { Step { .when = [] { return true; }, .send = { paletteHello() } },
+                                        Step { .when = [w] { return w->attached() && w->proofRead(); },
+                                               .send = { invocationOf("unknown", "open"),
+                                                         invocationOf("orchestrator", "undeclared"),
+                                                         invocationOf("orchestrator", ""),
+                                                         invocationOf("orchestrator", "open") } } },
+                                      [&journal] { return journaled(journal, "hint orchestrator actions"); },
+                                      QuietTicks)));
+
+    // Only the declared action of the known extension reached it: the queue holds it alone.
+    CHECK(invocationEffects(journal) == std::vector<std::string> { "hint orchestrator actions" });
+    auto const taken = h.host.extensionActions().take("orchestrator");
+    REQUIRE(taken.size() == 1);
+    CHECK(taken.front().first == "open");
+    CHECK(h.host.extensionActions().connectionOf("orchestrator", taken.front().second).has_value());
+}
+
+TEST_CASE("ExtensionPresence: an action the extension did not take is raised again once it runs",
+          "[daemon][presence]")
+{
+    auto h = ConsentHarness {};
+    h.world->pending.clear();
+    h.world->rows = { orchestratorRows(vthost::DaemonExtensionState::Running) };
+    auto window = h.connect();
+    auto* const w = window.get();
+    auto const& journal = *h.journal;
+    auto const hints = [&journal] {
+        return std::ranges::count(journal, std::string { "hint orchestrator actions" });
+    };
+    auto restarted = false;
+    h.loop.blockOn(core::net::testing::allOf(
+        w->server->run(),
+        runWhen(
+            &h.loop,
+            [&hints] { return hints() == 1; },
+            [&] {
+                // It faulted in update(actions) before it took the action, was disabled, and restarted.
+                h.world->changePresence({ orchestratorRows(vthost::DaemonExtensionState::Disabled) });
+                h.world->changePresence({ orchestratorRows(vthost::DaemonExtensionState::Running) });
+                restarted = true;
+            }),
+        play(
+            &h.loop,
+            w,
+            { Step { .when = [] { return true; }, .send = { paletteHello() } },
+              Step { .when = [w] { return w->attached() && w->proofRead(); },
+                     .send = { invocationOf("orchestrator", "open") } },
+              // A later invocation is raised too, though the first still waits.
+              Step { .when = [&] { return restarted && hints() == 2; },
+                     .send = { invocationOf("orchestrator", "refresh") } } },
+            [&hints] { return hints() == 3; },
+            QuietTicks)));
+
+    CHECK(hints() == 3);
+    auto const taken = h.host.extensionActions().take("orchestrator");
+    REQUIRE(taken.size() == 2);
+    CHECK(taken[0].first == "open");
+    CHECK(taken[1].first == "refresh");
+}
+
+TEST_CASE("ExtensionPresence: an invocation from a client without the capability is dropped",
+          "[daemon][presence]")
+{
+    auto h = ConsentHarness {};
+    h.world->pending.clear();
+    h.world->rows = { orchestratorRows(vthost::DaemonExtensionState::Running) };
+    auto window = h.connect();
+    auto* const w = window.get();
+    h.loop.blockOn(core::net::testing::allOf(
+        w->server->run(),
+        play(
+            &h.loop,
+            w,
+            { Step { .when = [] { return true; }, .send = { windowHello() } },
+              Step { .when = [w] { return w->attached() && w->proofRead(); },
+                     .send = { invocationOf("orchestrator", "open"),
+                               proto::DecodedPdu { proto::Heartbeat { .nonce = 9 } } } } },
+            [w] { return w->echoes() == 2; },
+            QuietTicks)));
+
+    CHECK(w->echoes() == 2);
+    CHECK(invocationEffects(*h.journal).empty());
+}
+
+TEST_CASE("ExtensionPresence: what an invocation does follows the extension's state", "[daemon][presence]")
+{
+    struct Row
+    {
+        vthost::DaemonExtensionState state;
+        std::vector<std::string> effects;
+    };
+    for (auto const& row:
+         { Row { .state = vthost::DaemonExtensionState::Stopped,
+                 .effects = { "start orchestrator", "hint orchestrator actions" } },
+           Row { .state = vthost::DaemonExtensionState::Disabled, .effects = { "restart orchestrator" } },
+           Row { .state = vthost::DaemonExtensionState::Denied, .effects = {} },
+           Row { .state = vthost::DaemonExtensionState::Failed, .effects = {} } })
+    {
+        INFO(std::to_underlying(row.state));
+        auto h = ConsentHarness {};
+        h.world->pending.clear();
+        h.world->rows = { orchestratorRows(row.state) };
+        auto window = h.connect();
+        auto* const w = window.get();
+        auto const& journal = *h.journal;
+        auto const expected = row.effects.size();
+        h.loop.blockOn(core::net::testing::allOf(
+            w->server->run(),
+            play(
+                &h.loop,
+                w,
+                { Step { .when = [] { return true; }, .send = { paletteHello() } },
+                  Step { .when = [w] { return w->attached() && w->proofRead(); },
+                         .send = { invocationOf("orchestrator", "open"),
+                                   proto::DecodedPdu { proto::Heartbeat { .nonce = 9 } } } } },
+                [&journal, expected, w] {
+                    return w->echoes() == 2 && invocationEffects(journal).size() == expected;
+                },
+                QuietTicks)));
+
+        CHECK(invocationEffects(journal) == row.effects);
+    }
+}
+
+TEST_CASE("ExtensionPresence: invoking a pending extension asks that window again",
+          "[daemon][presence][consent]")
+{
+    auto h = ConsentHarness {};
+    h.world->rows = { orchestratorRows(vthost::DaemonExtensionState::Pending) };
+    auto proven = h.connect();
+    auto unproven = h.connect(Proving::Nothing);
+    auto bystander = h.connect();
+    auto* const p = proven.get();
+    auto* const u = unproven.get();
+    auto* const b = bystander.get();
+    h.loop.blockOn(core::net::testing::allOf(
+        p->server->run(),
+        u->server->run(),
+        b->server->run(),
+        play(
+            &h.loop,
+            p,
+            { Step { .when = [] { return true; }, .send = { paletteHello() } },
+              Step { .when = [p] { return p->count<proto::ExtensionPermissionRequest>() == 1; },
+                     .send = { invocationOf("orchestrator", "") } } },
+            [p] { return p->count<proto::ExtensionPermissionRequest>() == 2; },
+            QuietTicks),
+        play(
+            &h.loop,
+            u,
+            { Step { .when = [] { return true; }, .send = { paletteHello() } },
+              Step { .when = [u] { return u->attached(); },
+                     .send = { invocationOf("orchestrator", ""),
+                               proto::DecodedPdu { proto::Heartbeat { .nonce = 9 } } } } },
+            [u] { return u->echoes() == 1; },
+            QuietTicks),
+        play(
+            &h.loop,
+            b,
+            { Step { .when = [] { return true; }, .send = { paletteHello() } } },
+            [b] { return b->count<proto::ExtensionPermissionRequest>() == 1; },
+            QuietTicks)));
+
+    // The invoking window is asked again; one that proved no key is asked nothing, and another window is not
+    // asked twice.
+    CHECK(p->count<proto::ExtensionPermissionRequest>() == 2);
+    CHECK(u->count<proto::ExtensionPermissionRequest>() == 0);
+    CHECK(b->count<proto::ExtensionPermissionRequest>() == 1);
+    CHECK(invocationEffects(*h.journal).empty());
+}
+
+// }}}

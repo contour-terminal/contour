@@ -275,6 +275,17 @@ namespace vthost::testing
         { proto::PduType::ExtensionPermissionSettled,
           proto::DecodedPdu {
               proto::ExtensionPermissionSettled { .name = "orchestrator", .grantDigest = "9a1b" } } },
+        { proto::PduType::ExtensionPresence,
+          proto::DecodedPdu { proto::ExtensionPresence {
+              .extensions = { proto::WireExtensionPresence {
+                  .extension = "orchestrator",
+                  .title = "secret-title",
+                  .state = proto::WirePresenceState::Running,
+                  .rows = { proto::WireActionRow { .id = "open", .title = "secret-row" } } } } } } },
+        { proto::PduType::InvokeExtensionAction,
+          proto::DecodedPdu {
+              proto::InvokeExtensionAction { .extension = "orchestrator", .action = "open" } } },
+        { proto::PduType::RevealPane, proto::DecodedPdu { proto::RevealPane { .session = 4 } } },
         { proto::PduType::SetWorkspaceName,
           proto::DecodedPdu { proto::SetWorkspaceName { .workspace = 3, .name = "secret-label" } } },
         { proto::PduType::SetWorkspaceColor,

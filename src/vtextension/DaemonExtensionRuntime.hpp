@@ -116,6 +116,10 @@ struct DaemonExtensionEntry
     std::string grantDigest;                                    ///< What its grant is recorded for.
     /// Why it could not run, neutralized for display, while it is Failed; empty otherwise.
     std::string problem;
+    /// What Contour names it: its manifest's `title`, else its name (displayTitleOf()).
+    std::string title {};
+    /// Its palette rows, the manifest's `action` lines in declaration order.
+    std::vector<ActionDecl> actions {};
 };
 
 /// What a DaemonExtensionRuntime is: fixed for its whole life. A changed configuration takes effect at the
@@ -159,7 +163,7 @@ struct DaemonExtensionRuntimeServices
 /// An extension that was to start but is not granted waits for the user's answer (pending()); answer()
 /// records it, and starts the extension once granted. revoke() forgets the answer and asks again.
 ///
-/// start(), status(), pending(), answer(), revoke() and stop() are for the owner's thread.
+/// start(), hint(), restart(), status(), pending(), answer(), revoke() and stop() are for the owner's thread.
 class DaemonExtensionRuntime
 {
     struct Extension;
@@ -204,6 +208,17 @@ class DaemonExtensionRuntime
     /// module cannot be loaded is logged, and Failed until it is started again (entries()).
     /// @param name What the configuration calls it.
     void start(std::string_view name);
+
+    /// Raises @p hint for a running extension: why it is to be called (DaemonExtensionRunner::hint()). Does
+    /// nothing for a name that does not run, or once stopped. Never waits for the extension.
+    /// @param name What the configuration calls it.
+    /// @param hint Why it is to be called.
+    void hint(std::string_view name, DaemonHint hint);
+
+    /// Starts a disabled extension again, with a fresh fault window (DaemonExtensionRunner::restart()). Does
+    /// nothing unless it is disabled: one that is stopped or waits for its grant stays as it is.
+    /// @param name What the configuration calls it.
+    void restart(std::string_view name);
 
     /// @param name What the configuration calls an extension.
     /// @return Where its runner stands; nullopt while it does not run.

@@ -110,6 +110,9 @@ enum class PduType : uint8_t
     ExtensionPermissionReply = 64,
     ExtensionPermissionSettled = 65,
     ConsentProof = 66,
+    ExtensionPresence = 67,
+    InvokeExtensionAction = 68,
+    RevealPane = 69,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1469,6 +1472,60 @@ struct ExtensionPermissionSettled
     bool operator==(ExtensionPermissionSettled const&) const = default;
 };
 
+/// A daemon extension's state as the palette shows it: what an invocation of one of its rows does follows it.
+enum class WirePresenceState : uint8_t
+{
+    Running = 0,   ///< It runs; its declared actions are delivered to it.
+    Stopped,       ///< It is granted and stopped; an invocation starts it first.
+    AwaitingGrant, ///< It waits for its user's grant; an invocation asks the invoking window again.
+    Disabled,      ///< It faulted too often and was disabled; an invocation restarts it.
+    Unavailable,   ///< Denied, or failed to load: nothing an invocation could do. Also any unknown byte.
+};
+
+/// One declared `action` line of a daemon extension: a palette row.
+struct WireActionRow
+{
+    std::string id = {};    ///< What InvokeExtensionAction::action names.
+    std::string title = {}; ///< What the palette shows.
+    bool operator==(WireActionRow const&) const = default;
+};
+
+/// One daemon extension as the palette shows it.
+struct WireExtensionPresence
+{
+    std::string extension = {};                           ///< What the daemon's configuration calls it.
+    std::string title = {};                               ///< Its manifest's `title`, else its name.
+    WirePresenceState state = WirePresenceState::Running; ///< What invoking one of its rows does.
+    std::vector<WireActionRow> rows = {};                 ///< Its declared actions, in declaration order.
+    bool operator==(WireExtensionPresence const&) const = default;
+};
+
+/// Server→client (Capability::ExtensionPresence): the daemon's extensions and their palette rows, the whole
+/// set each time. Sent at attach and again whenever an extension's state or rows change.
+struct ExtensionPresence
+{
+    std::vector<WireExtensionPresence> extensions = {}; ///< Every daemon extension, in configuration order.
+    bool operator==(ExtensionPresence const&) const = default;
+};
+
+/// Client→server (Capability::ExtensionPresence): the user chose a daemon extension's palette row. It carries
+/// no argument: the body is the two names, and a field appended by a newer peer is ignored, never delivered.
+/// An empty @ref action is the row that asks for a grant or restarts a disabled extension.
+struct InvokeExtensionAction
+{
+    std::string extension = {}; ///< WireExtensionPresence::extension.
+    std::string action = {};    ///< WireActionRow::id.
+    bool operator==(InvokeExtensionAction const&) const = default;
+};
+
+/// Server→client (Capability::ExtensionPresence): raise this window and focus @ref session's pane. The daemon
+/// has already made its tab the active one; the window only follows.
+struct RevealPane
+{
+    uint64_t session = 0; ///< The pane to focus.
+    bool operator==(RevealPane const&) const = default;
+};
+
 /// Either direction, after the handshake: the frame with serial @ref refusedSerial carried a PDU tag this
 /// peer does not know, or knows but cannot serve (a Control connection's attach-only request, a daemon
 /// control request on an endpoint with no daemon behind it). Its receiver stops sending that tag for the rest
@@ -2102,7 +2159,10 @@ using DecodedPdu = std::variant<Invalid,
                                 ExtensionPermissionRequest,
                                 ExtensionPermissionReply,
                                 ExtensionPermissionSettled,
-                                ConsentProof>;
+                                ConsentProof,
+                                ExtensionPresence,
+                                InvokeExtensionAction,
+                                RevealPane>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

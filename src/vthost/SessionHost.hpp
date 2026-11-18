@@ -66,6 +66,7 @@
 #include <vthost/CommandInterruption.hpp>
 #include <vthost/ConnectionId.hpp>
 #include <vthost/ConsentTicket.hpp>
+#include <vthost/ExtensionActions.hpp>
 #include <vthost/ExtensionHosting.hpp>
 #include <vthost/HistorySeed.hpp>
 #include <vthost/ObjectRegistry.hpp>
@@ -377,6 +378,10 @@ class SessionStreamEvents
 
     /// A daemon-scoped extension's question was answered: an observer that sent it closes it.
     virtual void daemonExtensionSettled(proto::ExtensionPermissionSettled const& /*settled*/) {}
+
+    /// What the palette shows of the daemon-scoped extensions changed: an observer with a palette sends
+    /// @p presence, the whole set. A client attaching later is sent SessionHost::extensionPresence() instead.
+    virtual void extensionPresenceChanged(proto::ExtensionPresence const& /*presence*/) {}
 };
 
 /// What a hosted session hands a desktop notification on as: its title, its body, and the occasion
@@ -1708,6 +1713,30 @@ class SessionHost final: public vtworkspace::ModelEvents, public IDaemonExtensio
     ///         client that can answer, attaching now, is to be asked. None without daemon-scoped extensions.
     [[nodiscard]] std::vector<proto::ExtensionPermissionRequest> pendingDaemonExtensionRequests() const;
 
+    /// @return The daemon-scoped extensions and their palette rows, as the wire carries them: what a client
+    ///         with a palette, attaching now, is sent. Empty without daemon-scoped extensions.
+    [[nodiscard]] proto::ExtensionPresence extensionPresence() const;
+
+    /// Applies what invoking a daemon-scoped extension's palette row does, by where the extension stands
+    /// (invocationEffectOf()). An unknown extension, or an action it does not declare, is dropped and logged;
+    /// an empty @p action is the row that asks for a grant or restarts, and only valid in those states.
+    /// @param connection The connection the user invoked it from: the action's origin.
+    /// @param extension What the daemon's configuration calls the extension.
+    /// @param action The declared action's id; empty for the grant or restart row.
+    /// @return What it did; Ignore for an invocation dropped. For AskAgain the caller re-sends the pending
+    ///         question to @p connection, which alone can tell whether its client may be asked.
+    [[nodiscard]] InvocationEffect invokeExtensionAction(ConnectionId const& connection,
+                                                         std::string_view extension,
+                                                         std::string_view action);
+
+    /// @return The actions the user invoked, queued per daemon-scoped extension: what an extension's
+    ///         `actions-take` reads.
+    [[nodiscard]] IExtensionActions& extensionActions() noexcept { return _extensionActions; }
+
+    /// Forgets @p connection's action origin, at its detach.
+    /// @param connection The connection that detached.
+    void forgetActionOrigin(ConnectionId const& connection);
+
     /// @return What the control API may do with the daemon-scoped extensions; null without any, so that every
     ///         `extension.*` verb answers unsupported.
     [[nodiscard]] IDaemonExtensionControl* daemonExtensionControl() noexcept
@@ -2343,6 +2372,11 @@ class SessionHost final: public vtworkspace::ModelEvents, public IDaemonExtensio
     /// the attached clients: what a published summary, or a failed start, does once per loop turn.
     void daemonSummariesChanged();
 
+    /// Sends the daemon-scoped extensions' palette rows to every client with a palette, and tells each
+    /// running extension that still holds actions to take them (one that faulted before it took them, and was
+    /// restarted): what a change of an extension's state or rows does once per loop turn.
+    void extensionPresenceChanged();
+
     /// The session hooks a new session's status-line extensions reach the host through, every one of which
     /// does nothing once the session is gone.
     /// @param session The session about to be spawned.
@@ -2580,6 +2614,9 @@ class SessionHost final: public vtworkspace::ModelEvents, public IDaemonExtensio
     ServedSessions _served;
     /// Whether a served spawn is admitted (@see closeServedSessions). Loop thread.
     ServedAdmission _servedAdmission = ServedAdmission::Open;
+    /// The actions the user invoked, queued per daemon-scoped extension, and each connection's origin. Before
+    /// _daemonWorld, which takes them; its hints reach the world through the loop and the gate.
+    ExtensionActions _extensionActions;
     /// The daemon-scoped extensions; null for none. Made by SessionHostConfig::daemonWorld in the
     /// constructor, stopped by the destructor before it drains the loop. @see makeDaemonWorld
     std::shared_ptr<IDaemonWorldHosting> _daemonWorld;

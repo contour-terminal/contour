@@ -143,6 +143,10 @@ enum class Capability : uint8_t
     /// -Settled): a client that can ask its user in a window offers it. A client without it is never asked,
     /// and a reply from it is ignored -- only a window may grant a daemon extension.
     DaemonExtensionConsent = 34,
+    /// The peer reads the daemon extensions' palette PDUs (ExtensionPresence, InvokeExtensionAction,
+    /// RevealPane): a client with a command palette offers it. A client without it is never sent the
+    /// extensions' rows, and an invocation from it is dropped.
+    ExtensionPresence = 35,
 };
 
 /// One row of the table naming a Capability.
@@ -186,6 +190,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::Names, .name = "names" },
     CapabilityRow { .capability = Capability::WorkspaceColor, .name = "workspace-color" },
     CapabilityRow { .capability = Capability::DaemonExtensionConsent, .name = "daemon-extension-consent" },
+    CapabilityRow { .capability = Capability::ExtensionPresence, .name = "extension-presence" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

@@ -463,3 +463,26 @@ TEST_CASE("the trace counts a daemon extension's question, never transcribes it"
         summarize(DecodedPdu { ExtensionPermissionSettled { .name = "orchestrator", .grantDigest = "9a1b" } })
         == "name=orchestrator digest=9a1b");
 }
+
+TEST_CASE("the trace counts an extension's palette rows, never transcribes them",
+          "[vthost][pdu][trace][presence][proto]")
+{
+    CHECK(toString(PduType::ExtensionPresence) == "ExtensionPresence");
+    CHECK(toString(PduType::InvokeExtensionAction) == "InvokeExtensionAction");
+    CHECK(toString(PduType::RevealPane) == "RevealPane");
+    CHECK(summarize(DecodedPdu { ExtensionPresence {
+              .extensions = { WireExtensionPresence {
+                                  .extension = "orchestrator",
+                                  .title = "secret-title",
+                                  .state = WirePresenceState::Running,
+                                  .rows = { WireActionRow { .id = "open", .title = "secret-row" },
+                                            WireActionRow { .id = "refresh", .title = "secret-row" } } },
+                              WireExtensionPresence { .extension = "notes",
+                                                      .title = "secret-title",
+                                                      .state = WirePresenceState::AwaitingGrant,
+                                                      .rows = {} } } } })
+          == "extensions=2 rows=2");
+    CHECK(summarize(DecodedPdu { InvokeExtensionAction { .extension = "orchestrator", .action = "open" } })
+          == R"(extension="orchestrator" action="open")");
+    CHECK(summarize(DecodedPdu { RevealPane { .session = 9 } }) == "session=9");
+}

@@ -110,6 +110,8 @@ add_library(vthost STATIC
     RerunPolicy.hpp
     ConnectionAcceptor.cpp
     ConnectionAcceptor.hpp
+    ExtensionActions.cpp
+    ExtensionActions.hpp
     ListeningSocket.hpp
     NativeSession.cpp
     NodeMove.cpp
@@ -400,6 +402,7 @@ if(VTHOST_TESTING)
         WorkspaceGit_test.cpp
         DaemonControl_test.cpp
         DaemonConsent_test.cpp
+        ExtensionActions_test.cpp
         DaemonWorldHosting_test.cpp
         DaemonRuntime_test.cpp
         ConnectionRegistry_test.cpp

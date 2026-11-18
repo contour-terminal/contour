@@ -13,6 +13,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -3550,4 +3551,81 @@ TEST_CASE("the consent proof is tag 66; the hello carries the nonce it answers",
     nonce.fill(std::byte { 0x3C });
     hello.consentNonce = nonce;
     CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).consentNonce == nonce);
+}
+
+TEST_CASE("the extension presence PDUs are tags 67 to 69 and round-trip", "[vthost][pdu][presence][proto]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::ExtensionPresence) == 67);
+    STATIC_CHECK(std::to_underlying(PduType::InvokeExtensionAction) == 68);
+    STATIC_CHECK(std::to_underlying(PduType::RevealPane) == 69);
+
+    auto const presence = DecodedPdu { ExtensionPresence {
+        .extensions = {
+            WireExtensionPresence {
+                .extension = "orchestrator",
+                .title = "Agents",
+                .state = WirePresenceState::Running,
+                .rows = { WireActionRow { .id = "open", .title = "Open Agents" },
+                          WireActionRow { .id = "refresh", .title = "Refresh Agents" },
+                          WireActionRow { .id = "show-blocked", .title = "Show blocked runs" } } },
+            WireExtensionPresence { .extension = "notes",
+                                    .title = "notes",
+                                    .state = WirePresenceState::AwaitingGrant,
+                                    .rows = {} } } } };
+    CHECK(roundTrip(presence) == presence);
+    auto const invoke =
+        DecodedPdu { InvokeExtensionAction { .extension = "orchestrator", .action = "open" } };
+    CHECK(roundTrip(invoke) == invoke);
+    auto const reveal = DecodedPdu { RevealPane { .session = 42 } };
+    CHECK(roundTrip(reveal) == reveal);
+
+    // A state byte no enumerator has reads as Unavailable: nothing an invocation could do.
+    auto unknown = Writer {};
+    unknown.varint(1);
+    unknown.string("x");
+    unknown.string("x");
+    unknown.u8(0xEE);
+    unknown.varint(0);
+    auto const decoded = decodePdu(frameOf(PduType::ExtensionPresence, unknown.view()));
+    REQUIRE(decoded.has_value());
+    CHECK(std::get<ExtensionPresence>(decoded->pdu).extensions.at(0).state == WirePresenceState::Unavailable);
+
+    // A body cut short is malformed.
+    auto cut = Writer {};
+    cut.string("orchestrator");
+    CHECK_FALSE(decodePdu(frameOf(PduType::InvokeExtensionAction, cut.view())).has_value());
+    CHECK_FALSE(decodePdu(frameOf(PduType::ExtensionPresence, cut.view())).has_value());
+}
+
+namespace
+{
+/// What InvokeExtensionAction must stay: two names and nothing else.
+struct TwoStrings
+{
+    std::string first;
+    std::string second;
+};
+} // namespace
+
+TEST_CASE("InvokeExtensionAction has no arguments", "[vthost][pdu][presence][proto]")
+{
+    STATIC_CHECK(std::is_aggregate_v<InvokeExtensionAction>);
+    STATIC_CHECK(sizeof(InvokeExtensionAction) == sizeof(TwoStrings));
+
+    auto body = Writer {};
+    body.string("orchestrator");
+    body.string("open");
+    auto trailing = Writer {};
+    trailing.string("orchestrator");
+    trailing.string("open");
+    trailing.u8(0x01);
+    trailing.u8(0x02);
+    trailing.u8(0x03);
+    auto const plain = decodePdu(frameOf(PduType::InvokeExtensionAction, body.view()));
+    auto const extended = decodePdu(frameOf(PduType::InvokeExtensionAction, trailing.view()));
+    REQUIRE(plain.has_value());
+    REQUIRE(extended.has_value());
+    CHECK(extended->pdu == plain->pdu);
+    CHECK(std::get<InvokeExtensionAction>(extended->pdu)
+          == InvokeExtensionAction { .extension = "orchestrator", .action = "open" });
 }

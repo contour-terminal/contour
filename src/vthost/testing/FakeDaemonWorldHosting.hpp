@@ -77,7 +77,24 @@ class FakeDaemonWorldHosting final: public IDaemonWorldHosting
         return _summaries;
     }
 
+    [[nodiscard]] std::vector<ExtensionActionRows> actionRows() const override { return rows; }
+
+    void hint(std::string_view name, ServedHint hint) override
+    {
+        _journal->push_back(std::format("hint {} {}", name, hint == ServedHint::Tabs ? "tabs" : "actions"));
+    }
+
+    void restart(std::string_view name) override { _journal->push_back(std::format("restart {}", name)); }
+
     void stop() noexcept override { _journal->emplace_back("stop"); }
+
+    /// Sets what actionRows() answers, and tells the host, as a phase change on an extension's lane does.
+    void changePresence(std::vector<ExtensionActionRows> changed)
+    {
+        rows = std::move(changed);
+        if (_events.presenceChanged)
+            _events.presenceChanged();
+    }
 
     /// Publishes @p text as @p name's one-line summary, and tells the host, as an extension's lane does.
     void publishSummary(std::string const& name, std::string text)
@@ -100,6 +117,8 @@ class FakeDaemonWorldHosting final: public IDaemonWorldHosting
     std::vector<DaemonExtensionRequest> pending;
     /// The extensions that wait for none, listed after the pending ones.
     std::vector<DaemonExtensionListing> others;
+    /// What actionRows() answers.
+    std::vector<ExtensionActionRows> rows;
     /// What status() answers, by name; a name not here does not compose.
     std::map<std::string, DaemonExtensionStatus, std::less<>> statuses;
 

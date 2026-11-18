@@ -545,6 +545,12 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _extensions(std::move(config.extensions)),
     // Before _objects takes config.uuids over.
     _served(config.servedIds ? std::move(config.servedIds) : config.uuids),
+    _extensionActions([&loop = _loop, gate = _gate](std::string_view extension, ServedHint hint) {
+        loop.post([gate, name = std::string(extension), hint] {
+            if (gate->host != nullptr && gate->host->_daemonWorld)
+                gate->host->_daemonWorld->hint(name, hint);
+        });
+    }),
     // Once the loop and the gate exist: the factory may post to the loop already.
     _daemonWorld(makeDaemonWorld(config.daemonWorld)),
     _announcedStatusPatience(config.announcedStatusPatience),
@@ -2753,6 +2759,7 @@ std::shared_ptr<IDaemonWorldHosting> SessionHost::makeDaemonWorld(DaemonWorldFac
     // A question that opens is sent to the windows that can answer it. A summary is read where it is shown,
     // and repaints the rows that show it: a burst of them costs the loop one repaint, as frames do.
     auto summaryPending = std::make_shared<std::atomic<bool>>(false);
+    auto presencePending = std::make_shared<std::atomic<bool>>(false);
     auto events = DaemonWorldEvents {
         .requestsChanged =
             [&loop = _loop, gate = _gate] {
@@ -2769,6 +2776,16 @@ std::shared_ptr<IDaemonWorldHosting> SessionHost::makeDaemonWorld(DaemonWorldFac
                     pending->store(false, std::memory_order_release);
                     if (gate->host != nullptr)
                         gate->host->daemonSummariesChanged();
+                });
+            },
+        .presenceChanged =
+            [&loop = _loop, gate = _gate, pending = std::move(presencePending)] {
+                if (pending->exchange(true, std::memory_order_acq_rel))
+                    return;
+                loop.post([gate, pending] {
+                    pending->store(false, std::memory_order_release);
+                    if (gate->host != nullptr)
+                        gate->host->extensionPresenceChanged();
                 });
             },
     };
@@ -2836,6 +2853,117 @@ void SessionHost::daemonSummariesChanged()
         refreshStatusLine(*session);
         fanOutStream(&SessionStreamEvents::sessionScreenUpdated, SessionId { id });
     }
+}
+
+namespace
+{
+    /// One state of a daemon-scoped extension, as the palette's wire names it.
+    struct PresenceRow
+    {
+        DaemonExtensionState state;
+        proto::WirePresenceState wire;
+    };
+
+    inline constexpr auto PresenceRows = std::array {
+        PresenceRow { .state = DaemonExtensionState::Running, .wire = proto::WirePresenceState::Running },
+        PresenceRow { .state = DaemonExtensionState::Stopped, .wire = proto::WirePresenceState::Stopped },
+        PresenceRow { .state = DaemonExtensionState::Pending,
+                      .wire = proto::WirePresenceState::AwaitingGrant },
+        PresenceRow { .state = DaemonExtensionState::Disabled, .wire = proto::WirePresenceState::Disabled },
+        PresenceRow { .state = DaemonExtensionState::Denied, .wire = proto::WirePresenceState::Unavailable },
+        PresenceRow { .state = DaemonExtensionState::Failed, .wire = proto::WirePresenceState::Unavailable },
+    };
+
+    /// @return @p rows as the wire carries them.
+    [[nodiscard]] proto::WireExtensionPresence wirePresenceOf(ExtensionActionRows const& rows)
+    {
+        auto const state = std::ranges::find(PresenceRows, rows.state, &PresenceRow::state);
+        auto wire = proto::WireExtensionPresence { .extension = rows.extension,
+                                                   .title = rows.title,
+                                                   .state = state != PresenceRows.end()
+                                                                ? state->wire
+                                                                : proto::WirePresenceState::Unavailable,
+                                                   .rows = {} };
+        for (auto const& [id, title]: rows.rows)
+            wire.rows.push_back(proto::WireActionRow { .id = id, .title = title });
+        return wire;
+    }
+} // namespace
+
+proto::ExtensionPresence SessionHost::extensionPresence() const
+{
+    auto presence = proto::ExtensionPresence {};
+    if (!_daemonWorld)
+        return presence;
+    for (auto const& rows: _daemonWorld->actionRows())
+        presence.extensions.push_back(wirePresenceOf(rows));
+    return presence;
+}
+
+void SessionHost::extensionPresenceChanged()
+{
+    if (!_daemonWorld)
+        return;
+    auto const all = _daemonWorld->actionRows();
+    auto presence = proto::ExtensionPresence {};
+    for (auto const& rows: all)
+    {
+        presence.extensions.push_back(wirePresenceOf(rows));
+        if (rows.state == DaemonExtensionState::Running && _extensionActions.holdsActionsFor(rows.extension))
+            _daemonWorld->hint(rows.extension, ServedHint::Actions);
+    }
+    for (auto* observer: _streamSubscribers)
+        observer->extensionPresenceChanged(presence);
+}
+
+InvocationEffect SessionHost::invokeExtensionAction(ConnectionId const& connection,
+                                                    std::string_view extension,
+                                                    std::string_view action)
+{
+    if (!_daemonWorld)
+        return InvocationEffect::Ignore;
+    auto const all = _daemonWorld->actionRows();
+    auto const found = std::ranges::find(all, extension, &ExtensionActionRows::extension);
+    if (found == all.end())
+    {
+        sessionLog()("{}: dropping an invocation of unknown daemon extension {}", connection, extension);
+        return InvocationEffect::Ignore;
+    }
+    auto const effect = invocationEffectOf(found->state);
+    // The grant and restart rows name no action; every other row names one the extension declares.
+    auto const declared =
+        action.empty()
+            ? effect == InvocationEffect::AskAgain || effect == InvocationEffect::Restart
+            : std::ranges::any_of(found->rows, [&](auto const& row) { return row.first == action; });
+    if (!declared)
+    {
+        sessionLog()("{}: dropping an invocation of daemon extension {}: it declares no action '{}'",
+                     connection,
+                     extension,
+                     action);
+        return InvocationEffect::Ignore;
+    }
+    switch (effect)
+    {
+        case InvocationEffect::StartThenDeliver:
+            _daemonWorld->startOnDemand(extension);
+            _extensionActions.deliver(extension, action, _extensionActions.originOf(connection));
+            break;
+        case InvocationEffect::Deliver:
+            _extensionActions.deliver(extension, action, _extensionActions.originOf(connection));
+            break;
+        case InvocationEffect::Restart: _daemonWorld->restart(extension); break;
+        case InvocationEffect::AskAgain: break;
+        case InvocationEffect::Ignore:
+            sessionLog()("{}: daemon extension {} cannot act: ignoring '{}'", connection, extension, action);
+            break;
+    }
+    return effect;
+}
+
+void SessionHost::forgetActionOrigin(ConnectionId const& connection)
+{
+    _extensionActions.forget(connection);
 }
 
 std::optional<DaemonExtensionStatus> SessionHost::status(std::string_view name) const

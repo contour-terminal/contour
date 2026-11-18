@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <vtextension/DaemonExtensionRuntime.hpp>
@@ -32,7 +33,9 @@ namespace
 
 /// A daemon module by its manifest, which the runtime refuses to load: it has a start function.
 constexpr auto BrokenManifest =
-    "name = broken\nversion = 2\nplacement daemon\nroot work = config:work\ncommand run short @work = true\n"sv;
+    "name = broken\nversion = 2\ntitle = Agents\nplacement daemon\nroot work = config:work\n"
+    "command run short @work = true\naction open = Open Agents\n"
+    "action refresh = Refresh Agents\n"sv;
 
 /// @return @p bytes as file content.
 [[nodiscard]] std::string textOf(std::vector<std::byte> const& bytes)
@@ -72,7 +75,8 @@ struct Fixture
                                           .wallClock = wallClock,
                                           .localTime = localTime },
             vthost::DaemonWorldEvents { .requestsChanged = {},
-                                        .summaryChanged = [this] { ++summaryChanges; } });
+                                        .summaryChanged = [this] { ++summaryChanges; },
+                                        .presenceChanged = [this] { ++presenceChanges; } });
     }
 
     Fixture(Fixture const&) = delete;
@@ -89,6 +93,7 @@ struct Fixture
     core::platform::ManualWallClock wallClock;
     vtbackend::LocalTimeConverter localTime { &vtbackend::systemLocalTime };
     int summaryChanges = 0;
+    int presenceChanges = 0;
     /// Made once its module is on disk.
     std::unique_ptr<vthost::DaemonWorldExtensions> world;
 };
@@ -185,4 +190,36 @@ TEST_CASE("DaemonWorldExtensions: what a revoked run still publishes is dropped"
     world.presence().publishSummary("broken", 1, "agents 2/4", "");
     CHECK(world.summaries().summaryOf("broken") == "agents 2/4");
     world.stop();
+}
+
+TEST_CASE("DaemonWorldExtensions: the palette rows are the declared actions, with where it stands",
+          "[daemon][presence]")
+{
+    auto fixture = Fixture {};
+    auto& world = *fixture.world;
+    using Rows = std::vector<std::pair<std::string, std::string>>;
+    auto const declared = Rows { { "open", "Open Agents" }, { "refresh", "Refresh Agents" } };
+    CHECK(world.actionRows()
+          == std::vector { vthost::ExtensionActionRows { .extension = "broken",
+                                                         .title = "Agents",
+                                                         .state = vthost::DaemonExtensionState::Stopped,
+                                                         .rows = declared } });
+
+    // Waiting for a grant is a state the palette shows.
+    world.startOnDemand("broken");
+    auto const afterStart = fixture.presenceChanges;
+    CHECK(afterStart >= 1);
+    CHECK(world.actionRows().at(0).state == vthost::DaemonExtensionState::Pending);
+
+    // So is every phase a run reports.
+    world.presence().phaseChanged("broken", 0, vtextension::DaemonExtensionPhase::Disabled);
+    CHECK(fixture.presenceChanges == afterStart + 1);
+
+    // Neither a hint nor a restart reaches an extension that does not run.
+    world.hint("broken", vthost::ServedHint::Actions);
+    world.hint("unknown", vthost::ServedHint::Tabs);
+    world.restart("broken");
+    CHECK(world.actionRows().at(0).state == vthost::DaemonExtensionState::Pending);
+    world.stop();
+    CHECK(world.actionRows().empty());
 }

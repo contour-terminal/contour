@@ -116,6 +116,18 @@ namespace
                      .notice = "{} failed" },
     };
 
+    /// One hint vthost raises, as vtextension names it.
+    struct HintRow
+    {
+        ServedHint served;
+        vtextension::DaemonHint hint;
+    };
+
+    inline constexpr auto HintRows = std::array {
+        HintRow { .served = ServedHint::Tabs, .hint = vtextension::DaemonHint::Tabs },
+        HintRow { .served = ServedHint::Actions, .hint = vtextension::DaemonHint::Actions },
+    };
+
     /// @return vthost's answer as vtextension's.
     [[nodiscard]] vtextension::GrantState grantOf(GrantState answer) noexcept
     {
@@ -141,8 +153,13 @@ void DaemonWorldExtensions::changingRequests(Change change)
 {
     auto const before = pendingRequests();
     change();
-    if (pendingRequests() != before && _events.requestsChanged)
+    if (pendingRequests() == before)
+        return;
+    if (_events.requestsChanged)
         _events.requestsChanged();
+    // Waiting for a grant, or no longer, is a state the palette shows.
+    if (_events.presenceChanged)
+        _events.presenceChanged();
 }
 
 void DaemonWorldExtensions::startOnDemand(std::string_view name)
@@ -235,6 +252,33 @@ std::string DaemonWorldExtensions::summaryOf(std::string_view name) const
     return {};
 }
 
+std::vector<ExtensionActionRows> DaemonWorldExtensions::actionRows() const
+{
+    auto all = std::vector<ExtensionActionRows> {};
+    for (auto const& entry: _runtime->entries())
+    {
+        auto rows = ExtensionActionRows {
+            .extension = entry.name, .title = entry.title, .state = stateOf(entry.phase), .rows = {}
+        };
+        for (auto const& action: entry.actions)
+            rows.rows.emplace_back(action.id, action.title);
+        all.push_back(std::move(rows));
+    }
+    return all;
+}
+
+void DaemonWorldExtensions::hint(std::string_view name, ServedHint hint)
+{
+    auto const row = std::ranges::find(HintRows, hint, &HintRow::served);
+    if (row != HintRows.end())
+        _runtime->hint(name, row->hint);
+}
+
+void DaemonWorldExtensions::restart(std::string_view name)
+{
+    _runtime->restart(name);
+}
+
 void DaemonWorldExtensions::stop() noexcept
 {
     _runtime->stop();
@@ -298,9 +342,11 @@ void DaemonWorldExtensions::phaseChanged(std::string_view extension,
             return;
         shown->phase = phase;
     }
-    // Every phase change repaints: what the status line shows follows from it.
+    // Every phase change repaints: what the status line and the palette show follows from it.
     if (_events.summaryChanged)
         _events.summaryChanged();
+    if (_events.presenceChanged)
+        _events.presenceChanged();
 }
 
 } // namespace vthost

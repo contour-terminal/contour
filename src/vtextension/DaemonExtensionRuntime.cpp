@@ -407,6 +407,23 @@ void DaemonExtensionRuntime::start(std::string_view name)
         runOrReport(*extension);
 }
 
+void DaemonExtensionRuntime::hint(std::string_view name, DaemonHint hint)
+{
+    if (_lifecycle == Lifecycle::Stopped)
+        return;
+    if (auto const* const extension = find(name); extension != nullptr && extension->runner)
+        extension->runner->hint(hint);
+}
+
+void DaemonExtensionRuntime::restart(std::string_view name)
+{
+    if (_lifecycle == Lifecycle::Stopped)
+        return;
+    // The runner does nothing unless it is disabled.
+    if (auto const* const extension = find(name); extension != nullptr && extension->runner)
+        extension->runner->restart();
+}
+
 std::optional<DaemonRunnerStatus> DaemonExtensionRuntime::status(std::string_view name) const
 {
     auto const* const extension = find(name);
@@ -423,10 +440,13 @@ std::vector<DaemonExtensionEntry> DaemonExtensionRuntime::entries() const
     for (auto const& extension: _extensions)
     {
         auto const phase = phaseOf(*extension);
+        auto const& manifest = extension->processesConfig.manifest;
         listed.push_back(DaemonExtensionEntry { .name = extension->name,
                                                 .phase = phase,
                                                 .grantDigest = extension->grantDigest,
-                                                .problem = extension->problem });
+                                                .problem = extension->problem,
+                                                .title = std::string(displayTitleOf(manifest)),
+                                                .actions = manifest.actions });
     }
     return listed;
 }
