@@ -355,6 +355,7 @@ command's environment is judged as the command gets it, `command-env-for` laid o
 
 | Line | Example | Means |
 | --- | --- | --- |
+| `title = <text>` | `title = Agents` | What Contour names the extension's served tab, palette rows and frames; the `name` when absent. Given once, at most 40 characters, nothing that disguises text (controls, bidirectional overrides and isolates, zero-width characters, line separators). |
 | `placement <status-line\|daemon>` | `placement daemon` | Where the extension runs; `status-line` without it. |
 | `root <label> [create] = config:<pointer>` | `root worktrees create = config:worktree_root` | Directories from the extension's configuration: slash-separated keys, none empty, a whole-key `*` for every element of a list. `create` lets the host create the one directory if it is missing; it is refused on a pointer with `*`. |
 | `read <root>` | `read worktrees` | The extension may read files under that root. |
@@ -366,7 +367,7 @@ command's environment is judged as the command gets it, `command-env-for` laid o
 | `pane-env <pane> <KEY> = value` | `pane-env agent GIT_CONFIG_COUNT = 1` | Environment for one pane. |
 | `inbox <name> = text` | `inbox note = A reviewer left a comment.` | Reserved: refused until a version of the manifest supports it. |
 | `serve <scheme>` | `serve orchestrator` | The extension serves `<scheme>://` tabs. |
-| `action <id> = title` | `action open = Open Agents` | A row in the command palette. |
+| `action <id> = title` | `action open = Open Agents` | A row in the command palette; its title follows the `title` line's rules. |
 
 A conformance corpus of valid and invalid version-2 manifests, which Contour's parser is tested
 against, lives in [`extensions/orchestrator/contract/manifest-v2`][corpus].

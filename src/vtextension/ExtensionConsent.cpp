@@ -31,37 +31,6 @@ namespace
         LogLevelName { .level = LogLevel::Error, .name = "error" },
     };
 
-    /// A range of code points, both ends included.
-    struct CodePointRange
-    {
-        char32_t first;
-        char32_t last;
-    };
-
-    /// What neutralizedForDisplay() shows as code points: what renders as nothing or as something else,
-    /// and what reorders or breaks the text around it.
-    constexpr auto DisguisingCodePoints = std::array {
-        CodePointRange { .first = 0x0000, .last = 0x001F },   // C0 controls
-        CodePointRange { .first = 0x007F, .last = 0x009F },   // DEL, C1 controls
-        CodePointRange { .first = 0x00AD, .last = 0x00AD },   // soft hyphen
-        CodePointRange { .first = 0x061C, .last = 0x061C },   // Arabic letter mark
-        CodePointRange { .first = 0x180E, .last = 0x180E },   // Mongolian vowel separator
-        CodePointRange { .first = 0x200B, .last = 0x200F },   // zero-width space/joiners, LRM, RLM
-        CodePointRange { .first = 0x2028, .last = 0x202E },   // line/paragraph separators, embeddings
-        CodePointRange { .first = 0x2060, .last = 0x2064 },   // word joiner, invisible operators
-        CodePointRange { .first = 0x2066, .last = 0x206F },   // isolates, deprecated format characters
-        CodePointRange { .first = 0xFEFF, .last = 0xFEFF },   // zero-width no-break space
-        CodePointRange { .first = 0xFFF9, .last = 0xFFFB },   // interlinear annotation
-        CodePointRange { .first = 0xE0000, .last = 0xE007F }, // tag characters
-    };
-
-    [[nodiscard]] bool disguises(char32_t codePoint) noexcept
-    {
-        return std::ranges::any_of(DisguisingCodePoints, [codePoint](CodePointRange const& range) {
-            return codePoint >= range.first && codePoint <= range.last;
-        });
-    }
-
     [[nodiscard]] bool needsQuotes(std::string_view element) noexcept
     {
         return element.empty() || element.contains(' ');
@@ -82,7 +51,7 @@ std::string neutralizedForDisplay(std::string_view text)
             continue;
         }
         auto const [codePoint, length] = *decoded;
-        if (disguises(codePoint))
+        if (disguisesText(codePoint))
             shown += std::format("<U+{:04X}>", static_cast<uint32_t>(codePoint));
         else
             shown += text.substr(0, length);

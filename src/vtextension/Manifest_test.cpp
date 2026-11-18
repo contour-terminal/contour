@@ -672,9 +672,53 @@ TEST_CASE("Manifest v2: a version-2 line is refused under version 1", "[vtextens
                                "pane-env p A = 1",
                                "inbox i = text",
                                "serve s",
-                               "action a = Title");
+                               "action a = Title",
+                               "title = Title");
     CAPTURE(line);
     CHECK(faultOf(std::format("name = x\nversion = 1\n{}\n", line)) == ManifestFault::Version2LineInVersion1);
+}
+
+TEST_CASE("Manifest v2: title is a version-2 line", "[vtextension][manifest]")
+{
+    auto const titled = parseManifestText(
+        "name = agents\nversion = 2\ntitle = Agents \xC2\xB7 all forty characters of it, ok!\n"sv);
+    REQUIRE(titled.has_value());
+    CHECK(titled->title == "Agents \xC2\xB7 all forty characters of it, ok!");
+    CHECK(vtextension::displayTitleOf(*titled) == titled->title);
+    CHECK(faultOf("name = agents\nversion = 1\ntitle = Agents\n"sv) == ManifestFault::Version2LineInVersion1);
+    CHECK(faultOf("name = agents\ntitle = Agents\nversion = 2\n"sv) == ManifestFault::VersionNotFirst);
+    CHECK(faultOf("name = agents\nversion = 2\ntitle =\n"sv) == ManifestFault::EmptyName);
+    CHECK(faultOf("name = agents\nversion = 2\ntitle x = Agents\n"sv) == ManifestFault::UnknownLine);
+
+    CHECK(faultOf("name = agents\nversion = 2\ntitle = Agents \xC2\xB7 one character beyond forty, sad!\n"sv)
+          == ManifestFault::BadTitle);
+    CHECK(faultOf("name = agents\nversion = 2\ntitle = Agents\ntitle = Others\n"sv)
+          == ManifestFault::Repeated);
+
+    // What would disguise a title in the chrome is refused, in an action's title too, as is a long one.
+    CHECK(faultOf("name = agents\nversion = 2\ntitle = Age\xE2\x80\xAEnts\n"sv) == ManifestFault::BadTitle);
+    CHECK(faultOf("name = agents\nversion = 2\ntitle = Age\xE2\x80\x8B"
+                  "nts\n"sv)
+          == ManifestFault::BadTitle);
+    CHECK(faultOf("name = agents\nversion = 2\ntitle = Agents\xE2\x80\xA8\n"sv) == ManifestFault::BadTitle);
+    CHECK(faultOf("name = agents\nversion = 2\naction open = Open \xE2\x81\xA6"
+                  "Agents\n"sv)
+          == ManifestFault::BadTitle);
+    CHECK(
+        faultOf(
+            "name = agents\nversion = 2\naction open = Open Agents \xC2\xB7 one character too many, ok!\n"sv)
+        == ManifestFault::BadTitle);
+    CHECK(parseManifestText(
+              "name = agents\nversion = 2\naction open = Open Agents \xC2\xB7 exactly forty characters!!\n"sv)
+              .has_value());
+
+    SECTION("absent, the name stands in")
+    {
+        auto const untitled = parseManifestText("name = agents\nversion = 2\n"sv);
+        REQUIRE(untitled.has_value());
+        CHECK(untitled->title.empty());
+        CHECK(vtextension::displayTitleOf(*untitled) == untitled->name);
+    }
 }
 
 TEST_CASE("Manifest v1: unchanged", "[vtextension][manifest]")

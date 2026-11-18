@@ -603,14 +603,45 @@ namespace
         return {};
     }
 
+    /// Whether @p title is shown as written: at most MaxTitleLength code points, none that disguises text
+    /// (DisguisingCodePoints). isSoundText() has already found the text to be UTF-8.
+    [[nodiscard]] bool isShownAsWritten(std::string_view title) noexcept
+    {
+        auto count = std::size_t { 0 };
+        while (!title.empty())
+        {
+            auto const decoded = decodeUtf8(title);
+            if (!decoded || disguisesText(decoded->first) || ++count > MaxTitleLength)
+                return false;
+            title.remove_prefix(decoded->second);
+        }
+        return true;
+    }
+
     [[nodiscard]] LineResult addAction(ParseState& state, Line const& line)
     {
         if (line.head.size() != 1)
             return refuse(ManifestFault::UnknownLine);
         if (std::ranges::contains(state.manifest.actions, line.head.front(), &ActionDecl::id))
             return refuse(ManifestFault::Duplicate);
+        if (!isShownAsWritten(*line.value))
+            return refuse(ManifestFault::BadTitle);
         state.manifest.actions.push_back(
             ActionDecl { .id = std::string(line.head.front()), .title = std::string(*line.value) });
+        return {};
+    }
+
+    /// A title is shown as written: a control character is refused anywhere in the text before a line is
+    /// read, and what else would disguise it is refused here, as is a title longer than MaxTitleLength.
+    [[nodiscard]] LineResult setTitle(ParseState& state, Line const& line)
+    {
+        if (!line.head.empty())
+            return refuse(ManifestFault::UnknownLine);
+        if (!state.manifest.title.empty())
+            return refuse(ManifestFault::Repeated);
+        if (!isShownAsWritten(*line.value))
+            return refuse(ManifestFault::BadTitle);
+        state.manifest.title = std::string(*line.value);
         return {};
     }
 
@@ -637,6 +668,7 @@ namespace
         LineKind { .keyword = "inbox", .since = 2, .value = LineValue::Text, .handler = &refuseReserved },
         LineKind { .keyword = "serve", .since = 2, .value = LineValue::None, .handler = &setServedScheme },
         LineKind { .keyword = "action", .since = 2, .value = LineValue::Text, .handler = &addAction },
+        LineKind { .keyword = "title", .since = 2, .value = LineValue::Text, .handler = &setTitle },
     };
 
     /// Judges one line under the manifest's version.
@@ -667,6 +699,11 @@ namespace
 std::string_view manifestFaultText(ManifestFault fault) noexcept
 {
     return ManifestFaultTexts.at(std::to_underlying(fault)).text;
+}
+
+std::string_view displayTitleOf(Manifest const& manifest) noexcept
+{
+    return manifest.title.empty() ? std::string_view(manifest.name) : std::string_view(manifest.title);
 }
 
 std::optional<std::string_view> placeholderName(std::string_view element) noexcept

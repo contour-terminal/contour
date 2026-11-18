@@ -116,6 +116,11 @@ struct Manifest
     /// The extension's name; the key its grants are recorded under.
     std::string name;
 
+    /// What Contour names the extension where it shows it (`title = <text>`, version 2): its served tab, its
+    /// palette rows and its frames. Empty when the manifest gives none; displayTitleOf() then answers the
+    /// name.
+    std::string title {};
+
     /// The manifest format revision the extension was written against.
     uint32_t version = 0;
 
@@ -188,9 +193,14 @@ enum class ManifestFault : uint8_t
     TabCharacter,             ///< A tab in a version-2 line: words are separated by single spaces only.
     SurroundingBlank,         ///< A version-2 line that begins or ends with a blank, which is never trimmed.
     UnsupportedLine,          ///< An `inbox` line: the kind is reserved, and no version supports it yet.
+    BadTitle, ///< A `title` or an `action`'s title longer than MaxTitleLength characters, or that disguises
+              ///< text.
     ForbiddenEnvironment, ///< An environment variable an extension may not set, or a value it may not take.
     ForbiddenGitConfig,   ///< A git configuration key an extension may not set, or a value it may not take.
 };
+
+/// The most characters (code points) a manifest's `title`, or an `action`'s title, may hold.
+inline constexpr std::size_t MaxTitleLength = 40;
 
 /// One row of the fault-description table.
 struct ManifestFaultText
@@ -250,6 +260,8 @@ inline constexpr auto ManifestFaultTexts = std::array {
                         .text = "a version-2 line that begins or ends with a blank" },
     ManifestFaultText { .fault = ManifestFault::UnsupportedLine,
                         .text = "the inbox line is reserved and not supported yet" },
+    ManifestFaultText { .fault = ManifestFault::BadTitle,
+                        .text = "a title too long, or holding a character that disguises text" },
     ManifestFaultText { .fault = ManifestFault::ForbiddenEnvironment,
                         .text =
                             "an environment variable an extension may not set, or a value it may not take" },
@@ -271,6 +283,11 @@ static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ManifestFa
 /// @return A short, human-readable description.
 [[nodiscard]] std::string_view manifestFaultText(ManifestFault fault) noexcept;
 
+/// What Contour names an extension where it shows it.
+/// @param manifest The extension's manifest.
+/// @return Its `title`, or its `name` when it declares none.
+[[nodiscard]] std::string_view displayTitleOf(Manifest const& manifest) noexcept;
+
 /// Reads the name of the placeholder an argv template element stands for.
 /// @param element One element of a command's argv template.
 /// @return The name between the braces if the element is exactly `{name}` with a non-empty name that
@@ -281,9 +298,9 @@ static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ManifestFa
 ///
 /// The `version` line is found first and every line is judged under it: version 1 knows `name`, `version`,
 /// `command <name> = argv…` and `control <permission>`, in any order; version 2 adds `placement`, `root`,
-/// `read`, `arg`, `command-env`, `command-env-for`, `pane`, `pane-env`, `serve` and `action` (and reserves
-/// `inbox`, which it refuses), binds every command to a timeout class and a root, wants `version` before
-/// every line but `name`, and a name declared before any line uses it.
+/// `read`, `arg`, `command-env`, `command-env-for`, `pane`, `pane-env`, `serve`, `action` and `title` (and
+/// reserves `inbox`, which it refuses), binds every command to a timeout class and a root, wants `version`
+/// before every line but `name`, and a name declared before any line uses it.
 /// @param text The section's bytes.
 /// @return The manifest, its digest left empty; the first fault found otherwise.
 [[nodiscard]] std::expected<Manifest, ManifestFault> parseManifestText(std::string_view text);
