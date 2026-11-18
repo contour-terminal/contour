@@ -144,8 +144,9 @@ enum class Capability : uint8_t
     /// and a reply from it is ignored -- only a window may grant a daemon extension.
     DaemonExtensionConsent = 34,
     /// The peer reads the daemon extensions' palette PDUs (ExtensionPresence, InvokeExtensionAction,
-    /// RevealPane): a client with a command palette offers it. A client without it is never sent the
-    /// extensions' rows, and an invocation from it is dropped.
+    /// RevealPane) and the served tabs trailing LayoutState: a client with a command palette offers it. A
+    /// client without it is never sent the extensions' rows or which tabs they serve, and an invocation from
+    /// it is dropped.
     ExtensionPresence = 35,
 };
 

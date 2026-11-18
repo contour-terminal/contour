@@ -1252,6 +1252,24 @@ struct WireTab
     bool operator==(WireTab const&) const = default;
 };
 
+/// Which daemon-scoped extension draws a tab, as the window marks it: told by the daemon, never by what the
+/// tab's program titles it.
+struct WireServedMark
+{
+    std::string extension;    ///< The extension's name.
+    std::string title;        ///< Its display title (its manifest's `title`, else its name).
+    std::string moduleDigest; ///< The hex SHA-256 of the module that draws the tab; empty when unknown.
+    bool operator==(WireServedMark const&) const = default;
+};
+
+/// One served tab of a LayoutState: the tab, by its id, and who draws it.
+struct WireServedTab
+{
+    uint64_t tabId = 0;  ///< The tab, as WireTab::tabId names it.
+    WireServedMark mark; ///< Who draws it.
+    bool operator==(WireServedTab const&) const = default;
+};
+
 /// The workspace's whole tab/pane layout — replayed on attach and re-pushed on
 /// every model change, so a client reproduces the daemon's tabs and split trees
 /// instead of flattening to one tab per session.
@@ -1264,6 +1282,12 @@ struct LayoutState
     /// 0 for none yet. Appended by a later version (Capability::TabEditAcks), and written only to a client
     /// that shares it: absent, nothing is known of which edits the push has seen.
     std::optional<uint64_t> servedEdit = std::nullopt;
+    /// The tabs a daemon-scoped extension draws, after `servedEdit` (Capability::ExtensionPresence). Written
+    /// only when not empty, and then with `servedEdit` before it (0 when absent), so that its place is fixed;
+    /// absent reads as empty, which is what a client without the capability is always sent. A field appended
+    /// after it by a later version must first write the list, empty as a 0 count, as this one writes
+    /// `servedEdit` first: a body that ends before the list is the only shape without it.
+    std::vector<WireServedTab> served {};
     bool operator==(LayoutState const&) const = default;
 };
 

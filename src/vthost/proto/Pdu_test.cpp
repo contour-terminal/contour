@@ -1044,15 +1044,41 @@ TEST_CASE("the upgrade PDUs round-trip and keep their tags", "[vthost][proto][up
 TEST_CASE("a known PDU with bytes appended by a newer peer decodes as the PDU",
           "[vthost][proto][negotiation]")
 {
-    for (auto const& [tag, pdu]: vthost::testing::everyAlternative())
+    auto examples = vthost::testing::everyAlternative();
+    // A LayoutState's appended field follows its served tabs, which a newer peer writes first (empty as a 0
+    // count): the shape with them is the one a field is appended to.
+    examples.emplace_back(PduType::LayoutState, DecodedPdu { vthost::testing::servedLayoutState() });
+    for (auto const& [tag, pdu]: examples)
     {
         INFO("PDU " << std::to_underlying(tag));
+        if (auto const* layout = std::get_if<LayoutState>(&pdu); layout != nullptr && layout->served.empty())
+            continue;
         auto const frame = encodeWithFieldAppended(pdu);
         auto const decoded = decodePdu(frame);
         REQUIRE(decoded);
         CHECK(decoded->pdu == pdu);
         CHECK(decoded->consumed == frame.size());
     }
+}
+
+TEST_CASE("a LayoutState from a newer peer appends after an empty served list", "[vthost][proto][served]")
+{
+    // The catalog's shape, without served tabs: the newer peer writes the list as a 0 count, then its field.
+    auto const examples = vthost::testing::everyAlternative();
+    auto const example =
+        std::ranges::find(examples, PduType::LayoutState, [](auto const& entry) { return entry.first; });
+    REQUIRE(example != examples.end());
+    auto const layout = std::get<LayoutState>(example->second);
+    REQUIRE(layout.served.empty());
+    auto const frame = encodeWithFieldsEdited(DecodedPdu { layout }, [](std::span<std::byte const> fields) {
+        auto grown = std::vector<std::byte>(fields.begin(), fields.end());
+        grown.push_back(std::byte { 0x00 }); // the served list: empty
+        grown.push_back(std::byte { 0x2A }); // the newer field
+        return grown;
+    });
+    CHECK(decodeAs<LayoutState>(frame) == layout);
+    CHECK(roundTrip(DecodedPdu { vthost::testing::servedLayoutState() })
+          == DecodedPdu { vthost::testing::servedLayoutState() });
 }
 
 TEST_CASE("the frame helpers build what they say", "[vthost][proto][negotiation]")
@@ -3081,6 +3107,63 @@ TEST_CASE("LayoutState carries the served edit, and a body from before it reads 
     unstamped.servedEdit = std::nullopt;
     CHECK(decodeAs<LayoutState>(encodeWithoutTrailingField(DecodedPdu { stamped }, 1)) == unstamped);
     CHECK(roundTrip(DecodedPdu { unstamped }) == DecodedPdu { unstamped });
+}
+
+TEST_CASE("LayoutState carries the served tabs after the served edit", "[vthost][proto][served]")
+{
+    auto const tab = WireTab { .tabId = 3, .activePane = 1, .root = WirePane { .paneId = 1, .session = 9 } };
+    auto const mark =
+        WireServedMark { .extension = "orchestrator", .title = "Agents", .moduleDigest = "3f9a0c1d2e4b5a69" };
+    auto const served = LayoutState { .workspace = 2,
+                                      .activeTab = 0,
+                                      .tabs = { tab },
+                                      .servedEdit = 7,
+                                      .served = { { .tabId = 3, .mark = mark } } };
+    CHECK(roundTrip(DecodedPdu { served }) == DecodedPdu { served });
+
+    // The list, as its sender appends it: its count, then the tab and its mark's three strings.
+    auto const listBytes = std::size_t { 1 + 1 } + (1 + mark.extension.size()) + (1 + mark.title.size())
+                           + (1 + mark.moduleDigest.size());
+
+    SECTION("an older sender's body ends before the list, which reads as empty")
+    {
+        auto withoutList = served;
+        withoutList.served.clear();
+        CHECK(decodeAs<LayoutState>(encodeWithoutTrailingField(DecodedPdu { served }, listBytes))
+              == withoutList);
+        CHECK(roundTrip(DecodedPdu { withoutList }) == DecodedPdu { withoutList });
+    }
+
+    SECTION("without the served edit, 0 is written before the list, and read back")
+    {
+        auto unstamped = served;
+        unstamped.servedEdit = std::nullopt;
+        auto expected = served;
+        expected.servedEdit = 0;
+        CHECK(roundTrip(DecodedPdu { unstamped }) == DecodedPdu { expected });
+        // 0 is one varint byte: dropping it with the list leaves the body of a sender from before both.
+        auto bare = served;
+        bare.servedEdit = std::nullopt;
+        bare.served.clear();
+        CHECK(decodeAs<LayoutState>(encodeWithoutTrailingField(DecodedPdu { unstamped }, listBytes + 1))
+              == bare);
+    }
+
+    SECTION("an empty list writes nothing: the body is the one without it")
+    {
+        auto empty = served;
+        empty.served.clear();
+        CHECK(bodyOf(DecodedPdu { empty }).size() + listBytes == bodyOf(DecodedPdu { served }).size());
+    }
+
+    SECTION("a list naming more tabs than the layout holds is malformed")
+    {
+        auto overfull = served;
+        overfull.served.push_back(overfull.served.front());
+        auto stream = Writer {};
+        encodePdu(stream, 1, DecodedPdu { overfull });
+        CHECK(decodePdu(stream.view()).error() == DecodeError::MalformedPdu);
+    }
 }
 
 TEST_CASE("the TabEditAcks capability is pinned", "[vthost][proto][tab-edit-acks]")

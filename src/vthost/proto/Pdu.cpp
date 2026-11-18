@@ -1456,8 +1456,18 @@ namespace
             out.u32(tab.color);
             encodePane(out, tab.root);
         }
-        if (pdu.servedEdit.has_value())
-            out.varint(*pdu.servedEdit);
+        if (pdu.servedEdit.has_value() || !pdu.served.empty())
+            out.varint(pdu.servedEdit.value_or(0));
+        if (pdu.served.empty())
+            return;
+        out.varint(pdu.served.size());
+        for (auto const& served: pdu.served)
+        {
+            out.varint(served.tabId);
+            out.string(served.mark.extension);
+            out.string(served.mark.title);
+            out.string(served.mark.moduleDigest);
+        }
     }
 
     // --- body decoders (one table row each) ---------------------------------
@@ -3049,6 +3059,25 @@ namespace
             if (!assign(in.varint(), served, error))
                 return std::unexpected(error);
             pdu.servedEdit = served;
+        }
+        // Appended after it (Capability::ExtensionPresence): the tabs an extension draws.
+        if (in.remaining() != 0)
+        {
+            auto servedCount = uint64_t { 0 };
+            if (!assign(in.varint(), servedCount, error))
+                return std::unexpected(error);
+            if (servedCount > tabCount)
+                return std::unexpected(DecodeError::MalformedPdu);
+            for ([[maybe_unused]] auto const _: std::views::iota(uint64_t { 0 }, servedCount))
+            {
+                auto served = WireServedTab {};
+                if (!assign(in.varint(), served.tabId, error)
+                    || !assign(in.string(), served.mark.extension, error)
+                    || !assign(in.string(), served.mark.title, error)
+                    || !assign(in.string(), served.mark.moduleDigest, error))
+                    return std::unexpected(error);
+                pdu.served.push_back(std::move(served));
+            }
         }
         return pdu;
     }

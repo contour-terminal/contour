@@ -766,7 +766,8 @@ namespace
             return std::nullopt;
         return ServedBy { .extension = served->extension,
                           .scheme = served->scheme,
-                          .moduleDigest = served->moduleDigest };
+                          .moduleDigest = served->moduleDigest,
+                          .title = served->title };
     }
 } // namespace
 

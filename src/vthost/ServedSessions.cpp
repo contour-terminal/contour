@@ -280,7 +280,8 @@ void ServedSessions::create(std::string const& id, std::string const& title, std
         spawn = ServedSpawn { .extension = found->extension,
                               .scheme = found->scheme,
                               .moduleDigest = moduleDigest,
-                              .device = found->device };
+                              .device = found->device,
+                              .title = title };
         workspace = found->workspace;
     }
     auto const pane = vtcontrol::parseUuid(id);

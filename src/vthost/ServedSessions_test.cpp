@@ -372,7 +372,8 @@ TEST_CASE("bytes the guest writes reach the terminal", "[daemon][served]")
     CHECK(bench.live.eventually([&] { return bench.live.pageText(session).contains("dashboard"); }));
     // Named after the extension's title, and marked as served by it.
     CHECK(*bench.live.host.servedBy(session)
-          == ServedBy { .extension = "orchestrator", .scheme = "agents", .moduleDigest = "3f9a" });
+          == ServedBy {
+              .extension = "orchestrator", .scheme = "agents", .moduleDigest = "3f9a", .title = "Agents" });
 }
 
 TEST_CASE("client input reaches tab-read in order", "[daemon][served]")

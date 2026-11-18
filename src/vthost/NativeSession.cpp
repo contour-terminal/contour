@@ -148,6 +148,34 @@ namespace
         return layout;
     }
 
+    /// The tabs of @p workspace that a daemon-scoped extension draws, each with who draws it: a tab is served
+    /// when one of its panes' sessions is.
+    /// @param workspace The workspace.
+    /// @param host Where each session says who draws it.
+    [[nodiscard]] std::vector<proto::WireServedTab> servedTabsOf(vtworkspace::Workspace& workspace,
+                                                                 SessionHost const& host)
+    {
+        auto served = std::vector<proto::WireServedTab> {};
+        for (auto const tabIndex: std::views::iota(0, workspace.tabCount()))
+        {
+            auto const* tab = workspace.tabAt(tabIndex);
+            if (tab == nullptr)
+                continue;
+            auto const sessions = tab->leafSessions();
+            for (auto const session: sessions)
+                if (auto const* by = host.servedBy(session))
+                {
+                    served.push_back(proto::WireServedTab {
+                        .tabId = tab->id().value,
+                        .mark = proto::WireServedMark { .extension = by->extension,
+                                                        .title = by->title,
+                                                        .moduleDigest = by->moduleDigest } });
+                    break;
+                }
+        }
+        return served;
+    }
+
     /// Whether a record went into a frame or would have overspent its budget.
     enum class RecordFit : uint8_t
     {
@@ -1143,7 +1171,10 @@ void NativeSession::sendWorkspaceLayout(vtworkspace::Workspace& workspace)
     // Asked before the layout goes out, and streamed after it: the client has the pane by then.
     if (workspace.id().value == _selectedWorkspace)
         requestArrivedSnapshots(workspace);
-    sendLayout(serializeLayout(workspace, _host.objects(), controlSpelling()));
+    auto layout = serializeLayout(workspace, _host.objects(), controlSpelling());
+    if (showsExtensionPresence())
+        layout.served = servedTabsOf(workspace, _host);
+    sendLayout(std::move(layout));
     announceWorkspaceMeta(workspace);
 }
 
@@ -1151,6 +1182,12 @@ void NativeSession::sendLayout(proto::LayoutState layout)
 {
     if (_negotiated.has_value() && _negotiated->shared.contains(proto::Capability::TabEditAcks))
         layout.servedEdit = _servedEdit;
+    // The served tabs follow the served edit, which a window that marks them is therefore always sent (0 when
+    // it does not track its edits), so that the list's place is fixed; any other window is sent no list.
+    if (showsExtensionPresence())
+        layout.servedEdit = layout.servedEdit.value_or(0);
+    else
+        layout.served.clear();
     send(0, proto::DecodedPdu { std::move(layout) });
 }
 

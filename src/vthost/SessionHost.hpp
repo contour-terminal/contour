@@ -482,6 +482,7 @@ struct ServedBy
     std::string extension;    ///< The extension's name.
     std::string scheme;       ///< What it serves the tab as, as the extension names it.
     std::string moduleDigest; ///< The hex SHA-256 of the module that draws it; empty when unknown.
+    std::string title {}; ///< The extension's display title, which the window's chrome marks the tab with.
 
     bool operator==(ServedBy const&) const = default;
 };
@@ -504,6 +505,7 @@ struct ServedSpawn
     std::string scheme;                           ///< @see ServedBy::scheme
     std::string moduleDigest;                     ///< @see ServedBy::moduleDigest
     std::shared_ptr<vtpty::ChannelPty> device {}; ///< The device; null is refused.
+    std::string title {};                         ///< @see ServedBy::title
 };
 
 /// One hosted session: the terminal (owning its PTY) plus the pump thread

@@ -171,7 +171,7 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `Names` | 32 | `names` | The peer speaks the control API's `name` spelling: `name` keys, `object.rename`, `object.renamed`, `toName`. Without it the other end speaks the old one to it (`label` keys, `object.setLabel`, `workspace.rename`, `workspace.labelChanged`, `toLabel`) through vtcontrol's legacy spelling table (`LegacySpelling.hpp`); removed before 0.9.0 |
 | `WorkspaceColor` | 33 | `workspace-color` | `SetWorkspaceColor` (tag 62, client->server, body: the workspace id, a has-colour byte and a `u32` `0xRRGGBB`, 0 when cleared) sets or clears a workspace's colour in the daemon's model, and `WorkspaceMeta`'s colour field (the fourth presence bit, after `position`) states it: in full and as a delta on each change. Without it (an older daemon) a client sends nothing and keeps the workspace uncoloured; an older client is stated no colour, so its `WorkspaceMeta` bytes are what they were |
 | `DaemonExtensionConsent` | 34 | `daemon-extension-consent` | `ExtensionPermissionRequest` / `ExtensionPermissionReply` / `ExtensionPermissionSettled` / `ConsentProof` (tags 63-66): a daemon-scoped extension's grant is asked only of a window that proved the daemon's consent key |
-| `ExtensionPresence` | 35 | `extension-presence` | The daemon extensions' palette rows and what invoking one does (see [Extension presence](#extension-presence)): `ExtensionPresence` (tag 67, server->client), `InvokeExtensionAction` (tag 68, client->server), `RevealPane` (tag 69, server->client). A client without it is never sent the rows, and an invocation from it is dropped |
+| `ExtensionPresence` | 35 | `extension-presence` | The daemon extensions' palette rows and what invoking one does (see [Extension presence](#extension-presence)): `ExtensionPresence` (tag 67, server->client), `InvokeExtensionAction` (tag 68, client->server), `RevealPane` (tag 69, server->client), and the served tabs trailing `LayoutState`. A client without it is never sent the rows or the served tabs, and an invocation from it is dropped |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -996,6 +996,16 @@ coalesces them), and so does every change that finds it running with actions sti
 before it took them is told again once it is back.
 
 `RevealPane` asks the window to raise itself and focus a pane whose tab the daemon has already made active.
+
+The same capability tells a window which of its tabs an extension draws. `LayoutState` gains, after
+`servedEdit`, a trailing list: `varint count`, per served tab `varint tabId, string extension, string title,
+string moduleDigest` (`WireServedTab`). It is written only when not empty, and then `servedEdit` is written
+before it whether or not `TabEditAcks` is shared (0 then), so that the list's place is fixed; a connection
+without `ExtensionPresence` is never sent it, and a body that ends before it reads as no served tab. A count
+above the layout's tab count is malformed. The window marks those tabs (`window::servedChromeOf`): the tab
+carries the served glyph, and its pane's header a strip naming the title, the extension and the first 12
+digits of the module's digest. The mark comes from the daemon alone, never from a tab's title, so a program
+cannot dress its own tab as served.
 
 ## The GUI seams (`contour client`, `contour client --tmux`)
 

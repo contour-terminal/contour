@@ -1006,4 +1006,89 @@ TEST_CASE("ExtensionPresence: invoking a pending extension asks that window agai
     CHECK(invocationEffects(*h.journal).empty());
 }
 
+namespace
+{
+
+/// Opens a tab the orchestrator serves in @p host's workspace, as its extension would.
+/// @return The tab's id.
+[[nodiscard]] uint64_t openAgentsTab(vthost::SessionHost& host)
+{
+    auto const* const tab = host.createTabIn(
+        host.workspaceId(),
+        { .served = vthost::ServedSpawn { .extension = "orchestrator",
+                                          .scheme = "agents",
+                                          .moduleDigest = "3f9a0c1d2e4b5a69",
+                                          .device = host.served().makeDevice(vtbackend::PageSize {
+                                              vtbackend::LineCount(24), vtbackend::ColumnCount(80) }),
+                                          .title = "Agents" } });
+    REQUIRE(tab != nullptr);
+    return tab->id().value;
+}
+
+/// @return Every LayoutState @p client received, in order.
+[[nodiscard]] std::vector<proto::LayoutState> layoutsOf(Client const& client)
+{
+    auto layouts = std::vector<proto::LayoutState> {};
+    for (auto const& frame: client.received)
+        if (auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu))
+            layouts.push_back(*layout);
+    return layouts;
+}
+
+} // namespace
+
+TEST_CASE("ExtensionPresence: a window that shows it is told which tabs an extension serves",
+          "[daemon][presence][served]")
+{
+    auto h = ConsentHarness {};
+    auto const served = openAgentsTab(h.host);
+    auto window = h.connect();
+    auto* const w = window.get();
+    h.loop.blockOn(
+        core::net::testing::allOf(w->server->run(),
+                                  play(
+                                      &h.loop,
+                                      w,
+                                      { Step { .when = [] { return true; }, .send = { paletteHello() } } },
+                                      [w] { return w->attached() && !layoutsOf(*w).empty(); },
+                                      QuietTicks)));
+
+    auto const layouts = layoutsOf(*w);
+    REQUIRE_FALSE(layouts.empty());
+    auto const& layout = layouts.back();
+    CHECK(layout.tabs.size() == 2);
+    // The palette hello tracks no edits: the served edit is 0, written so that the list's place is fixed.
+    CHECK(layout.servedEdit == std::optional<uint64_t> { 0 });
+    CHECK(layout.served
+          == std::vector { proto::WireServedTab {
+              .tabId = served,
+              .mark = proto::WireServedMark {
+                  .extension = "orchestrator", .title = "Agents", .moduleDigest = "3f9a0c1d2e4b5a69" } } });
+}
+
+TEST_CASE("ExtensionPresence: a window without it is told of no served tab", "[daemon][presence][served]")
+{
+    auto h = ConsentHarness {};
+    std::ignore = openAgentsTab(h.host);
+    auto window = h.connect();
+    auto* const w = window.get();
+    h.loop.blockOn(
+        core::net::testing::allOf(w->server->run(),
+                                  play(
+                                      &h.loop,
+                                      w,
+                                      { Step { .when = [] { return true; }, .send = { windowHello() } } },
+                                      [w] { return w->attached() && !layoutsOf(*w).empty(); },
+                                      QuietTicks)));
+
+    auto const layouts = layoutsOf(*w);
+    REQUIRE_FALSE(layouts.empty());
+    for (auto const& layout: layouts)
+    {
+        CHECK(layout.tabs.size() == 2);
+        CHECK(layout.served.empty());
+        CHECK_FALSE(layout.servedEdit.has_value());
+    }
+}
+
 // }}}

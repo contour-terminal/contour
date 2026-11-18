@@ -50,6 +50,22 @@ namespace vthost::testing
 
 /// One example of every catalog alternative, so the tests below can sweep the whole variant
 /// instead of naming alternatives one at a time (and silently missing the 18th).
+/// A LayoutState in its other shape: the catalog's, with the served tabs trailing it
+/// (Capability::ExtensionPresence).
+[[nodiscard]] inline proto::LayoutState servedLayoutState()
+{
+    return proto::LayoutState {
+        .workspace = 1,
+        .activeTab = 0,
+        .tabs = std::vector<proto::WireTab>(2),
+        .servedEdit = 3,
+        .served = { proto::WireServedTab { .tabId = 0,
+                                           .mark = proto::WireServedMark { .extension = "orchestrator",
+                                                                           .title = "Agents",
+                                                                           .moduleDigest = "3f9a" } } },
+    };
+}
+
 [[nodiscard]] inline std::vector<std::pair<proto::PduType, proto::DecodedPdu>> everyAlternative()
 {
     return {
