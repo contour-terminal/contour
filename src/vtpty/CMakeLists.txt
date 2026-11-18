@@ -16,6 +16,7 @@ endif()
 set(vtpty_LIBRARIES core::base core::log core::platform crispy::core Microsoft.GSL::GSL boxed-cpp::boxed-cpp core::async)
 
 set(vtpty_SOURCES
+    BeneathRead${PLATFORM_SUFFIX}.cpp
     ChannelPty.cpp
     CommandCapture.cpp
     CommandCapture${PLATFORM_SUFFIX}.cpp
@@ -49,6 +50,7 @@ set(vtpty_SOURCES
 
 set(vtpty_HEADERS
     AdoptedChild.hpp
+    BeneathRead.hpp
     ChannelPty.hpp
     ChildProcess.hpp
     ChunkedWrite.hpp
@@ -190,6 +192,7 @@ if(VTPTY_TESTING)
     enable_testing()
     add_executable(vtpty_test
         test_main.cpp
+        BeneathRead_test.cpp
         ChannelPty_test.cpp
         ChildProcess_test.cpp
         ChunkedWrite_test.cpp
