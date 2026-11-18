@@ -155,7 +155,7 @@ TEST_CASE("DaemonImports: these imports are served and no others", "[daemon][wit
         DaemonImport::Procs,    DaemonImport::ProcTake,    DaemonImport::ProcRelease, DaemonImport::StoreGet,
         DaemonImport::StoreSet, DaemonImport::StoreRemove, DaemonImport::StoreKeys,   DaemonImport::TabOpen,
         DaemonImport::TabClose, DaemonImport::TabReveal,   DaemonImport::Tabs,        DaemonImport::TabRead,
-        DaemonImport::TabWrite, DaemonImport::ActionsTake, DaemonImport::SummarySet,
+        DaemonImport::TabWrite, DaemonImport::ActionsTake, DaemonImport::SummarySet,  DaemonImport::FileRead,
     };
     for (auto const& row: DaemonImportRows)
     {

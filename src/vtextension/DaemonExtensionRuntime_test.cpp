@@ -34,6 +34,7 @@
 #include <vtextension/Manifest.hpp>
 #include <vtextension/RootPointer.hpp>
 #include <vtextension/testing/DaemonRunnerHarness.hpp>
+#include <vtextension/testing/FakeBeneathReader.hpp>
 #include <vtextension/testing/FakeDirectoryOpener.hpp>
 #include <vtextension/testing/FakeFileLocker.hpp>
 #include <vtextension/testing/FakeProcessRunner.hpp>
@@ -142,6 +143,7 @@ struct Fixture
             DaemonExtensionRuntimeServices { .backend = harness.backend,
                                              .runner = runner,
                                              .directories = directories,
+                                             .files = files,
                                              .fileSystem = fileSystem,
                                              .locker = locker,
                                              .wallClock = harness.wallClock,
@@ -171,6 +173,7 @@ struct Fixture
     FakeFileLocker locker;
     FakeProcessRunner runner;
     FakeDirectoryOpener directories;
+    vtextension::testing::FakeBeneathReader files;
     vtbackend::LocalTimeConverter localTime { &vtbackend::systemLocalTime };
     std::string home = "/home/me"; ///< The user's home directory, as the runtime is told it.
     std::latch firstLoad { 1 };    ///< Counted down when the first `load` returned, on the lane.

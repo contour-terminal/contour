@@ -17,6 +17,7 @@
 #include <vtextension/DeclaredProcesses.hpp>
 #include <vtextension/ExtensionComposition.hpp>
 #include <vtextension/FileExtensionStore.hpp>
+#include <vtextension/FileReadService.hpp>
 #include <vtextension/Manifest.hpp>
 #include <vtextension/RootPointer.hpp>
 #include <vtextension/World.hpp>
@@ -138,6 +139,8 @@ struct DaemonExtensionRuntime::Extension
     std::shared_ptr<HintRelay> relay = std::make_shared<HintRelay>();
     DeclaredProcessesConfig processesConfig; ///< What @ref processes was made from, to make them anew.
     std::unique_ptr<DeclaredProcesses> processes;
+    /// The files it may read, made as it starts under its grant; null while it does not run.
+    std::shared_ptr<FileReadService> files;
     std::unique_ptr<IServedTabService> tabs; ///< The tabs it serves and the actions it takes; never null.
     std::unique_ptr<DaemonExtensionRunner> runner; ///< Null until it runs; last, as it reaches the rest.
 };
@@ -309,6 +312,8 @@ std::expected<void, DeclarationProblem> DaemonExtensionRuntime::run(Extension& e
     }
     if (auto loaded = load(extension); !loaded)
         return loaded;
+    extension.files = std::make_shared<FileReadService>(
+        extension.processesConfig.manifest, extension.roots, _services.directories, _services.files);
     extension.runner =
         std::make_unique<DaemonExtensionRunner>(extension.engine,
                                                 extension.compiled,
@@ -323,6 +328,7 @@ std::expected<void, DeclarationProblem> DaemonExtensionRuntime::run(Extension& e
                                                                  .store = *extension.store,
                                                                  .presence = _services.presence,
                                                                  .tabs = *extension.tabs,
+                                                                 .files = *extension.files,
                                                                  .scheduler = _pool,
                                                                  .wallClock = _services.wallClock,
                                                                  .localTime = _services.localTime,
@@ -514,7 +520,9 @@ void DaemonExtensionRuntime::revoke(std::string_view name)
     // and their results dropped, by the job queued behind it -- the pool has one worker, so its jobs run in
     // the order they were posted. Nothing they did reaches the instance of a later grant, which gets
     // processes of its own.
-    _pool.post(_lane, [old = std::shared_ptr<DeclaredProcesses> { std::move(extension->processes) }] {});
+    _pool.post(_lane,
+               [old = std::shared_ptr<DeclaredProcesses> { std::move(extension->processes) },
+                oldFiles = std::exchange(extension->files, nullptr)] {});
     if (auto made = makeProcesses(*extension); !made)
         errorLog()("daemon.extensions.{}: its processes cannot be made anew; it does not run.",
                    extension->name);
@@ -535,7 +543,10 @@ void DaemonExtensionRuntime::stop() noexcept
     _pool.stop();
     // Then the processes, whose destruction cancels each one in flight and reaps its group.
     for (auto const& extension: _extensions)
+    {
         extension->processes.reset();
+        extension->files.reset();
+    }
     _provider.releaseRetired();
 }
 

@@ -71,6 +71,7 @@
     #include <vtbackend/screen/LocalTime.hpp>
     #include <vtbackend/screen/StatusLineExtensions.hpp>
 
+    #include <vtpty/BeneathRead.hpp>
     #include <vtpty/CommandCapture.hpp>
     #include <vtpty/DirectoryHandle.hpp>
     #include <vtpty/ProcessRunner.hpp>
@@ -1769,6 +1770,7 @@ class DaemonExtensionRig
                 .backend = *_backend,
                 .runner = *_runner,
                 .directories = vtpty::nativeDirectoryOpener(),
+                .files = vtpty::nativeBeneathReader(),
                 .fileSystem = core::platform::NativeFileSystem::instance(),
                 .locker = _locker,
                 .wallClock = _wallClock,

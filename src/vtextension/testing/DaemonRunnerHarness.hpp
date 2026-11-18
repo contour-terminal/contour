@@ -36,6 +36,7 @@
 #include <vtextension/ExtensionStore.hpp>
 #include <vtextension/ProcessService.hpp>
 #include <vtextension/World.hpp>
+#include <vtextension/testing/FakeFileReadService.hpp>
 #include <vtextension/testing/FakeServedTabService.hpp>
 #include <vtextension/testing/FakeWasmBackend.hpp>
 #include <vtextension/testing/ManualScheduler.hpp>
@@ -271,6 +272,7 @@ class DaemonRunnerHarness
             .store = store,
             .presence = presence,
             .tabs = tabs,
+            .files = files,
             .scheduler = laneScheduler,
             .wallClock = wallClock,
             .localTime = localTime,
@@ -337,6 +339,7 @@ class DaemonRunnerHarness
     FakeExtensionStore store;
     RecordingPresence presence;
     FakeServedTabService tabs;
+    FakeFileReadService files; ///< Answers `file-read` not-supported-yet unless a test sets otherwise.
     core::platform::ManualWallClock wallClock;
     std::vector<std::string> logged; ///< Every message logged, in order.
     /// The time zone `load` reads its UTC offset in.

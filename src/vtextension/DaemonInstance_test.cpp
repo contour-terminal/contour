@@ -137,7 +137,6 @@ constexpr auto UnservedRows = std::array {
     UnservedRow { DaemonImport::Panes,
                   &holdsNotSupportedYet<std::expected<std::vector<PaneInfo>, HostError>> },
     UnservedRow { DaemonImport::PaneReveal, &holdsNotSupportedYet<HostResult> },
-    UnservedRow { DaemonImport::FileRead, &holdsNotSupportedYet<std::expected<FileContent, FileError>> },
 };
 
 /// The imports this host serves for served tabs and invoked actions.
@@ -348,7 +347,7 @@ TEST_CASE("DaemonInstance: the tab and action imports are served", "[daemon][ins
         CHECK(DaemonImportRows.at(std::to_underlying(import)).availability == ImportAvailability::Served);
     }
     // Every row is served exactly when its handler serves it (a static_assert in DaemonInstance.cpp); of the
-    // 24, only the five below wait for a later phase.
+    // 24, only the four below wait for a later phase.
     CHECK(std::ranges::count(DaemonImportRows, ImportAvailability::Served, &DaemonImportRow::availability)
           == static_cast<std::ptrdiff_t>(DaemonImportRows.size() - UnservedRows.size()));
 
@@ -407,6 +406,47 @@ TEST_CASE("DaemonInstance: the tab and action imports are served", "[daemon][ins
           == std::expected<std::vector<ActionInfo>, HostError> {
               std::vector { ActionInfo { .id = "open", .origin = 7 } } });
     CHECK(guest.services.tabCloses == std::vector<std::string> { "tab-1" });
+}
+
+TEST_CASE("DaemonInstance: file-read is served", "[daemon][instance][file-read]")
+{
+    CHECK(DaemonImportRows.at(std::to_underlying(DaemonImport::FileRead)).availability
+          == ImportAvailability::Served);
+
+    constexpr auto ResultAddress = uint32_t { 2048 };
+    constexpr auto RootAddress = uint32_t { 100 };
+    constexpr auto PathAddress = uint32_t { 200 };
+    using FileResult = std::expected<FileContent, FileError>;
+    auto guest = FakeDaemonGuest {};
+    guest.services.fileContent =
+        FileContent { .bytes = { 'g', 'i', 't' }, .modifiedUnixMs = 1'700'000'000'123U };
+    auto instance = guest.start();
+    REQUIRE(instance.has_value());
+
+    auto read = std::optional<FileResult> {};
+    auto refused = std::optional<FileResult> {};
+    guest.onUpdate = [&](std::span<uint32_t>) -> std::expected<void, wasm::CallFailure> {
+        auto memory = FakeInstanceMemory { guest.guest() };
+        guest.put(RootAddress, "worktrees");
+        guest.put(PathAddress, "run-1/.git");
+        REQUIRE(guest.call(DaemonImport::FileRead, { RootAddress, 9, PathAddress, 10, ResultAddress })
+                    .has_value());
+        read = *abi::Codec<FileResult>::load(memory, ResultAddress);
+        guest.services.fileContent = std::unexpected(FileError::Escapes);
+        REQUIRE(guest.call(DaemonImport::FileRead, { RootAddress, 9, PathAddress, 10, ResultAddress })
+                    .has_value());
+        refused = *abi::Codec<FileResult>::load(memory, ResultAddress);
+        return {};
+    };
+    REQUIRE((*instance)->update(DaemonHint::Wake).has_value());
+
+    CHECK(guest.services.calls == std::vector { DaemonImport::FileRead, DaemonImport::FileRead });
+    CHECK(guest.services.fileReads.front()
+          == std::pair { std::string { "worktrees" }, std::string { "run-1/.git" } });
+    CHECK(read
+          == FileResult { FileContent { .bytes = { 'g', 'i', 't' }, .modifiedUnixMs = 1'700'000'000'123U } });
+    CHECK(refused == FileResult { std::unexpect, FileError::Escapes });
+    CHECK_FALSE((*instance)->fault().has_value());
 }
 
 TEST_CASE("DaemonInstance: a tab-write of one whole input page passes the call budget", "[daemon][instance]")

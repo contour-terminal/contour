@@ -57,6 +57,11 @@ daemon upgrade), running processes and open panes are kept, and the new instance
   is one its manifest declares, run directly (never through a shell), with arguments checked against
   their declared kinds, in a directory inside a granted root. `file-read` reads regular files inside a
   root declared readable; no `..`, no symlink leaving the root.
+- **`file-read` words a missing directory apart from a missing file.** `directory-gone`: a directory on
+  the path, the root's own or one below it, does not exist. A missing file in an existing directory is
+  `not-regular`, as is a directory, a pipe or a device. A symlink anywhere on the path, a file with a
+  second name (a hard link) and a file on another device than the root's are `escapes`; a file over
+  64 KiB is `too-large`, by what was read, not by the size the file claimed.
 
 ## Versions
 

@@ -4,6 +4,7 @@
 #include <vtpty/DirectoryHandle.hpp>
 
 #include <expected>
+#include <functional>
 #include <map>
 #include <string>
 #include <string_view>
@@ -35,6 +36,9 @@ class FakeDirectoryOpener final: public vtpty::IDirectoryOpener
     [[nodiscard]] std::expected<vtpty::DirectoryHandle, vtpty::DirectoryError> open(
         std::string_view path) override
     {
+        opened.emplace_back(path);
+        if (onOpen)
+            onOpen(path);
         return canonical(path).transform(
             [](std::string resolved) { return vtpty::DirectoryHandle::unbacked(std::move(resolved)); });
     }
@@ -69,6 +73,12 @@ class FakeDirectoryOpener final: public vtpty::IDirectoryOpener
         directories.emplace(path, path);
         return vtpty::DirectoryHandle::unbacked(path);
     }
+
+    /// Every path open() was asked for, in order.
+    std::vector<std::string> opened;
+
+    /// Runs first in every open().
+    std::function<void(std::string_view path)> onOpen;
 
     /// Every directory createBeneath() created, by its whole path, in order.
     std::vector<std::string> created;

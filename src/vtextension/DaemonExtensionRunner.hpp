@@ -23,6 +23,7 @@
 #include <vtextension/ExtensionPresence.hpp>
 #include <vtextension/ExtensionScheduler.hpp>
 #include <vtextension/ExtensionStore.hpp>
+#include <vtextension/FileReadService.hpp>
 #include <vtextension/IHostServices.hpp>
 #include <vtextension/ProcessService.hpp>
 #include <vtextension/Runner.hpp>
@@ -52,6 +53,7 @@ struct DaemonServices
     IExtensionStore& store;         ///< Its durable store.
     IExtensionPresence& presence;   ///< Where its summary is shown.
     IServedTabService& tabs;        ///< The tabs it serves, and the actions its user invoked.
+    IFileReadService& files;        ///< The files it may read.
     IExtensionScheduler& scheduler; ///< The lane it lives on, its timers, and its monotonic clock.
     core::platform::IWallClock const& wallClock; ///< The wall-clock time `now` answers with.
     /// The time zone: `load` tells the UTC offset at the wall-clock time of each load.

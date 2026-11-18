@@ -465,6 +465,12 @@ class DaemonExtensionRunner::Core final: public IDaemonHostServices, public std:
             _config.name, _config.generation, neutralizedForDisplay(shortText), neutralizedLines(detail));
         return {};
     }
+
+    [[nodiscard]] std::expected<FileContent, FileError> fileRead(std::string_view root,
+                                                                 std::string_view path) override
+    {
+        return _services.files.read(root, path);
+    }
     // }}}
 
   private:

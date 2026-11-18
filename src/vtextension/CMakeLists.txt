@@ -24,6 +24,7 @@ set(vtextension_SOURCES
     ExtensionHost.cpp
     ExtensionWorkerPool.cpp
     FileExtensionStore.cpp
+    FileReadService.cpp
     FileLocker_unix.cpp
     FileLocker_win32.cpp
     GuestCall.cpp
@@ -74,6 +75,7 @@ set(vtextension_HEADERS
     ExtensionStore.hpp
     ExtensionWorkerPool.hpp
     FileExtensionStore.hpp
+    FileReadService.hpp
     FileLocker.hpp
     GuestCall.hpp
     HostBindings.hpp
@@ -146,6 +148,7 @@ if(VTEXTENSION_TESTING)
         ExtensionHost_test.cpp
         ExtensionWorkerPool_test.cpp
         FileExtensionStore_test.cpp
+        FileReadService_test.cpp
         HostState_test.cpp
         Instance_test.cpp
         Isolation_test.cpp
@@ -163,8 +166,10 @@ if(VTEXTENSION_TESTING)
         wasm/WasmBinary_test.cpp
         testing/DaemonRunnerHarness.hpp
         testing/FailingFileSystem.hpp
+        testing/FakeBeneathReader.hpp
         testing/FakeDaemonHostServices.hpp
         testing/FakeFileLocker.hpp
+        testing/FakeFileReadService.hpp
         testing/FakeDirectoryOpener.hpp
         testing/FakeGrantStore.hpp
         testing/FakeGuestMemory.hpp

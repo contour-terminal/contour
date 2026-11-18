@@ -36,6 +36,7 @@
 #include <vtextension/ExtensionWorkerPool.hpp>
 #include <vtextension/FileExtensionStore.hpp>
 #include <vtextension/FileLocker.hpp>
+#include <vtextension/FileReadService.hpp>
 #include <vtextension/GuestCall.hpp>
 #include <vtextension/HostBindings.hpp>
 #include <vtextension/HostState.hpp>

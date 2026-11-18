@@ -32,6 +32,7 @@
 #include <vector>
 
 #include <vtextension/DaemonExtensionRuntime.hpp>
+#include <vtextension/testing/FakeBeneathReader.hpp>
 #include <vtextension/testing/FakeDirectoryOpener.hpp>
 #include <vtextension/testing/FakeFileLocker.hpp>
 #include <vtextension/testing/FixtureProcessRunner.hpp>
@@ -180,6 +181,7 @@ struct OrchestratorWorld
                                                         DaemonWorldServices { .backend = *backend,
                                                                               .runner = processRunner,
                                                                               .directories = directories,
+                                                                              .files = files,
                                                                               .fileSystem = fileSystem,
                                                                               .locker = locker,
                                                                               .wallClock = wallClock,
@@ -297,6 +299,8 @@ struct OrchestratorWorld
     std::unique_ptr<vtextension::wasm::IWasmBackend> backend = vtextension::wasm::makeDefaultBackend();
     vtextension::testing::FixtureProcessRunner processRunner;
     vtextension::testing::FakeDirectoryOpener directories;
+    /// The files `file-read` reads: none unless a test adds them, every other read `not-supported-yet`.
+    vtextension::testing::FakeBeneathReader files;
     core::platform::testing::InMemoryFileSystem fileSystem;
     vtextension::testing::FakeFileLocker locker;
     core::platform::ManualWallClock wallClock { std::chrono::system_clock::time_point {

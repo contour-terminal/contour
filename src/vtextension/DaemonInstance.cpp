@@ -251,6 +251,19 @@ struct DaemonInstance::HostCalls
         return answer(instance, arguments, instance._services.summarySet(*shortText, *detail));
     }
 
+    /// `file-read: func(root: string, path: string) -> result<file-content, file-error>`.
+    static abi::Result<void> fileRead(DaemonInstance& instance, std::span<uint32_t const> arguments)
+    {
+        auto reader = abi::FlatReader(arguments);
+        auto const root = lift<std::string>(instance, reader);
+        if (!root)
+            return std::unexpected(root.error());
+        auto const path = lift<std::string>(instance, reader);
+        if (!path)
+            return std::unexpected(path.error());
+        return answer(instance, arguments, instance._services.fileRead(*root, *path));
+    }
+
     /// An import this host does not serve yet, whose WIT result is @p Result: answers its error type's
     /// `not-supported-yet` at the result address, lifting nothing and calling no service. The result type
     /// fixes where the error lands: a result's payload is aligned to its widest case.
@@ -264,7 +277,6 @@ struct DaemonInstance::HostCalls
     using StringResult = std::expected<std::string, HostError>;
     using UnitResult = std::expected<void, HostError>;
     using PanesResult = std::expected<std::vector<PaneInfo>, HostError>;
-    using FileResult = std::expected<FileContent, FileError>;
 
     /// What runs each import, indexed by DaemonImport.
     static constexpr auto Handlers = std::array<Handler, DaemonImportRows.size()> {
@@ -291,15 +303,14 @@ struct DaemonInstance::HostCalls
         &actionsTake,                   // actions-take
         &summarySet,                    // summary-set
         &notSupportedYet<UnitResult>,   // pane-reveal
-        &notSupportedYet<FileResult>,   // file-read
+        &fileRead,                      // file-read
     };
 
     /// Every handler that answers `not-supported-yet`.
-    static constexpr auto NotSupportedYetHandlers = std::array<Handler, 4> {
+    static constexpr auto NotSupportedYetHandlers = std::array<Handler, 3> {
         &notSupportedYet<StringResult>,
         &notSupportedYet<UnitResult>,
         &notSupportedYet<PanesResult>,
-        &notSupportedYet<FileResult>,
     };
 
     /// @return Whether the handler of @p row answers exactly as the row's availability says.

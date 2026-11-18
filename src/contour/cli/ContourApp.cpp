@@ -27,6 +27,7 @@
 
 #include <vtparser/Parser.hpp>
 
+#include <vtpty/BeneathRead.hpp>
 #include <vtpty/CommandCapture.hpp>
 #include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/ExecutablePath.hpp>
@@ -1236,6 +1237,7 @@ namespace
                     vthost::DaemonWorldServices { .backend = *services.backend,
                                                   .runner = services.processRunner,
                                                   .directories = vtpty::nativeDirectoryOpener(),
+                                                  .files = vtpty::nativeBeneathReader(),
                                                   .fileSystem = core::platform::NativeFileSystem::instance(),
                                                   .locker = services.locker,
                                                   .wallClock = services.wallClock,

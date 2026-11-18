@@ -182,6 +182,14 @@ class FakeDaemonHostServices final: public IDaemonHostServices
         return {};
     }
 
+    [[nodiscard]] std::expected<FileContent, FileError> fileRead(std::string_view root,
+                                                                 std::string_view path) override
+    {
+        called(DaemonImport::FileRead);
+        fileReads.emplace_back(std::string(root), std::string(path));
+        return fileContent;
+    }
+
     std::vector<DaemonImport> calls;                           ///< Every service call, in order.
     std::function<void(DaemonImport)> onCall;                  ///< Runs first in every service call.
     std::vector<DaemonLogged> logged;                          ///< Every log().
@@ -205,6 +213,8 @@ class FakeDaemonHostServices final: public IDaemonHostServices
     std::vector<std::pair<std::string, ByteList>> tabWrites;               ///< Every tabWrite().
     std::expected<void, HostError> tabAnswer; ///< What tabClose(), tabReveal(), tabWrite() answer.
     std::vector<ActionInfo> actions;          ///< What the next actionsTake() answers.
+    std::vector<std::pair<std::string, std::string>> fileReads; ///< Every fileRead(): root and path.
+    std::expected<FileContent, FileError> fileContent;          ///< What fileRead() answers.
 
   private:
     void called(DaemonImport import)

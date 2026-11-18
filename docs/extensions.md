@@ -413,7 +413,7 @@ again in a later callback", which starts with a fresh budget, not "the store is 
 - `pane-open`, `pane-close`, `panes`: panes the extension owns;
 - `tab-open`, `tab-close`, `tab-reveal`, `tabs`, `tab-read`, `tab-write`: tabs it serves;
 - `actions-take`, `summary-set`, `pane-reveal`: its command-palette actions and its summary;
-- `file-read`: regular files inside a root declared readable.
+- `file-read`: regular files inside a root declared readable, of at most 64 KiB.
 
 A declared command runs only where its manifest binds it, and sees only what its manifest declares:
 
@@ -433,9 +433,40 @@ A declared command runs only where its manifest binds it, and sees only what its
   withheld; everything the manifest declares is added, `command-env-for` replacing `command-env` by name.
 - **A missing program** is a refused start, never a vanished working directory.
 
+`file-read(root, path)` reads beneath the root's directory and nowhere else:
+
+- **The path** is relative and names one entry per component: an empty or absolute path, an empty, `.` or
+  `..` component, or a NUL is `bad-argument`. A path into another root nested inside the readable one is
+  `not-granted`, as is a root not declared `read`: by its spelling, and in the walk by the nested root's
+  directory itself (device and inode), so a case-insensitive filesystem's other spelling is refused too.
+- **The root's directory** is opened by handle on the first read and judged by the path read back from it:
+  one that resolves elsewhere (swapped for a symlink) is `escapes`. The handle is held from then on, so a
+  mount placed over the path later never reaches a read; it is opened again only when it did not exist yet,
+  or was removed while held. The nested roots beneath it are identified from that handle once found and kept,
+  so renaming one away and back does not lift its fence. A root of several directories is read in
+  declaration order; the first in which the path's directories exist answers.
+- **The walk** opens each directory beneath the one above it, following no link, and the file without
+  blocking: a symlink anywhere on the path is `escapes`, and so is a file with more than one name (a hard
+  link may be a second name of a file outside the root) or on another device than the root's (a mount
+  brings another tree in). On Linux each component is opened with `openat2(RESOLVE_BENEATH |
+  RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV | RESOLVE_NO_MAGICLINKS)`, so a mount point is refused before the
+  mounted filesystem is asked anything: a stalled FUSE mount inside a worktree cannot stall the daemon, and
+  a bind mount of the same filesystem is refused like any other. Elsewhere, and on kernels without
+  `openat2`, the device is compared once a directory is opened. The file is looked at before it is opened
+  (an `O_PATH` descriptor on Linux), so a device node is not opened; a pipe, a socket, a device or a
+  directory is `not-regular`, and a pipe never blocks the daemon.
+- **`directory-gone`** means a directory on the path, the root's own or one below it, does not exist. A
+  missing file in an existing directory is `not-regular`: an extension tells a removed worktree from a
+  worktree whose `.git` file is gone. A root removed while the read holds it is `directory-gone` too.
+- **Fail-closed corners.** A btrfs subvolume or a ZFS dataset inside a worktree has a device of its own, so
+  a file in it is `escapes`, as a mount would be.
+- **At most 64 KiB** is returned: a file is read up to one byte past that, and one that holds more is
+  `too-large`, whatever size it claimed when it was opened.
+- On Windows, `file-read` answers `not-supported-yet`.
+
 An import Contour does not serve yet answers `not-supported-yet`, which an extension treats as a
-capability it lacks, not a fault. Today that is every pane, tab, action and file import but
-`summary-set`.
+capability it lacks, not a fault. Today that is `pane-open`, `pane-close`, `panes` and `pane-reveal`, and
+`file-read` on Windows.
 
 ### Daemon extensions: granting
 

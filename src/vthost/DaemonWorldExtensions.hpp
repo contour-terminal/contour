@@ -9,6 +9,7 @@
 
 #include <vtbackend/screen/LocalTime.hpp>
 
+#include <vtpty/BeneathRead.hpp>
 #include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/ProcessRunner.hpp>
 
@@ -39,6 +40,7 @@ struct DaemonWorldServices
     vtextension::wasm::IWasmBackend& backend;       ///< What the engine is created from.
     vtpty::IProcessRunner& runner;                  ///< Runs the declared processes.
     vtpty::IDirectoryOpener& directories;           ///< Opens their working directories.
+    vtpty::IBeneathReader& files;                   ///< Reads the files beneath their readable roots.
     core::platform::FileSystem const& fileSystem;   ///< Where modules, grants and stores are.
     vtextension::IFileLocker const& locker;         ///< Takes each store's directory lock.
     core::platform::IWallClock const& wallClock;    ///< The wall-clock time `now` answers with.

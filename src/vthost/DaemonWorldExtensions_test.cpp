@@ -5,7 +5,9 @@
 #include <vtbackend/screen/LocalTime.hpp>
 #include <vtbackend/screen/Settings.hpp>
 
+#include <vtpty/BeneathRead.hpp>
 #include <vtpty/ChannelPty.hpp>
+#include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/MockPty.hpp>
 
 #include <core/Environment.hpp>
@@ -13,6 +15,7 @@
 #include <core/net/testing/ScriptedBackend.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
+#include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -23,17 +26,25 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <format>
+#include <fstream>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include <vtcontrol/testing/SequentialUuidSource.hpp>
 #include <vtextension/CanonicalAbi.hpp>
 #include <vtextension/DaemonExtensionRuntime.hpp>
+#include <vtextension/DaemonImports.hpp>
+#include <vtextension/DaemonWorld.hpp>
+#include <vtextension/testing/FakeBeneathReader.hpp>
 #include <vtextension/testing/FakeDirectoryOpener.hpp>
 #include <vtextension/testing/FakeFileLocker.hpp>
 #include <vtextension/testing/FakeProcessRunner.hpp>
@@ -179,6 +190,7 @@ struct Fixture
             vthost::DaemonWorldServices { .backend = backend,
                                           .runner = runner,
                                           .directories = directories,
+                                          .files = files,
                                           .fileSystem = fileSystem,
                                           .locker = locker,
                                           .wallClock = wallClock,
@@ -199,6 +211,7 @@ struct Fixture
     vtextension::testing::FakeFileLocker locker;
     vtextension::testing::FakeProcessRunner runner;
     vtextension::testing::FakeDirectoryOpener directories;
+    vtextension::testing::FakeBeneathReader files;
     core::platform::ManualWallClock wallClock;
     vtbackend::LocalTimeConverter localTime { &vtbackend::systemLocalTime };
     int summaryChanges = 0;
@@ -538,6 +551,7 @@ struct ServingFakes
             vthost::DaemonWorldServices { .backend = backend,
                                           .runner = runner,
                                           .directories = directories,
+                                          .files = files,
                                           .fileSystem = fileSystem,
                                           .locker = locker,
                                           .wallClock = wallClock,
@@ -552,6 +566,7 @@ struct ServingFakes
     vtextension::testing::FakeFileLocker locker;
     vtextension::testing::FakeProcessRunner runner;
     vtextension::testing::FakeDirectoryOpener directories;
+    vtextension::testing::FakeBeneathReader files;
     core::platform::ManualWallClock wallClock;
     vtbackend::LocalTimeConverter localTime { &vtbackend::systemLocalTime };
     std::atomic<int> loads = 0;   ///< How many `load` calls returned.
@@ -844,3 +859,125 @@ TEST_CASE("DaemonWorldExtensions: what is typed into the host's frame never reac
     }));
     CHECK(read == "k");
 }
+
+#ifndef _WIN32 // The native reader reads beneath a directory handle, which Windows has none of.
+
+namespace
+{
+
+/// A daemon module that may read files beneath its one root.
+constexpr auto ReadingManifest =
+    "name = reader\nversion = 2\ntitle = Reader\nplacement daemon\nroot work = config:work\n"
+    "read work\ncommand run short @work = true\n"sv;
+
+} // namespace
+
+TEST_CASE("DaemonWorldExtensions: the daemon world reads files through the native reader",
+          "[daemon][hosting][file-read]")
+{
+    // A real directory, its file read by the production reader beneath the production opener's handle.
+    auto const temp = core::testing::ScopedTempDir { "contour-daemon-file-read" };
+    auto const work = std::filesystem::canonical(temp.path());
+    std::filesystem::create_directory(work / "run-1");
+    {
+        auto out = std::ofstream { work / "run-1" / ".git", std::ios::binary };
+        out << "gitdir: /src/repo/.git/worktrees/run-1\n";
+    }
+    std::filesystem::create_symlink("/etc/passwd", work / "run-1" / "escape");
+
+    using FileResult = std::expected<vtextension::FileContent, vtextension::FileError>;
+    constexpr auto RootAddress = uint32_t { 100 };
+    constexpr auto PathAddress = uint32_t { 200 };
+    constexpr auto ResultAddress = uint32_t { 2048 };
+    auto backend = vtextension::testing::FakeWasmBackend {};
+    auto results = std::vector<FileResult> {};
+    auto loaded = std::atomic<bool> { false };
+    auto next = uint32_t { 4096 };
+    backend.guest.exports["cabi_realloc"] =
+        [&next](std::span<uint32_t> argv) -> std::expected<void, vtextension::wasm::CallFailure> {
+        next = vtextension::abi::alignTo(next, argv[2]);
+        argv[0] = next;
+        next += argv[3];
+        return {};
+    };
+    // Its load reads one file, and one link, as the guest would.
+    backend.guest.exports["load"] =
+        [&](std::span<uint32_t> /*argv*/) -> std::expected<void, vtextension::wasm::CallFailure> {
+        auto& instance = *backend.lastInstance;
+        auto const put = [&instance](uint32_t address, std::string_view text) {
+            std::ranges::transform(text, instance.linearMemory.begin() + address, [](char c) {
+                return static_cast<std::byte>(c);
+            });
+        };
+        auto memory = vtextension::testing::FakeInstanceMemory { instance };
+        put(RootAddress, "work");
+        for (auto const path: { "run-1/.git"sv, "run-1/escape"sv })
+        {
+            put(PathAddress, path);
+            auto const arguments = std::array {
+                RootAddress, uint32_t { 4 }, PathAddress, static_cast<uint32_t>(path.size()), ResultAddress
+            };
+            if (!instance.callHost(std::to_underlying(vtextension::DaemonImport::FileRead), arguments))
+                return std::unexpected(vtextension::wasm::CallFailure::Trap);
+            results.push_back(*vtextension::abi::Codec<FileResult>::load(memory, ResultAddress));
+        }
+        loaded = true;
+        return {};
+    };
+
+    auto fileSystem = core::platform::testing::InMemoryFileSystem {};
+    fileSystem.addDirectory(work);
+    fileSystem.addFile(
+        "/ext/reader.wasm",
+        textOf(vtextension::testing::withManifest(
+            vtextension::testing::toModule(vtextension::testing::DaemonProbeModule), ReadingManifest)));
+    auto locker = vtextension::testing::FakeFileLocker {};
+    auto runner = vtextension::testing::FakeProcessRunner {};
+    auto wallClock = core::platform::ManualWallClock {};
+    auto localTime = vtbackend::LocalTimeConverter { &vtbackend::systemLocalTime };
+    auto tabs = RecordingTabs {};
+    auto actions =
+        vthost::ExtensionActions { [](std::string_view /*extension*/, vthost::ServedHint /*hint*/) {} };
+    auto world = vthost::DaemonWorldExtensions(
+        vtextension::DaemonExtensionRuntimeConfig {
+            .declarations = { vtextension::DaemonExtensionDeclaration {
+                .name = "reader",
+                .modulePath = "/ext/reader.wasm",
+                .autostart = vtextension::ExtensionAutostart::OnDemand,
+                .configJson = std::format(R"({{"work":"{}"}})", work.string()),
+                .storeDirectory = "/state/extensions/default/reader/store" } },
+            .grantsFile = "/config/extension-grants.daemon-scoped.txt",
+            .home = "/home/me",
+            .inheritedEnvironment = {},
+            .bundledDirectories = {} },
+        vthost::DaemonWorldServices { .backend = backend,
+                                      .runner = runner,
+                                      .directories = vtpty::nativeDirectoryOpener(),
+                                      .files = vtpty::nativeBeneathReader(),
+                                      .fileSystem = fileSystem,
+                                      .locker = locker,
+                                      .wallClock = wallClock,
+                                      .localTime = localTime },
+        vthost::DaemonWorldEvents {},
+        [](std::function<void()> const& job) { job(); },
+        vthost::DaemonWorldWiring { .tabs = tabs, .actions = actions });
+
+    world.startOnDemand("reader");
+    auto const pending = world.pendingRequests();
+    REQUIRE(pending.size() == 1);
+    world.answer("reader", pending.front().grantDigest, vthost::GrantState::Granted);
+    auto const deadline = std::chrono::steady_clock::now() + 10s;
+    while (!loaded.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(5ms);
+    REQUIRE(loaded.load());
+    world.stop();
+
+    REQUIRE(results.size() == 2);
+    REQUIRE(results[0].has_value());
+    auto const text = "gitdir: /src/repo/.git/worktrees/run-1\n"sv;
+    CHECK(results[0]->bytes == vtextension::ByteList(text.begin(), text.end()));
+    CHECK(results[0]->modifiedUnixMs != 0);
+    CHECK(results[1] == FileResult { std::unexpect, vtextension::FileError::Escapes });
+}
+
+#endif

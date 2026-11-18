@@ -146,6 +146,7 @@ namespace
                 .backend = services.backend,
                 .runner = services.runner,
                 .directories = services.directories,
+                .files = services.files,
                 .fileSystem = services.fileSystem,
                 .locker = services.locker,
                 .wallClock = services.wallClock,

@@ -136,7 +136,7 @@ inline constexpr auto DaemonImportRows = std::array<DaemonImportRow, 24> {
         ImportAvailability::NotSupportedYet },
     DaemonImportRow { DaemonImport::FileRead, "file-read", 5,
         "file-read: func(root: string, path: string) -> result<file-content, file-error>",
-        ImportAvailability::NotSupportedYet },
+        ImportAvailability::Served },
     // clang-format on
 };
 

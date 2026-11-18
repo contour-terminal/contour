@@ -54,6 +54,7 @@
 #include <vtextension/testing/FakeDaemonHostServices.hpp>
 #include <vtextension/testing/FakeDirectoryOpener.hpp>
 #include <vtextension/testing/FakeFileLocker.hpp>
+#include <vtextension/testing/FakeFileReadService.hpp>
 #include <vtextension/testing/FixtureProcessRunner.hpp>
 #include <vtextension/testing/GuestModuleCheck.hpp>
 #include <vtextension/testing/GuestSlowdown.hpp>
@@ -70,6 +71,7 @@ using namespace vtextension;
 using core::platform::testing::InMemoryFileSystem;
 using vtextension::testing::FakeDirectoryOpener;
 using vtextension::testing::FakeFileLocker;
+using vtextension::testing::FakeFileReadService;
 using vtextension::testing::FixtureProcessRunner;
 using vtextension::testing::InMemoryGrantStore;
 using vtextension::testing::ManualScheduler;
@@ -153,6 +155,7 @@ class GuestRig
                 .store = *_store,
                 .presence = presence,
                 .tabs = tabs,
+                .files = files,
                 .scheduler = scheduler,
                 .wallClock = wallClock,
                 .localTime = localTime,
@@ -204,7 +207,8 @@ class GuestRig
     InMemoryFileSystem fileSystem;
     FakeFileLocker locker;
     RecordingPresence presence;
-    UnservedTabs tabs; ///< This guest serves no tab here: its tab imports answer not-supported-yet.
+    UnservedTabs tabs;         ///< This guest serves no tab here: its tab imports answer not-supported-yet.
+    FakeFileReadService files; ///< It reads no file here: `file-read` answers not-supported-yet.
     ManualScheduler scheduler;
     core::platform::ManualWallClock wallClock { std::chrono::system_clock::time_point {
         std::chrono::hours { 500'000 } } };
@@ -463,6 +467,13 @@ class MeasuredServices final: public IDaemonHostServices
                                                             std::string_view /*detail*/) override
     {
         return {};
+    }
+
+    /// No file is read in a measurement: the read answers as an unserved import would.
+    [[nodiscard]] std::expected<FileContent, FileError> fileRead(std::string_view /*root*/,
+                                                                 std::string_view /*path*/) override
+    {
+        return std::unexpected(FileError::NotSupportedYet);
     }
 
   private:

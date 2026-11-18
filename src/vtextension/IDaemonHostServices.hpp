@@ -147,6 +147,13 @@ class IDaemonHostServices
     /// @return Nothing; or why it was not taken.
     [[nodiscard]] virtual std::expected<void, HostError> summarySet(std::string_view shortText,
                                                                     std::string_view detail) = 0;
+
+    /// `file-read`: a regular file inside a root declared readable (IFileReadService).
+    /// @param root The label of the root.
+    /// @param path The file, relative to the root's directory.
+    /// @return Its bytes and modification time; or why it was not read.
+    [[nodiscard]] virtual std::expected<FileContent, FileError> fileRead(std::string_view root,
+                                                                         std::string_view path) = 0;
 };
 
 } // namespace vtextension
