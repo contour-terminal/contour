@@ -205,6 +205,7 @@ set_property(SOURCE
         "${CMAKE_CURRENT_SOURCE_DIR}/ContourGuiApp.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/cli/ShellIntegration_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/config/Config_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/display/DashboardCornersRendering_test.cpp"
     APPEND PROPERTY COMPILE_DEFINITIONS ${_per_checkout_definitions})
 if(CONTOUR_FRONTEND_GUI)
     target_compile_definitions(contour_config PUBLIC CONTOUR_FRONTEND_GUI)
@@ -1052,6 +1053,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/SpeechSynthesizer_test.cpp
             display/ContentScale_test.cpp
             display/InGridVisualsRendering_test.cpp
+            display/DashboardCornersRendering_test.cpp
             session/ExitCode_test.cpp
             session/WindowSwitching_test.cpp
             session/ShellIntegrationCard_test.cpp
