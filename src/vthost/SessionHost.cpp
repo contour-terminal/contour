@@ -866,6 +866,9 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
     // settings' default — and not a size a requesting client named either, since the host projects
     // the pane tree onto the client area itself.
     settings.pageSize = _pageSize;
+    // A served session draws and nothing else: what its extension writes reaches nothing past the grid.
+    if (request.served)
+        settings.sequences = vtbackend::SequenceAllowance::ServedTab;
     if (!profileName.empty())
         sessionLog()("session {}: spawning under profile '{}'", id.value, profileName);
     else if (request.settings)

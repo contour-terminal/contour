@@ -17,6 +17,7 @@
 #include <atomic>
 #include <chrono>
 #include <concepts>
+#include <cstddef>
 #include <optional>
 
 namespace vtbackend
@@ -435,6 +436,11 @@ class MockTerm: public Terminal::NullEvents
     /// that a sequence did NOT raise one -- which is how the OSC 9;4 handler proves it no longer
     /// mistakes a progress sequence for a ConEmu notification.
     std::vector<std::pair<std::string, std::string>> notifications;
+
+    /// How often the bell rang.
+    std::size_t bells = 0;
+
+    void bell() override { ++bells; }
 
     void notify(std::string_view title, std::string_view body) override
     {

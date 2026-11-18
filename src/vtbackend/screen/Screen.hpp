@@ -758,6 +758,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Asked before the standard sets, so a font loaded under `B` takes `ESC ( B` over.
     /// @return Whether the sequence designated a soft font.
     [[nodiscard]] bool tryDesignateSoftFont(Sequence const& seq);
+
+    /// @param mode A DEC private mode, as DECSET/DECRST name it.
+    /// @return Whether this terminal's SequenceAllowance lets the application set or reset @p mode.
+    [[nodiscard]] bool admitsDECMode(unsigned mode) const noexcept;
     void singleShiftSelect(CharsetTable table);
     void requestPixelSize(RequestPixelSize area);
     void requestCharacterSize(RequestPixelSize area);

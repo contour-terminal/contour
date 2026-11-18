@@ -124,10 +124,23 @@ enum class PreeditStyle : uint8_t
     Inline,
 };
 
+/// Which control functions a terminal executes: all it knows, or only those that draw.
+enum class SequenceAllowance : uint8_t
+{
+    /// Every function the terminal knows, as a program in a pane is entitled to.
+    Everything = 0,
+    /// Only the functions that draw into the grid (@see servedTabExecutes): a tab a daemon-scoped extension
+    /// serves, whose output must reach nothing outside the grid -- no clipboard, title, notification,
+    /// image, working directory, bell, reply or character set.
+    ServedTab,
+};
+
 /// Terminal settings, enabling hardware reset to be easier implemented.
 struct Settings
 {
     VTType terminalId = VTType::VT525;
+    /// Which functions this terminal executes; fixed for its lifetime.
+    SequenceAllowance sequences = SequenceAllowance::Everything;
     ColorPalette colorPalette; // NB: The default color palette can be taken from the factory settings.
 
     // Set of DEC modes that are frozen and cannot be changed by the application.
