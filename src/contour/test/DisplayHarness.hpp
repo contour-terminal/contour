@@ -33,6 +33,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 #include <QtTest/QTest>
 
@@ -297,7 +298,7 @@ struct SecondWindow
         session = std::move(made.session);
         window = detail::standUpDisplay(HarnessWindow::Shown, *display, *session);
         controller = detail::bindHarnessController(_app, window.get(), display.get());
-        pump();
+        std::ignore = pump();
     }
 
     /// Tears this window down in the same order as ~DisplayHarness, for its own members only.
@@ -313,7 +314,10 @@ struct SecondWindow
 
     /// Forces one synchronous frame of this window and returns the grabbed image, as DisplayHarness::pump().
     /// @return The grabbed image.
-    QImage pump() const { return detail::pumpHarnessWindow(HarnessWindow::Shown, window.get()); }
+    [[nodiscard]] QImage pump() const
+    {
+        return detail::pumpHarnessWindow(HarnessWindow::Shown, window.get());
+    }
 
   private:
     contour::ContourGuiApp& _app; ///< The first window's application.

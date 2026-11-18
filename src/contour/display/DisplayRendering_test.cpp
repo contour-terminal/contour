@@ -1096,13 +1096,13 @@ void zoomIn(contour::session::TerminalSession& session,
     {
         CHECK(session(contour::actions::IncreaseFontSize {}));
         a.pump();
-        b.pump();
+        std::ignore = b.pump();
     }
     for ([[maybe_unused]] auto const settle: std::views::iota(0, 5))
     {
         QTest::qWait(10);
         a.pump();
-        b.pump();
+        std::ignore = b.pump();
     }
 }
 
@@ -1141,7 +1141,7 @@ TEST_CASE("display: a font zoom in one window leaves another window's font alone
         auto const beforeB = paneFontState(b);
         CHECK_FALSE(b.display->setFontSize(text::FontSize { 300.0 }));
         a.pump();
-        b.pump();
+        std::ignore = b.pump();
         CHECK(paneFontState(a) == beforeA);
         CHECK(paneFontState(b) == beforeB);
     }
@@ -1153,7 +1153,7 @@ TEST_CASE("display: a font zoom in one window leaves another window's font alone
         zoomIn(*b.session, a, b);
         a.window->show();
         a.pump();
-        b.pump();
+        std::ignore = b.pump();
         CHECK(paneFontState(a) == before);
         CHECK(b.display->fontSize().pt > before.fontPt);
     }
