@@ -12,15 +12,12 @@
 #include <cstddef>
 #include <expected>
 #include <filesystem>
-#include <fstream>
 #include <functional>
 #include <latch>
-#include <map>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <set>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -34,13 +31,17 @@
 #include <vtextension/ProcessService.hpp>
 #include <vtextension/RootResolution.hpp>
 #include <vtextension/testing/FakeDirectoryOpener.hpp>
+#include <vtextension/testing/FakeGrantStore.hpp>
 #include <vtextension/testing/FakeProcessRunner.hpp>
+#include <vtextension/testing/OrchestratorManifest.hpp>
 
 using namespace std::chrono_literals;
 using namespace std::string_view_literals;
 using namespace vtextension;
 using vtextension::testing::FakeDirectoryOpener;
+using vtextension::testing::FakeGrantStore;
 using vtextension::testing::FakeProcessRunner;
+using vtextension::testing::orchestratorManifest;
 
 namespace
 {
@@ -51,38 +52,6 @@ constexpr auto GrantDigest = "g1"sv;
 
 constexpr std::size_t KiB = 1024;
 constexpr std::size_t MiB = KiB * KiB;
-
-/// An in-memory grant store.
-class FakeGrantStore final: public IGrantStore
-{
-  public:
-    [[nodiscard]] GrantState lookup(std::string_view hostId, std::string_view digest) const override
-    {
-        auto const it = _grants.find({ std::string(hostId), std::string(digest) });
-        return it != _grants.end() ? it->second : GrantState::Pending;
-    }
-
-    void record(std::string_view hostId, std::string_view digest, GrantState state) override
-    {
-        _grants[{ std::string(hostId), std::string(digest) }] = state;
-    }
-
-  private:
-    std::map<std::pair<std::string, std::string>, GrantState> _grants;
-};
-
-[[nodiscard]] Manifest orchestratorManifest()
-{
-    auto file = std::ifstream(std::filesystem::path { VTEXTENSION_MANIFEST_CORPUS_DIR } / "valid"
-                                  / "orchestrator.manifest",
-                              std::ios::binary);
-    REQUIRE(file);
-    auto text = std::ostringstream {};
-    text << file.rdbuf();
-    auto manifest = parseManifestText(std::move(text).str());
-    REQUIRE(manifest.has_value());
-    return std::move(*manifest);
-}
 
 [[nodiscard]] std::vector<ResolvedRoot> defaultRoots()
 {

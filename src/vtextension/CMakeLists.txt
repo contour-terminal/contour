@@ -136,6 +136,7 @@ if(VTEXTENSION_TESTING)
         DaemonInstance_test.cpp
         DaemonWorld_test.cpp
         DeadlineGuard_test.cpp
+        DeclaredCleanup_test.cpp
         DeclaredProcesses_test.cpp
         Engine_test.cpp
         EventQueue_test.cpp
@@ -165,15 +166,18 @@ if(VTEXTENSION_TESTING)
         testing/FakeDaemonHostServices.hpp
         testing/FakeFileLocker.hpp
         testing/FakeDirectoryOpener.hpp
+        testing/FakeGrantStore.hpp
         testing/FakeGuestMemory.hpp
         testing/FakeProcessRunner.hpp
         testing/FakeServedTabService.hpp
         testing/FakeWasmBackend.hpp
         testing/FixtureProcessRunner.hpp
+        testing/GitSandbox.hpp
         testing/GuestModuleCheck.hpp
         testing/GuestSlowdown.hpp
         testing/Harness.hpp
         testing/LaneReport.hpp
+        testing/OrchestratorManifest.hpp
         testing/ManualScheduler.hpp
         testing/QueuedOwner.hpp
         testing/RunnerHarness.hpp
