@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/Logging.hpp>
 #include <contour/askpass/AskpassBroker.hpp>
+#include <contour/platform/QtInvoke.hpp>
 
 #include <core/Assert.hpp>
 #include <core/log/LogStore.hpp>
@@ -305,15 +306,12 @@ namespace
                 // Shared only to cross the queued call, which wants a copyable functor; the answer is wiped
                 // wherever it ends, by its Secret.
                 auto carried = std::make_shared<AskpassReply>(std::move(given));
-                QMetaObject::invokeMethod(
-                    worker,
-                    [self, id, carried] {
-                        if (self)
-                            self->answer(id, std::move(*carried));
-                    },
-                    Qt::QueuedConnection);
+                platform::postToObject(worker, [self, id, carried] {
+                    if (self)
+                        self->answer(id, std::move(*carried));
+                });
             };
-            QMetaObject::invokeMethod(
+            platform::postToObject(
                 _hub.guiContext,
                 [router = _hub.router,
                  route = _hub.route,
@@ -324,8 +322,7 @@ namespace
                  reply = std::move(reply)]() mutable {
                     router->ask(
                         route, promptId, kind, std::move(target), std::move(prompt), std::move(reply));
-                },
-                Qt::QueuedConnection);
+                });
         }
 
         void answer(ConnectionId id, AskpassReply reply)
@@ -382,10 +379,8 @@ namespace
 
         void postWithdraw(AskpassPromptId promptId) const
         {
-            QMetaObject::invokeMethod(
-                _hub.guiContext,
-                [router = _hub.router, promptId] { router->withdraw(promptId); },
-                Qt::QueuedConnection);
+            platform::postToObject(_hub.guiContext,
+                                   [router = _hub.router, promptId] { router->withdraw(promptId); });
         }
 
         void closePrompt(PromptEnd end)
@@ -447,8 +442,7 @@ namespace
                 endpoint = std::exchange(_state->endpoint, nullptr);
             }
             if (endpoint != nullptr)
-                QMetaObject::invokeMethod(
-                    _workerContext, [endpoint] { delete endpoint; }, Qt::BlockingQueuedConnection);
+                platform::invokeBlocking(_workerContext, [endpoint] { delete endpoint; });
         }
 
         Session(Session const&) = delete;
@@ -651,23 +645,20 @@ std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> AskpassBrok
 
     // On the broker's thread, which waits for nobody. The server listens before ssh is even started.
     auto listening = std::expected<QString, std::string> { std::unexpected { std::string {} } };
-    QMetaObject::invokeMethod(
-        _worker.get(),
-        [&] {
-            auto server =
-                std::make_unique<Endpoint>(Hub { _router, route, this, _worker.get(), *_promptIds, _clock },
-                                           state,
-                                           nonce,
-                                           targetText,
-                                           _config);
-            listening = server->listen(name);
-            if (listening)
-            {
-                auto const lock = std::lock_guard { state->mutex };
-                state->endpoint = server.release();
-            }
-        },
-        Qt::BlockingQueuedConnection);
+    platform::invokeBlocking(_worker.get(), [&] {
+        auto server =
+            std::make_unique<Endpoint>(Hub { _router, route, this, _worker.get(), *_promptIds, _clock },
+                                       state,
+                                       nonce,
+                                       targetText,
+                                       _config);
+        listening = server->listen(name);
+        if (listening)
+        {
+            auto const lock = std::lock_guard { state->mutex };
+            state->endpoint = server.release();
+        }
+    });
     if (!listening)
         return std::unexpected { "cannot listen for ssh's prompts: " + listening.error() };
 

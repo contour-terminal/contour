@@ -95,6 +95,28 @@ void postToObject(QObject* obj, F fun)
     QMetaObject::invokeMethod(obj, detail::PostedCall<F> { std::move(fun) }, Qt::QueuedConnection);
 }
 
+/// Runs a functor on the thread that owns @p obj and waits for it to return: Qt::BlockingQueuedConnection,
+/// in both directions visible to ThreadSanitizer.
+///
+/// The way there is postToObject()'s. The way back is a QSemaphore inside libQt6Core, released once the
+/// functor has run and acquired by this thread's wait -- a futex, which ThreadSanitizer cannot see either, so
+/// it would take what the functor wrote and this thread reads afterwards for a race. The functor's last act
+/// declares that ordering itself. @p obj must live on another thread, as for Qt::BlockingQueuedConnection.
+/// @param obj The object on whose thread @p fun runs.
+/// @param fun What to run there. Taken by value; it may capture this thread's locals by reference.
+template <typename F>
+void invokeBlocking(QObject* obj, F fun)
+{
+    auto returned = char {}; // Only its address: the token both threads name.
+    auto run = [&fun, &returned] {
+        fun();
+        detail::releasedAt(&returned);
+    };
+    QMetaObject::invokeMethod(
+        obj, detail::PostedCall<decltype(run)> { std::move(run) }, Qt::BlockingQueuedConnection);
+    detail::acquiredAt(&returned);
+}
+
 /// A QObject that work on another thread may post to for as long as the object lives.
 ///
 /// postToObject() needs the object alive while it posts, which a job that outlives the object cannot know.

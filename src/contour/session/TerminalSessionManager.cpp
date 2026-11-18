@@ -597,6 +597,9 @@ TerminalSession* TerminalSessionManager::createBackingSession(
                  session->id(),
                  (void*) session,
                  _sessionsById.size());
+    // Before the terminal is bound: a daemon-backed one is replayed on the client's reactor thread from then
+    // on, and what that replay posts back here is keyed by this id.
+    session->setModelSessionId(sessionId);
     // Close the cycle the constructor could not: the factory handed out a pty, and a
     // daemon-backed one needs the terminal built around it to populate its grid.
     factory.bindTerminal(&session->terminal().device(),
@@ -610,7 +613,6 @@ TerminalSession* TerminalSessionManager::createBackingSession(
 
     _pendingSessionId = sessionId;
     _sessionsById[sessionId.value] = session;
-    session->setModelSessionId(sessionId);
 
     connect(session, &TerminalSession::sessionClosed, [this, session]() { removeSession(*session); });
     connect(session, &TerminalSession::displayWorkingDirectoryChanged, this, [this, session] {

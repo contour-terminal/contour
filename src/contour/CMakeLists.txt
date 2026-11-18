@@ -1444,6 +1444,13 @@ if(CONTOUR_FRONTEND_GUI)
         # the full scene-graph/RHI render loop, and clean teardown. They are the coverage source for
         # the not-headless-constructible stack (see scripts/coverage.sh) and double as lifecycle
         # smoke tests in every preset. Linux-only: they assume /bin/sh and the offscreen QPA.
+        # No app run here reaches the machine's speech service, as contour_gui_test's test apps do not (see
+        # AppFixture's defaultSpeech()): the real binary's synthesizer would connect to speech-dispatcher where
+        # one runs, audibly, and under ThreadSanitizer libspeechd's event thread, which that uninstrumented library
+        # starts and ends itself, finishes with the sanitizer's ignores still on: a fatal report, exit status 66.
+        # An address nothing listens on makes the connection fail before that thread exists.
+        set(CONTOUR_E2E_NO_SPEECH "SPEECHD_ADDRESS=unix_socket:/nonexistent/contour-e2e-speechd.sock")
+
         if(NOT WIN32 AND NOT APPLE)
             # The custom config drives non-default Config.cpp branches and the render paths behind
             # them (background image + blur, scrollbar, indicator status line). The image path must
@@ -1520,7 +1527,7 @@ if(CONTOUR_FRONTEND_GUI)
                 contour_e2e_client_unreachable contour_e2e_hosting contour_e2e_stdio_relay contour_e2e_connect
                 contour_e2e_tls_key_login
                 PROPERTIES
-                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1"
+                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;${CONTOUR_E2E_NO_SPEECH}"
                     TIMEOUT 120
                     RUN_SERIAL TRUE
                     LABELS e2e)
@@ -1600,7 +1607,7 @@ if(CONTOUR_FRONTEND_GUI)
                         $<TARGET_FILE:contour>)
             set_tests_properties(contour_e2e_daemon_live_upgrade
                 PROPERTIES
-                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1"
+                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;${CONTOUR_E2E_NO_SPEECH}"
                     TIMEOUT 120
                     RUN_SERIAL TRUE
                     LABELS "e2e;daemon")
@@ -1616,7 +1623,7 @@ if(CONTOUR_FRONTEND_GUI)
                         $<TARGET_FILE:contour>)
             set_tests_properties(contour_e2e_daemon_crash_recovery
                 PROPERTIES
-                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;LSAN_OPTIONS=detect_leaks=0"
+                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;${CONTOUR_E2E_NO_SPEECH};LSAN_OPTIONS=detect_leaks=0"
                     TIMEOUT 180
                     RUN_SERIAL TRUE
                     LABELS "e2e;daemon;keeper")

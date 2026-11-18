@@ -737,8 +737,11 @@ void TerminalSession::scheduleRedraw()
     _terminal.markScreenDirty();
     // Don't refresh GUI tab info here: reached from the parser thread while _stateMutex is held (ESU path),
     // so _manager->update() would re-lock that non-recursive mutex. It only changes on GUI-thread events.
-    if (_display)
-        _display->scheduleRedraw();
+    // Through the mutex-guarded copy of _display, as renderBufferUpdated() does: the GUI thread reassigns
+    // _display while the parser thread (or a remote session's reactor) asks for a redraw.
+    auto const lock = std::scoped_lock { _renderNotifyMutex };
+    if (_renderNotifyTarget != nullptr)
+        _renderNotifyTarget->scheduleRedraw();
 }
 
 void TerminalSession::start()
@@ -1017,7 +1020,8 @@ void TerminalSession::refreshInterruptionOffer()
 
 void TerminalSession::repaintChangedScreen()
 {
-    if (!_display)
+    // Off the GUI thread (the parser's, or a remote session's reactor), where _display is not to be read.
+    if (!hasRenderNotifyTarget())
         return;
 
     // Emphatically NOT under Terminal's state mutex: this callback is raised BOTH with that mutex held
@@ -1220,6 +1224,12 @@ void TerminalSession::renderBufferUpdated()
     auto const lock = std::scoped_lock { _renderNotifyMutex };
     if (_renderNotifyTarget != nullptr)
         _renderNotifyTarget->renderBufferUpdated();
+}
+
+bool TerminalSession::hasRenderNotifyTarget()
+{
+    auto const lock = std::scoped_lock { _renderNotifyMutex };
+    return _renderNotifyTarget != nullptr;
 }
 
 void TerminalSession::kittyFrameAdvanced()

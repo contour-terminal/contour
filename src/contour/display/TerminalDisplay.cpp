@@ -2323,9 +2323,8 @@ void TerminalDisplay::scheduleRedraw()
     // display: attachDisplay() calls the old display's releaseSession(), which nulls its _session. A
     // released display has nothing to redraw, so bail out. hasSession() reads _session once; the session
     // serializes its renderBufferUpdated() forward against attach/detach, and the work below only posts to
-    // the GUI thread. It must not read terminal state or take the terminal's mutex. Only that forward is
-    // serialized: the parser thread's screenUpdated() -> scheduleRedraw() path is not, and relies on the
-    // hand-off ordering in releaseSession().
+    // the GUI thread. It must not read terminal state or take the terminal's mutex. The parser thread's
+    // screenUpdated() -> scheduleRedraw() path forwards through the same guarded copy.
     if (!hasSession())
         return;
 
