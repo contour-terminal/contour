@@ -70,17 +70,17 @@ struct ServedSessions::DeviceState
     /// @param chunk One write of the terminal's.
     void accept(std::string_view chunk)
     {
-        if (chunk.size() > MaxServedInputBytes)
+        if (chunk.size() > MaxServedTransferBytes)
         {
             sessionLog()("a served tab's input of {} bytes can never fit its bound of {} bytes; dropped",
                          chunk.size(),
-                         MaxServedInputBytes);
+                         MaxServedTransferBytes);
             return;
         }
         auto wasEmpty = false;
         {
             auto const lock = std::lock_guard { mutex };
-            if (input.size() + chunk.size() > MaxServedInputBytes)
+            if (input.size() + chunk.size() > MaxServedTransferBytes)
             {
                 if (std::exchange(overflow, InputOverflow::Dropping) == InputOverflow::None)
                     sessionLog()("a served tab's input is full; whole chunks are dropped until it is read");
@@ -480,7 +480,7 @@ std::expected<void, ServedTabError> ServedSessions::write(std::string_view exten
             return std::unexpected(ServedTabError::NotOwned);
         device = found->device;
     }
-    if (bytes.size() > MaxServedInputBytes)
+    if (bytes.size() > MaxServedTransferBytes)
         return std::unexpected(ServedTabError::Limit);
     if (device->isClosed())
         return std::unexpected(ServedTabError::Gone);

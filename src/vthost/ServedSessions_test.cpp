@@ -100,7 +100,7 @@ TEST_CASE("a chunk that does not fit whole is dropped whole", "[vthost][served]"
     auto h = WatchedHost {};
     auto& served = h.host.served();
     auto const device = served.makeDevice(Size);
-    auto const filler = std::string(vthost::MaxServedInputBytes - 2, 'a');
+    auto const filler = std::string(vthost::MaxServedTransferBytes - 2, 'a');
     REQUIRE(device->writeInput(filler, vtpty::InputKind::Keyboard) == static_cast<int>(filler.size()));
     REQUIRE(served.inputOf(*device) == filler);
 
@@ -119,7 +119,7 @@ TEST_CASE("a chunk bigger than the bound is dropped, however empty the buffer", 
     auto& served = h.host.served();
     auto const device = served.makeDevice(Size);
     std::ignore =
-        device->writeInput(std::string(vthost::MaxServedInputBytes + 1, 'p'), vtpty::InputKind::Keyboard);
+        device->writeInput(std::string(vthost::MaxServedTransferBytes + 1, 'p'), vtpty::InputKind::Keyboard);
     CHECK(served.inputOf(*device).empty());
     std::ignore = device->writeInput("q", vtpty::InputKind::Keyboard);
     CHECK(served.inputOf(*device) == "q");

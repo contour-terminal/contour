@@ -34,9 +34,14 @@ namespace vthost
 
 struct SessionSpawnRequest;
 
-/// The most input one served tab buffers for its extension: what one read of it takes. A chunk the terminal
-/// writes that does not fit whole is dropped whole, never cut, so that its reader never sees half a sequence.
-inline constexpr std::size_t MaxServedInputBytes = std::size_t { 64 } * 1024;
+/// The most bytes that cross a served tab in one host call, either way: the input one tab buffers for its
+/// extension (what one `tab-read` takes) and the output one `tab-write` carries. A chunk the terminal writes
+/// that does not fit whole is dropped whole, never cut, so that its reader never sees half a sequence.
+///
+/// It fits the daemon world's per-call budget, `maxHostCallBytes` = 65 664 bytes (a 64 KiB store value under
+/// a 128-byte key, DaemonLimits.hpp): 65 536 bytes of payload leave 128 for the call's other argument, the
+/// tab's id.
+inline constexpr std::size_t MaxServedTransferBytes = std::size_t { 64 } * 1024;
 
 /// Whether a host admits a served spawn.
 enum class ServedAdmission : uint8_t
@@ -130,7 +135,7 @@ class ServedSessions final: public IServedTabs
     ~ServedSessions() override = default;
 
     /// Makes the device of a served tab: what is fed to it is its screen's output; what its terminal writes
-    /// is appended to its input in whole chunks while they fit (@see MaxServedInputBytes); a resize is
+    /// is appended to its input in whole chunks while they fit (@see MaxServedTransferBytes); a resize is
     /// recorded. Any thread.
     /// @param size The size the device starts at.
     /// @return The device, shared with the session that adopts it.

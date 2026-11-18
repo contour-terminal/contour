@@ -315,7 +315,7 @@ class IServedTabs
     /// @return Its tabs, pending ones included, in the order they were opened.
     [[nodiscard]] virtual std::vector<ServedTabInfo> list(std::string_view extension) const = 0;
 
-    /// Takes the input the tab's terminal wrote since the last read, at most MaxServedInputBytes.
+    /// Takes the input the tab's terminal wrote since the last read, at most MaxServedTransferBytes.
     /// @param extension What the daemon's configuration calls it.
     /// @param tab The tab's id.
     /// @return The bytes, whole chunks only; empty for a tab not created yet; NotOwned for a foreign id.
@@ -325,7 +325,7 @@ class IServedTabs
     /// Draws into the tab: @p bytes reach its terminal as its program's output, once it exists.
     /// @param extension What the daemon's configuration calls it.
     /// @param tab The tab's id.
-    /// @param bytes At most MaxServedInputBytes.
+    /// @param bytes At most MaxServedTransferBytes.
     /// @return Nothing; NotOwned for a foreign id; Gone for a tab whose device closed; Limit for too many
     ///         bytes.
     [[nodiscard]] virtual std::expected<void, ServedTabError> write(std::string_view extension,

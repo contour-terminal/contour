@@ -2046,7 +2046,7 @@ Windows' built-in ConPTY and the bundled `conpty.dll` with `OpenConsole.exe`:
 A *served session* is a hosted session that runs no program: a daemon-scoped extension draws its screen. Its
 device is a host-owned `vtpty::ChannelPty` that `ServedSessions` (one per `SessionHost`) makes: what the
 extension feeds it is the terminal's output, and what the terminal writes to it -- keys, mouse reports,
-replies -- is buffered for the extension, up to `MaxServedInputBytes` (64 KiB, one read). A chunk the terminal
+replies -- is buffered for the extension, up to `MaxServedTransferBytes` (64 KiB, one read). A chunk the terminal
 writes that does not fit whole is dropped whole, never cut, so that the extension never reads half a sequence.
 A spawn names it with `SessionSpawnRequest::served`; the session carries `ServedBy` (the extension, its scheme,
 the module's digest), and its tab holds that one pane.

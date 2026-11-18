@@ -273,9 +273,10 @@ interface host {
     tab-reveal: func(tab: string, origin: origin) -> result<_, host-error>;
     /// Lists the served tabs.
     tabs: func() -> result<list<tab-info>, host-error>;
-    /// Reads what the user typed into a served tab since the last read.
+    /// Reads what the user typed into a served tab since the last read: at most 64 KiB, in whole chunks.
     tab-read: func(tab: string) -> result<list<u8>, host-error>;
-    /// Writes output to a served tab.
+    /// Writes output to a served tab: at most 64 KiB per call (more answers `limit`); write a larger frame in
+    /// pieces.
     tab-write: func(tab: string, bytes: list<u8>) -> result<_, host-error>;
     /// Takes the actions the user invoked since the last call.
     actions-take: func() -> result<list<action>, host-error>;
