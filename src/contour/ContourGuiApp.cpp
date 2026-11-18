@@ -84,6 +84,7 @@
 #include <contour/window/WindowController.hpp>
 #include <contour/window/WindowLivenessQt.hpp>
 
+#include <vtbackend/vt/Capabilities.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
 
 #include <vtpty/EnvironmentBlock.hpp>
@@ -91,6 +92,7 @@
 #include <vtpty/Process.hpp>
 #include <vtpty/ProgramLookup.hpp>
 #include <vtpty/SandboxInfo.hpp>
+#include <vtpty/SshTerminfoInstall.hpp>
 
 #ifdef CONTOUR_EXTENSIONS
     #include <vtextension/BundledExtensions.hpp>
@@ -243,6 +245,26 @@ bool hasStrandedQmlOverrides(fs::path const& configHome)
 
 namespace
 {
+    /// The terminfo entry a built-in SSH session installs on its host.
+    constexpr auto SshTerminfoEntryName = std::string_view { "contour" };
+
+    /// Builds what every SSH session installs, once: Contour's own terminfo source and the memo of hosts
+    /// it failed on. A source that cannot be turned into a command is logged and nothing is installed.
+    std::optional<vtpty::SshTerminfoInstaller> makeSshTerminfoInstaller()
+    {
+        auto command = vtpty::buildTerminfoInstallCommand(
+            SshTerminfoEntryName, vtbackend::capabilities::StaticDatabase {}.terminfo());
+        if (!command)
+        {
+            errorLog()("Contour's terminfo cannot be installed on SSH hosts: {}.",
+                       vtpty::describeTerminfoCommandError(command.error()));
+            return std::nullopt;
+        }
+        return vtpty::SshTerminfoInstaller { .entryName = std::string { SshTerminfoEntryName },
+                                             .command = *std::move(command),
+                                             .memo = std::make_shared<vtpty::InMemorySshTerminfoHostMemo>() };
+    }
+
     /// Worker threads of the pool every session's status-line commands and link matching run on.
     constexpr auto StatusLineCommandThreads = std::size_t { 2 };
 
@@ -511,7 +533,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _workspaceGitExecutor(cli::makeBackgroundExecutor(GitProbeThreads)),
     _injectedLinkServices { std::move(linkServices) },
     _sessionFactory(sessionFactory ? std::move(sessionFactory)
-                                   : std::make_unique<session::AppSessionFactory>(*this, _processPlacement)),
+                                   : std::make_unique<session::AppSessionFactory>(
+                                         *this, _processPlacement, makeSshTerminfoInstaller())),
     _externalLauncher(externalLauncher ? std::move(externalLauncher)
                                        : platform::makeExternalLauncher(_processPlacement)),
     _applicationRestart(applicationRestart ? std::move(applicationRestart)

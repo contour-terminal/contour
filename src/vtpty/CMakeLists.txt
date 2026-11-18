@@ -36,6 +36,10 @@ set(vtpty_SOURCES
     SpawnSpec.cpp
     SpawnTrampoline${PLATFORM_SUFFIX}.cpp
     SshFailureMessage.cpp
+    SshAgentIo.cpp
+    SshSessionRules.cpp
+    SshSocketWait.cpp
+    SshTerminfoInstall.cpp
     WindowsCommandLine.cpp
 )
 
@@ -71,6 +75,10 @@ set(vtpty_HEADERS
     SpawnSpec.hpp
     SpawnTrampoline.hpp
     SshFailureMessage.hpp
+    SshAgentIo.hpp
+    SshSessionRules.hpp
+    SshSocketWait.hpp
+    SshTerminfoInstall.hpp
     WindowsCommandLine.hpp
     Win32Handle.hpp
 )
@@ -180,6 +188,10 @@ if(VTPTY_TESTING)
         SpawnLadder_test.cpp
         SpawnSpec_test.cpp
         SpawnTrampoline_test.cpp
+        SshAgentIo_test.cpp
+        SshSessionRules_test.cpp
+        SshSocketWait_test.cpp
+        SshTerminfoInstall_test.cpp
         WindowsCommandLine_test.cpp
         test/PtyReading_test.cpp
     )

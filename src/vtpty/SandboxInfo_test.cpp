@@ -12,15 +12,18 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <optional>
 #include <string_view>
 
+using vtpty::describeSshChannelOpenFailure;
 using vtpty::describeSshConnectFailure;
 using vtpty::NetworkAccess;
 using vtpty::parseFlatpakInfo;
 using vtpty::SandboxState;
 using vtpty::SshConnectStage;
+using vtpty::TerminfoInstallAttempt;
 
 namespace
 {
@@ -163,6 +166,43 @@ TEST_CASE("describeSshConnectFailure does not trail off when the platform said n
 {
     CHECK(describeSshConnectFailure(SshConnectStage::Connect, NetworkAccess::Permitted, "host:22", "")
           == "Failed to connect to host:22.");
+}
+
+TEST_CASE("channel-open failure names install_terminfo after an install attempt", "[vtpty][ssh]")
+{
+    auto const attempted = describeSshChannelOpenFailure("boom", TerminfoInstallAttempt::Attempted);
+    CHECK(attempted.contains("install_terminfo: false"));
+    CHECK(attempted.contains("boom"));
+    CHECK(describeSshChannelOpenFailure("boom", TerminfoInstallAttempt::None)
+          == "Failed to open SSH channel. boom");
+}
+
+TEST_CASE("a connect timeout names the stage, the host and ssh.connect_timeout", "[vtpty][ssh]")
+{
+    auto const message =
+        vtpty::describeSshConnectTimeout("the SSH handshake", "example.com", std::chrono::seconds { 30 });
+    CHECK(message.contains("example.com"));
+    CHECK(message.contains("the SSH handshake"));
+    CHECK(message.contains("ssh.connect_timeout (30 s)"));
+    CHECK(message.contains("0 for no limit"));
+}
+
+TEST_CASE("an agent timeout names the agent step, the host and its allowance", "[vtpty][ssh]")
+{
+    auto const message = vtpty::describeSshAgentTimeout("example.com", std::chrono::seconds { 120 });
+    CHECK(message.contains("example.com"));
+    CHECK(message.contains("SSH agent"));
+    CHECK(message.contains("within 2 minutes"));
+    CHECK(vtpty::describeSshAgentTimeout("h", std::chrono::seconds { 90 }).contains("within 90 seconds"));
+}
+
+TEST_CASE("a closed agent names the host and claims no pending approval", "[vtpty][ssh]")
+{
+    auto const message = vtpty::describeSshAgentClosed("example.com");
+    CHECK(message.contains("example.com"));
+    CHECK(message.contains("closed"));
+    CHECK_FALSE(message.contains("approv"));
+    CHECK_FALSE(message.contains("waiting"));
 }
 
 TEST_CASE("programHostFor runs a program on the host only from a Flatpak that escapes it", "[vtpty][sandbox]")

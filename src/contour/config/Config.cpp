@@ -2854,13 +2854,42 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 {
     if (auto const child = node[entry])
     {
-        loadFromEntry(child, "host", where.hostname);
-        loadFromEntry(child, "port", where.port);
-        loadFromEntry(child, "user", where.username);
-        loadFromEntry(child, "private_key", where.privateKeyFile);
-        loadFromEntry(child, "public_key", where.publicKeyFile);
-        loadFromEntry(child, "known_hosts", where.knownHostsFile);
-        loadFromEntry(child, "forward_agent", where.forwardAgent);
+        // Each key under its own guard: one malformed value falls back to its own default, never takes the
+        // whole block -- and with it the host name, which is what makes the profile an SSH one -- with it.
+        loadGuarded(child, "host", where.hostname);
+        auto port = where.port;
+        loadGuarded(child, "port", port);
+        if (port >= 1 && port <= 65535)
+            where.port = port;
+        else
+            errorLog()("Ignoring ssh.port: {} is not a port number (1 to 65535).", port);
+        loadGuarded(child, "user", where.username);
+        loadGuarded(child, "private_key", where.privateKeyFile);
+        loadGuarded(child, "public_key", where.publicKeyFile);
+        loadGuarded(child, "known_hosts", where.knownHostsFile);
+        loadGuarded(child, "forward_agent", where.forwardAgent);
+        auto installTerminfo = where.terminfoInstall == vtpty::TerminfoInstall::Install;
+        loadGuarded(child, "install_terminfo", installTerminfo);
+        where.terminfoInstall =
+            installTerminfo ? vtpty::TerminfoInstall::Install : vtpty::TerminfoInstall::Off;
+        // Seconds in the file, 0 for no limit; inside vtpty an absent limit is nullopt.
+        auto connectTimeout = where.connectTimeout.value_or(std::chrono::seconds { 0 }).count();
+        loadGuarded(child, "connect_timeout", connectTimeout);
+        auto const maxSeconds =
+            std::chrono::duration_cast<std::chrono::seconds>(vtpty::MaxSshConnectTimeout).count();
+        if (connectTimeout < 0)
+            errorLog()("Ignoring ssh.connect_timeout: {} is negative; use 0 for no limit.", connectTimeout);
+        else if (connectTimeout == 0)
+            where.connectTimeout = std::nullopt;
+        else if (connectTimeout > maxSeconds)
+        {
+            errorLog()("ssh.connect_timeout: {} seconds is more than the most allowed, {}; using that.",
+                       connectTimeout,
+                       maxSeconds);
+            where.connectTimeout = std::chrono::seconds { maxSeconds };
+        }
+        else
+            where.connectTimeout = std::chrono::seconds { connectTimeout };
     }
 }
 
@@ -5792,7 +5821,10 @@ static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile co
                      << YAML::DoubleQuoted << core::pathToUtf8(ssh.publicKeyFile) << YAML::Key
                      << "known_hosts" << YAML::Value << YAML::DoubleQuoted
                      << core::pathToUtf8(ssh.knownHostsFile) << YAML::Key << "forward_agent" << YAML::Value
-                     << ssh.forwardAgent << YAML::EndMap;
+                     << ssh.forwardAgent << YAML::Key << "install_terminfo" << YAML::Value
+                     << (ssh.terminfoInstall == vtpty::TerminfoInstall::Install) << YAML::Key
+                     << "connect_timeout" << YAML::Value
+                     << ssh.connectTimeout.value_or(std::chrono::seconds { 0 }).count() << YAML::EndMap;
             }
             if (!profile.configuredEnvironment.empty())
             {

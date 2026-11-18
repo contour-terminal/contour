@@ -369,8 +369,9 @@ TEST_CASE("TerminalSession::workingDirectory opens a new tab in an OSC 7 directo
 
     // The new tab's shell starts there: the spawn gives up a working directory it cannot start in, and
     // says so, rather than not starting at all.
-    auto factory =
-        contour::session::AppSessionFactory { testApp.app(), std::make_shared<vtpty::NoPlacement>() };
+    auto factory = contour::session::AppSessionFactory { testApp.app(),
+                                                         std::make_shared<vtpty::NoPlacement>(),
+                                                         std::nullopt };
     auto pty = factory.createPty(
         workingDirectory, std::nullopt, vtpty::testing::execInfo("cmd.exe", { "/d", "/c", "exit" }));
     auto const started = pty->start();

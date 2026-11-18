@@ -21,8 +21,10 @@
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
 #include <vtpty/SandboxInfo.hpp>
+#include <vtpty/SshAgentIo.hpp>
 #include <vtpty/SshFailureMessage.hpp>
 #include <vtpty/SshKnownHosts.hpp>
+#include <vtpty/SshTerminfoInstall.hpp>
 
 #include <core/Escape.hpp>
 #include <core/Utf8Path.hpp>
@@ -41,6 +43,7 @@
 #include <optional>
 #include <ranges>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
 #include <libssh2.h>
@@ -277,6 +280,24 @@ namespace
 #endif
     }
 
+    /// Reads whether libssh2 still holds a packet it could not finish sending.
+    /// @param session The libssh2 session.
+    /// @return Whether libssh2 still holds a half-sent packet. @see SshOutbound
+    [[nodiscard]] SshOutbound pendingOutbound(LIBSSH2_SESSION* session)
+    {
+        return (libssh2_session_block_directions(session) & LIBSSH2_SESSION_BLOCK_OUTBOUND) != 0
+                   ? SshOutbound::Pending
+                   : SshOutbound::Idle;
+    }
+
+    /// Tells libssh2's own timeout apart from every other failure. @see classifySshStepFailure()
+    /// @param rc A failed libssh2 call's result.
+    /// @return Timeout for LIBSSH2_ERROR_TIMEOUT, else Other.
+    [[nodiscard]] constexpr SshCallError sshCallError(ssize_t rc) noexcept
+    {
+        return rc == LIBSSH2_ERROR_TIMEOUT ? SshCallError::Timeout : SshCallError::Other;
+    }
+
 } // namespace
 // }}}
 
@@ -300,6 +321,123 @@ using SocketHandle = crispy::NativeHandle<SOCKET, INVALID_SOCKET>;
 #else
 using SocketHandle = crispy::NativeHandle<int, -1>;
 #endif
+
+namespace
+{
+#ifdef _WIN32
+    /// The error Winsock reported last.
+    [[nodiscard]] std::error_code lastSocketError()
+    {
+        return { WSAGetLastError(), std::system_category() };
+    }
+#else
+    /// The error the last socket call reported.
+    [[nodiscard]] std::error_code lastSocketError()
+    {
+        return { errno, std::generic_category() };
+    }
+#endif
+
+    /// Connects @p socket to @p address, giving up once @p limit has passed. The socket is non-blocking for
+    /// the connect alone and blocking again afterwards, as libssh2 expects to find it: its handshake makes it
+    /// non-blocking itself, and session_free() restores the mode it found (session.c).
+    /// @param socket  The socket, not yet connected.
+    /// @param address Where to connect it to.
+    /// @param length  @p address's length.
+    /// @param limit   How long the connect may take; nullopt to wait as long as the system does.
+    /// @return Nothing once connected; the error, std::errc::timed_out once @p limit has passed.
+    [[nodiscard]] std::expected<void, std::error_code> connectSocket(
+        SocketHandle::native_handle_type socket,
+        sockaddr const* address,
+        SocketLength length,
+        std::optional<std::chrono::milliseconds> limit)
+    {
+        auto const deadline =
+            limit ? std::optional { std::chrono::steady_clock::now() + *limit } : std::nullopt;
+        auto const timedOut = std::unexpected { std::make_error_code(std::errc::timed_out) };
+#ifdef _WIN32
+        auto nonBlocking = u_long { 1 };
+        if (::ioctlsocket(socket, FIONBIO, &nonBlocking) != 0)
+            return std::unexpected { lastSocketError() };
+        auto const _ = core::Finally([socket]() {
+            auto blocking = u_long { 0 };
+            ::ioctlsocket(socket, FIONBIO, &blocking);
+        });
+        if (::connect(socket, address, length) == 0)
+            return {};
+        if (WSAGetLastError() != WSAEWOULDBLOCK)
+            return std::unexpected { lastSocketError() };
+
+        while (true)
+        {
+            auto writers = fd_set {};
+            auto failures = fd_set {};
+            FD_ZERO(&writers);
+            FD_ZERO(&failures);
+            FD_SET(socket, &writers);
+            FD_SET(socket, &failures);
+            auto tv = timeval {};
+            if (deadline)
+            {
+                auto const left = remainingSshBudget(*deadline, std::chrono::steady_clock::now());
+                if (!left)
+                    return timedOut;
+                tv.tv_sec = static_cast<decltype(tv.tv_sec)>(left->count() / 1000);
+                tv.tv_usec = static_cast<decltype(tv.tv_usec)>((left->count() % 1000) * 1000);
+            }
+            // A timeout goes round again: the deadline above decides when it is over.
+            auto const rc = ::select(0, nullptr, &writers, &failures, deadline ? &tv : nullptr);
+            if (rc > 0)
+                break;
+            if (rc < 0)
+                return std::unexpected { lastSocketError() };
+        }
+        auto error = 0;
+        auto size = static_cast<int>(sizeof(error));
+        if (::getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &size) != 0)
+            return std::unexpected { lastSocketError() };
+        if (error != 0)
+            return std::unexpected { std::error_code { error, std::system_category() } };
+        return {};
+#else
+        auto const flags = ::fcntl(socket, F_GETFL, 0);
+        if (flags < 0 || ::fcntl(socket, F_SETFL, flags | O_NONBLOCK) < 0)
+            return std::unexpected { lastSocketError() };
+        auto const _ = core::Finally([socket, flags]() { ::fcntl(socket, F_SETFL, flags); });
+        if (::connect(socket, address, length) == 0)
+            return {};
+        if (errno != EINPROGRESS)
+            return std::unexpected { lastSocketError() };
+
+        auto fd = pollfd { .fd = socket, .events = POLLOUT, .revents = 0 };
+        while (true)
+        {
+            auto timeoutMs = -1;
+            if (deadline)
+            {
+                auto const left = remainingSshBudget(*deadline, std::chrono::steady_clock::now());
+                if (!left)
+                    return timedOut;
+                timeoutMs = static_cast<int>(
+                    std::min<std::chrono::milliseconds::rep>(left->count(), std::numeric_limits<int>::max()));
+            }
+            // A timeout or a signal goes round again: the deadline above decides when it is over.
+            auto const rc = ::poll(&fd, 1, timeoutMs);
+            if (rc > 0)
+                break;
+            if (rc < 0 && errno != EINTR)
+                return std::unexpected { lastSocketError() };
+        }
+        auto error = 0;
+        auto size = static_cast<socklen_t>(sizeof(error));
+        if (::getsockopt(socket, SOL_SOCKET, SO_ERROR, &error, &size) != 0)
+            return std::unexpected { lastSocketError() };
+        if (error != 0)
+            return std::unexpected { std::error_code { error, std::generic_category() } };
+        return {};
+#endif
+    }
+} // namespace
 
 std::string SshHostConfig::toString() const
 {
@@ -461,10 +599,45 @@ std::expected<SshHostConfigMap, std::error_code> loadSshConfig()
     return loadSshConfig(configFilePath);
 }
 
+#ifndef _WIN32
+namespace
+{
+    // The functions handed to libssh2 must have the shape it calls; SshAgentIo.hpp spells it without libssh2.
+    static_assert(std::is_same_v<SshRecvFunction, LIBSSH2_RECV_FUNC((*) )>);
+    static_assert(std::is_same_v<SshSendFunction, LIBSSH2_SEND_FUNC((*) )>);
+
+    /// Replaces one of the session's I/O functions.
+    ///
+    /// libssh2 takes and returns callbacks as an untyped pointer -- a generic function pointer since 1.11.1
+    /// (libssh2_session_callback_set2), an object pointer before (libssh2_session_callback_set, the only API
+    /// of 1.11.0, which Ubuntu 24.04 ships) -- so the casts are the API's own; the type behind them is the
+    /// one the static_asserts above pin.
+    /// @param session     The session.
+    /// @param type        LIBSSH2_CALLBACK_RECV or LIBSSH2_CALLBACK_SEND.
+    /// @param replacement The function to install.
+    /// @return The function it replaces: libssh2's own.
+    template <typename Function>
+    [[nodiscard]] Function exchangeIoFunction(LIBSSH2_SESSION* session, int type, Function replacement)
+    {
+    #if LIBSSH2_VERSION_AT_LEAST(1, 11, 1)
+        return reinterpret_cast<Function>(
+            libssh2_session_callback_set2(session, type, reinterpret_cast<libssh2_cb_generic*>(replacement)));
+    #else
+        return reinterpret_cast<Function>(
+            libssh2_session_callback_set(session, type, reinterpret_cast<void*>(replacement)));
+    #endif
+    }
+} // namespace
+#endif
+
 struct SshSession::Private
 {
+#ifndef _WIN32
+    SshIoContext io; // The session's abstract pointer points here. @see sshAgentBoundedRecv
+#endif
     LIBSSH2_SESSION* sshSession = nullptr;
     LIBSSH2_CHANNEL* sshChannel = nullptr;
+    LIBSSH2_CHANNEL* installChannel = nullptr; // The terminfo install's; never the shell's.
     LIBSSH2_AGENT* sshAgent = nullptr;
 
     SocketHandle sshSocket;
@@ -472,8 +645,11 @@ struct SshSession::Private
     bool isReaderWoken = false; // Guarded by _injectMutex, including draining the wakeup channel.
 };
 
-SshSession::SshSession(SshHostConfig config, SshHostkeyVerificationRequestCallback hostkeyRequestCallback):
+SshSession::SshSession(SshHostConfig config,
+                       SshHostkeyVerificationRequestCallback hostkeyRequestCallback,
+                       std::optional<SshTerminfoInstaller> terminfo):
     _config { std::move(config) },
+    _terminfo { std::move(terminfo) },
     _hostkeyRequestCallback { std::move(hostkeyRequestCallback) },
     _ptySlave { std::make_unique<SshPtySlave>() },
     _p { new Private(), [](Private* p) { delete p; } }
@@ -497,7 +673,20 @@ SshSession::SshSession(SshHostConfig config, SshHostkeyVerificationRequestCallba
     // rewrite this file's author abandoned. It is switched to non-blocking on reaching
     // State::Operational, where the only two callers -- read() and write() -- do handle EAGAIN, and
     // where blocking inside libssh2 while holding _mutex would stall the other thread.
+#ifdef _WIN32
+    // The agent is reached through a named pipe there (agent_win.c), not through the session's I/O
+    // functions, so its waits are not bounded. @see SshAgentAuthAllowance
     _p->sshSession = libssh2_session_init();
+#else
+    _p->sshSession = libssh2_session_init_ex(nullptr, nullptr, nullptr, &_p->io);
+    if (_p->sshSession)
+    {
+        _p->io.recv =
+            exchangeIoFunction<SshRecvFunction>(_p->sshSession, LIBSSH2_CALLBACK_RECV, &sshAgentBoundedRecv);
+        _p->io.send =
+            exchangeIoFunction<SshSendFunction>(_p->sshSession, LIBSSH2_CALLBACK_SEND, &sshAgentBoundedSend);
+    }
+#endif
 }
 
 SshSession::~SshSession()
@@ -511,6 +700,14 @@ SshSession::~SshSession()
         _p->sshAgent = nullptr;
     }
 
+    // close() shut the socket down, so a send fails at once and a read sees the end of the stream --
+    // except while a packet is pending, when libssh2 answers every other send with EAGAIN and a blocking
+    // call would loop on it for ever. @see sshTeardownFor()
+    auto const teardown =
+        _p->sshSession ? sshTeardownFor(pendingOutbound(_p->sshSession)) : SshTeardown::AsConfigured;
+    if (teardown == SshTeardown::NonBlocking)
+        libssh2_session_set_blocking(_p->sshSession, 0);
+
     if (_p->sshChannel)
     {
         libssh2_channel_send_eof(_p->sshChannel);
@@ -521,9 +718,20 @@ SshSession::~SshSession()
     if (_p->sshSession)
     {
         libssh2_session_disconnect(_p->sshSession, "Normal shutdown");
-        libssh2_session_free(_p->sshSession);
+        // Leaked by design when this cannot finish: libssh2_session_free() returns EAGAIN without freeing
+        // anything once a channel it closes cannot send (session.c, session_free), and calling it again
+        // would only return EAGAIN again. One dead session's memory, not a hung thread.
+        if (libssh2_session_free(_p->sshSession) == LIBSSH2_ERROR_EAGAIN)
+            errorLog()("Leaking the SSH session to {}: libssh2 could not finish tearing it down.",
+                       _config.hostname);
         _p->sshSession = nullptr;
     }
+
+    // Only now: libssh2 sent its DISCONNECT and channel CLOSE through the descriptor above, and it must
+    // still be ours when it did, not a number another tab's socket has since been given. A leaked session
+    // never touches it again.
+    if (_p->sshSocket.isOpen())
+        _p->sshSocket.close();
 }
 
 void SshSession::setState(State nextState)
@@ -532,6 +740,25 @@ void SshSession::setState(State nextState)
         return;
 
     sshLog()("({}) State transition from {} to {}.\n", core::threadName(), _state.load(), nextState);
+
+    // Every transition passes here, so this is where the connect budget learns that it does not apply: while
+    // the user is asked, and while the agent authenticates under its own allowance, which starts here.
+    if (_connectBudget)
+    {
+        auto const now = std::chrono::steady_clock::now();
+        if (sshStepBudgetFor(nextState) == SshStepBudget::Connect)
+            _connectBudget->resume(now);
+        else
+            _connectBudget->pause(now);
+        if (nextState == State::AuthenticateAgent)
+            _agentDeadline = sshAgentDeadline(_config.connectTimeout, now);
+#ifndef _WIN32
+        // The agent's socket is bounded while, and only while, the agent is asked.
+        _p->io.agentDeadline = nextState == State::AuthenticateAgent ? _agentDeadline : std::nullopt;
+        if (nextState == State::AuthenticateAgent)
+            _p->io.agentIo = SshAgentIo::Fine;
+#endif
+    }
 
     _state = nextState;
 
@@ -542,11 +769,309 @@ void SshSession::setState(State nextState)
     }
 }
 
+std::string SshSession::fallbackTerm() const
+{
+    return _config.env.contains("TERM") ? _config.env.at("TERM") : ""s;
+}
+
+std::optional<std::chrono::steady_clock::time_point> SshSession::connectDeadline() const
+{
+    return _connectBudget ? _connectBudget->deadline() : std::nullopt;
+}
+
+std::optional<std::chrono::steady_clock::time_point> SshSession::stepDeadline() const
+{
+    switch (sshStepBudgetFor(_state))
+    {
+        case SshStepBudget::Connect: return connectDeadline();
+        case SshStepBudget::Agent: return _agentDeadline;
+        case SshStepBudget::None: break;
+    }
+    return std::nullopt;
+}
+
+SshBudget SshSession::armStepTimeout()
+{
+    auto const timeout = sshCallTimeout(stepDeadline(), std::chrono::steady_clock::now());
+    if (!timeout)
+    {
+        failStepTimeout();
+        return SshBudget::Spent;
+    }
+    libssh2_session_set_timeout(_p->sshSession, sshTimeoutArgument(*timeout));
+    return SshBudget::Left;
+}
+
+SshStepFailure SshSession::failIfStepTimedOut(int rc)
+{
+    // Without a limit libssh2's timeout is never armed here, and nothing is a timeout of ours.
+    auto const deadline = stepDeadline();
+    if (!deadline)
+        return SshStepFailure::Failed;
+    auto const failure = classifySshStepFailure(sshCallError(rc), deadline, std::chrono::steady_clock::now());
+    if (failure == SshStepFailure::TimedOut)
+        failStepTimeout();
+    return failure;
+}
+
+void SshSession::failStepTimeout()
+{
+    libssh2_session_set_blocking(_p->sshSession, 0);
+    if (sshStepBudgetFor(_state) == SshStepBudget::Agent)
+        fail(describeSshAgentTimeout(
+            _config.hostname,
+            std::chrono::duration_cast<std::chrono::seconds>(
+                sshAgentAllowance(_config.connectTimeout).value_or(SshAgentAuthAllowance))));
+    else
+        fail(describeSshConnectTimeout(connectStageName(_state),
+                                       _config.hostname,
+                                       _config.connectTimeout.value_or(std::chrono::seconds { 0 })));
+}
+
+SshBudget SshSession::armTerminfoTimeout()
+{
+    auto const left = remainingSshBudget(_terminfoDeadline, std::chrono::steady_clock::now());
+    if (!left)
+        return SshBudget::Spent;
+    libssh2_session_set_timeout(_p->sshSession, sshTimeoutArgument(*left));
+    return SshBudget::Left;
+}
+
+SshStepFailure SshSession::classifyTerminfoFailure(int rc) const
+{
+    return classifySshStepFailure(sshCallError(rc), _terminfoDeadline, std::chrono::steady_clock::now());
+}
+
+void SshSession::openTerminfoInstallChannel()
+{
+    if (!_terminfo
+        || _terminfo->memo->hasFailed(terminfoHostKey(_config.username, _config.hostname, _config.port)))
+    {
+        if (_terminfo)
+            logInfo("Skipping the terminfo install on {}: it failed on this host before.", _config.hostname);
+        setState(State::OpenChannel);
+        return;
+    }
+
+    // The install is a step of the connection coming up, so its budget ends no later than the connection's.
+    _terminfoDeadline = terminfoInstallDeadline(std::chrono::steady_clock::now(), connectDeadline());
+    if (armTerminfoTimeout() == SshBudget::Spent)
+    {
+        // Nothing was sent: the connection is out of time, and says so while the state still names the
+        // install.
+        failStepTimeout();
+        return;
+    }
+    _terminfoAttempt = TerminfoInstallAttempt::Attempted;
+
+    _p->installChannel = libssh2_channel_open_session(_p->sshSession);
+    if (!_p->installChannel)
+    {
+        auto const rc = libssh2_session_last_errno(_p->sshSession);
+        logInfo("Could not open the terminfo install channel: {}", libssl2ErrorString(rc));
+        // Only libssh2's own timeout leaves its open state stale, so only that ends the session; a clean
+        // refusal that merely arrived after the deadline leaves it idle, and the shell goes on.
+        leaveTerminfoInstall(TerminfoInstallStage::OpenChannel,
+                             rc == LIBSSH2_ERROR_TIMEOUT ? TerminfoInstallOutcome::TimedOut
+                                                         : TerminfoInstallOutcome::Failed);
+        return;
+    }
+    setState(State::InstallTerminfoExec);
+}
+
+void SshSession::execTerminfoInstall()
+{
+    if (armTerminfoTimeout() == SshBudget::Spent)
+    {
+        leaveTerminfoInstall(TerminfoInstallStage::Exec, TerminfoInstallOutcome::TimedOut);
+        return;
+    }
+
+    if (auto const rc = libssh2_channel_exec(_p->installChannel, _terminfo->command.c_str());
+        rc != LIBSSH2_ERROR_NONE)
+    {
+        logInfo("The host refused the terminfo install command: {}", libssl2ErrorString(rc));
+        leaveTerminfoInstall(TerminfoInstallStage::Exec, terminfoOutcomeOf(classifyTerminfoFailure(rc)));
+        return;
+    }
+
+    // The command reads nothing, but a remote shell that waits for stdin would otherwise never finish.
+    if (armTerminfoTimeout() == SshBudget::Spent)
+    {
+        leaveTerminfoInstall(TerminfoInstallStage::Exec, TerminfoInstallOutcome::TimedOut);
+        return;
+    }
+    if (auto const rc = libssh2_channel_send_eof(_p->installChannel); rc != LIBSSH2_ERROR_NONE)
+    {
+        logInfo("Could not close the terminfo install's input: {}", libssl2ErrorString(rc));
+        leaveTerminfoInstall(TerminfoInstallStage::Exec, terminfoOutcomeOf(classifyTerminfoFailure(rc)));
+        return;
+    }
+    _terminfoOutput.clear();
+    setState(State::InstallTerminfoRead);
+}
+
+void SshSession::readTerminfoInstall()
+{
+    constexpr auto OutputTailCap = size_t { 4096 };
+    auto chunk = std::array<char, 1024> {};
+
+    // Standard output first, to its end; the command is short and its stderr small, so what the host
+    // sends on stderr meanwhile waits in the channel's window. A budget that runs out after the marker
+    // was read still counts as installed.
+    while (true)
+    {
+        if (armTerminfoTimeout() == SshBudget::Spent)
+        {
+            leaveTerminfoInstall(TerminfoInstallStage::Read, judgeExpiredTerminfoRead(_terminfoOutput));
+            return;
+        }
+        auto const n = libssh2_channel_read(_p->installChannel, chunk.data(), chunk.size());
+        if (n < 0)
+        {
+            logInfo("Reading the terminfo install's output failed: {}",
+                    libssl2ErrorString(static_cast<int>(n)));
+            leaveTerminfoInstall(
+                TerminfoInstallStage::Read,
+                judgeFailedTerminfoRead(_terminfoOutput, classifyTerminfoFailure(static_cast<int>(n))));
+            return;
+        }
+        if (n == 0)
+            break;
+        appendTail(_terminfoOutput, std::string_view { chunk.data(), static_cast<size_t>(n) }, OutputTailCap);
+    }
+
+    auto errorOutput = std::string {};
+    while (true)
+    {
+        if (armTerminfoTimeout() == SshBudget::Spent)
+        {
+            leaveTerminfoInstall(TerminfoInstallStage::Read, judgeExpiredTerminfoRead(_terminfoOutput));
+            return;
+        }
+        auto const n = libssh2_channel_read_stderr(_p->installChannel, chunk.data(), chunk.size());
+        if (n <= 0)
+            break;
+        appendTail(errorOutput, std::string_view { chunk.data(), static_cast<size_t>(n) }, OutputTailCap);
+    }
+    if (!errorOutput.empty())
+        logInfo("Terminfo install on {} wrote to stderr: {}",
+                _config.hostname,
+                core::escape(errorOutput.data(), errorOutput.data() + errorOutput.size()));
+
+    leaveTerminfoInstall(TerminfoInstallStage::Read, judgeTerminfoInstallOutput(_terminfoOutput));
+}
+
+void SshSession::leaveTerminfoInstall(TerminfoInstallStage stage, TerminfoInstallOutcome outcome)
+{
+    _terminfoOutcome = outcome;
+
+    if (auto* const channel = std::exchange(_p->installChannel, nullptr))
+    {
+        // After a timeout, or with a packet pending, the channel is left alone: libssh2_channel_close() and
+        // _free() wait for the peer to close its side, which is exactly what a stalled host does not do,
+        // and a pending packet blocks the CLOSE until the budget is gone. libssh2_session_free() reclaims
+        // the channel. Each step runs under what is left of the budget; if it runs out, cleanup stops and
+        // the outcome already judged stays.
+        auto exitStatus = std::optional<int> {};
+        if (outcome != TerminfoInstallOutcome::TimedOut
+            && pendingOutbound(_p->sshSession) == SshOutbound::Idle && armTerminfoTimeout() == SshBudget::Left
+            && libssh2_channel_close(channel) == LIBSSH2_ERROR_NONE)
+        {
+            // libssh2 reports 0 until an exit status arrives, which would claim a success nobody reported,
+            // so it is read only once the host's CLOSE is known to have arrived: a host sends the exit
+            // status before it. A clean close does not say so -- it returns after the first packet that
+            // follows our CLOSE (channel.c, _libssh2_channel_close) -- but a clean wait_closed() does
+            // (channel.c, channel_wait_closed). Only a command that ran, read to its end, has one to send.
+            if (stage == TerminfoInstallStage::Read && armTerminfoTimeout() == SshBudget::Left
+                && libssh2_channel_wait_closed(channel) == LIBSSH2_ERROR_NONE)
+                exitStatus = libssh2_channel_get_exit_status(channel);
+            if (armTerminfoTimeout() == SshBudget::Left)
+                libssh2_channel_free(channel);
+        }
+        logInfo("Terminfo install on {}: {}, {}.",
+                _config.hostname,
+                terminfoOutcomeName(outcome),
+                exitStatus ? std::format("exit status {}", *exitStatus) : "no exit status"s);
+    }
+
+    // Looked at after the cleanup above, whatever the outcome: libssh2's timeout counts whole seconds and
+    // can fire before our deadline, leaving a packet pending under an outcome other than TimedOut, and the
+    // cleanup's own CLOSE can be the packet left pending.
+    auto const outbound = pendingOutbound(_p->sshSession);
+
+    // The install's timeout ends here; the shell's channel arms what is left of the connect budget itself.
+    libssh2_session_set_timeout(_p->sshSession, 0);
+
+    auto const connectBudget = sshCallTimeout(connectDeadline(), std::chrono::steady_clock::now())
+                                   ? SshBudget::Left
+                                   : SshBudget::Spent;
+    auto const after = afterTerminfoInstall(stage, outcome, outbound, connectBudget);
+
+    // Only a session that goes on to the shell is told it is using the fallback TERM.
+    auto const shellGoesOn = after == AfterTerminfoInstall::StartShell;
+
+    switch (outcome)
+    {
+        case TerminfoInstallOutcome::TimedOut:
+            if (shellGoesOn)
+                logInfoWithInject("Installing Contour's terminfo on {} timed out; using TERM={}. Set "
+                                  "ssh.install_terminfo: false to skip it.",
+                                  _config.hostname,
+                                  fallbackTerm());
+            else
+                logInfo("Installing Contour's terminfo on {} timed out.", _config.hostname);
+            break;
+        case TerminfoInstallOutcome::Failed:
+            if (shellGoesOn)
+                logInfo("Contour's terminfo was not installed on {}; using TERM={}.",
+                        _config.hostname,
+                        fallbackTerm());
+            else
+                logInfo("Contour's terminfo was not installed on {}.", _config.hostname);
+            break;
+        case TerminfoInstallOutcome::Installed:
+            logInfo("Installed Contour's terminfo on {}.", _config.hostname);
+            break;
+        case TerminfoInstallOutcome::NotAttempted: break;
+    }
+
+    // An install that cost the connection counts as failed even if the entry got there: the next
+    // connection to this host must not pay the same price again.
+    if (outcome == TerminfoInstallOutcome::Failed || outcome == TerminfoInstallOutcome::TimedOut
+        || after != AfterTerminfoInstall::StartShell)
+        _terminfo->memo->recordFailure(terminfoHostKey(_config.username, _config.hostname, _config.port));
+
+    switch (after)
+    {
+        case AfterTerminfoInstall::StartShell: break;
+        case AfterTerminfoInstall::ConnectTimedOut:
+            // Said while the state still names the install, the step that used the time.
+            failStepTimeout();
+            return;
+        case AfterTerminfoInstall::EndSession:
+            // The connection cannot open the shell's channel any more. The host is in the memo, so the next
+            // connection skips the install.
+            fail(stage == TerminfoInstallStage::OpenChannel && outcome == TerminfoInstallOutcome::TimedOut
+                     ? describeSshChannelOpenFailure("Opening the terminfo install channel timed out.",
+                                                     TerminfoInstallAttempt::Attempted)
+                     : std::format("The terminfo install on {} could not finish sending in time and left the "
+                                   "connection unusable. Set ssh.install_terminfo: false to skip it.",
+                                   _config.hostname));
+            return;
+    }
+
+    setState(State::OpenChannel);
+}
+
 bool SshSession::requestPty()
 {
     // Mode encoding defined here: https://datatracker.ietf.org/doc/html/rfc4250#section-4.5
     auto const modes = ""sv;
-    auto const term = _config.env.contains("TERM") ? _config.env.at("TERM") : ""s;
+    auto const term =
+        _terminfo ? chooseSshTerm(_terminfoOutcome, _terminfo->entryName, fallbackTerm()) : fallbackTerm();
+    if (armStepTimeout() == SshBudget::Spent)
+        return false;
     auto const rc = libssh2_channel_request_pty_ex(_p->sshChannel,
                                                    term.data(),
                                                    term.size(),
@@ -562,6 +1087,8 @@ bool SshSession::requestPty()
     }
     if (rc != LIBSSH2_ERROR_NONE)
     {
+        if (failIfStepTimedOut(rc) == SshStepFailure::TimedOut)
+            return false;
         fail("Failed to request PTY. {}", libssl2ErrorString(rc));
         return false;
     }
@@ -581,9 +1108,13 @@ bool SshSession::setEnv()
     {
         if (name != "TERM") // Already sent in the PTY request.
         {
+            if (armStepTimeout() == SshBudget::Spent)
+                return false;
             int const rc = libssh2_channel_setenv_ex(
                 _p->sshChannel, name.data(), name.size(), value.data(), value.size());
             if (rc == LIBSSH2_ERROR_EAGAIN)
+                return false;
+            if (rc != LIBSSH2_ERROR_NONE && failIfStepTimedOut(rc) == SshStepFailure::TimedOut)
                 return false;
             if (rc != LIBSSH2_ERROR_NONE)
                 logError("Failed to set SSH environment variable \"{}\". {}", name, libssl2ErrorString(rc));
@@ -614,6 +1145,101 @@ void SshSession::resizeScreen()
     setState(State::Operational);
 }
 
+SshSession::ConnectStep SshSession::handshake()
+{
+    if (armStepTimeout() == SshBudget::Spent)
+        return ConnectStep::Stop;
+    int const rc = LIBSSH2_HANDSHAKE_FUNCTION(_p->sshSession, _p->sshSocket);
+    if (rc == LIBSSH2_ERROR_EAGAIN)
+        return ConnectStep::Stop;
+    if (rc != LIBSSH2_ERROR_NONE)
+    {
+        if (failIfStepTimedOut(rc) == SshStepFailure::TimedOut)
+            return ConnectStep::Stop;
+        // fail() rather than close(): close() takes _mutex, which processState()'s callers already hold, so
+        // reaching here used to deadlock the calling thread.
+        fail("Failed to establish SSH session. {}", libssl2ErrorString(rc));
+        return ConnectStep::Stop;
+    }
+    setState(State::VerifyHostkey);
+    return ConnectStep::Next;
+}
+
+SshSession::ConnectStep SshSession::openChannel()
+{
+    if (armStepTimeout() == SshBudget::Spent)
+        return ConnectStep::Stop;
+    _p->sshChannel = libssh2_channel_open_session(_p->sshSession);
+    // A channel that came back is open, whatever error an earlier call left behind -- the install's timeout,
+    // say: the error number is only read when there is none.
+    auto const rc = _p->sshChannel ? LIBSSH2_ERROR_NONE : libssh2_session_last_errno(_p->sshSession);
+    if (rc == LIBSSH2_ERROR_EAGAIN)
+    {
+        errno = EAGAIN;
+        return ConnectStep::Stop;
+    }
+    if (rc != LIBSSH2_ERROR_NONE)
+    {
+        if (failIfStepTimedOut(rc) == SshStepFailure::TimedOut)
+            return ConnectStep::Stop;
+        fail(describeSshChannelOpenFailure(libssl2ErrorString(rc), _terminfoAttempt));
+        return ConnectStep::Stop;
+    }
+    assert(_p->sshChannel);
+    setState(State::RequestAuthAgent);
+    return ConnectStep::Next;
+}
+
+SshSession::ConnectStep SshSession::requestAuthAgent()
+{
+#if LIBSSH2_VERSION_AT_LEAST(1, 11, 0)
+    if (_config.forwardAgent)
+    {
+        // TODO: When having this one working, make sure to update the documentation in docs/profiles.md
+        if (armStepTimeout() == SshBudget::Spent)
+            return ConnectStep::Stop;
+        int const rc = libssh2_channel_request_auth_agent(_p->sshChannel);
+        if (rc == LIBSSH2_ERROR_EAGAIN)
+            return ConnectStep::Stop;
+        if (rc != LIBSSH2_ERROR_NONE && failIfStepTimedOut(rc) == SshStepFailure::TimedOut)
+            return ConnectStep::Stop;
+
+        if (rc != LIBSSH2_ERROR_NONE)
+            logError("Failed to request auth agent forwarding. {}", libssl2ErrorString(rc));
+        else
+            logInfo("Enabled SSH agent forwarding.");
+    }
+#else
+    logError("Failed to request auth agent forwarding. libssh2 version too old.");
+#endif
+    setState(State::RequestPty);
+    return ConnectStep::Next;
+}
+
+void SshSession::startShell()
+{
+    if (armStepTimeout() == SshBudget::Spent)
+        return;
+    auto const rc = libssh2_channel_shell(_p->sshChannel);
+    if (rc != LIBSSH2_ERROR_NONE)
+    {
+        if (failIfStepTimedOut(rc) == SshStepFailure::TimedOut)
+            return;
+        fail("Failed to start shell. {}", libssl2ErrorString(rc));
+        return;
+    }
+    // Up: the connect budget no longer applies, and a timeout would only cut the shell short.
+    libssh2_session_set_timeout(_p->sshSession, 0);
+    // Handshake done, so the blocking mode that carried it is no longer wanted: from here read() and write()
+    // run concurrently on two threads and both handle EAGAIN by waiting on the socket with _mutex released.
+    // @see the constructor and _mutex.
+    libssh2_session_set_blocking(_p->sshSession, 0);
+
+    auto const _ = std::lock_guard { _injectMutex };
+    setState(State::Operational);
+    _injectCV.notify_all();
+}
+
 void SshSession::processState()
 {
     // No waitForSocket() here. It used to open with `if (!_p->wantsWaitForSocket) return 0;`, which
@@ -638,23 +1264,10 @@ void SshSession::processState()
                     return;
                 setState(State::Handshake);
                 [[fallthrough]];
-            case State::Handshake: {
-                int const rc = LIBSSH2_HANDSHAKE_FUNCTION(_p->sshSession, _p->sshSocket);
-                if (rc == LIBSSH2_ERROR_EAGAIN)
-                {
+            case State::Handshake:
+                if (handshake() == ConnectStep::Stop)
                     return;
-                }
-                if (rc != LIBSSH2_ERROR_NONE)
-                {
-                    // fail() rather than close(): close() takes _mutex, which processState()'s
-                    // callers already hold, so reaching here used to deadlock the calling thread.
-                    fail("Failed to establish SSH session. {}", libssl2ErrorString(rc));
-                    return;
-                }
-
-                setState(State::VerifyHostkey);
                 break;
-            }
             case State::VerifyHostkey: {
                 switch (verifyHostkey())
                 {
@@ -722,46 +1335,17 @@ void SshSession::processState()
                 authenticateWithPassword();
                 break;
             }
-            case State::OpenChannel: {
-                _p->sshChannel = libssh2_channel_open_session(_p->sshSession);
-                auto const rc = libssh2_session_last_errno(_p->sshSession);
-                if (rc == LIBSSH2_ERROR_EAGAIN)
-                {
-                    errno = EAGAIN;
+            case State::InstallTerminfoOpenChannel: openTerminfoInstallChannel(); break;
+            case State::InstallTerminfoExec: execTerminfoInstall(); break;
+            case State::InstallTerminfoRead: readTerminfoInstall(); break;
+            case State::OpenChannel:
+                if (openChannel() == ConnectStep::Stop)
                     return;
-                }
-                if (rc != LIBSSH2_ERROR_NONE)
-                {
-                    fail("Failed to open SSH channel. {}", libssl2ErrorString(rc));
+                [[fallthrough]];
+            case State::RequestAuthAgent:
+                if (requestAuthAgent() == ConnectStep::Stop)
                     return;
-                }
-                assert(_p->sshChannel);
-                setState(State::RequestAuthAgent);
                 [[fallthrough]];
-            }
-            case State::RequestAuthAgent: {
-#if LIBSSH2_VERSION_AT_LEAST(1, 11, 0)
-                if (_config.forwardAgent)
-                {
-                    // TODO: When having this one working, make sure to update the documentation in
-                    //       docs/profiles.md
-                    int const rc = libssh2_channel_request_auth_agent(_p->sshChannel);
-                    if (rc == LIBSSH2_ERROR_EAGAIN)
-                    {
-                        return;
-                    }
-
-                    if (rc != LIBSSH2_ERROR_NONE)
-                        logError("Failed to request auth agent forwarding. {}", libssl2ErrorString(rc));
-                    else
-                        logInfo("Enabled SSH agent forwarding.");
-                }
-#else
-                logError("Failed to request auth agent forwarding. libssh2 version too old.");
-#endif
-                setState(State::RequestPty);
-                [[fallthrough]];
-            }
             case State::RequestPty: {
                 if (!requestPty())
                     return;
@@ -773,23 +1357,7 @@ void SshSession::processState()
                     return;
                 [[fallthrough]];
             }
-            case State::StartShell: {
-                auto const rc = libssh2_channel_shell(_p->sshChannel);
-                if (rc != LIBSSH2_ERROR_NONE)
-                {
-                    fail("Failed to start shell. {}", libssl2ErrorString(rc));
-                    return;
-                }
-                // Handshake done, so the blocking mode that carried it is no longer wanted: from here
-                // read() and write() run concurrently on two threads and both handle EAGAIN by
-                // waiting on the socket with _mutex released. @see the constructor and _mutex.
-                libssh2_session_set_blocking(_p->sshSession, 0);
-
-                auto const _ = std::lock_guard { _injectMutex };
-                setState(State::Operational);
-                _injectCV.notify_all();
-                [[fallthrough]];
-            }
+            case State::StartShell: startShell(); return;
             case State::Operational:
                 //.
                 return;
@@ -816,6 +1384,7 @@ StartResult SshSession::start()
     assert(_state == State::Initial);
     // Runs on the GUI thread while the PTY reader thread may already be in read(). @see _mutex.
     auto const _ = std::lock_guard { _mutex };
+    _connectBudget.emplace(_config.connectTimeout, std::chrono::steady_clock::now());
     setState(State::Started);
 
     // processState() runs synchronously as far as the connection attempt, so a host that is not
@@ -883,13 +1452,17 @@ void SshSession::close()
 
     if (_p->sshChannel)
     {
+        // The session can still be blocking here -- the connect sequence failed after the channel was
+        // opened -- and a packet still pending would make these calls loop for ever on a socket fail()
+        // shut down. Operational sessions are non-blocking already. @see sshTeardownFor()
+        if (sshTeardownFor(pendingOutbound(_p->sshSession)) == SshTeardown::NonBlocking)
+            libssh2_session_set_blocking(_p->sshSession, 0);
         libssh2_channel_send_eof(_p->sshChannel);
         libssh2_channel_close(_p->sshChannel);
         libssh2_channel_wait_closed(_p->sshChannel);
     }
 
-    if (_p->sshSocket.isOpen())
-        _p->sshSocket.close();
+    shutdownSocket();
 }
 
 bool SshSession::isClosed() const noexcept
@@ -971,27 +1544,39 @@ std::optional<SshSession::ReadResult> SshSession::read(crispy::BufferObject<char
     // block every GUI-thread injectRead() until the remote sends a byte, and it would also invert the
     // _mutex -> _injectMutex order that processState() establishes. @see _mutex.
 
-    // Below is for state: Operational
-    {
+    // Below is for state: Operational. One lock from the state check to the libssh2 call: released in
+    // between, a close() or a failed write() on the GUI thread could end the session after the check, and
+    // the read would reach a closed channel. The session is non-blocking by now, so the read returns at
+    // once either way and the idle wait happens below, unlocked.
+    auto const rc = [&]() -> std::optional<ssize_t> {
         auto const _ = std::lock_guard { _mutex };
         processState();
 
-        if (_state != State::Operational && !isClosed())
+        // Over, here or on another thread: there may be no channel to read from. _mutex -> _injectMutex is
+        // the lock order.
+        if (isClosed())
+        {
+            auto const injected = [&]() {
+                auto const injectLock = std::lock_guard { _injectMutex };
+                return _injectedRead.empty() ? InjectedRead::Empty : InjectedRead::Pending;
+            }();
+            errno = sshClosedReadErrno(injected);
+            return std::nullopt;
+        }
+
+        if (_state != State::Operational)
         {
             errno = EAGAIN;
             return std::nullopt;
         }
-    }
 
-    // The lock covers the libssh2 call and nothing else. The session is non-blocking by now, so this
-    // returns at once either way and the idle wait happens below, unlocked.
-    auto const rc = [&]() {
-        auto const _ = std::lock_guard { _mutex };
         return libssh2_channel_read(
             _p->sshChannel, storage.hotEnd(), std::min(storage.bytesAvailable(), size));
     }();
+    if (!rc)
+        return std::nullopt; // errno says why
 
-    if (rc == LIBSSH2_ERROR_EAGAIN)
+    if (*rc == LIBSSH2_ERROR_EAGAIN)
     {
         // Park on the socket rather than returning EAGAIN straight away -- the caller treats EAGAIN
         // as "try again", so returning immediately would spin a core. waitForSocket() releases
@@ -1001,14 +1586,14 @@ std::optional<SshSession::ReadResult> SshSession::read(crispy::BufferObject<char
         return std::nullopt;
     }
 
-    if (rc < 0)
+    if (*rc < 0)
     {
-        logError("Failed to read from SSH channel. {}", libssl2ErrorString(rc));
+        logError("Failed to read from SSH channel. {}", libssl2ErrorString(*rc));
         errno = EIO;
         return std::nullopt;
     }
 
-    auto const target = std::string_view { (char const*) storage.hotEnd(), static_cast<size_t>(rc) };
+    auto const target = std::string_view { (char const*) storage.hotEnd(), static_cast<size_t>(*rc) };
     auto const isStdFastPipe = false; // can never be, because it's an SSH network connection
     if (ptyInLog)
         ptyInLog()("{} received: \"{}\"", "ssh", core::escape(target.data(), target.data() + target.size()));
@@ -1111,6 +1696,14 @@ int SshSession::write(std::string_view buf)
         lock.unlock();
         waitForSocket(WriteRetryTimeout);
         lock.lock();
+
+        // Closed meanwhile by another thread: writing on would fail on a closed channel and turn the
+        // orderly Closed into a Failure.
+        if (isClosed())
+        {
+            errno = EPIPE;
+            return -1;
+        }
     }
 
     if (rv == LIBSSH2_ERROR_EAGAIN)
@@ -1127,10 +1720,15 @@ int SshSession::write(std::string_view buf)
         // short-circuits with EPIPE and the reader tears the session down.
         //
         // The one State::Failure that does NOT go through fail(): this is reachable only long after
-        // start() returned, so there is no _failureReason for anyone to read back, and fail() would
-        // close the socket out from under the reader thread that is blocked on it right now.
+        // start() returned, so there is no _failureReason for anyone to read back, nor a message to
+        // inject into a session that is ending. The rest is fail()'s: the socket is shut down, never
+        // closed, so the reader's descriptor stays valid, and the reader -- possibly parked in
+        // waitForSocket() with no timeout -- is woken to see the end. Both are safe under _mutex, as in
+        // close(): wakeupReader() takes _injectMutex after it, the established order.
         logError("Failed to write to SSH channel. {}", libssl2ErrorString(rv));
+        shutdownSocket();
         setState(State::Failure);
+        wakeupReader();
         errno = EIO;
         return -1;
     }
@@ -1260,10 +1858,20 @@ void SshSession::fail(std::string reason)
     logErrorWithInject(reason);
     _failureReason = std::move(reason);
 
-    if (_p->sshSocket.isOpen())
-        _p->sshSocket.close();
+    shutdownSocket();
 
     setState(State::Failure);
+}
+
+void SshSession::shutdownSocket()
+{
+    if (!_p->sshSocket.isOpen())
+        return;
+#ifdef _WIN32
+    ::shutdown(_p->sshSocket.get(), SD_BOTH);
+#else
+    ::shutdown(_p->sshSocket.get(), SHUT_RDWR);
+#endif
 }
 
 bool SshSession::connect(std::string_view host, int port)
@@ -1290,8 +1898,17 @@ bool SshSession::connect(std::string_view host, int port)
         }
         auto const _ = core::Finally([&]() { freeaddrinfo(addrList); });
 
+        auto addressesLeft = size_t { 0 };
+        auto const* counted = addrList;
+        while (counted != nullptr)
+        {
+            ++addressesLeft;
+            counted = counted->ai_next;
+        }
+
         for (addrinfo* addrEntry = addrList; addrEntry != nullptr; addrEntry = addrEntry->ai_next)
         {
+            auto const thisAndLater = addressesLeft--; // this address and the ones after it
             char addrStr[100] = {};
             switch (addrEntry->ai_family)
             {
@@ -1319,11 +1936,31 @@ bool SshSession::connect(std::string_view host, int port)
             if (!addressLength)
                 continue; // longer than any address is: nothing connect() could be handed whole
 
+            // Each address gets its share of what is left of the connect budget, so that one that never
+            // answers leaves time for the rest; nullopt waits as long as the system does, as when no limit
+            // applies.
+            auto remaining = std::optional<std::chrono::milliseconds> {};
+            if (auto const deadline = connectDeadline())
+            {
+                remaining = remainingSshBudget(*deadline, std::chrono::steady_clock::now());
+                if (!remaining)
+                {
+                    failStepTimeout();
+                    return false;
+                }
+            }
+            auto const limit = sshAddressConnectLimit(remaining, thisAndLater);
+
             _p->sshSocket = SocketHandle::fromNative(
                 socket(addrEntry->ai_family, addrEntry->ai_socktype, addrEntry->ai_protocol));
 
-            if (::connect(_p->sshSocket, addrEntry->ai_addr, *addressLength) == 0)
+            auto const connected =
+                connectSocket(_p->sshSocket.get(), addrEntry->ai_addr, *addressLength, limit);
+            if (connected)
             {
+#ifndef _WIN32
+                _p->io.transport = _p->sshSocket.get();
+#endif
                 auto const addrAndPort =
                     port == 22 ? std::string(addrStr) : std::format("{}:{}", addrStr, port);
                 if (host != addrStr)
@@ -1335,8 +1972,16 @@ bool SshSession::connect(std::string_view host, int port)
 
             // Per-address, so not yet terminal: another of the resolved addresses may answer. Only
             // the fallthrough below, once every one of them has been tried, ends the session.
-            lastConnectDetail = std::generic_category().message(errno);
+            lastConnectDetail = connected.error().message();
             logError("Failed to connect to {}:{} ({})", addrStr, port, lastConnectDetail);
+            if (classifySshStepFailure(
+                    SshCallError::Other, connectDeadline(), std::chrono::steady_clock::now())
+                == SshStepFailure::TimedOut)
+            {
+                // The budget ran out on this address; there is none left for the next.
+                failStepTimeout();
+                return false;
+            }
         }
     }
     catch (std::system_error const& e)
@@ -1345,7 +1990,7 @@ bool SshSession::connect(std::string_view host, int port)
         return false;
     }
 
-    // Every resolved address refused. fail() closes the socket, which is what tells the rest of this
+    // Every resolved address refused. fail() moves to State::Failure, which is what tells the rest of this
     // class that we are not connected.
     fail(describeSshConnectFailure(SshConnectStage::Connect,
                                    currentSandbox().network,
@@ -1464,7 +2109,10 @@ int SshSession::waitForSocket(std::optional<std::chrono::milliseconds> timeout)
     auto const [dir, socket] = [&]() {
         auto const _ = std::lock_guard { _mutex };
         assert(_p->sshSession);
-        auto const socket = _p->sshSocket.isOpen() ? std::optional { _p->sshSocket.get() } : std::nullopt;
+        // A shut-down socket reads as ready forever; once the session is over only the wakeup channel counts.
+        auto const isOver = _state == State::Closed || _state == State::Failure;
+        auto const socket =
+            _p->sshSocket.isOpen() && !isOver ? std::optional { _p->sshSocket.get() } : std::nullopt;
         return std::pair { libssh2_session_block_directions(_p->sshSession), socket };
     }();
 
@@ -1508,6 +2156,8 @@ int SshSession::waitForSocket(std::optional<std::chrono::milliseconds> timeout)
 void SshSession::authenticateWithPrivateKey()
 {
     auto const password = _injectedWrite;
+    if (armStepTimeout() == SshBudget::Spent)
+        return;
     auto const rc = authenticateWithKeyFiles(_p->sshSession, _config, password);
 
     if (rc == LIBSSH2_ERROR_EAGAIN)
@@ -1517,6 +2167,10 @@ void SshSession::authenticateWithPrivateKey()
 
     injectRead("\r\n");
     _injectedWrite.clear();
+
+    // A timeout is not a wrong passphrase: asking for one again would only spend more time.
+    if (rc != LIBSSH2_ERROR_NONE && failIfStepTimedOut(rc) == SshStepFailure::TimedOut)
+        return;
 
     if (rc != LIBSSH2_ERROR_NONE)
     {
@@ -1538,7 +2192,7 @@ void SshSession::authenticateWithPrivateKey()
 
     logInfoWithInject("Successfully authenticated with private key.");
 
-    setState(State::OpenChannel);
+    setState(State::InstallTerminfoOpenChannel);
 }
 
 void SshSession::authenticateWithPassword()
@@ -1547,6 +2201,8 @@ void SshSession::authenticateWithPassword()
     std::ranges::fill(_injectedWrite, '\0');
     _injectedWrite.clear();
 
+    if (armStepTimeout() == SshBudget::Spent)
+        return;
     int const rc = libssh2_userauth_password_ex(_p->sshSession,
                                                 _config.username.data(),
                                                 _config.username.size(),
@@ -1560,6 +2216,9 @@ void SshSession::authenticateWithPassword()
     }
 
     injectRead("\r\n");
+
+    if (rc != LIBSSH2_ERROR_NONE && failIfStepTimedOut(rc) == SshStepFailure::TimedOut)
+        return;
 
     if (rc != LIBSSH2_ERROR_NONE)
     {
@@ -1577,7 +2236,7 @@ void SshSession::authenticateWithPassword()
 
     logInfoWithInject("Successfully authenticated with password.");
 
-    setState(State::OpenChannel);
+    setState(State::InstallTerminfoOpenChannel);
 }
 
 bool SshSession::authenticateWithAgent()
@@ -1603,9 +2262,13 @@ bool SshSession::authenticateWithAgent()
             return false;
         }
 
+        if (armStepTimeout() == SshBudget::Spent)
+            return false;
         rc = libssh2_agent_list_identities(_p->sshAgent);
         if (rc != LIBSSH2_ERROR_NONE)
         {
+            if (judgeAgentFailure(rc) != SshAgentFailure::Failed)
+                return false;
             logError("Failed to list SSH identities. {}", libssl2ErrorString(rc));
             fallBackFromAgent();
             return false;
@@ -1621,23 +2284,27 @@ bool SshSession::authenticateWithAgent()
     while ((rc = libssh2_agent_get_identity(_p->sshAgent, &identity, prevIdentity)) == 0) // NOLINT
     {
         prevIdentity = identity;
-        if (i < _walkIndex)
-        {
-            ++i;
+        // The identity this pass reached, counted for every one of them -- tried or skipped -- so that a
+        // retry resumes at the one it left, not at the last one it skipped.
+        auto const index = i++;
+        if (index < _walkIndex)
             continue;
-        }
 
+        if (armStepTimeout() == SshBudget::Spent)
+            return false;
         rc = libssh2_agent_userauth(_p->sshAgent, _config.username.data(), identity);
         if (rc == LIBSSH2_ERROR_EAGAIN)
         {
-            _walkIndex = i;
+            _walkIndex = index;
             return false;
         }
+        if (rc != LIBSSH2_ERROR_NONE && judgeAgentFailure(rc) != SshAgentFailure::Failed)
+            return false;
         if (rc == LIBSSH2_ERROR_NONE)
         {
             logInfoWithInject("Successfully authenticated with SSH agent with identity: {}",
                               identity->comment);
-            setState(State::OpenChannel);
+            setState(State::InstallTerminfoOpenChannel);
             return true;
         }
         logInfo("Could not authenticate with SSH agent with identity: {}", identity->comment);
@@ -1646,6 +2313,28 @@ bool SshSession::authenticateWithAgent()
     logError("Failed to authenticate with SSH agent. No more identities available.");
     fallBackFromAgent();
     return false;
+}
+
+SshAgentFailure SshSession::judgeAgentFailure(int rc)
+{
+#ifdef _WIN32
+    auto const agentIo =
+        SshAgentIo::Fine; // The agent's pipe is not watched there. @see SshAgentAuthAllowance
+#else
+    auto const agentIo = _p->io.agentIo;
+#endif
+    auto const failure =
+        classifySshAgentFailure(agentIo, sshCallError(rc), stepDeadline(), std::chrono::steady_clock::now());
+    switch (failure)
+    {
+        case SshAgentFailure::Failed: break;
+        case SshAgentFailure::TimedOut: failStepTimeout(); break;
+        case SshAgentFailure::AgentClosed:
+            logErrorWithInject(describeSshAgentClosed(_config.hostname));
+            fallBackFromAgent();
+            break;
+    }
+    return failure;
 }
 
 void SshSession::fallBackFromAgent()

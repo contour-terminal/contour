@@ -7,6 +7,7 @@
 
 #include <vtpty/SandboxInfo.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -46,5 +47,43 @@ enum class SshConnectStage : uint8_t
                                                     NetworkAccess network,
                                                     std::string_view target,
                                                     std::string_view detail);
+
+/// Whether a terminfo install ran before the shell's channel was opened.
+enum class TerminfoInstallAttempt : uint8_t
+{
+    None = 0, ///< No install was tried on this connection.
+    Attempted ///< An install channel was opened (and has since been left).
+};
+
+/// The message a failed opening of the shell's SSH channel should carry.
+///
+/// After an install attempt the failure may be the install's doing -- a server that allows one session
+/// channel per connection, say -- so the message names the opt-out.
+/// @param detail  The libssh2 error text.
+/// @param attempt Whether a terminfo install ran first.
+/// @return The message, ready to show.
+[[nodiscard]] std::string describeSshChannelOpenFailure(std::string_view detail,
+                                                        TerminfoInstallAttempt attempt);
+
+/// The message an SSH connection that took longer than `ssh.connect_timeout` to come up should carry.
+/// @param stage  What the connection was doing when the limit ran out, e.g. "the SSH handshake".
+/// @param host   The host being connected to.
+/// @param limit  The configured limit.
+/// @return The message, ready to show.
+[[nodiscard]] std::string describeSshConnectTimeout(std::string_view stage,
+                                                    std::string_view host,
+                                                    std::chrono::seconds limit);
+
+/// The message an SSH agent authentication that took longer than its own allowance should carry.
+/// @param host      The host being connected to.
+/// @param allowance How long the agent step may take. @see SshAgentAuthAllowance
+/// @return The message, ready to show.
+[[nodiscard]] std::string describeSshAgentTimeout(std::string_view host, std::chrono::seconds allowance);
+
+/// The message an SSH agent that closed its connection in the middle of authentication should carry. It makes
+/// no claim about an approval: the agent is gone, not waiting.
+/// @param host The host being connected to.
+/// @return The message, ready to show.
+[[nodiscard]] std::string describeSshAgentClosed(std::string_view host);
 
 } // namespace vtpty

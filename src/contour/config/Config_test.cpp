@@ -429,6 +429,210 @@ profiles:
     CHECK_FALSE(reloadedRemote->shell.value().env.contains("REMOTE_VALUE"));
 }
 
+TEST_CASE("Config: ssh install_terminfo defaults to on", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: remote
+profiles:
+    remote:
+        ssh:
+            host: h
+)"sv);
+    auto const* remote = config.profile("remote");
+    REQUIRE(remote != nullptr);
+    CHECK(remote->ssh.value().terminfoInstall == vtpty::TerminfoInstall::Install);
+}
+
+TEST_CASE("Config: ssh install_terminfo: false turns it off", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: remote
+profiles:
+    remote:
+        ssh:
+            host: h
+            install_terminfo: false
+)"sv);
+    auto const* remote = config.profile("remote");
+    REQUIRE(remote != nullptr);
+    CHECK(remote->ssh.value().terminfoInstall == vtpty::TerminfoInstall::Off);
+}
+
+TEST_CASE("Config: install_terminfo round-trips through the writer", "[config]")
+{
+    QTemporaryDir dir;
+    auto const yaml = R"(
+default_profile: remote
+profiles:
+    remote:
+        ssh:
+            host: h
+            install_terminfo: false
+)"sv;
+    auto const before = loadFromYaml(dir, yaml);
+    auto const* remote = before.profile("remote");
+    REQUIRE(remote != nullptr);
+    auto const saved = contour::config::emitProfileYaml(*remote);
+    CHECK_FALSE(YAML::Load(saved)["ssh"]["install_terminfo"].as<bool>());
+    // The main file no longer says anything about it, so only the side file can supply Off.
+    writeSideFile(dir, "profiles/remote.yml", saved);
+    auto const after = loadFromYaml(dir, R"(
+default_profile: remote
+profiles:
+    remote:
+        ssh:
+            host: h
+)"sv);
+    auto const* reloaded = after.profile("remote");
+    REQUIRE(reloaded != nullptr);
+    CHECK(reloaded->ssh.value().terminfoInstall == vtpty::TerminfoInstall::Off);
+}
+
+TEST_CASE("Config: ssh connect_timeout defaults to 30 seconds", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: remote
+profiles:
+    remote:
+        ssh:
+            host: h
+)"sv);
+    auto const* remote = config.profile("remote");
+    REQUIRE(remote != nullptr);
+    CHECK(remote->ssh.value().connectTimeout == std::chrono::seconds { 30 });
+}
+
+TEST_CASE("Config: ssh connect_timeout reads seconds, 0 for no limit", "[config]")
+{
+    QTemporaryDir dir;
+    auto const load = [&](std::string_view value) {
+        auto const config = loadFromYaml(dir,
+                                         std::format(R"(
+default_profile: remote
+profiles:
+    remote:
+        ssh:
+            host: h
+            connect_timeout: {}
+)",
+                                                     value));
+        auto const* remote = config.profile("remote");
+        REQUIRE(remote != nullptr);
+        return remote->ssh.value().connectTimeout;
+    };
+    CHECK(load("5") == std::chrono::seconds { 5 });
+    CHECK_FALSE(load("0").has_value());
+    // A negative value is not a limit anyone means: the default stays.
+    CHECK(load("-3") == std::chrono::seconds { 30 });
+    // Beyond the most allowed, the most allowed.
+    CHECK(load("999999999999") == std::chrono::seconds { 86400 });
+}
+
+TEST_CASE("Config: a malformed ssh key falls back alone, the host stays", "[config]")
+{
+    struct Row
+    {
+        std::string_view key;
+        std::string_view value;
+    };
+    auto const table = std::array {
+        Row { "connect_timeout", "2.5" },
+        Row { "connect_timeout", "10s" },
+        Row { "connect_timeout", "-5" },
+        Row { "port", "twenty-two" },
+        Row { "port", "[1, 2]" },
+        Row { "install_terminfo", "maybe" },
+        // Not port numbers: 70000 would wrap round to 4464 in htons().
+        Row { "port", "70000" },
+        Row { "port", "0" },
+        Row { "port", "-22" },
+    };
+    for (auto const& row: table)
+    {
+        INFO(row.key << ": " << row.value);
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir,
+                                         std::format(R"(
+default_profile: remote
+profiles:
+    remote:
+        ssh:
+            host: h
+            user: u
+            {}: {}
+)",
+                                                     row.key,
+                                                     row.value));
+        auto const* remote = config.profile("remote");
+        REQUIRE(remote != nullptr);
+        auto const& ssh = remote->ssh.value();
+        // Still an SSH profile: a lost host name would open a local shell instead.
+        CHECK(ssh.hostname == "h");
+        CHECK(ssh.username == "u");
+        CHECK(ssh.connectTimeout == std::chrono::seconds { 30 });
+        CHECK(ssh.port == 22);
+        CHECK(ssh.terminfoInstall == vtpty::TerminfoInstall::Install);
+    }
+}
+
+TEST_CASE("Config: connect_timeout round-trips through the writer", "[config]")
+{
+    auto const roundTrip = [](std::string_view value) {
+        // A directory of its own each time: the side file written below would otherwise answer the next.
+        QTemporaryDir dir;
+        auto const before = loadFromYaml(dir,
+                                         std::format(R"(
+default_profile: remote
+profiles:
+    remote:
+        ssh:
+            host: h
+            connect_timeout: {}
+)",
+                                                     value));
+        auto const* remote = before.profile("remote");
+        REQUIRE(remote != nullptr);
+        auto const saved = contour::config::emitProfileYaml(*remote);
+        CHECK(YAML::Load(saved)["ssh"]["connect_timeout"].as<std::string>() == value);
+        // The main file no longer says anything about it, so only the side file can supply the value.
+        writeSideFile(dir, "profiles/remote.yml", saved);
+        auto const after = loadFromYaml(dir, R"(
+default_profile: remote
+profiles:
+    remote:
+        ssh:
+            host: h
+)"sv);
+        auto const* reloaded = after.profile("remote");
+        REQUIRE(reloaded != nullptr);
+        return reloaded->ssh.value().connectTimeout;
+    };
+    CHECK(roundTrip("7") == std::chrono::seconds { 7 });
+    CHECK_FALSE(roundTrip("0").has_value());
+}
+
+TEST_CASE("Config: a pinned TERM does not change the saved install_terminfo", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: remote
+profiles:
+    remote:
+        ssh:
+            host: h
+        environment:
+            TERM: xterm-256color
+)"sv);
+    auto const* remote = config.profile("remote");
+    REQUIRE(remote != nullptr);
+    CHECK(remote->ssh.value().terminfoInstall == vtpty::TerminfoInstall::Install);
+    auto const saved = contour::config::emitProfileYaml(*remote);
+    CHECK(YAML::Load(saved)["ssh"]["install_terminfo"].as<bool>());
+}
+
 #ifdef _WIN32
 TEST_CASE("Config: Windows profile environment overrides inherited names regardless of case", "[config]")
 {

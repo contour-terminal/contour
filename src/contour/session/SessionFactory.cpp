@@ -33,6 +33,22 @@ vtbackend::PageSize childPtyPageSize(vtbackend::PageSize total,
     return total;
 }
 
+std::optional<vtpty::SshTerminfoInstaller> sshTerminfoFor(
+    config::TerminalProfile const& profile, std::optional<vtpty::SshTerminfoInstaller> const& installer)
+{
+    if (!installer)
+        return std::nullopt;
+    auto const& pinned = profile.configuredEnvironment;
+    auto const pinnedTerm = pinned.find("TERM");
+    auto const profileTerm =
+        pinnedTerm != pinned.end() ? std::optional<std::string_view> { pinnedTerm->second } : std::nullopt;
+    if (vtpty::effectiveTerminfoInstall(
+            profile.ssh.value().terminfoInstall, profileTerm, installer->entryName)
+        != vtpty::TerminfoInstall::Install)
+        return std::nullopt;
+    return installer;
+}
+
 std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
     std::optional<std::string> cwd,
     std::optional<vtbackend::PageSize> pageSize,
@@ -47,11 +63,16 @@ std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
     // must honor its SSH configuration — silently opening a local shell instead would have the
     // user typing on the wrong host.
     if (!overridesShellProgram(commandOverride) && !profile->ssh.value().hostname.empty())
-        return make_unique<vtpty::SshSession>(profile->ssh.value(),
+    {
+        auto const& ssh = profile->ssh.value();
+        auto terminfo = sshTerminfoFor(*profile, _sshTerminfo);
+        return make_unique<vtpty::SshSession>(ssh,
                                               std::bind(&AppSessionFactory::requestSshHostkeyVerification,
                                                         this,
                                                         std::placeholders::_1,
-                                                        std::placeholders::_2));
+                                                        std::placeholders::_2),
+                                              std::move(terminfo));
+    }
 #endif
     // Work on a local copy of the shell config: profile->shell.value() is a reference into the
     // shared, cached profile, so writing the per-session working directory back into it would leak

@@ -5,10 +5,12 @@
 #include <crispy/BufferObject.hpp>
 
 #include <core/Utf8Path.hpp>
+#include <core/Utils.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <filesystem>
@@ -20,6 +22,15 @@
 #include <system_error>
 #include <tuple>
 #include <utility>
+
+#ifndef _WIN32
+    #include <sys/socket.h>
+
+    #include <unistd.h>
+
+    #include <arpa/inet.h>
+    #include <netinet/in.h>
+#endif
 
 namespace
 {
@@ -147,6 +158,88 @@ TEST_CASE("closing an SSH session wakes a reader that waits without a timeout", 
         session.wakeupReader(); // Should close() stop waking it: fail the check below, do not hang.
     CHECK(status == std::future_status::ready);
     CHECK_FALSE(reader.get());
+}
+
+#ifndef _WIN32
+TEST_CASE("an SSH host that never speaks fails within ssh.connect_timeout", "[ssh]")
+{
+    // A listener that never accepts: the kernel completes the TCP handshake from the backlog, and then
+    // nothing ever arrives -- the SSH handshake stalls, as on a host that hangs before its banner.
+    auto const listener = ::socket(AF_INET, SOCK_STREAM, 0);
+    REQUIRE(listener >= 0);
+    auto const closeListener = core::Finally([listener]() { ::close(listener); });
+    auto address = sockaddr_in {};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    REQUIRE(::bind(listener, reinterpret_cast<sockaddr const*>(&address), sizeof(address)) == 0);
+    REQUIRE(::listen(listener, 1) == 0);
+    auto length = static_cast<socklen_t>(sizeof(address));
+    REQUIRE(::getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length) == 0);
+
+    auto host = refusingHost("user");
+    host.port = ntohs(address.sin_port);
+    host.connectTimeout = std::chrono::seconds { 1 };
+
+    auto const started = std::chrono::steady_clock::now();
+    auto result = vtpty::StartResult {};
+    {
+        auto session = vtpty::SshSession { host, {} };
+        result = session.start();
+        auto const failedAfter = std::chrono::steady_clock::now() - started;
+        // libssh2 counts its timeout in whole seconds, so it can run up to a second over.
+        CHECK(failedAfter < std::chrono::seconds { 5 });
+    }
+    // The destructor tears a timed-out session down without waiting on the host.
+    CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds { 6 });
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().detail.contains("ssh.connect_timeout"));
+    CHECK(result.error().detail.contains("the SSH handshake"));
+}
+#endif
+
+TEST_CASE("which budget governs each state, and what it is called", "[ssh]")
+{
+    using State = vtpty::SshSession::State;
+    struct Row
+    {
+        State state;
+        std::string_view stage;
+        vtpty::SshStepBudget budget = vtpty::SshStepBudget::Connect;
+    };
+    auto const table = std::array {
+        Row { State::Initial, "connecting", vtpty::SshStepBudget::None },
+        Row { State::Started, "the TCP connect" },
+        Row { State::Connect, "the TCP connect" },
+        Row { State::Handshake, "the SSH handshake" },
+        Row { State::VerifyHostkey, "host key verification" },
+        Row { State::VerifyHostkeyWaitForInput, "host key verification", vtpty::SshStepBudget::None },
+        Row { State::AuthenticateAgent, "authentication", vtpty::SshStepBudget::Agent },
+        Row { State::AuthenticatePrivateKeyStart, "authentication" },
+        Row { State::AuthenticatePrivateKeyRequest, "authentication" },
+        Row { State::AuthenticatePrivateKeyWaitForInput, "authentication", vtpty::SshStepBudget::None },
+        Row { State::AuthenticatePrivateKey, "authentication" },
+        Row { State::AuthenticatePasswordStart, "authentication" },
+        Row { State::AuthenticatePasswordWaitForInput, "authentication", vtpty::SshStepBudget::None },
+        Row { State::AuthenticatePassword, "authentication" },
+        Row { State::InstallTerminfoOpenChannel, "the terminfo install" },
+        Row { State::InstallTerminfoExec, "the terminfo install" },
+        Row { State::InstallTerminfoRead, "the terminfo install" },
+        Row { State::OpenChannel, "opening the session channel" },
+        Row { State::RequestAuthAgent, "the agent forwarding request" },
+        Row { State::RequestPty, "the PTY request" },
+        Row { State::SetEnv, "sending the environment" },
+        Row { State::StartShell, "starting the shell" },
+        Row { State::Operational, "connecting", vtpty::SshStepBudget::None },
+        Row { State::ResizeScreen, "connecting", vtpty::SshStepBudget::None },
+        Row { State::Failure, "connecting", vtpty::SshStepBudget::None },
+        Row { State::Closed, "connecting", vtpty::SshStepBudget::None },
+    };
+    for (auto const& row: table)
+    {
+        INFO(std::format("{}", row.state));
+        CHECK(vtpty::connectStageName(row.state) == row.stage);
+        CHECK(vtpty::sshStepBudgetFor(row.state) == row.budget);
+    }
 }
 
 TEST_CASE("SSH injected text is read no further than the buffer's free space", "[ssh]")
