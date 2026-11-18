@@ -217,25 +217,30 @@ namespace
         Canvas(size_t width, size_t height): _width { width }, _pixels(width * height) {}
 
         /// Paints @p paint over the pixels @p coverage covers, where @p clip lets it.
-        void paintOver(std::span<float const> coverage,
-                       std::span<float const> clip,
-                       Paint const& paint) noexcept
+        /// @param coverage What the layer covers.
+        /// @param clip The clip in force; null when there is none.
+        /// @param paint The layer's colour.
+        void paintOver(CoverageMask const& coverage, CoverageMask const* clip, Paint const& paint) noexcept
         {
-            for (auto const index: std::views::iota(size_t { 0 }, _pixels.size()))
-            {
-                auto const share = coverage[index] * (clip.empty() ? 1.0F : clip[index]);
-                if (share <= 0)
-                    continue;
-                auto const color = paint.at(index % _width, index / _width);
-                if (!color)
-                    continue;
-                auto& pixel = _pixels[index];
-                auto const kept = 1 - (color->alpha * share);
-                pixel = { .red = (color->red * share) + (pixel.red * kept),
-                          .green = (color->green * share) + (pixel.green * kept),
-                          .blue = (color->blue * share) + (pixel.blue * kept),
-                          .alpha = (color->alpha * share) + (pixel.alpha * kept) };
-            }
+            for (auto const row: std::views::iota(size_t { 0 }, coverage.height))
+                for (auto const column: std::views::iota(size_t { 0 }, coverage.width))
+                {
+                    auto const x = coverage.left + column;
+                    auto const y = coverage.top + row;
+                    auto const share =
+                        coverage.values[(row * coverage.width) + column] * (clip ? clip->at(x, y) : 1.0F);
+                    if (share <= 0)
+                        continue;
+                    auto const color = paint.at(x, y);
+                    if (!color)
+                        continue;
+                    auto& pixel = _pixels[(y * _width) + x];
+                    auto const kept = 1 - (color->alpha * share);
+                    pixel = { .red = (color->red * share) + (pixel.red * kept),
+                              .green = (color->green * share) + (pixel.green * kept),
+                              .blue = (color->blue * share) + (pixel.blue * kept),
+                              .alpha = (color->alpha * share) + (pixel.alpha * kept) };
+                }
         }
 
         [[nodiscard]] RasterizedGlyph take(GlyphPixels format) const
@@ -261,9 +266,7 @@ namespace
     };
 
     /// @return What a layer covers of the window: its path filled, or the outline of its stroke.
-    [[nodiscard]] std::vector<float> coverageOf(VectorLayer const& layer,
-                                                Affine const& toPixels,
-                                                ImageSize window)
+    [[nodiscard]] CoverageMask coverageOf(VectorLayer const& layer, Affine const& toPixels, ImageSize window)
     {
         // Flattened, and stroked, in the layer's own coordinates: a matrix that scales its axes unequally
         // then draws the elliptical pen SVG draws. The tolerance is a pixel's, carried back there.
@@ -305,7 +308,7 @@ RasterizedGlyph rasterizeVectorGlyph(VectorGlyph const& glyph,
 
     auto canvas = Canvas { unbox<size_t>(window.width), unbox<size_t>(window.height) };
     // The clip in force, and how many more layers it covers.
-    auto clip = std::vector<float> {};
+    auto clip = CoverageMask {};
     auto clipped = size_t { 0 };
     for (auto const& layer: glyph.layers)
     {
@@ -323,9 +326,7 @@ RasterizedGlyph rasterizeVectorGlyph(VectorGlyph const& glyph,
         auto const& color = std::holds_alternative<VectorFill>(layer.operation)
                                 ? std::get<VectorFill>(layer.operation).color
                                 : std::get<VectorStroke>(layer.operation).color;
-        canvas.paintOver(coverage,
-                         clipped > 0 ? std::span<float const> { clip } : std::span<float const> {},
-                         Paint { color, toPixels, ink });
+        canvas.paintOver(coverage, clipped > 0 ? &clip : nullptr, Paint { color, toPixels, ink });
         if (clipped > 0)
             --clipped;
     }

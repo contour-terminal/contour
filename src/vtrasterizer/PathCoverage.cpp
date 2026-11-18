@@ -29,12 +29,17 @@ namespace
         }
 
         /// Adds the edges of a polygon, the one from its last point back to its first included.
-        void addPolygon(std::span<PathPoint const> points) noexcept
+        /// @param points The polygon.
+        /// @param origin Where in the points' coordinates the accumulator's window starts.
+        void addPolygon(std::span<PathPoint const> points, PathPoint origin) noexcept
         {
             if (points.size() < 2)
                 return;
+            auto const local = [&](PathPoint point) {
+                return PathPoint { .x = point.x - origin.x, .y = point.y - origin.y };
+            };
             for (auto const index: std::views::iota(size_t { 0 }, points.size()))
-                addClipped(points[index], points[(index + 1) % points.size()]);
+                addClipped(local(points[index]), local(points[(index + 1) % points.size()]));
         }
 
         /// @return The share of every pixel that is inside by @p rule, top row first.
@@ -189,12 +194,54 @@ namespace
     };
 } // namespace
 
-std::vector<float> pathCoverage(std::span<Polyline const> polygons, VectorFillRule rule, ImageSize window)
+std::vector<float> CoverageMask::expanded(ImageSize window) const
 {
-    auto accumulator = CoverageAccumulator { unbox<size_t>(window.width), unbox<size_t>(window.height) };
+    auto const windowWidth = unbox<size_t>(window.width);
+    auto pixels = std::vector<float>(windowWidth * unbox<size_t>(window.height), 0.0F);
+    for (auto const row: std::views::iota(size_t { 0 }, height))
+        std::ranges::copy(std::span { values }.subspan(row * width, width),
+                          pixels.begin() + static_cast<std::ptrdiff_t>(((top + row) * windowWidth) + left));
+    return pixels;
+}
+
+CoverageMask pathCoverage(std::span<Polyline const> polygons, VectorFillRule rule, ImageSize window)
+{
+    // Only the pixels the polygons' bounds reach can be covered: a glyph of many small layers, as an emoji
+    // is, would otherwise pay for the whole window once a layer.
+    auto const windowWidth = static_cast<float>(unbox<size_t>(window.width));
+    auto const windowHeight = static_cast<float>(unbox<size_t>(window.height));
+    auto minX = windowWidth;
+    auto minY = windowHeight;
+    auto maxX = 0.0F;
+    auto maxY = 0.0F;
     for (auto const& polygon: polygons)
-        accumulator.addPolygon(polygon.points);
-    return accumulator.coverage(rule);
+        for (auto const& point: polygon.points)
+        {
+            // A point that is not a number bounds nothing; its edges are dropped when they are added.
+            if (!std::isfinite(point.x) || !std::isfinite(point.y))
+                continue;
+            minX = std::min(minX, point.x);
+            minY = std::min(minY, point.y);
+            maxX = std::max(maxX, point.x);
+            maxY = std::max(maxY, point.y);
+        }
+    auto const left = std::floor(std::clamp(minX, 0.0F, windowWidth));
+    auto const top = std::floor(std::clamp(minY, 0.0F, windowHeight));
+    auto const right = std::ceil(std::clamp(maxX, 0.0F, windowWidth));
+    auto const bottom = std::ceil(std::clamp(maxY, 0.0F, windowHeight));
+    if (!(left < right && top < bottom))
+        return {};
+
+    auto mask = CoverageMask { .left = static_cast<size_t>(left),
+                               .top = static_cast<size_t>(top),
+                               .width = static_cast<size_t>(right - left),
+                               .height = static_cast<size_t>(bottom - top),
+                               .values = {} };
+    auto accumulator = CoverageAccumulator { mask.width, mask.height };
+    for (auto const& polygon: polygons)
+        accumulator.addPolygon(polygon.points, PathPoint { .x = left, .y = top });
+    mask.values = accumulator.coverage(rule);
+    return mask;
 }
 
 } // namespace vtrasterizer

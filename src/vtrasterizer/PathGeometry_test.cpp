@@ -42,7 +42,8 @@ namespace
 [[nodiscard]] double strokedArea(std::string_view path, VectorStrokeStyle const& style)
 {
     auto const outlines = strokePolylines(flatten(path), style, 0.01F);
-    auto const pixels = pathCoverage(outlines, VectorFillRule::NonZero, ImageSize { Width(32), Height(32) });
+    auto const window = ImageSize { Width(32), Height(32) };
+    auto const pixels = pathCoverage(outlines, VectorFillRule::NonZero, window).expanded(window);
     return std::accumulate(pixels.begin(), pixels.end(), 0.0);
 }
 
@@ -51,7 +52,8 @@ namespace
 [[nodiscard]] bool strokeCovers(std::string_view path, VectorStrokeStyle const& style, int x, int y)
 {
     auto const outlines = strokePolylines(flatten(path), style, 0.01F);
-    auto const pixels = pathCoverage(outlines, VectorFillRule::NonZero, ImageSize { Width(32), Height(32) });
+    auto const window = ImageSize { Width(32), Height(32) };
+    auto const pixels = pathCoverage(outlines, VectorFillRule::NonZero, window).expanded(window);
     return pixels[static_cast<size_t>((y * 32) + x)] > 0.99F;
 }
 

@@ -45,12 +45,12 @@ constexpr auto Window = ImageSize { Width(8), Height(8) };
 
 [[nodiscard]] std::vector<float> nonZero(std::vector<Polyline> const& polygons, ImageSize window = Window)
 {
-    return pathCoverage(polygons, VectorFillRule::NonZero, window);
+    return pathCoverage(polygons, VectorFillRule::NonZero, window).expanded(window);
 }
 
 [[nodiscard]] std::vector<float> evenOdd(std::vector<Polyline> const& polygons)
 {
-    return pathCoverage(polygons, VectorFillRule::EvenOdd, Window);
+    return pathCoverage(polygons, VectorFillRule::EvenOdd, Window).expanded(Window);
 }
 
 } // namespace
@@ -180,10 +180,41 @@ TEST_CASE("pathCoverage: what lies outside the window is clipped", "[PathCoverag
     }
 }
 
+TEST_CASE("pathCoverage: the mask is only as large as what the polygons can reach", "[PathCoverage]")
+{
+    // A small shape in a large window: what makes a glyph of many small layers cheap.
+    auto const mask =
+        pathCoverage(std::vector { rectangle(2.5F, 3, 5, 6.25F) }, VectorFillRule::NonZero, Window);
+    CHECK(mask.left == 2);
+    CHECK(mask.top == 3);
+    CHECK(mask.width == 3);
+    CHECK(mask.height == 4);
+    CHECK(mask.values.size() == 12);
+    CHECK(mask.at(2, 3) == Catch::Approx(0.5));
+    CHECK(mask.at(4, 6) == Catch::Approx(0.25));
+    // Outside it, nothing is covered, and asking is fine.
+    CHECK(mask.at(0, 0) == 0.0F);
+    CHECK(mask.at(7, 7) == 0.0F);
+    CHECK(mask.at(100, 100) == 0.0F);
+    // Expanded, it is the window's coverage.
+    CHECK(mask.expanded(Window).size() == 64);
+    CHECK(area(mask.expanded(Window)) == Catch::Approx(2.5 * 3.25));
+
+    // Bounds past the window are cut to it, and bounds wholly outside leave no mask at all.
+    auto const cut = pathCoverage(std::vector { rectangle(-50, 6, 50, 50) }, VectorFillRule::NonZero, Window);
+    CHECK(cut.left == 0);
+    CHECK(cut.top == 6);
+    CHECK(cut.width == 8);
+    CHECK(cut.height == 2);
+    CHECK(pathCoverage(std::vector { rectangle(20, 20, 30, 30) }, VectorFillRule::NonZero, Window)
+              .values.empty());
+}
+
 TEST_CASE("pathCoverage: degenerate input covers nothing", "[PathCoverage]")
 {
     CHECK(nonZero({}) == std::vector<float>(64, 0.0F));
-    CHECK(pathCoverage(std::vector { rectangle(1, 1, 7, 7) }, VectorFillRule::NonZero, ImageSize {}).empty());
+    CHECK(pathCoverage(std::vector { rectangle(1, 1, 7, 7) }, VectorFillRule::NonZero, ImageSize {})
+              .values.empty());
     // A single point, and a line there and back, enclose no area.
     CHECK(area(nonZero({ Polyline { .points = { { 4, 4 } } } })) == 0.0);
     CHECK(area(nonZero({ Polyline { .points = { { 1, 1 }, { 7, 7 } } } })) == 0.0);
