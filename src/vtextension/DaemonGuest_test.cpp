@@ -3,7 +3,8 @@
 // The agent orchestrator's WebAssembly module (extensions/orchestrator/guest) against the host's own
 // services: checked as a module, run by a DaemonExtensionRunner over declared processes answered from the
 // orchestrator's recorded fixtures, a FileExtensionStore and a recording presence, and timed in its largest
-// callback.
+// callback and its dashboard's repaint. The timings are hidden cases of their own tag, which `[guest]` (what
+// CI runs) never selects; run them in a release tree with `vtextension_test "[guest-measure]"`.
 #include <vtbackend/screen/LocalTime.hpp>
 
 #include <core/platform/Clock.hpp>
@@ -831,8 +832,7 @@ TEST_CASE("DaemonGuest: a restarted runner picks a finished command up by tag",
     CHECK(rig.lastShortText() == expected);
 }
 
-TEST_CASE("DaemonGuest: [.measure] the callback that receives the largest reply",
-          "[daemon][guest][orchestrator][.measure]")
+TEST_CASE("DaemonGuest: [.measure] the callback that receives the largest reply", "[.measure][guest-measure]")
 {
     auto const seed = measuredSeed();
     auto memory = MemoryStore {};
