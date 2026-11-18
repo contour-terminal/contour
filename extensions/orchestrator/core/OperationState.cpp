@@ -37,16 +37,16 @@ namespace
         Operation operation;
     };
 
-    /// Measured with git 2.56 unless noted; to be measured again when git is upgraded. A conflicting
+    /// Measured with git 2.56, every row; to be measured again when git is upgraded. A conflicting
     /// `stash pop` or `checkout -m` prints none of these, but leaves unmerged entries that `git status
-    /// --porcelain` reports.
+    /// --porcelain` reports. On a detached HEAD git words the `edit` and split stops "… during a rebase.",
+    /// which no row names: the rebase is found by its header line, which comes first.
     constexpr auto StateLines = std::array {
         StateLine { .prefix = "interactive rebase in progress; onto "sv, .operation = Operation::Rebase },
         StateLine { .prefix = "rebase in progress; onto "sv, .operation = Operation::Rebase },
         StateLine { .prefix = "You are currently rebasing"sv, .operation = Operation::Rebase },
         StateLine { .prefix = "You are currently editing a commit while rebasing"sv,
                     .operation = Operation::Rebase },
-        // From git's source, not measured.
         StateLine { .prefix = "You are currently splitting a commit while rebasing"sv,
                     .operation = Operation::Rebase },
         StateLine { .prefix = "You have unmerged paths."sv, .operation = Operation::Merge },
@@ -56,7 +56,6 @@ namespace
                     .operation = Operation::CherryPick },
         StateLine { .prefix = "Cherry-pick currently in progress."sv, .operation = Operation::CherryPick },
         StateLine { .prefix = "You are currently reverting commit "sv, .operation = Operation::Revert },
-        // From git's source, not measured.
         StateLine { .prefix = "Revert currently in progress."sv, .operation = Operation::Revert },
         StateLine { .prefix = "You are currently bisecting"sv, .operation = Operation::Bisect },
         StateLine { .prefix = "You are in the middle of an am session."sv, .operation = Operation::Am },

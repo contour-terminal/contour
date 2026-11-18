@@ -82,6 +82,21 @@ constexpr auto RecordedRows = std::array {
                        "\n"
                        "nothing to commit, working tree clean\n",
                    .expected = Operation::Rebase },
+    // Not from harness/r11.txt: an `edit` stop on a detached HEAD, as vtextension's DeclaredCleanup_test
+    // measures it. Git words it "during a rebase", which no StateLines entry names; the header line catches
+    // it.
+    OperationRow { .state = "rebase-i-edit-detached",
+                   .stdoutText =
+                       "interactive rebase in progress; onto <hash>\n"
+                       "Last command done (1 command done):\n"
+                       "   edit <hash>\n"
+                       "No commands remaining.\n"
+                       "You are currently editing a commit during a rebase.\n"
+                       "  (use \"git commit --amend\" to amend the current commit)\n"
+                       "  (use \"git rebase --continue\" once you are satisfied with your changes)\n"
+                       "\n"
+                       "nothing to commit, working tree clean\n",
+                   .expected = Operation::Rebase },
     OperationRow { .state = "merge-conflict",
                    .stdoutText = "On branch agent/x\n"
                                  "You have unmerged paths.\n"
