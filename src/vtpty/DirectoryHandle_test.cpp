@@ -7,6 +7,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#ifndef _WIN32
+    #include <sys/stat.h>
+#endif
+
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -88,6 +92,32 @@ TEST_CASE("DirectoryHandle: resolvedPath follows symlinks", "[processrunner]")
     auto const canonical = vtpty::nativeDirectoryOpener().canonical((directory.path() / "link").string());
     REQUIRE(canonical.has_value());
     CHECK(*canonical == std::filesystem::canonical(real).string());
+}
+
+TEST_CASE("DirectoryHandle: without a path from the descriptor, the canonical path is walked to",
+          "[processrunner]")
+{
+    auto const directory = core::testing::ScopedTempDir { "contour-directoryhandle" };
+    auto const real = directory.path() / "real";
+    std::filesystem::create_directory(real);
+    std::filesystem::create_directory_symlink(real, directory.path() / "link");
+    auto const opener = vtpty::makeDirectoryOpener(vtpty::DescriptorPaths::Unavailable);
+
+    auto const opened = opener->open((directory.path() / "link").string());
+    REQUIRE(opened.has_value());
+    auto const canonical = std::filesystem::canonical(real);
+    CHECK(opened->resolvedPath() == canonical.string());
+    // The descriptor is the directory the path names: the walk opened it, not the name.
+    struct stat held {};
+    struct stat named {};
+    REQUIRE(::fstat(opened->descriptor(), &held) == 0);
+    REQUIRE(::stat(canonical.c_str(), &named) == 0);
+    CHECK(held.st_ino == named.st_ino);
+    CHECK(held.st_dev == named.st_dev);
+
+    auto const created = opener->createBeneath(*opened, "child");
+    REQUIRE(created.has_value());
+    CHECK(created->resolvedPath() == (canonical / "child").string());
 }
 
 TEST_CASE("DirectoryHandle: createBeneath creates one directory and follows no link", "[processrunner]")

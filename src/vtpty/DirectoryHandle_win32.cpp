@@ -2,6 +2,7 @@
 #include <vtpty/DirectoryHandle.hpp>
 
 #include <expected>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -32,6 +33,11 @@ namespace
         }
     };
 } // namespace
+
+std::unique_ptr<IDirectoryOpener> makeDirectoryOpener(DescriptorPaths /*paths*/)
+{
+    return std::make_unique<UnsupportedDirectoryOpener>();
+}
 
 IDirectoryOpener& nativeDirectoryOpener() noexcept
 {

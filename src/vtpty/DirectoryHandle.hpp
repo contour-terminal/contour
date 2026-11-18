@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -84,10 +85,25 @@ class IDirectoryOpener
         DirectoryHandle const& parent, std::string_view name) = 0;
 };
 
+/// Where an opened directory's path is read from.
+enum class DescriptorPaths : uint8_t
+{
+    /// Nowhere: the name's canonical form is opened again one component at a time from `/`, following no
+    /// link, so the path given is the descriptor's however the name changes meanwhile.
+    Unavailable = 0,
+    /// The kernel, from the descriptor (`/proc/self/fd/N` on Linux, `fcntl(F_GETPATH)` on macOS), where it
+    /// can tell; Unavailable's walk where it cannot.
+    FromKernel,
+};
+
+/// @param paths Where an opened directory's path is read from.
+/// @return An opener over this machine's filesystem; Windows: one whose every call answers `Unsupported`.
+[[nodiscard]] std::unique_ptr<IDirectoryOpener> makeDirectoryOpener(DescriptorPaths paths);
+
 /// @return The opener over this machine's filesystem. POSIX: a directory is opened
 ///         `O_RDONLY | O_DIRECTORY | O_CLOEXEC`, and its resolved path read from the descriptor
-///         (`/proc/self/fd/N` on Linux, `fcntl(F_GETPATH)` on macOS, `realpath` of the opened name
-///         elsewhere). Windows: every call answers `Unsupported`.
+///         (DescriptorPaths::FromKernel). A directory deleted by the time it is opened is `Missing`. Windows:
+///         every call answers `Unsupported`.
 [[nodiscard]] IDirectoryOpener& nativeDirectoryOpener() noexcept;
 
 } // namespace vtpty

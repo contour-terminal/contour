@@ -12,6 +12,7 @@
 #include <format>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -69,26 +70,66 @@ namespace
 #endif
     }
 
+    /// Opens @p canonical, an absolute path without links, one component at a time from `/`, following none:
+    /// a component swapped for a link meanwhile is refused, so the descriptor is at @p canonical.
+    [[nodiscard]] std::expected<OwnedFd, DirectoryError> openWalking(std::string const& canonical)
+    {
+        constexpr auto Flags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC;
+        auto current = OwnedFd { ::open("/", Flags) };
+        if (!current.isOpen())
+            return std::unexpected(directoryError(errno));
+        for (auto const component: std::string_view { canonical } | std::views::split('/'))
+        {
+            auto const name = std::string { component.begin(), component.end() };
+            if (name.empty())
+                continue;
+            auto next = OwnedFd { ::openat(current.get(), name.c_str(), Flags) };
+            if (!next.isOpen())
+                // ELOOP (EMLINK on FreeBSD) here is a link where realpath() saw a directory: the name changed
+                // meanwhile.
+                return std::unexpected(errno == ELOOP || errno == EMLINK ? DirectoryError::Missing
+                                                                         : directoryError(errno));
+            current = std::move(next);
+        }
+        return current;
+    }
+
+    /// @return Whether the open directory @p descriptor has been removed (no name links to it any more).
+    [[nodiscard]] bool isRemoved(int descriptor) noexcept
+    {
+        struct stat status {};
+        return ::fstat(descriptor, &status) == 0 && status.st_nlink == 0;
+    }
+
     class NativeDirectoryOpener final: public IDirectoryOpener
     {
       public:
+        explicit NativeDirectoryOpener(DescriptorPaths paths) noexcept: _paths { paths } {}
+
         [[nodiscard]] std::expected<DirectoryHandle, DirectoryError> open(std::string_view path) override
         {
             auto const name = std::string { path };
             auto descriptor = OwnedFd { ::open(name.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC) };
             if (!descriptor.isOpen())
                 return std::unexpected(directoryError(errno));
+            if (isRemoved(descriptor.get()))
+                return std::unexpected(DirectoryError::Missing);
             // Read from the descriptor, so that the path is the directory's, not the name's at a later
             // moment.
-            auto resolved = pathOfDescriptor(descriptor.get());
-            if (!resolved)
-            {
-                auto real = realPath(name);
-                if (!real)
-                    return std::unexpected(real.error());
-                resolved = std::move(*real);
-            }
-            return DirectoryHandle { std::move(descriptor), std::move(*resolved) };
+            if (_paths == DescriptorPaths::FromKernel)
+                if (auto resolved = pathOfDescriptor(descriptor.get()))
+                    return DirectoryHandle { std::move(descriptor), std::move(*resolved) };
+            // No path from the descriptor: the canonical name is opened again without following a link, so
+            // the handle is at the path it is given, never at what the name led to a moment earlier.
+            auto real = realPath(name);
+            if (!real)
+                return std::unexpected(real.error());
+            auto walked = openWalking(*real);
+            if (!walked)
+                return std::unexpected(walked.error());
+            if (isRemoved(walked->get()))
+                return std::unexpected(DirectoryError::Missing);
+            return DirectoryHandle { std::move(*walked), std::move(*real) };
         }
 
         [[nodiscard]] std::expected<std::string, DirectoryError> canonical(
@@ -111,18 +152,27 @@ namespace
                 // ELOOP here is a symlink in the name's place, which is never followed.
                 return std::unexpected(errno == ELOOP ? DirectoryError::NotADirectory
                                                       : directoryError(errno));
-            auto resolved = pathOfDescriptor(descriptor.get());
+            auto resolved = _paths == DescriptorPaths::FromKernel ? pathOfDescriptor(descriptor.get())
+                                                                  : std::optional<std::string> {};
             if (!resolved)
                 resolved =
                     parent.resolvedPath() == "/" ? "/" + component : parent.resolvedPath() + "/" + component;
             return DirectoryHandle { std::move(descriptor), std::move(*resolved) };
         }
+
+      private:
+        DescriptorPaths _paths;
     };
 } // namespace
 
+std::unique_ptr<IDirectoryOpener> makeDirectoryOpener(DescriptorPaths paths)
+{
+    return std::make_unique<NativeDirectoryOpener>(paths);
+}
+
 IDirectoryOpener& nativeDirectoryOpener() noexcept
 {
-    static auto instance = NativeDirectoryOpener {};
+    static auto instance = NativeDirectoryOpener { DescriptorPaths::FromKernel };
     return instance;
 }
 
