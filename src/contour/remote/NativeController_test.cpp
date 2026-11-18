@@ -7229,3 +7229,76 @@ TEST_CASE("NativeController shows a daemon extension's palette rows and invokes 
     CHECK_FALSE(waitUntil(
         [&] { return daemon.clientFrames.count(vthost::proto::PduType::InvokeExtensionAction) > 1; }, 100));
 }
+
+TEST_CASE("NativeController hands the GUI the pane a daemon extension revealed",
+          "[attach][controller][remote][presence]")
+{
+    auto const journal = std::make_shared<std::vector<std::string>>();
+    auto world = std::shared_ptr<vthost::testing::FakeDaemonWorldHosting> {};
+    auto* tabs = static_cast<vthost::IServedTabs*>(nullptr);
+    auto* actions = static_cast<vthost::IExtensionActions*>(nullptr);
+    auto daemon = DaemonFixture { {},
+                                  {},
+                                  1,
+                                  {},
+                                  std::nullopt,
+                                  {},
+                                  vthost::ClientSizePolicy::Latest,
+                                  {},
+                                  [&](vthost::DaemonWorldEvents events,
+                                      vthost::OwnerPost post,
+                                      vthost::DaemonWorldWiring const& wiring) {
+                                      tabs = &wiring.tabs;
+                                      actions = &wiring.actions;
+                                      world = std::make_shared<vthost::testing::FakeDaemonWorldHosting>(
+                                          journal, std::move(post), std::move(events));
+                                      world->rows = { vthost::ExtensionActionRows {
+                                          .extension = "orchestrator",
+                                          .title = "Agents",
+                                          .state = vthost::DaemonExtensionState::Running,
+                                          .rows = { { "open", "Open Agents" } } } };
+                                      return world;
+                                  } };
+    std::ignore = daemon.seedSession("first");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline, ControllerOptions {});
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return !controller.extensionPresence().extensions.empty(); }));
+    REQUIRE(tabs != nullptr);
+    REQUIRE(actions != nullptr);
+    auto revealsSignalled = std::atomic<int> { 0 };
+    QObject::connect(
+        &controller, &contour::remote::NativeController::paneRevealRequested, [&] { ++revealsSignalled; });
+
+    // The window invokes the row; the extension takes it, with the window as its origin, and opens its tab
+    // there -- as a guest does, from its own thread.
+    controller.invokeExtensionAction("orchestrator", "open");
+    auto taken = std::vector<std::pair<std::string, vthost::Origin>> {};
+    REQUIRE(waitUntil([&] {
+        auto more = actions->take("orchestrator");
+        taken.insert(taken.end(), more.begin(), more.end());
+        return !taken.empty();
+    }));
+    auto const origin = taken.front().second;
+    auto const opened = tabs->open("orchestrator", "Agents", "", "agents", origin);
+    REQUIRE(opened.has_value());
+    REQUIRE(waitUntil([&] {
+        auto const listed = tabs->list("orchestrator");
+        return !listed.empty() && listed.front().state == vthost::ServedTabState::Open;
+    }));
+    // Opening activates the tab; it is the reveal that raises the window and focuses the pane.
+    CHECK(controller.takePaneReveals().empty());
+
+    REQUIRE(tabs->reveal("orchestrator", *opened, origin).has_value());
+    auto revealed = std::vector<uint64_t> {};
+    REQUIRE(waitUntil([&] {
+        for (auto const& reveal: controller.takePaneReveals())
+            revealed.push_back(reveal.session);
+        return !revealed.empty();
+    }));
+    CHECK(revealed.size() == 1);
+    CHECK(revealed.front() != 0);
+    CHECK(revealsSignalled.load() >= 1);
+}

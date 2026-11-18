@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <chrono>
 #include <format>
+#include <iterator>
 #include <ranges>
 #include <set>
 #include <span>
@@ -368,6 +369,16 @@ void DaemonLink::connectController()
             // realize them again beside the ended ones.
             _sessions.rebindDisconnected(*this);
             followLayout();
+            followPaneReveals();
+        },
+        Qt::QueuedConnection);
+    QObject::connect(
+        _controller.get(),
+        &NativeController::paneRevealRequested,
+        &_receiver,
+        [this] {
+            if (!isStopped())
+                followPaneReveals();
         },
         Qt::QueuedConnection);
     // The daemon's restore is told once, ahead of the layout it restored: the manager holds it until a
@@ -1416,6 +1427,23 @@ void DaemonLink::askHostedExtensions()
                        request.hostId);
     }
 #endif
+}
+
+void DaemonLink::followPaneReveals()
+{
+    if (!isLive())
+        return;
+    // A reveal may outrun the layout that brings its tab (a tab just opened, a window just switched): it
+    // waits a few looks, and RevealPatience at most -- reveals that arrived while this link was not live
+    // included -- then is dropped rather than steal the focus later.
+    std::ranges::move(_controller->takePaneReveals(), std::back_inserter(_pendingReveals));
+    _pendingReveals = followReveals(_pendingReveals, _controller->now(), [this](uint64_t session) {
+        auto* const shown = _sessions.sessionShownBy(*this, session);
+        if (shown == nullptr)
+            return false;
+        _sessions.revealSession(*shown);
+        return true;
+    });
 }
 
 void DaemonLink::answerSwitchRequests()

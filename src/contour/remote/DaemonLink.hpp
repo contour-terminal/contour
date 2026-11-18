@@ -523,6 +523,9 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     /// Answers the switch requests the daemon sent: each behind the guard (runGuardedSwitch()), in the window
     /// showing its workspace, or Failed when no window of this link shows it.
     void answerSwitchRequests();
+    /// Raises and focuses the panes the daemon revealed (paneRevealRequested()), and those revealed before
+    /// their pane was realized here, once the layouts that bring them have.
+    void followPaneReveals();
     void requireGuiThread() const;
 
     Id _id;
@@ -537,6 +540,10 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     window::DaemonUpkeep _upkeep;
     std::string _clientRelease;
     AttachState _state = AttachState::Connecting;
+
+    /// The panes the daemon revealed that no window of this link showed yet, oldest first: each tab arrives
+    /// with a layout, for a few looks or RevealPatience at most (followReveals()).
+    std::vector<PendingReveal> _pendingReveals;
 
     /// The live controller; null once given up. Remote-backed sessions hold ptys that unregister from it.
     std::unique_ptr<NativeController> _controller;

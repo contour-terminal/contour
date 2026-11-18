@@ -4243,6 +4243,18 @@ TerminalSession* TerminalSessionManager::sessionForHostId(window::HostIdentity c
     return found != sessions.end() ? *found : nullptr;
 }
 
+TerminalSession* TerminalSessionManager::sessionShownBy(WindowBinding const& binding,
+                                                        uint64_t hostSession) const
+{
+    auto const bound = sessionsBoundTo(binding);
+    auto const found = std::ranges::find_if(bound, [&](TerminalSession const* session) {
+        auto const where = hostOf(session);
+        return where.window != nullptr && leafOfSession(*where.tab, *session) != nullptr
+               && hostSessionIdOf(*session) == hostSession;
+    });
+    return found != bound.end() ? *found : nullptr;
+}
+
 std::optional<window::NodeDrag> TerminalSessionManager::paneDragOf(TerminalSession const& session) const
 {
     auto const [win, tab, leaf] = _model->findSessionLeaf(session.modelSessionId());

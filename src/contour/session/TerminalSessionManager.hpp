@@ -893,6 +893,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] TerminalSession* sessionForHostId(window::HostIdentity const& host,
                                                     uint64_t hostSession) const;
 
+    /// The session a pane of @p binding's windows shows for the daemon session @p hostSession.
+    /// @param binding The link the windows are bound to.
+    /// @param hostSession The daemon's id of the session (@see hostSessionIdOf).
+    /// @return The session; null when no pane of those windows shows it (yet).
+    [[nodiscard]] TerminalSession* sessionShownBy(WindowBinding const& binding, uint64_t hostSession) const;
+
     /// The drag payload of the pane showing @p session.
     /// @return The payload; std::nullopt for a session no pane shows, or one the host has no id for yet.
     [[nodiscard]] std::optional<window::NodeDrag> paneDragOf(TerminalSession const& session) const;

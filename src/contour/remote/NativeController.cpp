@@ -1843,13 +1843,27 @@ std::vector<vthost::client::NativeClient::DaemonConsentEvent> NativeController::
 
 void NativeController::onExtensionEvent(vthost::client::NativeClient::ExtensionEvent const& event)
 {
-    // A pane reveal is the daemon's answer to an extension's tab-reveal, which no daemon sends this window
-    // yet: nothing to follow.
     if (auto const* presence = std::get_if<vthost::proto::ExtensionPresence>(&event))
     {
         auto const lock = std::lock_guard { _mutex };
         _extensionPresence = *presence;
+        return;
     }
+    // An extension revealed its tab, which the daemon activated: the window raises itself and focuses it.
+    if (auto const* reveal = std::get_if<vthost::proto::RevealPane>(&event))
+    {
+        {
+            auto const lock = std::lock_guard { _mutex };
+            _paneReveals.push_back(PendingReveal { .session = reveal->session, .arrived = _clock.now() });
+        }
+        emit paneRevealRequested();
+    }
+}
+
+std::vector<PendingReveal> NativeController::takePaneReveals()
+{
+    auto const lock = std::lock_guard { _mutex };
+    return std::exchange(_paneReveals, {});
 }
 
 vthost::proto::ExtensionPresence NativeController::extensionPresence() const

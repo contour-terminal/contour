@@ -18,6 +18,7 @@
 /// terminal, which does not exist when `createPty` hands out the pty, so
 /// `bindTerminal` closes the cycle and primes the mirror.
 
+#include <contour/remote/PaneReveals.hpp>
 #include <contour/remote/ReactorThread.hpp>
 #include <contour/remote/RemoteController.hpp>
 #include <contour/remote/RemoteLayout.hpp>
@@ -332,6 +333,14 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param extension WireExtensionPresence::extension.
     /// @param action WireActionRow::id; empty for the row that asks for a grant or restarts.
     void invokeExtensionAction(std::string extension, std::string action);
+
+    /// Takes the panes paneRevealRequested() announced, oldest first: the remote sessions whose window is to
+    /// raise itself and focus their pane, as a daemon extension revealed its tab. GUI thread.
+    /// @return The daemon's session ids, as RevealPane named them, each stamped with when it arrived (now()).
+    [[nodiscard]] std::vector<PendingReveal> takePaneReveals();
+
+    /// @return The time on the controller's clock: what takePaneReveals() stamps its reveals with.
+    [[nodiscard]] core::platform::SteadyTimePoint now() const { return _clock.now(); }
 
     /// Answers a daemon-scoped extension's question takeDaemonConsentEvents() handed out. A no-op once
     /// detached.
@@ -767,6 +776,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// connect queued). The GUI takes the questions with takePermissionRequests().
     void extensionPermissionRequested();
 
+    /// The daemon asks this client's window to raise itself and focus a pane: a daemon extension revealed its
+    /// tab, which the daemon activated (fires on the reactor thread; connect queued). The GUI takes the panes
+    /// with takePaneReveals().
+    void paneRevealRequested();
+
     /// The daemon asks this client to switch the window showing one of its workspaces (fires on the reactor
     /// thread; connect queued). The GUI takes the requests with takeSwitchRequests().
     void switchRequested();
@@ -1172,6 +1186,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     std::vector<vthost::client::NativeClient::DaemonConsentEvent> _daemonConsentEvents;
     /// The daemon extensions' palette rows, as the daemon last sent them. Under _mutex.
     vthost::proto::ExtensionPresence _extensionPresence;
+    /// The panes RevealPane named that the GUI has not taken yet, oldest first. Under _mutex.
+    std::vector<PendingReveal> _paneReveals;
     /// Guards the geometry bookkeeping below, and ONLY that.
     ///
     /// A lock of its own because the resize sink is reached from inside a `_mutex`-holding frame:
