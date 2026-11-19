@@ -144,6 +144,7 @@ namespace
         ConfigProblem problem;
         std::string_view text;
         Listing listing = Listing::None;
+        std::string_view afterSubject = {}; ///< Follows the error's subject, where it names one.
     };
 
     constexpr auto ProblemTexts = std::array {
@@ -188,6 +189,9 @@ namespace
         ProblemText { .problem = ConfigProblem::UnsupportedSource,
                       .text = "is not a supported issue source",
                       .listing = Listing::IssueSources },
+        ProblemText { .problem = ConfigProblem::Unrecorded,
+                      .text = "is not yet supported",
+                      .afterSubject = " has no recorded fixture" },
         ProblemText { .problem = ConfigProblem::UnknownItemKind,
                       .text = "must be one of",
                       .listing = Listing::ItemKinds },
@@ -220,7 +224,8 @@ namespace
             case Listing::None: break;
             case Listing::Forges:
                 for (auto const& row: ForgeSpellings)
-                    if (findProvider(row.forge) != nullptr)
+                    if (auto const* const provider = findProvider(row.forge);
+                        provider != nullptr && provider->verification == Verification::Recorded)
                         values.push_back(row.name);
                 break;
             case Listing::IssueSources: values.assign(IssueSources.begin(), IssueSources.end()); break;
@@ -576,12 +581,28 @@ namespace
         return std::string { name };
     }
 
+    /// @return The forge @p name spells, if @p sources has a Recorded row for it; else why not.
+    [[nodiscard]] Checked<Forge> forgeOf(std::string_view name, std::string key, SourceTables const& sources)
+    {
+        auto const forge = forgeNamed(name);
+        auto const provider =
+            forge ? std::ranges::find(sources.providers, *forge, &Provider::forge) : sources.providers.end();
+        if (provider == sources.providers.end())
+            return fail(std::move(key), ConfigProblem::UnknownForge);
+        if (provider->verification != Verification::Recorded)
+            return std::unexpected(ConfigError { .key = std::move(key),
+                                                 .problem = ConfigProblem::Unrecorded,
+                                                 .subject = std::string(provider->name) });
+        return *forge;
+    }
+
     /// Validates the repository at @p index against those before it.
     [[nodiscard]] Checked<Repo> repoOf(JsonRepo const& json,
                                        std::size_t index,
                                        std::string_view path,
                                        std::string_view worktreeRoot,
-                                       std::span<Repo const> earlier)
+                                       std::span<Repo const> earlier,
+                                       SourceTables const& sources)
     {
         auto const prefix = std::format("repos[{}]", index);
         auto const key = [&](std::string_view field) {
@@ -600,9 +621,9 @@ namespace
 
         if (!json.forge)
             return fail(key("forge"), ConfigProblem::Missing);
-        auto const forge = forgeNamed(*json.forge);
-        if (!forge || findProvider(*forge) == nullptr)
-            return fail(key("forge"), ConfigProblem::UnknownForge);
+        auto const forge = forgeOf(*json.forge, key("forge"), sources);
+        if (!forge)
+            return std::unexpected(forge.error());
 
         auto const name = repoNameOf(json.name, path, prefix, earlier);
         if (!name)
@@ -636,7 +657,8 @@ namespace
     }
 
     [[nodiscard]] Checked<std::vector<Repo>> reposOf(std::optional<std::vector<JsonRepo>> const& value,
-                                                     HostInfo const& host)
+                                                     HostInfo const& host,
+                                                     SourceTables const& sources)
     {
         if (!value)
             return fail("repos", ConfigProblem::Missing);
@@ -647,7 +669,8 @@ namespace
         auto repos = std::vector<Repo> {};
         for (auto const index: std::views::iota(std::size_t { 0 }, value->size()))
         {
-            auto repo = repoOf((*value)[index], index, host.repoPaths[index], host.worktreeRoot, repos);
+            auto repo =
+                repoOf((*value)[index], index, host.repoPaths[index], host.worktreeRoot, repos, sources);
             if (!repo)
                 return std::unexpected(repo.error());
             repos.push_back(std::move(*repo));
@@ -753,9 +776,17 @@ std::string describe(ConfigProblem problem)
 
 std::string message(ConfigError const& error)
 {
-    if (error.key.empty())
-        return describe(error.problem);
-    return std::format("{}: {}", error.key, describe(error.problem));
+    auto text = error.key.empty() ? describe(error.problem)
+                                  : std::format("{}: {}", error.key, describe(error.problem));
+    if (auto const index = static_cast<std::size_t>(error.problem);
+        !error.subject.empty() && index < ProblemTexts.size())
+        text += std::format(": {}{}", error.subject, ProblemTexts[index].afterSubject);
+    return text;
+}
+
+SourceTables sourceTables() noexcept
+{
+    return SourceTables { .providers = providers() };
 }
 
 std::optional<std::chrono::milliseconds> parseDuration(std::string_view text) noexcept
@@ -775,7 +806,9 @@ std::optional<std::chrono::milliseconds> parseDuration(std::string_view text) no
     return unit->length * count;
 }
 
-std::expected<Config, ConfigError> Config::parse(std::string_view json, HostInfo const& host)
+std::expected<Config, ConfigError> Config::parse(std::string_view json,
+                                                 HostInfo const& host,
+                                                 SourceTables const& sources)
 {
     auto const generic = orchestrator::json::readDocument<orchestrator::json::ValidateOptions, Generic>(json);
     if (!generic)
@@ -793,7 +826,7 @@ std::expected<Config, ConfigError> Config::parse(std::string_view json, HostInfo
     if (!argumentAccepts(ArgumentKind::Path, host.worktreeRoot))
         return fail("worktree_root", ConfigProblem::NotAbsolutePath);
 
-    auto values = Values { .worktreeRoot = host.worktreeRoot };
+    auto values = Values { .worktreeRoot = host.worktreeRoot, .sources = sources };
     auto const assign = [](auto& target, auto checkedValue) -> std::optional<ConfigError> {
         if (!checkedValue)
             return std::move(checkedValue.error());
@@ -825,7 +858,7 @@ std::expected<Config, ConfigError> Config::parse(std::string_view json, HostInfo
                 durationOf(
                     document.finishedRetention, "finished_retention", DefaultFinishedRetention, NoMinimum)))
             return e;
-        if (auto e = assign(values.repos, reposOf(document.repos, host)))
+        if (auto e = assign(values.repos, reposOf(document.repos, host, sources)))
             return e;
         return assign(values.tasks, tasksOf(document.tasks, values.models));
     }();
@@ -843,7 +876,8 @@ Config::Config(Values values) noexcept:
     _statusBoardAfter { values.statusBoardAfter },
     _finishedRetention { values.finishedRetention },
     _repos { std::move(values.repos) },
-    _tasks { std::move(values.tasks) }
+    _tasks { std::move(values.tasks) },
+    _sources { values.sources }
 {
 }
 

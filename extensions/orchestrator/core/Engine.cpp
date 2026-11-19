@@ -137,7 +137,7 @@ Engine::Engine(std::optional<Config> config, HostInfo host, uint64_t monoMs, uin
 
 Engine::Started Engine::start(StartContext context)
 {
-    auto config = Config::parse(context.configJson, context.host);
+    auto config = Config::parse(context.configJson, context.host, context.sources);
     auto engine = Engine(config ? std::optional { std::move(*config) } : std::nullopt,
                          context.host,
                          std::max<uint64_t>(context.monoMs, 1),
@@ -325,7 +325,11 @@ StepContext Engine::contextFor(Run const& run) const noexcept
                              ? state->unknownCheckout
                              : CheckoutUnknown::Unavailable;
     return StepContext {
-        .mainCheckout = main, .unknownCheckout = unknown, .wallMs = _wallMs, .monoMs = _monoMs
+        .mainCheckout = main,
+        .unknownCheckout = unknown,
+        .wallMs = _wallMs,
+        .monoMs = _monoMs,
+        .providers = _config ? _config->sources().providers : providers(),
     };
 }
 

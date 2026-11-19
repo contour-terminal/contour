@@ -23,6 +23,7 @@
 #include <orchestrator/core/Fixtures.hpp>
 #include <orchestrator/core/Hooks.hpp>
 #include <orchestrator/core/Overloaded.hpp>
+#include <orchestrator/core/Provider.hpp>
 #include <orchestrator/core/Run.hpp>
 
 using namespace std::string_literals;
@@ -459,6 +460,12 @@ class Harness
             return ok(readFixture(FixtureRoot::Testdata, "github/prs-open.json"));
         if (command.command == "gh-issues")
             return ok(readFixture(FixtureRoot::Testdata, "github/issues-open.json"));
+        if (command.command == "glab-default-branch")
+            return ok(readFixture(FixtureRoot::Testdata, "gitlab/default-branch.json"));
+        if (command.command == "glab-mrs")
+            return ok(readFixture(FixtureRoot::Testdata, "gitlab/mrs-open.json"));
+        if (command.command == "glab-issues")
+            return ok(readFixture(FixtureRoot::Testdata, "gitlab/issues-open.json"));
         return ok();
     }
 
@@ -2089,7 +2096,7 @@ TEST_CASE("a failed login backs off and lists nothing", "[orchestrator][engine]"
     harness.finish("agent-setup-check", ok("[]"));
     harness.finish("git-worktree-list", ok(worktreeList(ContourPath)));
     harness.finish("gh-auth", failed(1, readFixture(FixtureRoot::Testdata, "github/auth-failed.stderr")));
-    CHECK(mentions(harness.engine().problems(), "gh is not logged in"));
+    CHECK(mentions(harness.engine().problems(), "GitHub: the login check failed (run gh auth status)"));
     CHECK(harness.commandsIssued("gh-prs") == 0);
     auto expected = Minute * 4;
     for ([[maybe_unused]] auto const poll: std::views::iota(0, 5))
@@ -2105,7 +2112,7 @@ TEST_CASE("a failed login backs off and lists nothing", "[orchestrator][engine]"
     CHECK(harness.wakeAt() - harness.now() == expected);
     harness.feed(Wake { .monoMs = harness.wakeAt(), .wallMs = DispatchWallMs });
     harness.boot();
-    CHECK(!mentions(harness.engine().problems(), "gh is not logged in"));
+    CHECK(!mentions(harness.engine().problems(), "GitHub: the login check failed (run gh auth status)"));
     CHECK(harness.wakeAt() - harness.now() == 2 * Minute);
 
     // A clean poll lists without asking for the login again.
@@ -3602,6 +3609,86 @@ TEST_CASE("reading a Finished run's transcript marks it seen", "[orchestrator][e
     harness.feed(ReadTranscript { .run = id, .tab = {}, .page = 1, .monoMs = harness.now() });
 
     CHECK(finishedOf(harness.run(id))->seen == Seen::Opened);
+}
+
+// }}}
+
+// {{{ GitLab, as a recording would enable it
+
+namespace
+{
+
+/// The shipped provider rows, each marked Recorded, as the recording step leaves GitLab's.
+[[nodiscard]] std::span<Provider const> recordedProviders()
+{
+    static auto const rows = [] {
+        auto recorded = std::vector<Provider>(providers().begin(), providers().end());
+        for (auto& row: recorded)
+            row.verification = Verification::Recorded;
+        return recorded;
+    }();
+    return rows;
+}
+
+/// One GitLab repository, accepted because its row is passed as Recorded.
+[[nodiscard]] StartContext gitlabContext()
+{
+    auto context = contextFor(
+        Settings { .repos = R"([ { "name": "contour", "path": "~/projects/contour", "forge": "gitlab",
+                        "issues": [ { "source": "forge", "query": "crash" } ] } ])" });
+    context.sources.providers = recordedProviders();
+    return context;
+}
+
+} // namespace
+
+TEST_CASE("the engine polls glab-mrs and checks out with glab-mr-checkout", "[orchestrator][engine][gitlab]")
+{
+    auto harness = Harness { gitlabContext() };
+    CHECK(harness.pending("glab-auth"));
+    CHECK(!harness.pending("gh-auth"));
+    harness.boot();
+    CHECK(harness.commandsIssued("glab-default-branch") == 1);
+    CHECK(harness.commandsIssued("glab-mrs") == 1);
+    CHECK(harness.commandsIssued("glab-issues") == 1);
+    CHECK(harness.commandsIssued("gh-prs") == 0);
+    CHECK(harness.engine().problems().empty());
+    CHECK(harness.engine().changeRequests("contour").size() == 3);
+
+    constexpr auto Id = "pr-41-20261113-150847"sv;
+    auto request = prDispatch(41);
+    request.url = "https://gitlab.example.com/group/project/-/merge_requests/41";
+    harness.feed(request);
+    harness.finish("git-fetch", ok());
+    auto const checkout = all<RunCommand>(harness.finish("git-worktree-add", ok()));
+    REQUIRE(checkout.size() == 1);
+    CHECK(checkout.front().command == "glab-mr-checkout");
+    CHECK(checkout.front().cwd == worktreeOf("contour", Id));
+    CHECK(std::ranges::contains(
+        checkout.front().arguments, "41"sv, [](Argument const& a) -> std::string_view { return a.value; }));
+    auto const opened = all<OpenPane>(harness.finish("glab-mr-checkout", ok()));
+    CHECK(opened.size() == 1);
+}
+
+TEST_CASE("an auth check's output is never kept", "[orchestrator][engine][gitlab]")
+{
+    constexpr auto Secret = "glpat-0123456789abcdefghij"sv;
+    auto harness = Harness { gitlabContext() };
+    harness.finish("agent-setup-check", ok("[]"));
+    harness.finish("git-worktree-list", ok(worktreeList(ContourPath)));
+    auto const effects = harness.finish(
+        "glab-auth",
+        failed(1, std::format("x gitlab.example.com: api call failed: token {} rejected", Secret)));
+    CHECK(harness.commandsIssued("glab-mrs") == 0);
+    CHECK(std::ranges::contains(harness.engine().problems(),
+                                "GitLab: the login check failed (run glab auth status)"sv));
+    CHECK(!mentions(harness.engine().problems(), Secret));
+    CHECK(!mentions(harness.engine().problems(), "api call failed"));
+    REQUIRE(harness.lastSummary());
+    CHECK(!harness.lastSummary()->shortText.contains(Secret));
+    CHECK(!harness.lastSummary()->detail.contains(Secret));
+    for (auto const& entry: harness.stored())
+        CHECK(!entry.value.contains(Secret));
 }
 
 // }}}

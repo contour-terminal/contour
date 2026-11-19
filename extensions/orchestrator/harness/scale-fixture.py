@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Scales a recorded `gh-prs` reply up to the largest one the command can print.
+"""Scales a recorded `gh-prs` or `glab-mrs` reply up to the largest one the command can print.
 
 `gh-prs` asks for at most 100 pull requests (`--limit 100`), so its largest reply holds 100. Recording one
 needs an author with 100 open pull requests; this builds it from a smaller recording instead: the recorded
@@ -11,8 +11,12 @@ then title, URL and head branch. The output is written the way `gh --jq` writes 
 kept, one trailing newline), so its size is the size `gh` would print, and it is deterministic: the same
 input always yields the same bytes.
 
-Usage: scale-fixture.py [--count N] <recorded.json> <scaled.json>
+`glab-mrs` (`--shape glab-mrs`) asks for at most 100 merge requests (`--per-page 100`) and prints GitLab's
+REST objects unprojected: each copy's `iid`, `web_url` and `source_branch` are changed instead.
+
+Usage: scale-fixture.py [--shape gh-prs|glab-mrs] [--count N] <recorded.json> <scaled.json>
     e.g. scale-fixture.py core/testdata/github/prs-open.json core/testdata/github/prs-100.json
+         scale-fixture.py --shape glab-mrs core/testdata/gitlab/mrs-open.json core/testdata/gitlab/mrs-100.json
 """
 
 from __future__ import annotations
@@ -26,31 +30,35 @@ from pathlib import Path
 # The number of pull requests `gh-prs` asks for: its `--limit` (core/Commands.cpp).
 DEFAULT_COUNT = 100
 
-# Where a projected row holds what each copy changes.
-NUMBER = 0
-URL = 2
-HEAD = 3
+# Where a row holds what each copy changes: a position in a projected `gh-prs` row, a key in a `glab-mrs`
+# object.
+SHAPES = {
+    "gh-prs": {"number": 0, "url": 2, "head": 3},
+    "glab-mrs": {"number": "iid", "url": "web_url", "head": "source_branch"},
+}
 
 # The first number a scaled copy gets; above every recorded one, so that no copy collides with an original.
 FIRST_NUMBER = 100000
 
 
-def scaled(recorded: list[list], count: int) -> list[list]:
+def scaled(recorded: list, count: int, shape: dict) -> list:
     """`count` rows: `recorded` repeated in order, each copy numbered and branched on its own."""
+    number_at, url_at, head_at = shape["number"], shape["url"], shape["head"]
     rows = []
     for index in range(count):
         row = copy.deepcopy(recorded[index % len(recorded)])
         number = FIRST_NUMBER + index
-        row[NUMBER] = number
-        row[HEAD] = f"{row[HEAD]}-{index}"
-        row[URL] = row[URL].rsplit("/", 1)[0] + f"/{number}"
+        row[number_at] = number
+        row[head_at] = f"{row[head_at]}-{index}"
+        row[url_at] = row[url_at].rsplit("/", 1)[0] + f"/{number}"
         rows.append(row)
     return rows
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--count", type=int, default=DEFAULT_COUNT, help="how many pull requests to write")
+    parser.add_argument("--shape", choices=sorted(SHAPES), default="gh-prs", help="the command whose reply it is")
+    parser.add_argument("--count", type=int, default=DEFAULT_COUNT, help="how many entries to write")
     parser.add_argument("recorded", type=Path, help="a recorded `gh-prs` reply")
     parser.add_argument("output", type=Path, help="where to write the scaled reply")
     arguments = parser.parse_args()
@@ -59,10 +67,11 @@ def main() -> int:
     if not isinstance(recorded, list) or not recorded:
         print(f"{arguments.recorded}: not a non-empty JSON array", file=sys.stderr)
         return 1
-    text = json.dumps(scaled(recorded, arguments.count), separators=(",", ":"), ensure_ascii=False) + "\n"
+    rows = scaled(recorded, arguments.count, SHAPES[arguments.shape])
+    text = json.dumps(rows, separators=(",", ":"), ensure_ascii=False) + "\n"
     arguments.output.write_text(text, encoding="utf-8", newline="\n")
     size = len(text.encode("utf-8"))
-    print(f"{arguments.output}: {arguments.count} pull requests, {size} bytes ({size / 1024:.1f} KiB)")
+    print(f"{arguments.output}: {arguments.count} entries, {size} bytes ({size / 1024:.1f} KiB)")
     return 0
 
 

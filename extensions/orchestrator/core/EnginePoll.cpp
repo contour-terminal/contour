@@ -225,7 +225,7 @@ void Engine::startPoll(std::vector<Effect>& out)
     _pollResult = PollResult::Clean;
     recheckFinished(out);
     auto const& first = _config->repos().front();
-    auto const* const provider = findProvider(first.forge);
+    auto const* const provider = findProvider(_config->sources().providers, first.forge);
     if (provider != nullptr && _auth == AuthState::LoggedIn && _authCheck == AuthCheck::Skip)
         issueLists(out);
     else if (provider != nullptr
@@ -326,7 +326,7 @@ void Engine::issueLists(std::vector<Effect>& out)
 {
     for (auto const& repo: _config->repos())
     {
-        auto const* const provider = findProvider(repo.forge);
+        auto const* const provider = findProvider(_config->sources().providers, repo.forge);
         auto const* const state = findRepoState(repo.name);
         if (provider == nullptr || state == nullptr)
             continue;
@@ -391,9 +391,27 @@ void Engine::onAuthResult(ProcessOutcome const& outcome, std::vector<Effect>& ou
         _auth = AuthState::LoggedOut;
         _pollResult = PollResult::Failed;
         auto const& first = _config->repos().front();
-        lines.push_back(judgement.verdict == Verdict::CwdMissing
-                            ? line(std::format("{}: {} does not exist", first.name, first.path))
-                            : line(std::format("gh is not logged in: {}", judgement.why)));
+        // An auth check's output may hold a token: only whether it succeeded is shown, never what it printed.
+        // The configuration accepted the forge, so it has a row.
+        auto const* const provider = findProvider(_config->sources().providers, first.forge);
+        auto const forge = provider != nullptr ? provider->name : forgeName(first.forge);
+        if (judgement.verdict == Verdict::CwdMissing)
+            lines.push_back(line(std::format("{}: {} does not exist", first.name, first.path)));
+        else if (outcome.start == StartResult::Refused) // the host's words, not the check's output
+            lines.push_back(
+                line(std::format("{}: the login check could not start: {}", forge, judgement.why)));
+        else if (outcome.completion == Completion::TimedOut)
+            lines.push_back(line(std::format("{}: the login check timed out", forge)));
+        else
+        {
+            // The check fails for an expired token, a locked keyring or a network error as much as for no
+            // login: the line says how to see which, by running the check itself.
+            auto const* const check = provider != nullptr ? findCommand(provider->authCheck) : nullptr;
+            auto how = std::string {};
+            for (auto const word: check != nullptr ? check->argv : std::span<std::string_view const> {})
+                how += how.empty() ? std::string(word) : std::format(" {}", word);
+            lines.push_back(line(std::format("{}: the login check failed (run {})", forge, how)));
+        }
     }
     onListAnswered(out);
 }
@@ -417,7 +435,8 @@ void Engine::onPollResult(std::string_view tag, ProcessOutcome const& outcome, s
     auto const parsed = parsePollTag(tag);
     auto* const state = parsed ? findRepoState(parsed->repo) : nullptr;
     auto const* const repo = parsed ? _config->findRepo(parsed->repo) : nullptr;
-    auto const* const provider = repo != nullptr ? findProvider(repo->forge) : nullptr;
+    auto const* const provider =
+        repo != nullptr ? findProvider(_config->sources().providers, repo->forge) : nullptr;
     if (state == nullptr || provider == nullptr)
         return;
     auto& lines = _pollProblems[std::string(tag)];

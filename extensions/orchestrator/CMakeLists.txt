@@ -54,6 +54,9 @@ add_library(orchestrator_core STATIC
     core/GitHub.cpp
     core/GitHub.hpp
     core/GitHubJson.hpp
+    core/GitLab.cpp
+    core/GitLab.hpp
+    core/GitLabJson.hpp
     core/Hooks.cpp
     core/Hooks.hpp
     core/HooksJson.hpp
@@ -78,6 +81,7 @@ add_library(orchestrator_core STATIC
     core/RunJson.hpp
     core/Sanitize.cpp
     core/Sanitize.hpp
+    core/Spelling.hpp
     core/Transcript.cpp
     core/Transcript.hpp
     core/TranscriptJson.hpp
@@ -144,6 +148,7 @@ if(ORCHESTRATOR_TESTING)
         core/FailureWords_test.cpp
         core/Finished_test.cpp
         core/GitHub_test.cpp
+        core/GitLab_test.cpp
         core/JsonPrefix_test.cpp
         core/Naming_test.cpp
         core/OperationState_test.cpp

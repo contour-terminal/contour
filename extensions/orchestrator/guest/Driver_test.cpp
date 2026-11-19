@@ -803,6 +803,25 @@ TEST_CASE("load takes a finished result in contiguous pages", "[guest]")
     CHECK(host.startsOf("gh-prs") == 0);
 }
 
+TEST_CASE("an auth check's output is released unread", "[guest]")
+{
+    auto host = FakeGuestHost {};
+    auto const handle = host.addFinished("poll/auth", "gh-auth", 1, "token gho_secret");
+    auto observer = RecordingObserver {};
+
+    [[maybe_unused]] auto const driver = Driver::load(host, host.ids, configJson(), hostInfo(), observer);
+
+    CHECK(std::ranges::none_of(host.calls,
+                               [](std::string const& call) { return call.starts_with("procTake"); }));
+    CHECK(std::ranges::contains(host.calls, std::format("procRelease {}", handle)));
+    REQUIRE(observer.starts.size() == 1);
+    REQUIRE(observer.starts.front().finished.size() == 1);
+    auto const& outcome = observer.starts.front().finished.front().outcome;
+    CHECK(outcome.exitCode == 1);
+    CHECK(outcome.stdoutText.empty());
+    CHECK(outcome.stderrText.empty());
+}
+
 TEST_CASE("load lists running processes as in flight", "[guest]")
 {
     auto host = FakeGuestHost {};

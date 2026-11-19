@@ -16,6 +16,7 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Overloaded.hpp>
 #include <orchestrator/view/Theme.hpp>
 
@@ -139,11 +140,19 @@ namespace
         }
     }
 
-    /// @return What a finished process left, as the engine takes it.
-    [[nodiscard]] ProcessOutcome takeOutcome(IGuestHost& host, uint32_t handle, ProcResult const& result)
+    /// @return What a finished process left, as the engine takes it; for a command whose output is not read
+    ///         (an auth check's may hold a token), only how it ended, its output released unread.
+    /// @param process A process the host lists as finished.
+    [[nodiscard]] ProcessOutcome takeOutcome(IGuestHost& host, ProcInfo const& process)
     {
-        auto standardOutput = takeStream(host, handle, ProcStream::Stdout);
-        auto standardError = takeStream(host, handle, ProcStream::Stderr);
+        auto const& result = *process.result;
+        auto const* const command = findCommand(process.command);
+        auto const output = command != nullptr ? command->output : OutputUse::Read;
+        auto const read = [&](ProcStream stream) {
+            return output == OutputUse::Read ? takeStream(host, process.handle, stream) : TakenStream {};
+        };
+        auto standardOutput = read(ProcStream::Stdout);
+        auto standardError = read(ProcStream::Stderr);
         auto const truncated = std::ranges::contains(
             std::array {
                 result.stdoutExtent, result.stderrExtent, standardOutput.extent, standardError.extent },
@@ -332,8 +341,7 @@ Driver Driver::load(IGuestHost& host,
                 inFlight.push_back(process.tag);
                 continue;
             }
-            finished.push_back(FinishedResult {
-                .tag = process.tag, .outcome = takeOutcome(host, process.handle, *process.result) });
+            finished.push_back(FinishedResult { .tag = process.tag, .outcome = takeOutcome(host, process) });
             taken.push_back(process.handle);
         }
     }
@@ -689,7 +697,7 @@ void Driver::consumeFinished()
     {
         if (!process.result || _consumed.contains(process.handle))
             continue;
-        auto outcome = takeOutcome(_host, process.handle, *process.result);
+        auto outcome = takeOutcome(_host, process);
         step(ProcessFinished { .tag = process.tag, .outcome = std::move(outcome), .monoMs = nowMs() });
         release(process.handle);
         stepReplies();

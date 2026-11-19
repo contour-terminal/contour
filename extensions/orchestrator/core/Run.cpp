@@ -355,11 +355,17 @@ namespace
                                            std::string_view Provider::* role,
                                            std::vector<Argument> arguments)
     {
-        auto const* const provider = findProvider(run.forge);
+        auto const* const provider = findProvider(context.providers, run.forge);
         if (provider == nullptr)
         {
             run.state = std::move(next);
             return advance(run, CommandFailed { NoProvider }, context);
+        }
+        // The host would refuse a command the manifest does not declare; the step says why instead.
+        if (provider->verification != Verification::Recorded)
+        {
+            run.state = std::move(next);
+            return advance(run, CommandFailed { unrecordedText(*provider) }, context);
         }
         return enterCommand(run, context, std::move(next), provider->*role, std::move(arguments));
     }

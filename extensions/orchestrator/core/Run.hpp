@@ -12,6 +12,7 @@
 
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/Provider.hpp>
 
 namespace orchestrator
 {
@@ -334,6 +335,8 @@ struct StepContext
         CheckoutUnknown::Unavailable; ///< Why mainCheckout is nullopt; not read while it is known.
     uint64_t wallMs = 0;              ///< Now, in wall-clock milliseconds.
     uint64_t monoMs = 0;              ///< Now, in monotonic milliseconds: what a change is stamped with.
+    /// The provider rows the configuration was read with; a step never runs an Unmeasured row's command.
+    std::span<Provider const> providers = orchestrator::providers();
 };
 
 /// The most characters an entry or a reason keeps, once sanitised.

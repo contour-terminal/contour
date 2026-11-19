@@ -227,12 +227,30 @@ namespace
         "{path}"sv,  "--page"sv, "{page}"sv,     "--format"sv,  "{format}"sv,  "--json"sv,
     };
 
+    // GitLab, through `glab`: written from its documentation and Unmeasured until its output is recorded, so
+    // none of them is in the manifest yet. `glab` prints the
+    // REST API's objects unprojected (`-F json`); it has no `--jq`.
+    constexpr auto GlabAuthArgv = std::array { "glab"sv, "auth"sv, "status"sv };
+    constexpr auto GlabDefaultBranchArgv = std::array { "glab"sv, "repo"sv, "view"sv, "-F"sv, "json"sv };
+    constexpr auto GlabMrsArgv = std::array {
+        "glab"sv, "mr"sv, "list"sv, "--author=@me"sv, "--per-page"sv, "100"sv, "-F"sv, "json"sv,
+    };
+    constexpr auto GlabIssuesArgv = std::array {
+        "glab"sv,     "issue"sv,   "list"sv, "--assignee=@me"sv, "--per-page"sv, "100"sv,
+        "--search"sv, "{query}"sv, "-F"sv,   "json"sv,
+    };
+    constexpr auto GlabMrCheckoutArgv =
+        std::array { "glab"sv, "mr"sv, "checkout"sv, "{number}"sv, "--branch"sv, "{branch}"sv };
+
     constexpr auto CommandTable = std::array {
+        // An auth check's exit status is all that counts: what it prints may hold a token.
         CommandDecl { .name = "gh-auth",
                       .timeout = Timeout::Short,
                       .root = Root::Repos,
                       .argv = GhAuthArgv,
-                      .environment = {} },
+                      .environment = {},
+                      .verification = Verification::Recorded,
+                      .output = OutputUse::ExitStatusOnly },
         CommandDecl { .name = "gh-default-branch",
                       .timeout = Timeout::Short,
                       .root = Root::Repos,
@@ -322,6 +340,37 @@ namespace
                       .root = Root::Worktrees,
                       .argv = AgentTranscriptArgv,
                       .environment = {} },
+        CommandDecl { .name = "glab-auth",
+                      .timeout = Timeout::Short,
+                      .root = Root::Repos,
+                      .argv = GlabAuthArgv,
+                      .environment = {},
+                      .verification = Verification::Unmeasured,
+                      .output = OutputUse::ExitStatusOnly },
+        CommandDecl { .name = "glab-default-branch",
+                      .timeout = Timeout::Short,
+                      .root = Root::Repos,
+                      .argv = GlabDefaultBranchArgv,
+                      .environment = {},
+                      .verification = Verification::Unmeasured },
+        CommandDecl { .name = "glab-mrs",
+                      .timeout = Timeout::Long,
+                      .root = Root::Repos,
+                      .argv = GlabMrsArgv,
+                      .environment = {},
+                      .verification = Verification::Unmeasured },
+        CommandDecl { .name = "glab-issues",
+                      .timeout = Timeout::Long,
+                      .root = Root::Repos,
+                      .argv = GlabIssuesArgv,
+                      .environment = {},
+                      .verification = Verification::Unmeasured },
+        CommandDecl { .name = "glab-mr-checkout",
+                      .timeout = Timeout::Long,
+                      .root = Root::Worktrees,
+                      .argv = GlabMrCheckoutArgv,
+                      .environment = {},
+                      .verification = Verification::Unmeasured },
     };
 
     // }}}
@@ -352,6 +401,26 @@ namespace
             text += word;
         }
         return text;
+    }
+
+    /// @return Whether @p decl reaches the manifest.
+    [[nodiscard]] constexpr bool isDeclared(CommandDecl const& decl) noexcept
+    {
+        return decl.verification == Verification::Recorded;
+    }
+
+    /// @return Whether a declared command or a pane names the argument @p name: an argument nothing in the
+    ///         manifest uses is left out of it.
+    [[nodiscard]] bool isNamedInManifest(std::string_view name) noexcept
+    {
+        auto const names = [&](std::span<std::string_view const> argv) {
+            return std::ranges::any_of(argv,
+                                       [&](std::string_view word) { return placeholderName(word) == name; });
+        };
+        return std::ranges::any_of(
+                   CommandTable,
+                   [&](CommandDecl const& decl) { return isDeclared(decl) && names(decl.argv); })
+               || std::ranges::any_of(PaneTable, [&](PaneDecl const& decl) { return names(decl.argv); });
     }
 
     /// Concatenates @p parts.
@@ -493,11 +562,14 @@ std::vector<std::string> manifestLines()
                                  decl.pointer }));
     for (auto const root: ReadableRoots)
         lines.push_back(concat({ "read ", manifestLabel(root) }));
-    for (auto const& decl: ArgumentTable)
+    for (auto const& decl: ArgumentTable | std::views::filter([](ArgumentDecl const& argument) {
+                               return isNamedInManifest(argument.name);
+                           }))
         lines.push_back(concat({ "arg ", decl.name, " = ", kindLabel(decl) }));
     for (auto const& variable: CommandEnvironmentTable)
         lines.push_back(concat({ "command-env ", variable.name, " = ", variable.value }));
-    for (auto const& decl: CommandTable)
+    auto declared = CommandTable | std::views::filter(isDeclared);
+    for (auto const& decl: declared)
         lines.push_back(concat({ "command ",
                                  decl.name,
                                  " ",
@@ -506,7 +578,7 @@ std::vector<std::string> manifestLines()
                                  manifestLabel(decl.root),
                                  " = ",
                                  joined(decl.argv) }));
-    for (auto const& decl: CommandTable)
+    for (auto const& decl: declared)
         for (auto const& variable: decl.environment)
             lines.push_back(
                 concat({ "command-env-for ", decl.name, " ", variable.name, " = ", variable.value }));

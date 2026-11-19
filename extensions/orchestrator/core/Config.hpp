@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/Provider.hpp>
 
 namespace orchestrator
 {
@@ -85,6 +86,8 @@ enum class ConfigProblem : uint8_t
     UnlistedModel,          ///< A task's model is not one of `models`.
     UnknownForge,           ///< Not a forge any provider stands for.
     UnsupportedSource,      ///< An issue source other than `forge`.
+    Unrecorded,             ///< A forge or issue source whose tool's output was never recorded
+                            ///< (Verification::Unmeasured).
     UnknownItemKind,        ///< An `applies_to` other than `pr` or `issue`.
     Zero,                   ///< A limit of 0.
     NotADuration,           ///< Not a duration such as `90s`, `2m`, `1h`, `30d` or `0`.
@@ -98,8 +101,18 @@ enum class ConfigProblem : uint8_t
 struct ConfigError
 {
     std::string key; ///< Where, such as `repos[0].remote`; empty when the document as a whole is at fault.
-    ConfigProblem problem; ///< What is wrong there.
+    ConfigProblem problem;    ///< What is wrong there.
+    std::string subject = {}; ///< What the problem is about, where its message names it, such as `GitLab`.
 };
+
+/// The rows a configuration may name: which forges and issue sources exist, and which of them were recorded.
+struct SourceTables
+{
+    std::span<Provider const> providers; ///< The forges.
+};
+
+/// @return The tables the extension ships: providers().
+[[nodiscard]] SourceTables sourceTables() noexcept;
 
 /// @param problem A configuration problem.
 /// @return What it means, as one sentence the user reads after the key.
@@ -131,9 +144,11 @@ class Config
     /// Reads and validates the configuration.
     /// @param json The `config` subtree, as the host converted it to JSON.
     /// @param host What the host resolved: the paths, one per repository, and the worktree root.
+    /// @param sources The forges a repository may name; one whose row is Unmeasured is refused.
     /// @return The configuration, or the first problem found and where.
     [[nodiscard]] static std::expected<Config, ConfigError> parse(std::string_view json,
-                                                                  HostInfo const& host);
+                                                                  HostInfo const& host,
+                                                                  SourceTables const& sources);
 
     /// @return The resolved directory under which every agent's worktree lies.
     [[nodiscard]] std::string const& worktreeRoot() const noexcept { return _worktreeRoot; }
@@ -153,6 +168,8 @@ class Config
     [[nodiscard]] std::span<Repo const> repos() const noexcept { return _repos; }
     /// @return The tasks, in the configured order.
     [[nodiscard]] std::span<TaskDef const> tasks() const noexcept { return _tasks; }
+    /// @return The forges and issue sources it was read with: the rows its repositories are served by.
+    [[nodiscard]] SourceTables const& sources() const noexcept { return _sources; }
 
     /// @param name A repository name.
     /// @return The repository of that name, or nullptr.
@@ -177,6 +194,7 @@ class Config
         std::chrono::milliseconds finishedRetention = DefaultFinishedRetention;
         std::vector<Repo> repos = {};
         std::vector<TaskDef> tasks = {};
+        SourceTables sources = {};
     };
 
     explicit Config(Values values) noexcept;
@@ -190,6 +208,7 @@ class Config
     std::chrono::milliseconds _finishedRetention;
     std::vector<Repo> _repos;
     std::vector<TaskDef> _tasks;
+    SourceTables _sources;
 };
 
 /// Reads a duration: a number of 1 to 9 digits followed by one unit, `s`, `m`, `h` or `d`; or a bare `0`.

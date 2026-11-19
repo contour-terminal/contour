@@ -28,6 +28,22 @@ struct EnvironmentVariable
     std::string_view value; ///< Its value.
 };
 
+/// Whether a row that talks to a tool was checked against what that tool really prints. Only a Recorded row
+/// reaches the manifest, its digest and the consent dialog, and only a Recorded forge or issue source is
+/// accepted by the configuration: a mapping written from documentation alone is never run.
+enum class Verification : uint8_t
+{
+    Unmeasured, ///< Written from the tool's documentation; its output was never recorded.
+    Recorded,   ///< Its mapping is tested against output recorded from the tool itself.
+};
+
+/// What the engine makes of a finished command's output.
+enum class OutputUse : uint8_t
+{
+    Read,           ///< Its output is read and mapped.
+    ExitStatusOnly, ///< Only whether it succeeded counts: its output is released unread, never kept or shown.
+};
+
 /// A typed argument: what a `{name}` placeholder may be replaced with.
 struct ArgumentDecl
 {
@@ -46,6 +62,9 @@ struct CommandDecl
     /// Added for this command only, after commandEnvironment(): a variable both name takes this value, so
     /// a GIT_CONFIG_COUNT here replaces the global one and must come with every pair it counts.
     std::span<EnvironmentVariable const> environment;
+    /// Whether it is declared in the manifest: an Unmeasured command is not, so the host refuses to run it.
+    Verification verification = Verification::Recorded;
+    OutputUse output = OutputUse::Read; ///< Whether its output is read at all.
 };
 
 /// A program the extension may put in a tab.
@@ -157,8 +176,9 @@ struct ActionDecl
 [[nodiscard]] std::string shellQuoted(std::span<std::string const> argv);
 
 /// The manifest lines the tables declare: every root, read, arg, command-env, command, command-env-for,
-/// pane, pane-env, serve and action line, in that order and each kind in table order. The manifest is these
-/// lines after its fixed `name`, `version`, `title` and `placement` lines.
+/// pane, pane-env, serve and action line, in that order and each kind in table order. A command whose
+/// verification is Unmeasured is left out, and so is an argument that no command left in and no pane names.
+/// The manifest is these lines after its fixed `name`, `version`, `title` and `placement` lines.
 /// @return One string per line, without line ends.
 [[nodiscard]] std::vector<std::string> manifestLines();
 

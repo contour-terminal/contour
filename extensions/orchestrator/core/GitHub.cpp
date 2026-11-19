@@ -17,9 +17,9 @@
 #include <orchestrator/core/ArgumentKinds.hpp>
 #include <orchestrator/core/GitHubJson.hpp>
 #include <orchestrator/core/Json.hpp>
-#include <orchestrator/core/JsonPrefix.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Sanitize.hpp>
+#include <orchestrator/core/Spelling.hpp>
 
 using namespace std::string_view_literals;
 
@@ -84,24 +84,6 @@ namespace
         return json::readDocument<ReadOptions, T>(text);
     }
 
-    /// One row of a table that names what a string from `gh` means.
-    template <typename Meaning>
-    struct Spelling
-    {
-        std::string_view text;
-        Meaning meaning;
-    };
-
-    /// @return The meaning of @p text in @p table, or @p fallback if no row spells it.
-    template <typename Meaning, std::size_t N>
-    constexpr Meaning meaningOf(std::array<Spelling<Meaning>, N> const& table,
-                                std::string_view text,
-                                Meaning fallback) noexcept
-    {
-        auto const row = std::ranges::find(table, text, &Spelling<Meaning>::text);
-        return row != table.end() ? row->meaning : fallback;
-    }
-
     /// The results of a completed CheckRun this mapping knows; any other is Pending.
     constexpr auto CheckRunConclusions = std::array {
         Spelling { .text = "SUCCESS"sv, .meaning = CiState::Passing },
@@ -158,36 +140,11 @@ namespace
                        .name = name.empty() ? textOf(json.context) : name };
     }
 
-    /// @return Whether the forge listed as many entries as were asked for, so that there may be more.
-    constexpr ListCompleteness completenessOf(std::size_t entries) noexcept
-    {
-        return entries >= ListLimit ? ListCompleteness::AtLimit : ListCompleteness::Complete;
-    }
-
-    /// The entries a list command printed, and whether there may be more.
-    template <typename T>
-    struct ReadList
-    {
-        std::vector<T> entries;
-        ListCompleteness completeness = ListCompleteness::Complete;
-    };
-
     /// Reads a list command's output: a whole one as it is, a cut one as the entries before the cut.
-    /// @return The entries; NotJson for a cut output that closes no entry.
     template <typename T>
-    std::expected<ReadList<T>, ParseError> readList(std::string_view text, OutputExtent extent)
+    std::expected<json::ReadList<T>, ParseError> readList(std::string_view text, OutputExtent extent)
     {
-        if (extent == OutputExtent::Whole)
-            return readJson<std::vector<T>>(text).transform([](std::vector<T> entries) {
-                auto const completeness = completenessOf(entries.size());
-                return ReadList<T> { .entries = std::move(entries), .completeness = completeness };
-            });
-        auto const prefix = json::closedArrayPrefix(text);
-        if (!prefix)
-            return std::unexpected(ParseError::NotJson);
-        return readJson<std::vector<T>>(*prefix).transform([](std::vector<T> entries) {
-            return ReadList<T> { .entries = std::move(entries), .completeness = ListCompleteness::Cut };
-        });
+        return json::readList<ReadOptions, T>(text, extent);
     }
 
     /// @return The repository part of a forge URL, `https://<host>/<owner>/<repository>/`; empty if @p url

@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 
+#include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Model.hpp>
 
 namespace orchestrator
@@ -38,6 +39,9 @@ struct Provider
     MapChangeRequests changeRequests;   ///< Reads listChangeRequests' output.
     MapIssues issues;                   ///< Reads listIssues' output.
     MapDefaultBranch defaultBranchOf;   ///< Reads defaultBranch's output.
+    /// Whether its mappings were tested against recorded output: the configuration accepts only a Recorded
+    /// forge, and each command the row names carries the same verification.
+    Verification verification = Verification::Unmeasured;
 };
 
 /// Every provider, one row per forge.
@@ -46,5 +50,15 @@ struct Provider
 /// @param forge A forge.
 /// @return Its row, or nullptr if no provider stands for it yet.
 [[nodiscard]] Provider const* findProvider(Forge forge) noexcept;
+
+/// @param rows Provider rows, such as a Config's sources().
+/// @param forge A forge.
+/// @return Its row in @p rows, or nullptr if none stands for it.
+[[nodiscard]] Provider const* findProvider(std::span<Provider const> rows, Forge forge) noexcept;
+
+/// What a step that would run an Unmeasured provider's command fails with, before asking the host.
+/// @param provider A provider row.
+/// @return Such as "not yet supported: GitLab has no recorded fixture".
+[[nodiscard]] std::string unrecordedText(Provider const& provider);
 
 } // namespace orchestrator

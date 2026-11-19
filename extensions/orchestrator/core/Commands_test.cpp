@@ -1017,6 +1017,26 @@ TEST_CASE("agent-transcript runs in the worktree root", "[orchestrator][commands
         "{session} --cwd {path} --page {page} --format {format} --json"sv));
 }
 
+TEST_CASE("unmeasured commands are not in the manifest", "[orchestrator][commands][manifest]")
+{
+    auto const lines = manifestLines();
+    auto unmeasured = 0;
+    for (auto const& decl: commands())
+    {
+        CAPTURE(decl.name);
+        auto const declared = std::ranges::any_of(lines, [&](std::string const& line) {
+            return line.starts_with(std::format("command {} ", decl.name));
+        });
+        CHECK(declared == (decl.verification == Verification::Recorded));
+        if (decl.verification == Verification::Unmeasured)
+            ++unmeasured;
+    }
+    // GitLab's five, until their output is recorded.
+    CHECK(unmeasured == 5);
+    CHECK(std::ranges::none_of(lines, [](std::string const& line) { return line.contains("glab"); }));
+    CHECK(manifestText() == readFixture(FixtureRoot::Contract, "manifest-v2/valid/orchestrator.manifest"));
+}
+
 TEST_CASE("the manifest-v2 corpus", "[orchestrator][commands][manifest][corpus]")
 {
     SECTION("each file gets the verdict it pins")

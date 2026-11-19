@@ -102,6 +102,9 @@ struct StartContext
     std::vector<FinishedResult> finished;           ///< The commands that finished while the guest was away.
     std::vector<PaneFact> panes;                    ///< The listed panes tagged with a run, listed now.
     PaneListing paneListing = PaneListing::Unknown; ///< Where the tags of @ref panes come from.
+    /// The forges and issue sources the configuration may name: the shipped ones, unless a test marks one
+    /// Recorded.
+    SourceTables sources = sourceTables();
 };
 
 // {{{ inputs

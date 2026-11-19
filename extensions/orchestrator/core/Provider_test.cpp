@@ -6,8 +6,10 @@
 #include <format>
 #include <set>
 #include <string_view>
+#include <vector>
 
 #include <orchestrator/core/Commands.hpp>
+#include <orchestrator/core/Config.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Provider.hpp>
 
@@ -40,23 +42,56 @@ constexpr auto CommandRoles = std::array {
 /// The commands whose `--limit` ListLimit must equal: AtLimit is only true if both say the same number.
 constexpr auto LimitedRoles = std::array { "listChangeRequests"sv, "listIssues"sv };
 
+/// How a tool spells the most entries a list asks for: `gh` and `acli` say `--limit`, `glab` `--per-page`.
+constexpr auto LimitFlags = std::array { "--limit"sv, "--per-page"sv };
+
 } // namespace
 
-TEST_CASE("Provider.github_names_only_declared_commands", "[provider]")
+TEST_CASE("every provider names declared commands", "[provider]")
 {
-    auto const* github = findProvider(Forge::GitHub);
-    REQUIRE(github != nullptr);
-    CHECK(github->forge == Forge::GitHub);
-    CHECK(github->name == "GitHub");
-    CHECK(github->changeRequests != nullptr);
-    CHECK(github->issues != nullptr);
-    CHECK(github->defaultBranchOf != nullptr);
-
-    for (auto const& row: CommandRoles)
+    CHECK(providers().size() == 2);
+    for (auto const& provider: providers())
     {
-        auto const name = row.of(*github);
-        CAPTURE(row.role, name);
-        CHECK(findCommand(name) != nullptr);
+        CAPTURE(provider.name);
+        CHECK(provider.changeRequests != nullptr);
+        CHECK(provider.issues != nullptr);
+        CHECK(provider.defaultBranchOf != nullptr);
+        for (auto const& row: CommandRoles)
+        {
+            auto const name = row.of(provider);
+            CAPTURE(row.role, name);
+            CHECK(findCommand(name) != nullptr);
+        }
+    }
+}
+
+TEST_CASE("a provider's commands share its verification", "[provider]")
+{
+    for (auto const& provider: providers())
+    {
+        for (auto const& row: CommandRoles)
+        {
+            auto const name = row.of(provider);
+            CAPTURE(provider.name, row.role, name);
+            auto const* const command = findCommand(name);
+            REQUIRE(command != nullptr);
+            // git's commands, which every forge's row shares, are Recorded: their output is not the forge's.
+            if (command->argv.front() != "git")
+                CHECK(command->verification == provider.verification);
+            else
+                CHECK(command->verification == Verification::Recorded);
+        }
+    }
+}
+
+TEST_CASE("an auth check's output is never read", "[provider]")
+{
+    for (auto const& provider: providers())
+    {
+        CAPTURE(provider.name);
+        auto const* const command = findCommand(provider.authCheck);
+        REQUIRE(command != nullptr);
+        CHECK(command->output == OutputUse::ExitStatusOnly);
     }
 }
 
@@ -99,7 +134,7 @@ TEST_CASE("Provider.list_commands_ask_for_ListLimit", "[provider]")
             CAPTURE(provider.name, role, name);
             auto const* command = findCommand(name);
             REQUIRE(command != nullptr);
-            auto const flag = std::ranges::find(command->argv, "--limit"sv);
+            auto const flag = std::ranges::find_first_of(command->argv, LimitFlags);
             REQUIRE(flag != command->argv.end());
             REQUIRE(std::next(flag) != command->argv.end());
             CHECK(*std::next(flag) == limit);
@@ -118,7 +153,35 @@ TEST_CASE("Provider.one_row_per_forge", "[provider]")
     }
 }
 
-TEST_CASE("Provider.gitlab_has_no_row_yet", "[provider]")
+TEST_CASE("an unmeasured forge is refused by the configuration", "[provider]")
 {
-    CHECK(findProvider(Forge::GitLab) == nullptr);
+    auto const* const gitlab = findProvider(Forge::GitLab);
+    REQUIRE(gitlab != nullptr);
+    CHECK(gitlab->verification == Verification::Unmeasured);
+
+    constexpr auto Json = R"({ "worktree_root": "~/worktrees",
+  "repos": [ { "path": "~/repo/contour", "forge": "gitlab" } ],
+  "tasks": [ { "id": "issue", "key": "w", "label": "work on issue", "applies_to": "issue", "model": "opus",
+               "prompt": "/contour-workflows:work-issue {url}" } ] })"sv;
+    auto const host = HostInfo { .home = "/home/u",
+                                 .worktreeRoot = "/home/u/worktrees",
+                                 .repoPaths = { "/home/u/repo/contour" },
+                                 .utcOffsetMinutes = 0 };
+    auto const config = Config::parse(Json, host, sourceTables());
+    REQUIRE(!config);
+    CHECK(config.error().key == "repos[0].forge");
+    CHECK(config.error().problem == ConfigProblem::Unrecorded);
+    CHECK(message(config.error()) == "repos[0].forge: is not yet supported: GitLab has no recorded fixture");
+    // The forges a configuration may name are the Recorded ones.
+    CHECK(describe(ConfigProblem::UnknownForge) == "is not a supported forge: github");
+
+    SECTION("a Recorded row is accepted")
+    {
+        auto recorded = std::vector<Provider>(providers().begin(), providers().end());
+        for (auto& row: recorded)
+            row.verification = Verification::Recorded;
+        auto const accepted = Config::parse(Json, host, SourceTables { .providers = recorded });
+        REQUIRE(accepted);
+        CHECK(accepted->repos().front().forge == Forge::GitLab);
+    }
 }

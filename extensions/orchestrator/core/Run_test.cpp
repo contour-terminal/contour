@@ -2221,6 +2221,10 @@ TEST_CASE("a tab id that is no name fails the opening", "[orchestrator][run]")
 
 TEST_CASE("preparation runs what the provider row of the run's forge names", "[orchestrator][run]")
 {
+    /// A forge no provider row stands for: every forge has a row now, so a stored value past the last one,
+    /// as a newer version might have written it.
+    constexpr auto UnlistedForge =
+        static_cast<orchestrator::Forge>(std::to_underlying(orchestrator::Forge::GitLab) + 1);
     /// Where the run starts from.
     enum class From : uint8_t
     {
@@ -2249,14 +2253,27 @@ TEST_CASE("preparation runs what the provider row of the run's forge names", "[o
               .effects = "persist, run git-worktree-add path base",
               .state = "Preparing(worktree-add)",
               .failure = "" },
-        Row { .name = "a forge without a row runs nothing",
+        // GitLab's row is Unmeasured: its commands are not in the manifest, so the host is never asked.
+        Row { .name = "an unmeasured forge runs nothing",
               .forge = orchestrator::Forge::GitLab,
+              .from = From::Dispatch,
+              .effects = "persist",
+              .state = "Finished(preparation-failed, removed, new)",
+              .failure = "fetch: not yet supported: GitLab has no recorded fixture" },
+        Row { .name = "an unmeasured forge checks what the fetch left",
+              .forge = orchestrator::Forge::GitLab,
+              .from = From::FetchDone,
+              .effects = "persist, read-git-file",
+              .state = "Ending(verify, preparation-failed)",
+              .failure = "worktree-add: not yet supported: GitLab has no recorded fixture" },
+        Row { .name = "a forge without a row runs nothing",
+              .forge = UnlistedForge,
               .from = From::Dispatch,
               .effects = "persist",
               .state = "Finished(preparation-failed, removed, new)",
               .failure = "fetch: no provider stands for the repository's forge" },
         Row { .name = "a forge without a row checks what the fetch left",
-              .forge = orchestrator::Forge::GitLab,
+              .forge = UnlistedForge,
               .from = From::FetchDone,
               .effects = "persist, read-git-file",
               .state = "Ending(verify, preparation-failed)",

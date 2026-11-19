@@ -121,7 +121,7 @@ struct Input
 
 [[nodiscard]] std::expected<Config, ConfigError> parse(Input const& input)
 {
-    return Config::parse(documentOf(input), hostOf(input));
+    return Config::parse(documentOf(input), hostOf(input), sourceTables());
 }
 
 } // namespace
@@ -289,7 +289,7 @@ constexpr auto RejectRows = std::array {
     RejectRow { "a repository without a path", { .find = R"("path": "~/repo/contour",)", .replace = "" }, "repos[0].path", ConfigProblem::Missing },
     RejectRow { "a repository without a forge", { .find = R"("forge": "github",)", .replace = "" }, "repos[0].forge", ConfigProblem::Missing },
     RejectRow { "forge: bitbucket", { .find = R"("github")", .replace = R"("bitbucket")" }, "repos[0].forge", ConfigProblem::UnknownForge },
-    RejectRow { "forge: gitlab has no provider yet", { .find = R"("github")", .replace = R"("gitlab")" }, "repos[0].forge", ConfigProblem::UnknownForge },
+    RejectRow { "forge: gitlab has no recorded output", { .find = R"("github")", .replace = R"("gitlab")" }, "repos[0].forge", ConfigProblem::Unrecorded },
     RejectRow { "a remote that is no Name", { .find = R"("origin")", .replace = R"("-origin")" }, "repos[0].remote", ConfigProblem::NotAName },
     RejectRow { "a base that is no Ref", { .find = R"("remote": "origin",)", .replace = R"("remote": "origin", "base": "a..b",)" }, "repos[0].base", ConfigProblem::NotARef },
     RejectRow { "an issue source other than forge", { .find = R"("source": "forge")", .replace = R"("source": "jira")" }, "repos[0].issues[0].source", ConfigProblem::UnsupportedSource },
