@@ -344,6 +344,52 @@ TEST_CASE("colouring a tab repaints its sidebar row", "[contour][sidebar][contro
     CHECK(tabColorOfRow().alpha() == 0);
 }
 
+TEST_CASE("the sidebar lists a workspace's tabs in the tab bar's order", "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    auto const made = contour::test::createSessionTabs(manager, *window, 3);
+    auto const a = made.tabs[0].value;
+    auto const b = made.tabs[1].value;
+    auto const c = made.tabs[2].value;
+    window->activateTab(0);
+    QCoreApplication::processEvents();
+
+    // The sidebar's tab rows, as they stand: no refresh is forced, so a move nobody announced shows.
+    auto const sidebarTabs = [&] {
+        return std::ranges::to<std::vector>(
+            window->sidebar().rows()
+            | std::views::filter([](auto const& row) { return row.key.kind == SidebarRowKind::Tab; })
+            | std::views::transform([](auto const& row) { return row.key.tab; }));
+    };
+    // The tab bar's order: the model's tabs of the displayed workspace, row by row.
+    auto const stripTabs = [&] {
+        auto const* const shown = manager.model().workspace(window->displayedWorkspace());
+        return std::ranges::to<std::vector>(
+            std::views::iota(0, shown->tabCount())
+            | std::views::transform([&](int i) { return shown->tabAt(i)->id().value; }));
+    };
+    window->sidebar().refreshNow();
+    REQUIRE(sidebarTabs() == std::vector<uint64_t> { a, b, c });
+
+    SECTION("a move that leaves the active tab where it was")
+    {
+        manager.moveTab(window->displayedWorkspace(), 2, 1);
+        QCoreApplication::processEvents();
+        CHECK(stripTabs() == std::vector<uint64_t> { a, c, b });
+        CHECK(sidebarTabs() == stripTabs());
+    }
+    SECTION("a move of the active tab itself")
+    {
+        manager.moveTab(window->displayedWorkspace(), 0, 2);
+        QCoreApplication::processEvents();
+        CHECK(stripTabs() == std::vector<uint64_t> { b, c, a });
+        CHECK(sidebarTabs() == stripTabs());
+    }
+}
+
 TEST_CASE("the sidebar is told whether anyone can see it", "[contour][sidebar][controller]")
 {
     auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
@@ -718,7 +764,9 @@ struct SplitTab
 
 /// Checks that a split put a new leaf beside @p split's @p divided, leaving the other pane's leaf where it
 /// was.
-void checkSplitBeside(contour::session::TerminalSessionManager& manager, SplitTab const& split, PaneKey divided)
+void checkSplitBeside(contour::session::TerminalSessionManager& manager,
+                      SplitTab const& split,
+                      PaneKey divided)
 {
     auto const other = divided == split.a ? split.b : split.a;
     REQUIRE(manager.model().findTab(split.tab)->paneCount() == 3);
