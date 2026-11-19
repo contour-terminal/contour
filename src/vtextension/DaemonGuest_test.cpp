@@ -494,6 +494,12 @@ class MeasuredServices final: public IDaemonHostServices
         return std::unexpected(HostError::NotSupportedYet);
     }
 
+    [[nodiscard]] std::expected<void, HostError> paneReveal(std::string_view /*pane*/,
+                                                            Origin /*origin*/) override
+    {
+        return std::unexpected(HostError::NotSupportedYet);
+    }
+
     /// No file is read in a measurement: the read answers as an unserved import would.
     [[nodiscard]] std::expected<FileContent, FileError> fileRead(std::string_view /*root*/,
                                                                  std::string_view /*path*/) override

@@ -130,10 +130,9 @@ struct UnservedRow
 
 using HostResult = std::expected<void, HostError>;
 
-/// Every import DaemonImportRows declares NotSupportedYet, with its WIT result.
-constexpr auto UnservedRows = std::array {
-    UnservedRow { DaemonImport::PaneReveal, &holdsNotSupportedYet<HostResult> },
-};
+/// Every import DaemonImportRows declares NotSupportedYet, with its WIT result (holdsNotSupportedYet<it>):
+/// none, as this host serves every import.
+constexpr auto UnservedRows = std::array<UnservedRow, 0> {};
 
 /// The imports this host serves for served tabs and invoked actions.
 constexpr auto TabAndActionImports = std::array {
@@ -342,8 +341,8 @@ TEST_CASE("DaemonInstance: the tab and action imports are served", "[daemon][ins
         CAPTURE(DaemonImportRows.at(std::to_underlying(import)).name);
         CHECK(DaemonImportRows.at(std::to_underlying(import)).availability == ImportAvailability::Served);
     }
-    // Every row is served exactly when its handler serves it (a static_assert in DaemonInstance.cpp); of the
-    // 24, only the one below waits for a later phase.
+    // Every row is served exactly when its handler serves it (a static_assert in DaemonInstance.cpp); all 24
+    // are.
     CHECK(std::ranges::count(DaemonImportRows, ImportAvailability::Served, &DaemonImportRow::availability)
           == static_cast<std::ptrdiff_t>(DaemonImportRows.size() - UnservedRows.size()));
 
@@ -404,9 +403,10 @@ TEST_CASE("DaemonInstance: the tab and action imports are served", "[daemon][ins
     CHECK(guest.services.tabCloses == std::vector<std::string> { "tab-1" });
 }
 
-TEST_CASE("pane-open, pane-close and panes are served", "[daemon][instance][panes]")
+TEST_CASE("pane-open, pane-close, panes and pane-reveal are served", "[daemon][instance][panes]")
 {
-    for (auto const import: { DaemonImport::PaneOpen, DaemonImport::PaneClose, DaemonImport::Panes })
+    for (auto const import:
+         { DaemonImport::PaneOpen, DaemonImport::PaneClose, DaemonImport::Panes, DaemonImport::PaneReveal })
     {
         CAPTURE(DaemonImportRows.at(std::to_underlying(import)).name);
         CHECK(DaemonImportRows.at(std::to_underlying(import)).availability == ImportAvailability::Served);
@@ -436,6 +436,7 @@ TEST_CASE("pane-open, pane-close and panes are served", "[daemon][instance][pane
     auto openedFar = std::optional<OpenResult> {};
     auto closed = std::optional<HostResult> {};
     auto listed = std::optional<ListResult> {};
+    auto revealed = std::optional<HostResult> {};
     guest.onUpdate = [&](std::span<uint32_t>) -> std::expected<void, wasm::CallFailure> {
         auto memory = FakeInstanceMemory { guest.guest() };
         guest.put(TemplateAddress, "agent");
@@ -486,13 +487,19 @@ TEST_CASE("pane-open, pane-close and panes are served", "[daemon][instance][pane
         closed = *abi::Codec<HostResult>::load(memory, ResultAddress);
         REQUIRE(guest.call(DaemonImport::Panes, { ResultAddress }).has_value());
         listed = *abi::Codec<ListResult>::load(memory, ResultAddress);
+        // pane, origin 7, the result.
+        REQUIRE(guest.call(DaemonImport::PaneReveal, { PaneAddress, 6, 7, ResultAddress }).has_value());
+        revealed = *abi::Codec<HostResult>::load(memory, ResultAddress);
         return {};
     };
     REQUIRE((*instance)->update(DaemonHint::Panes).has_value());
 
     CHECK(guest.services.calls
-          == std::vector {
-              DaemonImport::PaneOpen, DaemonImport::PaneOpen, DaemonImport::PaneClose, DaemonImport::Panes });
+          == std::vector { DaemonImport::PaneOpen,
+                           DaemonImport::PaneOpen,
+                           DaemonImport::PaneClose,
+                           DaemonImport::Panes,
+                           DaemonImport::PaneReveal });
     REQUIRE(guest.services.paneOpens.size() == 2);
     auto const& open = guest.services.paneOpens.front();
     CHECK(open.paneTemplate == "agent");
@@ -509,6 +516,8 @@ TEST_CASE("pane-open, pane-close and panes are served", "[daemon][instance][pane
     CHECK(guest.services.paneCloses == std::vector<std::string> { "pane-9" });
     CHECK(closed == HostResult { std::unexpect, HostError::NotOwned });
     CHECK(listed == guest.services.listedPanes);
+    CHECK(guest.services.paneReveals == std::vector { std::pair { std::string { "pane-9" }, Origin { 7 } } });
+    CHECK(revealed == HostResult { std::unexpect, HostError::NotOwned });
 }
 
 TEST_CASE("DaemonInstance: file-read is served", "[daemon][instance][file-read]")

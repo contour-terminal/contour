@@ -128,6 +128,13 @@ class IDaemonHostServices
     /// @return Each with its tag, status and program; or why they cannot be listed now (`limit`: retry).
     [[nodiscard]] virtual std::expected<std::vector<PaneInfo>, HostError> panes() = 0;
 
+    /// `pane-reveal`: brings a pane the extension opened in front of the origin's window (IPaneService).
+    /// @param pane Its id.
+    /// @param origin The connection the invoked action came from; one the host does not know reveals it where
+    ///               the user looked last.
+    /// @return Nothing; or why it was not revealed.
+    [[nodiscard]] virtual std::expected<void, HostError> paneReveal(std::string_view pane, Origin origin) = 0;
+
     /// `tab-open`: opens the extension's served tab where the origin's window is (IServedTabService).
     /// @param scheme What the tab is served as.
     /// @param origin The connection the invoked action came from.

@@ -133,7 +133,7 @@ inline constexpr auto DaemonImportRows = std::array<DaemonImportRow, 24> {
         "summary-set: func(short: string, detail: string) -> result<_, host-error>", ImportAvailability::Served },
     DaemonImportRow { DaemonImport::PaneReveal, "pane-reveal", 4,
         "pane-reveal: func(pane: string, origin: origin) -> result<_, host-error>",
-        ImportAvailability::NotSupportedYet },
+        ImportAvailability::Served },
     DaemonImportRow { DaemonImport::FileRead, "file-read", 5,
         "file-read: func(root: string, path: string) -> result<file-content, file-error>",
         ImportAvailability::Served },

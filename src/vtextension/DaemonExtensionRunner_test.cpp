@@ -447,7 +447,7 @@ TEST_CASE("DaemonExtensionRunner: destruction with a queued hint is safe", "[dae
     CHECK(harness.retirement.count() == 1);
 }
 
-TEST_CASE("DaemonExtensionRunner: a not-supported-yet import does not fault", "[daemon][runner]")
+TEST_CASE("DaemonExtensionRunner: a not-supported-yet answer does not fault", "[daemon][runner]")
 {
     auto harness = DaemonRunnerHarness {};
     auto answer = std::optional<UnitResult> {};
@@ -467,6 +467,7 @@ TEST_CASE("DaemonExtensionRunner: a not-supported-yet import does not fault", "[
     harness.scheduler.runPending();
 
     CHECK(answer == UnitResult { std::unexpect, HostError::NotSupportedYet });
+    CHECK(harness.panes.reveals.size() == 1); // reached the pane service, which answered it
     CHECK(harness.runner->status().state == DaemonRunnerState::Running);
 }
 
@@ -487,6 +488,7 @@ TEST_CASE(
                                 PaneError::TooMany,
                                 PaneError::HostRefused,
                                 PaneError::NotReconciled,
+                                PaneError::Gone,
                                 PaneError::NotSupportedYet);
     CAPTURE(std::to_underlying(error));
     harness.panes.listAnswer = std::unexpected(error);

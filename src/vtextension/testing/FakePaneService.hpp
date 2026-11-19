@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <vtextension/DaemonWorld.hpp>
@@ -56,16 +57,19 @@ class FakePaneService final: public IPaneService
 
     [[nodiscard]] std::expected<std::vector<PaneInfo>, PaneError> list() override { return listAnswer; }
 
-    [[nodiscard]] std::expected<void, PaneError> reveal(std::string_view /*pane*/, Origin /*origin*/) override
+    [[nodiscard]] std::expected<void, PaneError> reveal(std::string_view pane, Origin origin) override
     {
-        return std::unexpected(PaneError::NotSupportedYet);
+        reveals.emplace_back(std::string { pane }, origin);
+        return revealAnswer;
     }
 
-    std::vector<PaneOpenCall> opens; ///< Every open(), in order.
-    std::vector<std::string> closes; ///< Every close(), in order.
+    std::vector<PaneOpenCall> opens;                     ///< Every open(), in order.
+    std::vector<std::string> closes;                     ///< Every close(), in order.
+    std::vector<std::pair<std::string, Origin>> reveals; ///< Every reveal(), in order.
     std::expected<std::string, PaneError> openAnswer { std::unexpect, PaneError::NotSupportedYet };
     std::expected<void, PaneError> closeAnswer { std::unexpect, PaneError::NotSupportedYet };
     std::expected<std::vector<PaneInfo>, PaneError> listAnswer { std::unexpect, PaneError::NotSupportedYet };
+    std::expected<void, PaneError> revealAnswer { std::unexpect, PaneError::NotSupportedYet };
 };
 
 } // namespace vtextension::testing

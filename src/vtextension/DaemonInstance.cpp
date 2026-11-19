@@ -221,6 +221,16 @@ struct DaemonInstance::HostCalls
         return answer(instance, arguments, instance._services.panes());
     }
 
+    /// `pane-reveal: func(pane: string, origin: origin) -> result<_, host-error>`.
+    static abi::Result<void> paneReveal(DaemonInstance& instance, std::span<uint32_t const> arguments)
+    {
+        auto reader = abi::FlatReader(arguments.first(2));
+        auto const pane = lift<std::string>(instance, reader);
+        if (!pane)
+            return std::unexpected(pane.error());
+        return answer(instance, arguments, instance._services.paneReveal(*pane, arguments[2]));
+    }
+
     /// `tab-open: func(scheme: string, origin: origin) -> result<string, host-error>`.
     static abi::Result<void> tabOpen(DaemonInstance& instance, std::span<uint32_t const> arguments)
     {
@@ -321,41 +331,37 @@ struct DaemonInstance::HostCalls
         return answer(instance, arguments, Result { std::unexpect, Result::error_type::NotSupportedYet });
     }
 
-    /// The result of the import not served yet.
-    using UnitResult = std::expected<void, HostError>;
-
     /// What runs each import, indexed by DaemonImport.
     static constexpr auto Handlers = std::array<Handler, DaemonImportRows.size()> {
-        &log,                         // log
-        &wake,                        // wake
-        &now,                         // now
-        &procStart,                   // proc-start
-        &procs,                       // procs
-        &procTake,                    // proc-take
-        &procRelease,                 // proc-release
-        &storeGet,                    // store-get
-        &storeSet,                    // store-set
-        &storeRemove,                 // store-remove
-        &storeKeys,                   // store-keys
-        &paneOpen,                    // pane-open
-        &paneClose,                   // pane-close
-        &panes,                       // panes
-        &tabOpen,                     // tab-open
-        &tabClose,                    // tab-close
-        &tabReveal,                   // tab-reveal
-        &tabs,                        // tabs
-        &tabRead,                     // tab-read
-        &tabWrite,                    // tab-write
-        &actionsTake,                 // actions-take
-        &summarySet,                  // summary-set
-        &notSupportedYet<UnitResult>, // pane-reveal
-        &fileRead,                    // file-read
+        &log,         // log
+        &wake,        // wake
+        &now,         // now
+        &procStart,   // proc-start
+        &procs,       // procs
+        &procTake,    // proc-take
+        &procRelease, // proc-release
+        &storeGet,    // store-get
+        &storeSet,    // store-set
+        &storeRemove, // store-remove
+        &storeKeys,   // store-keys
+        &paneOpen,    // pane-open
+        &paneClose,   // pane-close
+        &panes,       // panes
+        &tabOpen,     // tab-open
+        &tabClose,    // tab-close
+        &tabReveal,   // tab-reveal
+        &tabs,        // tabs
+        &tabRead,     // tab-read
+        &tabWrite,    // tab-write
+        &actionsTake, // actions-take
+        &summarySet,  // summary-set
+        &paneReveal,  // pane-reveal
+        &fileRead,    // file-read
     };
 
-    /// Every handler that answers `not-supported-yet`.
-    static constexpr auto NotSupportedYetHandlers = std::array<Handler, 1> {
-        &notSupportedYet<UnitResult>,
-    };
+    /// Every handler that answers `not-supported-yet`: none, as this host serves every import; one it did not
+    /// would run notSupportedYet<its WIT result>.
+    static constexpr auto NotSupportedYetHandlers = std::array<Handler, 0> {};
 
     /// @return Whether the handler of @p row answers exactly as the row's availability says.
     [[nodiscard]] static constexpr bool matchesAvailability(DaemonImportRow const& row)

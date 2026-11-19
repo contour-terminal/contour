@@ -42,6 +42,7 @@ enum class PaneError : uint8_t
     TooMany,          ///< The extension has as many panes as it may.
     HostRefused,      ///< The host does not open panes now (a live upgrade runs), or cannot.
     NotReconciled,    ///< The host has not restored its sessions yet: the list would be wrong; retry later.
+    Gone,             ///< The pane was closed: its tab is going, or never came.
     NotSupportedYet,  ///< The host does not serve this yet: a capability, never a fault.
 };
 
@@ -166,10 +167,10 @@ struct PaneErrorRow
     HostError hostError; ///< The WIT host-error it reaches the guest as.
 };
 
-/// One row per error, indexed by value. Only a missing working directory is `gone`; a refusal the host may
-/// lift later (an upgrade running, sessions not restored yet) is `limit`. A working directory that is no
-/// directory answers what a declared process's does (CwdRefusal); too many panes, and a program not found,
-/// each have a word of their own, which the user can act on.
+/// One row per error, indexed by value. Only a missing working directory and a closed pane are `gone`; a
+/// refusal the host may lift later (an upgrade running, sessions not restored yet) is `limit`. A working
+/// directory that is no directory answers what a declared process's does (CwdRefusal); too many panes, and a
+/// program not found, each have a word of their own, which the user can act on.
 inline constexpr auto PaneErrorToHostError = std::array {
     PaneErrorRow { .error = PaneError::NotDeclared, .hostError = HostError::BadArgument },
     PaneErrorRow { .error = PaneError::ArgumentRejected, .hostError = HostError::BadArgument },
@@ -183,6 +184,7 @@ inline constexpr auto PaneErrorToHostError = std::array {
     PaneErrorRow { .error = PaneError::TooMany, .hostError = HostError::TooMany },
     PaneErrorRow { .error = PaneError::HostRefused, .hostError = HostError::Limit },
     PaneErrorRow { .error = PaneError::NotReconciled, .hostError = HostError::Limit },
+    PaneErrorRow { .error = PaneError::Gone, .hostError = HostError::Gone },
     PaneErrorRow { .error = PaneError::NotSupportedYet, .hostError = HostError::NotSupportedYet },
 };
 
