@@ -1022,4 +1022,105 @@ TEST_CASE("DaemonGuest: [.measure] the dashboard's repaint", "[.measure][guest-m
     }
 }
 
+namespace
+{
+
+/// @return @p seed, its configuration given a task for pull requests: the measured runs' has one for issues
+///         only, and the dispatch form is measured on the first row, a pull request.
+[[nodiscard]] MeasuredSeed withPullRequestTask(MeasuredSeed seed)
+{
+    constexpr auto Tasks = R"("tasks":[)"sv;
+    auto const at = seed.configJson.find(Tasks);
+    REQUIRE(at != std::string::npos);
+    seed.configJson.insert(at + Tasks.size(),
+                           R"({"id":"fix_ci","key":"f","label":"fix CI","applies_to":"pr","model":"sonnet",)"
+                           R"("prompt":"/contour-workflows:fix-ci {url}"},)");
+    return seed;
+}
+
+} // namespace
+
+TEST_CASE("DaemonGuest: [.measure] the dispatch form's repaint", "[.measure][guest-measure]")
+{
+    auto const deadline =
+        std::chrono::duration_cast<std::chrono::microseconds>(daemonWorldLimits().callDeadline);
+    // The measured runs fill every agent slot, so the form draws the refusal; with no run it draws what the
+    // dispatch would start, command line included.
+    auto const seeds = std::array {
+        std::pair { "the four measured runs (the form refuses: max_agents)",
+                    withPullRequestTask(measuredSeed()) },
+        std::pair { "no run (the form shows the whole dispatch)",
+                    MeasuredSeed { .configJson = std::string(OrchestratorConfig), .runs = {} } },
+    };
+    for (auto const& [label, seed]: seeds)
+    {
+        CAPTURE(label);
+        // (a) The form opened over the 120x40 dashboard with `d`. The rig's clock stands still, so an Esc
+        // would never close it: each round opens it in a rig of its own, the lists already taken in.
+        auto opened = std::vector<std::chrono::microseconds> {};
+        for ([[maybe_unused]] auto const _: std::views::iota(0, MeasuredRounds))
+        {
+            auto fresh = RepaintRig { seed };
+            fresh.tab.type("d"sv);
+            opened.push_back(fresh.timed(DaemonHint::Tabs));
+        }
+
+        auto rig = RepaintRig { seed };
+        // (b) A full repaint with the form open: the tab grows from 80x24 to 120x40.
+        rig.tab.type("d"sv);
+        rig.update(DaemonHint::Tabs);
+        auto resized = std::vector<std::chrono::microseconds> {};
+        for ([[maybe_unused]] auto const _: std::views::iota(0, MeasuredRounds))
+        {
+            rig.tab.info.cols = 80;
+            rig.tab.info.rows = 24;
+            rig.update(DaemonHint::Tabs);
+            rig.tab.info.cols = 120;
+            rig.tab.info.rows = 40;
+            resized.push_back(rig.timed(DaemonHint::Tabs));
+        }
+
+        // (c) Incremental: one key in the form (the model cycled); 50 characters typed into the note at once.
+        rig.tab.type("\t"sv);
+        rig.update(DaemonHint::Tabs);
+        auto oneKey = std::vector<std::chrono::microseconds> {};
+        for ([[maybe_unused]] auto const _: std::views::iota(0, MeasuredRounds))
+        {
+            rig.tab.type("\x1b[C"sv);
+            oneKey.push_back(rig.timed(DaemonHint::Tabs));
+        }
+        rig.tab.type("\t"sv);
+        rig.update(DaemonHint::Tabs);
+        auto note = std::vector<std::chrono::microseconds> {};
+        for ([[maybe_unused]] auto const _: std::views::iota(0, MeasuredRounds))
+        {
+            rig.tab.type(repeated("x"sv, KeysPerChunk));
+            note.push_back(rig.timed(DaemonHint::Tabs));
+        }
+
+        auto const rows = std::array {
+            std::pair { "(a) update(tabs) opening the form with d", spreadOf(std::move(opened)) },
+            std::pair { "(b) update(tabs) after a resize 80x24 -> 120x40, form open",
+                        spreadOf(std::move(resized)) },
+            std::pair { "(c) update(tabs) after one key in the form", spreadOf(std::move(oneKey)) },
+            std::pair { "(c) update(tabs) after 50 characters of note", spreadOf(std::move(note)) },
+        };
+        std::println(
+            "the dispatch form's repaint, 120x40, prs-100.json, {}, {} calls each:", label, MeasuredRounds);
+        for (auto const& [name, spread]: rows)
+            std::println("  {}: min {} median {} max {}; headroom {} of {}",
+                         name,
+                         spread.min,
+                         spread.median,
+                         spread.max,
+                         deadline - spread.max,
+                         deadline);
+        for (auto const& [name, spread]: rows)
+        {
+            CAPTURE(name);
+            REQUIRE(spread.max < deadline);
+        }
+    }
+}
+
 #endif
