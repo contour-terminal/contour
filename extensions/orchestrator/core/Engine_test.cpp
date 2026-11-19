@@ -357,6 +357,34 @@ class Harness
         return feed(FileRead { .tag = file.tag, .content = std::move(content) });
     }
 
+    /// Answers the oldest unanswered read whose tag ends in @p tagSuffix, as read @p modifiedWallMs.
+    std::vector<Effect> readTagged(std::string_view tagSuffix,
+                                   std::expected<std::string, FileReadError> content,
+                                   uint64_t modifiedWallMs = 0)
+    {
+        auto const found =
+            std::ranges::find_if(_reads, [&](ReadFile const& file) { return file.tag.ends_with(tagSuffix); });
+        CAPTURE(tagSuffix);
+        REQUIRE(found != _reads.end());
+        auto const tag = found->tag;
+        _reads.erase(found);
+        return feed(FileRead { .tag = tag,
+                               .content = std::move(content),
+                               .modifiedWallMs = modifiedWallMs,
+                               .monoMs = _now,
+                               .wallMs = DispatchWallMs + (_now - StartMonoMs) });
+    }
+
+    /// @return The unanswered reads whose tag ends in @p tagSuffix.
+    [[nodiscard]] std::vector<ReadFile> readsTagged(std::string_view tagSuffix) const
+    {
+        auto reads = std::vector<ReadFile> {};
+        for (auto const& file: _reads)
+            if (file.tag.ends_with(tagSuffix))
+                reads.push_back(file);
+        return reads;
+    }
+
     [[nodiscard]] bool hasRead(std::string_view suffix) const
     {
         return std::ranges::any_of(_reads, [&](ReadFile const& file) { return file.path.ends_with(suffix); });
@@ -1779,6 +1807,228 @@ TEST_CASE("no status board is read while blocked or done, nor with a threshold o
             CHECK_FALSE(harness.hasRead("/STATUS.md"));
         }
     }
+}
+
+TEST_CASE("ShowBoard reads now and every 5 s while shown", "[orchestrator][engine][board]")
+{
+    constexpr auto Period = static_cast<uint64_t>(BoardRefreshEvery.count());
+    auto harness = booted();
+    harness.runToRunning(prDispatch());
+    harness.list({ paneOf(PrId) });
+    auto const id = std::string { PrId };
+    auto const shownAt = harness.now();
+
+    harness.feed(ShowBoard { .run = id, .tab = "tab-1", .monoMs = shownAt });
+    auto reads = harness.readsTagged("#board-view");
+    REQUIRE(reads.size() == 1);
+    CHECK(reads.front().tag == id + "#board-view");
+    CHECK(reads.front().path == worktreeOf("contour", PrId) + "/STATUS.md");
+    CHECK(harness.wakeAt() == shownAt + Period);
+    harness.readTagged("#board-view", "# Status\n"s);
+
+    harness.feed(Wake { .monoMs = shownAt + Period - 1, .wallMs = DispatchWallMs });
+    CHECK(harness.readsTagged("#board-view").empty());
+    harness.feed(Wake { .monoMs = shownAt + Period, .wallMs = DispatchWallMs });
+    CHECK(harness.readsTagged("#board-view").size() == 1);
+    CHECK(harness.wakeAt() == shownAt + (2 * Period));
+    harness.readTagged("#board-view", "# Status\n"s);
+
+    harness.feed(HideBoard { .tab = "tab-1", .monoMs = harness.now() });
+    CHECK(harness.engine().board(id) == nullptr);
+    harness.feed(Wake { .monoMs = shownAt + (2 * Period), .wallMs = DispatchWallMs });
+    CHECK(harness.readsTagged("#board-view").empty());
+}
+
+TEST_CASE("a board read keeps its bytes and time", "[orchestrator][engine][board]")
+{
+    constexpr auto Modified = uint64_t { 1'700'000'000'000 };
+    auto harness = booted();
+    harness.runToRunning(prDispatch());
+    auto const id = std::string { PrId };
+    harness.feed(ShowBoard { .run = id, .tab = "tab-1", .monoMs = harness.now() });
+    REQUIRE(harness.engine().board(id) != nullptr);
+    CHECK(harness.engine().board(id)->state == BoardState::Unread);
+
+    auto const effects = harness.readTagged("#board-view", "# Status\n\x1b[2Jraw"s, Modified);
+
+    auto const* const board = harness.engine().board(id);
+    REQUIRE(board != nullptr);
+    CHECK(board->state == BoardState::Read);
+    // Kept raw: it is sanitised when drawn.
+    CHECK(board->bytes == "# Status\n\x1b[2Jraw");
+    CHECK(board->modifiedWallMs == Modified);
+    CHECK(board->readMonoMs == harness.now());
+    CHECK(board->readWallMs == DispatchWallMs + (harness.now() - StartMonoMs));
+    CHECK_FALSE(board->error);
+    CHECK(std::ranges::any_of(effects,
+                              [](Effect const& effect) { return std::holds_alternative<Redraw>(effect); }));
+    CHECK(harness.engine().hasBoard(id));
+
+    // The same board read again changes nothing the dashboard draws.
+    harness.wake(BoardRefreshEvery.count());
+    CHECK(std::ranges::none_of(harness.readTagged("#board-view", "# Status\n\x1b[2Jraw"s, Modified),
+                               [](Effect const& effect) { return std::holds_alternative<Redraw>(effect); }));
+}
+
+TEST_CASE("a board read that fails keeps the reason", "[orchestrator][engine][board]")
+{
+    struct Case
+    {
+        FileReadError error = FileReadError::Unreadable;
+        BoardState state = BoardState::Unavailable;
+        std::optional<FileReadError> kept = std::nullopt;
+    };
+    for (auto const& [error, state, kept]: std::array {
+             Case { .error = FileReadError::TooLarge,
+                    .state = BoardState::Unavailable,
+                    .kept = FileReadError::TooLarge },
+             Case { .error = FileReadError::Escapes,
+                    .state = BoardState::Unavailable,
+                    .kept = FileReadError::Escapes },
+             Case { .error = FileReadError::Unreadable,
+                    .state = BoardState::Unavailable,
+                    .kept = FileReadError::Unreadable },
+             Case { .error = FileReadError::NotRegular, .state = BoardState::Absent, .kept = std::nullopt },
+             Case {
+                 .error = FileReadError::DirectoryMissing, .state = BoardState::Gone, .kept = std::nullopt },
+         })
+    {
+        CAPTURE(error);
+        auto harness = booted();
+        harness.runToRunning(prDispatch());
+        auto const id = std::string { PrId };
+        harness.feed(ShowBoard { .run = id, .tab = "tab-1", .monoMs = harness.now() });
+        harness.readTagged("#board-view", std::unexpected { error });
+        auto const* const board = harness.engine().board(id);
+        REQUIRE(board != nullptr);
+        CHECK(board->state == state);
+        CHECK(board->error == kept);
+        CHECK(board->bytes.empty());
+        CHECK_FALSE(harness.engine().hasBoard(id));
+    }
+}
+
+TEST_CASE("the threshold read only marks the row", "[orchestrator][engine][board]")
+{
+    auto harness = booted();
+    harness.runToRunning(prDispatch());
+    harness.list({ paneOf(PrId) });
+    auto const id = std::string { PrId };
+    CHECK_FALSE(harness.engine().hasBoard(id));
+    harness.wake(15 * Minute);
+    REQUIRE(harness.readsTagged("/board").size() == 1);
+    harness.readTagged("/board", "# Status\n"s);
+    CHECK(harness.engine().hasBoard(id));
+    CHECK(harness.engine().board(id) == nullptr);
+    CHECK(harness.readsTagged("#board-view").empty());
+}
+
+TEST_CASE("showing a Finished run's board marks it seen", "[orchestrator][engine][board]")
+{
+    auto context = contextFor({});
+    context.stored.push_back(entryOf(storedRun(Finished { .ended = Ended::Completed,
+                                                          .fate = Fate::Removed,
+                                                          .entries = {},
+                                                          .seen = Seen::New,
+                                                          .endedWallMs = DispatchWallMs },
+                                               PrId)));
+    auto harness = Harness { std::move(context) };
+    harness.boot();
+    REQUIRE(finishedOf(harness.run(PrId))->seen == Seen::New);
+
+    harness.feed(ShowBoard { .run = std::string { PrId }, .tab = "tab-1", .monoMs = harness.now() });
+
+    CHECK(finishedOf(harness.run(PrId))->seen == Seen::Opened);
+    // Its worktree is gone with it: the board says so.
+    harness.readTagged("#board-view", std::unexpected { FileReadError::DirectoryMissing });
+    CHECK(harness.engine().board(PrId)->state == BoardState::Gone);
+}
+
+TEST_CASE("a finished run's shown board is not read again", "[orchestrator][engine][board]")
+{
+    constexpr auto Period = static_cast<uint64_t>(BoardRefreshEvery.count());
+    auto context = contextFor({});
+    context.stored.push_back(entryOf(storedRun(Finished { .ended = Ended::Completed,
+                                                          .fate = Fate::Kept,
+                                                          .entries = { "M a.txt" },
+                                                          .seen = Seen::New,
+                                                          .endedWallMs = DispatchWallMs },
+                                               PrId)));
+    auto harness = Harness { std::move(context) };
+    harness.boot();
+    auto const shownAt = harness.now();
+
+    // Shown, it is read once: its agent writes no more.
+    harness.feed(ShowBoard { .run = std::string { PrId }, .tab = "tab-1", .monoMs = shownAt });
+    REQUIRE(harness.readsTagged("#board-view").size() == 1);
+    harness.readTagged("#board-view", "# Status\n"s);
+    CHECK(harness.engine().board(PrId)->state == BoardState::Read);
+    CHECK(harness.wakeAt() != shownAt + Period);
+
+    harness.feed(Wake { .monoMs = shownAt + (3 * Period), .wallMs = DispatchWallMs });
+    CHECK(harness.readsTagged("#board-view").empty());
+    CHECK(harness.engine().board(PrId)->state == BoardState::Read);
+    // Shown anew, it is read again.
+    harness.feed(ShowBoard { .run = std::string { PrId }, .tab = "tab-1", .monoMs = harness.now() });
+    CHECK(harness.readsTagged("#board-view").size() == 1);
+}
+
+TEST_CASE("a run's worktree is kept until a finished run removed it", "[orchestrator][run]")
+{
+    auto run = storedRun(Running {}, PrId);
+    CHECK(keepsWorktree(run));
+    run.state = Finished { .ended = Ended::Completed,
+                           .fate = Fate::Kept,
+                           .entries = {},
+                           .seen = Seen::New,
+                           .endedWallMs = DispatchWallMs };
+    CHECK(keepsWorktree(run));
+    std::get<Finished>(run.state).fate = Fate::Removed;
+    CHECK_FALSE(keepsWorktree(run));
+}
+
+TEST_CASE("two tabs showing one board read it once per period", "[orchestrator][engine][board]")
+{
+    constexpr auto Period = static_cast<uint64_t>(BoardRefreshEvery.count());
+    auto harness = booted();
+    harness.runToRunning(prDispatch());
+    auto const id = std::string { PrId };
+    auto const shownAt = harness.now();
+    harness.feed(ShowBoard { .run = id, .tab = "tab-1", .monoMs = shownAt });
+    harness.readTagged("#board-view", "# Status\n"s);
+    harness.feed(ShowBoard { .run = id, .tab = "tab-2", .monoMs = shownAt + 1000 });
+    CHECK(harness.readsTagged("#board-view").empty());
+
+    harness.feed(Wake { .monoMs = shownAt + Period, .wallMs = DispatchWallMs });
+    CHECK(harness.readsTagged("#board-view").size() == 1);
+    harness.readTagged("#board-view", "# Status\n"s);
+
+    // Shown again by a tab that shows it, it is read now: the user asked for it.
+    harness.feed(ShowBoard { .run = id, .tab = "tab-2", .monoMs = shownAt + Period + 1000 });
+    CHECK(harness.readsTagged("#board-view").size() == 1);
+}
+
+TEST_CASE("HideBoard for one tab keeps the other's", "[orchestrator][engine][board]")
+{
+    constexpr auto Period = static_cast<uint64_t>(BoardRefreshEvery.count());
+    auto harness = booted();
+    harness.runToRunning(prDispatch());
+    auto const id = std::string { PrId };
+    harness.feed(ShowBoard { .run = id, .tab = "tab-1", .monoMs = harness.now() });
+    harness.readTagged("#board-view", "# Status\n"s);
+    harness.feed(ShowBoard { .run = id, .tab = "tab-2", .monoMs = harness.now() });
+
+    harness.feed(HideBoard { .tab = "tab-1", .monoMs = harness.now() });
+    REQUIRE(harness.engine().board(id) != nullptr);
+    harness.wake(Period);
+    CHECK(harness.readsTagged("#board-view").size() == 1);
+    harness.readTagged("#board-view", "# Status\n"s);
+
+    // Hidden by its last tab, it is read no more.
+    harness.feed(HideBoard { .tab = "tab-2", .monoMs = harness.now() });
+    CHECK(harness.engine().board(id) == nullptr);
+    harness.wake(Period);
+    CHECK(harness.readsTagged("#board-view").empty());
 }
 
 // }}}

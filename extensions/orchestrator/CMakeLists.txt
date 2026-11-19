@@ -33,6 +33,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Dependencies.cmake)
 # The sans-IO core.
 add_library(orchestrator_core STATIC
     core/ArgumentKinds.hpp
+    core/Board.hpp
     core/Commands.cpp
     core/Commands.hpp
     core/Config.cpp

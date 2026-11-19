@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <orchestrator/core/Sanitize.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <orchestrator/core/Utf8.hpp>
 
@@ -181,6 +184,37 @@ std::string displayText(std::string_view input, std::size_t maxChars)
             return std::move(line).take();
     }
     return std::move(line).take();
+}
+
+std::vector<std::string> displayLines(std::string_view input, std::size_t maxLines, std::size_t maxChars)
+{
+    auto lines = std::vector<std::string> {};
+    if (maxLines == 0)
+        return lines;
+    // A final LF ends the last line.
+    if (input.ends_with('\n'))
+        input.remove_suffix(1);
+    if (input.empty())
+        return lines;
+    for (auto const piece: std::views::split(input, '\n'))
+    {
+        if (lines.size() == maxLines)
+        {
+            lines.back() = "…";
+            return lines;
+        }
+        auto line = std::string_view { piece.begin(), piece.end() };
+        auto indent = std::size_t { 0 };
+        while (!line.empty() && (line.front() == ' ' || line.front() == '\t'))
+        {
+            indent += line.front() == '\t' ? TabIndentColumns : 1;
+            line.remove_prefix(1);
+        }
+        auto rest = displayText(line, maxChars);
+        lines.push_back(rest.empty() ? std::string {}
+                                     : std::string(std::min(indent, MaxIndentColumns), ' ') + rest);
+    }
+    return lines;
 }
 
 std::expected<std::string, NoteError> singleLineNote(std::string_view input)

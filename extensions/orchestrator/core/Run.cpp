@@ -792,6 +792,12 @@ bool isUnfinished(Run const& run) noexcept
     return !std::holds_alternative<Finished>(run.state);
 }
 
+bool keepsWorktree(Run const& run) noexcept
+{
+    auto const* const finished = std::get_if<Finished>(&run.state);
+    return finished == nullptr || finished->fate == Fate::Kept;
+}
+
 std::string_view agentStatusName(AgentStatus status) noexcept
 {
     return spell(AgentStatusNames, status);

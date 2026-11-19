@@ -16,6 +16,7 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/Board.hpp>
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Config.hpp>
 #include <orchestrator/core/Finished.hpp>
@@ -125,7 +126,9 @@ struct FileRead
 {
     std::string tag;                                   ///< The tag it was asked for with.
     std::expected<std::string, FileReadError> content; ///< Its bytes, or why they could not be read.
+    uint64_t modifiedWallMs = 0; ///< The file's modification time, in wall-clock milliseconds; 0: unknown.
     uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
+    uint64_t wallMs = 0; ///< When it arrived, in wall-clock milliseconds, read by the driver; 0: unknown.
 };
 
 /// The panes were listed.
@@ -203,6 +206,23 @@ struct ReadTranscript
     uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
 };
 
+/// A tab shows a run's status board: it is read now, and again every BoardRefreshEvery while a tab shows it.
+/// A tab shows one board at most: showing another stops showing the one it showed. Shown again by the tab
+/// that shows it, it is read again now; shown by a second tab, it is read on the first one's schedule.
+struct ShowBoard
+{
+    std::string run;     ///< The run's id.
+    std::string tab;     ///< The tab that shows it.
+    uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
+};
+
+/// A tab stopped showing a status board, or closed.
+struct HideBoard
+{
+    std::string tab;     ///< The tab.
+    uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
+};
+
 /// The user asked for the lists to be read again now.
 struct RefreshNow
 {
@@ -222,7 +242,9 @@ using Input = std::variant<Wake,
                            DismissRun,
                            MarkRunSeen,
                            RefreshNow,
-                           ReadTranscript>;
+                           ReadTranscript,
+                           ShowBoard,
+                           HideBoard>;
 
 // }}}
 // {{{ effects
@@ -472,6 +494,15 @@ class Engine
     /// @return Its transcript as last asked for (ReadTranscript); nullptr when it was not, or was dropped.
     [[nodiscard]] TranscriptView const* transcript(std::string_view run) const noexcept;
 
+    /// @param run A run's id.
+    /// @return Its status board, as last read for the tabs that show it (ShowBoard); nullptr when no tab
+    /// does.
+    [[nodiscard]] Board const* board(std::string_view run) const noexcept;
+
+    /// @param run A run's id.
+    /// @return Whether a STATUS.md was found in its worktree, by the threshold read or a shown board's.
+    [[nodiscard]] bool hasBoard(std::string_view run) const noexcept;
+
   private:
     /// Who a queued command is for: a run's go ahead of the polls.
     enum class Priority : uint8_t
@@ -597,6 +628,11 @@ class Engine
     void readBoards(std::vector<Effect>& out);
     [[nodiscard]] std::optional<uint64_t> boardDueAt(Run const& run) const;
     void onBoardRead(std::string_view runId, FileRead const& read);
+    void showBoard(ShowBoard const& request, std::vector<Effect>& out);
+    void hideBoard(std::string_view tab);
+    void readShownBoard(Run const& run, std::vector<Effect>& out);
+    void refreshShownBoards(std::vector<Effect>& out);
+    void onShownBoardRead(std::string_view runId, FileRead const& read);
 
     // Defined in EngineTranscript.cpp.
     void readTranscript(ReadTranscript const& request, std::vector<Effect>& out);
@@ -618,7 +654,16 @@ class Engine
     std::vector<PaneFact> _panes; ///< As last listed.
     PaneListing _paneListing =
         PaneListing::Unknown; ///< How _panes was listed; Unknown until a listing was known.
+    /// A status board some tabs show.
+    struct ShownBoard
+    {
+        Board board;                   ///< As last read.
+        std::vector<std::string> tabs; ///< The tabs that show it; never empty.
+        uint64_t nextReadMs = 0;       ///< When it is read again, in monotonic milliseconds.
+    };
+
     std::set<std::string, std::less<>> _boardsFound; ///< The runs whose STATUS.md this instance has read.
+    std::vector<ShownBoard> _shownBoards;            ///< The boards a tab shows, one entry per run.
     std::vector<TranscriptView>
         _transcripts; ///< At most MaxCachedTranscripts, the one asked for last at the back.
     std::map<std::string, uint32_t, std::less<>> _transcriptCalls; ///< The page in flight, by run id.

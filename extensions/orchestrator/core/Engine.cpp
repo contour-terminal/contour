@@ -64,6 +64,7 @@ namespace engine::detail
 namespace
 {
     using engine::detail::BoardTagSuffix;
+    using engine::detail::BoardViewTagSuffix;
     using engine::detail::judge;
     using engine::detail::later;
     using engine::detail::PollTagPrefix;
@@ -235,6 +236,8 @@ std::vector<Effect> Engine::step(Input const& input)
             },
             [&](MarkRunSeen const& seen) { feed(seen.run, MarkSeen {}, out); },
             [&](ReadTranscript const& request) { readTranscript(request, out); },
+            [&](ShowBoard const& request) { showBoard(request, out); },
+            [&](HideBoard const& request) { hideBoard(request.tab); },
             [&](RefreshNow const&) {
                 if (!_config)
                     return;
@@ -245,13 +248,14 @@ std::vector<Effect> Engine::step(Input const& input)
         },
         input);
     // Work that fell due is done on any input, so that no wake is ever asked for in the past; the status
-    // boards are read on wakes only.
+    // boards past their threshold are read on wakes only.
     if (_config)
     {
         if (_pollOutstanding == 0 && _monoMs >= _nextPollMs)
             startPoll(out);
         if (std::holds_alternative<Wake>(input))
             readBoards(out);
+        refreshShownBoards(out);
     }
     endStep(out, revision);
     return out;
@@ -529,6 +533,7 @@ void Engine::forget(std::string_view runId)
     if (auto const found = _boardsFound.find(runId); found != _boardsFound.end())
         _boardsFound.erase(found);
     std::erase_if(_transcripts, [&](TranscriptView const& view) { return view.run == runId; });
+    std::erase_if(_shownBoards, [&](ShownBoard const& shown) { return shown.board.run == runId; });
     _runs.erase(run);
 }
 
@@ -579,6 +584,12 @@ void Engine::onFileRead(FileRead const& read, std::vector<Effect>& out)
     if (read.tag.ends_with(BoardTagSuffix))
     {
         onBoardRead(std::string_view(read.tag).substr(0, read.tag.size() - BoardTagSuffix.size()), read);
+        return;
+    }
+    if (read.tag.ends_with(BoardViewTagSuffix))
+    {
+        onShownBoardRead(std::string_view(read.tag).substr(0, read.tag.size() - BoardViewTagSuffix.size()),
+                         read);
         return;
     }
     auto const inside = std::span(_runs).first(_insideCount);
@@ -742,6 +753,12 @@ std::optional<uint64_t> Engine::nextWake() const
     for (auto const& run: inside)
         if (auto const due = boardDueAt(run); due && *due > _monoMs)
             consider(*due);
+    // A shown board is read again on time; refreshShownBoards() leaves each one due ahead of now, but a
+    // finished run's, which is read no more.
+    for (auto const& shown: _shownBoards)
+        if (auto const run = std::ranges::find(_runs, shown.board.run, &Run::id);
+            run != _runs.end() && isUnfinished(*run))
+            consider(shown.nextReadMs);
     for (auto const& call: _inFlight)
         consider(call.deadlineMs);
     for (auto const& opening: _paneOpenings)

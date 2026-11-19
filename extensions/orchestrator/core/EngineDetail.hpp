@@ -69,8 +69,11 @@ struct Judgement
     return interval;
 }
 
-/// The suffix of the tag a status board is read with.
+/// The suffix of the tag a status board is read with until one is found (the threshold read).
 inline constexpr std::string_view BoardTagSuffix = "/board";
+
+/// The suffix of the tag a status board a tab shows is read with: `<run>#board-view`.
+inline constexpr std::string_view BoardViewTagSuffix = "#board-view";
 
 /// The suffix of the tag a run's transcript page is read with: `<run>#transcript`.
 inline constexpr std::string_view TranscriptTagSuffix = "#transcript";

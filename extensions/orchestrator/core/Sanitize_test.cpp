@@ -7,6 +7,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <orchestrator/core/Sanitize.hpp>
 
@@ -195,4 +196,28 @@ TEST_CASE("holdsInvisible", "[orchestrator][sanitize]")
         CAPTURE(visible);
         CHECK(!orchestrator::holdsInvisible(visible));
     }
+}
+
+TEST_CASE("displayLines keeps indentation and drops controls", "[orchestrator][sanitize]")
+{
+    CHECK(orchestrator::displayLines("  - a\n\t- b\r\n\x1b[31mc", 10, 80)
+          == std::vector<std::string> { "  - a", "    - b", "[31mc" });
+    // A final LF ends the last line; an empty line stays one; a line of spaces is empty.
+    CHECK(orchestrator::displayLines("a\n\n   \nb\n", 10, 80)
+          == std::vector<std::string> { "a", "", "", "b" });
+    // A lone CR is dropped, as is any other control character.
+    CHECK(orchestrator::displayLines("a\rb\x07", 10, 80) == std::vector<std::string> { "ab" });
+    // Indentation is capped; the rest is cut as displayText() cuts it.
+    CHECK(orchestrator::displayLines("\t\t\t\t\t\t\t\t\t\t\tx", 10, 80)
+          == std::vector<std::string> { std::string(orchestrator::MaxIndentColumns, ' ') + "x" });
+    CHECK(orchestrator::displayLines("  abcdef", 10, 4) == std::vector<std::string> { "  abc…" });
+    CHECK(orchestrator::displayLines("", 10, 80).empty());
+}
+
+TEST_CASE("displayLines cuts at maxLines", "[orchestrator][sanitize]")
+{
+    CHECK(orchestrator::displayLines("a\nb\nc", 2, 80) == std::vector<std::string> { "a", "…" });
+    CHECK(orchestrator::displayLines("a\nb", 2, 80) == std::vector<std::string> { "a", "b" });
+    CHECK(orchestrator::displayLines("a\nb\n", 2, 80) == std::vector<std::string> { "a", "b" });
+    CHECK(orchestrator::displayLines("a\nb", 0, 80).empty());
 }

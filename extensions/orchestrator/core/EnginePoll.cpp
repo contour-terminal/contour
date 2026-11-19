@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
@@ -28,6 +29,7 @@ namespace orchestrator
 namespace
 {
     using engine::detail::BoardTagSuffix;
+    using engine::detail::BoardViewTagSuffix;
     using engine::detail::judge;
     using engine::detail::Judgement;
     using engine::detail::later;
@@ -121,6 +123,34 @@ namespace
                 std::format("{}: {} left out {} entries it could not read", repo, label, listed.skipped)));
         return lines;
     }
+
+    /// What a failed read of a shown board makes of it.
+    struct BoardFailure
+    {
+        FileReadError error = FileReadError::Unreadable; ///< Why the read failed.
+        BoardState state = BoardState::Unavailable;      ///< What the board is then.
+    };
+
+    /// Every read failure that is not Unavailable; the rest are, with their reason kept.
+    constexpr auto BoardFailures = std::array {
+        BoardFailure { .error = FileReadError::NotRegular, .state = BoardState::Absent },
+        BoardFailure { .error = FileReadError::DirectoryMissing, .state = BoardState::Gone },
+    };
+
+    /// @return The board's state after a read that failed with @p error.
+    [[nodiscard]] BoardState boardStateOf(FileReadError error) noexcept
+    {
+        // A loop rather than std::ranges::find, for the reason Sanitize.cpp's dispositionOf() gives.
+        for (auto const& row: BoardFailures)
+            if (row.error == error)
+                return row.state;
+        return BoardState::Unavailable;
+    }
+
+    /// The run a shown board is of: what it is found by.
+    constexpr auto BoardRunOf = [](auto const& shown) -> std::string const& {
+        return shown.board.run;
+    };
 } // namespace
 
 // {{{ repositories
@@ -563,6 +593,109 @@ void Engine::onBoardRead(std::string_view runId, FileRead const& read)
     if (!read.content || findRun(runId) == nullptr)
         return;
     if (_boardsFound.emplace(runId).second)
+        ++_revision;
+}
+
+Board const* Engine::board(std::string_view run) const noexcept
+{
+    auto const shown = std::ranges::find(_shownBoards, run, BoardRunOf);
+    return shown != _shownBoards.end() ? &shown->board : nullptr;
+}
+
+bool Engine::hasBoard(std::string_view run) const noexcept
+{
+    return _boardsFound.contains(run);
+}
+
+void Engine::showBoard(ShowBoard const& request, std::vector<Effect>& out)
+{
+    auto const* const run = findRun(request.run);
+    if (!_config || run == nullptr)
+        return;
+    auto shown = std::ranges::find(_shownBoards, request.run, BoardRunOf);
+    // Shown again by the tab that shows it, the board is read now: the user asked for it.
+    auto readNow = shown != _shownBoards.end() && std::ranges::contains(shown->tabs, request.tab);
+    if (!readNow)
+    {
+        // A tab shows one board: the one it showed before is no longer shown there.
+        hideBoard(request.tab);
+        shown = std::ranges::find(_shownBoards, request.run, BoardRunOf);
+        if (shown != _shownBoards.end())
+            shown->tabs.push_back(request.tab);
+        else
+        {
+            _shownBoards.push_back(ShownBoard {
+                .board = Board { .run = request.run }, .tabs = { request.tab }, .nextReadMs = 0 });
+            ++_revision;
+            readNow = true;
+        }
+    }
+    if (std::holds_alternative<Finished>(run->state))
+        feed(request.run, MarkSeen {}, out);
+    if (auto const* const current = findRun(request.run); readNow && current != nullptr)
+        readShownBoard(*current, out);
+}
+
+void Engine::hideBoard(std::string_view tab)
+{
+    for (auto& shown: _shownBoards)
+        std::erase(shown.tabs, tab);
+    if (std::erase_if(_shownBoards, [](ShownBoard const& shown) { return shown.tabs.empty(); }) > 0)
+        ++_revision;
+}
+
+void Engine::readShownBoard(Run const& run, std::vector<Effect>& out)
+{
+    auto const shown = std::ranges::find(_shownBoards, run.id, BoardRunOf);
+    if (shown == _shownBoards.end())
+        return;
+    shown->nextReadMs = later(_monoMs, static_cast<uint64_t>(BoardRefreshEvery.count()));
+    out.emplace_back(ReadFile { .tag = std::format("{}{}", run.id, BoardViewTagSuffix),
+                                .path = std::format("{}/STATUS.md", run.worktree) });
+}
+
+void Engine::refreshShownBoards(std::vector<Effect>& out)
+{
+    auto due = std::vector<std::string> {};
+    for (auto const& shown: _shownBoards)
+        if (_monoMs >= shown.nextReadMs)
+            due.push_back(shown.board.run);
+    // A finished run's agent writes no more: its board is not read again, only when shown anew.
+    for (auto const& id: due)
+        if (auto const* const run = findRun(id); run != nullptr && isUnfinished(*run))
+            readShownBoard(*run, out);
+}
+
+void Engine::onShownBoardRead(std::string_view runId, FileRead const& read)
+{
+    if (findRun(runId) == nullptr)
+        return;
+    if (read.content && _boardsFound.emplace(runId).second)
+        ++_revision;
+    auto const shown = std::ranges::find(_shownBoards, runId, BoardRunOf);
+    if (shown == _shownBoards.end())
+        return;
+    auto next = Board { .run = std::string { runId } };
+    if (read.content)
+    {
+        next.state = BoardState::Read;
+        next.bytes = *read.content;
+        next.modifiedWallMs = read.modifiedWallMs;
+    }
+    else
+    {
+        next.state = boardStateOf(read.content.error());
+        if (next.state == BoardState::Unavailable)
+            next.error = read.content.error();
+    }
+    // When it was read moves on with every read; only what the dashboard draws from it is a change.
+    next.readMonoMs = read.monoMs != 0 ? read.monoMs : _monoMs;
+    next.readWallMs = read.wallMs != 0 ? read.wallMs : _wallMs;
+    auto const changed = next.state != shown->board.state || next.bytes != shown->board.bytes
+                         || next.modifiedWallMs != shown->board.modifiedWallMs
+                         || next.error != shown->board.error;
+    shown->board = std::move(next);
+    if (changed)
         ++_revision;
 }
 

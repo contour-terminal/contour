@@ -389,6 +389,11 @@ enum class BeginError : uint8_t
 /// @return Whether it is anything but Finished.
 [[nodiscard]] bool isUnfinished(Run const& run) noexcept;
 
+/// Whether a run's worktree is still there, as far as the run knows: where its status board is read.
+/// @param run The run.
+/// @return Whether it is anything but a Finished run whose worktree was removed.
+[[nodiscard]] bool keepsWorktree(Run const& run) noexcept;
+
 /// The name of @p status. The store keeps it, and Contour's program status reports an agent's state in the
 /// same words: one table serves both.
 /// @param status What an agent reported.
