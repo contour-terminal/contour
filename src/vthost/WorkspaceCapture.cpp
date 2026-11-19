@@ -199,6 +199,7 @@ WorkspaceSnapshot captureWorkspace(SessionHost& host,
             .identity = identityOf(
                 host.objects(), vtcontrol::ObjectKind::Workspace, host.objects().uuidOf(workspace->id())),
             .activeTab = static_cast<std::uint32_t>(std::max(workspace->activeTabIndex(), 0)),
+            .color = workspace->color(),
         };
         for (auto const tabIndex: std::views::iota(0, workspace->tabCount()))
         {

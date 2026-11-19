@@ -258,6 +258,65 @@ TEST_CASE("a workspace's trailing visibility byte, written by an older daemon, i
     REQUIRE(decoded);
     CHECK(decoded->snapshot.workspaces.at(0).activeTab == 2);
     CHECK(decoded->snapshot.workspaces.at(0).tabs.empty());
+    // The byte sits where the colour's filler goes: it is never read as a colour.
+    CHECK_FALSE(decoded->snapshot.workspaces.at(0).color.has_value());
+}
+
+TEST_CASE("a workspace's colour round-trips, and a workspace without one encodes as before",
+          "[vthost][snapshot][workspace-color]")
+{
+    auto original = sampleWorkspace();
+    original.workspaces.at(1).color = vtbackend::RGBColor { 0x7A3E9DU };
+    auto const decoded = decodeSnapshot(encodeSnapshot(original));
+    REQUIRE(decoded);
+    CHECK(decoded->snapshot == original);
+    CHECK(decoded->snapshot.workspaces.at(0).color == std::nullopt);
+    CHECK(decoded->snapshot.workspaces.at(1).color == vtbackend::RGBColor { 0x7A3E9DU });
+
+    // Without a colour nothing follows the tabs, so the file is byte for byte what a daemon before the colour
+    // wrote, and that daemon reads a coloured one with the colour skipped.
+    original.workspaces.at(1).color.reset();
+    CHECK(encodeSnapshot(original) == encodeSnapshot(sampleWorkspace()));
+}
+
+TEST_CASE("a workspace's colour follows a filler byte in the retired visibility byte's slot",
+          "[vthost][snapshot][workspace-color]")
+{
+    auto workspace = proto::Writer {};
+    workspace.u8(0); // identity
+    workspace.varint(0);
+    workspace.varint(0);
+    workspace.u8(0); // filler: what an older daemon read as its visibility byte (Left)
+    workspace.u8(1); // has a colour
+    workspace.u32(0x336699U);
+    auto body = proto::Writer {};
+    body.svarint(5);
+    body.varint(1);
+    body.blob(workspace.view());
+    auto const file = fileAround(body.view());
+
+    auto const decoded = decodeSnapshot(file);
+    REQUIRE(decoded);
+    CHECK(decoded->snapshot.workspaces.at(0).color == vtbackend::RGBColor { 0x336699U });
+
+    auto coloured = WorkspaceSnapshot { .takenAt = std::chrono::sys_seconds { std::chrono::seconds { 5 } } };
+    coloured.workspaces.push_back(WorkspaceLayoutSnapshot { .color = vtbackend::RGBColor { 0x336699U } });
+    CHECK(encodeSnapshot(coloured) == file);
+}
+
+TEST_CASE("a snapshot written before the workspace colour decodes without one",
+          "[vthost][snapshot][workspace-color]")
+{
+    for (auto const recorded:
+         { std::span<std::byte const> { testing::RecordedSnapshotV1 },
+           std::span<std::byte const> { std::as_bytes(std::span { testing::RecordedSnapshotNames }) } })
+    {
+        auto const decoded = decodeSnapshot(recorded);
+        REQUIRE(decoded);
+        REQUIRE_FALSE(decoded->snapshot.workspaces.empty());
+        for (auto const& workspace: decoded->snapshot.workspaces)
+            CHECK_FALSE(workspace.color.has_value());
+    }
 }
 
 TEST_CASE("a learned cell size round-trips, and a file without one decodes to none", "[vthost][snapshot]")

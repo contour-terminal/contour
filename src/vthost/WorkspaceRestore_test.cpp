@@ -14,12 +14,14 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <iterator>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -29,6 +31,7 @@
 #include <vthost/TabEdits.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/WorkspaceCapture.hpp>
+#include <vthost/proto/Wire.hpp>
 #include <vthost/testing/ControlHarness.hpp>
 #include <vthost/testing/FakeProfileCatalog.hpp>
 #include <vthost/testing/RecordedNameEncodings.hpp>
@@ -626,4 +629,105 @@ TEST_CASE("a restored snapshot's tab keeps its name over the runtime title an ol
         CHECK(renameByAddress(*host, "tab:mine", "renamed"));
         CHECK(registryNameOf(*host, tab) == "renamed");
     }
+}
+
+TEST_CASE("a workspace's colour comes back through the snapshot file, and so does having none",
+          "[vthost][snapshot][restore][workspace-color]")
+{
+    auto h = RestoreHarness {};
+    auto source = h.makeHost({});
+    REQUIRE(source->createTab() != nullptr);
+    auto const* const plain = source->createWorkspace();
+    auto const* const coloured = source->createWorkspace();
+    REQUIRE((plain != nullptr && coloured != nullptr));
+    source->model().setWorkspaceColor(source->workspaceId(), vtbackend::RGBColor { 0x336699U });
+    source->model().setWorkspaceColor(coloured->id(), vtbackend::RGBColor { 0x7A3E9DU });
+
+    auto decoded = decodeSnapshot(
+        encodeSnapshot(captureWorkspace(*source, { .scrollback = ScrollbackPersistence::Off }, Now)));
+    REQUIRE(decoded.has_value());
+    auto const restored = h.restore(WorkspaceRestore { .snapshot = decoded->snapshot });
+    REQUIRE(restored->restoreOutcome() == RestoreOutcome::Realized);
+
+    auto const& model = restored->model();
+    REQUIRE(model.workspaceCount() == 3);
+    CHECK(model.workspace(restored->workspaceId())->color() == vtbackend::RGBColor { 0x336699U });
+    CHECK_FALSE(model.workspaceAt(1)->color().has_value());
+    CHECK(model.workspaceAt(2)->color() == vtbackend::RGBColor { 0x7A3E9DU });
+}
+
+namespace
+{
+
+/// @return A snapshot file as a daemon that still recorded its workspaces' visibility wrote it: one workspace
+/// of one single-pane tab, its record ending in the retired visibility byte, Shown (1).
+[[nodiscard]] std::vector<std::byte> fileWithVisibilityByte()
+{
+    auto node = proto::Writer {};
+    node.u8(0); // a leaf, of nothing but defaults
+    auto tab = proto::Writer {};
+    tab.u8(0); // identity
+    tab.u8(0); // title
+    tab.u8(0); // colour
+    tab.varint(0);
+    tab.u8(0); // tiled
+    tab.blob(node.view());
+    auto workspace = proto::Writer {};
+    workspace.u8(0); // identity
+    workspace.varint(0);
+    workspace.varint(1);
+    workspace.blob(tab.view());
+    workspace.u8(1); // the retired visibility byte: Shown
+    auto body = proto::Writer {};
+    body.svarint(1'761'000'000);
+    body.varint(1);
+    body.blob(workspace.view());
+
+    auto file = proto::Writer {};
+    for (auto const letter: std::string_view { "CTRSNAP\n" })
+        file.u8(static_cast<std::uint8_t>(letter));
+    file.varint(SnapshotFormatVersion);
+    file.varint(body.size());
+    auto const checksum = fnv1a64(body.view());
+    file.u32(static_cast<std::uint32_t>(checksum));
+    file.u32(static_cast<std::uint32_t>(checksum >> 32));
+    file.bytes(body.view());
+    return file.take();
+}
+
+} // namespace
+
+TEST_CASE("a snapshot written before the workspace colour restores without one",
+          "[vthost][snapshot][restore][workspace-color]")
+{
+    auto const recorded = std::as_bytes(std::span { testing::RecordedSnapshotNames });
+    auto const legacy = fileWithVisibilityByte();
+    for (auto const file: { std::span<std::byte const> { recorded }, std::span<std::byte const> { legacy } })
+    {
+        auto decoded = decodeSnapshot(file);
+        REQUIRE(decoded.has_value());
+        auto h = RestoreHarness {};
+        auto const host = h.restore(WorkspaceRestore { .snapshot = decoded->snapshot });
+        REQUIRE(host->restoreOutcome() == RestoreOutcome::Realized);
+        auto const* const workspace = host->model().workspace(host->workspaceId());
+        REQUIRE(workspace != nullptr);
+        CHECK(workspace->tabCount() == 1);
+        CHECK_FALSE(workspace->color().has_value());
+    }
+}
+
+TEST_CASE("the host's own workspace keeps the colour of the workspace that filled it",
+          "[vthost][snapshot][restore][workspace-color]")
+{
+    // The first workspace's one pane fails to spawn, so the second fills the host's own workspace.
+    auto h = RestoreHarness {};
+    h.recorded.failFirst = 1;
+    auto snapshot = workspaceOf({ {} });
+    snapshot.workspaces.front().color = vtbackend::RGBColor { 0x336699U };
+    snapshot.workspaces.push_back(WorkspaceLayoutSnapshot { .tabs = { TabSnapshot { .root = leaf() } } });
+
+    auto const host = h.restore(WorkspaceRestore { .snapshot = std::move(snapshot) });
+    REQUIRE(host->restoreOutcome() == RestoreOutcome::Realized);
+    REQUIRE(host->model().workspaceCount() == 1);
+    CHECK_FALSE(host->model().workspace(host->workspaceId())->color().has_value());
 }

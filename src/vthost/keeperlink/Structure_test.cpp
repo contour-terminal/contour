@@ -181,7 +181,7 @@ struct TabWatcher final: vtworkspace::ModelEvents
 
 TEST_CASE("every structure event has a push timing", "[keeper][structure]")
 {
-    static_assert(keeperlink::StructureEventCount == 21, "a new structure event needs a row and this count");
+    static_assert(keeperlink::StructureEventCount == 22, "a new structure event needs a row and this count");
     auto const debounced = std::set { StructureEvent::PaneRatioChanged,
                                       StructureEvent::TabTitleChanged,
                                       StructureEvent::TabColorChanged,
@@ -424,4 +424,24 @@ TEST_CASE("every structure pushed restores into a model", "[keeper][structure]")
               == vtworkspace::ModelRestoreError::DuplicateId);
         CHECK(restored.has_value());
     }
+}
+
+TEST_CASE("a workspace's colour change is pushed to the keeper after a second", "[keeper][structure]")
+{
+    StructureHarness h;
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const pusher = keeperlink::StructurePusher { h.loop, h.host, h.sink, {} };
+    auto const initial = h.sink.pushed.size();
+
+    h.host.model().setWorkspaceColor(h.host.workspaceId(), vtbackend::RGBColor { 0x7A3E9DU });
+    std::ignore = h.loop.runOnce(0ms);
+    CHECK(h.sink.pushed.size() == initial);
+
+    // A deadline expires in one turn and its callback runs in the next.
+    h.clock.advance(1s);
+    std::ignore = h.loop.runOnce(0ms);
+    std::ignore = h.loop.runOnce(0ms);
+    REQUIRE(h.sink.pushed.size() == initial + 1);
+    REQUIRE(h.sink.pushed.back().tree.workspaces.size() == 1);
+    CHECK(h.sink.pushed.back().tree.workspaces.front().color == vtbackend::RGBColor { 0x7A3E9DU });
 }

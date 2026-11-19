@@ -521,3 +521,29 @@ TEST_CASE("the handover stream of a named workspace, tab and pane is pinned", "[
     CHECK(decoded->sessions.at(0).uuid == uuidOf(0xC3));
     CHECK(decoded->sessions.at(0).name == "logs");
 }
+
+TEST_CASE("a workspace's colour crosses a handover, and having none does too", "[handover][workspace-color]")
+{
+    auto image = sampleImage();
+    auto plain = image.tree.workspaces.front();
+    plain.id = vtworkspace::WorkspaceId { 11 };
+    image.tree.workspaces.front().color = vtbackend::RGBColor { 0x7A3E9DU };
+    image.tree.workspaces.push_back(plain);
+
+    auto const decoded = decodeHandover(encodeHandover(image));
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded->tree.workspaces.size() == 2);
+    CHECK(decoded->tree.workspaces.at(0).color == vtbackend::RGBColor { 0x7A3E9DU });
+    CHECK_FALSE(decoded->tree.workspaces.at(1).color.has_value());
+}
+
+TEST_CASE("a handover image from before the workspace colour carries none", "[handover][workspace-color]")
+{
+    // Written by a daemon that knew no workspace colour: its workspaces come across without one.
+    auto const decoded = decodeHandover(testing::RecordedHandoverNames);
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded->tree.workspaces.size() == 1);
+    CHECK_FALSE(decoded->tree.workspaces.front().color.has_value());
+    // And a workspace without one is written as that daemon wrote it, so that daemon reads it back.
+    CHECK(std::ranges::equal(encodeHandover(namedImage()), testing::RecordedHandoverNames));
+}

@@ -216,6 +216,10 @@ class StructurePusher final: public StructureEvents
     void paneTreeRestructured(vtworkspace::TabId) override { note(StructureEvent::PaneTreeRestructured); }
     void tabTitleChanged(vtworkspace::TabId) override { note(StructureEvent::TabTitleChanged); }
     void tabColorChanged(vtworkspace::TabId) override { note(StructureEvent::TabColorChanged); }
+    void workspaceColorChanged(vtworkspace::WorkspaceId) override
+    {
+        note(StructureEvent::WorkspaceColorChanged);
+    }
 
     // StructureEvents
     void sessionCreated(vtworkspace::SessionId) override { note(StructureEvent::SessionCreated); }

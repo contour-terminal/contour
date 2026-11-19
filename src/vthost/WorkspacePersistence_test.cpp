@@ -516,3 +516,26 @@ TEST_CASE("a workspace moved in the order is a layout change on its own",
     h.pass(Interval);
     CHECK(h.writes > before);
 }
+
+TEST_CASE("a workspace's colour change is a layout change on its own", "[vthost][snapshot][persistence]")
+{
+    auto h = PersistenceHarness {};
+    REQUIRE(h.host->createTab() != nullptr);
+    h.persist();
+    h.pass(Interval);
+    auto const before = h.writes;
+
+    h.host->model().setWorkspaceColor(h.host->workspaceId(), vtbackend::RGBColor { 0x336699U });
+    h.pass(2s);
+    CHECK(h.writes > before);
+    auto const written = h.store.load().snapshot;
+    REQUIRE(written.has_value());
+    REQUIRE(written->workspaces.size() == 1);
+    CHECK(written->workspaces.front().color == vtbackend::RGBColor { 0x336699U });
+
+    auto const coloured = h.writes;
+    h.host->model().resetWorkspaceColor(h.host->workspaceId());
+    h.pass(2s);
+    CHECK(h.writes > coloured);
+    CHECK_FALSE(h.store.load().snapshot.value().workspaces.front().color.has_value());
+}

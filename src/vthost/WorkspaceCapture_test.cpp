@@ -113,6 +113,22 @@ TEST_CASE("captureWorkspace records the layout as the model holds it", "[vthost]
     CHECK(snapshot.workspaces[1].tabs.size() == 1);
 }
 
+TEST_CASE("captureWorkspace records each workspace's colour, and none where it has none",
+          "[vthost][snapshot][capture][workspace-color]")
+{
+    auto h = CaptureHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const* const other = h.host.createWorkspace();
+    REQUIRE(other != nullptr);
+    h.host.model().setWorkspaceColor(other->id(), vtbackend::RGBColor { 0x7A3E9DU });
+
+    auto const snapshot = captureWorkspace(h.host, {}, Now);
+
+    REQUIRE(snapshot.workspaces.size() == 2);
+    CHECK_FALSE(snapshot.workspaces[0].color.has_value());
+    CHECK(snapshot.workspaces[1].color == vtbackend::RGBColor { 0x7A3E9DU });
+}
+
 TEST_CASE("captureWorkspace of an empty host is empty", "[vthost][snapshot][capture]")
 {
     auto h = CaptureHarness {};

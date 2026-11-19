@@ -1023,12 +1023,16 @@ SessionHost::RealizedRestore SessionHost::realizeRestoredWorkspace(WorkspaceRest
         // The first workspace that brings anything back is the host's own, which never stays empty while a
         // later one fills.
         auto const id = realized.panes == 0 ? _workspace : _model.createWorkspace()->id();
-        // The host's own workspace takes the identity of each one that tries to fill it, the last such one
-        // keeping it.
+        // The host's own workspace takes the identity and the colour of each one that tries to fill it, the
+        // last such one keeping them.
         auto const uuid = restoredUuid(ObjectKind::Workspace, workspace.identity);
         _objects.bind(id, uuid);
         _objects.setName(ObjectRef { .kind = ObjectKind::Workspace, .uuid = uuid },
                          nameOf(workspace.identity));
+        if (workspace.color)
+            _model.setWorkspaceColor(id, *workspace.color);
+        else
+            _model.resetWorkspaceColor(id);
         auto const inWorkspace = realizeRestoredWorkspace(id, workspace, restore);
         // A workspace none of whose panes came back is not left behind empty.
         if (inWorkspace.panes == 0 && id != _workspace)

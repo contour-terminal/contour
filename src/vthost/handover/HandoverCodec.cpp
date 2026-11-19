@@ -320,6 +320,12 @@ static void visitForeignFields(Visitor& visitor, T& workspace)
     visitor(2, workspace.tabs);
     visitor(3, workspace.activeTabIndex);
     visitor(4, workspace.previousActiveTabIndex);
+    // Written only where the workspace has a colour, so that one without is byte for byte what a release
+    // before the colour wrote; read wherever present, and none where absent.
+    if constexpr (std::is_same_v<Visitor, FieldDecoder>)
+        visitor(5, workspace.color);
+    else if (workspace.color)
+        visitor(5, workspace.color);
 }
 
 template <typename Visitor, typename T>

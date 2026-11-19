@@ -88,6 +88,8 @@ struct WorkspaceLayoutSnapshot
     std::optional<ObjectIdentityRecord> identity {};
     std::vector<TabSnapshot> tabs {};
     std::uint32_t activeTab = 0;
+    /// The colour the user gave the workspace; none for the host's default, and for a file written before it.
+    std::optional<vtbackend::RGBColor> color {};
 
     bool operator==(WorkspaceLayoutSnapshot const&) const = default;
 };

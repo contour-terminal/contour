@@ -1654,7 +1654,7 @@ not know are skipped; absent trailing fields keep their defaults — phase 1's P
 File     := Magic Version:varint BodyLength:varint ChecksumLo:u32 ChecksumHi:u32 Body
 Magic    := the 8 bytes "CTRSNAP\n"
 Body     := TakenAt:svarint(unix seconds) WorkspaceCount:varint Workspace{WorkspaceCount}
-Workspace := blob{ Identity? ActiveTab:varint TabCount:varint Tab{TabCount} }
+Workspace := blob{ Identity? ActiveTab:varint TabCount:varint Tab{TabCount} [Filler:u8(0) Color:u32(0xRRGGBB)?] }
 Tab      := blob{ Identity? Title:string? Color:u32(0xRRGGBB)? ActiveLeaf:varint Zoom:u8 Node }
 Node     := blob{ Split:u8 ( Ratio:varint(millionths) Node Node | Leaf ) }
 Leaf     := Identity? Cwd:string(UTF-8)? Profile:string? Foreground:string? CommandLine:string?
@@ -1662,6 +1662,14 @@ Leaf     := Identity? Cwd:string(UTF-8)? Profile:string? Foreground:string? Comm
 Identity := 16 raw bytes, Name:string?
 X?       := u8 0 (absent) | u8 1 then X
 ```
+
+A workspace's colour is written only when it has one: a workspace without a colour ends after its tabs,
+byte for byte as a daemon before the colour wrote it. `Filler` takes the slot where an older daemon
+wrote the workspace's retired visibility byte, so the byte that follows the tabs is skipped unread
+whichever of the two it is, and a daemon that still read that byte takes the filler 0 as `Left`. Only a
+`Color` after it is read; a record that ends at or in the slot has none. The live-upgrade image and the
+keeper's structure carry the colour too, as field 5 of `vtworkspace::WorkspaceState` (written only when
+set, for the same reason).
 
 The checksum is FNV-1a 64 over `Body`. **Cross-version readability is a requirement**: the drift
 restart writes the file with the old daemon and reads it with the new one. A daemon reads every
