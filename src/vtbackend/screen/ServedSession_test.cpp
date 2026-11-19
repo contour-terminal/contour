@@ -140,15 +140,15 @@ TEST_CASE("a served session sets the modes that draw, and no other", "[vtbackend
 {
     auto const served = makeTerminal(SequenceAllowance::ServedTab);
     // One DECSET naming a mode that draws and one that does not: the first is set, the second dropped.
-    served->writeToScreen("\033[?1049;2004h");
+    served->writeToScreen("\033[?1049;6h");
     CHECK(served->terminal.isModeEnabled(DECMode::ExtendedAltScreen));
-    CHECK_FALSE(served->terminal.isModeEnabled(DECMode::BracketedPaste));
+    CHECK_FALSE(served->terminal.isModeEnabled(DECMode::Origin));
     served->writeToScreen("\033[?25l");
     CHECK_FALSE(served->terminal.isModeEnabled(DECMode::VisibleCursor));
 
     auto const ordinary = makeTerminal(SequenceAllowance::Everything);
-    ordinary->writeToScreen("\033[?1049;2004h");
-    CHECK(ordinary->terminal.isModeEnabled(DECMode::BracketedPaste));
+    ordinary->writeToScreen("\033[?1049;6h");
+    CHECK(ordinary->terminal.isModeEnabled(DECMode::Origin));
 }
 
 // {{{ A real core::tui frame

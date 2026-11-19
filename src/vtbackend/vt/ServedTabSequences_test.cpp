@@ -80,14 +80,14 @@ TEST_CASE("a function off the allowlist is dropped in a served session", "[vtbac
 TEST_CASE("a served session sets only the DEC private modes that draw", "[vtbackend][served]")
 {
     for (auto const mode:
-         { 7U, 25U, 47U, 1047U, 1049U, 1000U, 1002U, 1003U, 1006U, 1015U, 1016U, 1004U, 2026U })
+         { 7U, 25U, 47U, 1047U, 1049U, 1000U, 1002U, 1003U, 1006U, 1015U, 1016U, 1004U, 2004U, 2026U })
     {
         INFO(mode);
         CHECK(servedTabSetsMode(mode));
     }
-    // Bracketed paste, origin mode, column mode, sixel scrolling, the reporting modes of the host's own:
-    // none draws.
-    for (auto const mode: { 1U, 3U, 6U, 69U, 80U, 2004U, 2027U, 2031U, 8452U })
+    // Bracketed paste draws nothing, but keeps a paste text: the extension gets it as one run, never as keys.
+    // Origin mode, column mode, sixel scrolling, the reporting modes of the host's own: none draws.
+    for (auto const mode: { 1U, 3U, 6U, 69U, 80U, 2027U, 2031U, 8452U })
     {
         INFO(mode);
         CHECK_FALSE(servedTabSetsMode(mode));

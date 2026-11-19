@@ -70,6 +70,7 @@ inline constexpr auto ServedTabModes = std::to_array<unsigned>({
     1015, // mouse: urxvt encoding
     1016, // mouse: SGR pixel encoding
     1004, // focus events
+    2004, // bracketed paste: a paste reaches the extension as text, never as keys
     2026, // synchronized output
 });
 

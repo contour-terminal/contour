@@ -869,10 +869,13 @@ TEST_CASE("DaemonWorldExtensions: what is typed into the host's frame never reac
           "[daemon][served]")
 {
     auto bench = ServingWorld {};
-    // The dashboard asked for mouse and focus reports, and something was typed it never read.
-    REQUIRE(bench.tabs->write(Orchestrator, bench.tab, "\x1b[?1000h\x1b[?1006h\x1b[?1004h").has_value());
+    // The dashboard asked for mouse and focus reports and bracketed paste, and something was typed it never
+    // read.
+    REQUIRE(bench.tabs->write(Orchestrator, bench.tab, "\x1b[?1000h\x1b[?1006h\x1b[?1004h\x1b[?2004h")
+                .has_value());
     REQUIRE(
         bench.live.eventually([&] { return bench.modeOn(vtbackend::DECMode::MouseProtocolNormalTracking); }));
+    CHECK(bench.modeOn(vtbackend::DECMode::BracketedPaste));
     bench.typeAndClick("q");
 
     std::ignore = bench.faultUntilDisabled();
@@ -880,6 +883,7 @@ TEST_CASE("DaemonWorldExtensions: what is typed into the host's frame never reac
     // The frame turned the reports off: the terminal sends none for it.
     CHECK_FALSE(bench.modeOn(vtbackend::DECMode::MouseProtocolNormalTracking));
     CHECK_FALSE(bench.modeOn(vtbackend::DECMode::FocusTracking));
+    CHECK_FALSE(bench.modeOn(vtbackend::DECMode::BracketedPaste));
     bench.typeAndClick("jk\r");
 
     // Restarted, and typed into while it says so.

@@ -28,7 +28,7 @@ namespace
     /// mouse and focus reports the extension may have turned on reset, and the page erased from its home --
     /// ED 0, not ED 2, which would push a copy of the page into the scrollback with every frame.
     constexpr auto HostFrameOpening = std::string_view {
-        "\x1b[?2026h\x1b[r\x1b[0m\x1b[?25l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[H\x1b[J"
+        "\x1b[?2026h\x1b[r\x1b[0m\x1b[?25l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?2004l\x1b[H\x1b[J"
     };
 
     /// What it ends with: synchronized output off, which presents it.
