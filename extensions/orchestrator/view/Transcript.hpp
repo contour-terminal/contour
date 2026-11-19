@@ -73,11 +73,14 @@ enum class EntryPlace : uint8_t
 
 /// @param run The run.
 /// @param page The page asked for.
+/// @param selfPrograms The programs the host runs as its own executable (HostInfo::selfPrograms): `contour`
+///        is named by the path the host runs it from, which a shell's PATH need not hold.
 /// @return How to read the page by hand: `contour agent transcript --session <uuid> --cwd <path>`, and
 ///         `--page <n>` beyond the first, quoted for a POSIX shell, one option a line, each line but the last
-///         continued with ` \`, none of them cut; std::nullopt when the session or the worktree would not be
-///         drawn as it is (showsAsItIs()), since what is drawn could then name another.
-[[nodiscard]] std::optional<std::vector<std::string>> transcriptCommandOf(Run const& run, uint32_t page);
+///         continued with ` \`, none of them cut; std::nullopt when contour's path, the session or the
+///         worktree would not be drawn as it is (showsAsItIs()), since what is drawn could then name another.
+[[nodiscard]] std::optional<std::vector<std::string>> transcriptCommandOf(
+    Run const& run, uint32_t page, std::span<HostProgram const> selfPrograms);
 
 /// @param engine The engine.
 /// @param tab The tab that shows it.

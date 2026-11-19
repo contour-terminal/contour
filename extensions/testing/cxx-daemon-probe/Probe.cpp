@@ -71,7 +71,9 @@ using namespace probe;
                                          std::size_t /*rootCount*/,
                                          char const* /*home*/,
                                          std::size_t /*homeLength*/,
-                                         int32_t /*utcOffsetMinutes*/)
+                                         int32_t /*utcOffsetMinutes*/,
+                                         void const* /*selfPrograms*/,
+                                         std::size_t /*selfProgramCount*/)
 {
     constexpr auto Message = std::string_view { "cxx-probe loaded" };
     hostLog(LogLevel::Info, Message.data(), Message.size());

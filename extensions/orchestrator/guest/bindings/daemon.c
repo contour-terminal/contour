@@ -326,6 +326,11 @@ void terminal_extensions_daemon_types_root_free(terminal_extensions_daemon_types
   daemon_list_string_free(&ptr->paths);
 }
 
+void terminal_extensions_daemon_types_self_program_free(terminal_extensions_daemon_types_self_program_t *ptr) {
+  daemon_string_free(&ptr->name);
+  daemon_string_free(&ptr->path);
+}
+
 void terminal_extensions_daemon_types_list_root_free(terminal_extensions_daemon_types_list_root_t *ptr) {
   size_t list_len = ptr->len;
   if (list_len > 0) {
@@ -337,9 +342,21 @@ void terminal_extensions_daemon_types_list_root_free(terminal_extensions_daemon_
   }
 }
 
+void terminal_extensions_daemon_types_list_self_program_free(terminal_extensions_daemon_types_list_self_program_t *ptr) {
+  size_t list_len = ptr->len;
+  if (list_len > 0) {
+    terminal_extensions_daemon_types_self_program_t *list_ptr = ptr->ptr;
+    for (size_t i = 0; i < list_len; i++) {
+      terminal_extensions_daemon_types_self_program_free(&list_ptr[i]);
+    }
+    free(list_ptr);
+  }
+}
+
 void terminal_extensions_daemon_types_host_info_free(terminal_extensions_daemon_types_host_info_t *ptr) {
   terminal_extensions_daemon_types_list_root_free(&ptr->roots);
   daemon_string_free(&ptr->home);
+  terminal_extensions_daemon_types_list_self_program_free(&ptr->self_programs);
 }
 
 void daemon_host_info_free(daemon_host_info_t *ptr) {
@@ -978,14 +995,15 @@ bool terminal_extensions_daemon_host_file_read(daemon_string_t *root, daemon_str
 }
 
 __attribute__((__export_name__("load")))
-void __wasm_export_exports_daemon_load(uint8_t * arg, size_t arg0, uint8_t * arg1, size_t arg2, uint8_t * arg3, size_t arg4, int32_t arg5) {
-  daemon_string_t arg6 = (daemon_string_t) { (uint8_t*)(arg), (arg0) };
-  daemon_host_info_t arg7 = (terminal_extensions_daemon_types_host_info_t) {
+void __wasm_export_exports_daemon_load(uint8_t * arg, size_t arg0, uint8_t * arg1, size_t arg2, uint8_t * arg3, size_t arg4, int32_t arg5, uint8_t * arg6, size_t arg7) {
+  daemon_string_t arg8 = (daemon_string_t) { (uint8_t*)(arg), (arg0) };
+  daemon_host_info_t arg9 = (terminal_extensions_daemon_types_host_info_t) {
     (terminal_extensions_daemon_types_list_root_t) (terminal_extensions_daemon_types_list_root_t) { (terminal_extensions_daemon_types_root_t*)(arg1), (arg2) },
     (daemon_string_t) (daemon_string_t) { (uint8_t*)(arg3), (arg4) },
     (int32_t) arg5,
+    (terminal_extensions_daemon_types_list_self_program_t) (terminal_extensions_daemon_types_list_self_program_t) { (terminal_extensions_daemon_types_self_program_t*)(arg6), (arg7) },
   };
-  exports_daemon_load(&arg6, &arg7);
+  exports_daemon_load(&arg8, &arg9);
 }
 
 __attribute__((__export_name__("update")))

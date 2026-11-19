@@ -266,7 +266,8 @@ std::expected<std::unique_ptr<DaemonExtensionRuntime::Extension>, DeclarationPro
                                   .roots = std::move(*roots),
                                   .inheritedEnvironment = config.inheritedEnvironment,
                                   .hostId = extension->hostId,
-                                  .grantDigest = extension->grantDigest };
+                                  .grantDigest = extension->grantDigest,
+                                  .selfPrograms = config.selfPrograms };
     auto const& declared = extension->processesConfig.manifest;
     auto const owner = ServedTabOwner { .extension = extension->name,
                                         .title = displayTitleOf(declared),
@@ -343,27 +344,28 @@ std::expected<void, DeclarationProblem> DaemonExtensionRuntime::run(Extension& e
     if (auto made = makePanes(extension); !made)
         return std::unexpected(problemOf(
             extension.name, DaemonExtensionProblem::RootUnresolvable, textOf(RootErrorTexts, made.error())));
-    extension.runner =
-        std::make_unique<DaemonExtensionRunner>(extension.engine,
-                                                extension.compiled,
-                                                DaemonRunnerConfig { .name = extension.name,
-                                                                     .configJson = extension.configJson,
-                                                                     .roots = extension.roots,
-                                                                     .home = _home,
-                                                                     .limits = _limits,
-                                                                     .durableBudget = {},
-                                                                     .generation = extension.generation },
-                                                DaemonServices { .processes = *extension.processes,
-                                                                 .store = *extension.store,
-                                                                 .presence = _services.presence,
-                                                                 .tabs = *extension.tabs,
-                                                                 .files = *extension.files,
-                                                                 .panes = *extension.panes,
-                                                                 .scheduler = _pool,
-                                                                 .wallClock = _services.wallClock,
-                                                                 .localTime = _services.localTime,
-                                                                 .retirement = _provider,
-                                                                 .onLog = _services.onLog });
+    extension.runner = std::make_unique<DaemonExtensionRunner>(
+        extension.engine,
+        extension.compiled,
+        DaemonRunnerConfig { .name = extension.name,
+                             .configJson = extension.configJson,
+                             .roots = extension.roots,
+                             .home = _home,
+                             .limits = _limits,
+                             .durableBudget = {},
+                             .generation = extension.generation,
+                             .selfPrograms = extension.processesConfig.selfPrograms },
+        DaemonServices { .processes = *extension.processes,
+                         .store = *extension.store,
+                         .presence = _services.presence,
+                         .tabs = *extension.tabs,
+                         .files = *extension.files,
+                         .panes = *extension.panes,
+                         .scheduler = _pool,
+                         .wallClock = _services.wallClock,
+                         .localTime = _services.localTime,
+                         .retirement = _provider,
+                         .onLog = _services.onLog });
     extension.relay->attach(extension.runner.get());
     return {};
 }

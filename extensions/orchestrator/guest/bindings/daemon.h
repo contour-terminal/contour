@@ -388,10 +388,23 @@ typedef struct terminal_extensions_daemon_types_root_t {
   daemon_list_string_t   paths;
 } terminal_extensions_daemon_types_root_t;
 
+// A program a declared command may name that the host runs as its own executable.
+typedef struct terminal_extensions_daemon_types_self_program_t {
+  // The program as a command's argv names it, such as `contour`.
+  daemon_string_t   name;
+  // The executable the host runs for it: absolute, whatever the daemon's PATH holds.
+  daemon_string_t   path;
+} terminal_extensions_daemon_types_self_program_t;
+
 typedef struct {
   terminal_extensions_daemon_types_root_t *ptr;
   size_t len;
 } terminal_extensions_daemon_types_list_root_t;
+
+typedef struct {
+  terminal_extensions_daemon_types_self_program_t *ptr;
+  size_t len;
+} terminal_extensions_daemon_types_list_self_program_t;
 
 // What the host tells the extension once, when it loads.
 typedef struct terminal_extensions_daemon_types_host_info_t {
@@ -401,6 +414,9 @@ typedef struct terminal_extensions_daemon_types_host_info_t {
   daemon_string_t   home;
   // How far local time is ahead of UTC at load, daylight saving included.
   int32_t   utc_offset_minutes;
+  // The programs a declared command names that the host runs as its own executable: what a person
+  // who runs such a command by hand should run too.
+  terminal_extensions_daemon_types_list_self_program_t   self_programs;
 } terminal_extensions_daemon_types_host_info_t;
 
 typedef terminal_extensions_daemon_types_hint_t daemon_hint_t;
@@ -556,7 +572,11 @@ void terminal_extensions_daemon_host_result_file_content_file_error_free(termina
 
 void terminal_extensions_daemon_types_root_free(terminal_extensions_daemon_types_root_t *ptr);
 
+void terminal_extensions_daemon_types_self_program_free(terminal_extensions_daemon_types_self_program_t *ptr);
+
 void terminal_extensions_daemon_types_list_root_free(terminal_extensions_daemon_types_list_root_t *ptr);
+
+void terminal_extensions_daemon_types_list_self_program_free(terminal_extensions_daemon_types_list_self_program_t *ptr);
 
 void terminal_extensions_daemon_types_host_info_free(terminal_extensions_daemon_types_host_info_t *ptr);
 

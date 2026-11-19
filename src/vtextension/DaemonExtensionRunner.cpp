@@ -259,6 +259,7 @@ class DaemonExtensionRunner::Core final: public IDaemonHostServices, public std:
             .home = _config.home,
             .utcOffsetMinutes = static_cast<int32_t>(
                 vtbackend::utcOffsetAt(_services.localTime, _services.wallClock.now()).count()),
+            .selfPrograms = _config.selfPrograms,
         };
         if (auto const loaded = _instance->load(_config.configJson, hostInfo); !loaded)
         {

@@ -43,6 +43,14 @@ struct TaskDef
     std::string prompt; ///< The prompt, with `{url}` standing for the item's URL.
 };
 
+/// A program a declared command names that the host runs as its own executable.
+struct HostProgram
+{
+    std::string name; ///< The program as the command's argv names it, such as `contour`.
+    std::string path; ///< The executable the host runs for it: absolute.
+    [[nodiscard]] bool operator==(HostProgram const&) const = default;
+};
+
 /// What the host resolved once (`~/` expanded, symlinks resolved) and passes in host-info; the core never
 /// expands a path.
 struct HostInfo
@@ -51,6 +59,8 @@ struct HostInfo
     std::string worktreeRoot;           ///< `worktree_root`, resolved.
     std::vector<std::string> repoPaths; ///< Each `repos[].path`, resolved, in the configuration's order.
     int32_t utcOffsetMinutes = 0;       ///< The local time's offset from UTC.
+    std::vector<HostProgram> selfPrograms = {}; ///< The programs the host runs as its own executable: what a
+                                                ///< command shown to be run by hand names instead.
 };
 
 /// One search that lists the issues a repository offers for work.

@@ -89,6 +89,7 @@
     #include <vtextension/ExtensionGrantStore.hpp>
     #include <vtextension/ExtensionWorkerPool.hpp>
     #include <vtextension/FileLocker.hpp>
+    #include <vtextension/SelfPrograms.hpp>
     #include <vtextension/wasm/DefaultBackend.hpp>
     #include <vtextension/wasm/WasmRuntime.hpp>
     #include <vthost/DaemonConsentKey.hpp>
@@ -1240,6 +1241,13 @@ namespace
                         .transform([](std::filesystem::path const& home) { return core::pathToUtf8(home); })
                         .value_or(std::string {}),
             .inheritedEnvironment = inheritedEnvironment(),
+            // `contour` in a declared command is this executable, whatever the daemon's PATH holds: a .dmg,
+            // an AppImage or a launchd agent puts none on it.
+            .selfPrograms = vtpty::currentExecutablePath()
+                                .transform([](std::filesystem::path const& executable) {
+                                    return vtextension::selfProgramsOf(executable);
+                                })
+                                .value_or(std::vector<vtextension::SelfProgram> {}),
             .bundledDirectories =
                 vtextension::bundledExtensionDirectories(vtextension::nativeBundledExtensionPlatform(),
                                                          core::defaultEnvironment(),

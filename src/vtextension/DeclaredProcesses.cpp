@@ -22,6 +22,7 @@
 #include <vtextension/ChildEnvironment.hpp>
 #include <vtextension/DeclaredArguments.hpp>
 #include <vtextension/RootResolution.hpp>
+#include <vtextension/SelfPrograms.hpp>
 
 namespace vtextension
 {
@@ -326,6 +327,7 @@ std::expected<ProcessHandle, ProcessError> DeclaredProcesses::start(std::string_
         return std::unexpected(cwdErrorOf(made.error()));
     }
 
+    resolveSelfProgram(*argv, _config.selfPrograms);
     auto spec = vtpty::ProcessSpec {
         .argv = std::move(*argv),
         .workingDirectory = std::move(*directory),

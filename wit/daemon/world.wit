@@ -32,6 +32,14 @@ interface types {
         paths: list<string>,
     }
 
+    /// A program a declared command may name that the host runs as its own executable.
+    record self-program {
+        /// The program as a command's argv names it, such as `contour`.
+        name: string,
+        /// The executable the host runs for it: absolute, whatever the daemon's PATH holds.
+        path: string,
+    }
+
     /// What the host tells the extension once, when it loads.
     record host-info {
         /// Every root the manifest declares, resolved.
@@ -40,6 +48,9 @@ interface types {
         home: string,
         /// How far local time is ahead of UTC at load, daylight saving included.
         utc-offset-minutes: s32,
+        /// The programs a declared command names that the host runs as its own executable: what a person
+        /// who runs such a command by hand should run too.
+        self-programs: list<self-program>,
     }
 }
 

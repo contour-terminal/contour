@@ -64,7 +64,7 @@ namespace
     /// nothing, so neither has a post-return function. A `render` is the status line's: a module exporting
     /// one was built for the other world.
     constexpr auto DaemonExportShapes = std::array {
-        ExportShape { .name = "load", .parameters = 7, .results = 0, .presence = Presence::Required },
+        ExportShape { .name = "load", .parameters = 9, .results = 0, .presence = Presence::Required },
         ExportShape { .name = "update", .parameters = 1, .results = 0, .presence = Presence::Required },
         ExportShape { .name = "cabi_realloc", .parameters = 4, .results = 1, .presence = Presence::Required },
         ExportShape { .name = "_initialize", .parameters = 0, .results = 0, .presence = Presence::Optional },

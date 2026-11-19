@@ -60,6 +60,7 @@ struct World
         "contour/setup-hooks-present.json";    ///< What `agent-setup-check` prints, under testdata.
     std::vector<WorktreeEntry> worktrees = {}; ///< Listed in the contour repository after its checkout.
     std::vector<std::string> held = {}; ///< Commands left unanswered until DashboardFixture::answerHeld().
+    std::vector<HostProgram> selfPrograms = {}; ///< What the host runs as its own executable.
 };
 
 /// @param world What the engine is started from.

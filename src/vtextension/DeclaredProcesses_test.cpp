@@ -3,18 +3,27 @@
 // The declared-process policy over a fake runner and a fake filesystem, with the orchestrator's manifest from
 // the conformance corpus: what is refused and why, where commands run, what they see, and how their results
 // are paged, kept and released.
+#include <vtpty/DirectoryHandle.hpp>
+#include <vtpty/ProcessRunner.hpp>
+
+#include <core/platform/Clock.hpp>
+#include <core/testing/ScopedTempDir.hpp>
+
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <expected>
 #include <filesystem>
+#include <format>
 #include <functional>
 #include <latch>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <set>
@@ -30,6 +39,7 @@
 #include <vtextension/Manifest.hpp>
 #include <vtextension/ProcessService.hpp>
 #include <vtextension/RootResolution.hpp>
+#include <vtextension/SelfPrograms.hpp>
 #include <vtextension/testing/FakeDirectoryOpener.hpp>
 #include <vtextension/testing/FakeGrantStore.hpp>
 #include <vtextension/testing/FakeProcessRunner.hpp>
@@ -249,6 +259,108 @@ TEST_CASE("DeclaredProcesses: every refusal", "[daemon][processes]")
         CHECK(fixture.runner.started().size() == startsBefore);
     }
 }
+
+TEST_CASE("DeclaredProcesses: contour runs as the daemon's own executable", "[daemon][processes]")
+{
+    // A launchd agent's, an AppImage's or a .dmg's PATH holds no `contour`.
+    constexpr auto Executable = "/Applications/Contour.app/Contents/MacOS/contour"sv;
+    auto config = configWith(defaultRoots());
+    config.inheritedEnvironment = { "PATH=/usr/bin:/bin" };
+    config.selfPrograms = selfProgramsOf(std::filesystem::path { Executable });
+    auto runner = FakeProcessRunner {};
+    auto directories = FakeDirectoryOpener {};
+    for (auto const* path: { "/w", "/w/contour", "/w/contour/pr-1", "/r/contour" })
+        directories.add(path);
+    auto grants = FakeGrantStore {};
+    grants.record(HostId, GrantDigest, GrantState::Granted);
+    auto processes = DeclaredProcesses::create(
+        std::move(config),
+        DeclaredProcessesServices {
+            .runner = runner, .directories = directories, .grants = grants, .onFinished = [] {} });
+    REQUIRE(processes.has_value());
+
+    REQUIRE((*processes)
+                ->start("agent-transcript",
+                        { { "session", "00000000-0000-4000-8000-000000000001" },
+                          { "path", "/w/contour/pr-1" },
+                          { "page", "1" },
+                          { "format", "1" } },
+                        "/w",
+                        "t")
+                .has_value());
+    REQUIRE((*processes)->start("gh-auth", {}, "/r/contour", "t").has_value());
+
+    REQUIRE(runner.started().size() == 2);
+    auto const& transcript = runner.started()[0].spec.argv;
+    REQUIRE(transcript.size() > 3);
+    CHECK(transcript[0] == Executable);
+    CHECK(transcript[1] == "agent");
+    CHECK(transcript[2] == "transcript");
+    // Another program is still found on the command's PATH.
+    CHECK(runner.started()[1].spec.argv.front() == "gh");
+}
+
+#ifndef _WIN32
+TEST_CASE("DeclaredProcesses: a PATH without contour still runs the transcript command",
+          "[daemon][processes]")
+{
+    // A real process: the daemon's PATH names an empty directory, and its own executable stands in for
+    // contour -- /bin/echo here, so that what ran is what it prints.
+    auto const directory = core::testing::ScopedTempDir { "contour-self-program" };
+    auto const worktrees = std::filesystem::canonical(directory.path());
+    auto const emptyPath = worktrees / "bin";
+    std::filesystem::create_directory(emptyPath);
+    auto runner = vtpty::ThreadedProcessRunner::create(core::platform::defaultSteadyClock(), {});
+    REQUIRE(runner.has_value());
+    auto grants = FakeGrantStore {};
+    grants.record(HostId, GrantDigest, GrantState::Granted);
+    auto mutex = std::mutex {};
+    auto ended = std::condition_variable {};
+    auto finished = 0;
+    auto config = configWith({ { .label = "worktrees", .paths = { worktrees.string() } },
+                               { .label = "repos", .paths = { (worktrees / "repo").string() } } });
+    config.inheritedEnvironment = { std::format("PATH={}", emptyPath.string()) };
+    config.selfPrograms = selfProgramsOf("/bin/echo");
+    auto processes =
+        DeclaredProcesses::create(std::move(config),
+                                  DeclaredProcessesServices { .runner = **runner,
+                                                              .directories = vtpty::nativeDirectoryOpener(),
+                                                              .grants = grants,
+                                                              .onFinished = [&] {
+                                                                  {
+                                                                      auto const lock =
+                                                                          std::scoped_lock { mutex };
+                                                                      ++finished;
+                                                                  }
+                                                                  ended.notify_all();
+                                                              } });
+    REQUIRE(processes.has_value());
+
+    auto const handle = (*processes)
+                            ->start("agent-transcript",
+                                    { { "session", "00000000-0000-4000-8000-000000000001" },
+                                      { "path", (worktrees / "contour" / "run-1").string() },
+                                      { "page", "2" },
+                                      { "format", "1" } },
+                                    worktrees.string(),
+                                    "t");
+    REQUIRE(handle.has_value());
+    {
+        auto lock = std::unique_lock { mutex };
+        REQUIRE(ended.wait_for(lock, std::chrono::seconds { 30 }, [&] { return finished == 1; }));
+    }
+    auto const infos = (*processes)->list();
+    REQUIRE(infos.size() == 1);
+    REQUIRE(infos.front().result.has_value());
+    CHECK(infos.front().result->exitCode == 0);
+    auto const printed = (*processes)->take(*handle, ProcStream::Stdout, 0);
+    REQUIRE(printed.has_value());
+    CHECK(printed->bytes
+          == std::format("agent transcript --session 00000000-0000-4000-8000-000000000001 --cwd {} --page 2 "
+                         "--format 1 --json\n",
+                         (worktrees / "contour" / "run-1").string()));
+}
+#endif
 
 TEST_CASE("DeclaredProcesses: most specific root", "[daemon][processes]")
 {

@@ -190,7 +190,9 @@ TEST_CASE("DaemonWorld: layouts follow the Canonical ABI", "[daemon][wit]")
     STATIC_CHECK(abi::Codec<FileContent>::Alignment == 8);
     STATIC_CHECK(abi::Codec<ResolvedRoot>::Size == 16);
     STATIC_CHECK(abi::Codec<ResolvedRoot>::Alignment == 4);
-    STATIC_CHECK(abi::Codec<DaemonHostInfo>::Size == 20);
+    STATIC_CHECK(abi::Codec<SelfProgram>::Size == 16);
+    STATIC_CHECK(abi::Codec<SelfProgram>::Alignment == 4);
+    STATIC_CHECK(abi::Codec<DaemonHostInfo>::Size == 28);
     STATIC_CHECK(abi::Codec<DaemonHostInfo>::Alignment == 4);
     STATIC_CHECK(abi::Codec<std::expected<uint32_t, HostError>>::Size == 8);
     STATIC_CHECK(abi::Codec<std::expected<uint32_t, HostError>>::Alignment == 4);
@@ -241,10 +243,12 @@ TEST_CASE("DaemonWorld: every record round-trips through guest memory", "[daemon
     auto const root = ResolvedRoot { .label = "repos", .paths = { "/home/u/src/a", "/home/u/src/b" } };
     CHECK(roundTrip(root) == root);
 
-    auto const hostInfo =
-        DaemonHostInfo { .roots = { root, ResolvedRoot { .label = "worktrees", .paths = {} } },
-                         .home = "/home/u",
-                         .utcOffsetMinutes = -330 };
+    auto const hostInfo = DaemonHostInfo {
+        .roots = { root, ResolvedRoot { .label = "worktrees", .paths = {} } },
+        .home = "/home/u",
+        .utcOffsetMinutes = -330,
+        .selfPrograms = { SelfProgram { .name = "contour", .path = "/opt/contour/bin/contour" } }
+    };
     CHECK(roundTrip(hostInfo) == hostInfo);
 
     CHECK(roundTrip(std::expected<uint32_t, HostError> { 9U }) == std::expected<uint32_t, HostError> { 9U });

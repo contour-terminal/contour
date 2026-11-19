@@ -95,8 +95,9 @@ namespace
     /// What the failed screen says instead of the command to read the page by hand, when a value in it would
     /// not be drawn as it is.
     constexpr auto UnshownCommandText =
-        "The command to read it by hand cannot be shown safely: the run's worktree path or session holds "
-        "characters that are drawn differently from what they are."sv;
+        "The command to read it by hand cannot be shown safely: contour's path, the run's worktree path or "
+        "its "
+        "session holds characters that are drawn differently from what they are."sv;
 
     /// What the screen says once its run is gone: dismissed, here or in another tab.
     constexpr auto DismissedText = "This run was dismissed."sv;
@@ -204,13 +205,19 @@ std::string transcriptFooterOf(TranscriptPage const& page)
     return footer;
 }
 
-std::optional<std::vector<std::string>> transcriptCommandOf(Run const& run, uint32_t page)
+std::optional<std::vector<std::string>> transcriptCommandOf(Run const& run,
+                                                            uint32_t page,
+                                                            std::span<HostProgram const> selfPrograms)
 {
-    // What is drawn could otherwise name another session or directory than the one the copy names.
-    if (!showsAsItIs(run.session) || !showsAsItIs(run.worktree))
+    // The contour the host runs the command with, which a PATH need not hold.
+    constexpr auto Program = "contour"sv;
+    auto const self = std::ranges::find(selfPrograms, Program, &HostProgram::name);
+    auto const program = self != selfPrograms.end() ? std::string { self->path } : std::string { Program };
+    // What is drawn could otherwise name another program, session or directory than the one the copy names.
+    if (!showsAsItIs(program) || !showsAsItIs(run.session) || !showsAsItIs(run.worktree))
         return std::nullopt;
     auto groups = std::vector<std::vector<std::string>> {
-        { "contour", "agent", "transcript" },
+        { program, "agent", "transcript" },
         { "--session", run.session },
         { "--cwd", run.worktree },
     };
@@ -258,7 +265,7 @@ std::optional<std::vector<TranscriptLine>> transcriptScreenText(Engine const& en
                          .role = Role::Failing },
         TranscriptLine {},
     };
-    auto command = transcriptCommandOf(*found, page);
+    auto command = transcriptCommandOf(*found, page, engine.host().selfPrograms);
     if (!command)
     {
         lines.push_back(TranscriptLine { .text = std::string { UnshownCommandText }, .role = Role::Warning });

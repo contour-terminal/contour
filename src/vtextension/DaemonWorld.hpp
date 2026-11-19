@@ -202,12 +202,22 @@ struct ResolvedRoot
     [[nodiscard]] bool operator==(ResolvedRoot const&) const = default;
 };
 
+/// A program a declared command may name that is the daemon's own executable: the world's `self-program`.
+struct SelfProgram
+{
+    std::string name; ///< The program as a command's argv names it, such as `contour`.
+    std::string path; ///< The executable the host runs for it: absolute, whatever the daemon's PATH holds.
+
+    [[nodiscard]] bool operator==(SelfProgram const&) const = default;
+};
+
 /// What the host tells the extension once, when it loads: the world's `host-info`.
 struct DaemonHostInfo
 {
-    std::vector<ResolvedRoot> roots; ///< Every root the manifest declares, resolved.
-    std::string home;                ///< The user's home directory.
-    int32_t utcOffsetMinutes = 0;    ///< How far local time is ahead of UTC at load.
+    std::vector<ResolvedRoot> roots;            ///< Every root the manifest declares, resolved.
+    std::string home;                           ///< The user's home directory.
+    int32_t utcOffsetMinutes = 0;               ///< How far local time is ahead of UTC at load.
+    std::vector<SelfProgram> selfPrograms = {}; ///< The programs the host runs as its own executable.
 
     [[nodiscard]] bool operator==(DaemonHostInfo const&) const = default;
 };
@@ -230,7 +240,8 @@ template <> struct RecordFields<TabInfo> { static constexpr auto Members = std::
 template <> struct RecordFields<ActionInfo> { static constexpr auto Members = std::tuple { &ActionInfo::id, &ActionInfo::origin }; };
 template <> struct RecordFields<FileContent> { static constexpr auto Members = std::tuple { &FileContent::bytes, &FileContent::modifiedUnixMs }; };
 template <> struct RecordFields<ResolvedRoot> { static constexpr auto Members = std::tuple { &ResolvedRoot::label, &ResolvedRoot::paths }; };
-template <> struct RecordFields<DaemonHostInfo> { static constexpr auto Members = std::tuple { &DaemonHostInfo::roots, &DaemonHostInfo::home, &DaemonHostInfo::utcOffsetMinutes }; };
+template <> struct RecordFields<SelfProgram> { static constexpr auto Members = std::tuple { &SelfProgram::name, &SelfProgram::path }; };
+template <> struct RecordFields<DaemonHostInfo> { static constexpr auto Members = std::tuple { &DaemonHostInfo::roots, &DaemonHostInfo::home, &DaemonHostInfo::utcOffsetMinutes, &DaemonHostInfo::selfPrograms }; };
 
 template <> inline constexpr uint32_t EnumCaseCount<DaemonHint> = 5;
 template <> inline constexpr uint32_t EnumCaseCount<HostError> = 9;

@@ -43,6 +43,7 @@ struct DaemonRunnerConfig
     ExtensionLimits limits = daemonWorldLimits(); ///< What it may cost; the engine's memory and stack caps.
     DurableBudget durableBudget {};               ///< What one callback may spend in durable host calls.
     DaemonRunGeneration generation = 0; ///< Which run of the extension this is: what it tells its presence.
+    std::vector<SelfProgram> selfPrograms = {}; ///< What `load` tells it the host runs as its own executable.
 };
 
 /// What a daemon-world runner reaches outside itself. Every reference must outlive the scheduler's processing

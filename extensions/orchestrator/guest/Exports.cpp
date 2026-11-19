@@ -39,7 +39,11 @@ constexpr auto ReposLabel = std::string_view { "repos" };
     auto host = HostInfo { .home = std::string(viewOf(info.home)),
                            .worktreeRoot = {},
                            .repoPaths = {},
-                           .utcOffsetMinutes = info.utc_offset_minutes };
+                           .utcOffsetMinutes = info.utc_offset_minutes,
+                           .selfPrograms = {} };
+    for (auto const& program: std::span(info.self_programs.ptr, info.self_programs.len))
+        host.selfPrograms.push_back(HostProgram { .name = std::string(viewOf(program.name)),
+                                                  .path = std::string(viewOf(program.path)) });
     for (auto const& root: std::span(info.roots.ptr, info.roots.len))
     {
         auto const paths = std::span(root.paths.ptr, root.paths.len);

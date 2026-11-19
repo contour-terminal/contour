@@ -168,7 +168,7 @@ TEST_CASE("DaemonInstance: load hands the guest its configuration and the host's
     guest.backend.guest.exports["load"] =
         [&](std::span<uint32_t> argv) -> std::expected<void, wasm::CallFailure> {
         auto memory = FakeInstanceMemory { guest.guest() };
-        auto reader = abi::FlatReader(argv.first(7));
+        auto reader = abi::FlatReader(argv.first(9));
         auto const config = abi::Codec<std::string>::liftFlat(memory, reader);
         auto const host = abi::Codec<DaemonHostInfo>::liftFlat(memory, reader);
         if (!config || !host)
@@ -185,6 +185,7 @@ TEST_CASE("DaemonInstance: load hands the guest its configuration and the host's
                    ResolvedRoot { .label = "worktrees", .paths = { "/wt" } } },
         .home = "/home/me",
         .utcOffsetMinutes = -330,
+        .selfPrograms = { SelfProgram { .name = "contour", .path = "/opt/contour/bin/contour" } },
     };
     REQUIRE((*instance)->load(R"({"poll_every":"2m"})", expected).has_value());
     CHECK(configJson == R"({"poll_every":"2m"})");

@@ -37,6 +37,7 @@ set(vtextension_SOURCES
     RootPointer.cpp
     RootResolution.cpp
     Runner.cpp
+    SelfPrograms.cpp
     SessionExtensions.cpp
     SettableEnvironment.cpp
     StatusLineAdapter.cpp
@@ -95,6 +96,7 @@ set(vtextension_HEADERS
     RootPointer.hpp
     RootResolution.hpp
     Runner.hpp
+    SelfPrograms.hpp
     SettableEnvironment.hpp
     ServedTabService.hpp
     SessionExtensions.hpp

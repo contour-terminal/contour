@@ -134,6 +134,9 @@ struct DaemonExtensionRuntimeConfig
         grantsFile;   ///< Where the user's answers are kept (@see DaemonScopedGrantsFileName).
     std::string home; ///< The user's home directory: what `~` in a root stands for.
     std::vector<std::string> inheritedEnvironment; ///< The daemon's environment, as `NAME=value`.
+    /// The programs the extensions' commands run as the daemon's own executable (selfProgramsOf()), and that
+    /// their `load` is told of; empty: none, every program is found on the commands' PATH.
+    std::vector<SelfProgram> selfPrograms = {};
     std::vector<std::filesystem::path>
         bundledDirectories;                       ///< Where a declaration without a module is looked for.
     ExtensionLimits limits = daemonWorldLimits(); ///< What each extension may cost.

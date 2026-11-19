@@ -293,10 +293,13 @@ std::string drawnAlone(TranscriptPanel& panel, Size size)
 
 /// @return The failed screen of the running agent's transcript, whose worktree is @p worktree, drawn at
 ///         @p size.
-[[nodiscard]] std::string failedScreenWith(std::string worktree, Size size)
+[[nodiscard]] std::string failedScreenWith(std::string worktree,
+                                           Size size,
+                                           std::vector<HostProgram> selfPrograms = {})
 {
     auto world = transcriptWorld();
     world.stored.front().worktree = std::move(worktree);
+    world.selfPrograms = std::move(selfPrograms);
     auto fixture = DashboardFixture { world, size };
     openTranscript(fixture, RunningId, failedWith("no session log\n"));
     return fixture.screen();
@@ -379,13 +382,35 @@ TEST_CASE("the command to read a page by hand is quoted", "[orchestrator][view][
 {
     auto run = storedRun(Running {}, RunningId, ChangeRequestRef { 2375 });
     run.worktree = "/home/u/work trees/x";
-    CHECK(transcriptCommandOf(run, 1)
+    CHECK(transcriptCommandOf(run, 1, {})
           == std::vector<std::string> { "contour agent transcript \\",
                                         std::format("--session {} \\", run.session),
                                         "--cwd '/home/u/work trees/x'" });
-    auto const third = transcriptCommandOf(run, 3);
+    auto const third = transcriptCommandOf(run, 3, {});
     REQUIRE(third.has_value());
     CHECK(third->back() == "--page 3");
+}
+
+TEST_CASE("the command to read a page by hand names the contour the host runs",
+          "[orchestrator][view][transcript]")
+{
+    // A .dmg's contour is on no shell's PATH: the command names the one the host ran.
+    constexpr auto Bundled = "/Applications/Contour Beta.app/Contents/MacOS/contour"sv;
+    auto const programs = std::vector { HostProgram { .name = "contour", .path = std::string { Bundled } } };
+    auto run = storedRun(Running {}, RunningId, ChangeRequestRef { 2375 });
+    auto const command = transcriptCommandOf(run, 1, programs);
+    REQUIRE(command.has_value());
+    CHECK(command->front() == std::format("'{}' agent transcript \\", Bundled));
+
+    auto const screen = failedScreenWith(run.worktree, Wide, programs);
+    CHECK(screen.contains("To read it by hand, run:"));
+    CHECK(screen.contains(std::format("'{}' agent transcript \\", Bundled)));
+
+    // A path that is drawn differently from what it is is never shown.
+    auto const hidden =
+        std::vector { HostProgram { .name = "contour", .path = "/opt/con\u200Btour/contour" } };
+    CHECK(!transcriptCommandOf(run, 1, hidden).has_value());
+    CHECK(failedScreenWith(run.worktree, Wide, hidden).contains("cannot be shown safely"));
 }
 
 TEST_CASE("the command to read a page by hand is refused when a value is drawn differently",
@@ -397,7 +422,7 @@ TEST_CASE("the command to read a page by hand is refused when a value is drawn d
     {
         CAPTURE(mark);
         run.worktree = std::format("/home/u/worktrees/contour/pr-2375{}", mark);
-        CHECK(!transcriptCommandOf(run, 1).has_value());
+        CHECK(!transcriptCommandOf(run, 1, {}).has_value());
         auto const screen = failedScreenWith(run.worktree, Medium);
         CHECK(screen.contains("cannot be shown safely"));
         CHECK(!screen.contains("To read it by hand, run:"));
@@ -411,7 +436,7 @@ TEST_CASE("a command line too long for the panel is never broken or cut", "[orch
     auto const path = std::format("/home/u/worktrees/contour/{}-end", std::string(200, 'Q'));
     auto run = storedRun(Running {}, RunningId, ChangeRequestRef { 2375 });
     run.worktree = path;
-    auto const command = transcriptCommandOf(run, 1);
+    auto const command = transcriptCommandOf(run, 1, {});
     REQUIRE(command.has_value());
     CHECK(command->back() == std::format("--cwd {}", path));
     // A copy of a broken line would carry a newline inside the path, and a cut one another path: the line

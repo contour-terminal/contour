@@ -190,7 +190,7 @@ inline constexpr auto FakeRequiredExports = std::array {
 
 /// The daemon world's required exports.
 inline constexpr auto FakeDaemonRequiredExports = std::array {
-    FakeExportShape { .name = "load", .parameters = 7, .results = 0 },
+    FakeExportShape { .name = "load", .parameters = 9, .results = 0 },
     FakeExportShape { .name = "update", .parameters = 1, .results = 0 },
     FakeExportShape { .name = "cabi_realloc", .parameters = 4, .results = 1 },
 };
