@@ -14,6 +14,7 @@ set -euo pipefail
 #   - a C++23 compiler, named by $CXX (default: g++), and the build dependencies of
 #     scripts/install-deps.sh
 #   - cargo with the wasm32-wasip1 target (scripts/install-rust-wasm.sh)
+#   - optionally a wasi-sdk (>= 34), named by $WASI_SDK_PREFIX, for the agent orchestrator
 #   - curl, to fetch linuxdeploy, and libspeechd2 (Qt's text-to-speech plugin is bundled)
 #
 # Environment:
@@ -22,6 +23,8 @@ set -euo pipefail
 #   OUTPUT_DIR      where the AppImage lands (default: the current directory)
 #   CXX             C++ compiler (default: g++)
 #   UCD_BASE_DIR    where libunicode keeps the Unicode database it downloads (default: inside BUILD_DIR)
+#   WASI_SDK_PREFIX a wasi-sdk to build the agent orchestrator's guest with, which is then bundled with the
+#                   other extensions (default: unset, no orchestrator)
 
 LINUXDEPLOY_VERSION="1-alpha-20251107-1"
 LINUXDEPLOY_QT_VERSION="1-alpha-20250213-1"
@@ -54,12 +57,16 @@ launcher=()
 command -v ccache >/dev/null && launcher=(-DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
 ucd=()
 [[ -n "${UCD_BASE_DIR:-}" ]] && ucd=(-DLIBUNICODE_UCD_BASE_DIR="$UCD_BASE_DIR")
+orchestrator=()
+[[ -n "${WASI_SDK_PREFIX:-}" ]] &&
+    orchestrator=(-DCONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST=ON -DWASI_SDK_PREFIX="$WASI_SDK_PREFIX")
 cmake -S "$ROOT" -B "$BUILD_DIR/build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER="$CC" \
     -DCMAKE_CXX_COMPILER="$CXX" \
     "${launcher[@]}" \
     "${ucd[@]}" \
+    "${orchestrator[@]}" \
     -DCMAKE_PREFIX_PATH="$QT_PREFIX" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCONTOUR_TESTING=OFF \

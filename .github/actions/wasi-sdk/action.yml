@@ -1,0 +1,42 @@
+name: "wasi-sdk"
+description: >-
+  Downloads a wasi-sdk release tarball, checks it against the release asset's SHA-256 before it is
+  unpacked, and unpacks it into the runner's temporary directory: the toolchain the C++ WebAssembly guests
+  (the agent orchestrator among them) are built with (cmake/ContourWasiCxx.cmake). One copy, so that the
+  test build and the package jobs fetch it alike. The version and the digests are the workflow's
+  WASI_SDK_* variables, bumped together.
+inputs:
+  version:
+    description: "The wasi-sdk major version, as in the release tag wasi-sdk-<version>."
+    required: true
+  platform:
+    description: "The release asset's platform suffix: x86_64-linux, arm64-macos, ..."
+    required: true
+  sha256:
+    description: "The SHA-256 of wasi-sdk-<version>.0-<platform>.tar.gz, as the release lists it."
+    required: true
+outputs:
+  prefix:
+    description: "The unpacked wasi-sdk, to pass as WASI_SDK_PREFIX."
+    value: ${{ steps.unpack.outputs.prefix }}
+runs:
+  using: composite
+  steps:
+    - name: "Download, verify and unpack wasi-sdk"
+      id: unpack
+      shell: bash
+      env:
+        WASI_SDK_VERSION: ${{ inputs.version }}
+        WASI_SDK_PLATFORM: ${{ inputs.platform }}
+        WASI_SDK_SHA256: ${{ inputs.sha256 }}
+      run: |
+        set -euo pipefail
+        name="wasi-sdk-${WASI_SDK_VERSION}.0-${WASI_SDK_PLATFORM}"
+        curl -fsSL --retry 5 --retry-all-errors --max-time 600 -o "$RUNNER_TEMP/$name.tar.gz" \
+            "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/$name.tar.gz"
+        # shasum is on both runner images; sha256sum is not on macOS.
+        echo "$WASI_SDK_SHA256  $RUNNER_TEMP/$name.tar.gz" | shasum -a 256 --check --strict
+        tar -xzf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP"
+        rm "$RUNNER_TEMP/$name.tar.gz"
+        test -x "$RUNNER_TEMP/$name/bin/clang++"
+        echo "prefix=$RUNNER_TEMP/$name" >> "$GITHUB_OUTPUT"
