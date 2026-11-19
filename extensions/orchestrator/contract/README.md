@@ -6,6 +6,13 @@ The other half of the contract, the `terminal-extensions:daemon` WIT world the e
 against, is Contour's public interface and lives with the host, at `wit/daemon/` in Contour's tree. The
 guest's C bindings (`guest/bindings/`) are generated from it; `guest/README.md` has the command.
 
+## `agent-transcript/`
+
+The output of `contour agent transcript --json`, which the orchestrator reads to show a run's transcript:
+its README describes format 1, and `format-1/*.json` are pages, each naming the session log it was printed
+from. The extension's tests parse every page; Contour's test runs the verb on those logs and compares its
+output with the pages byte for byte. A change of format is a `format-2/`, never an edit of format 1.
+
 ## `manifest-v2/`
 
 A conformance corpus for version 2 of the extension manifest's line grammar.

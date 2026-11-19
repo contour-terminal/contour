@@ -15,8 +15,14 @@ which wait for an answer and which are done; and finally remove worktrees withou
 still holds work. The orchestrator does that ritual. The user keeps the decisions: every dispatch is
 confirmed, nothing starts on its own.
 
+When an agent has been at it for a while, I want to know where it stands without switching to its tab and
+scrolling: what it says it is doing, and what it actually did. An agent asked to keep a `STATUS.md` has a
+board I read from the dashboard, with its age; every run has a transcript I page through, also after it
+finished and its worktree is gone; and from either I start the next run on the same item.
+
 - **Success:** four agents dispatched in a minute; their state visible at a glance from any window
-  attached to the daemon, or from none; worktrees gone when their runs end, unless they hold work.
+  attached to the daemon, or from none; worktrees gone when their runs end, unless they hold work; what a
+  finished run did readable without its worktree.
 - **Non-goals:** automatic dispatch; deciding what an agent may do. Claude Code's permission mode,
   the agent's skills and memory, and the forge's branch protection decide that — including whether an
   agent may push to a protected branch.
@@ -56,7 +62,9 @@ request's title is shown as text and does nothing.
 | --- | --- |
 | `↑` `↓` `j` `k` `Home` `End` | move the selection |
 | `Enter` | on a pull request or an issue, open the dispatch form on the first task that applies to it, or show its agent's tab if one runs; on an agent, show its tab; on a finished run, open its details (and mark it seen); on an orphan, open its details on the whole width |
-| `d` | open the dispatch form on the selected item |
+| `d` | open the dispatch form on the selected item; on a finished run, on its item, for a new run |
+| `b` | show the selected run's board (below) |
+| `t` | show the selected run's transcript (below) |
 | a task's `key` | open the dispatch form on that task |
 | `Esc` | close the help, the details page or the filter |
 | `Tab` | swap the details in for the list, and back (below 100 columns) |
@@ -73,8 +81,53 @@ then how many agents run. `Enter` dispatches; `Esc` cancels. A task's key may no
 dashboard's own: the configuration is refused with a line that names them. While Claude Code's status
 hooks are missing the form says so, and asks for a second `Enter`.
 
+## Boards and transcripts
+
+Both are screens of the dashboard's tab, not tabs of their own, and both are read-only.
+
+**The board** is the agent's `STATUS.md` at its worktree's root, read with `file-read` from the `worktrees`
+root and shown with how long ago it was written, again every five seconds while it is shown. The extension
+does not ask an agent to write one (a hook's request proved unreliable); a task's prompt does. Once an agent
+has run for `status_board_after` the engine looks for the file, and the agent's row carries `▤` when one is
+there. A board is untrusted text: drawn inert, cut at 64 KiB, and refused when it leads outside the worktree.
+Ending a run removes an untracked `STATUS.md` (`git clean -f -- STATUS.md`) before the worktree is checked for
+work, so a board never keeps a worktree. `b` is offered on a finished run only while its worktree was kept,
+and such a board is read once, not every five seconds; a board shown when its worktree goes says that it was
+removed when the run ended, never that the prompt failed to ask for one.
+
+**The transcript** is the run's Claude Code session log, a page of 30 entries at a time, read with the
+declared command `agent-transcript` (`contour agent transcript … --format 1 --json`). The host finds the log
+by the run's session id and binds it to the run's worktree, which need not exist any more, so a finished run
+keeps its transcript. The page's JSON is a contract (`contract/agent-transcript/`): a page in another format,
+or Contour's refusal of the one asked for, shows "format mismatch: update contour or the orchestrator", never
+a parse error. A read that fails shows the command to run by hand.
+
+| Key | Does, on a board | Does, on a transcript |
+| --- | --- | --- |
+| `↑` `↓` `j` `k` `PgUp` `PgDn` | scroll | scroll |
+| `Home` `End` | the top and the bottom | the first and the last page |
+| `←` `→` | | the previous and the next page |
+| `b` | read it again now | show the board |
+| `t` | show the transcript | |
+| `d` | the dispatch form on the run's item, for a new run | the same |
+| `Enter` | show the agent's tab | the same |
+| `Esc` | back to where it was opened from: the list or the transcript | back to where it was opened from: the list or the board |
+
 Its screens are pinned by golden files in `view/testdata/`, one per scene and size; after a deliberate
 change, `ORCHESTRATOR_UPDATE_GOLDENS=1 orchestrator_test "[view]"` writes them again, to be checked by eye.
+
+## The contract
+
+What the extension and Contour must agree on comes in three parts, each tested from both sides:
+
+- **`contract/manifest-v2/`**: the manifest's line grammar as a corpus of valid and invalid manifests, the
+  extension's own manifest among them, with the consent text Contour renders for it.
+- **`contract/agent-transcript/`**: the JSON pages `contour agent transcript` prints, format 1, each beside the
+  log it was printed from.
+- **The `terminal-extensions:daemon` WIT world**, at `wit/daemon/` in Contour's tree: Contour's public
+  interface, from which `guest/bindings/` is generated.
+
+`contract/README.md` says how each is checked.
 
 ## Building
 
