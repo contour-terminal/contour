@@ -14,6 +14,9 @@ A conformance corpus for version 2 of the extension manifest's line grammar.
   `orchestrator.manifest`, the extension's own manifest. The extension's tests regenerate the latter
   from its declared tables and compare byte for byte, so any change to a declared command, pane,
   argument or environment updates this file in the same commit.
+- `valid/orchestrator.consent.txt` is what Contour's consent dialog shows for this manifest: Contour's
+  consent test renders the question from `orchestrator.manifest` and compares it with this file, so a
+  manifest change and its consent text change together, in one commit.
 - `invalid/` holds manifests every conforming parser refuses, one fault per file, each named after it
   and explained by the comment on its first line.
 

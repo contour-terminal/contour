@@ -1001,7 +1001,8 @@ TEST_CASE("the manifest-v2 corpus", "[orchestrator][commands][manifest][corpus]"
         for (auto const directory: std::array { "valid"sv, "invalid"sv })
             for (auto const& name:
                  fixtureNames(FixtureRoot::Contract, "manifest-v2/" + std::string(directory)))
-                listed.push_back(std::string(directory) + '/' + name);
+                if (!name.ends_with(".consent.txt")) // what the consent dialog shows for a manifest, not one
+                    listed.push_back(std::string(directory) + '/' + name);
         CHECK(listed.size() == CorpusRows.size());
         for (auto const& name: listed)
         {
