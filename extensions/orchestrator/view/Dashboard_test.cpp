@@ -836,3 +836,16 @@ TEST_CASE("a running agent with no status after 30 s hints at a trust prompt", "
     CHECK(statusAt(31'000).status == "working 31s");
     CHECK(!std::ranges::contains(statusAt(31'000).details, hint));
 }
+
+TEST_CASE("scrolling back up to a section's first item shows its heading", "[orchestrator][view]")
+{
+    // At 80x24 the list is shorter than its rows: End scrolls the PULL REQUESTS heading away, and Home must
+    // bring it back with the first item, not stop at the item.
+    auto fixture = Fixture { World { .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }),
+                                                 storedRun(Done {}, DoneId, ChangeRequestRef { 2379 }) } },
+                             Medium };
+    CHECK(fixture.dashboard.input("\x1b[F"sv).empty());
+    CHECK(!fixture.screen().contains("MY PULL REQUESTS"));
+    CHECK(fixture.dashboard.input("\x1b[H"sv).empty());
+    CHECK(fixture.screen().contains("MY PULL REQUESTS"));
+}

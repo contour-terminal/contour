@@ -263,6 +263,12 @@ namespace
                 else if (height > 0 && selected >= top + height)
                     top = selected - height + 1;
             }
+            // The selected row is never the first one shown with its section's heading hidden right above
+            // it, where both fit: not after scrolling up to it, nor when rows arrive above it (a list
+            // answered after the rows the selection first scrolled to).
+            if (selected < rows.size() && selected == top && top > 0 && height > 1
+                && _state.rows[rows[top - 1]].kind == RowKind::Heading)
+                --top;
             top = std::min(top, rows.size() > height ? rows.size() - height : 0);
             for (auto const line: std::views::iota(std::size_t { 0 }, std::min(height, rows.size() - top)))
                 drawRow(inside,
