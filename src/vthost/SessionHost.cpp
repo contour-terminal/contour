@@ -2156,6 +2156,17 @@ SizeChange SessionHost::resizeLocked(SessionId session, vtbackend::Terminal& bac
         // The host's cell rides along, on the total-page basis resizeScreen divides by: a report that moves
         // grid and cell at once resizes the PTY once, and a grid resize alone keeps the cell.
         backing.resizeScreen(size, cellPixelSize() * total);
+        // A served page keeps no history (servedSessionSettings), but a shorter page holds the rows it pushed
+        // up until the next scroll (Grid::settleHeldHistory), which a served tab need never make: its
+        // extension repaints them. They go now, as ED 3 takes them, so no window shows a history for it.
+        if (servedBy(session) != nullptr)
+        {
+            auto& grid = backing.primaryScreen().grid();
+            auto const evictedBefore = grid.evictedRowCount();
+            grid.clearHistory();
+            if (grid.evictedRowCount() != evictedBefore)
+                backing.rowsDropped(vtbackend::LineCount(0));
+        }
     }
 
     // Outside the guard above: an observer resyncs the session, which takes the very lock this

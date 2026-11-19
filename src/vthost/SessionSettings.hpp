@@ -80,8 +80,10 @@ constexpr auto MaxSessionWordDelimiters = 256U;
 [[nodiscard]] vtbackend::Settings hostedSessionSettings(vtbackend::Settings settings);
 
 /// What a served session's terminal is, whatever settings it was spawned with: it executes only the sequences
-/// that draw (@see vtbackend::ServedTabFunctions), and keeps no history, as its extension repaints the page
-/// and what scrolled off it is a stale frame.
+/// that draw (@see vtbackend::ServedTabFunctions); keeps no history and reflows nothing on a resize, as its
+/// extension repaints the page at any size and what a reflow wraps or pushes off is a stale frame; and its
+/// keys are read by that extension (vtbackend::InputReader), so the status line it builds names no Insert
+/// mode.
 /// @param settings The settings the session would otherwise have.
 /// @return Them, made a served session's.
 [[nodiscard]] vtbackend::Settings servedSessionSettings(vtbackend::Settings settings);

@@ -1144,6 +1144,84 @@ TEST_CASE("a served tab keeps no history whatever the profiles say", "[daemon][s
     CHECK(historyOf().first == none);
 }
 
+TEST_CASE("a served tab's keys are read by its extension", "[daemon][served]")
+{
+    auto bench = ServedBench {};
+    auto window = FakeWindow { 1 };
+    auto const origin = bench.attach(window, bench.first);
+    auto const opened = bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, origin);
+    REQUIRE(opened.has_value());
+    auto const readerOf = [&](SessionId session) {
+        auto& terminal = bench.live.host.hostedSession(session)->terminal();
+        auto const lock = std::lock_guard { terminal };
+        return terminal.inputReader();
+    };
+    // So the status line the host builds for it, which its windows show, names no Insert mode.
+    CHECK(readerOf(bench.sessionOf(*opened)) == vtbackend::InputReader::Extension);
+    CHECK(readerOf(bench.shell) == vtbackend::InputReader::Program);
+}
+
+TEST_CASE("a served tab's page does not reflow on a resize", "[daemon][served]")
+{
+    auto bench = ServedBench {};
+    auto window = FakeWindow { 1 };
+    auto const origin = bench.attach(window, bench.first);
+    auto const opened = bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, origin);
+    REQUIRE(opened.has_value());
+    auto const session = bench.sessionOf(*opened);
+    auto const size = pageSizeOf(bench.live, session);
+
+    // A row as wide as the page, and one below it: its extension repaints them at any size.
+    auto const wide = std::string(unbox<std::size_t>(size.columns), 'x');
+    REQUIRE(
+        bench.tabs->write(Orchestrator, *opened, std::format("\x1b[H{}\x1b[2;1Hsecond", wide)).has_value());
+    REQUIRE(bench.live.eventually([&] { return bench.live.pageText(session).contains("second"); }));
+
+    // Narrower, a reflow would wrap the wide row onto the second one, and push the page's top into history.
+    auto const narrower = size.columns - vtbackend::ColumnCount(10);
+    std::ignore =
+        bench.live.host.applyClientSize(&window, vtpty::PageSize { size.lines, narrower }, std::nullopt);
+    REQUIRE(bench.live.eventually([&] { return pageSizeOf(bench.live, session).columns == narrower; }));
+    auto const page = pageLines(bench.live.pageText(session));
+    REQUIRE(page.size() >= 2);
+    CHECK(page[1].starts_with("second"));
+}
+
+TEST_CASE("a served tab follows the window's height and keeps no history", "[daemon][served]")
+{
+    auto bench = ServedBench {};
+    auto window = FakeWindow { 1 };
+    auto const origin = bench.attach(window, bench.first);
+    auto const opened = bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, origin);
+    REQUIRE(opened.has_value());
+    auto const session = bench.sessionOf(*opened);
+    auto const size = pageSizeOf(bench.live, session);
+    auto const historyOf = [&] {
+        auto& terminal = bench.live.host.hostedSession(session)->terminal();
+        auto const lock = std::lock_guard { terminal };
+        return terminal.primaryScreen().historyLineCount();
+    };
+    auto const resizeTo = [&](vtbackend::LineCount lines) {
+        std::ignore =
+            bench.live.host.applyClientSize(&window, vtpty::PageSize { lines, size.columns }, std::nullopt);
+        REQUIRE(bench.live.eventually([&] { return pageSizeOf(bench.live, session).lines == lines; }));
+    };
+
+    // A frame ends with the cursor on the bottom row, where a full-screen view leaves it: a shorter page then
+    // pushes its top rows up, which a served tab keeps none of.
+    REQUIRE(
+        bench.tabs->write(Orchestrator, *opened, std::format("\x1b[Htop\x1b[{};1Hbottom", unbox(size.lines)))
+            .has_value());
+    REQUIRE(bench.live.eventually([&] { return bench.live.pageText(session).contains("bottom"); }));
+    resizeTo(size.lines - vtbackend::LineCount(5));
+    CHECK(historyOf() == vtbackend::LineCount(0));
+
+    // Taller again, the page is the window's grid (resizeTo), and nothing pushed up comes back from a
+    // history.
+    resizeTo(size.lines + vtbackend::LineCount(3));
+    CHECK(historyOf() == vtbackend::LineCount(0));
+}
+
 TEST_CASE("a page too small for the stopped box shows its lines alone, cut", "[daemon][served]")
 {
     auto const frame = stoppedFrame(
