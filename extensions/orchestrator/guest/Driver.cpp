@@ -204,11 +204,14 @@ namespace
     /// The panes, as the engine takes them: the host's tagged listing, or none known while it serves none.
     struct ListedPanes
     {
-        std::vector<PaneFact> panes;                       ///< The listed panes.
-        PaneListing listing = PaneListing::OwnRecordsOnly; ///< Where their tags come from.
+        std::vector<PaneFact> panes;                ///< The listed panes.
+        PaneListing listing = PaneListing::Unknown; ///< Where their tags come from; Unknown: nothing listed.
     };
 
-    /// @return The panes; std::nullopt if the host failed to list them, which the engine is then not told.
+    /// @return The panes; std::nullopt if the host failed to list them -- `limit` before it restored its
+    ///         sessions, or any other failure -- which tells nothing about any run. A host that serves no
+    ///         listing (`not-supported-yet`) answers none, as PaneListing::OwnRecordsOnly: no running run is
+    ///         ended on it.
     [[nodiscard]] std::optional<ListedPanes> listedPanes(IGuestHost& host)
     {
         auto listed = host.panes();
@@ -216,7 +219,9 @@ namespace
         {
             if (listed.error() == HostError::NotSupportedYet)
                 return ListedPanes { .panes = {}, .listing = PaneListing::OwnRecordsOnly };
-            host.log(LogLevel::Warn, std::format("panes: {}", nameOf(listed.error())));
+            // `limit` is a host still restoring its sessions, as every boot after an upgrade is: not news.
+            host.log(listed.error() == HostError::Limit ? LogLevel::Debug : LogLevel::Warn,
+                     std::format("panes: {}", nameOf(listed.error())));
             return std::nullopt;
         }
         auto facts = std::vector<PaneFact> {};
@@ -325,8 +330,8 @@ Driver Driver::load(IGuestHost& host,
     else
         host.log(LogLevel::Error, std::format("procs: {}", nameOf(processes.error())));
 
-    // Unlisted, the panes are not known: none is reported, and the engine takes the listing as its own
-    // records.
+    // Unlisted, the panes are not known (PaneListing::Unknown): no run is reconciled, so none ends because
+    // the host could not answer yet; the next listing that is known reconciles them.
     auto panes = listedPanes(host).value_or(ListedPanes {});
     auto const clock = host.now();
     auto worktreeRoot = hostInfo.worktreeRoot;
@@ -368,8 +373,8 @@ void Driver::update(Hint hint)
             readTabs();
             break;
         case Hint::Actions: takeActions(); break;
-        // Served from phase 3 on, with the host's pane-to-tag registry.
-        case Hint::Panes: break;
+        // The host's registry changed: a pane opened, went, or its status changed.
+        case Hint::Panes: listPanes(); break;
     }
     drawTabs();
     askForWake();
@@ -539,11 +544,18 @@ void Driver::wake()
     // A lost Procs hint only delays a result: a wake takes it in first.
     consumeFinished();
     auto const clock = readClock();
-    if (!_timer.takeDue(clock.monoMs))
-        return;
-    step(Wake { .monoMs = clock.monoMs, .wallMs = clock.wallMs });
-    stepReplies();
-    listPanes();
+    if (_timer.takeDue(clock.monoMs))
+    {
+        step(Wake { .monoMs = clock.monoMs, .wallMs = clock.wallMs });
+        stepReplies();
+        listPanes();
+    }
+    else if (_paneListingDueMs && clock.monoMs >= *_paneListingDueMs)
+    {
+        // Asked once: a listing the host cannot answer yet is followed by its Panes hint once it can.
+        _paneListingDueMs.reset();
+        listPanes();
+    }
 }
 
 void Driver::listPanes()
@@ -553,6 +565,8 @@ void Driver::listPanes()
     auto listed = listedPanes(_host);
     if (!listed)
         return;
+    if (_paneListingDueMs && requestedMs >= *_paneListingDueMs)
+        _paneListingDueMs.reset();
     step(PanesListed {
         .panes = std::move(listed->panes), .requestedMonoMs = requestedMs, .listing = listed->listing });
     stepReplies();
@@ -610,7 +624,10 @@ void Driver::release(uint32_t handle)
 
 void Driver::askForWake()
 {
-    auto const due = _timer.unasked(dashboardsDueMs());
+    auto due = dashboardsDueMs();
+    if (_paneListingDueMs)
+        due = std::min(due.value_or(*_paneListingDueMs), *_paneListingDueMs);
+    due = _timer.unasked(due);
     if (!due)
         return;
     _host.wake(WakeTimer::delayUntil(*due, nowMs()));
@@ -650,14 +667,24 @@ void Driver::carryOut(std::span<Effect const> effects)
                                                      .monoMs = nowMs() });
                 },
                 [&](OpenPane const& open) {
-                    auto pane =
-                        _host.paneOpen(open.paneTemplate, open.arguments, open.cwd, open.title, open.run);
+                    auto pane = _host.paneOpen(
+                        open.paneTemplate,
+                        open.arguments,
+                        open.cwd,
+                        open.title,
+                        open.run,
+                        open.near.transform([](std::string const& tab) { return std::string_view { tab }; }));
                     if (pane)
                         _replies.emplace_back(
                             PaneOpenedFor { .run = open.run, .pane = std::move(*pane), .monoMs = nowMs() });
                     else
+                    {
+                        auto const refusedMs = nowMs();
                         _replies.emplace_back(PaneOpenFailedFor {
-                            .run = open.run, .why = std::string(nameOf(pane.error())), .monoMs = nowMs() });
+                            .run = open.run, .why = std::string(nameOf(pane.error())), .monoMs = refusedMs });
+                        // Nothing was opened, so no Panes hint follows.
+                        _paneListingDueMs = refusedMs + 1;
+                    }
                 },
                 [&](ClosePane const& close) {
                     if (auto const closed = _host.paneClose(close.pane); !closed)

@@ -924,6 +924,8 @@ bool isStorable(Run const& run) noexcept
         return false;
     if (run.pane && !fits(Shape::Name, *run.pane))
         return false;
+    if (run.near && !fits(Shape::Name, *run.near))
+        return false;
     if (run.failure && !fits(Shape::Entry, run.failure->why))
         return false;
     if (auto const* const jira = std::get_if<JiraRef>(&run.item); jira != nullptr && !isJiraKey(jira->key))
@@ -1082,6 +1084,7 @@ std::string toJson(Run const& run)
     json.branch = run.branch;
     json.worktree = run.worktree;
     json.pane = run.pane;
+    json.near = run.near;
     json.state = StateNames[run.state.index()];
     std::visit(Overloaded {
                    [&](Preparing const& preparing) { json.step = spell(PrepareStepNames, preparing.step); },
@@ -1143,6 +1146,7 @@ std::optional<Run> runFromJson(std::string_view text)
         .branch = std::move(json.branch),
         .worktree = std::move(json.worktree),
         .pane = std::move(json.pane),
+        .near = std::move(json.near),
         .state = std::move(*state),
         .lastStatus = lastStatus,
         .failure = json.failure

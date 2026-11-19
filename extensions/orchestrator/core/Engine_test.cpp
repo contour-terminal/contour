@@ -165,6 +165,7 @@ constexpr auto CleanIndex = "H 100644 78981922613b2afb6025042ff6bd878ac1994e85 0
                       .model = "",
                       .note = std::nullopt,
                       .session = std::string(Session),
+                      .near = std::nullopt,
                       .wallMs = DispatchWallMs };
 }
 
@@ -177,6 +178,7 @@ constexpr auto CleanIndex = "H 100644 78981922613b2afb6025042ff6bd878ac1994e85 0
                       .model = "",
                       .note = std::nullopt,
                       .session = std::string(Session),
+                      .near = std::nullopt,
                       .wallMs = DispatchWallMs };
 }
 
@@ -2356,6 +2358,95 @@ TEST_CASE("a tab that never opens is given up at its deadline", "[orchestrator][
         auto const closes = all<ClosePane>(harness.list({ paneOf(PrId, "p1") }));
         REQUIRE(closes.size() == 1);
         CHECK(closes.front().pane == "p1");
+    }
+}
+
+TEST_CASE("a dispatch's near reaches its OpenPane", "[orchestrator][engine][panes]")
+{
+    for (auto const& near: { std::optional<std::string> { "tab-7" }, std::optional<std::string> {} })
+    {
+        CAPTURE(near.value_or("none"));
+        auto harness = booted();
+        auto dispatch = prDispatch();
+        dispatch.near = near;
+        harness.feed(dispatch);
+        CHECK(harness.run(PrId)->near == near);
+        harness.finish("git-fetch", ok());
+        harness.finish("git-worktree-add", ok());
+        auto const opened = all<OpenPane>(harness.finish("gh-pr-checkout", ok()));
+        REQUIRE(opened.size() == 1);
+        CHECK(opened.front().near == near);
+    }
+}
+
+TEST_CASE("pane-open answering limit fails the run through the removal checks",
+          "[orchestrator][engine][panes]")
+{
+    // A live upgrade runs: the host answers limit, and the run is not retried.
+    auto harness = booted();
+    harness.feed(prDispatch());
+    harness.finish("git-fetch", ok());
+    harness.finish("git-worktree-add", ok());
+    REQUIRE(all<OpenPane>(harness.finish("gh-pr-checkout", ok())).size() == 1);
+
+    harness.feed(PaneOpenFailedFor { .run = std::string(PrId), .why = "limit", .monoMs = harness.now() });
+
+    auto const* const run = harness.run(PrId);
+    REQUIRE(run != nullptr);
+    REQUIRE(holds<Ending>(run));
+    CHECK(std::get<Ending>(run->state).cause == Ended::PreparationFailed);
+    REQUIRE(run->failure);
+    CHECK(run->failure->step == PrepareStep::OpenPane);
+    CHECK(run->failure->why == "limit");
+    CHECK(!countsAsActive(*run));
+}
+
+TEST_CASE("nothing deletes from a worktree before a listing is known", "[orchestrator][engine][panes]")
+{
+    auto stored = storedRun(Ending { .step = EndStep::Status,
+                                     .cause = Ended::Completed,
+                                     .resumedFrom = std::nullopt,
+                                     .removal = Removal::NotIssued });
+    auto context = contextFor({});
+    context.stored = { entryOf(stored) };
+    context.finished = { FinishedResult { .tag = *callTag(stored), .outcome = ok() } };
+    context.paneListing = PaneListing::Unknown;
+    auto harness = Harness { std::move(context) };
+    CHECK(harness.commandsIssued("git-worktree-remove") == 0);
+    auto const kept = finishedOf(harness.run(PrId));
+    REQUIRE(kept);
+    CHECK(kept->fate == Fate::Kept);
+    CHECK(kept->entries == std::vector { "git worktree remove failed: the open tabs are not known yet"s });
+}
+
+TEST_CASE("start with an unknown listing skips reconciliation", "[orchestrator][engine][panes]")
+{
+    auto const contextWith = [](PaneListing listing) {
+        auto stored = storedRun(Running {});
+        stored.pane = "p1";
+        auto context = contextFor({});
+        context.stored = { entryOf(stored) };
+        context.paneListing = listing;
+        return context;
+    };
+    SECTION("at start")
+    {
+        auto harness = Harness { contextWith(PaneListing::Unknown) };
+        CHECK(holds<Running>(harness.run(PrId)));
+        CHECK(countOf<ClosePane>(harness.last()) == 0);
+    }
+    SECTION("a later listing of nothing known")
+    {
+        auto harness = Harness { contextWith(PaneListing::Unknown) };
+        REQUIRE(holds<Running>(harness.run(PrId)));
+        // A PanesListed left defaulted, or fed Unknown, reconciles nothing either.
+        harness.feed(PanesListed { .panes = {}, .requestedMonoMs = harness.now() });
+        CHECK(holds<Running>(harness.run(PrId)));
+        harness.list({}, PaneListing::Unknown);
+        CHECK(holds<Running>(harness.run(PrId)));
+        // The first known listing does.
+        harness.list({});
+        CHECK(holds<Ending>(harness.run(PrId)));
     }
 }
 

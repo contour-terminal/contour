@@ -129,6 +129,7 @@ std::expected<Run, DispatchRefusal> Engine::prepare(Dispatch const& request) con
                      .branch = branchName(*id),
                      .worktree = worktreePath(_config->worktreeRoot(), repo->name, *id),
                      .pane = std::nullopt,
+                     .near = request.near,
                      .state = Preparing { PrepareStep::Fetch },
                      .lastStatus = std::nullopt,
                      .failure = std::nullopt,

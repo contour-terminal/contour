@@ -75,8 +75,10 @@ namespace
     /// The commands that delete from a worktree: never run while a tab of its run is listed.
     constexpr auto DeletingCommands = std::array { "git-clean"sv, "git-worktree-remove"sv };
 
-    /// Why a deleting command was held back.
+    /// Why a deleting command was held back: a tab of the run is listed.
     constexpr auto TabStillListed = "a tab of the run is still open"sv;
+    /// Why a deleting command was held back: no listing was known yet, so none can say that no tab is open.
+    constexpr auto TabsNotKnown = "the open tabs are not known yet"sv;
 
     /// Whether @p effect makes the run await a tagged host call.
     [[nodiscard]] bool awaitsCall(RunEffect const& effect) noexcept
@@ -404,7 +406,11 @@ void Engine::reconcileWith(std::span<PaneFact const> panes,
                            PaneListing listing,
                            std::vector<Effect>& out)
 {
+    // Nothing listed tells nothing: a run whose pane is not known to be gone is never ended on it.
+    if (listing == PaneListing::Unknown)
+        return;
     _panes.assign(panes.begin(), panes.end());
+    _paneListing = listing;
     auto const decisions =
         reconcile(std::span<Run const>(_runs).first(_insideCount), _panes, requestedMonoMs, listing);
     for (auto const& decision: decisions)
@@ -440,7 +446,7 @@ void Engine::apply(std::string_view runId, std::vector<RunEffect> effects, std::
     if (std::ranges::any_of(effects, awaitsCall))
         ++run->attempt;
     auto forgotten = false;
-    auto held = false;
+    auto held = std::optional<std::string_view> {};
     for (auto& effect: effects)
         std::visit(
             Overloaded {
@@ -455,11 +461,14 @@ void Engine::apply(std::string_view runId, std::vector<RunEffect> effects, std::
                     auto const* const command = findCommand(declared.name);
                     if (command == nullptr)
                         return;
-                    if (std::ranges::contains(DeletingCommands, command->name)
-                        && std::ranges::contains(_panes, run->id, &PaneFact::tag))
+                    if (std::ranges::contains(DeletingCommands, command->name))
                     {
-                        held = true;
-                        return;
+                        if (_paneListing == PaneListing::Unknown)
+                            held = TabsNotKnown;
+                        else if (std::ranges::contains(_panes, run->id, &PaneFact::tag))
+                            held = TabStillListed;
+                        if (held)
+                            return;
                     }
                     issue(RunCommand { .tag = callTag(*run).value_or(run->id),
                                        .command = command->name,
@@ -489,7 +498,8 @@ void Engine::apply(std::string_view runId, std::vector<RunEffect> effects, std::
                                                                { .name = "session", .value = run->session },
                                                                { .name = "prompt", .value = run->prompt } },
                                                 .cwd = run->worktree,
-                                                .title = run->id });
+                                                .title = run->id,
+                                                .near = run->near });
                 },
                 [&](CloseAgentPane const&) {
                     auto panes = std::vector<std::string> {};
@@ -506,7 +516,7 @@ void Engine::apply(std::string_view runId, std::vector<RunEffect> effects, std::
     if (forgotten)
         forget(runId);
     else if (held)
-        feed(runId, CommandFailed { TabStillListed }, out);
+        feed(runId, CommandFailed { *held }, out);
 }
 
 void Engine::forget(std::string_view runId)

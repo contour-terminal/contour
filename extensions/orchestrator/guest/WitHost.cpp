@@ -280,11 +280,13 @@ namespace
             return keys;
         }
 
-        [[nodiscard]] std::expected<std::string, HostError> paneOpen(std::string_view paneTemplate,
-                                                                     std::span<Argument const> arguments,
-                                                                     std::string_view cwd,
-                                                                     std::string_view title,
-                                                                     std::string_view tag) override
+        [[nodiscard]] std::expected<std::string, HostError> paneOpen(
+            std::string_view paneTemplate,
+            std::span<Argument const> arguments,
+            std::string_view cwd,
+            std::string_view title,
+            std::string_view tag,
+            std::optional<std::string_view> near) override
         {
             auto templateText = borrowed(paneTemplate);
             auto borrowedArguments = BorrowedArguments { arguments };
@@ -292,11 +294,17 @@ namespace
             auto cwdText = borrowed(cwd);
             auto titleText = borrowed(title);
             auto tagText = borrowed(tag);
+            auto nearText = borrowed(near.value_or(std::string_view {}));
             auto pane = daemon_string_t {};
             auto error = HostErrorCode {};
-            // No `near` tab is named: the agents' panes are not placed beside the dashboard yet.
-            if (!terminal_extensions_daemon_host_pane_open(
-                    &templateText, &list, &cwdText, &titleText, &tagText, nullptr, &pane, &error))
+            if (!terminal_extensions_daemon_host_pane_open(&templateText,
+                                                           &list,
+                                                           &cwdText,
+                                                           &titleText,
+                                                           &tagText,
+                                                           near ? &nearText : nullptr,
+                                                           &pane,
+                                                           &error))
                 return std::unexpected(hostErrorOf(error));
             auto id = copied(pane);
             daemon_string_free(&pane);

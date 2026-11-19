@@ -218,12 +218,15 @@ class IGuestHost
     /// @param cwd Its working directory.
     /// @param title Its title.
     /// @param tag The guest's own label, which panes() lists it with.
+    /// @param near A served tab of the guest's whose workspace it opens in; none: where the user looks.
     /// @return The pane's id, or why it was not opened.
-    [[nodiscard]] virtual std::expected<std::string, HostError> paneOpen(std::string_view paneTemplate,
-                                                                         std::span<Argument const> arguments,
-                                                                         std::string_view cwd,
-                                                                         std::string_view title,
-                                                                         std::string_view tag) = 0;
+    [[nodiscard]] virtual std::expected<std::string, HostError> paneOpen(
+        std::string_view paneTemplate,
+        std::span<Argument const> arguments,
+        std::string_view cwd,
+        std::string_view title,
+        std::string_view tag,
+        std::optional<std::string_view> near) = 0;
 
     /// Closes a pane the guest owns.
     /// @param pane The pane's id.

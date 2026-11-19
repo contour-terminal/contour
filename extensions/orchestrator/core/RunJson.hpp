@@ -51,6 +51,7 @@ struct JsonRun
     std::string branch;
     std::string worktree;
     std::optional<std::string> pane;
+    std::optional<std::string> near; ///< Absent in a run stored before it existed: read as none.
     std::string state;
     std::optional<std::string> step;
     std::optional<std::string> cause;

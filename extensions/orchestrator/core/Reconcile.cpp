@@ -262,7 +262,9 @@ std::vector<Decision> reconcile(std::span<Run const> runs,
             case Watch::Agent:
                 if (std::ranges::none_of(panes, isTagged))
                 {
-                    decisions.emplace_back(PaneWentAway { .run = run.id });
+                    // Only the host's listing tells that a tab is gone: the driver's own records list none.
+                    if (listing == PaneListing::Tagged)
+                        decisions.emplace_back(PaneWentAway { .run = run.id });
                     break;
                 }
                 closeWhere([&](PaneFact const& pane) {

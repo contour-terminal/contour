@@ -176,6 +176,10 @@ class Driver
     std::deque<Input> _replies;   ///< The replies the driver made itself, stepped after their batch.
     std::set<uint32_t> _consumed; ///< The finished processes stepped whose release failed.
     WakeTimer _timer;
+    /// When the panes must be listed though no hint will announce it: a millisecond after a pane-open was
+    /// refused, whose run waits until no tab tagged with it is listed (a listing asked for in the millisecond
+    /// the run changed tells it nothing); none while no listing is owed.
+    std::optional<uint64_t> _paneListingDueMs;
 };
 
 } // namespace orchestrator::guest

@@ -1874,6 +1874,30 @@ void checkSame(Run const& actual, Run const& expected)
 
 } // namespace
 
+TEST_CASE("near round-trips and an absent near reads as none", "[orchestrator][run]")
+{
+    auto run = makeRun(Item::Pr, Running {});
+    run.pane = "p1";
+    run.near = "0e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b";
+    auto const json = orchestrator::toJson(run);
+    CHECK(json.contains(R"("near":"0e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b")"));
+    auto const read = orchestrator::runFromJson(json);
+    REQUIRE(read.has_value());
+    CHECK(read->near == run.near);
+
+    // A run stored before it existed has no near, and reads as none; one with none stores none.
+    run.near.reset();
+    auto const without = orchestrator::toJson(run);
+    CHECK_FALSE(without.contains("near"));
+    auto const readWithout = orchestrator::runFromJson(without);
+    REQUIRE(readWithout.has_value());
+    CHECK_FALSE(readWithout->near.has_value());
+
+    // A near that is no Name is no stored run.
+    run.near = "a b";
+    CHECK_FALSE(orchestrator::isStorable(run));
+}
+
 TEST_CASE("runFromJson reads what toJson writes", "[orchestrator][run]")
 {
     auto resumed = endingAt(EndStep::Status, Ended::NeverReported);

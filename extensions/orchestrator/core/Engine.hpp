@@ -91,15 +91,15 @@ struct FinishedResult
 /// Everything the engine needs, in one value: there is no Recovered input and no call order to remember.
 struct StartContext
 {
-    uint64_t monoMs = 0;                  ///< Now, in monotonic milliseconds; greater than 0.
-    uint64_t wallMs = 0;                  ///< Now, in wall-clock milliseconds.
-    HostInfo host;                        ///< What the host resolved.
-    std::string configJson;               ///< The `config` subtree, as JSON.
-    std::vector<StoredEntry> stored;      ///< The store's entries.
-    std::vector<std::string> inFlight;    ///< The tags of the commands the host still runs.
-    std::vector<FinishedResult> finished; ///< The commands that finished while the guest was away.
-    std::vector<PaneFact> panes;          ///< The listed panes tagged with a run, listed now.
-    PaneListing paneListing = PaneListing::OwnRecordsOnly; ///< Where the tags of @ref panes come from.
+    uint64_t monoMs = 0;                            ///< Now, in monotonic milliseconds; greater than 0.
+    uint64_t wallMs = 0;                            ///< Now, in wall-clock milliseconds.
+    HostInfo host;                                  ///< What the host resolved.
+    std::string configJson;                         ///< The `config` subtree, as JSON.
+    std::vector<StoredEntry> stored;                ///< The store's entries.
+    std::vector<std::string> inFlight;              ///< The tags of the commands the host still runs.
+    std::vector<FinishedResult> finished;           ///< The commands that finished while the guest was away.
+    std::vector<PaneFact> panes;                    ///< The listed panes tagged with a run, listed now.
+    PaneListing paneListing = PaneListing::Unknown; ///< Where the tags of @ref panes come from.
 };
 
 // {{{ inputs
@@ -132,7 +132,7 @@ struct PanesListed
 {
     std::vector<PaneFact> panes;  ///< Every listed pane tagged with a run.
     uint64_t requestedMonoMs = 0; ///< When the listing was asked for, in monotonic milliseconds; never 0.
-    PaneListing listing = PaneListing::OwnRecordsOnly; ///< Where the tags of @ref panes come from.
+    PaneListing listing = PaneListing::Unknown; ///< Where the tags of @ref panes come from.
 };
 
 /// A run's agent tab opened.
@@ -161,6 +161,7 @@ struct Dispatch
     std::string model;               ///< The model; empty: the task's.
     std::optional<std::string> note; ///< The user's note, if any.
     std::string session;             ///< A fresh session UUID for the agent.
+    std::optional<std::string> near; ///< The dashboard tab the form was confirmed in, if known.
     uint64_t wallMs = 0; ///< Now, in wall-clock milliseconds: what the run's names are stamped with.
     uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
 };
@@ -240,6 +241,7 @@ struct OpenPane
     std::vector<Argument> arguments; ///< Its arguments, by placeholder.
     std::string cwd;                 ///< Its working directory: the run's worktree.
     std::string title;               ///< The tab's title.
+    std::optional<std::string> near; ///< The dashboard tab it opens beside (Run::near), if any.
 };
 
 /// Store a value.
@@ -539,7 +541,9 @@ class Engine
     std::size_t _insideCount = 0; ///< The runs the engine works on: those of this configuration, and the ones
                                   ///< outside it the user ended.
     std::vector<RepoState> _repos;
-    std::vector<PaneFact> _panes;                    ///< As last listed.
+    std::vector<PaneFact> _panes; ///< As last listed.
+    PaneListing _paneListing =
+        PaneListing::Unknown; ///< How _panes was listed; Unknown until a listing was known.
     std::set<std::string, std::less<>> _boardsFound; ///< The runs whose STATUS.md this instance has read.
     std::vector<InFlightCall> _inFlight;
     std::vector<InFlightCall> _paneOpenings; ///< The tabs asked for and not yet answered for, by run id.

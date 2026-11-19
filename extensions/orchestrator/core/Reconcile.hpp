@@ -76,8 +76,14 @@ using Decision = std::variant<Adopt, StatusChanged, ClosePane, PaneWentAway>;
 /// Where a pane listing's tags come from, which decides whether a pane missing from it is gone.
 enum class PaneListing : uint8_t
 {
-    OwnRecordsOnly, ///< The driver's record of the panes it opened: a pane it never recorded is missing.
-    Tagged,         ///< The host's listing with the ownership tags: every tagged pane is in it.
+    /// Nothing was listed: the host could not answer yet (`limit`, before it restored its sessions) or
+    /// failed. Nothing is concluded from it; runs are reconciled at the next listing that is known.
+    Unknown = 0,
+    /// The host serves no pane listing (`not-supported-yet`): the driver has only its own records of the
+    /// panes it opened, and lists none. No running run is ended on it; a run closing a tab it recorded
+    /// (Run::pane) is told the tab went away, as nothing else would tell it.
+    OwnRecordsOnly,
+    Tagged, ///< The host's listing with the ownership tags: every tagged pane is in it.
 };
 
 /// Compares the runs with the panes listed now.
@@ -87,11 +93,10 @@ enum class PaneListing : uint8_t
 ///
 /// Preconditions, which the driver keeps:
 /// - Every listed pane that carries an ownership tag is reported as a PaneFact. The host keeps the
-///   pane-to-tag registry, and its pane listing for the guest carries the tags (PaneListing::Tagged). A
-///   driver that only knows the panes it recorded itself (PaneListing::OwnRecordsOnly; Contour's control-API
-///   pane listing carries no tag) has a restart gap: a pane whose PaneOpened was lost is not seen. Such a
-///   listing therefore never tells a run in Ending(ClosePane) whose tab it never recorded (no Run::pane) that
-///   the tab is gone: that run waits for a tagged listing or the user.
+///   pane-to-tag registry, and its pane listing for the guest carries the tags (PaneListing::Tagged). A host
+///   that serves no listing leaves the driver its own records (PaneListing::OwnRecordsOnly), which list no
+///   pane: a running run is never told its tab went away, and a run in Ending(ClosePane) only when it
+///   recorded its tab (Run::pane). One whose tab it never recorded waits for a tagged listing or the user.
 /// - A listing the driver could not read in full is not fed at all: an incomplete listing would tell a run in
 ///   Ending(ClosePane) that its tab is gone.
 /// - @p requestedMonoMs is read before the listing is asked for, from the clock StepContext::monoMs comes

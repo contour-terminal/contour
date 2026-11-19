@@ -142,8 +142,10 @@ class FakeGuestHost final: public IGuestHost
     std::vector<std::pair<LogLevel, std::string>> logged;       ///< Every log().
     std::vector<uint32_t> wakes;                                ///< Every wake().
     std::vector<std::pair<std::string, std::string>> summaries; ///< Every summarySet().
-    std::vector<std::string> started;   ///< The command of every procStart() that started.
-    std::vector<std::string> paneOpens; ///< The tag of every paneOpen().
+    std::vector<std::string> started;                      ///< The command of every procStart() that started.
+    std::vector<std::string> paneOpens;                    ///< The tag of every paneOpen().
+    std::vector<std::optional<std::string>> paneOpenNears; ///< The near of every paneOpen().
+    std::vector<std::string> paneCloses;                   ///< Every paneClose().
 
     std::vector<TabInfo> tabList;                                  ///< What tabs() lists.
     std::pair<uint32_t, uint32_t> openSize { OpenCols, OpenRows }; ///< The size tabOpen() opens at.
@@ -345,18 +347,22 @@ class FakeGuestHost final: public IGuestHost
         return keys;
     }
 
-    [[nodiscard]] std::expected<std::string, HostError> paneOpen(std::string_view /*paneTemplate*/,
-                                                                 std::span<Argument const> /*arguments*/,
-                                                                 std::string_view /*cwd*/,
-                                                                 std::string_view /*title*/,
-                                                                 std::string_view tag) override
+    [[nodiscard]] std::expected<std::string, HostError> paneOpen(
+        std::string_view /*paneTemplate*/,
+        std::span<Argument const> /*arguments*/,
+        std::string_view /*cwd*/,
+        std::string_view /*title*/,
+        std::string_view tag,
+        std::optional<std::string_view> near) override
     {
         paneOpens.emplace_back(tag);
+        paneOpenNears.push_back(near.transform([](std::string_view tab) { return std::string { tab }; }));
         return std::unexpected(HostError::NotSupportedYet);
     }
 
-    [[nodiscard]] std::expected<void, HostError> paneClose(std::string_view /*pane*/) override
+    [[nodiscard]] std::expected<void, HostError> paneClose(std::string_view pane) override
     {
+        paneCloses.emplace_back(pane);
         return std::unexpected(HostError::NotSupportedYet);
     }
 
@@ -542,6 +548,7 @@ template <typename T>
                                  .model = "",
                                  .note = std::nullopt,
                                  .session = std::string(Session),
+                                 .near = std::nullopt,
                                  .wallMs = WallMs,
                                  .monoMs = StartMonoMs }));
     for ([[maybe_unused]] auto const _: std::views::iota(0, 20))
@@ -655,6 +662,7 @@ constexpr auto MeasuredConfig =
             .model = "",
             .note = std::nullopt,
             .session = std::format("123e4567-e89b-12d3-a456-4266141740{:02}", index),
+            .near = std::nullopt,
             .wallMs = WallMs,
             .monoMs = StartMonoMs }));
         REQUIRE(calls.size() == 1);
@@ -933,6 +941,40 @@ TEST_CASE("exactly one reply per OpenPane", "[guest]")
     CHECK(observer.inputsOf<PaneOpenedFor>().empty());
 }
 
+TEST_CASE("a refused pane-open lists the panes at once", "[guest][panes]")
+{
+    // A host that lists panes, but refuses this one (a Flatpak, Windows): nothing was opened, so no Panes
+    // hint follows, and the run must not wait for the next poll to learn that no tab is tagged with it.
+    auto const away = awayCallBefore<OpenPane>();
+    auto host = FakeGuestHost {};
+    host.paneListing = std::vector<PaneInfo> {};
+    putAway(host, away);
+    auto observer = RecordingObserver {};
+
+    auto driver = Driver::load(host, host.ids, configJson("master"), hostInfo(), observer);
+    // A listing in the millisecond the run changed would tell it nothing: the guest asks to wake a moment
+    // later, and lists then.
+    REQUIRE_FALSE(host.wakes.empty());
+    CHECK(host.wakes.back() == 1);
+    host.clock.monoMs += host.wakes.back();
+    driver.update(Hint::Wake);
+
+    auto const failed = std::ranges::find_if(
+        observer.inputs, [](Input const& input) { return std::holds_alternative<PaneOpenFailedFor>(input); });
+    REQUIRE(failed != observer.inputs.end());
+    CHECK(std::ranges::any_of(std::next(failed), observer.inputs.end(), [](Input const& input) {
+        return std::holds_alternative<PanesListed>(input);
+    }));
+    // Past the wait for its tab, on to the removal checks.
+    REQUIRE(host.store.size() == 1);
+    auto const run = runFromJson(host.store.begin()->second);
+    REQUIRE(run.has_value());
+    auto const* const ending = std::get_if<Ending>(&run->state);
+    REQUIRE(ending != nullptr);
+    CHECK(ending->cause == Ended::PreparationFailed);
+    CHECK(ending->step != EndStep::ClosePane);
+}
+
 TEST_CASE("wake is asked for the engine's latest timer only", "[guest]")
 {
     SECTION("the timer")
@@ -1031,6 +1073,107 @@ TEST_CASE("panes not supported yet lists own records only", "[guest]")
                                           .status = AgentStatus::Working,
                                           .program = ProgramLiveness::Alive } });
     }
+}
+
+TEST_CASE("the Panes hint lists the panes", "[guest][panes]")
+{
+    auto host = FakeGuestHost {};
+    host.paneListing = std::vector<PaneInfo> {};
+    auto observer = RecordingObserver {};
+    auto driver = Driver::load(host, configJson(), hostInfo(), observer);
+    observer.inputs.clear();
+    host.paneListing = std::vector { PaneInfo { .pane = "p1",
+                                                .tag = "pr-1-20261113-150847",
+                                                .status = AgentStatus::Blocked,
+                                                .program = ProgramLiveness::Alive } };
+
+    driver.update(Hint::Panes);
+
+    auto const listed = observer.inputsOf<PanesListed>();
+    REQUIRE(listed.size() == 1);
+    CHECK(listed.front().listing == PaneListing::Tagged);
+    CHECK(listed.front().panes
+          == std::vector { PaneFact { .pane = "p1",
+                                      .tag = "pr-1-20261113-150847",
+                                      .status = AgentStatus::Blocked,
+                                      .program = ProgramLiveness::Alive } });
+}
+
+TEST_CASE("a listing answered limit tells the engine nothing", "[guest][panes]")
+{
+    auto host = FakeGuestHost {};
+    host.paneListing = std::vector<PaneInfo> {};
+    auto observer = RecordingObserver {};
+    auto driver = Driver::load(host, configJson(), hostInfo(), observer);
+    observer.inputs.clear();
+    host.paneListing = std::unexpected(HostError::Limit);
+
+    driver.update(Hint::Panes);
+    driver.update(Hint::Wake);
+
+    // No PanesListed, and no fall back to the driver's own records: nothing was listed.
+    CHECK(observer.inputsOf<PanesListed>().empty());
+}
+
+TEST_CASE("a load whose listing answers limit ends no run", "[guest][panes]")
+{
+    // The host has not restored its sessions yet (a boot right after an upgrade): its listing answers limit.
+    auto served = Served {};
+    auto const run = view::test::storedRun(Running {}, "pr-2375-20261113-150847", ChangeRequestRef { 2375 });
+    served.host.store.insert_or_assign(runKey(run.id), toJson(run));
+    served.host.paneListing = std::unexpected(HostError::Limit);
+    served.load();
+
+    REQUIRE(served.observer.starts.size() == 1);
+    CHECK(served.observer.starts.front().paneListing == PaneListing::Unknown);
+    CHECK(served.observer.starts.front().panes.empty());
+    auto const stored = [&] {
+        auto const found = served.host.store.find(runKey(run.id));
+        REQUIRE(found != served.host.store.end());
+        auto read = runFromJson(found->second);
+        REQUIRE(read.has_value());
+        return *read;
+    };
+    CHECK(std::holds_alternative<Running>(stored().state));
+    CHECK(served.host.paneCloses.empty());
+    // Expected at every boot after an upgrade: logged, but not as a warning.
+    CHECK(std::ranges::any_of(served.host.logged, [](auto const& entry) {
+        return entry.first == LogLevel::Debug && entry.second == "panes: limit";
+    }));
+    CHECK(std::ranges::none_of(served.host.logged, [](auto const& entry) {
+        return entry.first == LogLevel::Warn && entry.second.starts_with("panes:");
+    }));
+
+    // Once the host has reconciled, its Panes hint lists the pane: the run goes on as it was.
+    served.host.paneListing = std::vector { PaneInfo { .pane = *run.pane,
+                                                       .tag = run.id,
+                                                       .status = AgentStatus::Working,
+                                                       .program = ProgramLiveness::Alive } };
+    served.driver->update(Hint::Panes);
+    CHECK(std::holds_alternative<Running>(stored().state));
+
+    // And a listing without it ends the run, through the removal checks.
+    served.host.clock.monoMs += 1'000;
+    served.host.paneListing = std::vector<PaneInfo> {};
+    served.driver->update(Hint::Panes);
+    INFO("state " << stored().state.index());
+    CHECK_FALSE(std::holds_alternative<Running>(stored().state));
+    CHECK_FALSE(countsAsActive(stored()));
+}
+
+TEST_CASE("OpenPane passes near to pane-open", "[guest][panes]")
+{
+    auto const away = awayCallBefore<OpenPane>();
+    auto host = FakeGuestHost {};
+    putAway(host, away);
+    auto observer = RecordingObserver {};
+
+    [[maybe_unused]] auto const driver = Driver::load(host, configJson("master"), hostInfo(), observer);
+
+    auto const opens = observer.effectsOf<OpenPane>();
+    REQUIRE(opens.size() == 1);
+    REQUIRE(host.paneOpenNears.size() == 1);
+    CHECK(host.paneOpenNears.front() == opens.front().near);
 }
 
 TEST_CASE("a failed store-set is logged, not fatal", "[guest]")

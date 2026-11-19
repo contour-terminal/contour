@@ -542,7 +542,9 @@ constexpr auto SourceRows = std::array {
     SourceRow { "own records, unrecorded tab",       State::EndingClosePane, Recorded::No,  Listed::Nothing, PaneListing::OwnRecordsOnly, Expect::Nothing },
     SourceRow { "own records, recorded tab gone",    State::EndingClosePane, Recorded::Yes, Listed::Nothing, PaneListing::OwnRecordsOnly, Expect::PaneWentAway },
     SourceRow { "own records, tab still listed",     State::EndingClosePane, Recorded::Yes, Listed::Alive,   PaneListing::OwnRecordsOnly, Expect::CloseAlive },
-    SourceRow { "own records, agent's tab gone",     State::Running,         Recorded::Yes, Listed::Nothing, PaneListing::OwnRecordsOnly, Expect::PaneWentAway },
+    // A host that lists no panes tells nothing about a running agent: its run is never ended on it.
+    SourceRow { "own records, agent's tab unlisted", State::Running,         Recorded::Yes, Listed::Nothing, PaneListing::OwnRecordsOnly, Expect::Nothing },
+    SourceRow { "tagged, agent's tab gone",          State::Running,         Recorded::Yes, Listed::Nothing, PaneListing::Tagged,         Expect::PaneWentAway },
     SourceRow { "own records, opening, tab listed",  State::PreparingOpenPane, Recorded::No, Listed::Alive,  PaneListing::OwnRecordsOnly, Expect::Adopt },
 };
 // clang-format on
