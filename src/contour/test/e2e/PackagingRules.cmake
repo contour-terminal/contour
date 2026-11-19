@@ -2,7 +2,7 @@
 # installs, and declares for CPack, exactly what its Debian package is supposed to carry.
 #
 # Run by ctest as
-#   cmake -D FRONTEND=gui|headless -D WITH_SYSTEMD_UNITS=ON|OFF -D WITH_EXTENSIONS=ON|OFF -D WITH_TERMINFO=ON|OFF -D INSTALL_SCRIPT=<cmake_install.cmake> -D CPACK_CONFIG=<CPackConfig.cmake> -P PackagingRules.cmake
+#   cmake -D FRONTEND=gui|headless -D WITH_SYSTEMD_UNITS=ON|OFF -D WITH_EXTENSIONS=ON|OFF -D WITH_ORCHESTRATOR=ON|OFF -D WITH_TERMINFO=ON|OFF -D INSTALL_SCRIPT=<cmake_install.cmake> -D CPACK_CONFIG=<CPackConfig.cmake> -P PackagingRules.cmake
 #
 # It reads the generated install rules and CPack configuration rather than running `cpack`, so it
 # needs no built tree and no dpkg: a GUI build tree cannot produce the daemon package anyway, and the
@@ -15,7 +15,7 @@ if(NOT FRONTEND STREQUAL "gui" AND NOT FRONTEND STREQUAL "headless")
     message(FATAL_ERROR "FRONTEND must be 'gui' or 'headless', got '${FRONTEND}'")
 endif()
 # An unset flag would silently skip its assertions, so each must be given explicitly.
-foreach(_flag IN ITEMS WITH_SYSTEMD_UNITS WITH_EXTENSIONS WITH_TERMINFO)
+foreach(_flag IN ITEMS WITH_SYSTEMD_UNITS WITH_EXTENSIONS WITH_ORCHESTRATOR WITH_TERMINFO)
     if(NOT "${${_flag}}" STREQUAL "ON" AND NOT "${${_flag}}" STREQUAL "OFF")
         message(FATAL_ERROR "${_flag} must be ON or OFF, got '${${_flag}}'")
     endif()
@@ -33,7 +33,8 @@ include("${CPACK_CONFIG}")
 set(DESKTOP_ONLY_RULES ".desktop" "kio/servicemenus" "icons/hicolor" "/metainfo")
 # Present only where the install block emits them: the systemd units on Linux with
 # CONTOUR_WITH_SYSTEMD outside Flatpak (the app-* OOM drop-ins of the GUI package among them),
-# the extensions when some are bundled, the terminfo when it is packaged.
+# the extensions when some are bundled (the agent orchestrator among them when its guest is built), the
+# terminfo when it is packaged.
 # What both packages ship.
 set(ALWAYS_RULES "shell-integration" "share/contour/fonts" "LICENSE.txt")
 if(WITH_SYSTEMD_UNITS)
@@ -44,6 +45,9 @@ if(WITH_SYSTEMD_UNITS)
 endif()
 if(WITH_EXTENSIONS)
     list(APPEND ALWAYS_RULES "share/contour/extensions")
+endif()
+if(WITH_ORCHESTRATOR)
+    list(APPEND ALWAYS_RULES "orchestrator.wasm")
 endif()
 if(WITH_TERMINFO)
     list(APPEND ALWAYS_RULES "terminfo")

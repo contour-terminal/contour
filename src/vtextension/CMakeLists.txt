@@ -243,12 +243,12 @@ if(VTEXTENSION_TESTING)
                                    CMAKE_ARGS "-DCXX_PROBE_EXPECTED_DIRECTORIES=${PROJECT_SOURCE_DIR}/src${CONTOUR_WASM_CXX_LIST_SEPARATOR}${PROJECT_SOURCE_DIR}/cmake")
         add_dependencies(vtextension_test cxx-daemon-probe_wasm)
         target_compile_definitions(vtextension_test PRIVATE VTEXTENSION_CXX_PROBE_MODULE="${_cxx_probe_wasm}")
-        # The agent orchestrator's module (extensions/orchestrator, added after src/; its target is resolved at
-        # generation), run against the host's services with the orchestrator's recorded fixtures. The measured
-        # store lives in the build tree, on the disk the build is on: /tmp is often tmpfs.
+        # The agent orchestrator's module (extensions/orchestrator, added before src/), run against the host's
+        # services with the orchestrator's recorded fixtures. The measured store lives in the build tree, on the
+        # disk the build is on: /tmp is often tmpfs.
         add_dependencies(vtextension_test orchestrator_wasm)
         target_compile_definitions(vtextension_test PRIVATE
-            VTEXTENSION_ORCHESTRATOR_MODULE="${CMAKE_BINARY_DIR}/wasm/orchestrator.wasm"
+            VTEXTENSION_ORCHESTRATOR_MODULE="${CONTOUR_ORCHESTRATOR_WASM_MODULE}"
             VTEXTENSION_ORCHESTRATOR_TESTDATA="${PROJECT_SOURCE_DIR}/extensions/orchestrator/core/testdata"
             VTEXTENSION_MEASURE_STORE_DIR="${CMAKE_BINARY_DIR}/measure-store")
     endif()

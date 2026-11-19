@@ -454,13 +454,14 @@ include(ProductionBuild)
 if(CONTOUR_WASM_GUESTS)
     add_subdirectory(extensions)
 endif()
-add_subdirectory(src)
 # The agent orchestrator: its own CMake project, built with Contour's gates. Its native libraries build when
 # extensions are on and its tests (ORCHESTRATOR_TESTING) or its guest (CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST) are,
-# independent of CONTOUR_WASM_GUESTS.
+# independent of CONTOUR_WASM_GUESTS. Before src/, which installs its module (CONTOUR_ORCHESTRATOR_WASM_MODULE)
+# with the bundled extensions when it is built.
 if(CONTOUR_EXTENSIONS)
     add_subdirectory(extensions/orchestrator)
 endif()
+add_subdirectory(src)
 add_subdirectory(examples)
 # LeakSanitizer's built-in suppressions (cmake/lsan-suppressions.txt), into every executable defined above;
 # after them, since it walks the targets they define.

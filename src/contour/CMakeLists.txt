@@ -26,6 +26,14 @@ endif()
 
 option(CONTOUR_MACOS_DEPLOY "Run macdeployqt + prune/verify/sign on the macOS app bundle" ON)
 
+# The agent orchestrator's module, when CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST builds it, is installed with the
+# bundled extensions (see "Bundled status-line extensions" below). Installed is not running: the daemon loads
+# it only for a `daemon.extensions.orchestrator` entry, and runs it only once the user has granted it.
+if(TARGET orchestrator_wasm)
+    list(APPEND CONTOUR_BUNDLED_EXTENSIONS orchestrator)
+    list(APPEND CONTOUR_BUNDLED_EXTENSION_MODULES "${CONTOUR_ORCHESTRATOR_WASM_MODULE}")
+endif()
+
 # {{{ Setup QT_COMPONENTS
 # QT_COMPONENTS is the list of Qt libraries Contour requires for building.
 # NB: Widgets is required for SystemTrayIcon's fallback implementation
@@ -1978,6 +1986,10 @@ if(CONTOUR_TESTING)
         if(CONTOUR_BUNDLED_EXTENSIONS)
             set(_packaging_extensions ON)
         endif()
+        set(_packaging_orchestrator OFF)
+        if("orchestrator" IN_LIST CONTOUR_BUNDLED_EXTENSIONS)
+            set(_packaging_orchestrator ON)
+        endif()
         set(_packaging_terminfo OFF)
         if(CONTOUR_PACKAGE_TERMINFO)
             set(_packaging_terminfo ON)
@@ -1987,6 +1999,7 @@ if(CONTOUR_TESTING)
                     -D "FRONTEND=${_frontend_kind}"
                     -D "WITH_SYSTEMD_UNITS=${_packaging_systemd}"
                     -D "WITH_EXTENSIONS=${_packaging_extensions}"
+                    -D "WITH_ORCHESTRATOR=${_packaging_orchestrator}"
                     -D "WITH_TERMINFO=${_packaging_terminfo}"
                     -D "INSTALL_SCRIPT=${CMAKE_CURRENT_BINARY_DIR}/cmake_install.cmake"
                     -D "CPACK_CONFIG=${CMAKE_BINARY_DIR}/CPackConfig.cmake"
@@ -2270,10 +2283,12 @@ function(contour_install_bundled_extensions destination)
         install(FILES "${_module}" DESTINATION "${destination}" RENAME "${_name}.wasm")
     endforeach()
 endfunction()
-if(TARGET contour_bundled_extensions)
-    # Building contour builds what installing it installs, also when only the contour target is built.
-    add_dependencies(contour contour_bundled_extensions)
-endif()
+# Building contour builds what installing it installs, also when only the contour target is built.
+foreach(_bundle IN ITEMS contour_bundled_extensions orchestrator_wasm)
+    if(TARGET ${_bundle})
+        add_dependencies(contour ${_bundle})
+    endif()
+endforeach()
 # }}}
 
 # {{{ Qt bundle installation helpers
