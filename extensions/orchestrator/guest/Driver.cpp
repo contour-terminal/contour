@@ -395,6 +395,12 @@ view::Dashboard const* Driver::dashboard(std::string_view tab) const noexcept
     return found != _dashboards.end() ? found->second.get() : nullptr;
 }
 
+view::Dashboard* Driver::dashboard(std::string_view tab) noexcept
+{
+    auto const found = _dashboards.find(tab);
+    return found != _dashboards.end() ? found->second.get() : nullptr;
+}
+
 // {{{ the served tabs
 
 void Driver::takeActions()
@@ -465,6 +471,21 @@ void Driver::apply(std::string_view tab, view::UiAction const& action)
 {
     std::visit(Overloaded {
                    [&](view::RevealAgentAction const& reveal) { revealAgent(tab, reveal.run); },
+                   [&](view::DispatchAction const& dispatch) {
+                       // Stamped with the time it arrived: the run's names carry the wall time.
+                       auto const clock = readClock();
+                       step(Dispatch { .repo = dispatch.repo,
+                                       .item = dispatch.item,
+                                       .url = dispatch.url,
+                                       .task = dispatch.task,
+                                       .model = dispatch.model,
+                                       .note = dispatch.note,
+                                       .session = dispatch.session,
+                                       .near = dispatch.near,
+                                       .wallMs = clock.wallMs,
+                                       .monoMs = clock.monoMs });
+                       stepReplies();
+                   },
                    [&](auto const& engineAction) {
                        step(inputOf(engineAction, nowMs()));
                        stepReplies();
@@ -761,6 +782,11 @@ void Driver::carryOut(std::span<Effect const> effects)
                               std::format("dispatch for {} refused: {}",
                                           refused.repo,
                                           DispatchRefusalNames[std::to_underlying(refused.reason)]));
+                    // The dashboard it was confirmed in says why.
+                    if (auto const dashboard =
+                            refused.near ? _dashboards.find(*refused.near) : _dashboards.end();
+                        dashboard != _dashboards.end())
+                        dashboard->second->dispatchRefused(refused.reason);
                 },
             },
             effect);

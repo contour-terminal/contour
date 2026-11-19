@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <core/tui/TestHelpers.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -1286,8 +1288,10 @@ TEST_CASE("open opens one tab and draws it", "[guest]")
     REQUIRE(served.host.writesTo("tab-1") == served.host.writes.size());
     auto const frame = served.host.writtenTo("tab-1");
     CHECK(frame.starts_with(SynchronizedOutput));
-    // Then the hidden cursor comes to rest, which draws nothing (@see view::RestingCursor).
-    CHECK(frame.ends_with(std::format("{}{}", SynchronizedOutputEnd, view::RestingCursor)));
+    // Then bracketed paste is asked for and the hidden cursor comes to rest, which draws nothing
+    // (@see view::BracketedPasteOn, view::RestingCursor).
+    CHECK(frame.ends_with(
+        std::format("{}{}{}", SynchronizedOutputEnd, view::BracketedPasteOn, view::RestingCursor)));
     CHECK(countOf(frame, SynchronizedOutput) == 1);
 }
 
@@ -1445,6 +1449,58 @@ TEST_CASE("the driver hands the dashboards its uuid source", "[guest][driver]")
         CHECK(served.dashboard(tab).tab() == tab);
     }
     CHECK(served.host.ids.taken == 0); // taken only as a form opens
+}
+
+TEST_CASE("a confirmed form dispatches with a fresh session", "[guest][driver][form]")
+{
+    auto served = Served {};
+    served.load();
+    served.invoke("open");
+    auto* const dashboard = served.driver->dashboard("tab-1");
+    REQUIRE(dashboard != nullptr);
+    dashboard->openForm("contour", ChangeRequestRef { 2375 }, "fix_ci");
+    REQUIRE(dashboard->form().has_value());
+    auto const session = dashboard->form()->session;
+    CHECK(session == "00000001-0000-4000-8000-000000000000");
+    served.host.clock.wallMs += 5'000;
+
+    served.type("\r");
+
+    auto const dispatched = served.observer.inputsOf<Dispatch>();
+    REQUIRE(dispatched.size() == 1);
+    CHECK(dispatched.front().session == session);
+    CHECK(dispatched.front().near == std::optional<std::string> { "tab-1" });
+    CHECK(dispatched.front().wallMs == served.host.clock.wallMs);
+    CHECK(dispatched.front().task == "fix_ci");
+    CHECK_FALSE(served.dashboard().form().has_value());
+    // The run starts: its fetch is the first command it asks for.
+    CHECK(served.host.startsOf("git-fetch") == 1);
+}
+
+TEST_CASE("a refused dispatch is drawn", "[guest][driver][form]")
+{
+    auto served = Served {};
+    served.load();
+    served.invoke("open");
+    served.host.writes.clear();
+
+    // A repository the configuration does not name: the engine refuses what the form could not see.
+    served.driver->apply(
+        "tab-1",
+        view::DispatchAction { .repo = "elsewhere",
+                               .item = ChangeRequestRef { 2375 },
+                               .url = "https://github.com/contour-terminal/contour/pull/2375",
+                               .task = "fix_ci",
+                               .model = "sonnet",
+                               .note = std::nullopt,
+                               .session = "00000001-0000-4000-8000-000000000000",
+                               .near = "tab-1" });
+    served.driver->update(Hint::Tabs);
+
+    CHECK(served.host.writesTo("tab-1") > 0); // drawn, not only remembered
+    CHECK(
+        core::tui::test::canvasToString(served.dashboard().rendered())
+            .contains(std::format("dispatch refused: {}", view::refusalText(DispatchRefusal::UnknownRepo))));
 }
 
 TEST_CASE("every declared action is carried out", "[guest]")

@@ -63,7 +63,7 @@ namespace
     [[nodiscard]] ProcessOutcome answerFor(World const& world, RunCommand const& command)
     {
         if (command.command == "agent-setup-check")
-            return ok(readFixture(FixtureRoot::Testdata, "contour/setup-hooks-present.json"));
+            return ok(readFixture(FixtureRoot::Testdata, world.hooks));
         if (command.command == "git-worktree-list")
             return ok(std::format("worktree {}\0HEAD {}\0branch refs/heads/master\0\0"sv, command.cwd, Sha));
         if (command.command == "gh-default-branch")

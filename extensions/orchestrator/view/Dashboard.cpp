@@ -53,6 +53,25 @@ namespace
     /// How far an agent's age moves before the rows are built again for it.
     constexpr auto AgeTickMs = uint64_t { 1000 };
 
+    /// The widest the dispatch form is in the Wide band.
+    constexpr auto FormMaxColumns = 80;
+    /// How much of the tab's width the dispatch form takes in the Medium band, in percent.
+    constexpr auto FormMediumPercent = 90;
+
+    /// @return The cells the dispatch form is wide in @p band, in a tab @p columns wide: in the Wide band a
+    /// popup
+    ///         of at most FormMaxColumns, in the Medium band most of the tab, in the Narrow band all of it.
+    [[nodiscard]] int formWidthIn(Band band, int columns) noexcept
+    {
+        switch (band)
+        {
+            case Band::Wide: return std::min(FormMaxColumns, columns);
+            case Band::Medium: return columns * FormMediumPercent / 100;
+            case Band::Narrow: break;
+        }
+        return columns;
+    }
+
     /// What separates two hints on the hint line.
     constexpr auto HintSeparator = " · "sv;
 
@@ -65,25 +84,6 @@ namespace
                 && size.height >= BandBreakpoints[index].minRows)
                 chosen = index;
         return chosen;
-    }
-
-    /// Draws @p title over the top border of a box that fills @p canvas.
-    void drawFrame(Canvas& canvas, std::string_view title)
-    {
-        auto const& border = styleOf(canvas.theme(), Role::Border);
-        canvas.drawBox(canvas.area(), core::tui::BorderStyle::Rounded, border);
-        // A blank either side of the title, which cut() would trim.
-        if (auto const text = cut(title, canvas.width() - 6); !text.empty())
-            canvas.putString(0, 2, std::format(" {} ", text), styleOf(canvas.theme(), Role::Text));
-    }
-
-    /// @return The part of @p canvas inside a box's border.
-    [[nodiscard]] Canvas insideFrame(Canvas const& canvas)
-    {
-        return canvas.subcanvas(Rect { .x = 1,
-                                       .y = 1,
-                                       .width = std::max(0, canvas.width() - 2),
-                                       .height = std::max(0, canvas.height() - 2) });
     }
 
     /// Whether a row is the selected one.
@@ -134,14 +134,21 @@ struct Dashboard::State
     void ensureRows();
     /// Applies the filter and the layout's furniture to the rows, and keeps the selection among them.
     void refilter();
-    /// Applies keys the parser decoded.
+    /// Applies keys the parser decoded: to the dispatch form while it is open, else by the key table.
+    /// @param events The keys.
+    /// @param hooksAtInput The form's HooksWarning as the input that holds them began.
     /// @return What the engine is asked, in order.
-    [[nodiscard]] std::vector<UiAction> applyKeys(std::vector<core::tui::InputEvent> const& events);
+    [[nodiscard]] std::vector<UiAction> applyKeys(std::vector<core::tui::InputEvent> const& events,
+                                                  HooksWarning hooksAtInput);
+    /// @return The form's HooksWarning now: what the next input begins with.
+    [[nodiscard]] HooksWarning formHooks() const noexcept;
     /// Resolves a held ESC that waited past EscapeTimeout into the Escape key.
     /// @return What the engine is asked, in order.
     [[nodiscard]] std::vector<UiAction> resolveOverdueEscape();
-    /// Shows the panels of the current pane and hides the others; places the help.
+    /// Shows the panels of the current pane and hides the others; places the help and the form.
     void syncLayout();
+    /// Shows the form where the band puts it, or hides it.
+    void syncForm();
     /// @return What a key is applied to.
     [[nodiscard]] KeyContext keyContext() const noexcept;
     /// @return Now, in the engine's monotonic milliseconds.
@@ -189,6 +196,7 @@ struct Dashboard::State
     ProblemLines* problems = nullptr;                      ///< The current layout's problem lines.
     Repaint repaint = Repaint::Needed;
     std::unique_ptr<HelpOverlay> help;
+    std::unique_ptr<DispatchFormView> formView; ///< Draws interaction.form.
     std::unique_ptr<core::tui::Responsive> root;
 };
 
@@ -420,7 +428,10 @@ namespace
             // here.
             canvas.hideCursor();
             auto const& pending = _state.interaction.pendingEnd;
-            if (!pending.empty())
+            if (auto const& notice = _state.interaction.notice; !notice.empty())
+                canvas.putString(
+                    0, 1, cut(notice, canvas.width() - 2), styleOf(canvas.theme(), Role::Failing));
+            else if (!pending.empty())
                 canvas.putString(
                     0,
                     1,
@@ -487,6 +498,7 @@ Dashboard::State::State(Engine const& engine,
     screen { surface, core::tui::ScreenConfig {}, clock },
     size { size },
     help { std::make_unique<HelpOverlay>() },
+    formView { std::make_unique<DispatchFormView>(engine, interaction.form) },
     root { std::make_unique<core::tui::Responsive>(std::ranges::to<std::vector<core::tui::Breakpoint>>(
         std::views::iota(std::size_t { 0 }, BandBreakpoints.size())
         | std::views::transform([this](std::size_t index) {
@@ -503,6 +515,8 @@ Dashboard::State::~State()
 {
     if (screen.isOverlayVisible(*help))
         screen.hideOverlay(*help);
+    if (screen.isOverlayVisible(*formView))
+        screen.hideOverlay(*formView);
     screen.root().removeChild(*root);
 }
 
@@ -604,17 +618,38 @@ KeyContext Dashboard::State::keyContext() const noexcept
                         .selected = selectedRow() };
 }
 
-std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEvent> const& events)
+std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEvent> const& events,
+                                                  HooksWarning hooksAtInput)
 {
     auto actions = std::vector<UiAction> {};
     auto const before = interaction;
     for (auto const& event: events)
     {
+        // A form opened by a key of this input confirms nothing an earlier form of it, or of an earlier
+        // input, did: the confirmation belongs to the form it was given in.
+        if (!interaction.form)
+            hooksAtInput = HooksWarning::None;
+        if (auto const* const paste = std::get_if<core::tui::PasteEvent>(&event))
+        {
+            interaction.notice.clear();
+            pasteInto(interaction, paste->text);
+            continue;
+        }
         auto const* const key = std::get_if<core::tui::KeyEvent>(&event);
         if (key == nullptr)
             continue;
+        interaction.notice.clear();
+        if (interaction.form)
+        {
+            if (auto dispatched = applyFormKey(*key, interaction.form, engine, hooksAtInput, tab))
+                actions.emplace_back(std::move(*dispatched));
+            continue;
+        }
         if (auto action = applyKey(*key, interaction, keyContext()))
             actions.push_back(std::move(*action));
+        // A form a key opened gets its agent's session id now.
+        if (interaction.form && interaction.form->session.empty())
+            interaction.form->session = formatUuidV4(ids.next());
         refilter();
     }
     if (interaction != before)
@@ -628,7 +663,12 @@ std::vector<UiAction> Dashboard::State::resolveOverdueEscape()
         return {};
     escapeHeldSince.reset();
     ensureRows();
-    return applyKeys(parser.timeout());
+    return applyKeys(parser.timeout(), formHooks());
+}
+
+HooksWarning Dashboard::State::formHooks() const noexcept
+{
+    return interaction.form ? interaction.form->hooks : HooksWarning::None;
 }
 
 void Dashboard::State::syncLayout()
@@ -646,7 +686,8 @@ void Dashboard::State::syncLayout()
             panel->setVisible(shown);
     if (problems != nullptr)
         problems->refresh();
-    if (interaction.overlay == Overlay::Help)
+    syncForm();
+    if (interaction.overlay == Overlay::Help && !interaction.form)
     {
         auto const wanted = help->preferredSize();
         screen.showOverlay(*help,
@@ -655,6 +696,26 @@ void Dashboard::State::syncLayout()
     }
     else if (screen.isOverlayVisible(*help))
         screen.hideOverlay(*help);
+}
+
+void Dashboard::State::syncForm()
+{
+    if (!interaction.form)
+    {
+        if (screen.isOverlayVisible(*formView))
+            screen.hideOverlay(*formView);
+        return;
+    }
+    // Centred; the Narrow band gives it the whole tab.
+    auto const band = BandBreakpoints[breakpointFor(size)].band;
+    auto const width = formWidthIn(band, size.width);
+    auto const height = band == Band::Narrow ? size.height : std::min(formView->heightAt(width), size.height);
+    formView->place(Size { .width = width, .height = height });
+    auto const at = core::tui::Point { .x = (size.width - width) / 2, .y = (size.height - height) / 2 };
+    if (screen.isOverlayVisible(*formView))
+        screen.positionOverlay(*formView, at);
+    else
+        screen.showOverlay(*formView, at);
 }
 
 // }}}
@@ -680,7 +741,9 @@ std::vector<UiAction> Dashboard::input(std::string_view bytes)
     auto actions = state.resolveOverdueEscape();
     state.escapeHeldSince.reset();
     state.ensureRows();
-    std::ranges::move(state.applyKeys(state.parser.feed(bytes)), std::back_inserter(actions));
+    // A form's warning confirmed by a key of this input is not confirmed for the rest of it.
+    std::ranges::move(state.applyKeys(state.parser.feed(bytes), state.formHooks()),
+                      std::back_inserter(actions));
     if (bytes.ends_with('\x1b'))
         state.escapeHeldSince = state.clock.now();
     return actions;
@@ -752,6 +815,29 @@ void Dashboard::select(std::string_view run)
     state.repaint = State::Repaint::Needed;
 }
 
+void Dashboard::openForm(std::string_view repo, ItemRef const& item, std::string_view task)
+{
+    auto& state = *_state;
+    auto form = openDispatchForm(state.engine, repo, item, task, {});
+    if (!form)
+        return;
+    form->session = formatUuidV4(state.ids.next());
+    state.interaction.form = std::move(form);
+    state.interaction.overlay = Overlay::None;
+    state.repaint = State::Repaint::Needed;
+}
+
+std::optional<DispatchFormState> const& Dashboard::form() const noexcept
+{
+    return _state->interaction.form;
+}
+
+void Dashboard::dispatchRefused(DispatchRefusal refusal)
+{
+    _state->interaction.notice = std::format("dispatch refused: {}", refusalText(refusal));
+    _state->repaint = State::Repaint::Needed;
+}
+
 std::string_view Dashboard::selectedRun() const noexcept
 {
     auto const* const row = _state->selectedRow();
@@ -779,6 +865,9 @@ std::string Dashboard::frame()
     // The cursor rests at the top-left, hidden: every frame addresses its cells absolutely, and a shorter tab
     // then cuts its bottom rows rather than pushing its top ones into a history -- in the terminal and in
     // every window that mirrors it.
+    // Bracketed paste on, in every frame, so that a tab the host drew in the meantime gets it back: a paste
+    // arrives as text, never as the keys it spells (an Enter in it would confirm the form).
+    state.frameBytes += BracketedPasteOn;
     state.frameBytes += RestingCursor;
     state.repaint = State::Repaint::Clean;
     return std::exchange(state.frameBytes, {});

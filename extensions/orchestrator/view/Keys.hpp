@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <orchestrator/view/Band.hpp>
+#include <orchestrator/view/DispatchForm.hpp>
 
 namespace orchestrator::view
 {
@@ -62,14 +63,15 @@ struct RevealAgentAction
     [[nodiscard]] bool operator==(RevealAgentAction const&) const = default;
 };
 
-/// What the dashboard asks for: the guest steps each as the engine input of the same name, but for
-/// RevealAgentAction, which it carries out itself with the host.
+/// What the dashboard asks for: the guest steps each as the engine input of the same name (DispatchAction as
+/// Dispatch), but for RevealAgentAction, which it carries out itself with the host.
 using UiAction = std::variant<RefreshNowAction,
                               EndRunAction,
                               RetryRemovalAction,
                               DismissAction,
                               MarkSeenAction,
-                              RevealAgentAction>;
+                              RevealAgentAction,
+                              DispatchAction>;
 
 // }}}
 // {{{ the key table
@@ -151,6 +153,8 @@ struct Interaction
     Filtering filtering = Filtering::Off; ///< Whether typed text goes to the filter.
     std::string filter = {};              ///< Rows whose text does not hold it are left out; empty: none is.
     std::string pendingEnd = {}; ///< The run whose end waits for a second `e` (D14: asks once); empty: none.
+    std::optional<DispatchFormState> form = {}; ///< The dispatch form, while it is open: it takes every key.
+    std::string notice = {}; ///< A one-line notice on the summary line, until the next key; empty: none.
     [[nodiscard]] bool operator==(Interaction const&) const = default;
 };
 
@@ -174,6 +178,24 @@ struct KeyContext
 /// @param command A command.
 /// @return Whether dispatch() has a row for it.
 [[nodiscard]] bool isDispatched(KeyCommand command) noexcept;
+
+/// @param key A key the terminal sent.
+/// @return The printable character it carries; std::nullopt for anything else, a key with Ctrl or Alt
+///         included.
+[[nodiscard]] std::optional<char32_t> printableOf(core::tui::KeyEvent const& key) noexcept;
+
+/// Drops the last code point of @p text: its continuation bytes and the byte that leads them.
+void dropLastCodepoint(std::string& text) noexcept;
+
+/// @param text What was pasted.
+/// @return It as one line: line ends and tabs folded to a space each, every other control character dropped.
+[[nodiscard]] std::string pastedText(std::string_view text);
+
+/// Applies a paste: into the dispatch form's note while it has the focus, into the filter while it is typed;
+/// dropped anywhere else. A paste is text, never keys: nothing in it confirms, moves or acts.
+/// @param interaction Where the user is; its note or filter extended.
+/// @param text What was pasted.
+void pasteInto(Interaction& interaction, std::string_view text);
 
 /// Whether a key went to the filter.
 enum class FilterInput : uint8_t

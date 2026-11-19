@@ -269,7 +269,11 @@ TEST_CASE("wrap: words fill each line; a word wider than a line is broken", "[or
     CHECK(wrap("a  b", 10, 8) == std::vector<std::string> { "a b" });
     CHECK(wrap("", 10, 8).empty());
     CHECK(wrap("anything", 0, 8).empty());
-    CHECK(wrap("a\x1b]52;c;x\x07" "b c", 40, 40) == std::vector<std::string> { "a]52;c;xb c" });
+    CHECK(wrap("a\x1b]52;c;x\x07"
+               "b c",
+               40,
+               40)
+          == std::vector<std::string> { "a]52;c;xb c" });
     // Never half a wide character: an odd width leaves a cell blank.
     for (auto const& line: wrap("語語語語語", 5, 3))
         CHECK(columnsOf(line) <= 5);

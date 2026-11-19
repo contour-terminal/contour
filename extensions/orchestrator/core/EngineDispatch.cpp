@@ -12,7 +12,6 @@
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/Naming.hpp>
-#include <orchestrator/core/Overloaded.hpp>
 #include <orchestrator/core/Prompt.hpp>
 
 namespace orchestrator
@@ -20,20 +19,6 @@ namespace orchestrator
 
 namespace
 {
-    /// Whether @p a and @p b name the same item.
-    [[nodiscard]] bool sameItem(ItemRef const& a, ItemRef const& b) noexcept
-    {
-        return std::visit(
-            Overloaded {
-                [](ChangeRequestRef const& x, ChangeRequestRef const& y) { return x.number == y.number; },
-                [](IssueRef const& x, IssueRef const& y) { return x.number == y.number; },
-                [](JiraRef const& x, JiraRef const& y) { return x.key == y.key; },
-                [](auto const&, auto const&) { return false; },
-            },
-            a,
-            b);
-    }
-
     /// The kind of task @p item takes.
     [[nodiscard]] AppliesTo kindOf(ItemRef const& item) noexcept
     {
@@ -46,7 +31,8 @@ void Engine::dispatch(Dispatch const& request, std::vector<Effect>& out)
     auto prepared = prepare(request);
     if (!prepared)
     {
-        out.emplace_back(DispatchRefused { .repo = request.repo, .reason = prepared.error() });
+        out.emplace_back(
+            DispatchRefused { .repo = request.repo, .reason = prepared.error(), .near = request.near });
         return;
     }
     auto const id = prepared->id;
@@ -59,7 +45,8 @@ void Engine::dispatch(Dispatch const& request, std::vector<Effect>& out)
     if (!effects)
     {
         forget(id);
-        out.emplace_back(DispatchRefused { .repo = request.repo, .reason = DispatchRefusal::BadPrompt });
+        out.emplace_back(DispatchRefused {
+            .repo = request.repo, .reason = DispatchRefusal::BadPrompt, .near = request.near });
         return;
     }
     apply(id, std::move(*effects), out);
@@ -98,9 +85,8 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
 
     // Only active runs count: a Finished entry is history, and Done is active until the user ends it.
     auto active = _runs | std::views::filter(countsAsActive);
-    if (std::ranges::any_of(active, [&](Run const& run) {
-            return run.repo == repo->name && sameItem(run.item, request.item);
-        }))
+    if (std::ranges::any_of(
+            active, [&](Run const& run) { return run.repo == repo->name && run.item == request.item; }))
         return std::unexpected { DispatchRefusal::AlreadyRunning };
     if (std::cmp_greater_equal(std::ranges::distance(active), _config->maxAgents()))
         return std::unexpected { DispatchRefusal::AgentLimit };

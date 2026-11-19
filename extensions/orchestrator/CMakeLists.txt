@@ -93,6 +93,8 @@ add_library(orchestrator_view STATIC
     view/Band.hpp
     view/Dashboard.cpp
     view/Dashboard.hpp
+    view/DispatchForm.cpp
+    view/DispatchForm.hpp
     view/Keys.cpp
     view/Keys.hpp
     view/Sections.cpp
@@ -190,6 +192,7 @@ if(ORCHESTRATOR_TESTING)
         proto/StepQueue_test.cpp
         proto/StoreKeys_test.cpp
         view/Dashboard_test.cpp
+        view/DispatchForm_test.cpp
         view/Keys_test.cpp
         view/Sections_test.cpp
         view/ViewFixtures.cpp

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <orchestrator/view/Sections.hpp>
 
+#include <core/tui/Canvas.hpp>
 #include <core/tui/Unicode.hpp>
 
 #include <libunicode/utf8_grapheme_segmenter.h>
@@ -93,15 +94,6 @@ namespace
     // {{{ the words a row is made of
 
     /// @return Such as `#2334`, or a Jira key.
-    [[nodiscard]] std::string itemNumber(ItemRef const& item)
-    {
-        return std::visit(Overloaded {
-                              [](ChangeRequestRef const& ref) { return std::format("#{}", ref.number); },
-                              [](IssueRef const& ref) { return std::format("#{}", ref.number); },
-                              [](JiraRef const& ref) { return ref.key; },
-                          },
-                          item);
-    }
 
     /// @return Such as `pr-2334`; the run's id when the item has no slug.
     [[nodiscard]] std::string itemName(Run const& run)
@@ -279,10 +271,10 @@ namespace
     {
         return Row { .kind = RowKind::Issue,
                      .prefix = prefixOf(lists, repo),
-                     .text = clean(std::format("{} {}", itemNumber(issue.item), issue.title)),
+                     .text = clean(std::format("{} {}", itemLabel(issue.item), issue.title)),
                      .title = clean(issue.title),
                      .details = {
-                         DetailLine { .label = "issue", .value = clean(itemNumber(issue.item)) },
+                         DetailLine { .label = "issue", .value = clean(itemLabel(issue.item)) },
                          DetailLine { .label = "url", .value = clean(issue.url), .role = Role::Dim } } };
     }
 
@@ -635,6 +627,33 @@ std::vector<std::string> wrap(std::string_view text, int firstColumns, int nextC
 int columnsOf(std::string_view text)
 {
     return core::tui::stringWidth(text);
+}
+
+std::string itemLabel(ItemRef const& item)
+{
+    return std::visit(Overloaded {
+                          [](ChangeRequestRef const& ref) { return std::format("#{}", ref.number); },
+                          [](IssueRef const& ref) { return std::format("#{}", ref.number); },
+                          [](JiraRef const& ref) { return ref.key; },
+                      },
+                      item);
+}
+
+void drawFrame(core::tui::Canvas& canvas, std::string_view title)
+{
+    auto const& border = styleOf(canvas.theme(), Role::Border);
+    canvas.drawBox(canvas.area(), core::tui::BorderStyle::Rounded, border);
+    // A blank either side of the title, which cut() would trim.
+    if (auto const text = cut(title, canvas.width() - 6); !text.empty())
+        canvas.putString(0, 2, std::format(" {} ", text), styleOf(canvas.theme(), Role::Text));
+}
+
+core::tui::Canvas insideFrame(core::tui::Canvas const& canvas)
+{
+    return canvas.subcanvas(core::tui::Rect { .x = 1,
+                                              .y = 1,
+                                              .width = std::max(0, canvas.width() - 2),
+                                              .height = std::max(0, canvas.height() - 2) });
 }
 
 std::string cut(std::string_view text, int columns)

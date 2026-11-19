@@ -85,18 +85,21 @@ enum class HeadOrigin : uint8_t
 struct ChangeRequestRef
 {
     uint64_t number = 0; ///< Its number in its repository.
+    [[nodiscard]] bool operator==(ChangeRequestRef const&) const = default;
 };
 
 /// A forge issue, by number.
 struct IssueRef
 {
     uint64_t number = 0; ///< Its number in its repository.
+    [[nodiscard]] bool operator==(IssueRef const&) const = default;
 };
 
 /// A Jira issue, by key.
 struct JiraRef
 {
     std::string key; ///< Such as `ABC-123`.
+    [[nodiscard]] bool operator==(JiraRef const&) const = default;
 };
 
 /// The thing an agent run works on.

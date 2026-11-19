@@ -139,12 +139,16 @@ class Driver
     /// @param tab A tab's id.
     /// @return The dashboard served in it; nullptr if the tab is not served.
     [[nodiscard]] view::Dashboard const* dashboard(std::string_view tab) const noexcept;
+    /// @param tab A tab's id.
+    /// @return The dashboard served in it, to act on as the user would; nullptr if the tab is not served.
+    [[nodiscard]] view::Dashboard* dashboard(std::string_view tab) noexcept;
 
     /// @return How many tabs are served.
     [[nodiscard]] std::size_t servedTabs() const noexcept { return _dashboards.size(); }
 
     /// Carries out what the dashboard served in @p tab asked for, as its typed input does: steps the engine
-    /// input of the same name, or, for view::RevealAgentAction, asks the host to reveal the run's agent tab
+    /// input of the same name (a view::DispatchAction as Dispatch, stamped with the time now), or, for
+    /// view::RevealAgentAction, asks the host to reveal the run's agent tab
     /// to the window that last opened or revealed that dashboard (origin 0 when none did since the guest
     /// loaded).
     /// @param tab A served tab's id.

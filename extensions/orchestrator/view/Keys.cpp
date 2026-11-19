@@ -71,14 +71,6 @@ namespace
                || core::tui::hasModifier(key.modifiers, core::tui::Modifier::Alt);
     }
 
-    /// @return The printable character @p key carries; std::nullopt for anything else.
-    [[nodiscard]] std::optional<char32_t> printableOf(core::tui::KeyEvent const& key) noexcept
-    {
-        if (key.codepoint < U' ' || key.codepoint == U'\x7f' || isChord(key))
-            return std::nullopt;
-        return key.codepoint;
-    }
-
     /// @return The name KeyRow::key gives @p key; empty for a key no name is given.
     [[nodiscard]] std::string nameOf(core::tui::KeyEvent const& key)
     {
@@ -89,17 +81,6 @@ namespace
         if (auto const printable = printableOf(key))
             appendUtf8(name, *printable);
         return name;
-    }
-
-    /// Drops the last code point of @p text: its continuation bytes and the byte that leads them.
-    void dropLastCodepoint(std::string& text) noexcept
-    {
-        constexpr auto ContinuationMask = uint8_t { 0b1100'0000 };
-        constexpr auto ContinuationBits = uint8_t { 0b1000'0000 };
-        while (!text.empty() && (static_cast<uint8_t>(text.back()) & ContinuationMask) == ContinuationBits)
-            text.pop_back();
-        if (!text.empty())
-            text.pop_back();
     }
 
     // }}}
@@ -228,6 +209,56 @@ namespace
 
     // }}}
 } // namespace
+
+std::optional<char32_t> printableOf(core::tui::KeyEvent const& key) noexcept
+{
+    if (key.codepoint < U' ' || key.codepoint == U'\x7f' || isChord(key))
+        return std::nullopt;
+    return key.codepoint;
+}
+
+void dropLastCodepoint(std::string& text) noexcept
+{
+    constexpr auto ContinuationMask = uint8_t { 0b1100'0000 };
+    constexpr auto ContinuationBits = uint8_t { 0b1000'0000 };
+    while (!text.empty() && (static_cast<uint8_t>(text.back()) & ContinuationMask) == ContinuationBits)
+        text.pop_back();
+    if (!text.empty())
+        text.pop_back();
+}
+
+std::string pastedText(std::string_view text)
+{
+    auto line = std::string {};
+    line.reserve(text.size());
+    auto previous = '\0';
+    for (auto const c: text)
+    {
+        if (c == '\n' && previous == '\r') // one line end, spelt CR LF
+            continue;
+        previous = c;
+        if (c == '\r' || c == '\n' || c == '\t')
+            line += ' ';
+        else if (static_cast<unsigned char>(c) >= 0x20 && c != '\x7f')
+            line += c;
+    }
+    return line;
+}
+
+void pasteInto(Interaction& interaction, std::string_view text)
+{
+    if (interaction.form)
+    {
+        if (interaction.form->focus == FormField::Note)
+            interaction.form->note += pastedText(text);
+        return;
+    }
+    if (interaction.filtering == Filtering::Typing)
+    {
+        interaction.filter += pastedText(text);
+        interaction.selected = 0;
+    }
+}
 
 std::span<KeyRow const> keyRows() noexcept
 {

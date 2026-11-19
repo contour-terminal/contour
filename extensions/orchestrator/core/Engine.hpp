@@ -293,8 +293,9 @@ enum class DispatchRefusal : uint8_t
 /// A dispatch was refused.
 struct DispatchRefused
 {
-    std::string repo;       ///< The repository it named.
-    DispatchRefusal reason; ///< Why.
+    std::string repo;                ///< The repository it named.
+    DispatchRefusal reason;          ///< Why.
+    std::optional<std::string> near; ///< The dashboard tab it was confirmed in (Dispatch::near), if known.
 };
 
 /// What the engine asks its driver to do, in order. A StoreSet of a run precedes every command, file read

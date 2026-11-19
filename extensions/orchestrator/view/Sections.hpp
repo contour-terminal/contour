@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/tui/Canvas.hpp>
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -113,6 +115,16 @@ struct Row
 [[nodiscard]] std::size_t positionOfSelectable(std::span<Row const> rows,
                                                std::span<std::size_t const> shown,
                                                std::size_t index) noexcept;
+
+/// @param item An item.
+/// @return How the dashboard names it: `#2331`, or a Jira key.
+[[nodiscard]] std::string itemLabel(ItemRef const& item);
+
+/// Draws a rounded box that fills @p canvas, @p title over its top border.
+void drawFrame(core::tui::Canvas& canvas, std::string_view title);
+
+/// @return The part of @p canvas inside a box's border.
+[[nodiscard]] core::tui::Canvas insideFrame(core::tui::Canvas const& canvas);
 
 /// @param text Text.
 /// @return How many cells it takes.

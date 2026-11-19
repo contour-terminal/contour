@@ -1,0 +1,40 @@
+╭─ Agents ─────────────────────────────────────────────────────────────╮ ╭─ Details ───────────────────────────────────╮
+│ MY PULL REQUESTS                                                     │ │ Say why the stdio relay failed, and send a… │
+│ ● #2375 Say why the stdio relay failed, and send a hello before hal… │ │                                             │
+│ ✓ #2369 examples: add donut-animation, a full-screen animation done… │ │ branch    fix/stdio-attach-starter-hello →  │
+│ ✓ #2346 contour: tab_style — shapes, fills, materials and widths fo… │ │             master                          │
+│ ✗ #2114 vtbackend: WIP -- DEC mode 44 and a partial margin-bell tri… │ │ checks    running                           │
+│ ✗ #1847 Adds ability to set Contour as default terminal on Windows … │ │ url       https://github.com/contour-termin │
+│                                                                      │ │             al/contour/pull/2375            │
+│ ISSUES WITHOUT A PR                                                  │ │                                             │
+│   #2356 Report the Qt macOS bug that drops Ctrl+Cmd+arrow key press… │ │                                             │
+│   #2338 Flaky on Windows: SessionHost.extension.controlVerb require… │ │                                             │
+│   #2253 Switch `da╭─ Dispatch an agent ──────────────────────────────────────────────────────────╮                   │
+│   #2163 OSC 133: o│ item      #2356 · Report the Qt macOS bug that drops Ctrl+Cmd+arrow key pre… │                   │
+│   #2162 OSC 9;9 (C│ task      ‹ work on issue ›                                                  │                   │
+│                   │ model     ‹ opus ›                                                           │                   │
+│ AGENTS · 0 OF 4 RU│ note      optional; tab to type one                                          │                   │
+│ no agents         │ prompt    /contour-workflows:work-issue                                      │                   │
+│                   │             https://github.com/contour-terminal/contour/issues/2356          │                   │
+│ FINISHED · 0 NEW  │ checkout  new branch agent/issue-2356-…                                      │                   │
+│ nothing finished  │ worktree  /home/u/worktrees/contour/issue-2356-…                             │                   │
+│                   │ command   claude --model opus --session-id                                   │                   │
+│                   │             00000001-0000-4000-8000-000000000000                             │                   │
+│                   │             '/contour-workflows:work-issue                                   │                   │
+│                   │             https://github.com/contour-terminal/contour/issues/2356'         │                   │
+│                   │                                                                              │                   │
+│                   │ 0 of 4 running                                                               │                   │
+│                   │ enter dispatch · tab next field · esc cancel                                 │                   │
+│                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+│                                                                      │ │                                             │
+╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
+ ↑↓ move · enter open · ? help · / filter · R refresh · e end run · x retry removal · del dismiss · esc back            
+ ⬢ agents 0/4 · ✗2                                                                                                      

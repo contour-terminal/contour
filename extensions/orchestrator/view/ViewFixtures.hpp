@@ -55,6 +55,8 @@ struct World
     ListAnswer prs = { "github/prs-open.json" };                          ///< What `gh-prs` prints.
     ListAnswer issues = { "github/issues-open.json" };                    ///< What `gh-issues` prints.
     std::vector<Run> stored = {}; ///< The runs in the store; the active ones have a live tab listed.
+    std::string hooks =
+        "contour/setup-hooks-present.json"; ///< What `agent-setup-check` prints, under testdata.
 };
 
 /// @param world What the engine is started from.

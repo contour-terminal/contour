@@ -16,6 +16,7 @@
 
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/Uuid.hpp>
+#include <orchestrator/view/DispatchForm.hpp>
 #include <orchestrator/view/Keys.hpp>
 
 namespace orchestrator::view
@@ -23,6 +24,10 @@ namespace orchestrator::view
 
 /// What ends every frame: CUP to the top-left, where the hidden cursor rests (@see Dashboard::frame).
 inline constexpr auto RestingCursor = std::string_view { "\033[H" };
+
+/// What every frame sets before RestingCursor: bracketed paste (DECSET 2004), so that a paste reaches the
+/// dashboard as one PasteEvent rather than as keys.
+inline constexpr auto BracketedPasteOn = std::string_view { "\033[?2004h" };
 
 /// The dashboard tab: the engine's lists drawn with core::tui, laid out by breakpoint (narrowest first, the
 /// last one the tab's size meets wins: BandBreakpoints), and the keys typed into it.
@@ -77,6 +82,20 @@ class Dashboard
     /// confirmation; does nothing when no row stands for the run.
     /// @param run The run's id.
     void select(std::string_view run);
+
+    /// Opens the dispatch form on an item the engine lists, its session id taken from the dashboard's source;
+    /// does nothing when the engine does not list the item or the task does not apply to it.
+    /// @param repo The repository's configured name.
+    /// @param item The item.
+    /// @param task The id of the task the form starts on.
+    void openForm(std::string_view repo, ItemRef const& item, std::string_view task);
+
+    /// @return The dispatch form while it is open.
+    [[nodiscard]] std::optional<DispatchFormState> const& form() const noexcept;
+
+    /// The engine refused a dispatch confirmed here: the summary line says why, until the next key.
+    /// @param refusal Why.
+    void dispatchRefused(DispatchRefusal refusal);
 
     /// @return The run the selected row stands for; empty when it stands for none, or nothing is selected.
     [[nodiscard]] std::string_view selectedRun() const noexcept;
