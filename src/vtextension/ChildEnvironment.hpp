@@ -56,6 +56,30 @@ inline constexpr auto InheritanceRules = std::array {
     InheritanceRule { .name = "GH_HOST", .match = NameMatch::Exact, .inheritance = Inheritance::Withheld },
     InheritanceRule {
         .name = "GH_ENTERPRISE_TOKEN", .match = NameMatch::Exact, .inheritance = Inheritance::Withheld },
+    // glab's host, repository, group and remote selection, as https://docs.gitlab.com/cli/configuration/
+    // lists it: a command, or an agent, would otherwise talk to another GitLab instance or project than the
+    // repository's remote names. GITLAB_TOKEN is kept: it is how the user logs glab in.
+    InheritanceRule {
+        .name = "GITLAB_HOST", .match = NameMatch::Exact, .inheritance = Inheritance::Withheld },
+    InheritanceRule { .name = "GL_HOST", .match = NameMatch::Exact, .inheritance = Inheritance::Withheld },
+    InheritanceRule { .name = "GITLAB_URI", .match = NameMatch::Exact, .inheritance = Inheritance::Withheld },
+    InheritanceRule {
+        .name = "GITLAB_API_HOST", .match = NameMatch::Exact, .inheritance = Inheritance::Withheld },
+    InheritanceRule {
+        .name = "GITLAB_SSH_HOST", .match = NameMatch::Exact, .inheritance = Inheritance::Withheld },
+    InheritanceRule {
+        .name = "GITLAB_REPO", .match = NameMatch::Exact, .inheritance = Inheritance::Withheld },
+    InheritanceRule {
+        .name = "GITLAB_GROUP", .match = NameMatch::Exact, .inheritance = Inheritance::Withheld },
+    InheritanceRule {
+        .name = "GITLAB_HEAD_REPO", .match = NameMatch::Exact, .inheritance = Inheritance::Withheld },
+    // GLAB_REMOTE_ALIAS, and the names glab checks after it but the GIT_ ones the prefix above withholds.
+    InheritanceRule {
+        .name = "GLAB_REMOTE_ALIAS", .match = NameMatch::Exact, .inheritance = Inheritance::Withheld },
+    InheritanceRule {
+        .name = "REMOTE_ALIAS", .match = NameMatch::Exact, .inheritance = Inheritance::Withheld },
+    InheritanceRule {
+        .name = "REMOTE_NICKNAME", .match = NameMatch::Exact, .inheritance = Inheritance::Withheld },
 };
 
 /// Tells whether a command inherits a variable, by InheritanceRules.

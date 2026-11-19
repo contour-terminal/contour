@@ -4,12 +4,14 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include <vtextension/ChildEnvironment.hpp>
+#include <vtextension/DeclaredPanes.hpp>
 #include <vtextension/Manifest.hpp>
 
 using vtextension::EnvironmentEntry;
@@ -87,4 +89,46 @@ TEST_CASE("ChildEnvironment: a later layer replaces a name in place", "[daemon][
               { "GIT_CONFIG_COUNT", "3" },
               { "GIT_OPTIONAL_LOCKS", "0" },
           });
+}
+
+TEST_CASE("GitLab's host selectors are withheld", "[daemon][processes]")
+{
+    // Every variable https://docs.gitlab.com/cli/configuration/#environment-variables names as choosing the
+    // host, the repository, the group or the remote glab works against.
+    constexpr auto Withheld = std::array<std::string_view, 14> {
+        "GITLAB_HOST",      "GL_HOST",      "GITLAB_URI",       "GITLAB_API_HOST",     "GITLAB_SSH_HOST",
+        "GITLAB_REPO",      "GITLAB_GROUP", "GITLAB_HEAD_REPO", "GLAB_REMOTE_ALIAS",   "GIT_REMOTE_URL_VAR",
+        "GIT_REMOTE_ALIAS", "REMOTE_ALIAS", "REMOTE_NICKNAME",  "GIT_REMOTE_NICKNAME",
+    };
+    auto inherited = std::vector<std::string> { "GITLAB_TOKEN=token", "PATH=/usr/bin" };
+    for (auto const name: Withheld)
+        inherited.push_back(std::format("{}=gitlab.example.com", name));
+
+    for (auto const name: Withheld)
+    {
+        INFO(name);
+        CHECK(vtextension::inheritanceOf(name) == vtextension::Inheritance::Withheld);
+    }
+    CHECK(vtextension::inheritanceOf("GITLAB_TOKEN") == vtextension::Inheritance::Kept);
+
+    SECTION("a declared command")
+    {
+        auto const environment = vtextension::childEnvironment(inherited, {}, {});
+        for (auto const name: Withheld)
+        {
+            INFO(name);
+            CHECK_FALSE(has(environment, name));
+        }
+        CHECK(has(environment, "GITLAB_TOKEN"));
+    }
+    SECTION("an agent pane")
+    {
+        auto const withheld = vtextension::paneWithheldNames(inherited);
+        for (auto const name: Withheld)
+        {
+            INFO(name);
+            CHECK(std::ranges::contains(withheld, name));
+        }
+        CHECK_FALSE(std::ranges::contains(withheld, "GITLAB_TOKEN"));
+    }
 }
