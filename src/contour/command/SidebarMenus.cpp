@@ -125,6 +125,10 @@ namespace
         static auto const rows = std::array {
             TabTable::rows(tabStripRows),
             TabTable::separator(),
+            // Each splits the tab's active pane.
+            TabTable::command(actions::SplitVertical {}, "Split Vertically"),
+            TabTable::command(actions::SplitHorizontal {}, "Split Horizontally"),
+            TabTable::separator(),
             TabTable::submenu("Move to Workspace", moveTargetRows)
                 .enabledWhen(movesNodes<SidebarTabMenuState>),
             TabTable::submenu("Merge into Tab", joinRowsOf<SidebarTabMenuState>)
@@ -158,6 +162,8 @@ namespace
         static auto const rows = std::array {
             PaneTable::command(GoToPane {}, "Go to Pane"),
             PaneTable::command(MarkSeen {}, "Mark Seen"),
+            PaneTable::command(SplitVertical {}, "Split Vertically"),
+            PaneTable::command(SplitHorizontal {}, "Split Horizontally"),
 
             PaneTable::separator(),
 

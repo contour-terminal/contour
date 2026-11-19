@@ -3765,26 +3765,42 @@ void TerminalSessionManager::activateTab(vtworkspace::WorkspaceId window, int in
     activateModelTabByRow(window, index);
 }
 
-PaneShowing TerminalSessionManager::showPane(vtworkspace::WorkspaceId window, window::PaneKey key)
+auto TerminalSessionManager::leafHolding(vtworkspace::WorkspaceId window, window::PaneKey key) const
+    -> std::optional<HeldLeaf>
 {
     auto const* const win = _model->workspace(window);
     if (win == nullptr)
-        return PaneShowing::NotHeld;
+        return std::nullopt;
     for (auto const row: std::views::iota(0, win->tabCount()))
     {
         auto* const tab = win->tabAt(row);
         if (tab == nullptr || tab->rootPane() == nullptr)
             continue;
-        auto const* const leaf = tab->rootPane()->walkTree(
-            [&](vtworkspace::Pane& pane) { return pane.isLeaf() && paneKeyOf(pane.session()) == key; });
-        if (leaf == nullptr)
-            continue;
-        activateModelTabByRow(window, row);
-        activatePane(tab->id(), leaf->id());
-        markPaneSeen(window, leaf->session());
-        return PaneShowing::Shown;
+        if (auto* const leaf = tab->rootPane()->walkTree(
+                [&](vtworkspace::Pane& pane) { return pane.isLeaf() && paneKeyOf(pane.session()) == key; }))
+            return HeldLeaf { .row = row, .tab = tab, .leaf = leaf };
     }
-    return PaneShowing::NotHeld;
+    return std::nullopt;
+}
+
+PaneShowing TerminalSessionManager::showPane(vtworkspace::WorkspaceId window, window::PaneKey key)
+{
+    auto const held = leafHolding(window, key);
+    if (!held)
+        return PaneShowing::NotHeld;
+    activateModelTabByRow(window, held->row);
+    activatePane(held->tab->id(), held->leaf->id());
+    markPaneSeen(window, held->leaf->session());
+    return PaneShowing::Shown;
+}
+
+std::optional<window::PaneKey> TerminalSessionManager::activePaneBeside(vtworkspace::WorkspaceId window,
+                                                                        window::PaneKey key) const
+{
+    auto const held = leafHolding(window, key);
+    if (!held || held->tab->activePane() == nullptr)
+        return std::nullopt;
+    return paneKeyOf(held->tab->activePane()->session());
 }
 
 void TerminalSessionManager::markActivePaneSeen(vtworkspace::WorkspaceId window)

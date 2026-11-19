@@ -69,7 +69,8 @@ TEST_CASE("close is disabled for the last workspace", "[sidebarmenu]")
     CHECK(row(several, "Close Workspace…").availability == RowAvailability::Enabled);
 }
 
-TEST_CASE("the sidebar tab menu is the tab strip's menu plus Move to Workspace", "[sidebarmenu]")
+TEST_CASE("the sidebar tab menu is the tab strip's menu plus the splits and Move to Workspace",
+          "[sidebarmenu]")
 {
     auto const state = SidebarTabMenuState {
         .tab = TabContextMenuState { .tabIndex = 0, .tabCount = 2 },
@@ -78,13 +79,13 @@ TEST_CASE("the sidebar tab menu is the tab strip's menu plus Move to Workspace",
     };
     auto const menu = buildSidebarTabMenu(state);
     auto const strip = buildTabContextMenu(state.tab);
-    REQUIRE(menu.size() == strip.size() + 3);
+    REQUIRE(menu.size() == strip.size() + 6);
     CHECK(titles(menu).front() == titles(strip).front());
     // Its close row says it asks.
     CHECK(std::ranges::contains(titles(menu), "Close Tab…"));
     CHECK_FALSE(std::ranges::contains(titles(menu), "Close Tab"));
     // Nothing to merge into: no Merge into Tab.
-    CHECK(std::ranges::equal(titles(menu) | std::views::drop(strip.size()),
+    CHECK(std::ranges::equal(titles(menu) | std::views::drop(strip.size() + 3),
                              std::vector<std::string> { "", "Move to Workspace", "Move to New Workspace" }));
 
     auto const& move = row(menu, "Move to Workspace");
@@ -110,12 +111,51 @@ TEST_CASE("the sidebar pane menu rows", "[sidebarmenu]")
 {
     auto const menu = buildSidebarPaneMenu(SidebarPaneMenuState {});
     CHECK(titles(menu)
-          == std::vector<std::string> {
-              "Go to Pane", "Mark Seen", "", "Move to New Tab", "Move to New Workspace", "", "Close Pane…" });
+          == std::vector<std::string> { "Go to Pane",
+                                        "Mark Seen",
+                                        "Split Vertically",
+                                        "Split Horizontally",
+                                        "",
+                                        "Move to New Tab",
+                                        "Move to New Workspace",
+                                        "",
+                                        "Close Pane…" });
     CHECK(std::holds_alternative<actions::GoToPane>(row(menu, "Go to Pane").action));
     CHECK(std::holds_alternative<actions::MoveToNewTab>(row(menu, "Move to New Tab").action));
     CHECK(std::holds_alternative<actions::MoveToNewWorkspace>(row(menu, "Move to New Workspace").action));
     CHECK(std::holds_alternative<actions::ClosePane>(row(menu, "Close Pane…").action));
+}
+
+TEST_CASE("the pane menu offers both splits after Mark Seen", "[sidebarmenu]")
+{
+    auto const menu = buildSidebarPaneMenu(SidebarPaneMenuState {});
+    CHECK(std::ranges::equal(titles(menu) | std::views::take(5),
+                             std::vector<std::string> {
+                                 "Go to Pane", "Mark Seen", "Split Vertically", "Split Horizontally", "" }));
+    CHECK(std::holds_alternative<actions::SplitVertical>(row(menu, "Split Vertically").action));
+    CHECK(std::holds_alternative<actions::SplitHorizontal>(row(menu, "Split Horizontally").action));
+}
+
+TEST_CASE("the sidebar's tab menu offers both splits", "[sidebarmenu]")
+{
+    auto const state = SidebarTabMenuState {
+        .tab = TabContextMenuState { .tabIndex = 0, .tabCount = 2 },
+        .others = { WorkspaceChoice { .position = 2, .title = "api" } },
+    };
+    auto const menu = buildSidebarTabMenu(state);
+    auto const strip = buildTabContextMenu(state.tab);
+    CHECK(std::ranges::equal(
+        titles(menu) | std::views::drop(strip.size()) | std::views::take(5),
+        std::vector<std::string> { "", "Split Vertically", "Split Horizontally", "", "Move to Workspace" }));
+    CHECK(std::holds_alternative<actions::SplitVertical>(row(menu, "Split Vertically").action));
+    CHECK(std::holds_alternative<actions::SplitHorizontal>(row(menu, "Split Horizontally").action));
+}
+
+TEST_CASE("the workspace menu offers no split", "[sidebarmenu]")
+{
+    auto const menu = buildWorkspaceMenu(WorkspaceMenuState { .position = 0, .count = 2 });
+    CHECK_FALSE(std::ranges::contains(titles(menu), "Split Vertically"));
+    CHECK_FALSE(std::ranges::contains(titles(menu), "Split Horizontally"));
 }
 
 namespace

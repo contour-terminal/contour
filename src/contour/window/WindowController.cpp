@@ -3617,6 +3617,19 @@ namespace
     {
         return std::holds_alternative<Alternative>(action);
     }
+
+    /// The actions a sidebar tab row runs on its tab's active pane, which a split divides. Every other action
+    /// of a tab row (the tab strip's commands) shows the tab's first pane.
+    constexpr auto TabRowActivePaneActions = std::array<bool (*)(actions::Action const&) noexcept, 2> {
+        holds<actions::SplitVertical>,
+        holds<actions::SplitHorizontal>,
+    };
+
+    [[nodiscard]] bool runsOnActivePane(actions::Action const& action) noexcept
+    {
+        return std::ranges::any_of(TabRowActivePaneActions,
+                                   [&](auto const matches) { return matches(action); });
+    }
 } // namespace
 
 void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Action const& action)
@@ -3787,6 +3800,8 @@ void WindowController::runSidebarActionShown(SidebarRowKey const& row, actions::
                     shown = listed->tab->panes.front().key;
                 if (!shown)
                     return RowActionOutcome::Waiting; // the tab is not listed (yet)
+                if (runsOnActivePane(action))
+                    shown = _manager.activePaneBeside(_displayed, *shown).value_or(*shown);
                 break;
             }
             case SidebarRowKind::Pane: shown = row.pane; break;

@@ -673,6 +673,112 @@ TEST_CASE("a sidebar pane menu moves its pane to a new tab and to a new workspac
     CHECK(window->ownedWorkspaces().size() == 2);
 }
 
+namespace
+{
+/// A tab split once: its first pane A and the pane B split off it, B active.
+struct SplitTab
+{
+    vtworkspace::TabId tab;
+    PaneKey a;
+    PaneKey b;
+};
+
+[[nodiscard]] SplitTab splitLastTab(contour::session::TerminalSessionManager& manager,
+                                    contour::window::WindowController& window,
+                                    vtworkspace::TabId tab)
+{
+    auto const& model = manager.model();
+    auto const a = manager.paneKeyOf(model.findTab(tab)->activePane()->session());
+    manager.splitActivePane(false, window.activeSession());
+    REQUIRE(model.findTab(tab)->paneCount() == 2);
+    auto const b = manager.paneKeyOf(model.findTab(tab)->activePane()->session());
+    REQUIRE(a != b);
+    return SplitTab { .tab = tab, .a = a, .b = b };
+}
+
+/// @return The leaf of @p tab whose session is kept under @p key.
+[[nodiscard]] vtworkspace::Pane* leafOf(contour::session::TerminalSessionManager& manager,
+                                        vtworkspace::TabId tab,
+                                        PaneKey key)
+{
+    auto* const leaf = manager.model().findTab(tab)->rootPane()->walkTree(
+        [&](vtworkspace::Pane& pane) { return pane.isLeaf() && manager.paneKeyOf(pane.session()) == key; });
+    REQUIRE(leaf != nullptr);
+    return leaf;
+}
+
+/// @return The node beside @p pane under its parent; null for the root.
+[[nodiscard]] vtworkspace::Pane const* siblingOf(vtworkspace::Pane const& pane)
+{
+    auto const* const parent = pane.parent();
+    if (parent == nullptr)
+        return nullptr;
+    return parent->first() == &pane ? parent->second() : parent->first();
+}
+
+/// Checks that a split put a new leaf beside @p split's @p divided, leaving the other pane's leaf where it
+/// was.
+void checkSplitBeside(contour::session::TerminalSessionManager& manager, SplitTab const& split, PaneKey divided)
+{
+    auto const other = divided == split.a ? split.b : split.a;
+    REQUIRE(manager.model().findTab(split.tab)->paneCount() == 3);
+    auto const* const sibling = siblingOf(*leafOf(manager, split.tab, divided));
+    REQUIRE(sibling != nullptr);
+    CHECK(sibling->isLeaf());
+    CHECK(manager.paneKeyOf(sibling->session()) != other);
+    // The other pane's sibling is the split that now holds the divided pane.
+    auto const* const otherSibling = siblingOf(*leafOf(manager, split.tab, other));
+    REQUIRE(otherSibling != nullptr);
+    CHECK_FALSE(otherSibling->isLeaf());
+}
+} // namespace
+
+TEST_CASE("a pane row's split divides that pane", "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    auto const made = contour::test::createSessionTabs(manager, *window, 1);
+    auto const split = splitLastTab(manager, *window, made.tabs[0]);
+
+    window->sidebar().openContextMenu(paneRowOf(*window, split.a), QPointF { 3, 4 });
+    auto const action = actionIdOf(window->sidebarContextMenuModel(), "Split Vertically");
+    REQUIRE(action.has_value());
+    window->triggerSidebarContextMenuAction(*action);
+
+    checkSplitBeside(manager, split, split.a);
+}
+
+TEST_CASE("a tab row's split divides the tab's active pane", "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    auto const made = contour::test::createSessionTabs(manager, *window, 2);
+    auto const split = splitLastTab(manager, *window, made.tabs[1]);
+    auto const workspace = window->displayedWorkspace();
+
+    SECTION("the tab shown")
+    {
+        // Nothing to do: the split tab is the one shown.
+    }
+    SECTION("another tab shown: the tab is shown first")
+    {
+        manager.activateTab(workspace, 0);
+        REQUIRE(manager.model().workspace(workspace)->activeTab()->id() == made.tabs[0]);
+    }
+
+    window->sidebar().openContextMenu(tabRowOf(*window, split.tab.value), QPointF { 3, 4 });
+    auto const action = actionIdOf(window->sidebarContextMenuModel(), "Split Horizontally");
+    REQUIRE(action.has_value());
+    window->triggerSidebarContextMenuAction(*action);
+
+    CHECK(manager.model().workspace(workspace)->activeTab()->id() == split.tab);
+    checkSplitBeside(manager, split, split.b);
+}
+
 TEST_CASE("a one-tab workspace's menu merges its tab into another tab", "[contour][sidebar][controller]")
 {
     auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
