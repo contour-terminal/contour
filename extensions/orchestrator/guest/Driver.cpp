@@ -472,6 +472,14 @@ void Driver::apply(std::string_view tab, view::UiAction const& action)
 {
     std::visit(Overloaded {
                    [&](view::RevealAgentAction const& reveal) { revealAgent(tab, reveal.run); },
+                   [&](view::ShowBoardAction const& show) {
+                       step(ShowBoard { .run = show.run, .tab = std::string { tab }, .monoMs = nowMs() });
+                       stepReplies();
+                   },
+                   [&](view::HideBoardAction const&) {
+                       step(HideBoard { .tab = std::string { tab }, .monoMs = nowMs() });
+                       stepReplies();
+                   },
                    [&](view::DispatchAction const& dispatch) {
                        // Stamped with the time it arrived: the run's names carry the wall time.
                        auto const clock = readClock();
@@ -531,8 +539,18 @@ void Driver::followTabs()
     auto const unlisted = [&](auto const& entry) {
         return std::ranges::none_of(*listed, [&](TabInfo const& tab) { return tab.tab == entry.first; });
     };
+    auto closed = std::vector<std::string> {};
+    for (auto const& entry: _dashboards)
+        if (unlisted(entry))
+            closed.push_back(entry.first);
     std::erase_if(_dashboards, unlisted);
     std::erase_if(_origins, unlisted);
+    // A closed tab shows no board: it is read no more for it.
+    for (auto& tab: closed)
+    {
+        step(HideBoard { .tab = std::move(tab), .monoMs = nowMs() });
+        stepReplies();
+    }
     for (auto const& tab: *listed)
     {
         if (auto const found = _dashboards.find(tab.tab); found != _dashboards.end())
@@ -727,11 +745,21 @@ void Driver::carryOut(std::span<Effect const> effects)
                             .tag = command.tag, .outcome = notStarted(started.error()), .monoMs = nowMs() });
                 },
                 [&](ReadFile const& read) {
-                    auto content = _host.fileRead(WorktreesRoot, relativeTo(_worktreeRoot, read.path));
-                    _replies.emplace_back(FileRead { .tag = read.tag,
-                                                     .content = std::move(content).transform_error(
-                                                         [](FileError error) { return readErrorOf(error); }),
-                                                     .monoMs = nowMs() });
+                    auto file = _host.fileRead(WorktreesRoot, relativeTo(_worktreeRoot, read.path));
+                    auto const clock = readClock();
+                    auto reply = FileRead { .tag = read.tag,
+                                            .content = std::unexpected { FileReadError::Unreadable },
+                                            .modifiedWallMs = 0,
+                                            .monoMs = clock.monoMs,
+                                            .wallMs = clock.wallMs };
+                    if (file)
+                    {
+                        reply.content = std::move(file->bytes);
+                        reply.modifiedWallMs = file->modifiedUnixMs;
+                    }
+                    else
+                        reply.content = std::unexpected { readErrorOf(file.error()) };
+                    _replies.emplace_back(std::move(reply));
                 },
                 [&](OpenPane const& open) {
                     auto pane = _host.paneOpen(

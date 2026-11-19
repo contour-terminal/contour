@@ -348,7 +348,7 @@ namespace
             return panes;
         }
 
-        [[nodiscard]] std::expected<std::string, FileError> fileRead(std::string_view root,
+        [[nodiscard]] std::expected<FileContent, FileError> fileRead(std::string_view root,
                                                                      std::string_view path) override
         {
             auto rootText = borrowed(root);
@@ -357,9 +357,10 @@ namespace
             auto error = FileErrorCode {};
             if (!terminal_extensions_daemon_host_file_read(&rootText, &pathText, &content, &error))
                 return std::unexpected(fileErrorOf(error));
-            auto bytes = copied(content.bytes);
+            auto file =
+                FileContent { .bytes = copied(content.bytes), .modifiedUnixMs = content.modified_unix_ms };
             terminal_extensions_daemon_host_file_content_free(&content);
-            return bytes;
+            return file;
         }
 
         [[nodiscard]] std::expected<std::string, HostError> tabOpen(std::string_view scheme,

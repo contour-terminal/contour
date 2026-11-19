@@ -64,15 +64,31 @@ struct RevealAgentAction
     [[nodiscard]] bool operator==(RevealAgentAction const&) const = default;
 };
 
+/// Show a run's status board in the dashboard's tab: it is read now, and again while the tab shows it.
+struct ShowBoardAction
+{
+    std::string run = {}; ///< The run's id.
+    [[nodiscard]] bool operator==(ShowBoardAction const&) const = default;
+};
+
+/// The dashboard's tab stopped showing a status board.
+struct HideBoardAction
+{
+    [[nodiscard]] bool operator==(HideBoardAction const&) const = default;
+};
+
 /// What the dashboard asks for: the guest steps each as the engine input of the same name (DispatchAction as
-/// Dispatch), but for RevealAgentAction, which it carries out itself with the host.
+/// Dispatch, ShowBoardAction and HideBoardAction as ShowBoard and HideBoard for the dashboard's tab), but for
+/// RevealAgentAction, which it carries out itself with the host.
 using UiAction = std::variant<RefreshNowAction,
                               EndRunAction,
                               RetryRemovalAction,
                               DismissAction,
                               MarkSeenAction,
                               RevealAgentAction,
-                              DispatchAction>;
+                              DispatchAction,
+                              ShowBoardAction,
+                              HideBoardAction>;
 
 // }}}
 // {{{ the key table

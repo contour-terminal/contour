@@ -139,6 +139,9 @@ class FakeGuestHost final: public IGuestHost
         answers;                             ///< What completeRunning() finishes each command with.
     std::optional<HostError> procStartError; ///< What every procStart() answers, if set.
     std::optional<HostError> storeSetError;  ///< What every storeSet() answers, if set.
+    std::expected<FileContent, FileError> fileContent =
+        std::unexpected(FileError::NotSupportedYet); ///< What every fileRead() answers.
+    std::vector<std::string> fileReads;              ///< The path of every fileRead().
     std::expected<std::vector<PaneInfo>, HostError> paneListing = std::unexpected(HostError::NotSupportedYet);
 
     std::vector<std::string> calls;                             ///< The calls the order of which tests check.
@@ -379,10 +382,11 @@ class FakeGuestHost final: public IGuestHost
         return {};
     }
 
-    [[nodiscard]] std::expected<std::string, FileError> fileRead(std::string_view /*root*/,
-                                                                 std::string_view /*path*/) override
+    [[nodiscard]] std::expected<FileContent, FileError> fileRead(std::string_view /*root*/,
+                                                                 std::string_view path) override
     {
-        return std::unexpected(FileError::NotSupportedYet);
+        fileReads.emplace_back(path);
+        return fileContent;
     }
 
     [[nodiscard]] std::expected<void, HostError> summarySet(std::string_view shortText,
@@ -1606,6 +1610,77 @@ TEST_CASE("a closed tab drops its dashboard", "[guest]")
     CHECK(served.driver->servedTabs() == 0);
     CHECK(served.driver->dashboard("tab-1") == nullptr);
     CHECK(served.host.writes.empty());
+}
+
+namespace
+{
+
+/// Gives @p served a running agent, its tab open: a board can be shown for it.
+void addAgent(Served& served)
+{
+    auto const run = view::test::storedRun(Running {}, "pr-2375-20261113-150847", ChangeRequestRef { 2375 });
+    served.host.store.insert_or_assign(runKey(run.id), toJson(run));
+    served.host.paneListing = std::vector { PaneInfo { .pane = *run.pane,
+                                                       .tag = run.id,
+                                                       .status = AgentStatus::Working,
+                                                       .program = ProgramLiveness::Alive } };
+}
+
+/// @return How many ReadFile effects the engine asked for a shown board.
+[[nodiscard]] std::size_t boardViewReads(RecordingObserver const& observer)
+{
+    return static_cast<std::size_t>(std::ranges::count_if(observer.effects, [](Effect const& effect) {
+        auto const* const read = std::get_if<ReadFile>(&effect);
+        return read != nullptr && read->tag.ends_with("#board-view");
+    }));
+}
+
+} // namespace
+
+TEST_CASE("a file read carries its modification time", "[guest][board]")
+{
+    constexpr auto Modified = uint64_t { 1'700'000'000'000 };
+    auto served = Served {};
+    addAgent(served);
+    served.host.fileContent = FileContent { .bytes = "# hi", .modifiedUnixMs = Modified };
+    served.load();
+    served.invoke("open");
+
+    served.driver->apply("tab-1", view::ShowBoardAction { .run = "pr-2375-20261113-150847" });
+
+    REQUIRE(served.host.fileReads.size() == 1);
+    CHECK(served.host.fileReads.front().ends_with("pr-2375-20261113-150847/STATUS.md"));
+    auto const reads = served.observer.inputsOf<FileRead>();
+    REQUIRE(reads.size() == 1);
+    CHECK(reads.front().modifiedWallMs == Modified);
+    CHECK(reads.front().wallMs == served.host.clock.wallMs);
+    CHECK(reads.front().content == "# hi");
+    auto const* const board = served.driver->engine().board("pr-2375-20261113-150847");
+    REQUIRE(board != nullptr);
+    CHECK(board->state == BoardState::Read);
+    CHECK(board->modifiedWallMs == Modified);
+}
+
+TEST_CASE("a served tab that closes stops showing its board", "[guest][board]")
+{
+    auto served = Served {};
+    addAgent(served);
+    served.host.fileContent = FileContent { .bytes = "# hi", .modifiedUnixMs = 1 };
+    served.load();
+    served.invoke("open");
+    served.driver->apply("tab-1", view::ShowBoardAction { .run = "pr-2375-20261113-150847" });
+    REQUIRE(boardViewReads(served.observer) == 1);
+
+    served.host.tabList.clear();
+    served.driver->update(Hint::Tabs);
+
+    auto const hidden = served.observer.inputsOf<HideBoard>();
+    REQUIRE(hidden.size() == 1);
+    CHECK(hidden.front().tab == "tab-1");
+    CHECK(served.driver->engine().board("pr-2375-20261113-150847") == nullptr);
+    served.host.clock.monoMs += 10'000;
+    served.driver->update(Hint::Wake);
+    CHECK(boardViewReads(served.observer) == 1);
 }
 
 TEST_CASE("a key split across two tab reads moves once", "[guest]")

@@ -95,6 +95,13 @@ enum class ProcCompletion : uint8_t
     TimedOut,  ///< The host ended it when its declared timeout passed.
 };
 
+/// A file the host read.
+struct FileContent
+{
+    std::string bytes = {};      ///< Its contents.
+    uint64_t modifiedUnixMs = 0; ///< When it was last modified, in milliseconds since the Unix epoch.
+};
+
 /// The host's clocks, read at once: the guest's only time.
 struct ClockReading
 {
@@ -263,8 +270,8 @@ class IGuestHost
     /// Reads a regular file inside a readable root.
     /// @param root The root's label.
     /// @param path The file, relative to the root.
-    /// @return Its bytes, or why they could not be read.
-    [[nodiscard]] virtual std::expected<std::string, FileError> fileRead(std::string_view root,
+    /// @return Its bytes and modification time, or why they could not be read.
+    [[nodiscard]] virtual std::expected<FileContent, FileError> fileRead(std::string_view root,
                                                                          std::string_view path) = 0;
 
     /// Opens a served tab in the origin's workspace; the host reveals the one already open there instead.
