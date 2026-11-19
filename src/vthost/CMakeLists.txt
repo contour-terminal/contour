@@ -128,6 +128,8 @@ add_library(vthost STATIC
     OwnedPanes.cpp
     OwnedPanes.hpp
     PduPump.hpp
+    RevealOnLoop.cpp
+    RevealOnLoop.hpp
     ServedSessions.cpp
     ServedSessions.hpp
     SessionHost.cpp

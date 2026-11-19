@@ -291,12 +291,6 @@ class ServedSessions final: public IServedTabs, public IServedTabLookup
     /// Creates the session of the pending tab @p id, or drops it if it was cancelled meanwhile. Loop thread.
     void create(std::string const& id, std::string const& title, std::string const& moduleDigest);
 
-    /// Activates @p session's tab and tells the window on @p connection, which shows @p origin; for a tab in
-    /// another workspace, that window is asked to switch first. Loop thread.
-    void revealOnLoop(vtworkspace::SessionId session,
-                      ConnectionId const& connection,
-                      vtworkspace::WorkspaceId origin);
-
     /// Removes @p id from the mirror. Call holding _mutex.
     void forget(std::string_view id);
 

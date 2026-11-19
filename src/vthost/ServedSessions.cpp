@@ -16,6 +16,7 @@
 
 #include <vthost/Logging.hpp>
 #include <vthost/RepeatedText.hpp>
+#include <vthost/RevealOnLoop.hpp>
 #include <vthost/SessionHost.hpp>
 
 namespace vthost
@@ -23,37 +24,6 @@ namespace vthost
 
 namespace
 {
-    /// What a reveal does once the window that was asked to switch answered.
-    enum class SwitchedReveal : uint8_t
-    {
-        Nothing = 0,  ///< The window did not go there: the user was asked, refused, or it failed.
-        ToOrigin,     ///< The asked window shows the tab's workspace now: it is told.
-        ToShowingNow, ///< Another window already showed it and was focused: that one is told.
-    };
-
-    /// One row of what a reveal does, by the asked window's answer.
-    struct SwitchedRevealRow
-    {
-        proto::SwitchOutcome outcome;
-        SwitchedReveal reveal;
-    };
-
-    inline constexpr auto SwitchedReveals = std::array {
-        SwitchedRevealRow { .outcome = proto::SwitchOutcome::Switched, .reveal = SwitchedReveal::ToOrigin },
-        SwitchedRevealRow { .outcome = proto::SwitchOutcome::FocusedExisting,
-                            .reveal = SwitchedReveal::ToShowingNow },
-        SwitchedRevealRow { .outcome = proto::SwitchOutcome::PickerShown, .reveal = SwitchedReveal::Nothing },
-        SwitchedRevealRow { .outcome = proto::SwitchOutcome::Refused, .reveal = SwitchedReveal::Nothing },
-        SwitchedRevealRow { .outcome = proto::SwitchOutcome::Failed, .reveal = SwitchedReveal::Nothing },
-    };
-
-    /// @return What a reveal does once the asked window answered @p outcome.
-    [[nodiscard]] constexpr SwitchedReveal switchedRevealOf(proto::SwitchOutcome outcome) noexcept
-    {
-        auto const row = std::ranges::find(SwitchedReveals, outcome, &SwitchedRevealRow::outcome);
-        return row != SwitchedReveals.end() ? row->reveal : SwitchedReveal::Nothing;
-    }
-
     /// What a host frame starts with: synchronized output on, scrolling margins, rendition, cursor and the
     /// mouse and focus reports the extension may have turned on reset, and the page erased from its home --
     /// ED 0, not ED 2, which would push a copy of the page into the scrollback with every frame.
@@ -394,7 +364,7 @@ std::expected<std::string, ServedTabError> ServedSessions::open(std::string_view
         });
     else if (reveal)
         _post([this, session = reveal->first, connection = *connection, workspace = reveal->second] {
-            revealOnLoop(session, connection, workspace);
+            revealSession(_host, session, connection, workspace);
         });
     return id;
 }
@@ -525,45 +495,9 @@ std::expected<void, ServedTabError> ServedSessions::reveal(std::string_view exte
         workspace = *selected;
     }
     _post([this, session, connection = *connection, workspace] {
-        revealOnLoop(session, connection, workspace);
+        revealSession(_host, session, connection, workspace);
     });
     return {};
-}
-
-void ServedSessions::revealOnLoop(vtworkspace::SessionId session,
-                                  ConnectionId const& connection,
-                                  vtworkspace::WorkspaceId origin)
-{
-    auto const where = _host.workspaceOf(session);
-    if (!where)
-        return;
-    if (*where == origin)
-    {
-        _host.activate(session);
-        _host.revealTo(connection, session);
-        return;
-    }
-    // In another workspace: the origin's window is asked to go there first, as the workspace it leaves.
-    _host.askToSwitch(connection,
-                      origin,
-                      proto::SwitchTargetWire { .kind = proto::SwitchDaemonKind::Same,
-                                                .daemon = {},
-                                                .workspace = _host.workspaceRef(*where) },
-                      [this, session, connection, target = *where](proto::SwitchReply const& reply) {
-                          auto const reveal = switchedRevealOf(reply.outcome);
-                          if (reveal == SwitchedReveal::Nothing || _host.workspaceOf(session) != target)
-                              return;
-                          _host.activate(session);
-                          switch (reveal)
-                          {
-                              case SwitchedReveal::ToOrigin: _host.revealTo(connection, session); break;
-                              case SwitchedReveal::ToShowingNow:
-                                  if (auto const shows = _host.showing(target); !shows.empty())
-                                      _host.revealTo(shows.front(), session);
-                                  break;
-                              case SwitchedReveal::Nothing: break;
-                          }
-                      });
 }
 
 std::vector<ServedTabInfo> ServedSessions::list(std::string_view extension) const
