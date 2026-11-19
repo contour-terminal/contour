@@ -55,9 +55,21 @@ struct MarkSeenAction
     [[nodiscard]] bool operator==(MarkSeenAction const&) const = default;
 };
 
-/// What the dashboard asks of the engine; the guest steps each as the engine input of the same name.
-using UiAction =
-    std::variant<RefreshNowAction, EndRunAction, RetryRemovalAction, DismissAction, MarkSeenAction>;
+/// Bring a run's agent tab in front of the window the dashboard was opened from.
+struct RevealAgentAction
+{
+    std::string run = {}; ///< The run's id.
+    [[nodiscard]] bool operator==(RevealAgentAction const&) const = default;
+};
+
+/// What the dashboard asks for: the guest steps each as the engine input of the same name, but for
+/// RevealAgentAction, which it carries out itself with the host.
+using UiAction = std::variant<RefreshNowAction,
+                              EndRunAction,
+                              RetryRemovalAction,
+                              DismissAction,
+                              MarkSeenAction,
+                              RevealAgentAction>;
 
 // }}}
 // {{{ the key table

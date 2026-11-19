@@ -320,6 +320,16 @@ namespace
             return {};
         }
 
+        [[nodiscard]] std::expected<void, HostError> paneReveal(std::string_view pane,
+                                                                uint32_t origin) override
+        {
+            auto paneText = borrowed(pane);
+            auto error = HostErrorCode {};
+            if (!terminal_extensions_daemon_host_pane_reveal(&paneText, origin, &error))
+                return std::unexpected(hostErrorOf(error));
+            return {};
+        }
+
         [[nodiscard]] std::expected<std::vector<PaneInfo>, HostError> panes() override
         {
             auto listed = terminal_extensions_daemon_host_list_pane_info_t {};

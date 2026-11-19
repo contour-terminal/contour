@@ -135,6 +135,14 @@ class Driver
     /// @return How many tabs are served.
     [[nodiscard]] std::size_t servedTabs() const noexcept { return _dashboards.size(); }
 
+    /// Carries out what the dashboard served in @p tab asked for, as its typed input does: steps the engine
+    /// input of the same name, or, for view::RevealAgentAction, asks the host to reveal the run's agent tab
+    /// to the window that last opened or revealed that dashboard (origin 0 when none did since the guest
+    /// loaded).
+    /// @param tab A served tab's id.
+    /// @param action What its dashboard asked for.
+    void apply(std::string_view tab, view::UiAction const& action);
+
   private:
     Driver(IGuestHost& host, IDriverObserver& observer, std::string worktreeRoot, Engine engine);
 
@@ -148,6 +156,7 @@ class Driver
     void showBlocked(uint32_t origin);
     /// @return The tab opened or revealed; std::nullopt when the host refused.
     std::optional<std::string> openTab(uint32_t origin);
+    void revealAgent(std::string_view tab, std::string_view run);
     void takeActions();
     void followTabs();
     void readTabs();
@@ -173,6 +182,8 @@ class Driver
     std::unique_ptr<Engine> _engine;
     std::unique_ptr<GuestClock> _clock; ///< The time last read from the host, which the dashboards read.
     std::map<std::string, std::unique_ptr<view::Dashboard>, std::less<>> _dashboards; ///< By tab id.
+    /// By tab id: the origin of the action that last opened or revealed it, which its reveals are sent to.
+    std::map<std::string, uint32_t, std::less<>> _origins;
     std::deque<Input> _replies;   ///< The replies the driver made itself, stepped after their batch.
     std::set<uint32_t> _consumed; ///< The finished processes stepped whose release failed.
     WakeTimer _timer;

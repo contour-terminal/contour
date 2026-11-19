@@ -236,6 +236,17 @@ class IGuestHost
     /// @return The panes the guest owns.
     [[nodiscard]] virtual std::expected<std::vector<PaneInfo>, HostError> panes() = 0;
 
+    /// Brings a pane the guest owns in front of the origin's window, which is asked first when the pane is in
+    /// another workspace; an origin whose window has gone stands for the window focused last. An origin of 0,
+    /// or one never handed to the guest, reveals nothing and answers `gone` -- unless a key was typed or a
+    /// mouse button pressed into one of the guest's served tabs within the last 2 s: then it stands for
+    /// that window.
+    /// @param pane The pane's id.
+    /// @param origin The connection the action that opened the dashboard came from; 0 for none.
+    /// @return Nothing, or why it was not revealed.
+    [[nodiscard]] virtual std::expected<void, HostError> paneReveal(std::string_view pane,
+                                                                    uint32_t origin) = 0;
+
     /// Reads a regular file inside a readable root.
     /// @param root The root's label.
     /// @param path The file, relative to the root.

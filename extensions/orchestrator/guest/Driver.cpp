@@ -159,26 +159,32 @@ namespace
         };
     }
 
-    /// @return The engine input a dashboard's action is stepped as, arriving at @p monoMs.
-    [[nodiscard]] Input inputOf(view::UiAction const& action, uint64_t monoMs)
+    // The engine input each of a dashboard's actions is stepped as, arriving at @p monoMs: one overload per
+    // UiAction the engine steps.
+
+    [[nodiscard]] Input inputOf(view::RefreshNowAction const& /*refresh*/, uint64_t monoMs)
     {
-        return std::visit(
-            Overloaded {
-                [&](view::RefreshNowAction const&) -> Input { return RefreshNow { .monoMs = monoMs }; },
-                [&](view::EndRunAction const& end) -> Input {
-                    return EndRun { .run = end.run, .monoMs = monoMs };
-                },
-                [&](view::RetryRemovalAction const& retry) -> Input {
-                    return RetryRemovalOf { .run = retry.run, .monoMs = monoMs };
-                },
-                [&](view::DismissAction const& dismiss) -> Input {
-                    return DismissRun { .run = dismiss.run, .monoMs = monoMs };
-                },
-                [&](view::MarkSeenAction const& seen) -> Input {
-                    return MarkRunSeen { .run = seen.run, .monoMs = monoMs };
-                },
-            },
-            action);
+        return RefreshNow { .monoMs = monoMs };
+    }
+
+    [[nodiscard]] Input inputOf(view::EndRunAction const& end, uint64_t monoMs)
+    {
+        return EndRun { .run = end.run, .monoMs = monoMs };
+    }
+
+    [[nodiscard]] Input inputOf(view::RetryRemovalAction const& retry, uint64_t monoMs)
+    {
+        return RetryRemovalOf { .run = retry.run, .monoMs = monoMs };
+    }
+
+    [[nodiscard]] Input inputOf(view::DismissAction const& dismiss, uint64_t monoMs)
+    {
+        return DismissRun { .run = dismiss.run, .monoMs = monoMs };
+    }
+
+    [[nodiscard]] Input inputOf(view::MarkSeenAction const& seen, uint64_t monoMs)
+    {
+        return MarkRunSeen { .run = seen.run, .monoMs = monoMs };
     }
 
     /// @return A listed tab's size, as the dashboard takes it.
@@ -447,7 +453,44 @@ std::optional<std::string> Driver::openTab(uint32_t origin)
     }
     if (!_dashboards.contains(*tab))
         followTabs();
+    // An agent revealed from this dashboard goes to the window that last opened or revealed it.
+    _origins.insert_or_assign(*tab, origin);
     return std::move(*tab);
+}
+
+void Driver::apply(std::string_view tab, view::UiAction const& action)
+{
+    std::visit(Overloaded {
+                   [&](view::RevealAgentAction const& reveal) { revealAgent(tab, reveal.run); },
+                   [&](auto const& engineAction) {
+                       step(inputOf(engineAction, nowMs()));
+                       stepReplies();
+                   },
+               },
+               action);
+}
+
+void Driver::revealAgent(std::string_view tab, std::string_view run)
+{
+    auto const runs = _engine->runs();
+    auto const found = std::ranges::find(runs, run, &Run::id);
+    if (found == runs.end() || !found->pane)
+    {
+        _host.log(LogLevel::Debug, std::format("reveal {}: no agent tab", run));
+        return;
+    }
+    // 0 when no action opened this dashboard since the guest loaded: the host then reveals it only in the
+    // window a key or a click into one of our tabs came from within the last 2 s, and answers gone otherwise.
+    auto const origin = _origins.find(tab);
+    auto const revealed = _host.paneReveal(*found->pane, origin != _origins.end() ? origin->second : 0);
+    if (!revealed)
+    {
+        // A pane closed meanwhile, or a dashboard no window opened since the guest loaded: expected, not
+        // news.
+        auto const expected = revealed.error() == HostError::Gone || revealed.error() == HostError::NotOwned;
+        _host.log(expected ? LogLevel::Debug : LogLevel::Warn,
+                  std::format("pane-reveal {}: {}", *found->pane, nameOf(revealed.error())));
+    }
 }
 
 void Driver::followTabs()
@@ -460,9 +503,11 @@ void Driver::followTabs()
             _host.log(LogLevel::Warn, std::format("tabs: {}", nameOf(listed.error())));
         return;
     }
-    std::erase_if(_dashboards, [&](auto const& entry) {
+    auto const unlisted = [&](auto const& entry) {
         return std::ranges::none_of(*listed, [&](TabInfo const& tab) { return tab.tab == entry.first; });
-    });
+    };
+    std::erase_if(_dashboards, unlisted);
+    std::erase_if(_origins, unlisted);
     for (auto const& tab: *listed)
     {
         if (auto const found = _dashboards.find(tab.tab); found != _dashboards.end())
@@ -489,10 +534,7 @@ void Driver::readTabs()
             continue;
         static_cast<void>(readClock());
         for (auto const& action: dashboard->input(*bytes))
-        {
-            step(inputOf(action, nowMs()));
-            stepReplies();
-        }
+            apply(tab, action);
     }
 }
 

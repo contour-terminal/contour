@@ -467,7 +467,13 @@ extern bool terminal_extensions_daemon_host_actions_take(terminal_extensions_dae
 // detail's line breaks (`\n`) are kept. Neutralising can make a text up to eight times longer, so a
 // detail as shown is at most 128 KiB.
 extern bool terminal_extensions_daemon_host_summary_set(daemon_string_t *short_, daemon_string_t *detail, terminal_extensions_daemon_host_host_error_t *err);
-// Shows a pane the extension owns in the origin's window.
+// Shows a pane the extension owns in the origin's window: activated where that window shows its
+// workspace, the user asked first when it is in another. An origin whose window has gone stands for
+// the window focused last; with none attached the pane only becomes its workspace's active tab. Within
+// 2 s of a key typed into one of the extension's served tabs, an origin that names no attached window
+// (0 included) stands for the window that key came from. Otherwise an origin never handed to the
+// extension (0, another extension's) is `gone` and raises nothing; so is a pane it closed, until its
+// session ended (`not-owned` after).
 extern bool terminal_extensions_daemon_host_pane_reveal(daemon_string_t *pane, terminal_extensions_daemon_host_origin_t origin, terminal_extensions_daemon_host_host_error_t *err);
 // Reads a regular file inside a root declared readable.
 extern bool terminal_extensions_daemon_host_file_read(daemon_string_t *root, daemon_string_t *path, terminal_extensions_daemon_host_file_content_t *ret, terminal_extensions_daemon_host_file_error_t *err);

@@ -146,6 +146,7 @@ class FakeGuestHost final: public IGuestHost
     std::vector<std::string> paneOpens;                    ///< The tag of every paneOpen().
     std::vector<std::optional<std::string>> paneOpenNears; ///< The near of every paneOpen().
     std::vector<std::string> paneCloses;                   ///< Every paneClose().
+    std::vector<std::pair<std::string, uint32_t>> paneReveals; ///< Every paneReveal(): pane and origin.
 
     std::vector<TabInfo> tabList;                                  ///< What tabs() lists.
     std::pair<uint32_t, uint32_t> openSize { OpenCols, OpenRows }; ///< The size tabOpen() opens at.
@@ -367,6 +368,12 @@ class FakeGuestHost final: public IGuestHost
     }
 
     [[nodiscard]] std::expected<std::vector<PaneInfo>, HostError> panes() override { return paneListing; }
+
+    [[nodiscard]] std::expected<void, HostError> paneReveal(std::string_view pane, uint32_t origin) override
+    {
+        paneReveals.emplace_back(std::string(pane), origin);
+        return {};
+    }
 
     [[nodiscard]] std::expected<std::string, FileError> fileRead(std::string_view /*root*/,
                                                                  std::string_view /*path*/) override
@@ -1360,6 +1367,64 @@ TEST_CASE("show-blocked opens the tab on the first blocked agent", "[guest]")
     CHECK(served.host.tabOpens.size() == 2);
     CHECK(served.driver->servedTabs() == 1);
     CHECK(served.dashboard().selectedRun() == BlockedId);
+}
+
+namespace
+{
+
+/// Stores one running agent, @p run, for @p served's guest to load, and lists its pane on the host.
+/// @return The run stored.
+[[nodiscard]] Run storeRunningAgent(Served& served, std::string_view run)
+{
+    auto stored = view::test::storedRun(Running {}, run, ChangeRequestRef { 2375 });
+    REQUIRE(stored.pane.has_value());
+    served.host.store.insert_or_assign(runKey(stored.id), toJson(stored));
+    served.host.paneListing = std::vector { PaneInfo { .pane = *stored.pane,
+                                                       .tag = stored.id,
+                                                       .status = AgentStatus::Working,
+                                                       .program = ProgramLiveness::Alive } };
+    return stored;
+}
+
+} // namespace
+
+TEST_CASE("the driver remembers the origin a dashboard was opened from", "[guest][driver]")
+{
+    constexpr auto RunId = "pr-2375-20261113-150847"sv;
+    auto served = Served {};
+    auto const run = storeRunningAgent(served, RunId);
+    served.load();
+    served.invoke("open", 7);
+    auto const stepped = served.observer.inputs.size();
+
+    served.driver->apply("tab-1", view::RevealAgentAction { .run = std::string(RunId) });
+
+    CHECK(served.host.paneReveals == std::vector { std::pair { *run.pane, uint32_t { 7 } } });
+    CHECK(served.observer.inputs.size() == stepped); // the host's to carry out, never the engine's
+
+    // The window that revealed the dashboard last is the one its agents go to.
+    served.invoke("show-blocked", 9);
+    served.driver->apply("tab-1", view::RevealAgentAction { .run = std::string(RunId) });
+    CHECK(served.host.paneReveals.back() == std::pair { *run.pane, uint32_t { 9 } });
+
+    // A run with no agent tab asks the host for nothing.
+    served.driver->apply("tab-1", view::RevealAgentAction { .run = "no-such-run" });
+    CHECK(served.host.paneReveals.size() == 2);
+}
+
+TEST_CASE("a reveal without a remembered origin passes 0", "[guest][driver]")
+{
+    constexpr auto RunId = "pr-2375-20261113-150847"sv;
+    auto served = Served {};
+    auto const run = storeRunningAgent(served, RunId);
+    // A dashboard the guest finds open as it loads: no action of this guest opened it.
+    served.host.tabList = { TabInfo { .tab = "tab-1", .scheme = "orchestrator", .cols = 120, .rows = 40 } };
+    served.load();
+    REQUIRE(served.driver->servedTabs() == 1);
+
+    served.driver->apply("tab-1", view::RevealAgentAction { .run = std::string(RunId) });
+
+    CHECK(served.host.paneReveals == std::vector { std::pair { *run.pane, uint32_t { 0 } } });
 }
 
 TEST_CASE("every declared action is carried out", "[guest]")
