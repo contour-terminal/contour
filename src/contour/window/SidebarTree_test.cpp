@@ -807,6 +807,18 @@ TEST_CASE("SidebarTree.hover_detail_joins_what_it_has", "[sidebar]")
     CHECK(hoverDetailOf(rows.front()).empty());
 }
 
+TEST_CASE("the hover detail holds a long folder whole", "[sidebar]")
+{
+    auto const cwd = "/" + std::string(299, 'd');
+    auto directory = oneTabWith(recordOf(ProgramState::Working));
+    directory.workspaces[0].tabs[0].panes[0].cwd = cwd;
+    auto const rows = rowsOf(directory);
+    auto const& row = tabRowOf(rows);
+    // The row's own line stays cut at MaxRowTextLength (the ellipsis counts as one character).
+    CHECK(row.folder == cwd.substr(0, MaxRowTextLength - 1) + "…");
+    CHECK(hoverDetailOf(row).contains(cwd));
+}
+
 namespace
 {
 /// A row of @p depth with only the parts the second line is decided from.

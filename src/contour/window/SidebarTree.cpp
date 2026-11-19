@@ -29,6 +29,7 @@ namespace
         ReasonParts fullReason;
         std::string program;
         std::string folder;
+        std::string fullFolder;
         TimeText time;
     };
 
@@ -127,6 +128,7 @@ namespace
         auto leaf = LeafStatus {};
         leaf.urgency = paneUrgency(pane, attention);
         leaf.folder = rowTextOf(pane.cwd);
+        leaf.fullFolder = rowTextOf(pane.cwd, MaxFullReasonLength);
         auto const winner = winnerOf(pane.status, attention.seenStatusGeneration);
         if (winner.record && urgencyOf(winner.kind, StatusSeen::Unseen) == leaf.urgency)
         {
@@ -191,6 +193,7 @@ namespace
         row.fullReasonCommand = leaf.fullReason.command;
         row.program = leaf.program;
         row.folder = leaf.folder;
+        row.fullFolder = leaf.fullFolder;
         row.time = leaf.time;
     }
 
@@ -472,7 +475,7 @@ std::string_view urgencyText(Urgency urgency) noexcept
 
 std::string hoverDetailOf(SidebarRow const& row)
 {
-    return joinedParts({ &row.program, &row.folder, &row.time.text });
+    return joinedParts({ &row.program, &row.fullFolder, &row.time.text });
 }
 
 std::string idleLineOf(SidebarRow const& row)
@@ -553,9 +556,9 @@ std::string formatRelative(std::chrono::seconds elapsed)
     return std::format("{}d ago", chrono::duration_cast<chrono::hours>(clamped).count() / 24);
 }
 
-std::string rowTextOf(std::string_view text)
+std::string rowTextOf(std::string_view text, std::size_t maxLength)
 {
-    return sanitizedTo(text, MaxRowTextLength);
+    return sanitizedTo(text, maxLength);
 }
 
 ReasonParts statusReasonOf(vtbackend::ProgramStatusRecord const& record,

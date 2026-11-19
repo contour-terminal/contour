@@ -49,14 +49,16 @@ Popup {
         }
 
         // The reason: its words in the body face, and its command, when it has one, in the monospace face
-        // after them; a long command wraps within the card.
+        // after them; both wrap within the card, so it shows them whole.
         Flow {
             Layout.fillWidth: true
             visible: card.row !== null && card.row.fullReason !== ""
 
             Text {
                 objectName: "sidebarHoverCardReason"
+                width: Math.min(implicitWidth, parent.width)
                 textFormat: Text.PlainText
+                wrapMode: Text.Wrap
                 text: card.row !== null ? card.row.fullReasonLabel : ""
                 font: chromeStyle.type.body
                 color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.paletteText
@@ -74,12 +76,13 @@ Popup {
             }
         }
 
+        // What it is about, where and for how long; it wraps, so a long folder the row cut reads to its end.
         Text {
             objectName: "sidebarHoverCardDetail"
             Layout.fillWidth: true
             visible: text !== ""
             textFormat: Text.PlainText
-            elide: Text.ElideMiddle
+            wrapMode: Text.Wrap
             text: card.row !== null ? card.row.hoverDetail : ""
             font: chromeStyle.type.footnote
             color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.paletteSecondaryText

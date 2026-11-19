@@ -1169,6 +1169,82 @@ TEST_CASE("the hover card closes when the pointer leaves it (offscreen)", "[cont
     CHECK(QTest::qWaitFor([&] { return !card->property("opened").toBool(); }, 3000));
 }
 
+namespace
+{
+/// Gives claude's pane @p record and hovers its row until the hover card opens.
+/// @return The card.
+QObject& openClaudeCard(SidebarWindow& scene, vtbackend::ProgramStatusRecord record)
+{
+    scene.controller.sidebarSource().listed.workspaces[0].tabs[0].panes[0].status = { std::move(record) };
+    scene.controller.sidebarModel().refreshNow();
+    QCoreApplication::processEvents();
+    auto* claude = scene.rowTitled(QStringLiteral("claude"));
+    REQUIRE(claude != nullptr);
+    auto* card = scene.root->findChild<QObject*>(QStringLiteral("sidebarHoverCard"));
+    REQUIRE(card != nullptr);
+    auto const over = claude->mapToScene(QPointF { claude->width() / 2, claude->height() / 2 }).toPoint();
+    QTest::mouseMove(scene.window, over - QPoint { 0, 1 });
+    QTest::mouseMove(scene.window, over);
+    REQUIRE(QTest::qWaitFor([&] { return card->property("opened").toBool(); }, 3000));
+    return *card;
+}
+
+/// Checks that the card's reason words, @p label long, wrap within the card and show every character.
+void checkReasonWraps(std::string const& label)
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        auto const& card = openClaudeCard(scene, recordOf(vtbackend::ProgramState::Working, label));
+        auto const* reason =
+            SidebarWindow::findNamed(*scene.window->contentItem(), QStringLiteral("sidebarHoverCardReason"));
+        REQUIRE(reason != nullptr);
+        CHECK(reason->property("text").toString() == QString::fromStdString(label));
+        CHECK(reason->width() <= card.property("availableWidth").toReal());
+        CHECK(reason->property("lineCount").toInt() > 1);
+        CHECK_FALSE(reason->property("truncated").toBool());
+        CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+} // namespace
+
+TEST_CASE("the hover card wraps a long status with no command (offscreen)", "[contour][gui][qml][sidebar]")
+{
+    auto label = std::string {};
+    for (auto const word: std::views::iota(1, 41))
+        label += std::format("{}word{:02}", label.empty() ? "" : " ", word);
+    checkReasonWraps(label);
+}
+
+TEST_CASE("the hover card wraps a status with no spaces (offscreen)", "[contour][gui][qml][sidebar]")
+{
+    checkReasonWraps(std::string(500, 'x'));
+}
+
+TEST_CASE("the hover card shows a long folder to its end (offscreen)", "[contour][gui][qml][sidebar]")
+{
+    auto const folder = "/" + std::string(280, 'p') + "/the-last-directory";
+    REQUIRE(folder.size() == 300);
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        scene.controller.sidebarSource().listed.workspaces[0].tabs[0].panes[0].cwd = folder;
+        openClaudeCard(scene, recordOf(vtbackend::ProgramState::Working, "Thinking"));
+        auto const* detail =
+            SidebarWindow::findNamed(*scene.window->contentItem(), QStringLiteral("sidebarHoverCardDetail"));
+        REQUIRE(detail != nullptr);
+        auto const text = detail->property("text").toString();
+        INFO("detail " << text.toStdString());
+        // The time follows the folder.
+        CHECK(text.endsWith(QString::fromStdString(folder) + QStringLiteral(" · 0:30")));
+        CHECK(detail->property("lineCount").toInt() > 1);
+        CHECK_FALSE(detail->property("truncated").toBool());
+        CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
 TEST_CASE("the Terminal row keeps the sidebar's text on the cell grid (offscreen)",
           "[contour][gui][qml][sidebar]")
 {

@@ -144,6 +144,7 @@ struct SidebarRow
     std::string fullReasonCommand;               ///< Its command.
     std::string program;                         ///< The program the reason is about; empty when unknown.
     std::string folder;                          ///< The pane's working directory; empty when unknown.
+    std::string fullFolder;                      ///< The hover card's folder: whole, to MaxFullReasonLength.
     std::string gitText;                         ///< Workspace rows: `feat/billing ↑2 ↓1`.
     TimeText time;                               ///< The right-hand side.
     Urgency urgency = Urgency::Idle;             ///< Rolled up over the panes beneath a parent row.
@@ -355,10 +356,11 @@ inline constexpr int MeterCells = 5;
 inline constexpr std::string_view LabelSeparator = " · ";
 
 /// Text from outside, made fit for a row's line: no controls, no invisible or bidi formatting, at most
-/// MaxRowTextLength characters.
+/// @p maxLength characters.
 /// @param text The text.
+/// @param maxLength The most characters it holds: a row's line, or MaxFullReasonLength for its hover card.
 /// @return The text as a row may show it.
-[[nodiscard]] std::string rowTextOf(std::string_view text);
+[[nodiscard]] std::string rowTextOf(std::string_view text, std::size_t maxLength = MaxRowTextLength);
 
 /// What a program-status record says it is doing or waits for: the reason a row shows of it. A permission
 /// asks for a command the program wants to run, which is the reason's command part; whatever leads it, the
