@@ -479,9 +479,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param name Its new name; empty clears it.
     void renameWorkspace(window::WindowController& window, uint64_t workspace, std::string name);
 
-    /// Colours the workspace @p workspace that @p window lists, in this process's model. A workspace the
-    /// window does not own is left alone. For a window a daemon serves this does nothing yet: the daemon
-    /// learns to colour a workspace in a later change.
+    /// Colours the workspace @p workspace that @p window lists: in its daemon for a window a daemon serves
+    /// (nothing, against a daemon that predates the colour), else in this process's model, where a workspace
+    /// the window does not own is left alone.
     /// @param window The window the user acts in.
     /// @param workspace The workspace's id, as the window's directory lists it (DirectoryWorkspace::id).
     /// @param color Its new colour; std::nullopt takes its colour away.

@@ -3009,6 +3009,11 @@ void SessionHost::workspaceRemoved(WorkspaceId workspace, int index)
     fanOut(&vtworkspace::ModelEvents::workspaceRemoved, workspace, index);
 }
 
+void SessionHost::workspaceColorChanged(WorkspaceId workspace)
+{
+    fanOut(&vtworkspace::ModelEvents::workspaceColorChanged, workspace);
+}
+
 void SessionHost::tabAboutToBeMovedToWorkspace(WorkspaceId from, int fromIndex, WorkspaceId to, int toIndex)
 {
     fanOut(&vtworkspace::ModelEvents::tabAboutToBeMovedToWorkspace, from, fromIndex, to, toIndex);

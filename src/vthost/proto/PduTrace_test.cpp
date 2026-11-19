@@ -397,6 +397,20 @@ TEST_CASE("the trace names the new PDUs without revealing a name", "[vthost][pro
           == "session=3 profile=\"ssh\"");
 }
 
+TEST_CASE("the trace shows a workspace's colour, set and cleared", "[vthost][proto][workspace-color]")
+{
+    CHECK(summarize(DecodedPdu {
+              WorkspaceMeta { .workspace = 2, .color = WireWorkspaceColor { .rgb = 0xC2548F } } })
+          == "workspace=2 color=#c2548f");
+    CHECK(summarize(DecodedPdu { WorkspaceMeta { .workspace = 2, .color = WireWorkspaceColor {} } })
+          == "workspace=2 color=none");
+    CHECK(toString(PduType::SetWorkspaceColor) == "SetWorkspaceColor");
+    CHECK(summarize(DecodedPdu {
+              SetWorkspaceColor { .workspace = 3, .color = WireWorkspaceColor { .rgb = 0x00FF08 } } })
+          == "workspace=3 color=#00ff08");
+    CHECK(summarize(DecodedPdu { SetWorkspaceColor { .workspace = 3 } }) == "workspace=3 color=none");
+}
+
 TEST_CASE("a ControlRequest's trace names the method but not the params", "[vthost][proto][control]")
 {
     auto const line =

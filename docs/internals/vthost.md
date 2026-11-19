@@ -169,6 +169,7 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `ClientGoodbye` | 30 | `client-goodbye` | `Goodbye` (tag 60, client->server, no body): the client says its connection ends on purpose, its window closed for good, sent last before the orderly close. The daemon then frees the workspace the window showed for the very next attach at once; without it (an older daemon or client) the end is a drop, whose workspace a new window leaves alone for a reconnect grace |
 | `LaunchFirstTab` | 31 | `launch-first-tab` | `OpenFirstTab` (tag 61, client->server, body: the workspace id the client saw empty): a launch that named a workspace holding no tab (`contour --workspace N`) asks the daemon, once its layout shows the workspace empty, to open the first tab there (only if that workspace still exists, is still selected by the connection and still holds none), in the directory the hello stated; without it (an older daemon) the launch waits for a tab, as it did, and the hello is the same `Select` either way |
 | `Names` | 32 | `names` | The peer speaks the control API's `name` spelling: `name` keys, `object.rename`, `object.renamed`, `toName`. Without it the other end speaks the old one to it (`label` keys, `object.setLabel`, `workspace.rename`, `workspace.labelChanged`, `toLabel`) through vtcontrol's legacy spelling table (`LegacySpelling.hpp`); removed before 0.9.0 |
+| `WorkspaceColor` | 33 | `workspace-color` | `SetWorkspaceColor` (tag 62, client->server, body: the workspace id, a has-colour byte and a `u32` `0xRRGGBB`, 0 when cleared) sets or clears a workspace's colour in the daemon's model, and `WorkspaceMeta`'s colour field (the fourth presence bit, after `position`) states it: in full and as a delta on each change. Without it (an older daemon) a client sends nothing and keeps the workspace uncoloured; an older client is stated no colour, so its `WorkspaceMeta` bytes are what they were |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -405,6 +406,9 @@ window resolves a switch naming one from its own directory, with no listing), it
 The daemon sends every field once per workspace, right after that workspace's first layout on the connection,
 and from then on a delta: absent optionals are unchanged, an empty name clears it, and a git state of kind
 `None` says the workspace is in no repository anymore. A workspace's removal is told by its layout emptying.
+To a client sharing `Capability::WorkspaceColor` it also states the workspace's colour, appended after
+`position` under the fourth presence bit (`0b1000`): a has-colour byte and a `u32` `0xRRGGBB`. The bit absent
+is unchanged (and is all an older daemon sends); present with has-colour 0 the colour is cleared.
 
 The workspace order travels in the same PDU: `position`, the workspace's 0-based place in the daemon's model,
 is sent with the full state and again for every workspace whose place changed (a reorder, a workspace created
@@ -425,8 +429,10 @@ the daemon's only workspace, kept empty as the one a creation naming no workspac
 client lists no workspace whose layout is empty. A handover drops the tabless workspaces an older release
 kept the same way.
 **`SetWorkspaceName`** (tag 58, same gate) sets a workspace's name through the object registry, so every
-window hears it as a `WorkspaceMeta` delta and every control subscriber as `object.renamed`. Neither
-has a reply.
+window hears it as a `WorkspaceMeta` delta and every control subscriber as `object.renamed`.
+**`SetWorkspaceColor`** (tag 62, gated on `Capability::WorkspaceColor`) sets or clears a workspace's colour in
+the model, whose `workspaceColorChanged` sends every window sharing the capability a `WorkspaceMeta` delta of
+the colour alone; an unknown workspace is a logged no-op. None of these has a reply.
 Name changes come from the object registry's name observer (`ObjectRegistry::onNameChanged`), which also
 publishes the control event `object.renamed`, for workspaces, tabs and panes alike.
 

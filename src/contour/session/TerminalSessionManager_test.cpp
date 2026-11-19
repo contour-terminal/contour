@@ -6200,6 +6200,12 @@ class RoutingFactory final: public contour::session::SessionFactory
         renamed.emplace_back(workspace, std::string { label });
         return contour::session::RemoteRouting::Routed;
     }
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteWorkspaceColor(
+        uint64_t workspace, std::optional<vtbackend::RGBColor> color) override
+    {
+        colored.emplace_back(workspace, color);
+        return contour::session::RemoteRouting::Routed;
+    }
     [[nodiscard]] contour::session::RemoteRouting requestRemoteMoveWorkspace(uint64_t workspace,
                                                                              uint32_t position) override
     {
@@ -6233,6 +6239,8 @@ class RoutingFactory final: public contour::session::SessionFactory
 
     std::vector<std::pair<uint64_t, std::string>> renamed;
     std::vector<std::pair<uint64_t, uint32_t>> moved;
+    /// The workspaces coloured, each with its colour; none for a reset.
+    std::vector<std::pair<uint64_t, std::optional<vtbackend::RGBColor>>> colored;
     std::vector<uint64_t> closed;                              ///< The workspaces closed.
     std::vector<std::pair<uint64_t, std::string>> renamedTabs; ///< The tabs renamed, by a session of theirs.
     std::vector<contour::session::RemoteMove> tabMoves;
@@ -6315,6 +6323,14 @@ TEST_CASE("TerminalSessionManager: a daemon's window routes the workspace mutati
     manager.renameWorkspace(*window.controller, 10, "ops");
     REQUIRE(factory.renamed.size() == 1);
     CHECK(factory.renamed[0] == std::pair<uint64_t, std::string> { 10, "ops" });
+
+    // A colour is the daemon's to give, and so is its reset: neither colours the window's own model.
+    auto const plum = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    manager.setWorkspaceColor(*window.controller, 20, plum);
+    manager.setWorkspaceColor(*window.controller, 20, std::nullopt);
+    CHECK(factory.colored
+          == std::vector<std::pair<uint64_t, std::optional<vtbackend::RGBColor>>> { { 20, plum },
+                                                                                    { 20, std::nullopt } });
 
     manager.moveWorkspace(*window.controller, 20, 0);
     manager.moveWorkspace(*window.controller, 10, -4);

@@ -359,6 +359,9 @@ NativeSession::NativeSession(core::net::EventLoop& loop,
     _layoutObserver.onWorkspaceOrderChange = [this] {
         syncWorkspacePositions();
     };
+    _layoutObserver.onWorkspaceColorChange = [this](vtworkspace::WorkspaceId workspace) {
+        workspaceColorChanged(workspace);
+    };
     _layoutObserver.onTabChange = [this](vtworkspace::TabId tab) {
         layoutChanged(_host.model().workspaceOfTab(tab));
     };
@@ -649,6 +652,29 @@ bool NativeSession::sharesWorkspaceMeta() const noexcept
     return _negotiated.has_value() && _negotiated->shared.contains(proto::Capability::WorkspaceMeta);
 }
 
+bool NativeSession::sharesWorkspaceColor() const noexcept
+{
+    return sharesWorkspaceMeta() && _negotiated->shared.contains(proto::Capability::WorkspaceColor);
+}
+
+proto::WireWorkspaceColor NativeSession::wireColorOf(vtworkspace::WorkspaceId workspace) const
+{
+    auto const* const known = _host.model().workspace(workspace);
+    auto const color = known != nullptr ? known->color() : std::nullopt;
+    return proto::WireWorkspaceColor { .rgb = color.transform(&vtbackend::RGBColor::value) };
+}
+
+void NativeSession::workspaceColorChanged(vtworkspace::WorkspaceId workspace)
+{
+    if (_phase != ConnectionPhase::Viewing || _closed || !sharesWorkspaceColor()
+        || !_announcedMeta.contains(workspace.value))
+        return;
+    send(0,
+         proto::DecodedPdu { proto::WorkspaceMeta { .workspace = workspace.value,
+                                                    .controlId = controlIdOf(workspace),
+                                                    .color = wireColorOf(workspace) } });
+}
+
 std::array<uint8_t, 16> NativeSession::controlIdOf(vtworkspace::WorkspaceId workspace) const
 {
     return _host.objects().uuidOf(workspace).value_or(vtcontrol::Uuid {}).bytes;
@@ -674,12 +700,15 @@ void NativeSession::announceWorkspaceMeta(vtworkspace::Workspace const& workspac
     // to a following window only (@see sendWorkspaceGit); absent, it is in no repository, or none was looked
     // up.
     auto git = summarizesPanes() ? _host.gitInfoOf(workspace.id()).transform(wireGitOf) : std::nullopt;
+    // The colour only to a client that reads it: an older one's full meta stays what it was.
+    auto color = sharesWorkspaceColor() ? std::optional { wireColorOf(workspace.id()) } : std::nullopt;
     send(0,
          proto::DecodedPdu { proto::WorkspaceMeta { .workspace = workspace.id().value,
                                                     .controlId = uuid.bytes,
                                                     .name = std::string { _host.objects().nameOf(ref) },
                                                     .git = std::move(git),
-                                                    .position = position } });
+                                                    .position = position,
+                                                    .color = color } });
 }
 
 int NativeSession::positionOf(vtworkspace::WorkspaceId workspace) const
@@ -2534,6 +2563,23 @@ NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame con
         else
             _host.objects().setName(
                 vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace, .uuid = *uuid }, set->name);
+        return TabVerb::Served;
+    }
+    if (auto const* recolor = std::get_if<proto::SetWorkspaceColor>(&frame.pdu))
+    {
+        if (!_negotiated->shared.contains(proto::Capability::WorkspaceColor))
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        // Applied to the model, whose workspaceColorChanged tells every client sharing the colour.
+        auto const workspace = vtworkspace::WorkspaceId { recolor->workspace };
+        if (_host.model().workspace(workspace) == nullptr)
+            errorLog()("{}: ignoring {}: there is no such workspace", _id, proto::describe(frame.pdu));
+        else if (recolor->color.rgb)
+            _host.model().setWorkspaceColor(workspace, vtbackend::RGBColor { *recolor->color.rgb });
+        else
+            _host.model().resetWorkspaceColor(workspace);
         return TabVerb::Served;
     }
     if (std::holds_alternative<proto::ReportFocus>(frame.pdu))

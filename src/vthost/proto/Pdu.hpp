@@ -105,6 +105,7 @@ enum class PduType : uint8_t
     CloseWorkspace = 59,
     Goodbye = 60,
     OpenFirstTab = 61,
+    SetWorkspaceColor = 62,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1782,6 +1783,15 @@ struct WireGitInfo
     bool operator==(WireGitInfo const&) const = default;
 };
 
+/// A workspace's colour as WorkspaceMeta and SetWorkspaceColor carry it: on the wire a has-colour byte (0 or
+/// 1) and a `u32` 0xRRGGBB, which is 0 when there is no colour.
+struct WireWorkspaceColor
+{
+    /// The colour as 0xRRGGBB; none for a workspace without one (the host's default).
+    std::optional<uint32_t> rgb = std::nullopt;
+    bool operator==(WireWorkspaceColor const&) const = default;
+};
+
 /// Server→client (Capability::WorkspaceMeta): what the daemon states of a workspace besides its layout.
 ///
 /// The daemon sends every field after the hello, and for a workspace created since, once its layout went out;
@@ -1798,6 +1808,9 @@ struct WorkspaceMeta
     /// meta and again, for every workspace that shifted, after a reorder, a creation or a removal: a client
     /// lists its workspaces by it, not by the order layouts happen to arrive or by id.
     std::optional<uint32_t> position = std::nullopt;
+    /// Its colour, if it changed; a WireWorkspaceColor without one clears it. Stated only to a client sharing
+    /// Capability::WorkspaceColor, after the position (the fourth presence bit).
+    std::optional<WireWorkspaceColor> color = std::nullopt;
     bool operator==(WorkspaceMeta const&) const = default;
 };
 
@@ -1853,6 +1866,17 @@ struct SetWorkspaceName
     uint64_t workspace = 0; ///< The daemon's workspace id.
     std::string name = {};  ///< The new name.
     bool operator==(SetWorkspaceName const&) const = default;
+};
+
+/// Client→server (Capability::WorkspaceColor): set or clear a workspace's colour, which is what the sidebar's
+/// colour menu does. The daemon applies it to its model, so every client sharing the capability is told
+/// through WorkspaceMeta::color. An unknown workspace changes nothing. A client sends it only to a daemon
+/// that shares the capability: an older one never sees it.
+struct SetWorkspaceColor
+{
+    uint64_t workspace = 0;        ///< The daemon's workspace id.
+    WireWorkspaceColor color = {}; ///< The new colour; one without a colour clears it.
+    bool operator==(SetWorkspaceColor const&) const = default;
 };
 
 /// @param summary A pane's summary.
@@ -2015,7 +2039,8 @@ using DecodedPdu = std::variant<Invalid,
                                 SetWorkspaceName,
                                 CloseWorkspace,
                                 Goodbye,
-                                OpenFirstTab>;
+                                OpenFirstTab,
+                                SetWorkspaceColor>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

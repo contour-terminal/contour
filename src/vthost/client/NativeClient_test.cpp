@@ -3270,6 +3270,70 @@ TEST_CASE("the workspace verbs are Unsupported, and nothing is written, without 
     CHECK(h.host.model().workspaceAt(0)->id().value == first);
 }
 
+TEST_CASE("a workspace's colour reaches the daemon when it shares WorkspaceColor",
+          "[vthost][attach][workspace-color]")
+{
+    auto h = IntentHarness { vthost::NativeSessionServices {},
+                             NativeClient::HandshakeOptions { .capabilities = proto::CapabilitySet::of(
+                                                                  { proto::Capability::AttachIntent,
+                                                                    proto::Capability::WorkspaceMeta,
+                                                                    proto::Capability::WorkspaceColor }) } };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId().value;
+    auto deliveries = std::vector<vthost::client::Delivery> {};
+    auto scenario = [](IntentHarness* h,
+                       uint64_t workspace,
+                       std::vector<vthost::client::Delivery>* deliveries) -> Task<void> {
+        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+        auto const colorOf = [h, workspace] {
+            return h->host.model().workspace(vtworkspace::WorkspaceId { workspace })->color();
+        };
+        deliveries->push_back(
+            h->client->setWorkspaceColor(workspace, proto::WireWorkspaceColor { .rgb = 0xC2548F }));
+        co_await core::net::testing::waitUntil(&h->loop, [colorOf] { return colorOf().has_value(); });
+        deliveries->push_back(h->client->setWorkspaceColor(workspace, proto::WireWorkspaceColor {}));
+        co_await core::net::testing::waitUntil(&h->loop, [colorOf] { return !colorOf().has_value(); });
+        h->client->detach();
+    }(&h, workspace, &deliveries);
+    h.drive(std::move(scenario));
+
+    CHECK(deliveries == std::vector(2, vthost::client::Delivery::Sent));
+}
+
+TEST_CASE("a workspace's colour is Unsupported, and nothing is written, without WorkspaceColor",
+          "[vthost][attach][workspace-color]")
+{
+    // A daemon that shares the metadata but predates the colour.
+    auto services = vthost::NativeSessionServices {};
+    std::erase(services.handshake.capabilities.idents, std::to_underlying(proto::Capability::WorkspaceColor));
+    auto h = IntentHarness { std::move(services),
+                             NativeClient::HandshakeOptions { .capabilities = proto::CapabilitySet::of(
+                                                                  { proto::Capability::AttachIntent,
+                                                                    proto::Capability::WorkspaceMeta,
+                                                                    proto::Capability::WorkspaceColor }) } };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId().value;
+    auto delivery = vthost::client::Delivery::Sent;
+    auto scenario =
+        [](IntentHarness* h, uint64_t workspace, vthost::client::Delivery* delivery) -> Task<void> {
+        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+        *delivery = h->client->setWorkspaceColor(workspace, proto::WireWorkspaceColor { .rgb = 0xC2548F });
+        // Renamed after it: the name arrives, so anything sent before it would have, too.
+        std::ignore = h->client->setWorkspaceName(workspace, "ops");
+        co_await core::net::testing::waitUntil(&h->loop, [h, workspace] {
+            return h->host.objects().nameOf(vtcontrol::ObjectRef {
+                       .kind = vtcontrol::ObjectKind::Workspace,
+                       .uuid = *h->host.objects().uuidOf(vtworkspace::WorkspaceId { workspace }) })
+                   == "ops";
+        });
+        h->client->detach();
+    }(&h, workspace, &delivery);
+    h.drive(std::move(scenario));
+
+    CHECK(delivery == vthost::client::Delivery::Unsupported);
+    CHECK_FALSE(h.host.model().workspace(vtworkspace::WorkspaceId { workspace })->color().has_value());
+}
+
 namespace
 {
 

@@ -126,6 +126,12 @@ namespace
         return found != table.end() ? found->name : "?";
     }
 
+    /// @return @p color as `color=#rrggbb`, or `color=none` for a cleared one: a colour is no user's words.
+    [[nodiscard]] std::string formatWorkspaceColor(WireWorkspaceColor const& color)
+    {
+        return color.rgb ? std::format("color=#{:06x}", *color.rgb) : std::string { "color=none" };
+    }
+
     /// @return @p git as ` git=branch,ahead:1,behind:0`, with only its kind and counts -- never the branch,
     ///         which is payload.
     [[nodiscard]] std::string formatGit(std::optional<WireGitInfo> const& git)
@@ -685,12 +691,13 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<WorkspaceMeta>(pdu);
                        // The name and the branch are told by presence only: both are the user's words.
-                       return std::format("workspace={}{}{}{}",
-                                          value.workspace,
-                                          value.position ? std::format(" position={}", *value.position)
-                                                         : std::string {},
-                                          formatPresence("name", value.name),
-                                          formatGit(value.git));
+                       return std::format(
+                           "workspace={}{}{}{}{}",
+                           value.workspace,
+                           value.position ? std::format(" position={}", *value.position) : std::string {},
+                           formatPresence("name", value.name),
+                           formatGit(value.git),
+                           value.color ? " " + formatWorkspaceColor(*value.color) : std::string {});
                    } },
         TraceRow { PduType::MoveWorkspace,
                    "MoveWorkspace",
@@ -709,6 +716,13 @@ namespace
                        // The name is the user's words: told by its length only.
                        auto const& value = std::get<SetWorkspaceName>(pdu);
                        return std::format("workspace={} name={} bytes", value.workspace, value.name.size());
+                   } },
+        TraceRow { PduType::SetWorkspaceColor,
+                   "SetWorkspaceColor",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<SetWorkspaceColor>(pdu);
+                       return std::format(
+                           "workspace={} {}", value.workspace, formatWorkspaceColor(value.color));
                    } },
     };
 

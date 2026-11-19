@@ -676,6 +676,15 @@ Delivery NativeClient::setWorkspaceName(uint64_t workspace, std::string name)
     return Delivery::Sent;
 }
 
+Delivery NativeClient::setWorkspaceColor(uint64_t workspace, proto::WireWorkspaceColor color)
+{
+    // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
+    auto const request = proto::SetWorkspaceColor { .workspace = workspace, .color = color };
+    if (!shares(proto::Capability::WorkspaceColor) || send(proto::DecodedPdu { request }) == 0)
+        return Delivery::Unsupported;
+    return Delivery::Sent;
+}
+
 Delivery NativeClient::setSplitOrientation(uint64_t anchorSession, vtworkspace::SplitState state)
 {
     // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.

@@ -4792,6 +4792,57 @@ TEST_CASE("a window's move and rename of a workspace reach the daemon and come b
     CHECK(workspaceOf(controller, first).name.empty());
 }
 
+TEST_CASE("a window's colour of a workspace reaches the daemon and comes back in the directory",
+          "[attach][controller][directory][workspace-color]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
+    CHECK_FALSE(workspaceOf(controller, second.id).color.has_value());
+
+    auto const plum = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    CHECK(controller.requestRemoteWorkspaceColor(second.id, plum) == contour::session::RemoteRouting::Routed);
+    CHECK(waitUntil([&] { return workspaceOf(controller, second.id).color == std::optional { plum }; }));
+    CHECK(daemon.onDaemon([&] {
+        return daemon.host->model().workspace(vtworkspace::WorkspaceId { second.id })->color();
+    }) == std::optional { plum });
+
+    CHECK(controller.requestRemoteWorkspaceColor(second.id, std::nullopt)
+          == contour::session::RemoteRouting::Routed);
+    CHECK(waitUntil([&] { return !workspaceOf(controller, second.id).color.has_value(); }));
+}
+
+TEST_CASE("a window does not send a workspace's colour to a daemon that predates it",
+          "[attach][controller][directory][workspace-color]")
+{
+    auto daemon = DaemonFixture { {}, servicesWithout(vthost::proto::Capability::WorkspaceColor) };
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
+
+    CHECK(controller.requestRemoteWorkspaceColor(second.id, vtbackend::RGBColor { 1, 2, 3 })
+          == contour::session::RemoteRouting::Refused);
+    // A rename after it arrives, so the colour would have too.
+    REQUIRE(controller.requestRemoteRenameWorkspace(second.id, "ops")
+            == contour::session::RemoteRouting::Routed);
+    REQUIRE(waitUntil([&] { return workspaceOf(controller, second.id).name == "ops"; }));
+    CHECK(daemon.clientFrames.count(vthost::proto::PduType::SetWorkspaceColor) == 0);
+    CHECK_FALSE(workspaceOf(controller, second.id).color.has_value());
+}
+
 TEST_CASE("a window renames a tab of a workspace it does not show, and the directory follows",
           "[attach][controller][directory][sidebar]")
 {

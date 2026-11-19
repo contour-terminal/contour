@@ -531,6 +531,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
         uint64_t workspace, std::string_view name) override;
     [[nodiscard]] contour::session::RemoteRouting requestRemoteMoveWorkspace(uint64_t workspace,
                                                                              uint32_t position) override;
+    /// SessionFactory: colours the daemon's workspace (proto::SetWorkspaceColor). Refused where the daemon
+    /// does not share Capability::WorkspaceColor, which an older one does not: nothing is sent to it.
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteWorkspaceColor(
+        uint64_t workspace, std::optional<vtbackend::RGBColor> color) override;
     /// SessionFactory: renames the daemon's tab holding @p session (proto::EditTab), mirrored here or not.
     [[nodiscard]] contour::session::RemoteRouting requestRemoteTabRename(uint64_t session,
                                                                          std::string_view name) override;

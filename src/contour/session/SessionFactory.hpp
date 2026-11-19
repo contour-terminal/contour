@@ -7,6 +7,7 @@
 #include <contour/session/HostedOperation.hpp>
 #include <contour/window/DropZonePolicy.hpp>
 
+#include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/shell/CommandLineText.hpp>
@@ -410,6 +411,18 @@ class SessionFactory
     ///         workspace itself.
     [[nodiscard]] virtual RemoteRouting requestRemoteRenameWorkspace(uint64_t /*workspace*/,
                                                                      std::string_view /*name*/)
+    {
+        return RemoteRouting::Local;
+    }
+
+    /// Attach mode: colours the DAEMON's workspace @p workspace, or clears its colour; the daemon's change
+    /// reaches every window listing it (WorkspaceMeta::color).
+    /// @param workspace The daemon's workspace id, as a directory lists it.
+    /// @param color The new colour; none clears it.
+    /// @return As requestRemoteRenameWorkspace(); Refused also against a daemon that predates the colour
+    ///         (Capability::WorkspaceColor), which is sent nothing.
+    [[nodiscard]] virtual RemoteRouting requestRemoteWorkspaceColor(
+        uint64_t /*workspace*/, std::optional<vtbackend::RGBColor> /*color*/)
     {
         return RemoteRouting::Local;
     }

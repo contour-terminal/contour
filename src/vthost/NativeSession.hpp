@@ -143,6 +143,7 @@ struct HandshakePolicy
                                                                    proto::Capability::WorkspaceMeta,
                                                                    proto::Capability::ClientGoodbye,
                                                                    proto::Capability::LaunchFirstTab,
+                                                                   proto::Capability::WorkspaceColor,
                                                                    // compat(0.9.0): Names may stay; the
                                                                    // legacy branches taken without it go.
                                                                    proto::Capability::Names });
@@ -328,7 +329,13 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
             onWorkspaceChange;                               ///< A change in one workspace's tab strip.
         std::function<void(vtworkspace::TabId)> onTabChange; ///< A change within one tab.
         std::function<void()> onWorkspaceOrderChange;        ///< A workspace moved in the workspace order.
+        std::function<void(vtworkspace::WorkspaceId)>
+            onWorkspaceColorChange; ///< A workspace's colour changed.
         void workspaceMoved(vtworkspace::WorkspaceId, int, int) override { onWorkspaceOrderChange(); }
+        void workspaceColorChanged(vtworkspace::WorkspaceId workspace) override
+        {
+            onWorkspaceColorChange(workspace);
+        }
         /// A removed workspace is pushed emptied, which is how a client learns it is gone: one that held no
         /// tab any more fired no tab event to say so.
         void workspaceRemoved(vtworkspace::WorkspaceId workspace, int) override
@@ -991,6 +998,19 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// Whether this connection is told each workspace's name, control id and git state (its client shares
     /// Capability::WorkspaceMeta).
     [[nodiscard]] bool sharesWorkspaceMeta() const noexcept;
+
+    /// Whether this connection is told each workspace's colour too (its client shares
+    /// Capability::WorkspaceColor besides Capability::WorkspaceMeta).
+    [[nodiscard]] bool sharesWorkspaceColor() const noexcept;
+
+    /// @param workspace A workspace of the model.
+    /// @return Its colour as WorkspaceMeta carries it; none for one the model lacks or that has no colour.
+    [[nodiscard]] proto::WireWorkspaceColor wireColorOf(vtworkspace::WorkspaceId workspace) const;
+
+    /// Sends a colour delta for @p workspace when this connection shares the colour and was told of the
+    /// workspace; one it was not told of yet is told the colour in full with it.
+    /// @param workspace The workspace whose colour changed.
+    void workspaceColorChanged(vtworkspace::WorkspaceId workspace);
 
     /// Sends @p workspace's WorkspaceMeta in full, once: the first time its layout goes to this connection
     /// with a tab. A layout with none forgets it was sent, so the workspace is announced again once it holds

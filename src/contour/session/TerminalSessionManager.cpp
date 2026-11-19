@@ -1605,11 +1605,16 @@ void TerminalSessionManager::setWorkspaceColor(window::WindowController& window,
                                                uint64_t workspace,
                                                std::optional<vtbackend::RGBColor> color)
 {
-    // A daemon's workspace is coloured in its daemon, which cannot be asked to yet: until the native
-    // protocol carries a workspace's colour, the request is dropped rather than coloured locally, where
-    // the daemon's next directory would undo it.
     if (listsRemotely(window))
+    {
+        // The daemon's colour change comes back as the window's new directory. One that predates the colour
+        // is asked nothing, and the workspace is not coloured locally either: its next directory would undo
+        // it.
+        if (factoryFor(window.displayedWorkspace()).requestRemoteWorkspaceColor(workspace, color)
+            == RemoteRouting::Refused)
+            managerLog()("The daemon cannot colour workspace {}.", workspace);
         return;
+    }
     auto const id = vtworkspace::WorkspaceId { workspace };
     if (!ownsWorkspace(window, id))
         return;
