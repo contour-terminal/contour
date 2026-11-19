@@ -607,10 +607,17 @@ TEST_CASE("Manifest v2: the orchestrator's manifest", "[vtextension][manifest][c
     using vtextension::EnvironmentEntry;
     using vtextension::RootCreation;
 
-    auto const parsed =
-        parseManifestText(readCorpusFile(corpusDirectory() / "valid" / "orchestrator.manifest"));
+    auto const text = readCorpusFile(corpusDirectory() / "valid" / "orchestrator.manifest");
+    auto const parsed = parseManifestText(text);
     REQUIRE(parsed.has_value());
     auto const& manifest = *parsed;
+    // The corpus grows with the extension: the counts are its own lines', every one of them parsed.
+    auto const linesStartingWith = [&](std::string_view keyword) {
+        return static_cast<std::size_t>(
+            std::ranges::count_if(std::views::split(text, '\n'), [&](auto const& line) {
+                return std::string_view { line }.starts_with(keyword);
+            }));
+    };
     CHECK(manifest.name == "orchestrator");
     CHECK(manifest.title == "Agents");
     CHECK(manifest.version == 2);
@@ -626,7 +633,8 @@ TEST_CASE("Manifest v2: the orchestrator's manifest", "[vtextension][manifest][c
     CHECK(manifest.roots[1].creation == RootCreation::Existing);
     CHECK(manifest.readableRoots == std::vector<std::string> { "worktrees" });
 
-    REQUIRE(manifest.arguments.size() == 9);
+    REQUIRE(manifest.arguments.size() == linesStartingWith("arg "));
+    REQUIRE(manifest.arguments.size() >= 9);
     auto const path = std::ranges::find(manifest.arguments, "path", &vtextension::ArgumentDecl::name);
     REQUIRE(path != manifest.arguments.end());
     CHECK(path->kind == ArgumentKind::Path);
@@ -636,7 +644,8 @@ TEST_CASE("Manifest v2: the orchestrator's manifest", "[vtextension][manifest][c
     }));
 
     CHECK(manifest.commandEnvironment.size() == 7);
-    CHECK(manifest.commands.size() == 17);
+    CHECK(manifest.commands.size() == linesStartingWith("command "));
+    CHECK(manifest.commands.size() >= 17);
     auto const* const prs = commandNamed(manifest, "gh-prs");
     REQUIRE(prs != nullptr);
     CHECK(prs->timeout == CommandTimeout::Long);

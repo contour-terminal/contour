@@ -492,6 +492,8 @@ TEST_CASE("GIT_ATTR_SOURCE and core.attributesFile reach exactly the cleanup com
         std::pair { "base"sv, std::string("main") },
         std::pair { "path"sv, (sandbox->worktreeRoot() / "environment").string() },
         std::pair { "query"sv, std::string("query") },
+        std::pair { "page"sv, std::string("1") },
+        std::pair { "format"sv, std::string("1") },
     };
 
     auto const manifest = orchestratorManifest();

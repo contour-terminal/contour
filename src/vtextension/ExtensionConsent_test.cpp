@@ -343,11 +343,17 @@ namespace
     return std::move(text).str();
 }
 
+/// @return The orchestrator's manifest's text, from the conformance corpus.
+[[nodiscard]] std::string orchestratorManifestText()
+{
+    return readWhole(std::filesystem::path { VTEXTENSION_MANIFEST_CORPUS_DIR } / "valid"
+                     / "orchestrator.manifest");
+}
+
 /// @return The orchestrator's manifest, from the conformance corpus.
 [[nodiscard]] Manifest orchestratorManifest()
 {
-    auto manifest = vtextension::parseManifestText(readWhole(
-        std::filesystem::path { VTEXTENSION_MANIFEST_CORPUS_DIR } / "valid" / "orchestrator.manifest"));
+    auto manifest = vtextension::parseManifestText(orchestratorManifestText());
     REQUIRE(manifest.has_value());
     return std::move(*manifest);
 }
@@ -378,13 +384,20 @@ TEST_CASE("ExtensionConsent: the daemon question for the orchestrator", "[vtexte
         .roots = roots,
         .grantDigest = "g" });
 
+    // The consent text lives beside the manifest it renders, so that the two change in one commit.
     CHECK(joined(question)
-          == readWhole(std::filesystem::path { VTEXTENSION_TESTDATA_DIR } / "consent-orchestrator.txt"));
+          == readWhole(std::filesystem::path { VTEXTENSION_MANIFEST_CORPUS_DIR } / "valid"
+                       / "orchestrator.consent.txt"));
 
     auto commandLines = question.lines | std::views::filter([](vtextension::ConsentLine const& line) {
                             return line.text.contains("short, in ") || line.text.contains("long, in ");
                         });
-    CHECK(std::ranges::distance(commandLines) == 17);
+    // One line per declared command: as many as the manifest has `command` lines.
+    auto const manifestText = orchestratorManifestText();
+    auto const declared = std::ranges::count_if(std::views::split(manifestText, '\n'), [](auto const& line) {
+        return std::string_view { line }.starts_with("command ");
+    });
+    CHECK(std::ranges::distance(commandLines) == declared);
     CHECK(std::ranges::all_of(commandLines, [](vtextension::ConsentLine const& line) {
         return line.weight == vtcontrol::ConsentWeight::CanRunCommands;
     }));
