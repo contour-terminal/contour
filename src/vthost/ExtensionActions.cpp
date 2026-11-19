@@ -32,8 +32,14 @@ void ExtensionActions::forget(ConnectionId const& connection)
     auto const gone = std::ranges::find(_origins, connection, &std::pair<ConnectionId, Origin>::first);
     if (gone == _origins.end())
         return;
-    for (auto& handed: _handedOut | std::views::values)
-        std::erase(handed, gone->second);
+    for (auto& [extension, handed]: _handedOut)
+        if (std::erase(handed, gone->second) > 0)
+        {
+            auto& detached = _detachedOut[extension];
+            detached.push_back(gone->second);
+            if (detached.size() > MaxDetachedOrigins)
+                detached.pop_front();
+        }
     _origins.erase(gone);
 }
 
@@ -96,6 +102,18 @@ std::optional<ConnectionId> ExtensionActions::connectionOf(std::string_view exte
     if (known == _origins.end())
         return std::nullopt;
     return known->first;
+}
+
+OriginStanding ExtensionActions::standingOf(std::string_view extension, Origin origin) const
+{
+    auto const lock = std::scoped_lock { _mutex };
+    if (auto const handed = _handedOut.find(extension);
+        handed != _handedOut.end() && std::ranges::contains(handed->second, origin))
+        return OriginStanding::Attached;
+    if (auto const detached = _detachedOut.find(extension);
+        detached != _detachedOut.end() && std::ranges::contains(detached->second, origin))
+        return OriginStanding::Detached;
+    return OriginStanding::Unknown;
 }
 
 } // namespace vthost

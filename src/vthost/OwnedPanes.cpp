@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <vthost/Logging.hpp>
+#include <vthost/RevealOnLoop.hpp>
 
 namespace vthost
 {
@@ -168,7 +169,7 @@ std::expected<void, OwnedPaneError> OwnedPanes::close(std::string_view extension
         });
         if (found == _entries.end())
             return std::unexpected(OwnedPaneError::NotOwned);
-        if (found->state == OwnedPaneState::Cancelled)
+        if (found->state == OwnedPaneState::Cancelled || found->state == OwnedPaneState::Closing)
             return {};
         if (found->state == OwnedPaneState::Pending)
         {
@@ -177,6 +178,7 @@ std::expected<void, OwnedPaneError> OwnedPanes::close(std::string_view extension
         }
         if (!found->session)
             return std::unexpected(OwnedPaneError::NotReconciled);
+        found->state = OwnedPaneState::Closing;
         session = *found->session;
     }
     // Listed until its session ended (sessionEnded()), as every other pane that goes.
@@ -201,6 +203,67 @@ std::expected<std::vector<OwnedPaneInfo>, OwnedPaneError> OwnedPanes::list(std::
                                              .program = entry.program,
                                              .state = entry.state });
     return listed;
+}
+
+std::expected<void, OwnedPaneError> OwnedPanes::reveal(std::string_view extension,
+                                                       std::string_view pane,
+                                                       Origin origin)
+{
+    auto const id = vtcontrol::parseUuid(pane);
+    {
+        auto const lock = std::lock_guard { _mutex };
+        auto const found = std::ranges::find_if(_entries, [&](Entry const& entry) {
+            return id && entry.pane == *id && entry.extension == extension;
+        });
+        if (found == _entries.end())
+            return std::unexpected(OwnedPaneError::NotOwned);
+        switch (found->state)
+        {
+            case OwnedPaneState::Cancelled:
+            case OwnedPaneState::Closing: return std::unexpected(OwnedPaneError::Gone);
+            case OwnedPaneState::Open:
+                // Read from the files, and not checked yet against what the host restored.
+                if (!found->session)
+                    return std::unexpected(OwnedPaneError::NotReconciled);
+                break;
+            case OwnedPaneState::Pending: break; // its creation, posted earlier, runs first
+        }
+    }
+    // The origin's window; else that of a key typed into one of the extension's served tabs just now, which
+    // is what asked for it (a dashboard's input carries no origin). Without either, no user action is
+    // behind an origin never handed to it -- 0, made up, another extension's: an extension never raises a
+    // window on its own. One that was handed and went stale stands for the window focused last (windowFor()).
+    auto const connection = _services.origins.connectionOf(extension, origin).or_else([&] {
+        return _services.servedTabs.recentInputFrom(extension);
+    });
+    if (!connection && _services.origins.standingOf(extension, origin) == OriginStanding::Unknown)
+        return std::unexpected(OwnedPaneError::Gone);
+    // Looked up on the loop: a pending pane's session exists only once its creation ran there.
+    _services.post([this, pane = *id, window = windowFor(connection)] {
+        auto session = std::optional<vtworkspace::SessionId> {};
+        {
+            auto const lock = std::lock_guard { _mutex };
+            if (auto const found = std::ranges::find(_entries, pane, &Entry::pane); found != _entries.end())
+                session = found->session;
+        }
+        if (!session)
+            return;
+        if (window)
+            revealSession(_services.tabHost, *session, window->first, window->second);
+        else
+            _services.tabHost.activate(*session); // no window to tell: its tab is the one its workspace shows
+    });
+    return {};
+}
+
+std::optional<std::pair<ConnectionId, vtworkspace::WorkspaceId>> OwnedPanes::windowFor(
+    std::optional<ConnectionId> const& origin) const
+{
+    // The origin's window; else, for one that detached, where the user looked last.
+    for (auto const& connection: { origin, _services.workspaces.mostRecentlyFocused() })
+        if (auto const workspace = connection ? _services.workspaces.selectedBy(*connection) : std::nullopt)
+            return std::pair { *connection, *workspace };
+    return std::nullopt;
 }
 
 void OwnedPanes::reconcile(std::span<HostedPane const> hosted)
@@ -295,10 +358,10 @@ bool OwnedPanes::ownsPane(vtcontrol::Uuid const& pane) const
 
 void OwnedPanes::save(std::string_view extension)
 {
-    // Still hosted, so carried by an upgrade before its session ended: open, or closed while it was being
-    // created and ending now.
+    // Still hosted, so carried by an upgrade before its session ended: open, closing, or closed while it was
+    // being created and ending now.
     auto const isHosted = [](Entry const& entry) {
-        return entry.state == OwnedPaneState::Open
+        return entry.state == OwnedPaneState::Open || entry.state == OwnedPaneState::Closing
                || (entry.state == OwnedPaneState::Cancelled && entry.session.has_value());
     };
     auto records = std::vector<OwnedPaneRecord> {};

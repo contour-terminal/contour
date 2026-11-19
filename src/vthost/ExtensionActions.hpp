@@ -64,6 +64,9 @@ inline constexpr std::size_t MaxQueuedActions = 32;
     return InvocationEffect::Ignore;
 }
 
+/// The most detached origins remembered per extension (standingOf()); past it the oldest answers Unknown.
+inline constexpr std::size_t MaxDetachedOrigins = 256;
+
 /// The production IExtensionActions: the actions the user invoked, queued per extension, the origin each
 /// connection is given, and which extension each origin was handed to.
 ///
@@ -99,6 +102,7 @@ class ExtensionActions final: public IExtensionActions
     [[nodiscard]] std::vector<std::pair<std::string, Origin>> take(std::string_view extension) override;
     [[nodiscard]] std::optional<ConnectionId> connectionOf(std::string_view extension,
                                                            Origin origin) const override;
+    [[nodiscard]] OriginStanding standingOf(std::string_view extension, Origin origin) const override;
 
   private:
     std::function<void(std::string_view, ServedHint)> _raise;
@@ -109,6 +113,9 @@ class ExtensionActions final: public IExtensionActions
     std::vector<std::pair<ConnectionId, Origin>> _origins;
     /// The origins take() handed each extension, while their connection is attached. Guarded by _mutex.
     std::map<std::string, std::vector<Origin>, std::less<>> _handedOut;
+    /// The origins take() handed each extension whose connection detached since, the newest
+    /// MaxDetachedOrigins of them. Guarded by _mutex.
+    std::map<std::string, std::deque<Origin>, std::less<>> _detachedOut;
     Origin _nextOrigin = 1; ///< Guarded by _mutex.
 };
 

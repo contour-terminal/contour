@@ -22,6 +22,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <vtcontrol/Uuid.hpp>
@@ -83,11 +84,12 @@ struct OwnedPanesServices
     IOwnedPaneStore& store;             ///< The registry files.
     vtcontrol::UuidSource& ids;         ///< Mints pane UUIDs; thread-safe.
     OwnedPaneHost& host;                ///< The loop-side model calls.
-    IServedTabLookup const& servedTabs; ///< `near` -> the served tab's workspace, if it is the extension's.
+    IServedTabLookup const& servedTabs; ///< `near` -> its tab's workspace; who typed into its tabs just now.
     IExtensionActions const& origins;   ///< origin -> ConnectionId (pane-reveal).
     IConnectionWorkspaces const&
         workspaces;                    ///< ConnectionId -> selected workspace; the most recently focused.
     IServedAdmission const& admission; ///< The upgrade latch.
+    ServedTabHost& tabHost;            ///< The reveal walk's loop-side calls (revealSession()).
     OwnerPost post;                    ///< Posts to the loop.
     std::function<void(std::string_view extension)> panesChanged; ///< Raises ServedHint::Panes; any thread.
 };
@@ -133,6 +135,9 @@ class OwnedPanes final: public IOwnedPanes
                                                             std::string_view pane) override;
     [[nodiscard]] std::expected<std::vector<OwnedPaneInfo>, OwnedPaneError> list(
         std::string_view extension) const override;
+    [[nodiscard]] std::expected<void, OwnedPaneError> reveal(std::string_view extension,
+                                                             std::string_view pane,
+                                                             Origin origin) override;
 
     /// Checks the registry against the panes the host holds once it restored them. Loop thread, once.
     /// @param hosted Every pane the host holds.
@@ -179,6 +184,12 @@ class OwnedPanes final: public IOwnedPanes
     /// @return Where a pane opened near @p near opens. Loop thread.
     [[nodiscard]] std::optional<vtworkspace::WorkspaceId> workspaceFor(
         std::string_view extension, std::optional<std::string> const& near) const;
+
+    /// @param origin The connection of a reveal's origin; nullopt for one that detached.
+    /// @return The window to reveal in, and the workspace it shows: the origin's own, else the one focused
+    ///         last; nullopt when no window shows a workspace. Any thread.
+    [[nodiscard]] std::optional<std::pair<ConnectionId, vtworkspace::WorkspaceId>> windowFor(
+        std::optional<ConnectionId> const& origin) const;
 
     /// Writes @p extension's open panes to its registry file. Loop thread.
     void save(std::string_view extension);

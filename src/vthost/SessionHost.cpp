@@ -566,7 +566,8 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
             *this,
             hintRaiser(),
             loopPost(),
-            *this),
+            *this,
+            _clocks.steady.get()),
     _ownedPaneStore(config.ownedPaneStore ? std::move(config.ownedPaneStore)
                                           : std::make_shared<InMemoryOwnedPaneStore>()),
     _ownedPaneWriter(*_ownedPaneStore),
@@ -582,6 +583,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
         .origins = _extensionActions,
         .workspaces = _connectionWorkspaces,
         .admission = *this,
+        .tabHost = *this,
         .post = loopPost(),
         .panesChanged =
             [raise = hintRaiser()](std::string_view extension) { raise(extension, ServedHint::Panes); },
@@ -2382,6 +2384,9 @@ void SessionHost::writeInputAs(SessionId session,
         // does not, nor does what a window sends by itself -- the focus report as it is switched to, a mouse
         // report -- which is why the client says which is which.
         auto const answersIntegration = from.has_value() && kind == proto::InputKind::Keyboard;
+        // A key typed into an extension's served tab may ask it to reveal something there and then.
+        if (answersIntegration)
+            _served.noteTyped(session, *from);
         _lastInput.insert_or_assign(session.value,
                                     LastInput { .at = _loop.clock().now(), .from = std::move(from) });
         if (answersIntegration)

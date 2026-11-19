@@ -230,14 +230,16 @@ ServedSessions::ServedSessions(std::shared_ptr<vtcontrol::UuidSource> ids,
                                IServedAdmission const& admission,
                                Raise raise,
                                OwnerPost post,
-                               ServedTabHost& host):
+                               ServedTabHost& host,
+                               core::platform::IClock const& clock):
     _ids { std::move(ids) },
     _origins { origins },
     _workspaces { workspaces },
     _admission { admission },
     _raise { std::move(raise) },
     _post { std::move(post) },
-    _host { host }
+    _host { host },
+    _clock { clock }
 {
 }
 
@@ -303,6 +305,24 @@ std::optional<vtworkspace::WorkspaceId> ServedSessions::workspaceOfTab(std::stri
                && candidate.phase != TabPhase::Cancelled;
     });
     return found != _tabs.end() ? std::optional { found->workspace } : std::nullopt;
+}
+
+std::optional<ConnectionId> ServedSessions::recentInputFrom(std::string_view extension) const
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto const typed = _typed.find(extension);
+    if (typed == _typed.end() || _clock.now() - typed->second.second > ServedInputGrace)
+        return std::nullopt;
+    return typed->second.first;
+}
+
+void ServedSessions::noteTyped(vtworkspace::SessionId session, ConnectionId const& from)
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto const tab = std::ranges::find(_tabs, std::optional { session }, &Tab::session);
+    if (tab == _tabs.end())
+        return;
+    _typed.insert_or_assign(tab->extension, std::pair { from, _clock.now() });
 }
 
 void ServedSessions::forget(std::string_view id)
@@ -477,7 +497,9 @@ std::expected<void, ServedTabError> ServedSessions::reveal(std::string_view exte
                                                            std::string_view tab,
                                                            Origin origin)
 {
-    auto const connection = _origins.connectionOf(extension, origin);
+    // The origin's window; else that of the key that asked for it, typed into one of its tabs just now.
+    auto const connection =
+        _origins.connectionOf(extension, origin).or_else([&] { return recentInputFrom(extension); });
     auto session = vtworkspace::SessionId {};
     auto workspace = vtworkspace::WorkspaceId {};
     {

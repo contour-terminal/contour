@@ -143,8 +143,9 @@ namespace
         vtextension::PaneError::NotSupportedYet, // NotSupported (held directories, here)
         vtextension::PaneError::CwdMissing,      // DirectoryGone
         vtextension::PaneError::ProgramMissing,  // ProgramMissing
+        vtextension::PaneError::Gone,            // Gone
     };
-    static_assert(OwnedPaneErrorRows.size() == std::to_underlying(OwnedPaneError::ProgramMissing) + 1U,
+    static_assert(OwnedPaneErrorRows.size() == std::to_underlying(OwnedPaneError::Gone) + 1U,
                   "every OwnedPaneError has a row");
 
     [[nodiscard]] constexpr vtextension::PaneError paneErrorOf(OwnedPaneError error) noexcept
@@ -215,11 +216,10 @@ namespace
                 .transform_error(paneErrorOf);
         }
 
-        /// Revealing an agent pane is served from the next phase on.
-        [[nodiscard]] std::expected<void, vtextension::PaneError> reveal(
-            std::string_view /*pane*/, vtextension::Origin /*origin*/) override
+        [[nodiscard]] std::expected<void, vtextension::PaneError> reveal(std::string_view pane,
+                                                                         vtextension::Origin origin) override
         {
-            return std::unexpected(vtextension::PaneError::NotSupportedYet);
+            return _panes.reveal(_extension, pane, origin).transform_error(paneErrorOf);
         }
 
       private:

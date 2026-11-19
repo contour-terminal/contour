@@ -423,7 +423,16 @@ again in a later callback", which starts with a fresh budget, not "the store is 
   Contour cannot start a program in a directory it holds open (a Flatpak whose shells run on the host, and
   Windows), and `gone` for a worktree removed since it was opened;
 - `tab-open`, `tab-close`, `tab-reveal`, `tabs`, `tab-read`, `tab-write`: tabs it serves;
-- `actions-take`, `summary-set`, `pane-reveal`: its command-palette actions and its summary;
+- `actions-take`, `summary-set`: its command-palette actions and its summary;
+- `pane-reveal`: brings one of its agent panes in front of the window an action came from (its `origin`):
+  made the active tab where that window shows the pane's workspace; in another workspace the window asks the
+  user first, and a refusal changes nothing. An origin whose window has gone since stands for the window the
+  user focused last; with no window attached the pane's tab only becomes the active one of its workspace. A
+  key typed into one of its served tabs is a user action too: for at most 2 s after it, a reveal whose origin
+  names no attached window (0 included) goes to the window that key came from -- which is how a dashboard
+  reveals from its own key bindings, whose input carries no origin; `tab-reveal` follows the same rule. Past
+  that, an origin it was never handed (0, or another extension's) raises no window and answers `gone`: a
+  reveal needs a user action behind it. A pane it closed answers `gone` until its session ended, `not-owned` after;
 - `file-read`: regular files inside a root declared readable, of at most 64 KiB.
 
 A declared command runs only where its manifest binds it, and sees only what its manifest declares:
@@ -480,7 +489,8 @@ A declared command runs only where its manifest binds it, and sees only what its
 - On Windows, `file-read` answers `not-supported-yet`.
 
 An import Contour does not serve yet answers `not-supported-yet`, which an extension treats as a
-capability it lacks, not a fault. Today that is `pane-reveal`, and `file-read` on Windows.
+capability it lacks, not a fault. Today that is `file-read` on Windows, and `pane-open` where Contour cannot
+start a program in a directory it holds open (a Flatpak whose shells run on the host, and Windows).
 
 ### Daemon extensions: granting
 

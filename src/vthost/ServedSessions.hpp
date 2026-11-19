@@ -10,10 +10,14 @@
 
 #include <vtpty/ChannelPty.hpp>
 
+#include <core/platform/Clock.hpp>
+
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -89,7 +93,12 @@ class IServedAdmission
     [[nodiscard]] virtual ServedAdmission current() const noexcept = 0;
 };
 
-/// A served tab's workspace, as the served tabs' mirror holds it. Any thread.
+/// How long after a user typed into one of an extension's served tabs a reveal it asks for, without an
+/// origin that names an attached window, still counts as that user's: the key that asked was typed there.
+inline constexpr auto ServedInputGrace = std::chrono::seconds { 2 };
+
+/// A served tab's workspace, as the served tabs' mirror holds it; and who typed into an extension's served
+/// tabs last. Any thread.
 class IServedTabLookup
 {
   public:
@@ -106,6 +115,11 @@ class IServedTabLookup
     /// otherwise.
     [[nodiscard]] virtual std::optional<vtworkspace::WorkspaceId> workspaceOfTab(
         std::string_view extension, std::string_view tab) const = 0;
+
+    /// @param extension Who asks.
+    /// @return The connection whose user typed into one of @p extension's served tabs last, if that was at
+    ///         most ServedInputGrace ago; nullopt otherwise.
+    [[nodiscard]] virtual std::optional<ConnectionId> recentInputFrom(std::string_view extension) const = 0;
 };
 
 /// Told the outcome of a switch a window was asked for. @see ServedTabHost::askToSwitch
@@ -182,13 +196,15 @@ class ServedSessions final: public IServedTabs, public IServedTabLookup
     /// @param raise Tells an extension its tabs changed: their input, their size, their number.
     /// @param post Hands a job to the host's loop.
     /// @param host The host's loop-thread face.
+    /// @param clock The host loop's steady clock, which input is stamped and judged by; thread-safe.
     ServedSessions(std::shared_ptr<vtcontrol::UuidSource> ids,
                    IExtensionActions const& origins,
                    IConnectionWorkspaces const& workspaces,
                    IServedAdmission const& admission,
                    Raise raise,
                    OwnerPost post,
-                   ServedTabHost& host);
+                   ServedTabHost& host,
+                   core::platform::IClock const& clock);
 
     ServedSessions(ServedSessions const&) = delete;
     ServedSessions(ServedSessions&&) = delete;
@@ -240,6 +256,11 @@ class ServedSessions final: public IServedTabs, public IServedTabLookup
     void resumeDrawing(std::string_view extension) override;
     [[nodiscard]] std::optional<vtworkspace::WorkspaceId> workspaceOfTab(std::string_view extension,
                                                                          std::string_view tab) const override;
+    [[nodiscard]] std::optional<ConnectionId> recentInputFrom(std::string_view extension) const override;
+
+    /// Records that the user on @p from typed into @p session, if it is a served tab: a reveal its extension
+    /// asks for soon after counts as that user's (recentInputFrom()). Loop thread.
+    void noteTyped(vtworkspace::SessionId session, ConnectionId const& from);
 
   private:
     struct DeviceState;
@@ -301,7 +322,10 @@ class ServedSessions final: public IServedTabs, public IServedTabLookup
     Raise _raise;
     OwnerPost _post;
     ServedTabHost& _host;
+    core::platform::IClock const& _clock;
     mutable std::mutex _mutex; ///< Guards everything below.
+    /// Per extension: who typed into one of its served tabs last, and when.
+    std::map<std::string, std::pair<ConnectionId, core::platform::SteadyTimePoint>, std::less<>> _typed;
     std::vector<Entry> _devices;
     std::vector<Tab> _tabs;
     vtbackend::PageSize _pageSize { vtbackend::LineCount(24), vtbackend::ColumnCount(80) };

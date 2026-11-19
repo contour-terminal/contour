@@ -212,6 +212,14 @@ struct ExtensionActionRows
 /// Minted once per connection, never reused.
 using Origin = uint32_t;
 
+/// What an origin is to the extension that names it.
+enum class OriginStanding : uint8_t
+{
+    Unknown = 0, ///< Never handed to it: 0, made up, or another extension's.
+    Detached,    ///< Handed to it, and its connection has detached since.
+    Attached,    ///< Handed to it, and its connection is attached.
+};
+
 /// The actions the user invoked, per extension, with the connection each came from: what an extension's
 /// `actions-take` reads.
 class IExtensionActions
@@ -237,6 +245,12 @@ class IExtensionActions
     ///         never handed @p extension.
     [[nodiscard]] virtual std::optional<ConnectionId> connectionOf(std::string_view extension,
                                                                    Origin origin) const = 0;
+
+    /// From any thread. Tells an origin that went stale from one there never was a user action behind.
+    /// @param extension What the daemon's configuration calls the extension asking.
+    /// @param origin An origin it names.
+    /// @return Whether take() handed @p origin to @p extension, and whether its connection is still attached.
+    [[nodiscard]] virtual OriginStanding standingOf(std::string_view extension, Origin origin) const = 0;
 };
 
 /// Why a call about a served tab was refused.
@@ -306,12 +320,14 @@ class IServedTabs
                                                                     std::string_view tab) = 0;
 
     /// Brings one of the extension's tabs in front of the origin's window: activated where it is shown, the
-    /// window asked first when it is in another workspace. A tab not created yet is activated by its
-    /// creation.
+    /// window asked first when it is in another workspace. Without an attached origin, the window whose user
+    /// typed into one of its served tabs at most ServedInputGrace ago is the one asking. A tab not created
+    /// yet is activated by its creation.
     /// @param extension What the daemon's configuration calls it.
     /// @param tab The tab's id.
     /// @param origin The connection the action that asked for it came from.
-    /// @return Nothing; NotOwned for an id that is not one of its tabs; Gone for an origin that detached.
+    /// @return Nothing; NotOwned for an id that is not one of its tabs; Gone for an origin that detached, and
+    ///         no recent typing to stand for it.
     [[nodiscard]] virtual std::expected<void, ServedTabError> reveal(std::string_view extension,
                                                                      std::string_view tab,
                                                                      Origin origin) = 0;
@@ -367,6 +383,7 @@ enum class OwnedPaneError : uint8_t
     NotSupported,  ///< This host cannot start a program in a directory held open (a Flatpak's host, Windows).
     DirectoryGone, ///< The directory held open was removed since (whatever stands at its path now).
     ProgramMissing, ///< The program is not found where its spawn would look it up.
+    Gone, ///< The pane was closed (its tab is going, or was never created), or no action is behind it.
 };
 
 /// Where an agent pane stands, as its extension lists it.
@@ -375,6 +392,7 @@ enum class OwnedPaneState : uint8_t
     Pending = 0, ///< Opened, and its session not created yet.
     Open,        ///< Its session exists.
     Cancelled,   ///< Closed while pending: its creation creates nothing, and drops it.
+    Closing,     ///< Closed while open: listed until its session ended.
 };
 
 /// Whether the program the host spawned in a pane still runs there.
@@ -452,6 +470,23 @@ class IOwnedPanes
     ///         restored its sessions.
     [[nodiscard]] virtual std::expected<std::vector<OwnedPaneInfo>, OwnedPaneError> list(
         std::string_view extension) const = 0;
+
+    /// Brings one of the extension's panes in front of the origin's window: activated where that window
+    /// shows it, the window asked first when it is in another workspace. Without an attached origin, the
+    /// window whose user typed into one of the extension's served tabs at most ServedInputGrace ago is the
+    /// one asking. An origin handed to this extension whose connection detached since stands for the window
+    /// focused last; with no window attached, the
+    /// pane's tab is activated in its own workspace. One never handed to it (0, made up, another
+    /// extension's) reveals nothing: no user action is behind it. A pane not created yet is revealed once
+    /// it is.
+    /// @param extension Whose pane it is.
+    /// @param pane The pane's id.
+    /// @param origin The connection the action that asked for it came from.
+    /// @return Nothing; NotOwned for an id that is not one of its panes; Gone for one it closed, or for an
+    ///         origin never handed to it; NotReconciled until the host restored its sessions.
+    [[nodiscard]] virtual std::expected<void, OwnedPaneError> reveal(std::string_view extension,
+                                                                     std::string_view pane,
+                                                                     Origin origin) = 0;
 };
 
 /// What the daemon world reaches of its host, handed to the factory complete: the cyclic wiring of host and

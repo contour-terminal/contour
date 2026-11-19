@@ -103,8 +103,18 @@ class RecordingOwnedPanes final: public vthost::IOwnedPanes
         return listAnswer;
     }
 
+    [[nodiscard]] std::expected<void, vthost::OwnedPaneError> reveal(std::string_view extension,
+                                                                     std::string_view pane,
+                                                                     vthost::Origin origin) override
+    {
+        reveals.push_back(std::format("{} {} {}", extension, pane, origin));
+        return revealAnswer;
+    }
+
     std::vector<vthost::OwnedPaneSpawn> opens;
     std::vector<std::string> closes;
+    std::vector<std::string> reveals;
+    std::expected<void, vthost::OwnedPaneError> revealAnswer {};
     std::expected<std::string, vthost::OwnedPaneError> openAnswer = std::string { "pane-1" };
     std::expected<std::vector<vthost::OwnedPaneInfo>, vthost::OwnedPaneError> listAnswer {
         std::unexpect, vthost::OwnedPaneError::NotReconciled
@@ -1081,7 +1091,7 @@ TEST_CASE("DaemonWorldExtensions: the pane calls reach the host's owned panes in
                                                     .status = row.agentStatus,
                                                     .program = vtextension::PaneProgram::Gone } } });
 
-    // The host refusals, as the policy words them; reveal waits for a later phase.
+    // The host refusals, as the policy words them.
     struct Refusal
     {
         vthost::OwnedPaneError host;
@@ -1103,7 +1113,12 @@ TEST_CASE("DaemonWorldExtensions: the pane calls reach the host's owned panes in
         CHECK(host->open(vtextension::PaneSpawn { .argv = { "claude" } })
               == std::expected<std::string, vtextension::PaneError> { std::unexpect, policyError });
     }
-    CHECK(host->reveal("pane-1", 1)
-          == std::expected<void, vtextension::PaneError> { std::unexpect,
-                                                           vtextension::PaneError::NotSupportedYet });
+
+    // A reveal reaches the host under the extension's name, with its origin; a closed pane is gone.
+    CHECK(host->reveal("pane-1", 7).has_value());
+    CHECK(panes.reveals == std::vector<std::string> { "orchestrator pane-1 7" });
+    panes.revealAnswer = std::unexpected(vthost::OwnedPaneError::Gone);
+    CHECK(host->reveal("pane-1", 7)
+          == std::expected<void, vtextension::PaneError> { std::unexpect, vtextension::PaneError::Gone });
+    CHECK(vtextension::hostErrorOf(vtextension::PaneError::Gone) == vtextension::HostError::Gone);
 }

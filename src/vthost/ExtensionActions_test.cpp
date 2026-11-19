@@ -111,6 +111,26 @@ TEST_CASE("ExtensionActions: an origin acts only for the extension it was handed
     CHECK(actions.connectionOf("notes", origin) == connection(1));
 }
 
+TEST_CASE("ExtensionActions: an origin's standing tells a stale one from one never handed out",
+          "[daemon][presence]")
+{
+    auto recorder = Recorder {};
+    auto& actions = recorder.actions;
+    auto const origin = actions.originOf(connection(1));
+    CHECK(actions.standingOf("orchestrator", origin) == vthost::OriginStanding::Unknown);
+    actions.deliver("orchestrator", "open", origin);
+    REQUIRE(actions.take("orchestrator").size() == 1);
+    CHECK(actions.standingOf("orchestrator", origin) == vthost::OriginStanding::Attached);
+
+    actions.forget(connection(1));
+
+    CHECK(actions.standingOf("orchestrator", origin) == vthost::OriginStanding::Detached);
+    CHECK(actions.connectionOf("orchestrator", origin) == std::nullopt);
+    // Never handed to another extension, nor is 0 to anyone.
+    CHECK(actions.standingOf("notes", origin) == vthost::OriginStanding::Unknown);
+    CHECK(actions.standingOf("orchestrator", 0) == vthost::OriginStanding::Unknown);
+}
+
 TEST_CASE("ExtensionActions: every delivery raises Actions", "[daemon][presence]")
 {
     // The runner coalesces hints; raising only when a queue fills from empty would lose the wakeup of an

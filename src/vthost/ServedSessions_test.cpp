@@ -611,6 +611,28 @@ TEST_CASE("a reveal in the window's own workspace activates and tells it", "[dae
     CHECK(window.switches.empty());
 }
 
+TEST_CASE("a tab-reveal without an origin goes to the window that just typed into the tab",
+          "[daemon][served]")
+{
+    auto bench = ServedBench {};
+    auto typing = FakeWindow { 1 };
+    auto const origin = bench.attach(typing, bench.first);
+    auto const opened = bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, origin);
+    REQUIRE(opened.has_value());
+    auto const session = bench.sessionOf(*opened);
+    REQUIRE(bench.live.host.createTabIn(bench.first) != nullptr);
+    bench.turn();
+    auto const gone = std::expected<void, ServedTabError> { std::unexpect, ServedTabError::Gone };
+    // Before any key: no user action stands behind origin 0.
+    CHECK(bench.tabs->reveal(Orchestrator, *opened, 0) == gone);
+
+    bench.live.host.writeInputFrom(session, "\r", typing.connectionId(), proto::InputKind::Keyboard);
+    REQUIRE(bench.tabs->reveal(Orchestrator, *opened, 0).has_value());
+
+    CHECK(bench.live.eventually([&] { return typing.reveals == std::vector { session }; }));
+    CHECK(bench.activeIn(bench.first) == session);
+}
+
 TEST_CASE("tab-open returns at once and the tab follows on the loop", "[daemon][served]")
 {
     auto bench = ServedBench {};

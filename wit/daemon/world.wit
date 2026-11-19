@@ -287,7 +287,13 @@ interface host {
     /// detail's line breaks (`\n`) are kept. Neutralising can make a text up to eight times longer, so a
     /// detail as shown is at most 128 KiB.
     summary-set: func(short: string, detail: string) -> result<_, host-error>;
-    /// Shows a pane the extension owns in the origin's window.
+    /// Shows a pane the extension owns in the origin's window: activated where that window shows its
+    /// workspace, the user asked first when it is in another. An origin whose window has gone stands for
+    /// the window focused last; with none attached the pane only becomes its workspace's active tab. Within
+    /// 2 s of a key typed into one of the extension's served tabs, an origin that names no attached window
+    /// (0 included) stands for the window that key came from. Otherwise an origin never handed to the
+    /// extension (0, another extension's) is `gone` and raises nothing; so is a pane it closed, until its
+    /// session ended (`not-owned` after).
     pane-reveal: func(pane: string, origin: origin) -> result<_, host-error>;
     /// Reads a regular file inside a root declared readable.
     file-read: func(root: string, path: string) -> result<file-content, file-error>;

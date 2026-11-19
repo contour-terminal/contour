@@ -2077,6 +2077,18 @@ A served session is **disposable**: nothing of it survives the daemon, and its e
   held the latch is gone. A refused upgrade leaves the served tabs closed.
 - **A keeper recovery drops it.** It has no process, so the structure names it `SessionDevice::PtyOnly`, and
   recovery adopts only the sessions the keeper held (`KeeperChild`); restoring the image closes its pane.
+- **It is revealed as a served tab is (`pane-reveal`).** The walk is one, `revealSession` (`RevealOnLoop.hpp`):
+  activated where the window shows it, else that window asked to switch first, and nothing activated when it
+  refuses. The window is the origin's (`IExtensionActions::connectionOf`, bound to the extension it was handed
+  to); an origin handed to it whose connection detached since (`IExtensionActions::standingOf`) stands for
+  the window focused last, as `near`'s fallback does; with no window attached the pane's tab is only activated
+  in its own workspace. A key typed into one of the extension's served tabs is a user action as well: for
+  `ServedInputGrace` (2 s, on the sessions' steady clock) after it, a reveal without an attached origin --
+  pane-reveal and tab-reveal alike -- goes to the window it came from (`ServedSessions::noteTyped`, keyboard
+  input only, from `writeInputAs`), which is how a dashboard whose guest restarted still reveals on Enter.
+  Otherwise an origin never handed to it -- 0, made up, another extension's -- answers `gone` and raises
+  nothing: an extension never raises a window without a user action behind it. The
+  session is looked up on the loop, so a pending pane is revealed once created; a closed one answers `gone`.
 - **A workspace snapshot leaves it out.** A cold restart brings panes back as shells, which would bring a
   dashboard back as a shell tab, so `captureWorkspace` skips every tab that holds a served leaf at any depth,
   and remaps the workspace's active tab to the captured ones: an active served tab maps to the tab that would
@@ -2129,8 +2141,8 @@ announces the exec: a save still queued then would leave the next image reconcil
   link went (`DirectoryHandle::isRemoved`, a worktree removed and made again at its path). The spawn lets
   its handle go once the trampoline holds a copy.
 - **It is listed from `pane-open` until its session ended**: `Pending` until created, `Cancelled` when closed
-  before that (its creation then spawns nothing), `Open` after; a close of an open pane posts the session's end,
-  and the entry goes only with `sessionEnded`. The extension's engine reconciles its runs against that list, so a
+  before that (its creation then spawns nothing), `Open` after, `Closing` once an open pane was closed; that
+  close posts the session's end, and the entry goes only with `sessionEnded`. The extension's engine reconciles its runs against that list, so a
   pane missing from it is a run that ends.
 - **A workspace snapshot leaves it out.** `captureWorkspace` prunes an agent's pane from its tab's split tree
   (its sibling takes the split's place; a tab left with no pane is left out, and the active tab is remapped as
