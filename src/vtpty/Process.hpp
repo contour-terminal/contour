@@ -203,6 +203,13 @@ class [[nodiscard]] Process: public Pty, public ChildProcess
     /// @return Whether such a spawn can succeed here.
     [[nodiscard]] static HeldDirectorySpawn heldDirectorySpawn(SandboxEscape escape);
 
+    /// Whether a spawn of @p exec on this machine would find its program: looked up as start() looks it up,
+    /// on the PATH the child is given -- @p exec's own, else the inherited one unless @p exec withholds it.
+    /// Asked before a spawn whose failure would otherwise say only that it failed.
+    /// @param exec What would be spawned.
+    /// @return Whether its program is found.
+    [[nodiscard]] static bool findsProgram(ExecInfo const& exec);
+
     // A Process has a child only once start() has spawned one. Before that, and for good when start()
     // failed before spawning, there is nothing to ask about, wait for or signal, and the calls below
     // say so rather than reaching for whatever process an unset id would name.

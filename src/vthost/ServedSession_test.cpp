@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/DirectoryHandle.hpp>
+
 #include <core/Environment.hpp>
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
@@ -12,6 +14,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -22,8 +29,12 @@
 #include <variant>
 #include <vector>
 
+#include <vthost/ExtensionHosting.hpp>
 #include <vthost/LastSessionWatcher.hpp>
+#include <vthost/OwnedPaneStore.hpp>
+#include <vthost/OwnedPanes.hpp>
 #include <vthost/SessionHost.hpp>
+#include <vthost/SessionSnapshot.hpp>
 #include <vthost/handover/HandoverCapture.hpp>
 #include <vthost/handover/HandoverCodec.hpp>
 #include <vthost/handover/HandoverRestore.hpp>
@@ -34,6 +45,7 @@
 #include <vthost/keeper/UniqueFd.hpp>
 #include <vthost/keeperlink/Recovery.hpp>
 #include <vthost/keeperlink/Structure.hpp>
+#include <vthost/testing/FakeDaemonWorldHosting.hpp>
 #include <vthost/testing/FakeHandoverMemory.hpp>
 #include <vthost/testing/FakeProcessImageReplacer.hpp>
 #include <vthost/testing/HandoverTesting.hpp>
@@ -312,6 +324,205 @@ TEST_CASE("(d) a capture and restore round trip with a served session present", 
     CHECK(holdsExactly(next->host, old.shells));
     for (auto const [id, uuid]: std::views::zip(old.shells, uuids))
         CHECK(next->host.objects().uuidOf(id) == uuid);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Owned panes, in the host's real construction order: the registry is read before any restore, and nothing
+// lists it before the constructor's posted reconciliation ran -- a boot extension asking at once is told to
+// retry (WIT `limit`), never that its agent's pane is gone.
+
+namespace
+{
+
+constexpr auto PanesOwner = std::string_view { "orchestrator" };
+
+/// A daemon world whose boot extension lists its panes as it is made, during the host's construction; it
+/// journals the hints it is raised afterwards.
+struct BootLister
+{
+    std::shared_ptr<std::vector<std::string>> journal = std::make_shared<std::vector<std::string>>();
+    std::optional<std::expected<std::vector<OwnedPaneInfo>, OwnedPaneError>> listedAtBoot;
+
+    [[nodiscard]] DaemonWorldFactory factory()
+    {
+        return [this](DaemonWorldEvents events, OwnerPost post, DaemonWorldWiring wiring) {
+            listedAtBoot = wiring.panes.list(PanesOwner);
+            return std::make_shared<vthost::testing::FakeDaemonWorldHosting>(
+                journal, std::move(post), std::move(events));
+        };
+    }
+
+    /// @return How many times the extension was raised ServedHint::Panes.
+    [[nodiscard]] std::size_t paneHints() const
+    {
+        return static_cast<std::size_t>(
+            std::ranges::count(*journal, std::format("hint {} panes", PanesOwner)));
+    }
+};
+
+/// @return A registry holding @p pane as the extension's agent pane `run-1`.
+[[nodiscard]] std::shared_ptr<InMemoryOwnedPaneStore> registryOf(vtcontrol::Uuid pane)
+{
+    return std::make_shared<InMemoryOwnedPaneStore>(
+        std::map<std::string, std::vector<OwnedPaneRecord>, std::less<>> {
+            { std::string(PanesOwner), { OwnedPaneRecord { .pane = pane, .tag = "run-1" } } } });
+}
+
+/// @return A configuration naming objects with sequential UUIDs, its registry @p registry, its daemon world
+///         @p lister's.
+[[nodiscard]] SessionHostConfig withRegistry(std::shared_ptr<IOwnedPaneStore> registry, BootLister& lister)
+{
+    auto config = LiveHost::sequentialIds();
+    config.ownedPaneStore = std::move(registry);
+    config.daemonWorld = lister.factory();
+    return config;
+}
+
+/// Checks what @p next lists once reconciled: the agent's pane @p pane, alive, raised once.
+void checkReconciledAgent(LiveHost& next, BootLister const& lister, vtcontrol::Uuid pane)
+{
+    // Asked during the construction, before the restore: retry later, nothing concluded.
+    REQUIRE(lister.listedAtBoot.has_value());
+    CHECK(*lister.listedAtBoot
+          == std::expected<std::vector<OwnedPaneInfo>, OwnedPaneError> { std::unexpect,
+                                                                         OwnedPaneError::NotReconciled });
+    REQUIRE(next.eventually([&] { return next.host.ownedPanes().list(PanesOwner).has_value(); }));
+    CHECK(next.host.ownedPanes().list(PanesOwner)
+          == std::expected<std::vector<OwnedPaneInfo>, OwnedPaneError> {
+              std::vector { OwnedPaneInfo { .pane = vtcontrol::toString(pane),
+                                            .tag = "run-1",
+                                            .status = std::nullopt,
+                                            .program = PaneLiveness::Alive,
+                                            .state = OwnedPaneState::Open } } });
+    REQUIRE(next.eventually([&] { return lister.paneHints() == 1; }));
+}
+
+} // namespace
+
+TEST_CASE("owned panes are reconciled after a live upgrade's restore", "[daemon][panes][handover]")
+{
+    // The old host owns the agent's pane itself, so that a capture which dropped it would fail this.
+    auto const registry = std::make_shared<InMemoryOwnedPaneStore>();
+    auto oldLister = BootLister {};
+    auto live = std::make_unique<LiveHost>(catDevice, withRegistry(registry, oldLister));
+    live->spawnTwo();
+    REQUIRE(live->eventually([&] { return live->host.ownedPanes().list(PanesOwner).has_value(); }));
+    auto const directory = std::make_shared<vtpty::DirectoryHandle const>(
+        vtpty::DirectoryHandle::unbacked(std::filesystem::temp_directory_path().string()));
+    auto const opened = live->host.ownedPanes().open(OwnedPaneSpawn { .extension = std::string(PanesOwner),
+                                                                      .argv = { "claude" },
+                                                                      .directory = directory,
+                                                                      .cwd = directory->resolvedPath(),
+                                                                      .title = "run-1",
+                                                                      .tag = "run-1" });
+    REQUIRE(opened.has_value());
+    auto const agent = vtcontrol::parseUuid(*opened);
+    REQUIRE(agent.has_value());
+    REQUIRE(live->eventually([&] {
+        auto const listed = live->host.ownedPanes().list(PanesOwner);
+        return listed && listed->size() == 1 && listed->front().state == OwnedPaneState::Open;
+    }));
+    for (auto const session: live->host.sessionIds())
+        REQUIRE(live->eventually([&] { return live->pageText(session).contains("ready"); }));
+    live->settle();
+    auto captured = live->capture();
+    REQUIRE(captured.has_value());
+    auto decoded = decodeHandover(encodeHandover(*captured));
+    REQUIRE(decoded.has_value());
+    // Read before the old host goes, whose destruction would write it: the exec runs no destructor, so the
+    // registry is what LiveUpgrade flushed before it (LiveUpgrade_test pins that it does).
+    live->host.flushOwnedPanes();
+    CHECK(registry->loadAll()
+          == std::vector<std::pair<std::string, std::vector<OwnedPaneRecord>>> {
+              { std::string(PanesOwner), { OwnedPaneRecord { .pane = *agent, .tag = "run-1" } } } });
+    releaseForAdoption(live->host);
+    live.reset();
+
+    auto lister = BootLister {};
+    auto config = withRegistry(registry, lister);
+    config.handover = *std::move(decoded);
+    auto const next = std::make_unique<LiveHost>(catDevice, std::move(config));
+    CHECK(next->host.handoverOutcome().has_value());
+    checkReconciledAgent(*next, lister, *agent);
+}
+
+TEST_CASE("owned panes are reconciled after a keeper recovery", "[daemon][panes][keeper]")
+{
+    auto live = std::make_unique<LiveHost>(catDevice);
+    auto const old = spawnServedLayout(*live);
+    auto const agent = live->host.objects().uuidOf(old.shells.back());
+    REQUIRE(agent.has_value());
+    auto image = recoverFromKeeper(live, old.shells, old.served);
+
+    auto lister = BootLister {};
+    auto config = withRegistry(registryOf(*agent), lister);
+    config.handover = std::move(image);
+    auto const next = std::make_unique<LiveHost>(catDevice, std::move(config));
+    CHECK(holdsExactly(next->host, old.shells));
+    checkReconciledAgent(*next, lister, *agent);
+}
+
+TEST_CASE("owned panes are reconciled on the normal constructor exit", "[daemon][panes][restore]")
+{
+    // A pane the registry names, which a cold start does not bring back.
+    auto const gone = vtcontrol::Uuid { std::array<uint8_t, 16> { 0xAB, 0xCD, 0, 0, 0, 0, 0x40, 0, 0x80 } };
+    auto const registry = registryOf(gone);
+    auto lister = BootLister {};
+    auto config = withRegistry(registry, lister);
+    SECTION("a fresh start")
+    {
+    }
+    SECTION("a snapshot restore")
+    {
+        auto workspace = WorkspaceLayoutSnapshot {};
+        workspace.tabs.push_back(TabSnapshot { .root = PaneNode { .pane = PaneSnapshot {} } });
+        config.restore =
+            WorkspaceRestore { .snapshot = WorkspaceSnapshot { .workspaces = { std::move(workspace) } } };
+    }
+    auto const next = std::make_unique<LiveHost>(catDevice, std::move(config));
+
+    REQUIRE(lister.listedAtBoot.has_value());
+    CHECK(*lister.listedAtBoot
+          == std::expected<std::vector<OwnedPaneInfo>, OwnedPaneError> { std::unexpect,
+                                                                         OwnedPaneError::NotReconciled });
+    REQUIRE(next->eventually([&] { return next->host.ownedPanes().list(PanesOwner).has_value(); }));
+    CHECK(next->host.ownedPanes().list(PanesOwner)->empty());
+    REQUIRE(next->eventually([&] { return lister.paneHints() == 1; }));
+}
+
+TEST_CASE("an extension told to retry hears Panes though it owns no pane", "[daemon][panes][restore]")
+{
+    auto lister = BootLister {};
+    auto const next = std::make_unique<LiveHost>(
+        catDevice, withRegistry(std::make_shared<InMemoryOwnedPaneStore>(), lister));
+    REQUIRE(lister.listedAtBoot.has_value());
+    CHECK(*lister.listedAtBoot
+          == std::expected<std::vector<OwnedPaneInfo>, OwnedPaneError> { std::unexpect,
+                                                                         OwnedPaneError::NotReconciled });
+    REQUIRE(next->eventually([&] { return lister.paneHints() == 1; }));
+    CHECK(next->host.ownedPanes().list(PanesOwner)->empty());
+}
+
+TEST_CASE("a cold restart empties the registry", "[daemon][panes][restore]")
+{
+    auto const gone = vtcontrol::Uuid { std::array<uint8_t, 16> { 0xAB, 0xCD, 0, 0, 0, 0, 0x40, 0, 0x80 } };
+    auto const registry = registryOf(gone);
+    auto lister = BootLister {};
+    auto config = withRegistry(registry, lister);
+    auto workspace = WorkspaceLayoutSnapshot {};
+    workspace.tabs.push_back(TabSnapshot { .root = PaneNode { .pane = PaneSnapshot {} } });
+    config.restore =
+        WorkspaceRestore { .snapshot = WorkspaceSnapshot { .workspaces = { std::move(workspace) } } };
+    auto const next = std::make_unique<LiveHost>(catDevice, std::move(config));
+
+    REQUIRE(next->eventually([&] { return lister.paneHints() == 1; }));
+    CHECK(next->host.ownedPanes().list(PanesOwner)->empty());
+    // The file is written anew, empty.
+    next->host.flushOwnedPanes();
+    auto const kept = registry->loadAll();
+    REQUIRE(kept.size() == 1);
+    CHECK(kept.front().first == PanesOwner);
+    CHECK(kept.front().second.empty());
 }
 
 #ifdef VTHOST_TEST_ORCHESTRATOR_WASM

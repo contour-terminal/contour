@@ -35,6 +35,7 @@
 #include <vthost/DaemonLifecycle.hpp>
 #include <vthost/ExtensionHosting.hpp>
 #include <vthost/KeeperSettings.hpp>
+#include <vthost/OwnedPaneStore.hpp>
 #include <vthost/ProfileCatalog.hpp>
 #include <vthost/RelocationRequest.hpp>
 #include <vthost/SessionSettings.hpp>
@@ -210,6 +211,9 @@ struct DaemonConfig
     /// nothing of them. Called once, by the session host, once the daemon's loop exists. `contour daemon`
     /// sets it from `daemon.extensions`, which `src/vthost` cannot reach.
     DaemonWorldFactory daemonWorld {};
+    /// The registry of the agent panes the daemon-scoped extensions open, one file per extension beside its
+    /// store; null for one in memory, which no restart keeps. `contour daemon` sets it with @ref daemonWorld.
+    std::shared_ptr<IOwnedPaneStore> ownedPanes {};
     /// The release this daemon states in every ServerHello and status reply; empty when unknown.
     std::string releaseVersion {};
     /// The image this daemon runs from, as its status reply states it.

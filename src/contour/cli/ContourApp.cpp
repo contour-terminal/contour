@@ -66,6 +66,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -105,6 +106,7 @@
 #include <vthost/FilePrivacy.hpp>
 #include <vthost/KnownDaemons.hpp>
 #include <vthost/Linger.hpp>
+#include <vthost/OwnedPaneStore.hpp>
 #include <vthost/PlatformStreams.hpp>
 #include <vthost/ServiceControl.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
@@ -1248,6 +1250,28 @@ namespace
             };
         };
     }
+
+    /// @param extensions The daemon-scoped extensions the profile declares.
+    /// @param daemon The socket the daemon serves, which names each extension's files.
+    /// @param env The environment the state directory is read from.
+    /// @return The registry of the agent panes they open, a file beside each one's store; null when none is
+    ///         declared.
+    [[nodiscard]] std::shared_ptr<vthost::IOwnedPaneStore> ownedPaneStoreOf(
+        std::span<config::DaemonExtensionConfig const> extensions,
+        vtextension::DaemonIdentity const& daemon,
+        core::Environment const& env)
+    {
+        if (extensions.empty())
+            return nullptr;
+        auto const stateDirectory = vthost::daemonStateDirectory(env);
+        auto files = std::map<std::string, std::filesystem::path, std::less<>> {};
+        for (auto const& extension: extensions)
+            if (auto file = vthost::daemonExtensionPanesFile(
+                    stateDirectory, daemon.name, daemon.socketPath, daemon.nameSocketPath, extension.name))
+                files.emplace(extension.name, std::move(*file));
+        return std::make_shared<vthost::FileOwnedPaneStore>(core::platform::NativeFileSystem::instance(),
+                                                            std::move(files));
+    }
 #endif
 
     /// Moves a daemon about to serve onto its staged image, or leases the staged image it already runs
@@ -1750,6 +1774,7 @@ int ContourApp::serveDaemon(DaemonVerbOptions const& options,
                                        executableDirectory,
                                        processEnvironment(),
                                        extensionServices);
+    config.ownedPanes = ownedPaneStoreOf(daemonExtensions, daemonIdentity, processEnvironment());
 #endif
 
     if (auto label = options.tmuxCompatSocket; !label.empty())

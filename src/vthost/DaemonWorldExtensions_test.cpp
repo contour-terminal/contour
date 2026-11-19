@@ -18,6 +18,7 @@
 #include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -77,6 +78,38 @@ constexpr auto BrokenManifest =
     std::ranges::transform(bytes, text.begin(), [](std::byte b) { return static_cast<char>(b); });
     return text;
 }
+
+/// Owned panes that record what is asked of them, and answer what the test set.
+class RecordingOwnedPanes final: public vthost::IOwnedPanes
+{
+  public:
+    [[nodiscard]] std::expected<std::string, vthost::OwnedPaneError> open(
+        vthost::OwnedPaneSpawn spawn) override
+    {
+        opens.push_back(std::move(spawn));
+        return openAnswer;
+    }
+
+    [[nodiscard]] std::expected<void, vthost::OwnedPaneError> close(std::string_view extension,
+                                                                    std::string_view pane) override
+    {
+        closes.push_back(std::format("{} {}", extension, pane));
+        return {};
+    }
+
+    [[nodiscard]] std::expected<std::vector<vthost::OwnedPaneInfo>, vthost::OwnedPaneError> list(
+        std::string_view /*extension*/) const override
+    {
+        return listAnswer;
+    }
+
+    std::vector<vthost::OwnedPaneSpawn> opens;
+    std::vector<std::string> closes;
+    std::expected<std::string, vthost::OwnedPaneError> openAnswer = std::string { "pane-1" };
+    std::expected<std::vector<vthost::OwnedPaneInfo>, vthost::OwnedPaneError> listAnswer {
+        std::unexpect, vthost::OwnedPaneError::NotReconciled
+    };
+};
 
 /// Served tabs that record what is asked of them.
 class RecordingTabs final: public vthost::IServedTabs
@@ -167,7 +200,7 @@ struct Fixture
                                             .summaryChanged = [this] { ++summaryChanges; },
                                             .presenceChanged = [this] { ++presenceChanges; } },
                 [](std::function<void()> const& job) { job(); },
-                vthost::DaemonWorldWiring { .tabs = tabs, .actions = actions });
+                vthost::DaemonWorldWiring { .tabs = tabs, .actions = actions, .panes = panes });
     }
 
     /// @return The daemon world, on this fixture's fakes.
@@ -217,6 +250,7 @@ struct Fixture
     int summaryChanges = 0;
     int presenceChanges = 0;
     RecordingTabs tabs;
+    RecordingOwnedPanes panes;
     vthost::ExtensionActions actions { [](std::string_view /*extension*/, vthost::ServedHint /*hint*/) {} };
     /// Made once its module is on disk.
     std::unique_ptr<vthost::DaemonWorldExtensions> world;
@@ -369,12 +403,13 @@ TEST_CASE("DaemonWorldExtensions: a served-tab call reaches the host in the mani
           "[daemon][served]")
 {
     auto tabs = RecordingTabs {};
+    auto panes = RecordingOwnedPanes {};
     auto actions = vthost::ExtensionActions { [](std::string_view, vthost::ServedHint) {} };
     auto const scheme = std::string_view { "agents" };
     auto service = vthost::servedTabServiceOf(
         vtextension::ServedTabOwner {
             .extension = "orchestrator", .title = "Agents", .scheme = scheme, .moduleDigest = "3f9a" },
-        vthost::DaemonWorldWiring { .tabs = tabs, .actions = actions });
+        vthost::DaemonWorldWiring { .tabs = tabs, .actions = actions, .panes = panes });
 
     // Only the declared scheme is served, under the manifest's title.
     CHECK(service->tabOpen("shell", 1)
@@ -407,7 +442,7 @@ TEST_CASE("DaemonWorldExtensions: a served-tab call reaches the host in the mani
     auto unserving = vthost::servedTabServiceOf(
         vtextension::ServedTabOwner {
             .extension = "plain", .title = "plain", .scheme = std::nullopt, .moduleDigest = "" },
-        vthost::DaemonWorldWiring { .tabs = tabs, .actions = actions });
+        vthost::DaemonWorldWiring { .tabs = tabs, .actions = actions, .panes = panes });
     CHECK(unserving->tabOpen("agents", 1)
           == std::expected<std::string, vtextension::HostError> { std::unexpect,
                                                                   vtextension::HostError::BadArgument });
@@ -936,6 +971,7 @@ TEST_CASE("DaemonWorldExtensions: the daemon world reads files through the nativ
     auto wallClock = core::platform::ManualWallClock {};
     auto localTime = vtbackend::LocalTimeConverter { &vtbackend::systemLocalTime };
     auto tabs = RecordingTabs {};
+    auto panes = RecordingOwnedPanes {};
     auto actions =
         vthost::ExtensionActions { [](std::string_view /*extension*/, vthost::ServedHint /*hint*/) {} };
     auto world = vthost::DaemonWorldExtensions(
@@ -960,7 +996,7 @@ TEST_CASE("DaemonWorldExtensions: the daemon world reads files through the nativ
                                       .localTime = localTime },
         vthost::DaemonWorldEvents {},
         [](std::function<void()> const& job) { job(); },
-        vthost::DaemonWorldWiring { .tabs = tabs, .actions = actions });
+        vthost::DaemonWorldWiring { .tabs = tabs, .actions = actions, .panes = panes });
 
     world.startOnDemand("reader");
     auto const pending = world.pendingRequests();
@@ -981,3 +1017,93 @@ TEST_CASE("DaemonWorldExtensions: the daemon world reads files through the nativ
 }
 
 #endif
+
+TEST_CASE("DaemonWorldExtensions: the pane calls reach the host's owned panes in the world's words",
+          "[daemon][panes]")
+{
+    auto tabs = RecordingTabs {};
+    auto panes = RecordingOwnedPanes {};
+    auto actions = vthost::ExtensionActions { [](std::string_view, vthost::ServedHint) {} };
+    auto host = vthost::paneHostOf(
+        vtextension::ServedTabOwner {
+            .extension = "orchestrator", .title = "Agents", .scheme = std::nullopt, .moduleDigest = "" },
+        vthost::DaemonWorldWiring { .tabs = tabs, .actions = actions, .panes = panes });
+
+    // The spawn reaches the host whole, under the extension's name.
+    auto const directory =
+        std::make_shared<vtpty::DirectoryHandle const>(vtpty::DirectoryHandle::unbacked("/w/run-1"));
+    CHECK(host->open(vtextension::PaneSpawn { .argv = { "claude" },
+                                              .environment = { { "GIT_CONFIG_COUNT", "2" } },
+                                              .removedEnvironment = { "GIT_DIR" },
+                                              .directory = directory,
+                                              .cwd = "/w/run-1",
+                                              .title = "run-1",
+                                              .tag = "run-1",
+                                              .near = "tab-7" })
+          == std::expected<std::string, vtextension::PaneError> { "pane-1" });
+    REQUIRE(panes.opens.size() == 1);
+    CHECK(panes.opens.front().extension == "orchestrator");
+    CHECK(panes.opens.front().argv == std::vector<std::string> { "claude" });
+    CHECK(panes.opens.front().removedEnvironment == std::vector<std::string> { "GIT_DIR" });
+    CHECK(panes.opens.front().directory == directory);
+    CHECK(panes.opens.front().near == "tab-7");
+
+    CHECK(host->close("pane-1").has_value());
+    CHECK(panes.closes == std::vector<std::string> { "orchestrator pane-1" });
+
+    // Not reconciled yet: the guest is told to retry (limit), never that its panes are gone.
+    CHECK(host->list()
+          == std::expected<std::vector<vtextension::PaneInfo>, vtextension::PaneError> {
+              std::unexpect, vtextension::PaneError::NotReconciled });
+    CHECK(vtextension::hostErrorOf(vtextension::PaneError::NotReconciled) == vtextension::HostError::Limit);
+
+    // A pane's status and program, as the world spells them.
+    struct Row
+    {
+        std::optional<vtbackend::ProgramState> status;
+        std::optional<vtextension::AgentStatus> agentStatus;
+    };
+    auto const row = GENERATE(Row { std::nullopt, std::nullopt },
+                              Row { vtbackend::ProgramState::Idle, vtextension::AgentStatus::Idle },
+                              Row { vtbackend::ProgramState::Working, vtextension::AgentStatus::Working },
+                              Row { vtbackend::ProgramState::Done, vtextension::AgentStatus::Done },
+                              Row { vtbackend::ProgramState::Blocked, vtextension::AgentStatus::Blocked },
+                              Row { vtbackend::ProgramState::Error, vtextension::AgentStatus::Error });
+    panes.listAnswer = std::vector { vthost::OwnedPaneInfo { .pane = "pane-1",
+                                                             .tag = "run-1",
+                                                             .status = row.status,
+                                                             .program = vthost::PaneLiveness::Gone,
+                                                             .state = vthost::OwnedPaneState::Open } };
+    CHECK(host->list()
+          == std::expected<std::vector<vtextension::PaneInfo>, vtextension::PaneError> {
+              std::vector { vtextension::PaneInfo { .pane = "pane-1",
+                                                    .tag = "run-1",
+                                                    .status = row.agentStatus,
+                                                    .program = vtextension::PaneProgram::Gone } } });
+
+    // The host refusals, as the policy words them; reveal waits for a later phase.
+    struct Refusal
+    {
+        vthost::OwnedPaneError host;
+        vtextension::PaneError policy;
+    };
+    for (auto const& [hostError, policyError]: std::array {
+             Refusal { .host = vthost::OwnedPaneError::TooMany, .policy = vtextension::PaneError::TooMany },
+             Refusal { .host = vthost::OwnedPaneError::Upgrading,
+                       .policy = vtextension::PaneError::HostRefused },
+             Refusal { .host = vthost::OwnedPaneError::ProgramMissing,
+                       .policy = vtextension::PaneError::ProgramMissing },
+             Refusal { .host = vthost::OwnedPaneError::NotSupported,
+                       .policy = vtextension::PaneError::NotSupportedYet },
+             Refusal { .host = vthost::OwnedPaneError::DirectoryGone,
+                       .policy = vtextension::PaneError::CwdMissing },
+         })
+    {
+        panes.openAnswer = std::unexpected(hostError);
+        CHECK(host->open(vtextension::PaneSpawn { .argv = { "claude" } })
+              == std::expected<std::string, vtextension::PaneError> { std::unexpect, policyError });
+    }
+    CHECK(host->reveal("pane-1", 1)
+          == std::expected<void, vtextension::PaneError> { std::unexpect,
+                                                           vtextension::PaneError::NotSupportedYet });
+}

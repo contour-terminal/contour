@@ -27,6 +27,7 @@
 #include <vtextension/DaemonExtensionRuntime.hpp>
 #include <vtextension/ExtensionPresence.hpp>
 #include <vtextension/FileLocker.hpp>
+#include <vtextension/PaneService.hpp>
 #include <vtextension/ServedTabService.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vthost/ExtensionHosting.hpp>
@@ -62,6 +63,14 @@ struct DaemonExtensionSummary
 /// @return The service.
 [[nodiscard]] std::unique_ptr<vtextension::IServedTabService> servedTabServiceOf(
     vtextension::ServedTabOwner const& owner, DaemonWorldWiring wiring);
+
+/// Makes the host side of one extension's agent panes on the host's owned panes: the extension's name bound,
+/// a pane's status worded as the WIT's agent-status, and the host's refusals as the policy's PaneError.
+/// @param owner The extension, as its manifest declares it.
+/// @param wiring What it reaches of the host; outlives the adapter.
+/// @return The adapter.
+[[nodiscard]] std::unique_ptr<vtextension::IPaneHost> paneHostOf(vtextension::ServedTabOwner const& owner,
+                                                                 DaemonWorldWiring wiring);
 
 /// The production IDaemonWorldHosting: every declared daemon-scoped extension on one
 /// vtextension::DaemonExtensionRuntime, composed on construction, its problems logged. Where they show

@@ -272,4 +272,14 @@ std::optional<std::filesystem::path> daemonExtensionStoreDirectory(
            / "store";
 }
 
+std::optional<std::filesystem::path> daemonExtensionPanesFile(std::filesystem::path const& stateDirectory,
+                                                              std::string_view name,
+                                                              std::filesystem::path const& socket,
+                                                              std::filesystem::path const& namedSocket,
+                                                              std::string_view extension)
+{
+    return daemonExtensionStoreDirectory(stateDirectory, name, socket, namedSocket, extension)
+        .transform([](std::filesystem::path const& store) { return store.parent_path() / "owned-panes"; });
+}
+
 } // namespace vthost

@@ -6,6 +6,7 @@
 /// how a host makes and stops its daemon-scoped extensions is testable in a build without extensions too.
 
 #include <algorithm>
+#include <array>
 #include <format>
 #include <functional>
 #include <map>
@@ -81,7 +82,10 @@ class FakeDaemonWorldHosting final: public IDaemonWorldHosting
 
     void hint(std::string_view name, ServedHint hint) override
     {
-        _journal->push_back(std::format("hint {} {}", name, hint == ServedHint::Tabs ? "tabs" : "actions"));
+        // Spelled by ServedHint's value, so a hint added there is a row here.
+        static constexpr auto HintNames = std::array<std::string_view, 3> { "tabs", "actions", "panes" };
+        static_assert(HintNames.size() == std::to_underlying(ServedHint::Panes) + 1U);
+        _journal->push_back(std::format("hint {} {}", name, HintNames.at(std::to_underlying(hint))));
     }
 
     void restart(std::string_view name) override { _journal->push_back(std::format("restart {}", name)); }

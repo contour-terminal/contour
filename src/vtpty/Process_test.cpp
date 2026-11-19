@@ -1130,3 +1130,27 @@ TEST_CASE("Process.applyCommandOverride keeps removedEnvironment and the directo
     vtpty::Process::applyCommandOverride(shell, plain);
     CHECK(shell.directory == commandOverride.directory);
 }
+
+#ifndef _WIN32
+TEST_CASE("Process.findsProgramOnThePathTheChildIsGiven", "[process]")
+{
+    auto const scratch = core::testing::ScopedTempDir { "contour-finds-program" };
+    auto const program = scratch.path() / "agent";
+    std::ofstream { program } << "#!/bin/sh\n";
+    std::filesystem::permissions(program, std::filesystem::perms::owner_all);
+
+    auto exec = vtpty::Process::ExecInfo {};
+    exec.program = "agent";
+    exec.env["PATH"] = scratch.path().string();
+    CHECK(vtpty::Process::findsProgram(exec));
+
+    exec.program = "not-installed-anywhere";
+    CHECK_FALSE(vtpty::Process::findsProgram(exec));
+
+    // Withheld and not set again, the inherited PATH is gone, and the program with it.
+    exec.program = "agent";
+    exec.env.clear();
+    exec.removedEnvironment = { "PATH" };
+    CHECK_FALSE(vtpty::Process::findsProgram(exec));
+}
+#endif

@@ -18,6 +18,9 @@
 /// nothing of extensions at all.
 
 #include <vtbackend/screen/StatusLineExtensions.hpp>
+#include <vtbackend/vt/ProgramStatus.hpp>
+
+#include <vtpty/DirectoryHandle.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -190,6 +193,7 @@ enum class ServedHint : uint8_t
 {
     Tabs,    ///< Its served tabs changed.
     Actions, ///< The user invoked its actions (IExtensionActions::take()).
+    Panes,   ///< Its agent panes changed: opened, gone, or their status (IOwnedPanes::list()).
 };
 
 /// One daemon-scoped extension as the palette shows it: its declared `action` lines, and where it stands --
@@ -353,12 +357,110 @@ class IServedTabs
     virtual void resumeDrawing(std::string_view extension) = 0;
 };
 
+/// Why a call about an extension's agent pane was refused.
+enum class OwnedPaneError : uint8_t
+{
+    NotOwned,      ///< The id names no pane this extension opened: another's, a shell's, or none at all.
+    TooMany,       ///< The extension has MaxOwnedPanesPerExtension panes already.
+    Upgrading,     ///< A live upgrade runs: nothing opens until it is over.
+    NotReconciled, ///< The host has not restored its sessions yet: the answer would be wrong; retry later.
+    NotSupported,  ///< This host cannot start a program in a directory held open (a Flatpak's host, Windows).
+    DirectoryGone, ///< The directory held open was removed since (whatever stands at its path now).
+    ProgramMissing, ///< The program is not found where its spawn would look it up.
+};
+
+/// Where an agent pane stands, as its extension lists it.
+enum class OwnedPaneState : uint8_t
+{
+    Pending = 0, ///< Opened, and its session not created yet.
+    Open,        ///< Its session exists.
+    Cancelled,   ///< Closed while pending: its creation creates nothing, and drops it.
+};
+
+/// Whether the program the host spawned in a pane still runs there.
+enum class PaneLiveness : uint8_t
+{
+    Gone = 0, ///< It exited, and its session is still hosted.
+    Alive,    ///< It runs, or is about to.
+};
+
+/// One agent pane, as its extension lists it.
+struct OwnedPaneInfo
+{
+    std::string pane;                                 ///< Its id: its pane's UUID.
+    std::string tag;                                  ///< The extension's own label for it.
+    std::optional<vtbackend::ProgramState> status {}; ///< What its program last reported (PaneStatusSources).
+    PaneLiveness program = PaneLiveness::Alive;       ///< Whether its program still runs.
+    OwnedPaneState state = OwnedPaneState::Pending;   ///< Whether its session exists yet.
+
+    bool operator==(OwnedPaneInfo const&) const = default;
+};
+
+/// What an extension's agent pane is to run, everything its policy checked: the program, its environment,
+/// and the directory it starts in, held open.
+struct OwnedPaneSpawn
+{
+    std::string extension;                                           ///< Whose pane it is.
+    std::vector<std::string> argv;                                   ///< The program and its arguments.
+    std::vector<std::pair<std::string, std::string>> environment {}; ///< Laid over the inherited one.
+    std::vector<std::string> removedEnvironment {};                  ///< Inherited names it does not see.
+    std::shared_ptr<vtpty::DirectoryHandle const> directory {};      ///< Entered by its descriptor.
+    std::string cwd {};                                              ///< The directory's resolved path.
+    std::string title {};                                            ///< The tab's fixed name.
+    std::string tag {};                                              ///< The extension's own label.
+    std::optional<std::string> near {}; ///< The served tab whose workspace it opens in, if any.
+};
+
+/// The most agent panes one extension may have at once, pending ones included.
+inline constexpr std::size_t MaxOwnedPanesPerExtension = 32;
+
+/// The agent panes daemon-scoped extensions open: tabs running a program of theirs, opened beside their
+/// dashboard without taking the focus, and known to be theirs across a live upgrade.
+///
+/// Thread rules: every member may be called on any thread and never blocks on the host's loop. The
+/// implementation keeps a mutex-guarded mirror of the panes that these read and write, and posts every model
+/// change -- creation, close -- to the loop.
+class IOwnedPanes
+{
+  public:
+    IOwnedPanes() = default;
+    IOwnedPanes(IOwnedPanes const&) = delete;
+    IOwnedPanes(IOwnedPanes&&) = delete;
+    IOwnedPanes& operator=(IOwnedPanes const&) = delete;
+    IOwnedPanes& operator=(IOwnedPanes&&) = delete;
+    virtual ~IOwnedPanes() = default;
+
+    /// Opens an agent pane. Returns before its session exists: it is created on the loop, and listed Pending
+    /// until then.
+    /// @param spawn What it runs.
+    /// @return The pane's id; Limit past MaxOwnedPanesPerExtension or while a live upgrade runs;
+    ///         NotReconciled before the host restored its sessions; NotSupported where no program can be
+    ///         started in a directory held open; DirectoryGone for one removed since it was opened. Each
+    ///         refusal is decided before any pane exists.
+    [[nodiscard]] virtual std::expected<std::string, OwnedPaneError> open(OwnedPaneSpawn spawn) = 0;
+
+    /// Closes one of the extension's panes: a pending one is never created; an open one stays listed until
+    /// its session ended.
+    /// @param extension Whose pane it is.
+    /// @param pane The pane's id.
+    /// @return Nothing; NotOwned for an id that is not one of its panes.
+    [[nodiscard]] virtual std::expected<void, OwnedPaneError> close(std::string_view extension,
+                                                                    std::string_view pane) = 0;
+
+    /// @param extension Whose panes.
+    /// @return Its panes, pending ones included, in the order they were opened; NotReconciled until the host
+    ///         restored its sessions.
+    [[nodiscard]] virtual std::expected<std::vector<OwnedPaneInfo>, OwnedPaneError> list(
+        std::string_view extension) const = 0;
+};
+
 /// What the daemon world reaches of its host, handed to the factory complete: the cyclic wiring of host and
 /// world resolved at construction.
 struct DaemonWorldWiring
 {
     IServedTabs& tabs;          ///< Any thread (@see IServedTabs).
     IExtensionActions& actions; ///< take() and connectionOf() from any thread; the rest is the host's.
+    IOwnedPanes& panes;         ///< Any thread (@see IOwnedPanes).
 };
 
 /// What asking the windows again came to.

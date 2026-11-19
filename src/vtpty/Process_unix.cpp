@@ -5,6 +5,7 @@
 #include <vtpty/PreparedSpawn.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProcessPlacement.hpp>
+#include <vtpty/ProgramLookup.hpp>
 #include <vtpty/Pty.hpp>
 #include <vtpty/SandboxInfo.hpp>
 #include <vtpty/SpawnSpec.hpp>
@@ -185,6 +186,20 @@ ProgramHost Process::programHost(SandboxEscape escape)
 HeldDirectorySpawn Process::heldDirectorySpawn(SandboxEscape escape)
 {
     return heldDirectorySpawnOn(programHost(escape));
+}
+
+bool Process::findsProgram(ExecInfo const& exec)
+{
+    // The child's PATH as start() assembles it on this machine; what else it sets there never reaches PATH.
+    auto const environment = buildEnvironmentBlock(
+        util::environmentEntries(), exec.env, exec.removedEnvironment, EnvironmentNames::CaseSensitive);
+    auto const searchPath = string {
+        environmentValue(environment, "PATH", EnvironmentNames::CaseSensitive).value_or(string_view {})
+    };
+    return namesProgram(exec.program,
+                        ProgramSearch { .path = searchPath,
+                                        .workingDirectory = exec.workingDirectory,
+                                        .fileSystem = core::platform::NativeFileSystem::instance() });
 }
 
 SpawnProgress settleProgressOf(OwnedFd& settle) noexcept

@@ -16,6 +16,7 @@
 
 #include <vtextension/ExtensionConsent.hpp>
 #include <vtextension/ExtensionError.hpp>
+#include <vtextension/PaneService.hpp>
 #include <vthost/DaemonExtensions.hpp>
 
 namespace vthost
@@ -133,6 +134,99 @@ namespace
         DaemonWorldWiring _wiring;
     };
 
+    /// One row per OwnedPaneError, indexed by value: the policy's word for it.
+    inline constexpr auto OwnedPaneErrorRows = std::array {
+        vtextension::PaneError::NotOwned,        // NotOwned
+        vtextension::PaneError::TooMany,         // TooMany
+        vtextension::PaneError::HostRefused,     // Upgrading
+        vtextension::PaneError::NotReconciled,   // NotReconciled
+        vtextension::PaneError::NotSupportedYet, // NotSupported (held directories, here)
+        vtextension::PaneError::CwdMissing,      // DirectoryGone
+        vtextension::PaneError::ProgramMissing,  // ProgramMissing
+    };
+    static_assert(OwnedPaneErrorRows.size() == std::to_underlying(OwnedPaneError::ProgramMissing) + 1U,
+                  "every OwnedPaneError has a row");
+
+    [[nodiscard]] constexpr vtextension::PaneError paneErrorOf(OwnedPaneError error) noexcept
+    {
+        return OwnedPaneErrorRows.at(std::to_underlying(error));
+    }
+
+    /// The status a pane reports, as the world names it, indexed by vtbackend::ProgramState.
+    inline constexpr auto AgentStatusOf = std::array {
+        vtextension::AgentStatus::Idle,    // Idle
+        vtextension::AgentStatus::Working, // Working
+        vtextension::AgentStatus::Done,    // Done
+        vtextension::AgentStatus::Blocked, // Blocked
+        vtextension::AgentStatus::Error,   // Error
+    };
+    static_assert(AgentStatusOf.size() == std::to_underlying(vtbackend::ProgramState::Error) + 1U,
+                  "every ProgramState has a row");
+
+    /// One extension's agent panes, on the host's owned panes.
+    class PaneHostAdapter final: public vtextension::IPaneHost
+    {
+      public:
+        PaneHostAdapter(std::string_view extension, IOwnedPanes& panes):
+            _extension { extension }, _panes { panes }
+        {
+        }
+
+        [[nodiscard]] std::expected<std::string, vtextension::PaneError> open(
+            vtextension::PaneSpawn spawn) override
+        {
+            return _panes
+                .open(OwnedPaneSpawn { .extension = _extension,
+                                       .argv = std::move(spawn.argv),
+                                       .environment = std::move(spawn.environment),
+                                       .removedEnvironment = std::move(spawn.removedEnvironment),
+                                       .directory = std::move(spawn.directory),
+                                       .cwd = std::move(spawn.cwd),
+                                       .title = std::move(spawn.title),
+                                       .tag = std::move(spawn.tag),
+                                       .near = std::move(spawn.near) })
+                .transform_error(paneErrorOf);
+        }
+
+        [[nodiscard]] std::expected<void, vtextension::PaneError> close(std::string_view pane) override
+        {
+            return _panes.close(_extension, pane).transform_error(paneErrorOf);
+        }
+
+        [[nodiscard]] std::expected<std::vector<vtextension::PaneInfo>, vtextension::PaneError> list()
+            override
+        {
+            return _panes.list(_extension)
+                .transform([](std::vector<OwnedPaneInfo> const& panes) {
+                    return std::ranges::to<std::vector<vtextension::PaneInfo>>(
+                        panes | std::views::transform([](OwnedPaneInfo const& info) {
+                            return vtextension::PaneInfo {
+                                .pane = info.pane,
+                                .tag = info.tag,
+                                .status = info.status.transform([](vtbackend::ProgramState state) {
+                                    return AgentStatusOf.at(std::to_underlying(state));
+                                }),
+                                .program = info.program == PaneLiveness::Alive
+                                               ? vtextension::PaneProgram::Alive
+                                               : vtextension::PaneProgram::Gone,
+                            };
+                        }));
+                })
+                .transform_error(paneErrorOf);
+        }
+
+        /// Revealing an agent pane is served from the next phase on.
+        [[nodiscard]] std::expected<void, vtextension::PaneError> reveal(
+            std::string_view /*pane*/, vtextension::Origin /*origin*/) override
+        {
+            return std::unexpected(vtextension::PaneError::NotSupportedYet);
+        }
+
+      private:
+        std::string _extension;
+        IOwnedPanes& _panes;
+    };
+
     /// @return The daemon world @p config declares, its problems logged.
     [[nodiscard]] std::unique_ptr<vtextension::DaemonExtensionRuntime> compose(
         vtextension::DaemonExtensionRuntimeConfig config,
@@ -156,6 +250,8 @@ namespace
                     [wiring](vtextension::ServedTabOwner const& owner) {
                         return servedTabServiceOf(owner, wiring);
                     },
+                .panesFor =
+                    [wiring](vtextension::ServedTabOwner const& owner) { return paneHostOf(owner, wiring); },
                 .onLog = &logExtensionMessage });
         for (auto const& problem: composed.problems)
             errorLog()("{}", problem.message);
@@ -267,6 +363,7 @@ namespace
     inline constexpr auto HintRows = std::array {
         HintRow { .served = ServedHint::Tabs, .hint = vtextension::DaemonHint::Tabs },
         HintRow { .served = ServedHint::Actions, .hint = vtextension::DaemonHint::Actions },
+        HintRow { .served = ServedHint::Panes, .hint = vtextension::DaemonHint::Panes },
     };
 
     /// @return vthost's answer as vtextension's.
@@ -281,6 +378,12 @@ namespace
         return vtextension::GrantState::Pending;
     }
 } // namespace
+
+std::unique_ptr<vtextension::IPaneHost> paneHostOf(vtextension::ServedTabOwner const& owner,
+                                                   DaemonWorldWiring wiring)
+{
+    return std::make_unique<PaneHostAdapter>(owner.extension, wiring.panes);
+}
 
 std::unique_ptr<vtextension::IServedTabService> servedTabServiceOf(vtextension::ServedTabOwner const& owner,
                                                                    DaemonWorldWiring wiring)

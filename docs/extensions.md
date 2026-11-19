@@ -419,7 +419,9 @@ again in a later callback", which starts with a fresh budget, not "the store is 
   appends its template's `pane-env` pairs after them. `pane-open` returns before the pane exists; the pane
   opens beside the served tab `near` names, else where the window focused last looks, without taking the
   focus, and is listed from then on until its session ends. `panes` answers `limit` until the daemon has
-  restored its sessions; at most 32 panes per extension;
+  restored its sessions; at most 32 panes per extension. `pane-open` answers `not-supported-yet` where
+  Contour cannot start a program in a directory it holds open (a Flatpak whose shells run on the host, and
+  Windows), and `gone` for a worktree removed since it was opened;
 - `tab-open`, `tab-close`, `tab-reveal`, `tabs`, `tab-read`, `tab-write`: tabs it serves;
 - `actions-take`, `summary-set`, `pane-reveal`: its command-palette actions and its summary;
 - `file-read`: regular files inside a root declared readable, of at most 64 KiB.

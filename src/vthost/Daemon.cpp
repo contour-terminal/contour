@@ -1740,7 +1740,11 @@ int runDaemon(DaemonConfig const& config,
             .restore = std::move(restore),
             .handover = std::exchange(image, std::nullopt),
             .adoptChild = daemonKeeper.childAdopter(),
-            .seedRecovered = std::move(recovery.seeder) }
+            .seedRecovered = std::move(recovery.seeder),
+            .ownedPaneStore = config.ownedPanes,
+            .ptySandbox = vtpty::sandboxEscapeFromConfig(config.escapeSandbox),
+            .heldDirectorySpawn = &vtpty::Process::heldDirectorySpawn,
+            .programFound = &vtpty::Process::findsProgram }
     };
     // Destroyed before the host: an end the daemon did not announce (an exception during the setup, every
     // listener gone on its own) leaves the sessions to the keeper, not their Releases.

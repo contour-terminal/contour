@@ -65,12 +65,15 @@
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/CommandInterruption.hpp>
 #include <vthost/ConnectionId.hpp>
+#include <vthost/ConnectionWorkspaces.hpp>
 #include <vthost/ConsentTicket.hpp>
 #include <vthost/ExtensionActions.hpp>
 #include <vthost/ExtensionHosting.hpp>
 #include <vthost/HistorySeed.hpp>
 #include <vthost/NodeMove.hpp>
 #include <vthost/ObjectRegistry.hpp>
+#include <vthost/OwnedPaneStore.hpp>
+#include <vthost/OwnedPanes.hpp>
 #include <vthost/PermissionWire.hpp>
 #include <vthost/ProfileCatalog.hpp>
 #include <vthost/RestoredCounts.hpp>
@@ -1044,6 +1047,9 @@ struct SessionSpawnRequest
     /// Whether the spawn may fall back from the directory it names (@see SessionHost::settleStartDirectory).
     StartDirectory startDirectory = StartDirectory::Preferred;
 
+    /// Whether the tab a creation makes becomes its workspace's active one (createTabIn()).
+    vtworkspace::TabActivation activation = vtworkspace::TabActivation::Activate;
+
     /// Engaged for a served session: it runs no program, but adopts the device named here, and every field
     /// above that shapes a program (its command, profile, directory, history and input) is ignored. Refused
     /// while the host's ServedAdmission is Closed. Nullopt spawns a program.
@@ -1234,8 +1240,24 @@ struct SessionHostConfig
     RecoveredSeeder seedRecovered {};
     /// Where the UUIDs of workspaces, tabs and panes come from. Tests pass a sequential one.
     std::shared_ptr<vtcontrol::UuidSource> uuids = vtcontrol::systemUuidSource();
-    /// Where the UUIDs of served tabs come from (@see ServedSessions); null for @ref uuids.
+    /// Where the UUIDs of served tabs and of extensions' agent panes come from (@see ServedSessions,
+    /// OwnedPanes), minted on the extensions' lane: thread-safe. Null for @ref uuids.
     std::shared_ptr<vtcontrol::UuidSource> servedIds {};
+    /// The registry of the agent panes daemon-scoped extensions opened (@see OwnedPanes); null for one in
+    /// memory, which no restart keeps.
+    std::shared_ptr<IOwnedPaneStore> ownedPaneStore {};
+    /// The sandbox policy @ref ptys spawns under (makeShellPtyFactory()'s `escape_sandbox`). A spawn through
+    /// @ref profilePtys runs under its own profile's instead.
+    SandboxEscape ptySandbox = SandboxEscape::Escapes;
+    /// Whether a program spawned under a sandbox policy can be started in a directory held open
+    /// (vtpty::Process::heldDirectorySpawn). Where an agent's spawn could not (a Flatpak whose shells run on
+    /// the host, Windows), an extension's pane-open is refused not-supported-yet. Empty: everywhere, for a
+    /// host whose devices start no program.
+    std::function<vtpty::HeldDirectorySpawn(SandboxEscape)> heldDirectorySpawn {};
+    /// Whether an agent pane's program is found where its spawn would look it up
+    /// (vtpty::Process::findsProgram), so that pane-open names a missing one rather than open a tab that
+    /// fails. Called on any thread. Empty: every program is, for a host whose devices start none.
+    std::function<bool(vtpty::Process::ExecInfo const&)> programFound {};
     /// How long after its connection dropped a window is taken to still show its workspace, so that an
     /// attach does not take it (@see SessionHost::shownForAttach). The default is proto::ReconnectGrace: the
     /// longest wait between two reconnect attempts of a client plus the time one may take to attach.
@@ -1299,7 +1321,9 @@ class HostGitLookups
 class SessionHost final:
     public vtworkspace::ModelEvents,
     public IDaemonExtensionControl,
-    private ServedTabHost
+    private ServedTabHost,
+    private OwnedPaneHost,
+    private IServedAdmission
 {
   public:
     /// @param loop The event loop all model mutation is confined to.
@@ -2012,10 +2036,17 @@ class SessionHost final:
     void admitServedSessions() noexcept;
 
     /// @return Whether a served spawn is admitted now.
-    [[nodiscard]] ServedAdmission servedAdmission() const noexcept { return _servedAdmission; }
+    [[nodiscard]] ServedAdmission servedAdmission() const noexcept { return current(); }
 
     /// @return The served tabs of this host, and their devices.
     [[nodiscard]] ServedSessions& served() noexcept { return _served; }
+
+    /// @return The agent panes daemon-scoped extensions opened in this host.
+    [[nodiscard]] OwnedPanes& ownedPanes() noexcept { return _ownedPanes; }
+    /// Waits until the owned-pane registry saved so far reached its store, which is written off the loop.
+    void flushOwnedPanes() { _ownedPaneWriter.flush(); }
+    /// @copydoc ownedPanes()
+    [[nodiscard]] OwnedPanes const& ownedPanes() const noexcept { return _ownedPanes; }
 
     /// @param session A hosted session.
     /// @return What the pane is doing now; every field empty for an unknown session.
@@ -2206,6 +2237,10 @@ class SessionHost final:
     /// @return Its PTY, through the profile PTY factory when a profile was resolved and one is set; null when
     ///         the factory failed.
     [[nodiscard]] std::unique_ptr<vtpty::Pty> makePty(ResolvedSpawn const& spawn) const;
+
+    /// @return Whether makePty() spawns @p spawn through the profile PTY factory, under its profile's sandbox
+    ///         policy (else through the host's, under SessionHostConfig::ptySandbox).
+    [[nodiscard]] bool spawnsByProfile(ResolvedSpawn const& spawn) const noexcept;
 
     /// Settles the directory @p request's shell starts in, for every way a spawn names one: the directory
     /// of @ref SessionSpawnRequest::directoryFrom when the request names none, then a check that the
@@ -2466,6 +2501,28 @@ class SessionHost final:
         vtworkspace::SessionId session) const override;
     [[nodiscard]] std::string workspaceRef(vtworkspace::WorkspaceId workspace) const override;
 
+    // OwnedPaneHost: what the owned panes reach of the host, on the loop thread.
+    [[nodiscard]] std::optional<vtworkspace::SessionId> createOwnedTab(
+        OwnedPaneSpawn const& spawn, vtcontrol::Uuid pane, vtworkspace::WorkspaceId workspace) override;
+    void closeOwnedSession(vtworkspace::SessionId session) override;
+    [[nodiscard]] vtpty::HeldDirectorySpawn heldDirectorySpawn() const override;
+    [[nodiscard]] std::optional<vtworkspace::WorkspaceId> firstWorkspace() const override;
+    [[nodiscard]] bool findsProgram(OwnedPaneSpawn const& spawn) const override;
+
+    // IServedAdmission: the upgrade latch, read from any thread.
+    [[nodiscard]] ServedAdmission current() const noexcept override;
+
+    /// Tells the owned panes which panes the host holds, once every restore path ran: posted to the loop by
+    /// the constructor, on each of its exits.
+    void postOwnedPaneReconciliation();
+
+    /// Tells the owned panes @p session's status, if it runs one of theirs. Loop thread.
+    void noteOwnedPaneStatus(vtworkspace::SessionId session);
+
+    /// @return @p session's status as an agent pane shows it (paneStatusOf()); nullopt for none.
+    [[nodiscard]] std::optional<vtbackend::ProgramState> paneStatusOfSession(
+        vtworkspace::SessionId session) const;
+
     /// Publishes the workspace @p client selects to the served tabs' mirror.
     void publishSelection(SessionStreamEvents const& client);
 
@@ -2601,6 +2658,11 @@ class SessionHost final:
     HostGitLookups _git;
     /// The host's profiles; null for none. @see SessionHostConfig::profiles
     std::shared_ptr<ProfileCatalog const> _profiles;
+    SandboxEscape _ptySandbox; ///< @see SessionHostConfig::ptySandbox
+    /// @see SessionHostConfig::heldDirectorySpawn
+    std::function<vtpty::HeldDirectorySpawn(SandboxEscape)> _heldDirectorySpawn;
+    /// @see SessionHostConfig::programFound
+    std::function<bool(vtpty::Process::ExecInfo const&)> _programFound;
     /// What each attached client reported it can display, keyed by its stream subscription so the
     /// entry lives exactly as long as the client does (@see unsubscribeStream). `_pageSize` is
     /// resolved from these, never assigned from one of them.
@@ -2730,11 +2792,23 @@ class SessionHost final:
     /// _served, which reads the origins, and _daemonWorld, which takes them; its hints reach the world
     /// through the loop and the gate.
     ExtensionActions _extensionActions;
+    /// Whether a served or owned spawn is admitted (@see closeServedSessions): written on the loop, read from
+    /// any thread (IServedAdmission).
+    std::atomic<ServedAdmission> _servedAdmission { ServedAdmission::Open };
+    /// Which workspace each attached window selects, and which was focused last. Before _served and
+    /// _ownedPanes, which read it.
+    ConnectionWorkspaces _connectionWorkspaces;
     /// The served tabs and their devices. Before _daemonWorld, whose extensions serve them, and before
     /// _sessions, which hold the devices it made.
     ServedSessions _served;
-    /// Whether a served spawn is admitted (@see closeServedSessions). Loop thread.
-    ServedAdmission _servedAdmission = ServedAdmission::Open;
+    /// The registry the owned panes are read from and written to. Before _ownedPanes.
+    std::shared_ptr<IOwnedPaneStore> _ownedPaneStore;
+    /// Writes _ownedPaneStore off the loop; flushed as it goes, after _ownedPanes.
+    AsyncOwnedPaneStore _ownedPaneWriter;
+    /// The agent panes daemon-scoped extensions opened. Built from the raw registry before the restore runs,
+    /// so Unreconciled until the constructor's posted reconciliation ran; before _daemonWorld, whose boot
+    /// extensions may list their panes at once.
+    OwnedPanes _ownedPanes;
     /// The daemon-scoped extensions; null for none. Made by SessionHostConfig::daemonWorld in the
     /// constructor, stopped by the destructor before it drains the loop. @see makeDaemonWorld
     std::shared_ptr<IDaemonWorldHosting> _daemonWorld;

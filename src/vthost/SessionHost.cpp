@@ -364,6 +364,17 @@ namespace
         }
         return bytes.size();
     }
+
+    /// @return What an agent pane runs: @p spawn's program, which must be named, in its directory.
+    [[nodiscard]] vtpty::Process::ExecInfo ownedExecOf(OwnedPaneSpawn const& spawn)
+    {
+        return vtpty::Process::ExecInfo { .program = spawn.argv.front(),
+                                          .arguments = { std::next(spawn.argv.begin()), spawn.argv.end() },
+                                          .workingDirectory = spawn.cwd,
+                                          .env = { spawn.environment.begin(), spawn.environment.end() },
+                                          .removedEnvironment = spawn.removedEnvironment,
+                                          .directory = spawn.directory };
+    }
 } // namespace
 
 void HostedSession::writeInput(std::string_view bytes)
@@ -541,16 +552,40 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _fileSystem(config.fileSystem.get()),
     _git(config.git, config.fileSystem.get()),
     _profiles(std::move(config.profiles)),
+    _ptySandbox(config.ptySandbox),
+    _heldDirectorySpawn(std::move(config.heldDirectorySpawn)),
+    _programFound(std::move(config.programFound)),
     _defaultCellPixelSize(config.defaultCellPixelSize),
     _nextSessionId(config.firstSessionId),
     _extensions(std::move(config.extensions)),
     _extensionActions(hintRaiser()),
     // Before _objects takes config.uuids over.
-    _served(config.servedIds ? std::move(config.servedIds) : config.uuids,
+    _served(config.servedIds ? config.servedIds : config.uuids,
             _extensionActions,
+            _connectionWorkspaces,
+            *this,
             hintRaiser(),
             loopPost(),
             *this),
+    _ownedPaneStore(config.ownedPaneStore ? std::move(config.ownedPaneStore)
+                                          : std::make_shared<InMemoryOwnedPaneStore>()),
+    _ownedPaneWriter(*_ownedPaneStore),
+    // From the raw registry, before any restore: Unreconciled until postOwnedPaneReconciliation()'s job ran.
+    // It asks heldDirectorySpawn() at once, which reads only _profiles, _profilePtys, _ptySandbox and
+    // _heldDirectorySpawn, each initialized before it.
+    _ownedPanes(OwnedPanesServices {
+        .store = _ownedPaneWriter,
+        // Minted on the extensions' lane, as the served tabs' ids are, from the same source.
+        .ids = config.servedIds ? *config.servedIds : *config.uuids,
+        .host = *this,
+        .servedTabs = _served,
+        .origins = _extensionActions,
+        .workspaces = _connectionWorkspaces,
+        .admission = *this,
+        .post = loopPost(),
+        .panesChanged =
+            [raise = hintRaiser()](std::string_view extension) { raise(extension, ServedHint::Panes); },
+    }),
     // Once the loop and the gate exist: the factory may post to the loop already.
     _daemonWorld(makeDaemonWorld(config.daemonWorld)),
     _announcedStatusPatience(config.announcedStatusPatience),
@@ -591,6 +626,8 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     if (config.handover)
     {
         _handoverOutcome = restoreHandover(*std::move(config.handover));
+        // A live upgrade or a keeper recovery: its panes came back, and with them the extensions' own.
+        postOwnedPaneReconciliation();
         return;
     }
     // The first workspace is named before anything is spawned into it: its UUID is part of every pane's
@@ -610,10 +647,15 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     }
     else
         realizeStartupLayout(_workspace, config.startupLayout);
+    // A cold restart restores no agent pane (the snapshot leaves them out), so this empties the registry.
+    postOwnedPaneReconciliation();
 }
 
 SessionHost::~SessionHost()
 {
+    // Before anything else: an agent pane's creation or a served tab's, posted and run by the drain below,
+    // must find the host closed rather than create a session it then tears down.
+    _servedAdmission.store(ServedAdmission::Closed, std::memory_order_release);
     // No frame timer may tick a terminal the teardown below destroys, nor fire in the drain it turns.
     _animationTicks.clear();
     // Nor may a git lookup tell the host the drain below turns.
@@ -670,13 +712,29 @@ SessionHost::ResolvedSpawn SessionHost::resolveSpawn(SessionSpawnRequest const& 
     return spawn;
 }
 
+bool SessionHost::spawnsByProfile(ResolvedSpawn const& spawn) const noexcept
+{
+    return spawn.sandbox && _profilePtys && spawn.commandOverride;
+}
+
 std::unique_ptr<vtpty::Pty> SessionHost::makePty(ResolvedSpawn const& spawn) const
 {
     // The profile's own sandbox policy travels with its shell: one inherited from the daemon's default
     // profile would run a contained profile's shell on the host.
-    if (spawn.sandbox && _profilePtys && spawn.commandOverride)
+    if (spawnsByProfile(spawn))
         return _profilePtys(_pageSize, *spawn.commandOverride, *spawn.sandbox);
     return _ptyFactory(_pageSize, spawn.commandOverride);
+}
+
+vtpty::HeldDirectorySpawn SessionHost::heldDirectorySpawn() const
+{
+    if (!_heldDirectorySpawn)
+        return vtpty::HeldDirectorySpawn::Supported;
+    // Decided as makePty() spawns an agent: resolved as its request is (no profile named, a program
+    // overriding the shell), under its profile's policy where profiles spawn, else the host's.
+    auto const spawn =
+        resolveSpawn(SessionSpawnRequest { .commandOverride = vtpty::Process::ExecInfo {} }, SessionId {});
+    return _heldDirectorySpawn(spawnsByProfile(spawn) ? *spawn.sandbox : _ptySandbox);
 }
 
 Uuid SessionHost::paneUuidFor(SessionSpawnRequest const& request)
@@ -784,7 +842,7 @@ namespace
 
 bool SessionHost::admitsServed(ServedSpawn const& served) const
 {
-    if (_servedAdmission == ServedAdmission::Closed)
+    if (current() == ServedAdmission::Closed)
     {
         sessionLog()("a served tab of {} is refused while a live upgrade runs", served.extension);
         return false;
@@ -805,8 +863,7 @@ ServedBy const* SessionHost::servedBy(SessionId session) const noexcept
 
 void SessionHost::closeServedSessions()
 {
-    _servedAdmission = ServedAdmission::Closed;
-    _served.publishAdmission(_servedAdmission);
+    _servedAdmission.store(ServedAdmission::Closed, std::memory_order_release);
     // Collected first: ending a session changes the map being walked.
     auto const served = std::ranges::to<std::vector<SessionId>>(
         sessionIds() | std::views::filter([this](SessionId id) { return servedBy(id) != nullptr; }));
@@ -816,8 +873,7 @@ void SessionHost::closeServedSessions()
 
 void SessionHost::admitServedSessions() noexcept
 {
-    _servedAdmission = ServedAdmission::Open;
-    _served.publishAdmission(_servedAdmission);
+    _servedAdmission.store(ServedAdmission::Open, std::memory_order_release);
 }
 
 std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& incoming, SpawnIds const& ids)
@@ -993,6 +1049,8 @@ std::unique_ptr<HostedSession> SessionHost::makeHostedSession(SessionId id,
                 if (std::holds_alternative<WorkingDirectoryChangedSignal>(signal)
                     || std::holds_alternative<CommandBlockFinishedSignal>(signal))
                     refreshWorkspaceGitOf(id);
+                if (std::holds_alternative<ProgramStatusChangedSignal>(signal))
+                    noteOwnedPaneStatus(id);
             });
         },
         makeSessionExtensions(id),
@@ -1420,7 +1478,7 @@ Tab* SessionHost::createTabIn(vtworkspace::WorkspaceId workspace, SessionSpawnRe
 
     _stagedTab = StagedTab { .uuid = tabUuid,
                              .name = request.presetIds ? request.presetIds->tabName : std::string {} };
-    auto* tab = _model.createTab(workspace);
+    auto* tab = _model.createTab(workspace, request.activation);
     _stagedTab.reset();
     _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
     if (tab == nullptr)
@@ -1583,7 +1641,7 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client, DetachKi
         return;
     _focusSerials.erase(client);
     _selectionSeen.erase(client);
-    _served.publishWorkspace(client->connectionId(), std::nullopt);
+    _connectionWorkspaces.publish(client->connectionId(), std::nullopt);
     noteLeft(client->selectedWorkspace());
     // A window that said it closes leaves its workspace free at once, a hold from an earlier drop of the same
     // window included; a lost connection is a reconnect.
@@ -1630,8 +1688,8 @@ void SessionHost::noteSelected(SessionStreamEvents const& client)
 void SessionHost::publishSelection(SessionStreamEvents const& client)
 {
     auto const selected = client.selectedWorkspace();
-    _served.publishWorkspace(client.connectionId(),
-                             selected != 0 ? std::optional { WorkspaceId { selected } } : std::nullopt);
+    _connectionWorkspaces.publish(client.connectionId(),
+                                  selected != 0 ? std::optional { WorkspaceId { selected } } : std::nullopt);
 }
 
 void SessionHost::noteLeft(uint64_t workspace)
@@ -1651,7 +1709,10 @@ void SessionHost::noteFocus(SessionStreamEvents const& client, proto::WindowFocu
     if (!std::ranges::contains(_attachedClients, &client))
         return;
     if (focus == proto::WindowFocus::Focused)
+    {
         _focusSerials[&client] = ++_focusCounter;
+        _connectionWorkspaces.noteFocused(client.connectionId());
+    }
     settleRaiseRole();
 }
 
@@ -2267,6 +2328,8 @@ void SessionHost::replaceProfiles(std::shared_ptr<ProfileCatalog const> profiles
     if (!profiles)
         return;
     _profiles = std::move(profiles);
+    // The default profile's sandbox policy may differ now, and with it whether an agent can start here.
+    _ownedPanes.heldDirectoriesChanged();
     auto relimited = std::vector<SessionId> {};
     for (auto const& [id, session]: _sessions)
     {
@@ -2403,6 +2466,7 @@ void SessionHost::eraseSession(uint64_t session)
     _endWaits.erase(session);
     _sessions.erase(session);
     _served.sessionEnded(SessionId { session });
+    _ownedPanes.sessionEnded(SessionId { session });
     tellStructure(&StructureEvents::sessionClosed, SessionId { session });
 }
 
@@ -2790,6 +2854,8 @@ void SessionHost::settleEnd(SessionId session)
         endSession(session, hosted.endCause());
         return;
     }
+    // Its program is gone while its session waits for the status: an agent's pane lists it so.
+    _ownedPanes.programExited(session);
     // Its status comes from whoever reaps it, perhaps after the hangup by more than any moment's patience:
     // the session ends once it came, or once the patience ran out.
     auto wait = std::make_unique<EndWait>();
@@ -2946,7 +3012,7 @@ std::shared_ptr<IDaemonWorldHosting> SessionHost::makeDaemonWorld(DaemonWorldFac
     };
     return factory(std::move(events),
                    std::move(post),
-                   DaemonWorldWiring { .tabs = _served, .actions = _extensionActions });
+                   DaemonWorldWiring { .tabs = _served, .actions = _extensionActions, .panes = _ownedPanes });
 }
 
 ServedSessions::Raise SessionHost::hintRaiser() const
@@ -2975,6 +3041,79 @@ std::optional<SessionId> SessionHost::createServedTab(WorkspaceId workspace, Ses
     if (tab == nullptr)
         return std::nullopt;
     return tab->rootPane()->session();
+}
+
+std::optional<SessionId> SessionHost::createOwnedTab(OwnedPaneSpawn const& spawn,
+                                                     vtcontrol::Uuid pane,
+                                                     WorkspaceId workspace)
+{
+    if (spawn.argv.empty())
+        return std::nullopt;
+    auto exec = ownedExecOf(spawn);
+    // The agent replaces the shell's program (ShellOverride::Overlays), in its directory or nowhere, in a tab
+    // opened in the background: the user's active and previous tabs stay as they were.
+    auto const* const tab = createTabIn(
+        workspace,
+        SessionSpawnRequest { .commandOverride = std::move(exec),
+                              .presetIds = PresetObjectIds { .pane = pane, .tabName = spawn.title },
+                              .startDirectory = StartDirectory::Required,
+                              .activation = vtworkspace::TabActivation::Background });
+    if (tab == nullptr)
+        return std::nullopt;
+    return tab->rootPane()->session();
+}
+
+bool SessionHost::findsProgram(OwnedPaneSpawn const& spawn) const
+{
+    // A profile's own PATH, overlaid as the agent spawns, is not consulted: it is read on the loop alone.
+    return !spawn.argv.empty() && (!_programFound || _programFound(ownedExecOf(spawn)));
+}
+
+void SessionHost::closeOwnedSession(SessionId session)
+{
+    endSession(session, SessionEnd::Requested);
+}
+
+std::optional<WorkspaceId> SessionHost::firstWorkspace() const
+{
+    auto const* const first = _model.workspaceAt(0);
+    return first != nullptr ? std::optional { first->id() } : std::nullopt;
+}
+
+ServedAdmission SessionHost::current() const noexcept
+{
+    return _servedAdmission.load(std::memory_order_acquire);
+}
+
+void SessionHost::postOwnedPaneReconciliation()
+{
+    _loop.post([gate = _gate] {
+        auto* const host = gate->host;
+        if (host == nullptr)
+            return;
+        auto hosted = std::vector<HostedPane> {};
+        for (auto const session: host->sessionIds())
+            if (auto const pane = host->_objects.uuidOf(session))
+                hosted.push_back(HostedPane {
+                    .pane = *pane, .session = session, .status = host->paneStatusOfSession(session) });
+        host->_ownedPanes.reconcile(hosted);
+    });
+}
+
+void SessionHost::noteOwnedPaneStatus(SessionId session)
+{
+    if (_ownedPanes.owns(session))
+        _ownedPanes.statusChanged(session, paneStatusOfSession(session));
+}
+
+std::optional<vtbackend::ProgramState> SessionHost::paneStatusOfSession(SessionId session) const
+{
+    auto const it = _sessions.find(session.value);
+    if (it == _sessions.end())
+        return std::nullopt;
+    auto const& terminal = std::as_const(it->second->terminal());
+    auto const guard = std::lock_guard { terminal };
+    return paneStatusOf(terminal.programStatus().records());
 }
 
 void SessionHost::activate(SessionId session)

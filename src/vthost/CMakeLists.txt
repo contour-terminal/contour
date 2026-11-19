@@ -74,6 +74,8 @@ add_library(vthost STATIC
     RelocationRequest.hpp
     ConnectionRegistry.cpp
     ConnectionRegistry.hpp
+    ConnectionWorkspaces.cpp
+    ConnectionWorkspaces.hpp
     DaemonRuntime.cpp
     DaemonUpgradeHooks.cpp
     DaemonUpgradeHooks.hpp
@@ -121,6 +123,10 @@ add_library(vthost STATIC
     NativeSession.hpp
     ObjectRegistry.cpp
     ObjectRegistry.hpp
+    OwnedPaneStore.cpp
+    OwnedPaneStore.hpp
+    OwnedPanes.cpp
+    OwnedPanes.hpp
     PduPump.hpp
     ServedSessions.cpp
     ServedSessions.hpp
@@ -384,6 +390,7 @@ if(VTHOST_TESTING)
         LoopDrain_test.cpp
         NodeMove_test.cpp
         ObjectRegistry_test.cpp
+        OwnedPanes_test.cpp
         ServedSessions_test.cpp
         SessionHost_test.cpp
         ShellPtyFactory_test.cpp

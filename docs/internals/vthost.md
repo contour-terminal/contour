@@ -2101,6 +2101,51 @@ What reaches a served session is held to what the extension means it to be:
   client's are. Refusing them would make the dashboard unusable from that front end while protecting nothing
   the user does not already see.
 
+### Owned panes
+
+An *owned pane* is a tab a daemon-scoped extension opened for an agent (`pane-open`): an ordinary hosted
+session running the program of one of its manifest's `pane` templates. `OwnedPanes` (one per `SessionHost`)
+keeps which pane is whose: a mutex-guarded mirror the extensions' lane reads and writes, every model change --
+creation, close -- posted to the loop, as `ServedSessions` does for served tabs. It is also persisted, one file
+per extension beside its store (`owned-panes`, `<pane-uuid> <tag>` per line, written whole and durably, at most
+32 read back), so that an extension that runs again after a live upgrade or a keeper recovery finds the panes its
+runs recorded. The loop never waits for that disk: `AsyncOwnedPaneStore` hands each save to a writer thread, the
+newest records of an extension replacing those still waiting, and the host's destruction writes what waits. A
+live upgrade's exec runs no destructor, so `LiveUpgrade` flushes the writer after the capture and before it
+announces the exec: a save still queued then would leave the next image reconciling without the pane.
+
+- **It opens out of focus, where it was dispatched.** The creation resolves the workspace from the dashboard
+  `near` names (the served tabs' mirror, and only for the extension's own tab), else from the window focused
+  last (`ConnectionWorkspaces`, which `noteFocus` stamps and the selection publishes), else the first
+  workspace, and opens the tab there with `TabActivation::Background`: no `activeTabChanged`, and the active and
+  previous tabs stay the user's. A pane-open accepted just before a live upgrade closed the served sessions
+  creates nothing: the creation checks the admission again on the loop, and fails the pane.
+- **It runs where it was told, or not at all.** The spawn is `StartDirectory::Required` with the directory the
+  policy opened held in `ExecInfo::directory`, which the spawn trampoline enters by `fchdir()`: a worktree
+  removed since fails the spawn instead of starting the agent in the profile's directory. `pane-open` refuses
+  before any pane exists where that cannot hold: `not-supported-yet` where the program would run through
+  `flatpak-spawn` or on Windows (`Process::heldDirectorySpawn`, asked of the policy the agent's spawn takes:
+  the default profile's where profiles spawn, else the daemon's, again after a profile reload), `gone` (`CwdMissing`) for a directory whose last
+  link went (`DirectoryHandle::isRemoved`, a worktree removed and made again at its path). The spawn lets
+  its handle go once the trampoline holds a copy.
+- **It is listed from `pane-open` until its session ended**: `Pending` until created, `Cancelled` when closed
+  before that (its creation then spawns nothing), `Open` after; a close of an open pane posts the session's end,
+  and the entry goes only with `sessionEnded`. The extension's engine reconciles its runs against that list, so a
+  pane missing from it is a run that ends.
+- **Its status is named, not newest.** `PaneStatusSources` picks the `claude-code` record (the hooks'), then the
+  root record, from the session's OSC 7501 records; `program` is `gone` while a session whose child exited
+  waits for its status.
+
+**The construction order.** `_ownedPanes` is built in `SessionHost`'s member-initializer list, before the
+constructor body restores a handover image (a live upgrade or a keeper recovery) or a snapshot, and before
+`_daemonWorld`, whose boot extensions may call `panes` at once. It therefore starts from the raw files,
+`Unreconciled`, and `list` and `open` answer `NotReconciled` (WIT `limit`, "retry later") until
+`OwnedPanes::reconcile` has run. The constructor posts that reconciliation on **both** of its exits -- the early
+return after `restoreHandover`, and the end of the normal path -- with every pane the host then holds: an entry
+whose pane is not there is dropped (a cold restart empties the registry), the files are saved, and `Panes` is
+raised for every extension that had entries or was told to retry. Listing earlier would tell an extension its running agent's pane
+is gone, and the removal checks that follow could remove a worktree under a running agent.
+
 ## Binary imsg IPC (the real tmux binary as a client)
 
 The daemon's third endpoint, `<control-socket>-tmux`, speaks tmux's binary

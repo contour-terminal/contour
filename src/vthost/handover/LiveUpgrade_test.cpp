@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #ifndef _WIN32
+    #include <vtpty/DirectoryHandle.hpp>
     #include <vtpty/Process.hpp>
     #include <vtpty/ProcessPlacement.hpp>
     #include <vtpty/test/ProcessTesting.hpp>
@@ -32,6 +33,7 @@
     #include <stdexcept>
     #include <string>
     #include <string_view>
+    #include <thread>
     #include <tuple>
     #include <utility>
     #include <variant>
@@ -43,6 +45,8 @@
     #include <vthost/DaemonBinary.hpp>
     #include <vthost/DaemonImage.hpp>
     #include <vthost/LoopDrain.hpp>
+    #include <vthost/OwnedPaneStore.hpp>
+    #include <vthost/OwnedPanes.hpp>
     #include <vthost/SessionHost.hpp>
     #include <vthost/handover/HandoverCodec.hpp>
     #include <vthost/handover/HandoverRestore.hpp>
@@ -137,8 +141,11 @@ struct Upgrade: vthost::testing::UpgradeBench
 {
     /// @param devices The device of each session the host spawns.
     /// @param settings The sessions' terminal settings.
-    explicit Upgrade(LiveHost::Devices devices = catDevice, vtbackend::Settings settings = {}):
-        UpgradeBench { std::move(devices), std::move(settings) }
+    /// @param config How the host is set up.
+    explicit Upgrade(LiveHost::Devices devices = catDevice,
+                     vtbackend::Settings settings = {},
+                     SessionHostConfig config = LiveHost::sequentialIds()):
+        UpgradeBench { std::move(devices), std::move(settings), std::move(config) }
     {
     }
 
@@ -258,6 +265,38 @@ struct AdoptingHost
 
     SessionHost host;
     LoopDrain drain;
+};
+
+/// A registry whose every save takes a while, as a slow disk's does: a save still on its way when the process
+/// image is replaced never lands.
+class SlowOwnedPaneStore final: public IOwnedPaneStore
+{
+  public:
+    static constexpr auto SaveTime = std::chrono::milliseconds { 1500 };
+
+    [[nodiscard]] std::vector<std::pair<std::string, std::vector<OwnedPaneRecord>>> loadAll() const override
+    {
+        return _records.loadAll();
+    }
+
+    [[nodiscard]] std::expected<void, OwnedPaneStoreError> save(
+        std::string_view extension, std::span<OwnedPaneRecord const> records) override
+    {
+        std::this_thread::sleep_for(SaveTime);
+        return _records.save(extension, records);
+    }
+
+    /// @return The records saved of @p extension so far.
+    [[nodiscard]] std::vector<OwnedPaneRecord> savedOf(std::string_view extension) const
+    {
+        for (auto const& [name, records]: _records.loadAll())
+            if (name == extension)
+                return records;
+        return {};
+    }
+
+  private:
+    InMemoryOwnedPaneStore _records;
 };
 
 /// The keeper a daemon runs behind, as a test sets its answers.
@@ -402,6 +441,45 @@ TEST_CASE("an exception after the keeper was told of the exec leaves the keeper 
     REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
     CHECK(u.live->host.sessionCount() == 3);
     CHECK(k.keeper.launches().size() == 1);
+}
+
+TEST_CASE("a live upgrade writes the owned-pane registry before the exec",
+          "[vthost][handover][upgrade][panes]")
+{
+    constexpr auto Owner = std::string_view { "orchestrator" };
+    auto const store = std::make_shared<SlowOwnedPaneStore>();
+    auto config = LiveHost::sequentialIds();
+    config.ownedPaneStore = store;
+    auto u = Upgrade { catDevice, {}, std::move(config) };
+    u.live->spawnTwo();
+    auto& panes = u.live->host.ownedPanes();
+    REQUIRE(u.live->eventually([&] { return panes.list(Owner).has_value(); }));
+    auto const directory = std::make_shared<vtpty::DirectoryHandle const>(
+        vtpty::DirectoryHandle::unbacked(std::filesystem::temp_directory_path().string()));
+    auto const opened = panes.open(OwnedPaneSpawn { .extension = std::string(Owner),
+                                                    .argv = { "claude" },
+                                                    .directory = directory,
+                                                    .cwd = directory->resolvedPath(),
+                                                    .title = "run-1",
+                                                    .tag = "run-1" });
+    REQUIRE(opened.has_value());
+    REQUIRE(u.live->eventually([&] {
+        auto const listed = panes.list(Owner);
+        return listed && listed->size() == 1 && listed->front().state == OwnedPaneState::Open;
+    }));
+    REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
+
+    // What the store holds at the exec is all the next image finds: nothing runs after it, no destructor.
+    auto atExec = std::optional<std::vector<OwnedPaneRecord>> {};
+    u.replacer.onReplace = [&] {
+        atExec = store->savedOf(Owner);
+        throw ImageReplaced {};
+    };
+    auto upgrade = u.orchestrator();
+    REQUIRE_THROWS_AS(std::ignore = u.run(upgrade, UpgradeTarget { .imageId = u.imageId }), ImageReplaced);
+    REQUIRE(atExec.has_value());
+    CHECK(*atExec
+          == std::vector { OwnedPaneRecord { .pane = *vtcontrol::parseUuid(*opened), .tag = "run-1" } });
 }
 
 TEST_CASE("an exception after the exec was announced calls it off with the keeper",

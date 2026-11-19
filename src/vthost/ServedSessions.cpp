@@ -256,11 +256,15 @@ struct ServedSessions::DeviceState
 
 ServedSessions::ServedSessions(std::shared_ptr<vtcontrol::UuidSource> ids,
                                IExtensionActions const& origins,
+                               IConnectionWorkspaces const& workspaces,
+                               IServedAdmission const& admission,
                                Raise raise,
                                OwnerPost post,
                                ServedTabHost& host):
     _ids { std::move(ids) },
     _origins { origins },
+    _workspaces { workspaces },
+    _admission { admission },
     _raise { std::move(raise) },
     _post { std::move(post) },
     _host { host }
@@ -306,25 +310,10 @@ std::string ServedSessions::inputOf(vtpty::ChannelPty const& device) const
     return state->input;
 }
 
-void ServedSessions::publishWorkspace(ConnectionId const& connection,
-                                      std::optional<vtworkspace::WorkspaceId> selected)
-{
-    auto const lock = std::lock_guard { _mutex };
-    std::erase_if(_selected, [&](auto const& entry) { return entry.first == connection; });
-    if (selected)
-        _selected.emplace_back(connection, *selected);
-}
-
 void ServedSessions::publishPageSize(vtbackend::PageSize size)
 {
     auto const lock = std::lock_guard { _mutex };
     _pageSize = size;
-}
-
-void ServedSessions::publishAdmission(ServedAdmission admission)
-{
-    auto const lock = std::lock_guard { _mutex };
-    _admission = admission;
 }
 
 ServedSessions::Tab* ServedSessions::ownedBy(std::string_view extension, std::string_view id)
@@ -335,11 +324,15 @@ ServedSessions::Tab* ServedSessions::ownedBy(std::string_view extension, std::st
     return found != _tabs.end() ? &*found : nullptr;
 }
 
-std::optional<vtworkspace::WorkspaceId> ServedSessions::selectedBy(ConnectionId const& connection) const
+std::optional<vtworkspace::WorkspaceId> ServedSessions::workspaceOfTab(std::string_view extension,
+                                                                       std::string_view tab) const
 {
-    auto const found =
-        std::ranges::find(_selected, connection, &std::pair<ConnectionId, vtworkspace::WorkspaceId>::first);
-    return found != _selected.end() ? std::optional { found->second } : std::nullopt;
+    auto const lock = std::lock_guard { _mutex };
+    auto const found = std::ranges::find_if(_tabs, [&](Tab const& candidate) {
+        return candidate.id == tab && candidate.extension == extension
+               && candidate.phase != TabPhase::Cancelled;
+    });
+    return found != _tabs.end() ? std::optional { found->workspace } : std::nullopt;
 }
 
 void ServedSessions::forget(std::string_view id)
@@ -361,9 +354,9 @@ std::expected<std::string, ServedTabError> ServedSessions::open(std::string_view
     auto created = false;
     {
         auto const lock = std::lock_guard { _mutex };
-        if (_admission == ServedAdmission::Closed)
+        if (_admission.current() == ServedAdmission::Closed)
             return std::unexpected(ServedTabError::Limit);
-        auto const workspace = selectedBy(*connection);
+        auto const workspace = _workspaces.selectedBy(*connection);
         if (!workspace)
             return std::unexpected(ServedTabError::Gone);
         // One dashboard per extension and workspace: a second open, pending or not, is the first one.
@@ -525,7 +518,7 @@ std::expected<void, ServedTabError> ServedSessions::reveal(std::string_view exte
         // A pending tab is activated by its creation.
         if (!found->session)
             return {};
-        auto const selected = connection ? selectedBy(*connection) : std::nullopt;
+        auto const selected = connection ? _workspaces.selectedBy(*connection) : std::nullopt;
         if (!selected)
             return std::unexpected(ServedTabError::Gone);
         session = *found->session;

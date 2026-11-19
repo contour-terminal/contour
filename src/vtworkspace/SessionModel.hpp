@@ -182,8 +182,9 @@ class SessionModel
     // }}}
     // {{{ Tabs
 
-    /// Appends a new tab (with a single fresh-session pane) to @p workspace and makes it active.
-    [[nodiscard]] Tab* createTab(WorkspaceId workspace);
+    /// Appends a new tab (with a single fresh-session pane) to @p workspace and, by @p activation, makes it
+    /// active.
+    [[nodiscard]] Tab* createTab(WorkspaceId workspace, TabActivation activation = TabActivation::Activate);
 
     /// Closes the tab @p tab in @p workspace, reporting each of its sessions closed. If it was the
     /// last tab, the workspace becomes empty (the host decides whether to close the OS window).
@@ -469,8 +470,12 @@ class SessionModel
     ///         twice, which would run the host's whole status-line fan-out for one keystroke.
     bool announceZoomChange(Tab& tab, std::optional<PaneId> zoomedLeafBefore);
 
-    /// Inserts @p tab into @p workspace at @p index (clamped), announcing it and making it the active tab.
-    Tab* insertTab(Workspace& workspace, int index, std::unique_ptr<Tab> tab);
+    /// Inserts @p tab into @p workspace at @p index (clamped), announcing it and, by @p activation, making it
+    /// the active tab.
+    Tab* insertTab(Workspace& workspace,
+                   int index,
+                   std::unique_ptr<Tab> tab,
+                   TabActivation activation = TabActivation::Activate);
 
     /// Announces the zoom change, or else the retitle, of @p tab after a move touched its panes.
     void announcePaneMove(Tab& tab, std::optional<PaneId> zoomedLeafBefore);

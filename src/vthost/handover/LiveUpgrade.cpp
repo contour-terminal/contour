@@ -281,6 +281,9 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::run(UpgradeTar
         daemonLog()("live upgrade refused: {}", describe(image.error()));
         co_return std::unexpected(image.error());
     }
+    // The exec runs no destructor: the owned-pane registry still queued for its writer reaches the disk now,
+    // or the next image reconciles without the panes it names and ends the runs of agents still running.
+    _host.flushOwnedPanes();
 
     // Only the encoded image and the handles it names go on: the decoded one, every session's terminal state
     // in it, is let go of here rather than kept through the wait for the target.

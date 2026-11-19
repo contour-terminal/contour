@@ -24,6 +24,7 @@
 
 #include <vtcontrol/Uuid.hpp>
 #include <vthost/ConnectionId.hpp>
+#include <vthost/ConnectionWorkspaces.hpp>
 #include <vthost/ExtensionHosting.hpp>
 #include <vthost/SessionEnd.hpp>
 #include <vthost/proto/Pdu.hpp>
@@ -70,6 +71,41 @@ enum class ServedAdmission : uint8_t
 {
     Open = 0, ///< It does.
     Closed,   ///< A live upgrade runs: what it would have to close again is refused until it ends.
+};
+
+/// The upgrade latch: whether a served or owned spawn is admitted, read from any thread. One source for both,
+/// SessionHost's: what closes for a live upgrade closes for every extension at once.
+class IServedAdmission
+{
+  public:
+    IServedAdmission() = default;
+    IServedAdmission(IServedAdmission const&) = delete;
+    IServedAdmission(IServedAdmission&&) = delete;
+    IServedAdmission& operator=(IServedAdmission const&) = delete;
+    IServedAdmission& operator=(IServedAdmission&&) = delete;
+    virtual ~IServedAdmission() = default;
+
+    /// @return Closed while a live upgrade runs; Open otherwise.
+    [[nodiscard]] virtual ServedAdmission current() const noexcept = 0;
+};
+
+/// A served tab's workspace, as the served tabs' mirror holds it. Any thread.
+class IServedTabLookup
+{
+  public:
+    IServedTabLookup() = default;
+    IServedTabLookup(IServedTabLookup const&) = delete;
+    IServedTabLookup(IServedTabLookup&&) = delete;
+    IServedTabLookup& operator=(IServedTabLookup const&) = delete;
+    IServedTabLookup& operator=(IServedTabLookup&&) = delete;
+    virtual ~IServedTabLookup() = default;
+
+    /// @param extension Who asks.
+    /// @param tab A served tab's id.
+    /// @return The workspace of @p tab, if it is one of @p extension's tabs and not closed; nullopt
+    /// otherwise.
+    [[nodiscard]] virtual std::optional<vtworkspace::WorkspaceId> workspaceOfTab(
+        std::string_view extension, std::string_view tab) const = 0;
 };
 
 /// Told the outcome of a switch a window was asked for. @see ServedTabHost::askToSwitch
@@ -131,9 +167,9 @@ class ServedTabHost
 /// Each extension serves at most one tab per workspace: opening it again for the same workspace -- open or
 /// still pending, even within one batch of calls -- answers the same id and reveals it. The workspace is the
 /// one the origin's connection selects as the mirror holds it: the loop publishes every attached
-/// connection's selection (publishWorkspace()), so an open racing a switch of that window lands in the
+/// connection's selection (IConnectionWorkspaces), so an open racing a switch of that window lands in the
 /// workspace the user was looking at a moment before -- the switch that follows is the user's own.
-class ServedSessions final: public IServedTabs
+class ServedSessions final: public IServedTabs, public IServedTabLookup
 {
   public:
     /// Raises a hint for an extension, from any thread; never waits.
@@ -141,11 +177,15 @@ class ServedSessions final: public IServedTabs
 
     /// @param ids Where the UUIDs of served tabs come from; thread-safe.
     /// @param origins Which connection each origin stands for.
+    /// @param workspaces Which workspace each attached window selects, as the loop publishes it.
+    /// @param admission The upgrade latch: an open is refused (Limit) while it is closed.
     /// @param raise Tells an extension its tabs changed: their input, their size, their number.
     /// @param post Hands a job to the host's loop.
     /// @param host The host's loop-thread face.
     ServedSessions(std::shared_ptr<vtcontrol::UuidSource> ids,
                    IExtensionActions const& origins,
+                   IConnectionWorkspaces const& workspaces,
+                   IServedAdmission const& admission,
                    Raise raise,
                    OwnerPost post,
                    ServedTabHost& host);
@@ -167,16 +207,8 @@ class ServedSessions final: public IServedTabs
     /// @return What its terminal wrote and nobody read yet; empty for a device this did not make. Any thread.
     [[nodiscard]] std::string inputOf(vtpty::ChannelPty const& device) const;
 
-    /// Records which workspace @p connection's window selects, which open() reads. Loop thread.
-    /// @param connection An attached connection.
-    /// @param selected Its selection; nullopt once it selects none, or detached.
-    void publishWorkspace(ConnectionId const& connection, std::optional<vtworkspace::WorkspaceId> selected);
-
     /// Records the size new served tabs start at: the host's client area. Loop thread.
     void publishPageSize(vtbackend::PageSize size);
-
-    /// Records whether a served tab may be opened: refused (Limit) while a live upgrade runs. Loop thread.
-    void publishAdmission(ServedAdmission admission);
 
     /// Records that @p session's tab moved, whole, to @p workspace: the extension's dashboard of that
     /// workspace now, and no longer of the one it was opened in. Loop thread; a session that serves no tab
@@ -206,6 +238,8 @@ class ServedSessions final: public IServedTabs
     void closeAll(std::string_view extension) override;
     void drawStopped(std::string_view extension, std::string_view title, std::string_view lastFault) override;
     void resumeDrawing(std::string_view extension) override;
+    [[nodiscard]] std::optional<vtworkspace::WorkspaceId> workspaceOfTab(std::string_view extension,
+                                                                         std::string_view tab) const override;
 
   private:
     struct DeviceState;
@@ -254,9 +288,6 @@ class ServedSessions final: public IServedTabs
     ///         _mutex.
     [[nodiscard]] Tab* ownedBy(std::string_view extension, std::string_view id);
 
-    /// @return The workspace @p connection selects, as published; nullopt for none. Call holding _mutex.
-    [[nodiscard]] std::optional<vtworkspace::WorkspaceId> selectedBy(ConnectionId const& connection) const;
-
     /// Creates the session of the pending tab @p id, or drops it if it was cancelled meanwhile. Loop thread.
     void create(std::string const& id, std::string const& title, std::string const& moduleDigest);
 
@@ -271,15 +302,15 @@ class ServedSessions final: public IServedTabs
 
     std::shared_ptr<vtcontrol::UuidSource> _ids; ///< Where the UUIDs of served tabs come from.
     IExtensionActions const& _origins;
+    IConnectionWorkspaces const& _workspaces;
+    IServedAdmission const& _admission;
     Raise _raise;
     OwnerPost _post;
     ServedTabHost& _host;
     mutable std::mutex _mutex; ///< Guards everything below.
     std::vector<Entry> _devices;
     std::vector<Tab> _tabs;
-    std::vector<std::pair<ConnectionId, vtworkspace::WorkspaceId>> _selected;
     vtbackend::PageSize _pageSize { vtbackend::LineCount(24), vtbackend::ColumnCount(80) };
-    ServedAdmission _admission = ServedAdmission::Open;
 };
 
 } // namespace vthost

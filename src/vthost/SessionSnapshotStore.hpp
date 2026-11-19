@@ -205,4 +205,19 @@ class SessionSnapshotStore
     std::filesystem::path const& namedSocket,
     std::string_view extension);
 
+/// The registry of the agent panes the daemon-world extension @p extension opened (@see OwnedPaneStore):
+/// `owned-panes` beside its store, in the directory daemonExtensionStoreDirectory() names the store's parent.
+/// @param stateDirectory The daemon's state directory.
+/// @param name The daemon's name.
+/// @param socket The socket the daemon listens on; canonical, as @p namedSocket.
+/// @param namedSocket The socket its name would run on.
+/// @param extension What the configuration calls the extension.
+/// @return The file; nullopt where daemonExtensionStoreDirectory() names no directory.
+[[nodiscard]] std::optional<std::filesystem::path> daemonExtensionPanesFile(
+    std::filesystem::path const& stateDirectory,
+    std::string_view name,
+    std::filesystem::path const& socket,
+    std::filesystem::path const& namedSocket,
+    std::string_view extension);
+
 } // namespace vthost

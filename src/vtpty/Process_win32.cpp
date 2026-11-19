@@ -182,6 +182,23 @@ HeldDirectorySpawn Process::heldDirectorySpawn(SandboxEscape /*escape*/)
     return HeldDirectorySpawn::Unsupported; // No CreateProcess takes a directory by handle.
 }
 
+bool Process::findsProgram(ExecInfo const& exec)
+{
+    // The child's PATH as start() assembles it; a relative path names a file in this process's directory.
+    auto const inherited = inheritedEnvironment();
+    auto const environment =
+        buildWindowsEnvironment(std::vector<std::string_view> { inherited.begin(), inherited.end() },
+                                exec.env,
+                                exec.removedEnvironment);
+    auto const searchPath = std::string {
+        environmentValue(environment, "PATH", EnvironmentNames::CaseInsensitive).value_or(std::string_view {})
+    };
+    return namesProgram(exec.program,
+                        ProgramSearch { .path = searchPath,
+                                        .workingDirectory = {},
+                                        .fileSystem = core::platform::NativeFileSystem::instance() });
+}
+
 StartResult Process::start()
 {
     Require(static_cast<ConPty const*>(_d->pty.get()));
