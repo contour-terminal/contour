@@ -3231,6 +3231,7 @@ void WindowController::restoreSidebar()
     auto const metrics = app.sidebarMetrics();
     _sidebarVisibility = config.sidebar.value().visibility;
     _tabPlacement = config.tabPlacement.value();
+    _sidebarTabColorStyle = config.sidebar.value().tabColor;
     _sidebarUnits = config.sidebar.value().width.value_or(metrics.tokens.width);
 
     // What the user last chose wins over the configured defaults.

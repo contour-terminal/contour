@@ -83,11 +83,26 @@ Item {
     /// fill with an accent pill, the Terminal inverse video. This item only draws what it is told.
     readonly property var paint: chromeStyle.sidebarSelection(row.selection, row.treeFocused, row.keyboardFocused)
     readonly property bool emphasized: row.paint.fill === "emphasized"
+    /// What the tab's colour paints on the row -- { fill, bar, ink }, each transparent where it paints nothing
+    /// -- in the configured style (`sidebar.tab_color`, window::SidebarTabColor), faded by the row's state as
+    /// the tab strip fades a coloured tab. This item only draws what it is told.
+    readonly property var tabPaint: chromeStyle.sidebarTabColor(row.controller ? row.controller.sidebarTabColorStyle : 0,
+                                                                row.tabColor, chromeStyle.colors.sidebarFill,
+                                                                row.selection, hover.hovered, Window.active)
+    /// Whether the tab's colour fills the row: it then stands in for the selection's and the hover's fill.
+    readonly property bool tinted: row.tabPaint.fill.a > 0
+    readonly property bool hasTabBar: row.tabPaint.bar.a > 0
+    readonly property bool hasTabInk: row.tabPaint.ink.a > 0
+    /// The progress meter's ink: the running status's, unless the row's tint would swallow it.
+    readonly property color runningInk: chromeStyle.paletteRevision < 0 ? "transparent"
+        : chromeStyle.sidebarMarkInk(chromeStyle.statusInk(chromeStyle.statusRunning), row.tabPaint.fill, row.tabPaint.ink)
     readonly property color selectionInk: row.emphasized ? chromeStyle.colors.sidebarSelectionInk
                                                          : chromeStyle.colors.sidebarSelectionInkInactive
     readonly property color ink: chromeStyle.paletteRevision < 0 ? "transparent"
                                : row.marked ? row.selectionInk : chromeStyle.colors.tabText
+    // On a tinted row everything the row writes takes the ink chosen for the tint, so it stays legible on it.
     readonly property color secondaryInk: chromeStyle.paletteRevision < 0 ? "transparent"
+                                        : row.tinted ? row.tabPaint.ink
                                         : row.marked ? row.selectionInk : chromeStyle.colors.sidebarSecondaryInk
     // The gap between the leading glyphs and the name: at least a cell on the Terminal row, whose small
     // spacing steps are no cells at all, so `▾ billing` never reads `▾billing`.
@@ -143,6 +158,18 @@ Item {
     FontMetrics { id: titleMetrics; font: titleText.font }
     FontMetrics { id: secondLineMetrics; font: chromeStyle.type.footnote }
 
+    // A coloured tab's tint (`sidebar.tab_color: tint`), in place of the hover's and the selection's fill, with
+    // the selection's inset and radius. Its fade tells selected, hovered and resting rows apart.
+    Rectangle {
+        objectName: "sidebarRowTabFill"
+        anchors.fill: parent
+        anchors.leftMargin: row.fillInset
+        anchors.rightMargin: row.fillInset
+        visible: row.tinted
+        radius: chromeStyle.sidebar.selectionRadius
+        color: row.tabPaint.fill
+    }
+
     // What the pointer does to a row on the rows whose platform shows it (chromeStyle.sidebar.rowFeedback):
     // the band's hover fill under it, the pressed fill while it is held. Under the selection, at its inset.
     Rectangle {
@@ -150,7 +177,8 @@ Item {
         anchors.fill: parent
         anchors.leftMargin: row.fillInset
         anchors.rightMargin: row.fillInset
-        visible: chromeStyle.sidebar.rowFeedback && !row.marked && (primaryTap.pressed || hover.hovered)
+        visible: chromeStyle.sidebar.rowFeedback && !row.marked && !row.tinted
+                 && (primaryTap.pressed || hover.hovered)
         radius: chromeStyle.sidebar.selectionRadius
         color: chromeStyle.paletteRevision < 0 ? "transparent"
              : primaryTap.pressed ? chromeStyle.colors.controlPressedFill : chromeStyle.colors.tabHoverFill
@@ -163,7 +191,7 @@ Item {
         anchors.fill: parent
         anchors.leftMargin: row.fillInset
         anchors.rightMargin: row.fillInset
-        visible: row.marked
+        visible: row.marked && !row.tinted
         radius: chromeStyle.sidebar.selectionRadius
         color: chromeStyle.paletteRevision < 0 ? "transparent"
              : row.emphasized ? chromeStyle.colors.sidebarSelectionFill
@@ -184,6 +212,43 @@ Item {
     FocusRing {
         shown: row.paint.ring
         hostRadius: chromeStyle.sidebar.selectionRadius
+    }
+
+    // A coloured tab's bar (`sidebar.tab_color: bar`): the row's full height at its leading edge. On the
+    // Terminal row it is the tab strip's colour cell, once on each of the row's lines, in the room the lead
+    // keeps for it past the tree's connectors.
+    Item {
+        id: tabBar
+        objectName: "sidebarRowTabBar"
+        /// The bar's colour: what the native rows fill it with, and the cell tree inks its glyphs in.
+        readonly property color color: row.tabPaint.bar
+        visible: row.hasTabBar
+        x: row.cellTree ? lead.x + barRoom.x : 0
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        width: chromeStyle.sidebar.tabColorBarWidth
+
+        Rectangle {
+            visible: !row.cellTree
+            anchors.fill: parent
+            color: tabBar.color
+        }
+
+        Column {
+            visible: row.cellTree
+
+            Repeater {
+                model: Math.round(row.height / chromeStyle.sidebar.rowHeight)
+                Text {
+                    height: chromeStyle.sidebar.rowHeight
+                    textFormat: Text.PlainText
+                    text: chromeStyle.tabColorGlyph
+                    font: chromeStyle.type.body
+                    color: tabBar.color
+                    Accessible.ignored: true
+                }
+            }
+        }
     }
 
     // The first line: what leads it, the title, and what trails it. Each part takes whole cells on the
@@ -225,6 +290,14 @@ Item {
                 font: chromeStyle.type.body
                 color: row.secondaryInk
                 Accessible.ignored: true
+            }
+
+            // On the Terminal row, the cell the tab colour's bar is drawn in (sidebarRowTabBar), so the bar
+            // never covers the tree's connectors.
+            Item {
+                id: barRoom
+                visible: row.cellTree && row.hasTabBar
+                width: chromeStyle.sidebar.tabColorBarWidth
             }
 
             // A workspace's disclosure; a click folds or unfolds it. The row's token says how it is drawn: a
@@ -290,6 +363,7 @@ Item {
                 width: chromeStyle.snapToCells(implicitWidth)
                 kind: row.glyph
                 shaped: !row.cellTree
+                tint: row.tabPaint
                 progress: row.hasProgress ? row.progress : -1
             }
 
@@ -314,7 +388,7 @@ Item {
             textFormat: Text.PlainText
             text: row.title
             font: row.isWorkspace ? chromeStyle.type.bodyStrong : chromeStyle.type.body
-            color: row.ink
+            color: row.hasTabInk ? row.tabPaint.ink : row.ink
             elide: Text.ElideRight
             Accessible.ignored: true
         }
@@ -350,6 +424,7 @@ Item {
                 width: chromeStyle.snapToCells(implicitWidth)
                 kind: row.glyph
                 shaped: !row.cellTree
+                tint: row.tabPaint
             }
 
             // The time in the state, the time since it ended, or the progress's percent.
@@ -376,7 +451,7 @@ Item {
                 textFormat: Text.PlainText
                 text: row.meterText
                 font: chromeStyle.type.footnote
-                color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.statusInk(chromeStyle.statusRunning)
+                color: row.runningInk
                 Accessible.ignored: true
             }
         }
@@ -511,7 +586,7 @@ Item {
             anchors.bottom: parent.bottom
             width: parent.width * row.progressFraction
             radius: chromeStyle.size.progressBar
-            color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.statusInk(chromeStyle.statusRunning)
+            color: row.runningInk
         }
     }
 

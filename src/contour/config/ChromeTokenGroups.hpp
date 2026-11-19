@@ -1048,6 +1048,7 @@ struct SidebarTokens
     int selectionRadius = 0;  ///< The selected row's corner radius; 0 squares it off.
     int accentPillWidth = 0;  ///< The accent pill's width; 0 draws none.
     int hoverCardWidth = 0;   ///< The width of the card a hovered row shows.
+    int tabColorBarWidth = 0; ///< Width of the `bar` style's bar (`sidebar.tab_color`); > 0 on every row.
 
     [[nodiscard]] bool operator==(SidebarTokens const&) const = default;
 };

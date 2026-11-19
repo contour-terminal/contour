@@ -2312,6 +2312,38 @@ profiles:
     }
 }
 
+TEST_CASE("sidebar.tab_color picks how a tab's colour shows in the sidebar", "[config][sidebar]")
+{
+    using contour::config::SidebarTabColorStyle;
+
+    auto const styleFrom = [](std::string_view sidebarBody) {
+        QTemporaryDir dir;
+        auto const yaml = std::format("default_profile: main\n"
+                                      "sidebar:\n"
+                                      "{}"
+                                      "profiles:\n"
+                                      "    main:\n"
+                                      "        shell: /bin/sh\n",
+                                      sidebarBody);
+        return loadFromYaml(dir, yaml).sidebar.value().tabColor;
+    };
+
+    CHECK(styleFrom("    tab_color: bar\n") == SidebarTabColorStyle::Bar);
+    CHECK(styleFrom("    tab_color: name\n") == SidebarTabColorStyle::Name);
+    CHECK(styleFrom("    tab_color: tint\n") == SidebarTabColorStyle::Tint);
+    CHECK(styleFrom("    width: 260\n") == SidebarTabColorStyle::Tint);
+    CHECK(styleFrom("    tab_color: purple\n") == SidebarTabColorStyle::Tint);
+    CHECK(styleFrom("    tab_color: \"\"\n") == SidebarTabColorStyle::Tint);
+}
+
+TEST_CASE("a written configuration documents sidebar.tab_color", "[config][sidebar]")
+{
+    auto rendered = std::string {};
+    REQUIRE_NOTHROW(rendered = contour::config::createString<contour::config::YAMLConfigWriter>(
+                        contour::config::Config {}));
+    CHECK(rendered.contains("tab_color: tint"));
+}
+
 TEST_CASE("Config.firstLaunchDefaults", "[config]")
 {
     SECTION("a plain Config is the newest edition")

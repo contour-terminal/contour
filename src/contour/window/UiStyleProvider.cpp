@@ -20,6 +20,7 @@
 #include <contour/window/SecureLockPlacement.hpp>
 #include <contour/window/SidebarControls.hpp>
 #include <contour/window/SidebarSelection.hpp>
+#include <contour/window/SidebarTabColor.hpp>
 #include <contour/window/SidebarToggle.hpp>
 #include <contour/window/SplitChrome.hpp>
 #include <contour/window/TabBadge.hpp>
@@ -675,6 +676,50 @@ QVariantMap UiStyleProvider::sidebarSelection(int selection, bool treeFocused, b
     return { { QStringLiteral("fill"), nameOf(selectionFillName(paint.fill)) },
              { QStringLiteral("ring"), paint.ring == FocusRing::Shown },
              { QStringLiteral("pill"), paint.pill == AccentPill::Shown } };
+}
+
+QVariantMap UiStyleProvider::sidebarTabColor(int style,
+                                             QColor const& tabColor,
+                                             QColor const& rowBackground,
+                                             int selection,
+                                             bool hovered,
+                                             bool windowActive) const
+{
+    auto const pointer = hovered ? RowPointer::Hovering : RowPointer::Away;
+    auto const focus = windowActive ? WindowFocus::Active : WindowFocus::Inactive;
+    auto const toQml = [](std::optional<vtbackend::RGBColor> const& color) {
+        return color ? platform::toQColor(*color) : QColor { Qt::transparent };
+    };
+    auto paint = SidebarTabColorPaint {};
+    if (inRange(style, config::SidebarTabColorStyleCount))
+    {
+        auto const marked = inRange(selection, 3) ? static_cast<RowSelection>(selection) : RowSelection::None;
+        auto const colour = tabColor.isValid() && tabColor.alpha() > 0
+                                ? std::optional { platform::toRGBColor(tabColor) }
+                                : std::nullopt;
+        paint = sidebarTabColorPaint(static_cast<config::SidebarTabColorStyle>(style),
+                                     colour,
+                                     platform::toRGBColor(rowBackground),
+                                     sidebarTabVisualState(marked, pointer, focus));
+    }
+    return { { QStringLiteral("fill"), toQml(paint.fill) },
+             { QStringLiteral("bar"), toQml(paint.bar) },
+             { QStringLiteral("ink"), toQml(paint.ink) } };
+}
+
+QColor UiStyleProvider::sidebarMarkInk(QColor const& mark,
+                                       QColor const& tintFill,
+                                       QColor const& tintInk) const
+{
+    auto const present = [](QColor const& color) {
+        return color.isValid() && color.alpha() > 0 ? std::optional { platform::toRGBColor(color) }
+                                                    : std::nullopt;
+    };
+    auto const paint =
+        SidebarTabColorPaint { .fill = present(tintFill), .bar = std::nullopt, .ink = present(tintInk) };
+    if (!paint.fill)
+        return mark;
+    return platform::toQColor(window::sidebarMarkInk(platform::toRGBColor(mark), paint));
 }
 
 qreal UiStyleProvider::wellGap() const noexcept

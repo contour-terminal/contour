@@ -3455,6 +3455,9 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     }
     else if (width)
         where.width.reset();
+
+    // An unknown word is reported and keeps the previous style, as every enum setting does.
+    (void) detail::loadConfigEnum(child, "tab_color", keyPathTo(child, "tab_color"), where.tabColor, logger);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, GutterConfig& where)

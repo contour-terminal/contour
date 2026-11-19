@@ -940,6 +940,35 @@ class UiStyleProvider: public QObject
                                                            bool treeFocused,
                                                            bool rowFocused) const;
 
+    /// What a tab's colour paints on a sidebar row (window::sidebarTabColorPaint) in the configured style.
+    ///
+    /// The QML-facing carve-out: two bools, as QML holds them (HoverHandler.hovered, Window.active),
+    /// converted to window::RowPointer and window::WindowFocus at once; the enums as their underlying values.
+    /// @param style         A config::SidebarTabColorStyle as an int; anything else paints nothing.
+    /// @param tabColor      The row's tab colour; fully transparent (or invalid) when the tab has none.
+    /// @param rowBackground The sidebar's fill, the tint fades toward.
+    /// @param selection     A window::RowSelection as an int; anything else is no selection.
+    /// @param hovered       Whether the pointer is over the row.
+    /// @param windowActive  Whether the row's window is the active one.
+    /// @return `{ fill, bar, ink }` as colours, each fully transparent when the style paints nothing of that
+    ///         kind -- the tabColor role's own convention, so QML tests each by its alpha.
+    [[nodiscard]] Q_INVOKABLE QVariantMap sidebarTabColor(int style,
+                                                          QColor const& tabColor,
+                                                          QColor const& rowBackground,
+                                                          int selection,
+                                                          bool hovered,
+                                                          bool windowActive) const;
+
+    /// The colour a status mark is drawn in on a sidebar row (window::sidebarMarkInk): its own, unless a
+    /// tab's tint under it would swallow it, then the tint's ink.
+    /// @param mark     The mark's semantic colour.
+    /// @param tintFill The row's tint (sidebarTabColor's `fill`); transparent where the row has none.
+    /// @param tintInk  The tint's ink (sidebarTabColor's `ink`).
+    /// @return The colour to draw the mark in.
+    [[nodiscard]] Q_INVOKABLE QColor sidebarMarkInk(QColor const& mark,
+                                                    QColor const& tintFill,
+                                                    QColor const& tintInk) const;
+
     /// @return The title band's height in logical pixels. @see bandHeight
     [[nodiscard]] qreal bandHeight() const noexcept;
 

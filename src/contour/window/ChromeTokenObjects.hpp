@@ -853,6 +853,7 @@ class ChromeSidebarTokens: public QObject
     Q_PROPERTY(qreal selectionRadius READ selectionRadius CONSTANT)
     Q_PROPERTY(qreal accentPillWidth READ accentPillWidth CONSTANT)
     Q_PROPERTY(qreal hoverCardWidth READ hoverCardWidth CONSTANT)
+    Q_PROPERTY(qreal tabColorBarWidth READ tabColorBarWidth CONSTANT)
     /// How the sidebar looks: a config::SidebarLook as its underlying value, which the predicates below name.
     Q_PROPERTY(int look READ look CONSTANT)
     Q_PROPERTY(int sourceList READ sourceList CONSTANT)
@@ -921,6 +922,11 @@ class ChromeSidebarTokens: public QObject
 
     /// @return The width of a hovered row's card.
     [[nodiscard]] qreal hoverCardWidth() const noexcept { return _tokens.hoverCardWidth * _units.horizontal; }
+    /// @return The width of the bar a coloured tab's rows wear under `sidebar.tab_color: bar`.
+    [[nodiscard]] qreal tabColorBarWidth() const noexcept
+    {
+        return _tokens.tabColorBarWidth * _units.horizontal;
+    }
     /// @return How the sidebar looks, a config::SidebarLook as its underlying value.
     [[nodiscard]] int look() const noexcept { return static_cast<int>(_look); }
     /// @return Whether the sidebar stands beside the band, the window's full height.

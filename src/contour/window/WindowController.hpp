@@ -241,6 +241,9 @@ class WindowController:
     Q_PROPERTY(int sidebarVisibility READ sidebarVisibility NOTIFY sidebarVisibilityChanged)
     Q_PROPERTY(int sidebarWidth READ sidebarWidth NOTIFY sidebarWidthChanged)
     Q_PROPERTY(int tabPlacement READ tabPlacement NOTIFY tabPlacementChanged)
+    /// How a coloured tab shows its colour on its sidebar rows: a config::SidebarTabColorStyle's underlying
+    /// value, read once from `sidebar.tab_color` when the window is made.
+    Q_PROPERTY(int sidebarTabColorStyle READ sidebarTabColorStyle CONSTANT)
     /// What the workspaces this window does not show ask of the user: the most urgent of their roll-ups, an
     /// Urgency's underlying value (SidebarModel::otherWorkspacesUrgency).
     Q_PROPERTY(int otherWorkspacesUrgency READ otherWorkspacesUrgency NOTIFY otherWorkspacesUrgencyChanged)
@@ -1310,6 +1313,13 @@ class WindowController:
     /// @return Where the tabs live, a config::TabPlacement as its underlying value.
     [[nodiscard]] int tabPlacement() const noexcept { return static_cast<int>(_tabPlacement); }
 
+    /// @return How a coloured tab shows its colour on its sidebar rows, a config::SidebarTabColorStyle as its
+    ///         underlying value.
+    [[nodiscard]] int sidebarTabColorStyle() const noexcept
+    {
+        return static_cast<int>(_sidebarTabColorStyle);
+    }
+
     /// Tells the window how wide the title band's parts are, so the window is never made narrower than they
     /// fit in: the band's fixed parts, the location chip at its last fit step and one tab-well minimum
     /// (bandMinimumWidth()). It joins the window's minimum-width size hint, so the tab well cannot collapse.
@@ -2341,6 +2351,8 @@ class WindowController:
     config::SidebarVisibility _sidebarVisibility = config::SidebarVisibility::Hidden;
     int _sidebarUnits = 0;
     config::TabPlacement _tabPlacement = config::TabPlacement::Top;
+    // How a coloured tab shows on its sidebar rows; like the placement, fixed for the window's life.
+    config::SidebarTabColorStyle _sidebarTabColorStyle = config::SidebarTabColorStyle::Tint;
 
     // Declared title-bar chrome height in logical px (written by Main.qml's binding).
     int _chromeHeight = 0;

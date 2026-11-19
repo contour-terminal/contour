@@ -23,6 +23,8 @@
 #include <contour/window/SidebarModel.hpp>
 #include <contour/window/StatusUrgency.hpp>
 
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/vt/ProgramStatus.hpp>
 
 #include <QtCore/QCoreApplication>
@@ -132,6 +134,18 @@ enum class ClaudeTab : uint8_t
     Split,       ///< claude and a second pane, review (key 12).
 };
 
+/// Whether billing's tabs are coloured.
+enum class TabColours : uint8_t
+{
+    None = 0, ///< No tab has a colour.
+    Coloured, ///< claude's tab is #4C5FD5 and build's #E8853A; docs' notes stays uncoloured.
+};
+
+/// claude's tab colour under TabColours::Coloured.
+constexpr auto ClaudeTabColour = vtbackend::RGBColor { 0x4C, 0x5F, 0xD5 };
+/// build's tab colour under TabColours::Coloured.
+constexpr auto BuildTabColour = vtbackend::RGBColor { 0xE8, 0x85, 0x3A };
+
 /// How the window the sidebar is loaded in is set up.
 struct SidebarScene
 {
@@ -149,6 +163,11 @@ struct SidebarScene
     ClaudeTab claudeTab = ClaudeTab::OnePane; ///< Whether claude's tab is split.
     std::string billingTitle = "billing";     ///< The first workspace's name, which the location chip shows.
     int tabCount = 2;                         ///< How many tabs the window has.
+    TabColours tabColours = TabColours::None; ///< Whether billing's tabs are coloured.
+    /// claude's tab colour in place of ClaudeTabColour, under TabColours::Coloured.
+    std::optional<vtbackend::RGBColor> claudeTabColour = std::nullopt;
+    /// How a coloured tab shows on its rows (`sidebar.tab_color`).
+    contour::config::SidebarTabColorStyle tabColorStyle = contour::config::SidebarTabColorStyle::Tint;
 };
 
 /// Main.qml over a mock whose sidebar lists two workspaces: billing (a pane that asks for a permission and
@@ -192,6 +211,11 @@ struct SidebarWindow
         billingWorkspace.git = contour::window::DirectoryGit { .branch = "feat/billing", .ahead = 2 };
         if (scene.claudeTab == ClaudeTab::Split)
             billingWorkspace.tabs.front().panes.push_back(contour::test::directoryPaneOf(12, "review"));
+        if (scene.tabColours == TabColours::Coloured)
+        {
+            billingWorkspace.tabs.at(0).color = scene.claudeTabColour.value_or(ClaudeTabColour);
+            billingWorkspace.tabs.at(1).color = BuildTabColour;
+        }
         listed.workspaces = {
             std::move(billingWorkspace),
             contour::test::directoryWorkspaceOf(2, "docs", { contour::test::directoryPaneOf(20, "notes") }),
@@ -202,6 +226,7 @@ struct SidebarWindow
                                       .tab = scene.shownWorkspace == 1 ? 10u : 20u };
         controller.sidebarModel().refreshNow();
         controller.setTabPlacement(scene.placement);
+        controller.setSidebarTabColorStyle(scene.tabColorStyle);
 
         root = contour::test::loadMainWindow(engine, controller, warnings, setupOf(scene.row, scene.motion));
         if (scene.visibility == contour::config::SidebarVisibility::Shown)
@@ -2839,5 +2864,185 @@ TEST_CASE("with no band, a shown sidebar's daemon control is the one place that 
     }
     // The scenario is real: some row draws no band here.
     CHECK(hiddenBands > 0);
+}
+// }}}
+
+// {{{ Tab colour
+namespace
+{
+
+/// @return @p value's colour as one comparable number, whatever spec it was made in.
+[[nodiscard]] QRgb rgbaOf(QVariant const& value)
+{
+    return value.value<QColor>().rgba();
+}
+
+/// What `chromeStyle.sidebarTabColor` paints on @p row as it stands: not hovered, in its window as active as
+/// the window the test drives really is.
+[[nodiscard]] QVariantMap tabPaintOf(SidebarWindow const& scene, QQuickItem const& row)
+{
+    auto* style =
+        scene.engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto const* colors = style->property("colors").value<QObject*>();
+    REQUIRE(colors != nullptr);
+    auto paint = QVariantMap {};
+    REQUIRE(QMetaObject::invokeMethod(style,
+                                      "sidebarTabColor",
+                                      Q_RETURN_ARG(QVariantMap, paint),
+                                      Q_ARG(int, scene.controller.sidebarTabColorStyle()),
+                                      Q_ARG(QColor, row.property("tabColor").value<QColor>()),
+                                      Q_ARG(QColor, colors->property("sidebarFill").value<QColor>()),
+                                      Q_ARG(int, row.property("selection").toInt()),
+                                      Q_ARG(bool, false),
+                                      Q_ARG(bool, scene.window->isActive())));
+    return paint;
+}
+
+/// The part of @p row named @p name.
+[[nodiscard]] QQuickItem& rowPart(QQuickItem const& row, char const* name)
+{
+    auto* found = SidebarWindow::findNamed(row, QString::fromLatin1(name));
+    REQUIRE(found != nullptr);
+    return *found;
+}
+
+/// Checks that @p row wears no tab colour: no tint, no bar, and its name in the row's own ink.
+void checkWearsNoTabColour(QQuickItem const& row)
+{
+    CHECK_FALSE(rowPart(row, "sidebarRowTabFill").isVisible());
+    CHECK_FALSE(rowPart(row, "sidebarRowTabBar").isVisible());
+    CHECK(rgbaOf(rowPart(row, "sidebarRowTitle").property("color")) == rgbaOf(row.property("ink")));
+}
+
+} // namespace
+
+TEST_CASE("a coloured tab's rows show its colour as sidebar.tab_color says (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    using contour::config::SidebarTabColorStyle;
+    using contour::window::RowSelection;
+    using contour::window::SidebarRowKind;
+    auto const orange = QColor { QStringLiteral("#E8853A") };
+    auto const blue = QColor { QStringLiteral("#4C5FD5") };
+
+    for (auto const row: drawnRows())
+        for (auto const style:
+             { SidebarTabColorStyle::Tint, SidebarTabColorStyle::Bar, SidebarTabColorStyle::Name })
+        {
+            INFO("row " << static_cast<int>(row) << ", style " << static_cast<int>(style));
+            auto scene = SidebarWindow { { .row = row,
+                                           .claudeTab = ClaudeTab::Split,
+                                           .tabColours = TabColours::Coloured,
+                                           .tabColorStyle = style } };
+            // The pointer off the sidebar, so no row is hovered.
+            QTest::mouseMove(scene.window, QPoint { scene.window->width() - 5, scene.window->height() - 5 });
+            QCoreApplication::processEvents();
+
+            auto colouredRows = 0;
+            for (auto const* item: scene.rows())
+            {
+                INFO("title " << item->property("title").toString().toStdString());
+                auto const kind = static_cast<SidebarRowKind>(item->property("kind").toInt());
+                auto const tabColour = item->property("tabColor").value<QColor>();
+                if (tabColour.alpha() == 0)
+                {
+                    checkWearsNoTabColour(*item);
+                    continue;
+                }
+                REQUIRE(kind != SidebarRowKind::Workspace);
+                ++colouredRows;
+                // build's tab row is orange; claude's tab row and both its pane rows are blue.
+                CHECK(tabColour.rgba()
+                      == (item->property("title") == QStringLiteral("build") ? orange : blue).rgba());
+
+                auto const& fill = rowPart(*item, "sidebarRowTabFill");
+                auto const& bar = rowPart(*item, "sidebarRowTabBar");
+                auto const& selection = rowPart(*item, "sidebarRowSelection");
+                auto const titleInk = rgbaOf(rowPart(*item, "sidebarRowTitle").property("color"));
+                auto const marked =
+                    item->property("selection").toInt() != static_cast<int>(RowSelection::None);
+                auto const paint = tabPaintOf(scene, *item);
+                switch (style)
+                {
+                    case SidebarTabColorStyle::Tint:
+                        CHECK(fill.isVisible());
+                        CHECK(rgbaOf(fill.property("color")) == rgbaOf(paint.value(QStringLiteral("fill"))));
+                        CHECK(titleInk == rgbaOf(paint.value(QStringLiteral("ink"))));
+                        CHECK_FALSE(selection.isVisible());
+                        CHECK_FALSE(bar.isVisible());
+                        break;
+                    case SidebarTabColorStyle::Bar:
+                        CHECK(bar.isVisible());
+                        CHECK(bar.width() > 0);
+                        CHECK(bar.width() == scene.token("tabColorBarWidth"));
+                        CHECK(bar.height() == item->height());
+                        CHECK(rgbaOf(bar.property("color")) == tabColour.rgba());
+                        CHECK_FALSE(fill.isVisible());
+                        CHECK(selection.isVisible() == marked);
+                        CHECK(titleInk == rgbaOf(item->property("ink")));
+                        break;
+                    case SidebarTabColorStyle::Name:
+                        CHECK(titleInk == tabColour.rgba());
+                        CHECK_FALSE(fill.isVisible());
+                        CHECK_FALSE(bar.isVisible());
+                        CHECK(selection.isVisible() == marked);
+                        break;
+                }
+            }
+            CHECK(colouredRows == 4);
+
+            // Folded, billing stands in for its selected, coloured tab, and still wears no tab colour.
+            auto* billing = scene.rowTitled(QStringLiteral("billing"));
+            REQUIRE(billing != nullptr);
+            scene.controller.sidebarModel().collapse(billing->property("index").toInt());
+            QCoreApplication::processEvents();
+            billing = scene.rowTitled(QStringLiteral("billing"));
+            REQUIRE(billing != nullptr);
+            REQUIRE(billing->property("selection").toInt()
+                    == static_cast<int>(RowSelection::ContainsSelected));
+            checkWearsNoTabColour(*billing);
+        }
+}
+TEST_CASE("a status mark stays legible on its row's tint, even in the tab's own colour (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        // claude's permission mark, as it is drawn on an uncoloured row.
+        auto const markColour = [&] {
+            auto plain = SidebarWindow { { .row = row } };
+            auto* claude = plain.rowTitled(QStringLiteral("claude"));
+            REQUIRE(claude != nullptr);
+            return rowPart(*claude, "sidebarRowGlyph").property("ink").value<QColor>();
+        }();
+        REQUIRE(markColour.alpha() > 0);
+
+        // claude's tab coloured exactly as its mark: the selected row's tint is the mark's own colour.
+        auto scene = SidebarWindow { { .row = row,
+                                       .tabColours = TabColours::Coloured,
+                                       .claudeTabColour =
+                                           vtbackend::RGBColor { static_cast<uint8_t>(markColour.red()),
+                                                                 static_cast<uint8_t>(markColour.green()),
+                                                                 static_cast<uint8_t>(markColour.blue()) },
+                                       .tabColorStyle = contour::config::SidebarTabColorStyle::Tint } };
+        auto* claude = scene.rowTitled(QStringLiteral("claude"));
+        REQUIRE(claude != nullptr);
+        REQUIRE(claude->property("selection").toInt()
+                == static_cast<int>(contour::window::RowSelection::Selected));
+        REQUIRE(claude->property("tabColor").value<QColor>().rgb() == markColour.rgb());
+        auto const& fill = rowPart(*claude, "sidebarRowTabFill");
+        REQUIRE(fill.isVisible());
+        auto const fillColour = fill.property("color").value<QColor>();
+        auto const drawn = rowPart(*claude, "sidebarRowGlyph").property("ink").value<QColor>();
+        CHECK(drawn.rgb() != fillColour.rgb());
+        auto const rgbOf = [](QColor const& colour) {
+            return vtbackend::RGBColor { static_cast<uint8_t>(colour.red()),
+                                         static_cast<uint8_t>(colour.green()),
+                                         static_cast<uint8_t>(colour.blue()) };
+        };
+        CHECK(vtbackend::contrastRatio(rgbOf(drawn), rgbOf(fillColour)) >= vtbackend::MinimumMarkContrast);
+    }
 }
 // }}}

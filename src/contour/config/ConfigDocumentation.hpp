@@ -383,6 +383,11 @@ constexpr StringLiteral SidebarConfig {
     "    {comment} kept within the bounds of the chrome style. Omit this setting or use null for the\n"
     "    {comment} style's own width.\n"
     "    width: {}\n"
+    "    {comment} How a coloured tab shows its colour on its sidebar rows (ignore-case):\n"
+    "    {comment}   tint = the row is filled with the colour, faded as the tab strip fades it (default).\n"
+    "    {comment}   bar  = a narrow bar in the colour at the row's leading edge.\n"
+    "    {comment}   name = the tab's name is drawn in the colour.\n"
+    "    tab_color: {}\n"
     "\n"
 };
 
@@ -2970,6 +2975,7 @@ constexpr StringLiteral SidebarWeb {
     "sidebar:\n"
     "  visible: true\n"
     "  width: null\n"
+    "  tab_color: tint\n"
     "```\n"
     "\n"
     "- `visible`: Whether the sidebar starts shown. This is `false` for the "
@@ -2978,6 +2984,11 @@ constexpr StringLiteral SidebarWeb {
     "- `width`: The sidebar's starting width in logical pixels, or in cells "
     "under `ui_style: terminal`, kept within the bounds of the chrome style; a width dragged in a window is "
     "remembered likewise. Omit it or use `null` for the style's own width.\n"
+    "- `tab_color`: How a coloured tab shows its colour on its sidebar rows (ignore-case). An uncoloured "
+    "tab looks the same in all three.\n"
+    "    - `tint` (default): the row is filled with the colour, faded as the tab strip fades it.\n"
+    "    - `bar`: a narrow bar in the colour at the row's leading edge, the row's full height.\n"
+    "    - `name`: the tab's name is drawn in the colour.\n"
     "\n"
 };
 

@@ -255,8 +255,17 @@ with the sidebar hidden.
 sidebar:
   visible: true     # start shown; what you last chose in a window wins over this
   width: 240        # logical pixels (cells under ui_style: terminal); omit for the style's own
+  tab_color: tint   # tint | bar | name
 tab_placement: sidebar   # sidebar | top
 ```
+
+`tab_color` picks how a coloured tab shows its colour on its rows, the tab's and its panes'; an uncoloured
+tab looks the same in all three, and workspace rows never carry a tab's colour.
+
+- `tint` (the default): the row is filled with the colour, faded as the tab strip fades it, and its text
+  turns black or white to stay legible.
+- `bar`: a narrow bar in the colour runs the row's full height at its leading edge.
+- `name`: the tab's name is drawn in the colour.
 
 See [Key mapping](configuration/key-mapping.md#workspace-sidebar) for the actions and their default chords.
 The default width is 220 px on macOS, 240 px on Fluent and ContourLinux, and 28 cells under

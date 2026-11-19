@@ -608,7 +608,8 @@ namespace detail
                                                 .footerHeight = 32,
                                                 .selectionRadius = 6,
                                                 .accentPillWidth = 0,
-                                                .hoverCardWidth = 280 };
+                                                .hoverCardWidth = 280,
+                                                .tabColorBarWidth = 3 };
 
     /// The workspace sidebar on the Fluent row: a navigation pane, its selection marked by an accent pill.
     inline constexpr SidebarTokens FluentSidebar { .width = 240,
@@ -622,7 +623,8 @@ namespace detail
                                                    .footerHeight = 40,
                                                    .selectionRadius = 4,
                                                    .accentPillWidth = 3,
-                                                   .hoverCardWidth = 320 };
+                                                   .hoverCardWidth = 320,
+                                                   .tabColorBarWidth = 3 };
 
     /// The workspace sidebar on the ContourLinux row: its selection a neutral fill (the label's ink at low
     /// alpha), inset and rounded as libadwaita's sidebars draw it, and as the row's own command palette does
@@ -638,7 +640,8 @@ namespace detail
                                                   .footerHeight = 40,
                                                   .selectionRadius = 8,
                                                   .accentPillWidth = 0,
-                                                  .hoverCardWidth = 320 };
+                                                  .hoverCardWidth = 320,
+                                                  .tabColorBarWidth = 3 };
 
     /// The workspace sidebar on the Terminal row, in cells: a tree of whole rows.
     inline constexpr SidebarTokens TerminalSidebar { .width = 28,
@@ -652,7 +655,8 @@ namespace detail
                                                      .footerHeight = 1,
                                                      .selectionRadius = 0,
                                                      .accentPillWidth = 0,
-                                                     .hoverCardWidth = 40 };
+                                                     .hoverCardWidth = 40,
+                                                     .tabColorBarWidth = 1 };
 
     inline constexpr ChromeTokenRow MacRow {
         .size = { .titleBar = 38,

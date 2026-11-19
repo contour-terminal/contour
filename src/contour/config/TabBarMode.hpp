@@ -43,6 +43,19 @@ enum class SidebarVisibility : uint8_t
 /// Number of @c SidebarVisibility enumerators, derived from the last one.
 inline constexpr size_t SidebarVisibilityCount = static_cast<size_t>(SidebarVisibility::Shown) + 1;
 
+/// How a coloured tab shows its colour on its sidebar rows (`sidebar.tab_color`).
+/// @note Exposed to QML as an @c int through WindowController::sidebarTabColorStyle, which
+///       UiStyleProvider::sidebarTabColor converts back; SidebarRow.qml takes 0 (Tint) without a controller.
+enum class SidebarTabColorStyle : uint8_t
+{
+    Tint = 0, //!< The row is filled with the colour, faded toward the sidebar as the tab strip does.
+    Bar,      //!< A narrow bar in the colour at the row's leading edge.
+    Name,     //!< The tab's name is drawn in the colour.
+};
+
+/// Number of @c SidebarTabColorStyle enumerators, derived from the last one.
+inline constexpr size_t SidebarTabColorStyleCount = static_cast<size_t>(SidebarTabColorStyle::Name) + 1;
+
 /// When the GUI tab strip (tab bar) is shown.
 enum class TabBarVisibility : uint8_t
 {
@@ -69,6 +82,12 @@ namespace detail
     inline constexpr auto SidebarVisibilityTable = std::array {
         ConfigEnumInfo<SidebarVisibility> { SidebarVisibility::Hidden, "hidden", "Hidden" },
         ConfigEnumInfo<SidebarVisibility> { SidebarVisibility::Shown, "shown", "Shown" },
+    };
+
+    inline constexpr auto SidebarTabColorStyleTable = std::array {
+        ConfigEnumInfo<SidebarTabColorStyle> { SidebarTabColorStyle::Tint, "tint", "Tint" },
+        ConfigEnumInfo<SidebarTabColorStyle> { SidebarTabColorStyle::Bar, "bar", "Bar" },
+        ConfigEnumInfo<SidebarTabColorStyle> { SidebarTabColorStyle::Name, "name", "Name" },
     };
 
     // The tokens are the ones already written into every existing contour.yml, so they are fixed;
@@ -112,6 +131,12 @@ template <>
 constexpr std::span<ConfigEnumInfo<SidebarVisibility> const> configEnumValues() noexcept
 {
     return detail::SidebarVisibilityTable;
+}
+
+template <>
+constexpr std::span<ConfigEnumInfo<SidebarTabColorStyle> const> configEnumValues() noexcept
+{
+    return detail::SidebarTabColorStyleTable;
 }
 
 template <>

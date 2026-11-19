@@ -406,6 +406,9 @@ struct SidebarConfig
     /// to the row's bounds where it is used. None takes the row's own width.
     std::optional<int> width {};
 
+    /// How a coloured tab shows its colour on its sidebar rows: a tint, a bar or its name's ink.
+    SidebarTabColorStyle tabColor { SidebarTabColorStyle::Tint };
+
     bool operator==(SidebarConfig const&) const = default;
 };
 
