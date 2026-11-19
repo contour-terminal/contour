@@ -89,12 +89,12 @@ TEST_CASE("agent and finished rows", "[orchestrator][view]")
     REQUIRE(running != nullptr);
     CHECK(running->text == "pr-2375 · fix CI · sonnet");
     CHECK(running->status == "working 6m");
-    CHECK(running->offers == std::vector { KeyCommand::EndRun });
+    CHECK(running->offers == std::vector { KeyCommand::Board, KeyCommand::EndRun });
 
     auto const* const done = rowOfRun(rows, DoneId);
     REQUIRE(done != nullptr);
     CHECK(done->status == "done · e ends it");
-    CHECK(done->offers == std::vector { KeyCommand::EndRun });
+    CHECK(done->offers == std::vector { KeyCommand::Board, KeyCommand::EndRun });
 
     auto const* const finished = rowOfRun(rows, KeptId);
     REQUIRE(finished != nullptr);
@@ -102,7 +102,8 @@ TEST_CASE("agent and finished rows", "[orchestrator][view]")
     CHECK(finished->mark == "●");
     CHECK(finished->text == "issue-2356 · work on issue · ended by you");
     CHECK(finished->status == "kept: 2 entries");
-    CHECK(finished->offers == std::vector { KeyCommand::RetryRemoval, KeyCommand::Dismiss });
+    CHECK(finished->offers
+          == std::vector { KeyCommand::Board, KeyCommand::RetryRemoval, KeyCommand::Dismiss });
     CHECK(finished->onOpen == OpenEffect::MarkSeen);
     CHECK(std::ranges::contains(textsOf(rows, RowKind::Heading), "AGENTS · 2 OF 4 RUNNING"));
     CHECK(std::ranges::contains(textsOf(rows, RowKind::Heading), "FINISHED · 1 NEW"));
@@ -136,7 +137,7 @@ TEST_CASE("a run outside the configuration is marked and still endable", "[orche
     auto const* const active = rowOfRun(rows, RunningId);
     REQUIRE(active != nullptr);
     CHECK(active->status == "outside the configuration");
-    CHECK(active->offers == std::vector { KeyCommand::EndRun });
+    CHECK(active->offers == std::vector { KeyCommand::Board, KeyCommand::EndRun });
     CHECK(active->details.front() == outside);
 
     // Its outcome wins in the row; the details still say where it belongs.
@@ -153,7 +154,10 @@ TEST_CASE("a run outside the configuration is marked and still endable", "[orche
         REQUIRE(finished != nullptr);
         CHECK(finished->kind == RowKind::Finished);
         CHECK(finished->status == status);
-        CHECK(finished->offers == std::vector { KeyCommand::Dismiss });
+        // A removed run's board went with its worktree.
+        auto const expected = id == KeptId ? std::vector { KeyCommand::Board, KeyCommand::Dismiss }
+                                           : std::vector { KeyCommand::Dismiss };
+        CHECK(finished->offers == expected);
         CHECK(finished->details.front() == outside);
         CHECK(std::ranges::none_of(finished->details,
                                    [](DetailLine const& line) { return line.value.contains("x tries"); }));
@@ -194,7 +198,7 @@ TEST_CASE("a refused configuration labels no run outside, and the trust hint sti
     auto const* const row = rowOfRun(rows, RunningId);
     REQUIRE(row != nullptr);
     CHECK(row->status == "waiting? see its tab");
-    CHECK(row->offers == std::vector { KeyCommand::EndRun });
+    CHECK(row->offers == std::vector { KeyCommand::Board, KeyCommand::EndRun });
     CHECK(std::ranges::none_of(row->details, [](DetailLine const& line) {
         return line.value.contains("outside the configuration");
     }));

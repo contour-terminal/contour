@@ -34,6 +34,8 @@ namespace
         DashboardKey { .name = "down"sv, .character = '\0' },
         DashboardKey { .name = "left"sv, .character = '\0' },
         DashboardKey { .name = "right"sv, .character = '\0' },
+        DashboardKey { .name = "pgup"sv, .character = '\0' },
+        DashboardKey { .name = "pgdn"sv, .character = '\0' },
     };
 } // namespace
 

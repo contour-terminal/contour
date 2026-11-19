@@ -106,6 +106,8 @@ add_library(orchestrator_view STATIC
     view/Keys.hpp
     view/Sections.cpp
     view/Sections.hpp
+    view/StatusBoard.cpp
+    view/StatusBoard.hpp
     view/Theme.cpp
     view/Theme.hpp
 )
@@ -155,6 +157,7 @@ if(ORCHESTRATOR_TESTING)
         view/DispatchForm_test.cpp
         view/Keys_test.cpp
         view/Sections_test.cpp
+        view/StatusBoard_test.cpp
         view/ViewFixtures.cpp
         view/ViewFixtures.hpp
     )

@@ -25,6 +25,9 @@ namespace orchestrator::view
 /// while it asks. The hint only points at the tab; nothing answers the prompt.
 inline constexpr auto TrustPromptHintAfter = std::chrono::seconds { 30 };
 
+/// What an agent row's status starts with once a STATUS.md was found in its worktree.
+inline constexpr auto BoardCue = std::string_view { "▤" };
+
 /// What a row of the list stands for.
 enum class RowKind : uint8_t
 {
@@ -67,17 +70,18 @@ struct DetailLine
 /// One row of the list and the details it opens. Every text is sanitised: no control character, one line.
 struct Row
 {
-    RowKind kind = RowKind::Notice;       ///< What it stands for.
-    std::string mark = {};                ///< One cell before the text, such as `✓`; empty: a blank.
-    Role markRole = Role::Text;           ///< How the mark is drawn.
-    std::string prefix = {};              ///< The repository's name, drawn dim; empty with one repository.
-    std::string text = {};                ///< The row's text.
-    std::string status = {};              ///< Right-aligned after the text, such as `approved`; may be empty.
-    Role statusRole = Role::Dim;          ///< How the status is drawn.
-    std::string run = {};                 ///< The run it stands for; empty for a pull request or an issue.
-    std::string repo = {};                ///< The repository of its item or orphan; empty for a run.
-    std::optional<ItemRef> item = {};     ///< The pull request or issue it stands for; absent for a run.
-    std::vector<KeyCommand> offers = {};  ///< The run commands it accepts: EndRun, RetryRemoval, Dismiss.
+    RowKind kind = RowKind::Notice;   ///< What it stands for.
+    std::string mark = {};            ///< One cell before the text, such as `✓`; empty: a blank.
+    Role markRole = Role::Text;       ///< How the mark is drawn.
+    std::string prefix = {};          ///< The repository's name, drawn dim; empty with one repository.
+    std::string text = {};            ///< The row's text.
+    std::string status = {};          ///< Right-aligned after the text, such as `approved`; may be empty.
+    Role statusRole = Role::Dim;      ///< How the status is drawn.
+    std::string run = {};             ///< The run it stands for; empty for a pull request or an issue.
+    std::string repo = {};            ///< The repository of its item or orphan; empty for a run.
+    std::optional<ItemRef> item = {}; ///< The pull request or issue it stands for; absent for a run.
+    std::vector<KeyCommand>
+        offers = {}; ///< The run commands it accepts: Board, EndRun, RetryRemoval, Dismiss.
     OpenEffect onOpen = OpenEffect::None; ///< What opening its details tells the engine.
     std::string title = {};               ///< The details' first line.
     std::vector<DetailLine> details = {}; ///< The details' other lines.

@@ -448,8 +448,11 @@ void Driver::showBlocked(uint32_t origin)
     auto const runs = _engine->runs();
     auto const blocked =
         std::ranges::find_if(runs, [](Run const& run) { return std::holds_alternative<Blocked>(run.state); });
-    if (blocked != runs.end())
-        dashboard->second->select(blocked->id);
+    if (blocked == runs.end())
+        return;
+    // Selecting it leaves a board the tab showed, which the engine then stops reading.
+    for (auto const& action: dashboard->second->select(blocked->id))
+        apply(*tab, action);
 }
 
 std::optional<std::string> Driver::openTab(uint32_t origin)
@@ -585,8 +588,12 @@ void Driver::drawTabs()
 {
     if (_dashboards.empty())
         return;
-    // The frame resolves an ESC held past its deadline, and measures the agents' ages, by the time now.
+    // An ESC held past its deadline is the Escape key, whose action (a board hidden) reaches the engine
+    // before the frames; they measure the agents' ages by the time now.
     static_cast<void>(readClock());
+    for (auto const& [tab, dashboard]: _dashboards)
+        for (auto const& action: dashboard->expireEscape())
+            apply(tab, action);
     for (auto const& [tab, dashboard]: _dashboards)
         if (auto const bytes = dashboard->frame(); !bytes.empty())
             write(tab, bytes);

@@ -20,5 +20,5 @@
 │ state     running                                                            │
 │ branch    agent/pr-2375-20261113-150847…                                     │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move · enter open · d dispatch · ? help · / filter · R refresh · e end run  
+ ↑↓ move · enter open · d dispatch · ? help · b board · / filter · R refresh    
  end pr-2375-20261113-150847? e to confirm · esc to keep                        

@@ -79,9 +79,11 @@ class Dashboard
     void engineChanged();
 
     /// Selects the row of a run, dropping the filter when it hides that row and an end waiting for its
-    /// confirmation; does nothing when no row stands for the run.
+    /// confirmation, and returning from a board to the dashboard; does nothing when no row stands for the
+    /// run.
     /// @param run The run's id.
-    void select(std::string_view run);
+    /// @return What the engine is asked: HideBoardAction when a board was left; else nothing.
+    [[nodiscard]] std::vector<UiAction> select(std::string_view run);
 
     /// Opens the dispatch form on an item the engine lists, its session id taken from the dashboard's source;
     /// does nothing when the engine does not list the item or the task does not apply to it.
@@ -115,7 +117,13 @@ class Dashboard
     ///         engineChanged() or when a row changed with time. For tests.
     [[nodiscard]] std::size_t rowBuilds() const noexcept;
 
-    /// Resolves an ESC whose deadline passed (see pendingEscapeDeadline()), then draws.
+    /// Resolves an ESC whose deadline passed (see pendingEscapeDeadline()) into the Escape key; the guest
+    /// calls it before frame(), so that what the key asks reaches the engine (Esc on a board hides it).
+    /// @return What the engine is asked, in order; empty when no ESC waited past its deadline.
+    [[nodiscard]] std::vector<UiAction> expireEscape();
+
+    /// Resolves an ESC whose deadline passed (see pendingEscapeDeadline()), then draws. What that Escape key
+    /// asks is dropped: expireEscape() first takes it.
     /// @return The bytes that bring the tab up to date; empty when nothing changed since the last frame.
     [[nodiscard]] std::string frame();
 

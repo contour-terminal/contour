@@ -323,7 +323,7 @@ namespace
                        },
                        run.state);
         // An active run outside the configuration stays endable: its cleanup works from what the run stored.
-        auto offers = std::vector<KeyCommand> {};
+        auto offers = std::vector<KeyCommand> { KeyCommand::Board };
         if (countsAsActive(run))
             offers.push_back(KeyCommand::EndRun);
         // What the row stands out for comes first, so that a short details panel still shows it.
@@ -348,6 +348,9 @@ namespace
                 break;
         }
         std::ranges::move(runDetails(lists, run), std::back_inserter(details));
+        // A run whose STATUS.md was found says so: `b` shows it.
+        if (lists.engine->hasBoard(run.id))
+            status = std::format("{} {}", BoardCue, status);
         auto const text = std::format("{} · {} · {}", itemName(run), taskLabel(lists.config, run), run.model);
         return Row { .kind = RowKind::Agent,
                      .mark = std::string { mark },
@@ -386,7 +389,9 @@ namespace
         else
             status = "removed";
 
-        auto offers = std::vector<KeyCommand> {};
+        // Its board went with its worktree.
+        auto offers =
+            keepsWorktree(run) ? std::vector<KeyCommand> { KeyCommand::Board } : std::vector<KeyCommand> {};
         if (isRetryable)
             offers.push_back(KeyCommand::RetryRemoval);
         if (!isChecking)

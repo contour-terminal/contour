@@ -338,7 +338,7 @@ TEST_CASE("the help lists the keys that have a hint", "[orchestrator][view]")
     for (auto const& row: keyRows())
     {
         CAPTURE(row.key);
-        if (!row.hint.empty())
+        if (!row.hint.empty() && holds(row.on, Screen::Dashboard))
             CHECK(help.contains(std::format("│ {} ", row.hint)));
     }
     CHECK(fixture.dashboard.input("\x1b").empty());
@@ -745,24 +745,24 @@ TEST_CASE("select picks a run's row, dropping a filter that hides it", "[orchest
     static_cast<void>(fixture.dashboard.frame());
     CHECK(fixture.dashboard.selectedRun().empty());
 
-    fixture.dashboard.select(BlockedId);
+    CHECK(fixture.dashboard.select(BlockedId).empty());
     CHECK(fixture.dashboard.selectedRun() == BlockedId);
     CHECK(!fixture.dashboard.frame().empty());
 
     // A filter that hides the row is dropped; an unknown run selects nothing else.
     CHECK(fixture.dashboard.input("/2375\r").empty());
     REQUIRE(fixture.dashboard.interaction().filter == "2375");
-    fixture.dashboard.select(BlockedId);
+    CHECK(fixture.dashboard.select(BlockedId).empty());
     CHECK(fixture.dashboard.selectedRun() == BlockedId);
     CHECK(fixture.dashboard.interaction().filter.empty());
-    fixture.dashboard.select("no-such-run");
+    CHECK(fixture.dashboard.select("no-such-run").empty());
     CHECK(fixture.dashboard.selectedRun() == BlockedId);
 
     // An end that waits for its confirmation is dropped: it was asked of another row.
-    fixture.dashboard.select(RunningId);
+    CHECK(fixture.dashboard.select(RunningId).empty());
     CHECK(fixture.dashboard.input("e").empty());
     REQUIRE(fixture.dashboard.interaction().pendingEnd == RunningId);
-    fixture.dashboard.select(BlockedId);
+    CHECK(fixture.dashboard.select(BlockedId).empty());
     CHECK(fixture.dashboard.interaction().pendingEnd.empty());
 }
 
@@ -843,7 +843,7 @@ TEST_CASE("a running agent with no status after 30 s hints at a trust prompt", "
     CHECK(statusAt(30'000).statusRole == Role::Warning);
     CHECK(std::ranges::contains(statusAt(30'000).details, hint));
     // Still endable, and nothing else: the hint answers nothing.
-    CHECK(statusAt(30'000).offers == std::vector { KeyCommand::EndRun });
+    CHECK(statusAt(30'000).offers == std::vector { KeyCommand::Board, KeyCommand::EndRun });
 
     // The dashboard draws it at 30 s on its own, asking the engine nothing.
     auto clock = core::ManualClock { at(29'500) };

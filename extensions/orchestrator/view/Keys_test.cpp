@@ -41,9 +41,9 @@ TEST_CASE("keyRows: every row's command is dispatched", "[orchestrator][view]")
     CHECK(std::ranges::all_of(keyRows(), [](KeyRow const& row) { return isDispatched(row.command); }));
 }
 
-TEST_CASE("keyRows: no review, board or transcript key yet", "[orchestrator][view]")
+TEST_CASE("keyRows: no review or transcript key yet", "[orchestrator][view]")
 {
-    for (auto const key: { "f"sv, "r"sv, "b"sv, "t"sv })
+    for (auto const key: { "f"sv, "r"sv, "t"sv })
     {
         CAPTURE(key);
         CHECK(std::ranges::find(keyRows(), key, &KeyRow::key) == keyRows().end());
@@ -71,7 +71,7 @@ TEST_CASE("commandFor names keys by the table", "[orchestrator][view]")
     for (auto const& [key, expected]: cases)
     {
         CAPTURE(static_cast<uint32_t>(key.key));
-        CHECK(commandFor(key) == expected);
+        CHECK(commandFor(key, Screen::Dashboard) == expected);
     }
 }
 
@@ -145,9 +145,9 @@ TEST_CASE("Tab shows details in the Narrow band", "[orchestrator][view]")
     // Enter dispatches or reveals; the details are Tab's wherever the band cannot show them beside the list.
     auto const tab = std::ranges::find(keyRows(), "tab"sv, &KeyRow::key);
     REQUIRE(tab != keyRows().end());
-    CHECK(isHintedIn(*tab, Band::Medium));
-    CHECK(isHintedIn(*tab, Band::Narrow));
-    CHECK(!isHintedIn(*tab, Band::Wide));
+    CHECK(isHintedIn(*tab, Band::Medium, Screen::Dashboard));
+    CHECK(isHintedIn(*tab, Band::Narrow, Screen::Dashboard));
+    CHECK(!isHintedIn(*tab, Band::Wide, Screen::Dashboard));
 
     auto const item = Row { .kind = RowKind::PullRequest };
     for (auto const band: { Band::Narrow, Band::Medium })

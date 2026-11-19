@@ -28,6 +28,7 @@
 
 #include <orchestrator/view/Band.hpp>
 #include <orchestrator/view/Sections.hpp>
+#include <orchestrator/view/StatusBoard.hpp>
 #include <orchestrator/view/Theme.hpp>
 
 using namespace std::string_view_literals;
@@ -90,17 +91,35 @@ namespace
         Selected,   ///< Drawn in the selection's.
     };
 
-    /// Which pane a panel is shown in.
+    /// Which pane or screen a panel is shown in.
     enum class PanelRole : uint8_t
     {
         List,           ///< The list.
         DetailsBelow,   ///< The details below the list (Medium).
         DetailsPage,    ///< The details in the list's place, the whole width.
         ListAndDetails, ///< The list and the details side by side (Wide).
+        Body,           ///< What holds the list and the details (Medium, Narrow): the dashboard's alone.
+        Board,          ///< A run's status board in the body's place.
+        Chrome,         ///< The problem lines and the summary line, which a board in the Narrow band covers.
     };
 
-    /// The pane each role is shown in, indexed by PanelRole.
+    /// The pane each of the dashboard's roles is shown in, indexed by PanelRole up to Board.
     constexpr auto ShownInPane = std::array { Pane::List, Pane::List, Pane::Details, Pane::List };
+
+    /// @return Whether a panel of @p role is shown while the user is at @p interaction, in @p band.
+    [[nodiscard]] bool isShown(PanelRole role, Interaction const& interaction, Band band) noexcept
+    {
+        switch (role)
+        {
+            case PanelRole::Body: return interaction.screen == Screen::Dashboard;
+            case PanelRole::Board: return interaction.screen == Screen::Board;
+            // The Narrow band gives a board the whole tab but for its keys.
+            case PanelRole::Chrome: return interaction.screen != Screen::Board || band != Band::Narrow;
+            default: break;
+        }
+        return interaction.screen == Screen::Dashboard
+               && ShownInPane[std::to_underlying(role)] == interaction.pane;
+    }
 } // namespace
 
 // {{{ the state
@@ -153,6 +172,8 @@ struct Dashboard::State
     [[nodiscard]] uint64_t nowMonoMs() const noexcept;
     /// @return The selected row among the visible ones; nullptr when there is none.
     [[nodiscard]] Row const* selectedRow() const noexcept;
+    /// @return The band the tab's size chooses.
+    [[nodiscard]] Band band() const noexcept;
 
     /// Whether the rows match the engine.
     enum class Rows : uint8_t
@@ -195,6 +216,7 @@ struct Dashboard::State
     Repaint repaint = Repaint::Needed;
     std::unique_ptr<HelpOverlay> help;
     std::unique_ptr<DispatchFormView> formView; ///< Draws interaction.form.
+    BoardPanelState boardPanel;                 ///< What the board panel learnt drawing itself.
     std::unique_ptr<core::tui::Responsive> root;
 };
 
@@ -397,22 +419,39 @@ namespace
         Dashboard::State const& _state;
     };
 
-    /// The keys that act now in a band, by their hints.
+    /// The keys that act now in a band and on the screen shown, by their hints.
     class HintLine final: public Component
     {
       public:
-        explicit HintLine(Band band): _band { band } {}
+        HintLine(Dashboard::State const& state, Band band): _state { state }, _band { band } {}
 
         void render(Canvas& canvas) override
         {
+            auto const& interaction = _state.interaction;
             auto hinted = std::vector<std::string_view> {};
             for (auto const& row: keyRows())
-                if (isHintedIn(row, _band))
+                if (isHintedIn(row, _band, interaction.screen) && isOffered(row))
                     hinted.push_back(row.hint);
             canvas.putString(0, 1, joinHints(hinted, canvas.width() - 2), styleOf(canvas.theme(), Role::Dim));
         }
 
       private:
+        /// @return Whether the row acts now. On the dashboard the hints are the keys of every row; on a
+        ///         board or a transcript Enter needs a run whose agent has a tab, and `b` a run whose
+        ///         worktree is there.
+        [[nodiscard]] bool isOffered(KeyRow const& row) const noexcept
+        {
+            auto const& interaction = _state.interaction;
+            if (interaction.screen == Screen::Dashboard)
+                return true;
+            if (row.command == KeyCommand::Enter)
+                return hasAgentTab(&_state.engine, interaction.subject);
+            if (row.command == KeyCommand::Board)
+                return hasBoardToShow(&_state.engine, interaction.subject);
+            return true;
+        }
+
+        Dashboard::State const& _state;
         Band _band;
     };
 
@@ -449,10 +488,12 @@ namespace
         Dashboard::State const& _state;
     };
 
-    /// @return The hints of the keys that have one, in the table's order.
+    /// @return The hints of the dashboard's keys that have one, in the table's order.
     [[nodiscard]] auto hints()
     {
-        return keyRows() | std::views::transform(&KeyRow::hint)
+        return keyRows()
+               | std::views::filter([](KeyRow const& row) { return holds(row.on, Screen::Dashboard); })
+               | std::views::transform(&KeyRow::hint)
                | std::views::filter([](std::string_view hint) { return !hint.empty(); });
     }
 
@@ -549,8 +590,8 @@ std::unique_ptr<Component> Dashboard::State::buildLayout(std::size_t breakpoint)
     auto const& chosen = BandBreakpoints[breakpoint];
     toggled.clear();
     // Shown or hidden once added: adding a child shows it.
-    auto const toggle = [this](PanelRole role, Component& panel) {
-        panel.setVisible(ShownInPane[std::to_underlying(role)] == interaction.pane);
+    auto const toggle = [this, &chosen](PanelRole role, Component& panel) {
+        panel.setVisible(isShown(role, interaction, chosen.band));
         toggled.emplace_back(role, &panel);
     };
     auto const filling = layout::Style { .grow = 1, .basis = 0 };
@@ -558,7 +599,7 @@ std::unique_ptr<Component> Dashboard::State::buildLayout(std::size_t breakpoint)
     auto column = std::make_unique<FlexBox>(layout::Style { .direction = layout::Direction::Column });
     auto problemLines = std::make_unique<ProblemLines>(*this);
     problems = problemLines.get();
-    column->add(std::move(problemLines), layout::Style { .shrink = 0 });
+    toggle(PanelRole::Chrome, column->add(std::move(problemLines), layout::Style { .shrink = 0 }));
     switch (chosen.band)
     {
         case Band::Wide: {
@@ -577,20 +618,23 @@ std::unique_ptr<Component> Dashboard::State::buildLayout(std::size_t breakpoint)
                    body->add(std::make_unique<DetailsPanel>(*this),
                              layout::Style { .shrink = 0, .basis = DetailsBelowRows }));
             toggle(PanelRole::DetailsPage, body->add(std::make_unique<DetailsPanel>(*this), filling));
-            column->add(std::move(body), filling);
+            toggle(PanelRole::Body, column->add(std::move(body), filling));
             break;
         }
         case Band::Narrow: {
             auto body = std::make_unique<FlexBox>(layout::Style { .direction = layout::Direction::Column });
             toggle(PanelRole::List, body->add(std::make_unique<ListPanel>(*this), filling));
             toggle(PanelRole::DetailsPage, body->add(std::make_unique<DetailsPanel>(*this), filling));
-            column->add(std::move(body), filling);
+            toggle(PanelRole::Body, column->add(std::move(body), filling));
             break;
         }
     }
+    toggle(PanelRole::Board,
+           column->add(std::make_unique<StatusBoardPanel>(engine, interaction, clock, boardPanel), filling));
     if (chosen.furniture == Furniture::Shown)
-        column->add(std::make_unique<HintLine>(chosen.band), layout::Style { .shrink = 0 });
-    column->add(std::make_unique<SummaryLine>(*this), layout::Style { .shrink = 0 });
+        column->add(std::make_unique<HintLine>(*this, chosen.band), layout::Style { .shrink = 0 });
+    toggle(PanelRole::Chrome,
+           column->add(std::make_unique<SummaryLine>(*this), layout::Style { .shrink = 0 }));
     shownLayout = column.get();
     return column;
 }
@@ -636,13 +680,20 @@ Row const* Dashboard::State::selectedRow() const noexcept
     return position < visible.size() ? &rows[visible[position]] : nullptr;
 }
 
+Band Dashboard::State::band() const noexcept
+{
+    return BandBreakpoints[breakpointFor(size)].band;
+}
+
 KeyContext Dashboard::State::keyContext() const noexcept
 {
-    return KeyContext { .band = BandBreakpoints[breakpointFor(size)].band,
+    return KeyContext { .band = band(),
                         .selectable = selectableCount(rows, visible),
                         .selected = selectedRow(),
                         .engine = &engine,
-                        .task = std::nullopt };
+                        .task = std::nullopt,
+                        .lines = boardPanel.lines,
+                        .rows = boardPanel.rows };
 }
 
 std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEvent> const& events,
@@ -708,8 +759,7 @@ void Dashboard::State::syncLayout()
         problems = nullptr;
     }
     for (auto const& [role, panel]: toggled)
-        if (auto const shown = ShownInPane[std::to_underlying(role)] == interaction.pane;
-            panel->visible() != shown)
+        if (auto const shown = isShown(role, interaction, band()); panel->visible() != shown)
             panel->setVisible(shown);
     if (problems != nullptr)
         problems->refresh();
@@ -784,7 +834,9 @@ std::optional<core::SteadyTimePoint> Dashboard::pendingEscapeDeadline() const no
 
 std::optional<core::SteadyTimePoint> Dashboard::nextRepaintDue() const noexcept
 {
-    auto const& due = _state->rowChangeMs;
+    // A board shows no rows: only its age moves on with time.
+    auto const& due =
+        _state->interaction.screen == Screen::Board ? _state->boardPanel.ageChangeMs : _state->rowChangeMs;
     return due ? std::optional { core::SteadyTimePoint { std::chrono::milliseconds { *due } } }
                : std::nullopt;
 }
@@ -810,7 +862,7 @@ void Dashboard::engineChanged()
     _state->repaint = State::Repaint::Needed;
 }
 
-void Dashboard::select(std::string_view run)
+std::vector<UiAction> Dashboard::select(std::string_view run)
 {
     auto& state = *_state;
     state.ensureRows();
@@ -835,11 +887,16 @@ void Dashboard::select(std::string_view run)
         found = selectableIndexOf();
     }
     if (!found)
-        return;
+        return {};
     state.interaction.selected = *found;
     // An end that waited for its confirmation was for the row selected before.
     state.interaction.pendingEnd.clear();
     state.repaint = State::Repaint::Needed;
+    // The row is shown on the dashboard: a board shown in its place is left, and no longer read.
+    if (state.interaction.screen != Screen::Board)
+        return {};
+    leaveBoard(state.interaction);
+    return { UiAction { HideBoardAction {} } };
 }
 
 void Dashboard::openForm(std::string_view repo, ItemRef const& item, std::string_view task)
@@ -871,18 +928,28 @@ std::string_view Dashboard::selectedRun() const noexcept
     return row != nullptr ? std::string_view { row->run } : std::string_view {};
 }
 
+std::vector<UiAction> Dashboard::expireEscape()
+{
+    return _state->resolveOverdueEscape();
+}
+
 std::string Dashboard::frame()
 {
     auto& state = *_state;
-    // An Escape key resolved here asks the engine nothing: it only closes what is open.
+    // The guest took what an overdue Escape key asks with expireEscape(); one resolved here only closes.
     static_cast<void>(state.resolveOverdueEscape());
     // A row changed with time alone (an age moved on, a trust-prompt hint fell due): the rows are built and
     // drawn again, though the engine did not change.
     if (state.rowChangeMs && state.nowMonoMs() >= *state.rowChangeMs)
     {
         state.rowsState = State::Rows::Stale;
-        state.repaint = State::Repaint::Needed;
+        if (state.interaction.screen == Screen::Dashboard)
+            state.repaint = State::Repaint::Needed;
     }
+    // A board's age moved on.
+    if (auto const due = state.boardPanel.ageChangeMs;
+        state.interaction.screen == Screen::Board && due && state.nowMonoMs() >= *due)
+        state.repaint = State::Repaint::Needed;
     if (state.repaint == State::Repaint::Clean)
         return {};
     state.ensureRows();

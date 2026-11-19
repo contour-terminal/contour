@@ -1402,6 +1402,42 @@ TEST_CASE("show-blocked opens the tab on the first blocked agent", "[guest]")
     CHECK(served.dashboard().selectedRun() == BlockedId);
 }
 
+TEST_CASE("show-blocked leaves a board and stops reading it", "[guest][board]")
+{
+    constexpr auto RunningId = "pr-2375-20261113-150847"sv;
+    constexpr auto BlockedId = "pr-2379-20261113-151500"sv;
+    auto served = Served {};
+    auto listing = std::vector<PaneInfo> {};
+    for (auto const& run: { view::test::storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }),
+                            view::test::storedRun(Blocked {}, BlockedId, ChangeRequestRef { 2379 }) })
+    {
+        served.host.store.insert_or_assign(runKey(run.id), toJson(run));
+        listing.push_back(PaneInfo { .pane = *run.pane,
+                                     .tag = run.id,
+                                     .status = std::holds_alternative<Blocked>(run.state)
+                                                   ? AgentStatus::Blocked
+                                                   : AgentStatus::Working,
+                                     .program = ProgramLiveness::Alive });
+    }
+    served.host.paneListing = listing;
+    served.host.fileContent = FileContent { .bytes = "# hi", .modifiedUnixMs = 1 };
+    served.load();
+    served.invoke("open");
+    CHECK(served.driver->dashboard("tab-1")->select(RunningId).empty());
+    served.type("b");
+    REQUIRE(served.dashboard().interaction().screen == view::Screen::Board);
+    REQUIRE(served.driver->engine().board(RunningId) != nullptr);
+
+    served.invoke("show-blocked");
+
+    CHECK(served.dashboard().interaction().screen == view::Screen::Dashboard);
+    CHECK(served.dashboard().selectedRun() == BlockedId);
+    auto const hidden = served.observer.inputsOf<HideBoard>();
+    REQUIRE(hidden.size() == 1);
+    CHECK(hidden.front().tab == "tab-1");
+    CHECK(served.driver->engine().board(RunningId) == nullptr);
+}
+
 namespace
 {
 
@@ -1681,6 +1717,36 @@ TEST_CASE("a served tab that closes stops showing its board", "[guest][board]")
     served.host.clock.monoMs += 10'000;
     served.driver->update(Hint::Wake);
     CHECK(boardViewReads(served.observer) == 1);
+}
+
+TEST_CASE("b and a held ESC show and hide a board through the engine", "[guest][board]")
+{
+    constexpr auto Run = "pr-2375-20261113-150847"sv;
+    auto served = Served {};
+    addAgent(served);
+    served.host.fileContent = FileContent { .bytes = "# hi", .modifiedUnixMs = 1 };
+    served.load();
+    served.invoke("open");
+    CHECK(served.driver->dashboard("tab-1")->select(Run).empty());
+
+    served.type("b");
+    auto const shown = served.observer.inputsOf<ShowBoard>();
+    REQUIRE(shown.size() == 1);
+    CHECK(shown.front().run == Run);
+    CHECK(shown.front().tab == "tab-1");
+    CHECK(served.dashboard().interaction().screen == view::Screen::Board);
+    CHECK(core::tui::test::canvasToString(served.dashboard().rendered()).contains("STATUS.md"));
+
+    served.type("\x1b");
+    REQUIRE_FALSE(served.host.wakes.empty());
+    served.host.clock.monoMs += served.host.wakes.back();
+    served.driver->update(Hint::Wake);
+
+    auto const hidden = served.observer.inputsOf<HideBoard>();
+    REQUIRE(hidden.size() == 1);
+    CHECK(hidden.front().tab == "tab-1");
+    CHECK(served.driver->engine().board(Run) == nullptr);
+    CHECK(served.dashboard().interaction().screen == view::Screen::Dashboard);
 }
 
 TEST_CASE("a key split across two tab reads moves once", "[guest]")

@@ -9,6 +9,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -96,22 +97,53 @@ using UiAction = std::variant<RefreshNowAction,
 /// What a key does on the dashboard.
 enum class KeyCommand : uint8_t
 {
-    Up,           ///< Select the row above.
-    Down,         ///< Select the row below.
-    Home,         ///< Select the first row.
-    End,          ///< Select the last row.
-    Enter,        ///< Dispatch on the selected item, reveal its agent, or open a finished run's details.
-    Back,         ///< Close what is open: the help, the details page, the filter.
-    Tab,          ///< In the Medium and Narrow bands, swap the details in for the list, and back.
-    Filter,       ///< Type a filter for the rows.
-    Help,         ///< Show or hide the keys.
-    Refresh,      ///< Read the lists again now.
-    EndRun,       ///< End the selected run.
-    RetryRemoval, ///< Check the selected kept worktree again.
-    Dismiss,      ///< Drop the selected finished run.
-    Dispatch,     ///< Open the dispatch form on the selected item, on the first task that applies to it.
-    Task,         ///< Open the dispatch form on the selected item, on the task whose key was typed.
+    Up,             ///< Select the row above.
+    Down,           ///< Select the row below.
+    Home,           ///< Select the first row.
+    End,            ///< Select the last row.
+    Enter,          ///< Dispatch on the selected item, reveal its agent, or open a finished run's details.
+    Back,           ///< Close what is open: a board, the help, the details page, the filter.
+    Tab,            ///< In the Medium and Narrow bands, swap the details in for the list, and back.
+    Filter,         ///< Type a filter for the rows.
+    Help,           ///< Show or hide the keys.
+    Refresh,        ///< Read the lists again now.
+    EndRun,         ///< End the selected run.
+    RetryRemoval,   ///< Check the selected kept worktree again.
+    Dismiss,        ///< Drop the selected finished run.
+    Dispatch,       ///< Open the dispatch form on the selected item, on the first task that applies to it.
+    Task,           ///< Open the dispatch form on the selected item, on the task whose key was typed.
+    Board,          ///< Show the selected run's status board; on the board, read it again now.
+    Transcript,     ///< Show the selected run's transcript.
+    ScrollPageUp,   ///< Scroll a board or a transcript up by a screen.
+    ScrollPageDown, ///< Scroll a board or a transcript down by a screen.
+    PreviousPage,   ///< Show the transcript's previous page.
+    NextPage,       ///< Show the transcript's next page.
 };
+
+/// What the dashboard's tab shows.
+enum class Screen : uint8_t
+{
+    Dashboard = 0, ///< The lists and the details.
+    Board,         ///< A run's status board (Interaction::subject).
+    Transcript,    ///< A run's transcript (Interaction::subject).
+};
+
+/// The screens a key row acts and is hinted on: a bit per Screen.
+enum class ScreenSet : uint8_t
+{
+    Dashboard = 0b001,  ///< The dashboard only.
+    Board = 0b010,      ///< The status board only.
+    Transcript = 0b100, ///< The transcript only.
+    All = 0b111,        ///< Every screen.
+};
+
+/// @param set Some screens.
+/// @param screen A screen.
+/// @return Whether @p set holds @p screen.
+[[nodiscard]] constexpr bool holds(ScreenSet set, Screen screen) noexcept
+{
+    return ((std::to_underlying(set) >> std::to_underlying(screen)) & 1U) != 0;
+}
 
 /// One key: what it is called, what it does, and what the hint line calls it.
 struct KeyRow
@@ -122,23 +154,26 @@ struct KeyRow
     std::string_view hint = {}; ///< How the hint line and the help name it; empty: neither shows the row.
     std::optional<Band> hiddenIn =
         std::nullopt; ///< The band whose hint line does not show it, where it does nothing; absent: none.
+    ScreenSet on = ScreenSet::Dashboard; ///< The screens it acts and is hinted on.
 };
 
 /// @param row A key.
 /// @param band The tab's band.
-/// @return Whether the hint line of a tab in @p band shows the row's hint.
-[[nodiscard]] constexpr bool isHintedIn(KeyRow const& row, Band band) noexcept
+/// @param screen What the tab shows.
+/// @return Whether the hint line of a tab in @p band showing @p screen shows the row's hint.
+[[nodiscard]] constexpr bool isHintedIn(KeyRow const& row, Band band, Screen screen) noexcept
 {
-    return !row.hint.empty() && row.hiddenIn != band;
+    return !row.hint.empty() && row.hiddenIn != band && holds(row.on, screen);
 }
 
 /// @return Every key the dashboard acts on now, in the order the hint line and the help show them.
 [[nodiscard]] std::span<KeyRow const> keyRows() noexcept;
 
 /// @param key A key the terminal sent.
-/// @return What it does on the dashboard; std::nullopt for a key no row names, or one with Ctrl or Alt.
-///         A task's key is not in the table: applyKey() looks it up in the configuration.
-[[nodiscard]] std::optional<KeyCommand> commandFor(core::tui::KeyEvent const& key) noexcept;
+/// @param screen What the tab shows.
+/// @return What it does on @p screen; std::nullopt for a key no row of that screen names, or one with Ctrl or
+///         Alt. A task's key is not in the table: applyKey() looks it up in the configuration.
+[[nodiscard]] std::optional<KeyCommand> commandFor(core::tui::KeyEvent const& key, Screen screen) noexcept;
 
 // }}}
 // {{{ the interaction
@@ -175,6 +210,10 @@ struct Interaction
     std::string pendingEnd = {}; ///< The run whose end waits for a second `e` (D14: asks once); empty: none.
     std::optional<DispatchFormState> form = {}; ///< The dispatch form, while it is open: it takes every key.
     std::string notice = {}; ///< A one-line notice on the summary line, until the next key; empty: none.
+    Screen screen = Screen::Dashboard; ///< What the tab shows.
+    std::string subject = {};          ///< The run a board or a transcript is of; empty on the dashboard.
+    uint32_t page = 1;                 ///< The transcript's 1-based page.
+    std::size_t scroll = 0;            ///< The first line a board or a transcript shows.
     [[nodiscard]] bool operator==(Interaction const&) const = default;
 };
 
@@ -186,6 +225,8 @@ struct KeyContext
     Row const* selected = nullptr;        ///< The selected row; nullptr when there is none.
     Engine const* engine = nullptr;       ///< Its runs, lists and tasks; nullptr: no key dispatches.
     std::optional<std::size_t> task = {}; ///< For KeyCommand::Task: the task, an index into Config::tasks().
+    std::size_t lines = 0;                ///< How many lines a board or a transcript has, as last drawn.
+    std::size_t rows = 0;                 ///< How many of them the tab showed at once.
 };
 
 /// Applies one key's command.
@@ -196,6 +237,21 @@ struct KeyContext
 [[nodiscard]] std::optional<UiAction> dispatch(KeyCommand command,
                                                Interaction& interaction,
                                                KeyContext const& context);
+
+/// Returns from a board to the dashboard; the caller asks the engine to stop reading it (HideBoardAction).
+/// @param interaction Where the user is.
+void leaveBoard(Interaction& interaction) noexcept;
+
+/// @param engine The engine; nullptr: none.
+/// @param run A run's id.
+/// @return Whether the run is active and has an agent tab to go to.
+[[nodiscard]] bool hasAgentTab(Engine const* engine, std::string_view run) noexcept;
+
+/// @param engine The engine; nullptr: none.
+/// @param run A run's id.
+/// @return Whether the run has a board to show: it is known, and its worktree is still there
+///         (keepsWorktree()).
+[[nodiscard]] bool hasBoardToShow(Engine const* engine, std::string_view run) noexcept;
 
 /// @param command A command.
 /// @return Whether dispatch() has a row for it.
