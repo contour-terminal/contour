@@ -39,6 +39,12 @@ typedef uint8_t terminal_extensions_daemon_host_host_error_t;
 #define TERMINAL_EXTENSIONS_DAEMON_HOST_HOST_ERROR_GONE 4
 // The host does not serve this import yet: a capability the extension does not have, never a fault.
 #define TERMINAL_EXTENSIONS_DAEMON_HOST_HOST_ERROR_NOT_SUPPORTED_YET 5
+// The working directory is no directory, or one that may not be opened.
+#define TERMINAL_EXTENSIONS_DAEMON_HOST_HOST_ERROR_NOT_A_DIRECTORY 6
+// The extension has as many panes as it may: one must close before another opens.
+#define TERMINAL_EXTENSIONS_DAEMON_HOST_HOST_ERROR_TOO_MANY 7
+// The program a pane template runs is not found on the PATH the pane would start it with.
+#define TERMINAL_EXTENSIONS_DAEMON_HOST_HOST_ERROR_PROGRAM_MISSING 8
 
 // Why the host did not read a file.
 typedef uint8_t terminal_extensions_daemon_host_file_error_t;
@@ -470,8 +476,8 @@ extern bool terminal_extensions_daemon_host_summary_set(daemon_string_t *short_,
 // Shows a pane the extension owns in the origin's window: activated where that window shows its
 // workspace, the user asked first when it is in another. An origin whose window has gone stands for
 // the window focused last; with none attached the pane only becomes its workspace's active tab. Within
-// 2 s of a key typed into one of the extension's served tabs, an origin that names no attached window
-// (0 included) stands for the window that key came from. Otherwise an origin never handed to the
+// 2 s of a key typed or a mouse button pressed into one of the extension's served tabs, an origin that
+// names no attached window (0 included) stands for the window that key or click came from. Otherwise an origin never handed to the
 // extension (0, another extension's) is `gone` and raises nothing; so is a pane it closed, until its
 // session ended (`not-owned` after).
 extern bool terminal_extensions_daemon_host_pane_reveal(daemon_string_t *pane, terminal_extensions_daemon_host_origin_t origin, terminal_extensions_daemon_host_host_error_t *err);

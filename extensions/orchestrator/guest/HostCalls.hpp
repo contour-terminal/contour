@@ -8,6 +8,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <orchestrator/core/Commands.hpp>
@@ -48,11 +49,19 @@ enum class HostError : uint8_t
 {
     NotGranted,      ///< The user has not granted what the call needs.
     NotOwned,        ///< The pane, tab or process belongs to another extension.
-    BadArgument,     ///< An argument is not what the manifest declares, or a program is missing.
+    BadArgument,     ///< An argument is not what the manifest declares, or a process's program is missing.
     Limit,           ///< A limit of the host is reached.
     Gone,            ///< The pane, tab, process or working directory no longer exists.
     NotSupportedYet, ///< The host does not serve this call yet.
+    NotADirectory,   ///< The working directory is no directory, or may not be opened.
+    TooMany,         ///< The extension has as many panes as it may.
+    ProgramMissing,  ///< A pane template's program is not found on the daemon's PATH.
 };
+
+/// How many HostError values there are: the WIT's `host-error` cases, which WitHost.cpp checks against the
+/// generated bindings, so that a case the WIT gains cannot be left out of a table indexed by HostError.
+inline constexpr auto HostErrorCount = std::size_t { 9 };
+static_assert(std::to_underlying(HostError::ProgramMissing) + 1U == HostErrorCount);
 
 /// Why the host did not read a file.
 enum class FileError : uint8_t
@@ -66,6 +75,10 @@ enum class FileError : uint8_t
     Escapes,         ///< The path leaves the root.
     NotSupportedYet, ///< The host does not serve this call yet.
 };
+
+/// How many FileError values there are: the WIT's `file-error` cases, checked as HostErrorCount is.
+inline constexpr auto FileErrorCount = std::size_t { 8 };
+static_assert(std::to_underlying(FileError::NotSupportedYet) + 1U == FileErrorCount);
 
 /// One of a process's two output streams.
 enum class ProcStream : uint8_t

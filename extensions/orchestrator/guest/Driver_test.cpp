@@ -25,6 +25,7 @@
 #include <vector>
 
 #include <orchestrator/core/Engine.hpp>
+#include <orchestrator/core/FailureWords.hpp>
 #include <orchestrator/core/Fixtures.hpp>
 #include <orchestrator/guest/Driver.hpp>
 #include <orchestrator/guest/HostCalls.hpp>
@@ -950,6 +951,27 @@ TEST_CASE("exactly one reply per OpenPane", "[guest]")
     CHECK(failed.front().run == opens.front().run);
     CHECK(failed.front().why == "not-supported-yet");
     CHECK(observer.inputsOf<PaneOpenedFor>().empty());
+}
+
+TEST_CASE("every error the daemon world answers has plain words on the dashboard", "[guest]")
+{
+    // A run's failure carries the code its host call answered (nameOf); the dashboard must never show one
+    // bare.
+    auto const hasRow = [](std::string_view code) {
+        return std::ranges::contains(failureWords(), code, &FailureWords::code);
+    };
+    for (auto const value: std::views::iota(std::size_t { 0 }, HostErrorCount))
+    {
+        auto const code = nameOf(static_cast<HostError>(value));
+        INFO(code);
+        CHECK(hasRow(code));
+    }
+    for (auto const value: std::views::iota(std::size_t { 0 }, FileErrorCount))
+    {
+        auto const code = nameOf(static_cast<FileError>(value));
+        INFO(code);
+        CHECK(hasRow(code));
+    }
 }
 
 TEST_CASE("a refused pane-open lists the panes at once", "[guest][panes]")

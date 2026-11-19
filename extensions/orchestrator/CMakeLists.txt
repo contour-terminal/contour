@@ -45,6 +45,8 @@ add_library(orchestrator_core STATIC
     core/EngineDetail.hpp
     core/EngineDispatch.cpp
     core/EnginePoll.cpp
+    core/FailureWords.cpp
+    core/FailureWords.hpp
     core/Finished.cpp
     core/Finished.hpp
     core/GitHub.cpp
@@ -172,6 +174,7 @@ if(ORCHESTRATOR_TESTING)
         core/Config_test.cpp
         core/Engine_test.cpp
         core/Fixtures.hpp
+        core/FailureWords_test.cpp
         core/Finished_test.cpp
         core/GitHub_test.cpp
         core/JsonPrefix_test.cpp

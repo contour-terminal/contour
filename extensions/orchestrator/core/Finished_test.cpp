@@ -349,6 +349,22 @@ TEST_CASE("Finished list and summary", "[orchestrator][finished]")
                "removed, new: fetch: fatal: no remote");
     }
 
+    SECTION("a refused host call is said in plain words, as the dashboard says it")
+    {
+        auto run = makeRun("pr-1-20261113-150847",
+                           Finished { .ended = Ended::PreparationFailed,
+                                      .fate = Fate::Removed,
+                                      .entries = {},
+                                      .seen = Seen::New,
+                                      .endedWallMs = NowMs });
+        run.failure = RunFailure { .step = PrepareStep::OpenPane, .why = "not-supported-yet" };
+        CHECK(orchestrator::runStateText(run).ends_with(": pane: not-supported-yet"));
+        auto const runs = std::array { std::move(run) };
+        CHECK(orchestrator::summarize(Counts { 0, 4, 0, 0, 1 }, runs)
+                  .detail.ends_with(
+                      "preparation failed, worktree removed, new: pane: agents can't start here yet"));
+    }
+
     SECTION("hostile text is sanitised")
     {
         auto finishedState = finished(Fate::Kept, Seen::New, NowMs);

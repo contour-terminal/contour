@@ -25,6 +25,7 @@
 
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Config.hpp>
+#include <orchestrator/core/FailureWords.hpp>
 #include <orchestrator/core/Finished.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Naming.hpp>
@@ -396,8 +397,13 @@ namespace
             details.push_back(outsideDetail());
         std::ranges::move(runDetails(lists, run), std::back_inserter(details));
         if (run.failure)
-            details.push_back(
-                DetailLine { .label = "failure", .value = clean(run.failure->why), .role = Role::Failing });
+        {
+            details.push_back(DetailLine {
+                .label = "failure", .value = clean(plainFailure(run.failure->why)), .role = Role::Failing });
+            if (auto const* const words = failureWordsOf(run.failure->why); words && !words->detail.empty())
+                details.push_back(
+                    DetailLine { .label = "", .value = clean(words->detail), .role = Role::Dim });
+        }
         for (auto const& entry: finished.entries)
             details.push_back(DetailLine { .label = "", .value = clean(entry), .role = Role::Warning });
         if (isRetryable)

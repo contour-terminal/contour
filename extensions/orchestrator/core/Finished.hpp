@@ -48,15 +48,16 @@ inline constexpr std::size_t MaxSummaryLineChars = 200;
 [[nodiscard]] std::string_view endedText(Ended ended) noexcept;
 
 /// Where a run stands, in the words the summary's run lines use: such as "running" or "ending: verify"; for a
-/// finished run, how it ended, what became of its worktree, whether it was seen, and why it was kept.
+/// finished run, how it ended, what became of its worktree, whether it was seen, and why it was kept or
+/// failed. A failure keeps its host call's code (`pane: not-supported-yet`), for diagnosis.
 /// @param run The run.
 /// @return Its state, in words.
 [[nodiscard]] std::string runStateText(Run const& run);
 
 /// One run's line of Summary::detail.
 /// @param run The run.
-/// @return Its id, repository, model and runStateText(), sanitised to one line of at most
-///         MaxSummaryLineChars characters.
+/// @return Its id, repository, model and runStateText() with a failure in plain words (plainFailure()),
+///         sanitised to one line of at most MaxSummaryLineChars characters.
 [[nodiscard]] std::string runLine(Run const& run);
 
 /// The numbers the summary shows.

@@ -15,6 +15,7 @@
 #include <utility>
 #include <variant>
 
+#include <orchestrator/core/FailureWords.hpp>
 #include <orchestrator/core/Overloaded.hpp>
 #include <orchestrator/core/Run.hpp>
 #include <orchestrator/core/Sanitize.hpp>
@@ -76,10 +77,18 @@ namespace
     /// The bytes the line counting the runs left out may take, its line end included.
     constexpr auto MaxTrailerBytes = std::size_t { 32 };
 
+    /// How a run's failure is spelled.
+    enum class FailureWording : uint8_t
+    {
+        Code = 0, ///< As the host call answered it, such as `not-supported-yet`: for diagnosis.
+        Plain,    ///< In plain words (plainFailure()): for the summary.
+    };
+
     /// How a finished run ended, what became of its worktree, whether it was seen, and why.
     [[nodiscard]] std::string describeFinished(Run const& run,
                                                Finished const& finished,
-                                               std::string_view again)
+                                               std::string_view again,
+                                               FailureWording wording)
     {
         auto text = std::format("{}, {}, {}{}",
                                 nameOf(EndedNames, finished.ended),
@@ -87,10 +96,36 @@ namespace
                                 nameOf(SeenNames, finished.seen),
                                 again);
         if (run.failure)
-            text += std::format(": {}: {}", nameOf(PrepareStepNames, run.failure->step), run.failure->why);
+            text += std::format(": {}: {}",
+                                nameOf(PrepareStepNames, run.failure->step),
+                                wording == FailureWording::Plain ? plainFailure(run.failure->why)
+                                                                 : std::string_view { run.failure->why });
         else if (finished.fate == Fate::Kept && !finished.entries.empty())
             text += std::format(": {}", finished.entries.front());
         return text;
+    }
+
+    /// Where @p run stands, its failure spelled as @p wording says.
+    [[nodiscard]] std::string stateText(Run const& run, FailureWording wording)
+    {
+        return std::visit(Overloaded {
+                              [](Preparing const& state) {
+                                  return std::format("preparing: {}", nameOf(PrepareStepNames, state.step));
+                              },
+                              [](Running const&) { return std::string { "running" }; },
+                              [](Blocked const&) { return std::string { "blocked" }; },
+                              [](Done const&) { return std::string { "done" }; },
+                              [&run, wording](Ending const& state) {
+                                  if (state.resumedFrom)
+                                      return describeFinished(
+                                          run, *state.resumedFrom, ", checking again"sv, wording);
+                                  return std::format("ending: {}", nameOf(EndStepNames, state.step));
+                              },
+                              [&run, wording](Finished const& state) {
+                                  return describeFinished(run, state, ""sv, wording);
+                              },
+                          },
+                          run.state);
     }
 
     [[nodiscard]] std::string shortTextOf(Counts const& counts)
@@ -121,27 +156,14 @@ std::string_view endedText(Ended ended) noexcept
 
 std::string runStateText(Run const& run)
 {
-    return std::visit(Overloaded {
-                          [](Preparing const& state) {
-                              return std::format("preparing: {}", nameOf(PrepareStepNames, state.step));
-                          },
-                          [](Running const&) { return std::string { "running" }; },
-                          [](Blocked const&) { return std::string { "blocked" }; },
-                          [](Done const&) { return std::string { "done" }; },
-                          [&run](Ending const& state) {
-                              if (state.resumedFrom)
-                                  return describeFinished(run, *state.resumedFrom, ", checking again"sv);
-                              return std::format("ending: {}", nameOf(EndStepNames, state.step));
-                          },
-                          [&run](Finished const& state) { return describeFinished(run, state, ""sv); },
-                      },
-                      run.state);
+    return stateText(run, FailureWording::Code);
 }
 
 std::string runLine(Run const& run)
 {
-    return displayText(std::format("{} · {} · {} · {}", run.id, run.repo, run.model, runStateText(run)),
-                       MaxSummaryLineChars);
+    return displayText(
+        std::format("{} · {} · {} · {}", run.id, run.repo, run.model, stateText(run, FailureWording::Plain)),
+        MaxSummaryLineChars);
 }
 
 bool isPurgeable(Run const& run, uint64_t nowWallMs, std::chrono::milliseconds retention) noexcept

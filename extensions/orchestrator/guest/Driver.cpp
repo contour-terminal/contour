@@ -25,12 +25,13 @@ namespace orchestrator::guest
 namespace
 {
     /// The names of HostError, by value, as the daemon world spells them.
-    constexpr auto HostErrorNames = std::array<std::string_view, 6> {
-        "not-granted", "not-owned", "bad-argument", "limit", "gone", "not-supported-yet",
+    constexpr auto HostErrorNames = std::array<std::string_view, HostErrorCount> {
+        "not-granted",       "not-owned",       "bad-argument", "limit",           "gone",
+        "not-supported-yet", "not-a-directory", "too-many",     "program-missing",
     };
 
     /// The names of FileError, by value, as the daemon world spells them.
-    constexpr auto FileErrorNames = std::array<std::string_view, 8> {
+    constexpr auto FileErrorNames = std::array<std::string_view, FileErrorCount> {
         "not-granted", "bad-argument", "directory-gone", "not-regular",
         "unreadable",  "too-large",    "escapes",        "not-supported-yet",
     };
@@ -41,8 +42,8 @@ namespace
         "unknown-model",  "already-running", "base-unknown", "bad-prompt",
     };
 
-    static_assert(HostErrorNames.size() == std::to_underlying(HostError::NotSupportedYet) + 1U);
-    static_assert(FileErrorNames.size() == std::to_underlying(FileError::NotSupportedYet) + 1U);
+    static_assert(HostErrorNames.size() == HostErrorCount);
+    static_assert(FileErrorNames.size() == FileErrorCount);
     static_assert(DispatchRefusalNames.size() == std::to_underlying(DispatchRefusal::BadPrompt) + 1U);
 
     /// What a FileError tells the engine; every error a `.git` file read can meet that is not one of these is

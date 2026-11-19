@@ -71,6 +71,21 @@ using Fixture = DashboardFixture;
     return run;
 }
 
+/// A run whose tab the host refused to open: agents cannot start in a worktree from this sandbox.
+[[nodiscard]] Run paneRefusedRun()
+{
+    auto run = storedRun(Finished { .ended = Ended::PreparationFailed,
+                                    .fate = Fate::Removed,
+                                    .entries = {},
+                                    .seen = Seen::New,
+                                    .endedWallMs = DispatchWallMs },
+                         NewId,
+                         ChangeRequestRef { 2366 },
+                         "fix_ci");
+    run.failure = RunFailure { .step = PrepareStep::OpenPane, .why = "not-supported-yet" };
+    return run;
+}
+
 /// What a kept run records when its checks stopped at `common-dir`.
 constexpr auto CommonDirReason =
     "git uses another directory than the main checkout's .git; nothing more was run there"sv;
@@ -109,6 +124,7 @@ struct Scene
                                       KeptId,
                                       IssueRef { 2356 },
                                       "issue") } };
+    auto const paneRefused = World { .prs = { "github/prs-empty.json" }, .stored = { paneRefusedRun() } };
     return {
         Scene { .name = "empty", .world = World { .configJson = "{}" } },
         Scene { .name = "lists", .world = listsOnly },
@@ -150,6 +166,8 @@ struct Scene
                 .world = keptReasons,
                 .keys = "\x1b[F\t"sv,
                 .sizes = { Narrow } },
+        Scene { .name = "pane-refused", .world = paneRefused, .keys = "\x1b[F"sv, .sizes = { Wide } },
+        Scene { .name = "pane-refused", .world = paneRefused, .keys = "\x1b[F\t"sv, .sizes = { Narrow } },
         Scene { .name = "orphans", .world = orphansWorld(), .keys = "\x1b[F"sv, .sizes = { Medium } },
         // Enter opens an orphan's details on the whole width, for its command line.
         Scene { .name = "orphans", .world = orphansWorld(), .keys = "\x1b[F\r"sv, .sizes = { Wide, Narrow } },

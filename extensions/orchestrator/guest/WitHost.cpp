@@ -66,10 +66,14 @@ namespace
         return { reinterpret_cast<char const*>(bytes.ptr), bytes.len };
     }
 
+    // The WIT's error cases, counted as the native enums count them.
+    static_assert(TERMINAL_EXTENSIONS_DAEMON_HOST_HOST_ERROR_PROGRAM_MISSING + 1U == HostErrorCount);
+    static_assert(TERMINAL_EXTENSIONS_DAEMON_HOST_FILE_ERROR_NOT_SUPPORTED_YET + 1U == FileErrorCount);
+
     [[nodiscard]] HostError hostErrorOf(HostErrorCode code) noexcept
     {
         // An error the bindings do not know cannot come from the WIT they were generated from.
-        return code <= TERMINAL_EXTENSIONS_DAEMON_HOST_HOST_ERROR_NOT_SUPPORTED_YET
+        return code <= TERMINAL_EXTENSIONS_DAEMON_HOST_HOST_ERROR_PROGRAM_MISSING
                    ? static_cast<HostError>(code)
                    : HostError::BadArgument;
     }

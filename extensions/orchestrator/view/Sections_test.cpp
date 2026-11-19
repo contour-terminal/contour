@@ -462,3 +462,30 @@ TEST_CASE("a long orphan path keeps its whole command", "[orchestrator][view]")
     REQUIRE(command != nullptr);
     CHECK(command->value == std::format("git -C {} worktree remove {}", ContourPath, path));
 }
+
+TEST_CASE("a failed run says why in plain words and keeps the code in its state", "[orchestrator][view]")
+{
+    auto failed = storedRun(Finished { .ended = Ended::PreparationFailed,
+                                       .fate = Fate::Removed,
+                                       .entries = {},
+                                       .seen = Seen::New,
+                                       .endedWallMs = DispatchWallMs },
+                            KeptId,
+                            IssueRef { 2356 },
+                            "issue");
+    failed.failure = RunFailure { .step = PrepareStep::OpenPane, .why = "not-supported-yet" };
+    auto const engine = bootEngine({ .stored = { failed } });
+    auto const rows = buildRows(engine, StartMonoMs);
+    auto const* const row = rowOfRun(rows, KeptId);
+    REQUIRE(row != nullptr);
+    CHECK(row->status == "failed");
+    auto const detail = [&](std::string_view label) {
+        auto const found = std::ranges::find(row->details, label, &DetailLine::label);
+        return found != row->details.end() ? found->value : std::string {};
+    };
+    CHECK(detail("failure") == "agents can't start here yet");
+    auto const failure = std::ranges::find(row->details, "failure"sv, &DetailLine::label);
+    REQUIRE(std::next(failure) != row->details.end());
+    CHECK(std::next(failure)->value.contains("Flatpak or Windows build"));
+    CHECK(detail("state").ends_with(": pane: not-supported-yet"));
+}
