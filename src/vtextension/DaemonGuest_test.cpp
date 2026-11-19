@@ -315,17 +315,26 @@ struct MeasuredSeed
     return seed;
 }
 
+/// What a measured guest reads once its dashboard asks: a transcript page and a status board.
+struct MeasuredReads
+{
+    std::string transcriptPage = {}; ///< What `agent-transcript` prints at once; empty: it never finishes.
+    std::string board = {};          ///< What `STATUS.md` holds; empty: no file is read.
+};
+
 /// The daemon world's served imports for one measured `update(procs)`: at `load`, the pull request list and
 /// every seeded run's call run; before the update they all finish, the list with the 100 pull requests and
-/// each call with exit 0. Store calls go to the store given, tab calls to the tabs given.
+/// each call with exit 0. Store calls go to the store given, tab calls to the tabs given; a transcript or a
+/// board is read as @p reads says.
 class MeasuredServices final: public IDaemonHostServices
 {
   public:
     MeasuredServices(std::string pullRequests,
                      std::span<MeasuredSeed::Run const> runs,
                      IExtensionStore& store,
-                     IServedTabService& tabs):
-        _tabs { tabs }, _store { store }
+                     IServedTabService& tabs,
+                     MeasuredReads reads = {}):
+        _tabs { tabs }, _store { store }, _reads { std::move(reads) }
     {
         _processes.push_back(Process {
             .handle = 1, .tag = "poll/contour/prs", .command = "gh-prs", .output = std::move(pullRequests) });
@@ -340,12 +349,7 @@ class MeasuredServices final: public IDaemonHostServices
     void finish()
     {
         for (auto& process: _processes)
-            process.state = ProcResult { .completion = ProcCompletion::Exited,
-                                         .exitCode = 0,
-                                         .stdoutBytes = static_cast<uint32_t>(process.output.size()),
-                                         .stdoutExtent = OutputExtent::Whole,
-                                         .stderrBytes = 0,
-                                         .stderrExtent = OutputExtent::Whole };
+            process.state = finished(process.output);
     }
 
     /// @return The store writes since the last call, which starts the count again.
@@ -358,14 +362,28 @@ class MeasuredServices final: public IDaemonHostServices
         return ClockReading { .monotonicMs = 1'000, .wallMs = 1'794'582'527'000 };
     }
 
-    [[nodiscard]] std::expected<uint32_t, HostError> procStart(std::string_view /*command*/,
+    [[nodiscard]] std::expected<uint32_t, HostError> procStart(std::string_view command,
                                                                ConfigMap const& /*args*/,
                                                                std::string_view /*cwd*/,
-                                                               std::string_view /*tag*/) override
+                                                               std::string_view tag) override
     {
+        auto const handle = static_cast<uint32_t>(1'000 + ++_started);
+        // A transcript page asked for is printed at once, and listed finished.
+        if (command == "agent-transcript" && !_reads.transcriptPage.empty())
+        {
+            ++_transcriptReads;
+            _processes.push_back(Process { .handle = handle,
+                                           .tag = std::string(tag),
+                                           .command = std::string(command),
+                                           .output = _reads.transcriptPage,
+                                           .state = finished(_reads.transcriptPage) });
+        }
         // The poll's own commands run, and are never listed: only the seeded calls answer.
-        return static_cast<uint32_t>(1'000 + ++_started);
+        return handle;
     }
+
+    /// @return How many transcript pages were asked for.
+    [[nodiscard]] std::size_t transcriptReads() const noexcept { return _transcriptReads; }
 
     [[nodiscard]] std::expected<std::vector<ProcInfo>, HostError> procs() override
     {
@@ -500,14 +518,29 @@ class MeasuredServices final: public IDaemonHostServices
         return std::unexpected(HostError::NotSupportedYet);
     }
 
-    /// No file is read in a measurement: the read answers as an unserved import would.
+    /// A status board is read when one is served, written a minute before now; any other read answers as an
+    /// unserved import would.
     [[nodiscard]] std::expected<FileContent, FileError> fileRead(std::string_view /*root*/,
-                                                                 std::string_view /*path*/) override
+                                                                 std::string_view path) override
     {
-        return std::unexpected(FileError::NotSupportedYet);
+        if (_reads.board.empty() || !path.ends_with("STATUS.md"))
+            return std::unexpected(FileError::NotSupportedYet);
+        return FileContent { .bytes = ByteList(_reads.board.begin(), _reads.board.end()),
+                             .modifiedUnixMs = now().wallMs - 60'000 };
     }
 
   private:
+    /// @return A process's result: exited 0, having printed @p output.
+    [[nodiscard]] static ProcResult finished(std::string_view output) noexcept
+    {
+        return ProcResult { .completion = ProcCompletion::Exited,
+                            .exitCode = 0,
+                            .stdoutBytes = static_cast<uint32_t>(output.size()),
+                            .stdoutExtent = OutputExtent::Whole,
+                            .stderrBytes = 0,
+                            .stderrExtent = OutputExtent::Whole };
+    }
+
     IServedTabService& _tabs;
     static constexpr auto PageBytes = std::size_t { 64 } * 1024;
 
@@ -528,9 +561,11 @@ class MeasuredServices final: public IDaemonHostServices
     }
 
     IExtensionStore& _store;
+    MeasuredReads _reads;
     std::vector<Process> _processes;
     uint32_t _started = 0;
     std::size_t _storeWrites = 0;
+    std::size_t _transcriptReads = 0;
 };
 
 /// A store in memory: the callback without the disk.
@@ -741,14 +776,16 @@ class RepaintRig
     /// @param seed The configuration and the runs taken in.
     /// @param pullRequestsFixture The pull requests listed.
     /// @param limits The guest's limits: the daemon world's, which a measurement times against.
+    /// @param reads What a transcript read and a board read answer.
     explicit RepaintRig(MeasuredSeed const& seed,
                         std::string_view pullRequestsFixture = "github/prs-100.json",
-                        ExtensionLimits limits = daemonWorldLimits()):
+                        ExtensionLimits limits = daemonWorldLimits(),
+                        MeasuredReads reads = {}):
         _limits { limits },
         _backend { wasm::makeDefaultBackend() },
         _engine { required(Engine::create(*_backend, World::Daemon, _limits)) },
         _compiled { required(CompiledExtension::load(*_engine, orchestratorModule())) },
-        _services { readTestdata(pullRequestsFixture), seed.runs, _store, tab },
+        _services { readTestdata(pullRequestsFixture), seed.runs, _store, tab, std::move(reads) },
         _instance { required(DaemonInstance::create(_compiled, _services, _clock, *_engine, _limits)) }
     {
         for (auto const& run: seed.runs)
@@ -778,6 +815,9 @@ class RepaintRig
 
     /// Runs one `update(hint)` untimed.
     void update(DaemonHint hint) { REQUIRE(_instance->update(hint).has_value()); }
+
+    /// @return How many transcript pages the guest asked for.
+    [[nodiscard]] std::size_t transcriptReads() const noexcept { return _services.transcriptReads(); }
 
     MeasuredTab tab; ///< The tab it serves.
 
@@ -1120,6 +1160,140 @@ TEST_CASE("DaemonGuest: [.measure] the dispatch form's repaint", "[.measure][gue
             CAPTURE(name);
             REQUIRE(spread.max < deadline);
         }
+    }
+}
+
+namespace
+{
+
+/// The worst-case transcript page: 30 entries of 2 KiB of text, every byte a `"` or a `\` that JSON escapes,
+/// so about 124 KiB as `contour agent transcript --json` prints it.
+[[nodiscard]] std::string worstTranscriptPage()
+{
+    constexpr auto Entries = 30;
+    constexpr auto TextBytes = std::size_t { 2048 };
+    auto escaped = std::string {};
+    while (escaped.size() < 2 * TextBytes)
+        escaped += R"(\"\\)";
+    escaped.resize(2 * TextBytes);
+    auto page = std::string { R"({"format":1,"session":"00000000-0000-4000-8000-000000000001",)"
+                              R"("writtenBy":"2.1.328","page":1,"pages":3,"notUnderstood":0,"entries":[)" };
+    for (auto const index: std::views::iota(0, Entries))
+        page += std::format(R"({}{{"kind":"{}","time":"2026-11-19T18:36:55.086Z","text":"{}"}})",
+                            index == 0 ? "" : ",",
+                            index % 2 == 0 ? "tool-result" : "assistant",
+                            escaped);
+    return page + "]}";
+}
+
+/// @return A status board of 64 KiB, the most a file read returns: a markdown list of short lines.
+[[nodiscard]] std::string largestBoard()
+{
+    constexpr auto Bytes = std::size_t { 64 } * 1024;
+    auto board = std::string { "# Status\n\n" };
+    for (auto index = 0; board.size() < Bytes; ++index)
+        board += std::format(
+            "- step {}: reproduced, fixed and tested the reflow of a wrapped line's last cell\n", index);
+    board.resize(Bytes);
+    return board;
+}
+
+} // namespace
+
+TEST_CASE("DaemonGuest: [.measure] the transcript's and the board's repaint", "[.measure][guest-measure]")
+{
+    auto const deadline =
+        std::chrono::duration_cast<std::chrono::microseconds>(daemonWorldLimits().callDeadline);
+    auto const seed = measuredSeed();
+    auto const page = worstTranscriptPage();
+    auto const board = largestBoard();
+    std::println("the worst transcript page is {} bytes; the board {} bytes", page.size(), board.size());
+
+    // (a) The worst page asked for with `t` on the last run's row, then taken in and drawn at 120x40; again
+    // after a round through its board (`b`, unserved here), which leaves the page asked for anew.
+    auto transcript = RepaintRig {
+        seed, "github/prs-100.json", daemonWorldLimits(), MeasuredReads { .transcriptPage = page }
+    };
+    transcript.tab.type("\x1b[F"sv);
+    transcript.update(DaemonHint::Tabs);
+    auto asked = std::vector<std::chrono::microseconds> {};
+    auto delivered = std::vector<std::chrono::microseconds> {};
+    for (auto const round: std::views::iota(0, MeasuredRounds))
+    {
+        transcript.tab.type(round == 0 ? "t"sv : "bt"sv);
+        asked.push_back(transcript.timed(DaemonHint::Tabs));
+        delivered.push_back(transcript.timed(DaemonHint::Procs));
+    }
+    REQUIRE(transcript.transcriptReads() == static_cast<std::size_t>(MeasuredRounds));
+
+    // (b) A full repaint of the page: the tab grows from 80x24 to 120x40, the page wrapped anew.
+    auto resized = std::vector<std::chrono::microseconds> {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, MeasuredRounds))
+    {
+        transcript.tab.info.cols = 80;
+        transcript.tab.info.rows = 24;
+        transcript.update(DaemonHint::Tabs);
+        transcript.tab.info.cols = 120;
+        transcript.tab.info.rows = 40;
+        resized.push_back(transcript.timed(DaemonHint::Tabs));
+    }
+
+    // (c) Scrolling the page by a screen.
+    auto scrolled = std::vector<std::chrono::microseconds> {};
+    for (auto const round: std::views::iota(0, MeasuredRounds))
+    {
+        transcript.tab.type(round % 2 == 0 ? "\x1b[6~"sv : "\x1b[5~"sv);
+        scrolled.push_back(transcript.timed(DaemonHint::Tabs));
+    }
+
+    // (d) The 64 KiB board read and drawn with `b`; again after a round through its transcript (`t`, left
+    // unanswered here), which draws the board anew and reads it again now.
+    auto boards =
+        RepaintRig { seed, "github/prs-100.json", daemonWorldLimits(), MeasuredReads { .board = board } };
+    boards.tab.type("\x1b[F"sv);
+    boards.update(DaemonHint::Tabs);
+    auto shown = std::vector<std::chrono::microseconds> {};
+    for (auto const round: std::views::iota(0, MeasuredRounds))
+    {
+        boards.tab.type(round == 0 ? "b"sv : "tb"sv);
+        shown.push_back(boards.timed(DaemonHint::Tabs));
+    }
+    // (e) A full repaint of the board: the tab grows from 80x24 to 120x40, the board wrapped anew.
+    auto boardResized = std::vector<std::chrono::microseconds> {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, MeasuredRounds))
+    {
+        boards.tab.info.cols = 80;
+        boards.tab.info.rows = 24;
+        boards.update(DaemonHint::Tabs);
+        boards.tab.info.cols = 120;
+        boards.tab.info.rows = 40;
+        boardResized.push_back(boards.timed(DaemonHint::Tabs));
+    }
+
+    auto const rows = std::array {
+        std::pair { "(a) update(tabs) asking for the page with t", spreadOf(std::move(asked)) },
+        std::pair { "(a) update(procs) delivering the worst page, drawn", spreadOf(std::move(delivered)) },
+        std::pair { "(b) update(tabs) after a resize 80x24 -> 120x40, page shown",
+                    spreadOf(std::move(resized)) },
+        std::pair { "(c) update(tabs) after a page key", spreadOf(std::move(scrolled)) },
+        std::pair { "(d) update(tabs) reading and drawing the 64 KiB board", spreadOf(std::move(shown)) },
+        std::pair { "(e) update(tabs) after a resize 80x24 -> 120x40, board shown",
+                    spreadOf(std::move(boardResized)) },
+    };
+    std::println("the transcript's and the board's repaint, 120x40, prs-100.json, {} calls each:",
+                 MeasuredRounds);
+    for (auto const& [name, spread]: rows)
+        std::println("  {}: min {} median {} max {}; headroom {} of {}",
+                     name,
+                     spread.min,
+                     spread.median,
+                     spread.max,
+                     deadline - spread.max,
+                     deadline);
+    for (auto const& [name, spread]: rows)
+    {
+        CAPTURE(name);
+        REQUIRE(spread.max < deadline);
     }
 }
 
