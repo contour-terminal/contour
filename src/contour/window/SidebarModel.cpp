@@ -74,6 +74,8 @@ namespace
         RoleName { SidebarModel::AccessibleDescriptionRole, "accessibleDescription" },
         RoleName { SidebarModel::SelectionRole, "selection" },
         RoleName { SidebarModel::TreeTextContinuedRole, "treeTextContinued" },
+        RoleName { SidebarModel::SecondLineRole, "secondLine" },
+        RoleName { SidebarModel::IdleLineRole, "idleLine" },
     };
 
     [[nodiscard]] QString qs(std::string const& text)
@@ -174,6 +176,8 @@ namespace
         note(before.selection == after.selection, { SidebarModel::SelectionRole });
         note(before.continued == after.continued && before.depth == after.depth,
              { SidebarModel::TreeTextContinuedRole });
+        note(secondLineOf(before) == secondLineOf(after), { SidebarModel::SecondLineRole });
+        note(idleLineOf(before) == idleLineOf(after), { SidebarModel::IdleLineRole });
         // The spoken name is the title; the description folds in the kind and the status, not a running time.
         if (accessibleNameOf(before) != accessibleNameOf(after))
             for (auto const role: { static_cast<int>(SidebarModel::AccessibleNameRole),
@@ -411,6 +415,8 @@ QVariant SidebarModel::data(QModelIndex const& index, int role) const
         case AccessibleDescriptionRole: return accessibleDescriptionOf(*row);
         case SelectionRole: return static_cast<int>(row->selection);
         case TreeTextContinuedRole: return qs(treeContinuationText(*row));
+        case SecondLineRole: return static_cast<int>(secondLineOf(*row));
+        case IdleLineRole: return qs(idleLineOf(*row));
         default: break;
     }
     return {};

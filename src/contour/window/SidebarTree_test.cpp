@@ -807,6 +807,50 @@ TEST_CASE("SidebarTree.hover_detail_joins_what_it_has", "[sidebar]")
     CHECK(hoverDetailOf(rows.front()).empty());
 }
 
+namespace
+{
+/// A row of @p depth with only the parts the second line is decided from.
+SidebarRow secondLineRow(uint8_t depth, std::string folder, std::string program, std::string reason = {})
+{
+    auto row = SidebarRow {};
+    row.depth = depth;
+    row.folder = std::move(folder);
+    row.program = std::move(program);
+    row.reason = std::move(reason);
+    return row;
+}
+} // namespace
+
+TEST_CASE("idleLineOf joins folder and program", "[sidebar]")
+{
+    CHECK(idleLineOf(secondLineRow(1, "~/src", "claude")) == "~/src · claude");
+    CHECK(idleLineOf(secondLineRow(2, "~/src", "claude")) == "~/src · claude");
+}
+
+TEST_CASE("idleLineOf leaves a missing half out", "[sidebar]")
+{
+    CHECK(idleLineOf(secondLineRow(1, "~/src", {})) == "~/src");
+    CHECK(idleLineOf(secondLineRow(1, {}, "claude")) == "claude");
+    CHECK(idleLineOf(secondLineRow(1, {}, {})).empty());
+}
+
+TEST_CASE("idleLineOf is empty for a workspace row", "[sidebar]")
+{
+    CHECK(idleLineOf(secondLineRow(0, "~/src", "claude")).empty());
+}
+
+TEST_CASE("secondLineOf prefers a status to the idle line", "[sidebar]")
+{
+    for (auto const depth: { uint8_t { 1 }, uint8_t { 2 } })
+    {
+        CHECK(secondLineOf(secondLineRow(depth, "~/src", {}, "exit 1")) == SecondLine::Status);
+        CHECK(secondLineOf(secondLineRow(depth, "~/src", {})) == SecondLine::Idle);
+        CHECK(secondLineOf(secondLineRow(depth, {}, {})) == SecondLine::Idle);
+    }
+    CHECK(secondLineOf(secondLineRow(0, {}, {}, "exit 1")) == SecondLine::None);
+    CHECK(secondLineOf(secondLineRow(0, {}, {})) == SecondLine::None);
+}
+
 TEST_CASE("SidebarTree.unlabelled_workspace_is_numbered_as_its_host_numbers_it", "[sidebar]")
 {
     // The daemon counts a workspace the list leaves out: the row says what `contour ls` says.

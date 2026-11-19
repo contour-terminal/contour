@@ -2,9 +2,9 @@
 // One row of the workspace sidebar (SidebarModel): a workspace, a tab of one, or a pane of a split tab.
 //
 // A workspace row: its disclosure, its name, its git state and the rolled-up status glyph. A tab or pane row:
-// its status glyph, its title, its reason on a second line when there is one, and its time -- or its progress,
-// as a thin meter -- at the right. Everything the row says, and in what order the statuses rank, is the
-// model's (SidebarTree.hpp); every extent, ink and radius is the row's tokens (chromeStyle.sidebar,
+// its status glyph, its title, a second line -- its reason when there is one, else its folder and program --
+// and its time -- or its progress, as a thin meter -- at the right. A tab or pane row is always two lines
+// tall. Everything the row says, and in what order the statuses rank, is the model's (SidebarTree.hpp); every extent, ink and radius is the row's tokens (chromeStyle.sidebar,
 // chromeStyle.colors), so one file draws the source list, the navigation pane, the header pane and the cell
 // tree alike. On the Terminal row the tree's connectors are text (the treeText role) and the meter is block
 // characters (meterText), so every part stays on the cell grid.
@@ -49,6 +49,8 @@ Item {
     required property string fullReasonCommand
     required property string hoverDetail
     required property real progressFraction
+    required property int secondLine
+    required property string idleLine
 
     /// The sidebar's model (WindowController.sidebar), which the row's actions go to. Its bindings never
     /// read it: the row compares its roles with the SidebarRows enums, so a row that outlives its model while
@@ -71,7 +73,7 @@ Item {
     // A workspace and a tab have names of their own, which the user can change; a pane has none.
     readonly property bool renamable: row.kind !== SidebarRows.SidebarRowKind.Pane
     readonly property bool cellTree: chromeStyle.sidebar.look === chromeStyle.sidebar.cellTree
-    readonly property bool hasReason: row.reason !== "" && !row.isWorkspace
+    readonly property bool hasReason: row.secondLine === SidebarRows.SecondLine.Status
     readonly property bool hasProgress: row.timeKind === SidebarRows.TimeKind.Progress && row.progress >= 0
     /// Whether the row wears the selection: the displayed tab, or the folded workspace that holds it.
     readonly property bool marked: row.selection !== SidebarRows.RowSelection.None
@@ -93,15 +95,18 @@ Item {
     // The selection's and the hover fill's inset: the command palette's on the same row, and none on the
     // Terminal row, whose selection is the whole run of cells.
     readonly property real fillInset: row.cellTree ? 0 : chromeStyle.space.paletteInset
-    // A two-line row groups its lines: the reason sits a small step under the name, and the pair is centred in
-    // the row, so the rows stand further apart than the lines within one.
+    // A tab or pane row is always two lines, the reason or the idle line under the name, so a status coming
+    // or going changes text and never the row's height. It groups its lines: the second sits a small step
+    // under the name, and the pair is centred in the row, so the rows stand further apart than the lines
+    // within one.
     readonly property real lineGap: row.groupsLines ? chromeStyle.space.s1 : 0
     // On the Terminal row each line is a whole cell row, so the first line keeps the row's height there.
-    readonly property bool groupsLines: row.hasReason && !row.cellTree
+    readonly property bool groupsLines: !row.isWorkspace && !row.cellTree
     readonly property real firstLineHeight: row.groupsLines ? Math.max(titleMetrics.height, chromeStyle.sidebar.glyph)
                                                             : chromeStyle.sidebar.rowHeight
+    // Both second lines are set in the footnote face, so one measure centres the pair whichever it is.
     readonly property real firstLineTop: row.groupsLines
-        ? Math.max(0, (row.height - row.firstLineHeight - row.lineGap - reasonMetrics.height) / 2) : 0
+        ? Math.max(0, (row.height - row.firstLineHeight - row.lineGap - secondLineMetrics.height) / 2) : 0
     // The row's edge padding: 0 on the Terminal row, whose small spacing steps are no cells at all.
     readonly property real padding: chromeStyle.space.s3
     // What the row keeps free at its trailing end, inside the selection: the padding (a cell on the Terminal
@@ -114,7 +119,7 @@ Item {
     readonly property bool renaming: renameLoader.active
 
     width: ListView.view ? ListView.view.width : implicitWidth
-    implicitHeight: row.hasReason ? chromeStyle.sidebar.twoLineRowHeight : chromeStyle.sidebar.rowHeight
+    implicitHeight: row.isWorkspace ? chromeStyle.sidebar.rowHeight : chromeStyle.sidebar.twoLineRowHeight
     height: implicitHeight
 
     Accessible.role: Accessible.TreeItem
@@ -135,7 +140,7 @@ Item {
     }
 
     FontMetrics { id: titleMetrics; font: titleText.font }
-    FontMetrics { id: reasonMetrics; font: reasonText.font }
+    FontMetrics { id: secondLineMetrics; font: chromeStyle.type.footnote }
 
     // What the pointer does to a row on the rows whose platform shows it (chromeStyle.sidebar.rowFeedback):
     // the band's hover fill under it, the pressed fill while it is held. Under the selection, at its inset.
@@ -423,7 +428,7 @@ Item {
     // next row and to the row's own children, so a two-line row never breaks the tree.
     Text {
         objectName: "sidebarRowTreeContinued"
-        visible: row.cellTree && row.hasReason && row.treeTextContinued !== ""
+        visible: row.cellTree && !row.isWorkspace && row.treeTextContinued !== ""
         x: lead.x
         anchors.top: reasonLine.top
         textFormat: Text.PlainText
@@ -469,6 +474,23 @@ Item {
             elide: Text.ElideRight
             Accessible.ignored: true
         }
+    }
+
+    // The second line of a row with nothing to say: where it is and what runs there (`~/src · zsh`), in the
+    // row's muted ink. Empty when neither is known; the row keeps its height all the same.
+    Text {
+        objectName: "sidebarRowIdle"
+        visible: row.secondLine === SidebarRows.SecondLine.Idle
+        x: titleText.x
+        width: reasonLine.width
+        anchors.top: firstLine.bottom
+        anchors.topMargin: row.lineGap
+        textFormat: Text.PlainText
+        text: row.idleLine
+        font: chromeStyle.type.footnote
+        color: row.secondaryInk
+        elide: Text.ElideRight
+        Accessible.ignored: true
     }
 
     // The thin meter under a native row that reports progress.

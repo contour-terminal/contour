@@ -841,6 +841,8 @@ TEST_CASE(
             { "fullReasonCommand", QString {} },
             { "hoverDetail", QString {} },
             { "progressFraction", 0.0 },
+            { "secondLine", kind == 0 ? 0 : 1 },
+            { "idleLine", QString {} },
             { "sidebar", QVariant::fromValue<QObject*>(nullptr) },
             { "controller", QVariant::fromValue<QObject*>(nullptr) },
         };

@@ -327,6 +327,22 @@ namespace
         return holdsDisplayed && !showsDisplayed ? RowSelection::ContainsSelected : RowSelection::None;
     }
 
+    /// @param parts The texts, in order.
+    /// @return The parts that are not empty, joined by LabelSeparator.
+    [[nodiscard]] std::string joinedParts(std::initializer_list<std::string const*> parts)
+    {
+        auto joined = std::string {};
+        for (auto const* part: parts)
+        {
+            if (part->empty())
+                continue;
+            if (!joined.empty())
+                joined += LabelSeparator;
+            joined += *part;
+        }
+        return joined;
+    }
+
 } // namespace
 
 std::string gitTextOf(DirectoryGit const& git)
@@ -456,16 +472,14 @@ std::string_view urgencyText(Urgency urgency) noexcept
 
 std::string hoverDetailOf(SidebarRow const& row)
 {
-    auto detail = std::string {};
-    for (auto const* part: { &row.program, &row.folder, &row.time.text })
-    {
-        if (part->empty())
-            continue;
-        if (!detail.empty())
-            detail += LabelSeparator;
-        detail += *part;
-    }
-    return detail;
+    return joinedParts({ &row.program, &row.folder, &row.time.text });
+}
+
+std::string idleLineOf(SidebarRow const& row)
+{
+    if (secondLineOf(row) == SecondLine::None)
+        return {};
+    return joinedParts({ &row.folder, &row.program });
 }
 
 int parentRowOf(std::span<SidebarRow const> rows, int row) noexcept

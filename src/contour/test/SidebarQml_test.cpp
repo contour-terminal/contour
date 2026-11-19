@@ -463,11 +463,75 @@ TEST_CASE("the sidebar shows one row per model row with title, reason and time (
         CHECK(reason->property("y").toReal() == command->property("y").toReal());
         CHECK(time->isVisible());
         CHECK(time->property("text").toString() == QStringLiteral("0:30"));
-        // A row with a reason is two lines tall, one without it one line.
+        // A tab row is two lines tall, with a reason or without one; a workspace row is one line.
         CHECK(claude->height() == scene.token("twoLineRowHeight"));
+        auto* notes = scene.rowTitled(QStringLiteral("notes"));
+        REQUIRE(notes != nullptr);
+        CHECK(notes->height() == scene.token("twoLineRowHeight"));
         auto* docs = scene.rowTitled(QStringLiteral("docs"));
         REQUIRE(docs != nullptr);
         CHECK(docs->height() == scene.token("rowHeight"));
+        CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("a tab row keeps its height when its reason comes and goes (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        auto* claude = scene.rowTitled(QStringLiteral("claude"));
+        auto* build = scene.rowTitled(QStringLiteral("build"));
+        REQUIRE(claude != nullptr);
+        REQUIRE(build != nullptr);
+        auto* reasonLine = SidebarWindow::findNamed(*claude, QStringLiteral("sidebarRowReasonLine"));
+        REQUIRE(reasonLine != nullptr);
+        REQUIRE(reasonLine->isVisible());
+        auto const height = claude->height();
+        auto const below = build->y();
+
+        // The reason goes; the list lays out again on the next frame.
+        auto const frames = QSignalSpy { scene.window, &QQuickWindow::frameSwapped };
+        scene.controller.sidebarSource().listed.workspaces[0].tabs[0].panes[0].status = {};
+        scene.controller.sidebarModel().refreshNow();
+        REQUIRE(QTest::qWaitFor([&] { return !reasonLine->isVisible() && frames.count() > 0; }, 1000));
+
+        CHECK(claude->height() == height);
+        CHECK(build->y() == below);
+        CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("an idle row shows its folder on the second line (offscreen)", "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        scene.controller.sidebarSource().listed.workspaces[1].tabs[0].panes[0].cwd = "/src/docs";
+        scene.controller.sidebarModel().refreshNow();
+
+        auto* notes = scene.rowTitled(QStringLiteral("notes"));
+        REQUIRE(notes != nullptr);
+        auto* idle = SidebarWindow::findNamed(*notes, QStringLiteral("sidebarRowIdle"));
+        auto* reasonLine = SidebarWindow::findNamed(*notes, QStringLiteral("sidebarRowReasonLine"));
+        REQUIRE(idle != nullptr);
+        REQUIRE(reasonLine != nullptr);
+        CHECK(idle->isVisible());
+        CHECK(idle->property("text").toString() == QStringLiteral("/src/docs"));
+        CHECK_FALSE(reasonLine->isVisible());
+
+        // A row with a reason shows it instead.
+        auto* claude = scene.rowTitled(QStringLiteral("claude"));
+        REQUIRE(claude != nullptr);
+        auto* claudeIdle = SidebarWindow::findNamed(*claude, QStringLiteral("sidebarRowIdle"));
+        auto* claudeReason = SidebarWindow::findNamed(*claude, QStringLiteral("sidebarRowReasonLine"));
+        REQUIRE(claudeIdle != nullptr);
+        REQUIRE(claudeReason != nullptr);
+        CHECK_FALSE(claudeIdle->isVisible());
+        CHECK(claudeReason->isVisible());
         CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
 }

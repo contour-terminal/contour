@@ -886,6 +886,42 @@ TEST_CASE("SidebarModel: the reason is delivered as its words and its command", 
     CHECK(failed.data(SidebarModel::ReasonCommandRole).toString() == "make");
 }
 
+TEST_CASE("SidebarModel: an idle tab row's second line is its folder", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
+    t.source.listed.workspaces[0].tabs[0].panes[0].cwd = "/srv/app";
+    t.sidebar().refreshNow();
+
+    CHECK(t.sidebar().roleNames().value(SidebarModel::SecondLineRole) == "secondLine");
+    CHECK(t.sidebar().roleNames().value(SidebarModel::IdleLineRole) == "idleLine");
+    auto const tab = t.sidebar().index(1);
+    CHECK(tab.data(SidebarModel::SecondLineRole).toInt() == static_cast<int>(sidebarrows::SecondLine::Idle));
+    CHECK(tab.data(SidebarModel::IdleLineRole).toString() == "/srv/app");
+    auto const workspace = t.sidebar().index(0);
+    CHECK(workspace.data(SidebarModel::SecondLineRole).toInt()
+          == static_cast<int>(sidebarrows::SecondLine::None));
+    CHECK(workspace.data(SidebarModel::IdleLineRole).toString().isEmpty());
+}
+
+TEST_CASE("a reason arriving changes the second line's role", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
+    t.sidebar().refreshNow();
+    auto changed = QSignalSpy { &t.sidebar(), &QAbstractItemModel::dataChanged };
+
+    auto record = recordOf(ProgramState::Done);
+    record.message = "All tests pass";
+    t.source.listed.workspaces[0].tabs[0].panes[0].status = { record };
+    t.sidebar().refreshNow();
+
+    auto const named = std::ranges::any_of(changed, [](QList<QVariant> const& signal) {
+        return signal.at(2).value<QList<int>>().contains(SidebarModel::SecondLineRole);
+    });
+    CHECK(named);
+    CHECK(t.sidebar().index(1).data(SidebarModel::SecondLineRole).toInt()
+          == static_cast<int>(sidebarrows::SecondLine::Status));
+}
+
 TEST_CASE("SidebarModel: the command map names every tree command", "[contour][sidebar]")
 {
     auto const commands = sidebarCommandMap();

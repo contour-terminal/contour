@@ -81,6 +81,15 @@ enum class RowSelection : uint8_t
 };
 Q_ENUM_NS(RowSelection)
 
+/// What a row's second line holds (@see window::SecondLine, which it mirrors).
+enum class SecondLine : uint8_t
+{
+    None = 0, ///< No second line: a workspace row.
+    Idle,     ///< The idle line: the folder and the program.
+    Status,   ///< The reason.
+};
+Q_ENUM_NS(SecondLine)
+
 /// Whether activating a row showed anything. Not exposed to QML: only C++ asks.
 enum class RowActivation : uint8_t
 {
@@ -152,6 +161,9 @@ static_assert(std::to_underlying(RowSelection::Selected)
               == std::to_underlying(window::RowSelection::Selected));
 static_assert(std::to_underlying(RowSelection::ContainsSelected)
               == std::to_underlying(window::RowSelection::ContainsSelected));
+static_assert(std::to_underlying(SecondLine::None) == std::to_underlying(window::SecondLine::None));
+static_assert(std::to_underlying(SecondLine::Idle) == std::to_underlying(window::SecondLine::Idle));
+static_assert(std::to_underlying(SecondLine::Status) == std::to_underlying(window::SecondLine::Status));
 
 } // namespace contour::window::sidebarrows
 
@@ -404,6 +416,8 @@ class SidebarModel: public QAbstractListModel
         SelectionRole,         ///< RowSelection: the displayed tab, or the folded row that holds it.
         TreeTextContinuedRole, ///< The Terminal look's connectors on the second line
                                ///< (treeContinuationText()).
+        SecondLineRole,        ///< SecondLine: whether the second line is the reason, the idle line or none.
+        IdleLineRole,          ///< The second line of a row with no reason (idleLineOf()).
     };
 
     /// @param host The window the sidebar sits in; must outlive the model.

@@ -283,6 +283,30 @@ enum class ChipMarker : uint8_t
 /// @return The parts it has, joined by ` · `; empty when it has none.
 [[nodiscard]] std::string hoverDetailOf(SidebarRow const& row);
 
+/// What a row's second line holds.
+enum class SecondLine : uint8_t
+{
+    None = 0, ///< No second line: a workspace row.
+    Idle,     ///< The idle line (idleLineOf()): where the pane is and what runs there.
+    Status,   ///< The reason: what the pane does or waits for.
+};
+
+/// @param row The row.
+/// @return Status when the row has a reason; else Idle when it is a tab or pane row; None for a
+///         workspace row.
+[[nodiscard]] constexpr SecondLine secondLineOf(SidebarRow const& row) noexcept
+{
+    if (row.depth == 0)
+        return SecondLine::None;
+    return row.reason.empty() ? SecondLine::Idle : SecondLine::Status;
+}
+
+/// The second line of a tab or pane row with no reason to show (`~/src · claude`).
+/// @param row The row.
+/// @return The idle line: folder, then program, joined by LabelSeparator; a missing part is left out
+///         with its separator; empty for a workspace row and when both are empty.
+[[nodiscard]] std::string idleLineOf(SidebarRow const& row);
+
 /// The index of the row @p row hangs under.
 /// @param rows The rows as shown.
 /// @param row A row's index.
