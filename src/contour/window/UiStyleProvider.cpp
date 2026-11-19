@@ -256,11 +256,11 @@ namespace
         return color ? platform::toQColor(*color) : QColor { Qt::transparent };
     }
 
-    /// @param hovered Whether QML's HoverHandler holds the pointer over the row.
-    /// @return It as the row's paint decisions take it.
-    [[nodiscard]] constexpr RowPointer rowPointerOf(bool hovered) noexcept
+    /// @param pointer A window::RowPointer as QML passes it, an int.
+    /// @return It; away for a value no enumerator has.
+    [[nodiscard]] constexpr RowPointer rowPointerOf(int pointer) noexcept
     {
-        return hovered ? RowPointer::Hovering : RowPointer::Away;
+        return inRange(pointer, RowPointerCount) ? static_cast<RowPointer>(pointer) : RowPointer::Away;
     }
 
     /// @param windowActive Whether QML's Window.active holds for the row's window.
@@ -716,11 +716,18 @@ QVariantMap UiStyleProvider::sidebarSelection(int selection, bool treeFocused, b
              { QStringLiteral("pill"), paint.pill == AccentPill::Shown } };
 }
 
+int UiStyleProvider::sidebarRowPointer(bool hovered, bool pressed) const
+{
+    if (pressed)
+        return static_cast<int>(RowPointer::Pressing);
+    return static_cast<int>(hovered ? RowPointer::Hovering : RowPointer::Away);
+}
+
 QVariantMap UiStyleProvider::sidebarTabColor(int style,
                                              QColor const& tabColor,
                                              QColor const& rowBackground,
                                              int selection,
-                                             bool hovered,
+                                             int pointer,
                                              bool windowActive) const
 {
     auto paint = SidebarTabColorPaint {};
@@ -729,7 +736,7 @@ QVariantMap UiStyleProvider::sidebarTabColor(int style,
                                      presentColor(tabColor),
                                      platform::toRGBColor(rowBackground),
                                      sidebarTabVisualState(rowSelectionOf(selection),
-                                                           rowPointerOf(hovered),
+                                                           rowPointerOf(pointer),
                                                            windowActivityOf(windowActive)));
     return { { QStringLiteral("fill"), qmlPaintColor(paint.fill) },
              { QStringLiteral("bar"), qmlPaintColor(paint.bar) },
@@ -741,7 +748,7 @@ QVariantMap UiStyleProvider::sidebarWorkspaceColor(int style,
                                                    QColor const& workspaceColor,
                                                    QColor const& rowBackground,
                                                    int selection,
-                                                   bool hovered,
+                                                   int pointer,
                                                    bool windowActive) const
 {
     auto paint = SidebarWorkspaceColorPaint {};
@@ -751,7 +758,7 @@ QVariantMap UiStyleProvider::sidebarWorkspaceColor(int style,
                                            presentColor(workspaceColor),
                                            platform::toRGBColor(rowBackground),
                                            sidebarTabVisualState(rowSelectionOf(selection),
-                                                                 rowPointerOf(hovered),
+                                                                 rowPointerOf(pointer),
                                                                  windowActivityOf(windowActive)));
     return { { QStringLiteral("fill"), qmlPaintColor(paint.fill) },
              { QStringLiteral("ink"), qmlPaintColor(paint.ink) },

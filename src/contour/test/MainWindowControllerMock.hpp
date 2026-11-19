@@ -21,6 +21,7 @@
 #include <contour/window/PromptHost.hpp>
 #include <contour/window/RemoteChrome.hpp>
 #include <contour/window/SidebarModel.hpp>
+#include <contour/window/SidebarTabColor.hpp>
 #include <contour/window/StatusUrgency.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabBarDropPolicy.hpp>
@@ -105,14 +106,10 @@ inline constexpr auto MockProfileNames =
 [[nodiscard]] inline QColor mockTabBackgroundColor(
     QColor const& tabColor, QColor const& rowBackground, bool active, bool hovered, bool windowActive)
 {
-    auto const state = [&] {
-        if (active)
-            return window::TabVisualState::Active;
-        if (hovered)
-            return window::TabVisualState::Hover;
-        return windowActive ? window::TabVisualState::Inactive
-                            : window::TabVisualState::InactiveWindowUnfocused;
-    }();
+    auto const state = window::sidebarTabVisualState(
+        active ? window::RowSelection::Selected : window::RowSelection::None,
+        hovered ? window::RowPointer::Hovering : window::RowPointer::Away,
+        windowActive ? window::WindowActivity::Active : window::WindowActivity::Inactive);
     return platform::toQColor(window::tabBackgroundColor(
         platform::toRGBColor(tabColor), platform::toRGBColor(rowBackground), state));
 }

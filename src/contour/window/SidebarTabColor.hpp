@@ -17,18 +17,23 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 
 namespace contour::window
 {
 
-/// Whether the pointer is over a sidebar row.
+/// Whether the pointer is over a sidebar row, and whether it holds it down.
 enum class RowPointer : uint8_t
 {
     Away = 0, ///< The pointer is elsewhere.
     Hovering, ///< The pointer is over the row.
+    Pressing, ///< The pointer holds the row down.
 };
+
+/// Number of @c RowPointer enumerators, derived from the last one.
+inline constexpr size_t RowPointerCount = static_cast<size_t>(RowPointer::Pressing) + 1;
 
 /// The tab-strip prominence a sidebar row's tab colour is drawn at.
 /// @param selection Whether the row is the window's shown tab; a folded workspace holding it counts as
@@ -36,8 +41,9 @@ enum class RowPointer : uint8_t
 /// @param pointer   Whether the pointer is over the row.
 /// @param activity  Whether the row's window is active.
 /// @return As the tab strip decides a coloured tab's (WindowController's tabVisualStateFor): Active for the
-///         selected row in any window, so it always keeps the most of the colour; else Hover while hovered;
-///         else Inactive in the active window and InactiveWindowUnfocused in another.
+///         selected row in any window, so it always keeps the most of the colour; else Pressed while held
+///         down, so a press on a tinted row reads apart from a hover; else Hover while hovered; else Inactive
+///         in the active window and InactiveWindowUnfocused in another.
 [[nodiscard]] constexpr TabVisualState sidebarTabVisualState(RowSelection selection,
                                                              RowPointer pointer,
                                                              WindowActivity activity) noexcept
@@ -48,8 +54,12 @@ enum class RowPointer : uint8_t
         case RowSelection::ContainsSelected: return TabVisualState::Active;
         case RowSelection::None: break;
     }
-    if (pointer == RowPointer::Hovering)
-        return TabVisualState::Hover;
+    switch (pointer)
+    {
+        case RowPointer::Pressing: return TabVisualState::Pressed;
+        case RowPointer::Hovering: return TabVisualState::Hover;
+        case RowPointer::Away: break;
+    }
     return activity == WindowActivity::Active ? TabVisualState::Inactive
                                               : TabVisualState::InactiveWindowUnfocused;
 }

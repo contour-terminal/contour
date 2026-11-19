@@ -21,11 +21,12 @@ namespace
 {
 constexpr auto Selections =
     std::array { RowSelection::None, RowSelection::Selected, RowSelection::ContainsSelected };
-constexpr auto Pointers = std::array { RowPointer::Away, RowPointer::Hovering };
+constexpr auto Pointers = std::array { RowPointer::Away, RowPointer::Hovering, RowPointer::Pressing };
 constexpr auto Foci = std::array { WindowActivity::Inactive, WindowActivity::Active };
 constexpr auto Styles =
     std::array { SidebarTabColorStyle::Tint, SidebarTabColorStyle::Bar, SidebarTabColorStyle::Name };
 constexpr auto States = std::array { TabVisualState::Active,
+                                     TabVisualState::Pressed,
                                      TabVisualState::Hover,
                                      TabVisualState::Inactive,
                                      TabVisualState::InactiveWindowUnfocused };
@@ -51,15 +52,22 @@ TEST_CASE("sidebarTabVisualState.the selected row keeps the colour, others follo
         Expectation { RowSelection::None, RowPointer::Away, WindowActivity::Active, Inactive },
         Expectation { RowSelection::None, RowPointer::Hovering, WindowActivity::Inactive, Hover },
         Expectation { RowSelection::None, RowPointer::Hovering, WindowActivity::Active, Hover },
+        Expectation { RowSelection::None, RowPointer::Pressing, WindowActivity::Inactive, Pressed },
+        Expectation { RowSelection::None, RowPointer::Pressing, WindowActivity::Active, Pressed },
         Expectation { RowSelection::Selected, RowPointer::Away, WindowActivity::Inactive, Active },
         Expectation { RowSelection::Selected, RowPointer::Away, WindowActivity::Active, Active },
         Expectation { RowSelection::Selected, RowPointer::Hovering, WindowActivity::Inactive, Active },
         Expectation { RowSelection::Selected, RowPointer::Hovering, WindowActivity::Active, Active },
+        Expectation { RowSelection::Selected, RowPointer::Pressing, WindowActivity::Inactive, Active },
+        Expectation { RowSelection::Selected, RowPointer::Pressing, WindowActivity::Active, Active },
         Expectation { RowSelection::ContainsSelected, RowPointer::Away, WindowActivity::Inactive, Active },
         Expectation { RowSelection::ContainsSelected, RowPointer::Away, WindowActivity::Active, Active },
         Expectation {
             RowSelection::ContainsSelected, RowPointer::Hovering, WindowActivity::Inactive, Active },
         Expectation { RowSelection::ContainsSelected, RowPointer::Hovering, WindowActivity::Active, Active },
+        Expectation {
+            RowSelection::ContainsSelected, RowPointer::Pressing, WindowActivity::Inactive, Active },
+        Expectation { RowSelection::ContainsSelected, RowPointer::Pressing, WindowActivity::Active, Active },
     };
     static_assert(Table.size() == Selections.size() * Pointers.size() * Foci.size());
 
@@ -78,6 +86,28 @@ TEST_CASE("sidebarTabVisualState.in an inactive window the selected row keeps mo
     };
     CHECK(fractionOf(RowSelection::Selected) > fractionOf(RowSelection::None));
     CHECK(fractionOf(RowSelection::ContainsSelected) > fractionOf(RowSelection::None));
+}
+
+TEST_CASE("sidebarTabColorPaint.a press on a tinted row reads apart from a hover and from rest", "[sidebar]")
+{
+    // A tinted row draws no hover or pressed fill of its own: its tint is what the pointer changes.
+    auto const fillOf = [](RowPointer pointer) {
+        return sidebarTabColorPaint(
+                   SidebarTabColorStyle::Tint,
+                   Orange,
+                   RowFill,
+                   sidebarTabVisualState(RowSelection::None, pointer, WindowActivity::Active))
+            .fill;
+    };
+    auto const resting = fillOf(RowPointer::Away);
+    auto const hovered = fillOf(RowPointer::Hovering);
+    auto const pressed = fillOf(RowPointer::Pressing);
+    CHECK(hovered != resting);
+    CHECK(pressed != hovered);
+    CHECK(pressed != resting);
+    // Pressed sits between hover and the selected row's full colour.
+    CHECK(tabColorFraction(TabVisualState::Pressed) > tabColorFraction(TabVisualState::Hover));
+    CHECK(tabColorFraction(TabVisualState::Pressed) < tabColorFraction(TabVisualState::Active));
 }
 
 TEST_CASE("sidebarMarkInk.a mark keeps its colour unless it would vanish into the tint", "[sidebar]")

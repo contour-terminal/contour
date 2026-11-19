@@ -92,12 +92,15 @@ Item {
     /// fill with an accent pill, the Terminal inverse video. This item only draws what it is told.
     readonly property var paint: chromeStyle.sidebarSelection(row.selection, row.treeFocused, row.keyboardFocused)
     readonly property bool emphasized: row.paint.fill === "emphasized"
+    /// What the pointer does to the row (window::RowPointer): a coloured row's tint fades by it, and keeps
+    /// more of its colour while pressed than while hovered.
+    readonly property int pointer: chromeStyle.sidebarRowPointer(hover.hovered, primaryTap.pressed)
     /// What the tab's colour paints on the row -- { fill, bar, ink }, each transparent where it paints nothing
     /// -- in the configured style (`sidebar.tab_color`, window::SidebarTabColor), faded by the row's state as
     /// the tab strip fades a coloured tab. This item only draws what it is told.
     readonly property var tabPaint: chromeStyle.sidebarTabColor(row.controller ? row.controller.sidebarTabColorStyle : 0,
                                                                 row.tabColor, chromeStyle.colors.sidebarFill,
-                                                                row.selection, hover.hovered, Window.active)
+                                                                row.selection, row.pointer, Window.active)
     /// Whether the tab's colour fills the row: it then stands in for the selection's and the hover's fill.
     readonly property bool tinted: row.tabPaint.fill.a > 0
     readonly property bool hasTabBar: row.tabPaint.bar.a > 0
@@ -107,7 +110,7 @@ Item {
     /// window::SidebarWorkspaceColor). This item only draws what it is told.
     readonly property var workspacePaint: chromeStyle.sidebarWorkspaceColor(
         row.controller ? row.controller.sidebarWorkspaceColorStyle : 0, row.kind, row.workspaceColor,
-        chromeStyle.colors.sidebarFill, row.selection, hover.hovered, Window.active)
+        chromeStyle.colors.sidebarFill, row.selection, row.pointer, Window.active)
     /// Whether the workspace's colour fills the row (its own row, `tint`): it then stands in for the
     /// selection's and the hover's fill, as a tab's tint does.
     readonly property bool workspaceTinted: row.workspacePaint.fill.a > 0

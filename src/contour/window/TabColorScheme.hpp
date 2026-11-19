@@ -22,6 +22,7 @@ namespace contour::window
 enum class TabVisualState : std::uint8_t
 {
     Active,                  //!< The active tab of a focused window: full color, no fade.
+    Pressed,                 //!< A non-active tab the pointer holds down: between hover and active.
     Hover,                   //!< A non-active tab under the pointer: lightly faded.
     Inactive,                //!< A non-active tab of a focused window: faded.
     InactiveWindowUnfocused, //!< A non-active tab while the window is unfocused: faded most.
@@ -35,9 +36,10 @@ struct TabFade
 };
 
 /// Fade factors per state. Active/Hover/Inactive mirror Windows Terminal (1.0 / 0.6 / 0.3); the
-/// window-unfocused value dims a little further.
-inline constexpr std::array<TabFade, 4> TabFadeTable { {
+/// window-unfocused value dims a little further, and a press keeps more than a hover, so the two read apart.
+inline constexpr std::array<TabFade, 5> TabFadeTable { {
     { TabVisualState::Active, 1.0F },
+    { TabVisualState::Pressed, 0.8F },
     { TabVisualState::Hover, 0.6F },
     { TabVisualState::Inactive, 0.3F },
     { TabVisualState::InactiveWindowUnfocused, 0.2F },

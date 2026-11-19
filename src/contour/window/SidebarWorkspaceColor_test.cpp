@@ -25,6 +25,7 @@ constexpr auto Styles = std::array { SidebarWorkspaceColorStyle::Tint,
                                      SidebarWorkspaceColorStyle::Swatch };
 constexpr auto Kinds = std::array { SidebarRowKind::Workspace, SidebarRowKind::Tab, SidebarRowKind::Pane };
 constexpr auto States = std::array { TabVisualState::Active,
+                                     TabVisualState::Pressed,
                                      TabVisualState::Hover,
                                      TabVisualState::Inactive,
                                      TabVisualState::InactiveWindowUnfocused };

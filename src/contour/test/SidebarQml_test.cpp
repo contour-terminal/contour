@@ -21,6 +21,7 @@
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/SidebarControls.hpp>
 #include <contour/window/SidebarModel.hpp>
+#include <contour/window/SidebarTabColor.hpp>
 #include <contour/window/StatusUrgency.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -2884,8 +2885,8 @@ namespace
     return value.value<QColor>().rgba();
 }
 
-/// What `chromeStyle.sidebarTabColor` paints on @p row as it stands: not hovered, in its window as active as
-/// the window the test drives really is.
+/// What `chromeStyle.sidebarTabColor` paints on @p row as it stands: under the pointer as it is, in its
+/// window as active as the window the test drives really is.
 [[nodiscard]] QVariantMap tabPaintOf(SidebarWindow const& scene, QQuickItem const& row)
 {
     auto* style =
@@ -2901,7 +2902,7 @@ namespace
                                       Q_ARG(QColor, row.property("tabColor").value<QColor>()),
                                       Q_ARG(QColor, colors->property("sidebarFill").value<QColor>()),
                                       Q_ARG(int, row.property("selection").toInt()),
-                                      Q_ARG(bool, false),
+                                      Q_ARG(int, row.property("pointer").toInt()),
                                       Q_ARG(bool, scene.window->isActive())));
     return paint;
 }
@@ -3031,6 +3032,43 @@ TEST_CASE("a coloured tab's rows show its colour as sidebar.tab_color says (offs
             checkWearsNoTabColour(*billing);
         }
 }
+TEST_CASE("a tinted row shows a press apart from a hover (offscreen)", "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row,
+                                       .claudeTab = ClaudeTab::Split,
+                                       .tabColours = TabColours::Coloured,
+                                       .tabColorStyle = contour::config::SidebarTabColorStyle::Tint } };
+        // build: coloured, and not the shown tab, so the pointer is what fades its tint.
+        auto* build = scene.rowTitled(QStringLiteral("build"));
+        REQUIRE(build != nullptr);
+        REQUIRE(build->property("selection").toInt()
+                == static_cast<int>(contour::window::RowSelection::None));
+        auto const& fill = rowPart(*build, "sidebarRowTabFill");
+        auto const fillColour = [&] {
+            return rgbaOf(fill.property("color"));
+        };
+
+        scene.hover(*build);
+        REQUIRE(build->property("pointer").toInt()
+                == static_cast<int>(contour::window::RowPointer::Hovering));
+        auto const hovered = fillColour();
+        CHECK(hovered == rgbaOf(tabPaintOf(scene, *build).value(QStringLiteral("fill"))));
+
+        auto const centre = build->mapToScene(QPointF { build->width() / 2, build->height() / 2 }).toPoint();
+        QTest::mousePress(scene.window, Qt::LeftButton, Qt::NoModifier, centre);
+        QCoreApplication::processEvents();
+        CHECK(build->property("pointer").toInt() == static_cast<int>(contour::window::RowPointer::Pressing));
+        CHECK(fill.isVisible());
+        CHECK(fillColour() != hovered);
+        CHECK(fillColour() == rgbaOf(tabPaintOf(scene, *build).value(QStringLiteral("fill"))));
+        QTest::mouseRelease(scene.window, Qt::LeftButton, Qt::NoModifier, centre);
+        QCoreApplication::processEvents();
+    }
+}
+
 TEST_CASE("a status mark stays legible on its row's tint, even in the tab's own colour (offscreen)",
           "[contour][gui][qml][sidebar]")
 {
@@ -3097,8 +3135,8 @@ constexpr auto ContourColour = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
                           .workspaceColorStyle = style };
 }
 
-/// What `chromeStyle.sidebarWorkspaceColor` paints on @p row as it stands: not hovered, in its window as
-/// active as the window the test drives really is.
+/// What `chromeStyle.sidebarWorkspaceColor` paints on @p row as it stands: under the pointer as it is, in its
+/// window as active as the window the test drives really is.
 [[nodiscard]] QVariantMap workspacePaintOf(SidebarWindow const& scene, QQuickItem const& row)
 {
     auto* style =
@@ -3115,7 +3153,7 @@ constexpr auto ContourColour = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
                                       Q_ARG(QColor, row.property("workspaceColor").value<QColor>()),
                                       Q_ARG(QColor, colors->property("sidebarFill").value<QColor>()),
                                       Q_ARG(int, row.property("selection").toInt()),
-                                      Q_ARG(bool, false),
+                                      Q_ARG(int, row.property("pointer").toInt()),
                                       Q_ARG(bool, scene.window->isActive())));
     return paint;
 }
@@ -3325,6 +3363,46 @@ TEST_CASE("a coloured workspace's rows show its colour as sidebar.workspace_colo
             REQUIRE(contourRow != nullptr);
             checkWorkspaceRowPaint(*contourRow, style);
         }
+}
+
+TEST_CASE("a tinted workspace row shows a press apart from a hover (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene =
+            SidebarWindow { workspaceColourScene(row, contour::config::SidebarWorkspaceColorStyle::Tint) };
+        auto* contourRow = scene.rowTitled(QStringLiteral("contour"));
+        REQUIRE(contourRow != nullptr);
+        REQUIRE(contourRow->property("selection").toInt()
+                == static_cast<int>(contour::window::RowSelection::None));
+        auto const& fill = rowPart(*contourRow, "sidebarRowWorkspaceFill");
+        auto const fillColour = [&] {
+            return rgbaOf(fill.property("color"));
+        };
+
+        scene.hover(*contourRow);
+        REQUIRE(contourRow->property("pointer").toInt()
+                == static_cast<int>(contour::window::RowPointer::Hovering));
+        auto const hovered = fillColour();
+        CHECK(hovered == rgbaOf(workspacePaintOf(scene, *contourRow).value(QStringLiteral("fill"))));
+
+        // Off the disclosure, which takes the press itself.
+        auto const at =
+            contourRow->mapToScene(QPointF { contourRow->width() * 3 / 4, contourRow->height() / 2 })
+                .toPoint();
+        QTest::mouseMove(scene.window, at);
+        QTest::mousePress(scene.window, Qt::LeftButton, Qt::NoModifier, at);
+        QCoreApplication::processEvents();
+        CHECK(contourRow->property("pointer").toInt()
+              == static_cast<int>(contour::window::RowPointer::Pressing));
+        CHECK(fill.isVisible());
+        CHECK(fillColour() != hovered);
+        CHECK(fillColour() == rgbaOf(workspacePaintOf(scene, *contourRow).value(QStringLiteral("fill"))));
+        QTest::mouseRelease(scene.window, Qt::LeftButton, Qt::NoModifier, at);
+        QCoreApplication::processEvents();
+    }
 }
 
 TEST_CASE("a workspace's rail and a tab's bar stand side by side (offscreen)", "[contour][gui][qml][sidebar]")
