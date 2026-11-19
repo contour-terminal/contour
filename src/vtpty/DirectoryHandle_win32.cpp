@@ -45,4 +45,9 @@ IDirectoryOpener& nativeDirectoryOpener() noexcept
     return instance;
 }
 
+bool DirectoryHandle::isRemoved() const noexcept
+{
+    return false; // No directory is held open here (nativeDirectoryOpener() answers Unsupported).
+}
+
 } // namespace vtpty

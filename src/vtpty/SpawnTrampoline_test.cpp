@@ -12,6 +12,7 @@
     #include <vtpty/test/ProcessTesting.hpp>
 
     #include <core/Utils.hpp>
+    #include <core/testing/ScopedTempDir.hpp>
 
     #include <catch2/catch_test_macros.hpp>
     #include <catch2/generators/catch_generators.hpp>
@@ -383,6 +384,25 @@ TEST_CASE("spawnTrampoline.reports a working directory it cannot enter", "[vtpty
     CHECK(exitedWith(waitFor(child.pid), EXIT_FAILURE));
 }
 
+TEST_CASE("spawnTrampoline.the trampoline fchdirs into the WorkingDirectory slot", "[vtpty][trampoline]")
+{
+    // The path names a directory that does not exist: entered by the descriptor, it is never looked at.
+    auto const directory = core::testing::ScopedTempDir { "contour-trampoline" };
+    auto const held = vtpty::OwnedFd { ::open(directory.path().c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC) };
+    REQUIRE(held.isOpen());
+    auto spec = terminalSpec({ "/bin/sh", "-c", "printf '<%s>' \"$(pwd -P)\"" });
+    launchOf(spec).workingDirectory = "/nonexistent-directory";
+    auto child = spawnOnTerminal(std::move(spec),
+                                 { { .slot = vtpty::TrampolineSlot::WorkingDirectory, .fd = held.get() } });
+    release(child.gate);
+
+    auto const expected = std::format("<{}>", fs::canonical(directory.path()).string());
+    auto const output = readUntil(child.terminal.master.get(),
+                                  [&](std::string_view text) { return text.contains(expected); });
+    CHECK(output.contains(expected));
+    CHECK(exitedWith(waitFor(child.pid), 0));
+}
+
 TEST_CASE("spawnTrampoline.a settle channel nobody listens to does not stop the program",
           "[vtpty][trampoline]")
 {
@@ -628,6 +648,22 @@ TEST_CASE("spawnTrampoline.an unsupported version exits 121", "[vtpty][trampolin
     REQUIRE(self.has_value());
     auto name = "contour-spawn"s;
     auto marker = std::format("{}{}", vtpty::SpawnTrampolineMarker, 99);
+    auto argv = std::array<char*, 3> { name.data(), marker.data(), nullptr };
+    auto pid = pid_t {};
+    REQUIRE(
+        ::posix_spawn(&pid, self->c_str(), nullptr, nullptr, argv.data(), vtpty::util::processEnvironment())
+        == 0);
+    CHECK(exitedWith(waitFor(pid), static_cast<int>(vtpty::TrampolineExit::UnsupportedVersion)));
+}
+
+TEST_CASE("spawnTrampoline.an older trampoline protocol version is refused with exit 121",
+          "[vtpty][trampoline]")
+{
+    // Version 1 knew no WorkingDirectory slot: spoken to, it would start the program where it was itself.
+    auto const self = vtpty::selfExecutablePath();
+    REQUIRE(self.has_value());
+    auto name = "contour-spawn"s;
+    auto marker = std::format("{}{}", vtpty::SpawnTrampolineMarker, 1);
     auto argv = std::array<char*, 3> { name.data(), marker.data(), nullptr };
     auto pid = pid_t {};
     REQUIRE(

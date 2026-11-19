@@ -99,11 +99,7 @@ namespace
 
 struct Process::Private
 {
-    string path;
-    vector<string> args;
-    fs::path cwd;
-    Environment env;
-    vector<string> removedEnvironment;
+    ExecInfo exec;
     bool escapeSandbox;
 
     unique_ptr<Pty> pty {};
@@ -144,9 +140,11 @@ struct Process::Private
     {
         if (pid == NoChild)
             return nullopt;
-        return AdoptedChild {
-            .pid = pid, .executable = path, .args = args, .cwd = cwd, .hangupGrace = hangupGrace
-        };
+        return AdoptedChild { .pid = pid,
+                              .executable = exec.program,
+                              .args = exec.arguments,
+                              .cwd = exec.workingDirectory,
+                              .hangupGrace = hangupGrace };
     }
 
     /// @return The child's id, or NoChild when there is none to ask about, wait for or signal.
@@ -157,20 +155,12 @@ struct Process::Private
     }
 };
 
-Process::Process(string const& path,
-                 vector<string> const& args,
-                 fs::path const& cwd,
-                 Environment const& env,
-                 vector<string> removedEnvironment,
-                 bool escapeSandbox,
+Process::Process(ExecInfo exe,
                  unique_ptr<Pty> pty,
+                 bool escapeSandbox,
                  shared_ptr<ProcessPlacement> placement,
                  HangupGrace hangupGrace):
-    _d(new Private { .path = path,
-                     .args = args,
-                     .cwd = cwd,
-                     .env = env,
-                     .removedEnvironment = std::move(removedEnvironment),
+    _d(new Private { .exec = std::move(exe),
                      .escapeSandbox = escapeSandbox,
                      .pty = std::move(pty),
                      .placement = std::move(placement),
@@ -190,6 +180,11 @@ bool Process::isFlatpak()
 ProgramHost Process::programHost(SandboxEscape escape)
 {
     return programHostFor(currentSandbox().state, escape);
+}
+
+HeldDirectorySpawn Process::heldDirectorySpawn(SandboxEscape escape)
+{
+    return heldDirectorySpawnOn(programHost(escape));
 }
 
 SpawnProgress settleProgressOf(OwnedFd& settle) noexcept
@@ -218,12 +213,20 @@ std::expected<PreparedSpawn, StartFailure> prepareTrampolineSpawn(Pty& startedPt
     auto const descriptors = startedPty.spawnDescriptors();
     if (!descriptors)
         return spawnFailure("The terminal is not a Unix pseudo terminal.");
+    auto const host = Process::programHost(escape);
+    auto const passesOwnEnvironment = host == ProgramHost::ThisMachine;
+    // A directory held open is entered by its descriptor, which only this machine's trampoline can be handed:
+    // flatpak-spawn would be given the path, which is exactly what the handle exists not to trust.
+    if (exec.directory && (exec.directory->descriptor() < 0 || !passesOwnEnvironment))
+        return spawnFailure(std::format("The directory \"{}\" cannot be entered by its handle here.",
+                                        exec.directory->resolvedPath()));
+    // Removed since it was opened: entering it would start the program in a directory no name reaches.
+    if (exec.directory && exec.directory->isRemoved())
+        return spawnFailure(std::format("The directory \"{}\" was removed.", exec.directory->resolvedPath()));
     auto const hasStdoutFastPipe = descriptors->stdoutFastPipeWriter.has_value();
 
     // When escaping the sandbox, flatpak-spawn is handed the variables as --env= arguments and the
     // child keeps our environment untouched.
-    auto const host = Process::programHost(escape);
-    auto const passesOwnEnvironment = host == ProgramHost::ThisMachine;
 
     // The environment is assembled here, so that the trampoline can install it as it is -- and always, so
     // that a trampoline another process forks (the PTY keeper) runs the program under this one's.
@@ -260,6 +263,24 @@ std::expected<PreparedSpawn, StartFailure> prepareTrampolineSpawn(Pty& startedPt
                     ProgramSearch { .path = searchPath,
                                     .workingDirectory = exec.workingDirectory,
                                     .fileSystem = core::platform::NativeFileSystem::instance() }));
+
+    // A program run in a directory held open is found here, on the PATH's absolute entries only, and the
+    // trampoline execs that path: searched there, after it entered the directory, an empty or relative entry
+    // would find what a program the user did not write put in it (findHeldDirectoryProgram()). A held
+    // directory is entered on this machine only, so the program is the invocation's own.
+    auto heldImage = std::optional<string> {};
+    if (exec.directory)
+    {
+        auto const path = environmentValue(childEnvironment, "PATH", EnvironmentNames::CaseSensitive);
+        heldImage = findHeldDirectoryProgram(
+            invocation.program,
+            execSearchPath(path.transform([](string_view value) { return string { value }; })),
+            [directory = exec.directory->descriptor()](string const& candidate) {
+                return util::isExecutableIn(directory, candidate);
+            });
+        if (!heldImage)
+            return spawnFailure(std::format("The program \"{}\" was not found.", invocation.program));
+    }
 
     auto childArgv = [&]() -> vector<string> {
         if (host == ProgramHost::ThisMachine)
@@ -311,8 +332,9 @@ std::expected<PreparedSpawn, StartFailure> prepareTrampolineSpawn(Pty& startedPt
         return spawnFailure(gate.error().message());
 
     auto spec = SpawnSpec {
+        .image = heldImage.value_or(string {}),
         .argv = std::move(childArgv),
-        .lookup = ExecLookup::SearchPath,
+        .lookup = heldImage ? ExecLookup::ExactPath : ExecLookup::SearchPath,
         .environment = std::move(childEnvironment),
         .launch =
             TerminalLaunch {
@@ -334,6 +356,8 @@ std::expected<PreparedSpawn, StartFailure> prepareTrampolineSpawn(Pty& startedPt
     };
     if (descriptors->stdoutFastPipeWriter)
         fds.push_back({ .slot = TrampolineSlot::FastPipe, .fd = *descriptors->stdoutFastPipeWriter });
+    if (exec.directory)
+        fds.push_back({ .slot = TrampolineSlot::WorkingDirectory, .fd = exec.directory->descriptor() });
 
     auto prepared = prepareTrampoline(std::move(spec), fds);
     if (!prepared)
@@ -351,14 +375,11 @@ StartResult Process::start()
     if (auto started = _d->pty->start(); !started)
         return started;
 
-    auto prepared = prepareTrampolineSpawn(*_d->pty,
-                                           ExecInfo { .program = _d->path,
-                                                      .arguments = _d->args,
-                                                      .workingDirectory = _d->cwd,
-                                                      .env = _d->env,
-                                                      .removedEnvironment = _d->removedEnvironment },
-                                           sandboxEscapeFromConfig(_d->escapeSandbox),
-                                           _d->placement->childOomScoreAdjust());
+    auto prepared = prepareTrampolineSpawn(
+        *_d->pty, _d->exec, sandboxEscapeFromConfig(_d->escapeSandbox), _d->placement->childOomScoreAdjust());
+    // The spawn holds its own copy of the directory's descriptor now; this process lets its handle go, so
+    // that a worktree removed later is not held open by a handle nobody enters again.
+    _d->exec.directory.reset();
     if (!prepared)
         return std::unexpected(prepared.error());
 
@@ -666,8 +687,8 @@ string Process::workingDirectory() const
 {
     // Between fork() and the chdir() the trampoline does before it settles, the child is still in this
     // process's directory, which it is about to leave: the one it starts in is the answer.
-    if (!_d->cwd.empty() && spawnProgress() == SpawnProgress::InProgress)
-        return _d->cwd.string();
+    if (!_d->exec.workingDirectory.empty() && spawnProgress() == SpawnProgress::InProgress)
+        return _d->exec.workingDirectory.string();
 
     auto const childPid = _d->child();
     if (childPid == NoChild)

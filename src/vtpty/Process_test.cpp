@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/DetachedProcess.hpp>
+#include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/MockPty.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProcessPlacement.hpp>
@@ -11,6 +12,7 @@
 #include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <cerrno>
@@ -34,6 +36,8 @@
 #include <vector>
 
 #ifndef _WIN32
+    #include <vtpty/PreparedSpawn.hpp>
+    #include <vtpty/SpawnSpec.hpp>
     #include <vtpty/UnixPty.hpp>
 
     #include <sys/wait.h>
@@ -556,6 +560,168 @@ TEST_CASE("Process.saysWhyItCannotEnterItsWorkingDirectory", "[process]")
     (void) hangUp(process);
 }
 
+TEST_CASE("Process.a spawn by directory handle starts there even after the path is replaced",
+          "[process][trampoline]")
+{
+    // The handle is opened on `d`; then `d` moves away and a symlink to /tmp takes its name. A child entered
+    // by the path would start in /tmp; entered by the handle it starts where `d` went.
+    auto const scratch = core::testing::ScopedTempDir { "contour-process" };
+    auto const original = scratch.path() / "d";
+    auto const moved = scratch.path() / "moved";
+    std::filesystem::create_directory(original);
+    auto opened = vtpty::nativeDirectoryOpener().open(original.string());
+    REQUIRE(opened.has_value());
+    std::filesystem::rename(original, moved);
+    std::filesystem::create_directory_symlink("/tmp", original);
+
+    auto exec = execInfo("/bin/sh", { "-c", "printf '<%s>' \"$(pwd -P)\"" });
+    exec.workingDirectory = original;
+    exec.directory = std::make_shared<vtpty::DirectoryHandle const>(std::move(*opened));
+    auto process = vtpty::testing::unplacedProcess(exec, PageSize);
+    REQUIRE(process.start().has_value());
+    CHECK(printed(process, std::format("<{}>", std::filesystem::canonical(moved).string())));
+    (void) hangUp(process);
+}
+
+TEST_CASE("Process.a program planted in a held directory is never found on the PATH", "[process][trampoline]")
+{
+    // An agent writes in its worktree: an `sh` it drops there, or in a directory a relative PATH entry names,
+    // must not run in place of the real one when the PATH has an empty entry (the working directory, as
+    // execvp() reads it) or a relative one. The program is found before the spawn, on absolute entries only,
+    // and the trampoline execs that path.
+    auto const scratch = core::testing::ScopedTempDir { "contour-process" };
+    auto const marker = scratch.path() / "planted-ran";
+    for (auto const& planted:
+         { scratch.path() / "sh", scratch.path() / "bin" / "sh", scratch.path() / "only-planted" })
+    {
+        std::filesystem::create_directories(planted.parent_path());
+        std::ofstream { planted } << std::format("#!/bin/sh\n: > '{}'\nprintf planted\n", marker.string());
+        std::filesystem::permissions(planted, std::filesystem::perms::owner_all);
+    }
+    auto opened = vtpty::nativeDirectoryOpener().open(scratch.path().string());
+    REQUIRE(opened.has_value());
+    auto const handle = std::make_shared<vtpty::DirectoryHandle const>(std::move(*opened));
+    auto const path = GENERATE(as<std::string> {}, ":/usr/bin:/bin", "bin:/usr/bin:/bin");
+    CAPTURE(path);
+
+    SECTION("the real program runs")
+    {
+        auto exec = execInfo("sh", { "-c", "printf 'ran %s' real" });
+        exec.workingDirectory = scratch.path();
+        exec.directory = handle;
+        exec.env["PATH"] = path;
+        auto process = vtpty::testing::unplacedProcess(exec, PageSize);
+        REQUIRE(process.start().has_value());
+        CHECK(printed(process, "ran real"));
+        (void) hangUp(process);
+    }
+    SECTION("one only the directory has is not found")
+    {
+        auto exec = execInfo("only-planted", {});
+        exec.workingDirectory = scratch.path();
+        exec.directory = handle;
+        exec.env["PATH"] = path;
+        auto process = vtpty::testing::unplacedProcess(exec, PageSize);
+        auto const started = process.start();
+        REQUIRE_FALSE(started.has_value());
+        CHECK(started.error().error == vtpty::StartError::SpawnFailed);
+    }
+    CHECK_FALSE(std::filesystem::exists(marker));
+}
+
+TEST_CASE("Process.a handle that holds no directory starts nothing", "[process][trampoline]")
+{
+    // Never the path in its place: a spawn told to start in a directory held open does, or fails.
+    auto exec = execInfo("/bin/sh", { "-c", "exit 0" });
+    exec.workingDirectory = "/tmp";
+    exec.directory = std::make_shared<vtpty::DirectoryHandle const>(vtpty::DirectoryHandle::unbacked("/tmp"));
+    auto process = vtpty::testing::unplacedProcess(exec, PageSize);
+    auto const started = process.start();
+    REQUIRE_FALSE(started.has_value());
+    CHECK(started.error().error == vtpty::StartError::SpawnFailed);
+}
+
+TEST_CASE("Process.a directory removed since it was opened starts nothing", "[process][trampoline]")
+{
+    // Removed and made again at its name: the handle names a directory no path reaches any more.
+    auto const scratch = core::testing::ScopedTempDir { "contour-process" };
+    auto const worktree = scratch.path() / "worktree";
+    std::filesystem::create_directory(worktree);
+    auto opened = vtpty::nativeDirectoryOpener().open(worktree.string());
+    REQUIRE(opened.has_value());
+    std::filesystem::remove(worktree);
+    std::filesystem::create_directory(worktree);
+    auto const handle = std::make_shared<vtpty::DirectoryHandle const>(std::move(*opened));
+    CHECK(handle->isRemoved());
+
+    auto exec = execInfo("/bin/sh", { "-c", "exit 0" });
+    exec.workingDirectory = worktree;
+    exec.directory = handle;
+    auto process = vtpty::testing::unplacedProcess(exec, PageSize);
+    auto const started = process.start();
+    REQUIRE_FALSE(started.has_value());
+    CHECK(started.error().error == vtpty::StartError::SpawnFailed);
+}
+
+TEST_CASE("Process.lets the directory it was started in go", "[process][trampoline]")
+{
+    auto const directory = core::testing::ScopedTempDir { "contour-process" };
+    auto opened = vtpty::nativeDirectoryOpener().open(directory.path().string());
+    REQUIRE(opened.has_value());
+    auto const handle = std::make_shared<vtpty::DirectoryHandle const>(std::move(*opened));
+    CHECK_FALSE(handle->isRemoved());
+    auto exec = execInfo("/bin/sh", { "-c", "printf ready" });
+    exec.directory = handle;
+    auto process = vtpty::testing::unplacedProcess(exec, PageSize);
+    REQUIRE(handle.use_count() == 3); // this test's, exec's, and the process's
+    REQUIRE(process.start().has_value());
+    CHECK(handle.use_count() == 2);
+    CHECK(printed(process, "ready"));
+    (void) hangUp(process);
+}
+
+TEST_CASE("Process.a held directory is entered only on this machine's trampoline", "[process]")
+{
+    // flatpak-spawn runs the program on the host, and can be handed only the path.
+    CHECK(vtpty::heldDirectorySpawnOn(vtpty::ProgramHost::ThisMachine)
+          == vtpty::HeldDirectorySpawn::Supported);
+    CHECK(vtpty::heldDirectorySpawnOn(vtpty::ProgramHost::SandboxHost)
+          == vtpty::HeldDirectorySpawn::Unsupported);
+    CHECK(vtpty::Process::heldDirectorySpawn(vtpty::SandboxEscape::Escapes)
+          == vtpty::heldDirectorySpawnOn(vtpty::Process::programHost(vtpty::SandboxEscape::Escapes)));
+}
+
+TEST_CASE("Process.a terminal launch carries at most 11 descriptors", "[process][trampoline]")
+{
+    // What a PTY keeper is handed for a terminal launch: the trampoline's slots and its spec socket, then the
+    // four descriptors the keeper keeps, then the executable -- within keeper::Spawn::MaxDescriptors (12).
+    constexpr auto KeptByTheKeeper = std::size_t { 4 };
+    constexpr auto MostDescriptors = vtpty::TerminalLaunchSlotCount + 1 + KeptByTheKeeper + 1;
+    static_assert(MostDescriptors == 11);
+
+    auto const directory = core::testing::ScopedTempDir { "contour-process" };
+    auto opened = vtpty::nativeDirectoryOpener().open(directory.path().string());
+    REQUIRE(opened.has_value());
+    auto exec = execInfo("/bin/sh", { "-c", "exit 0" });
+    exec.workingDirectory = directory.path();
+    exec.directory = std::make_shared<vtpty::DirectoryHandle const>(std::move(*opened));
+    auto pty = vtpty::createPty(PageSize, std::nullopt);
+    REQUIRE(pty->start().has_value());
+    auto const prepared =
+        vtpty::prepareTrampolineSpawn(*pty, exec, vtpty::SandboxEscape::Contained, std::nullopt);
+    REQUIRE(prepared.has_value());
+    // The spec socket, and one slot per descriptor handed over -- each a terminal launch's.
+    CHECK(prepared->childFds.size() <= vtpty::TerminalLaunchSlotCount + 1);
+    auto slots = vtpty::TrampolineSlots {};
+    for (auto const& [target, copy]: prepared->childFds)
+        if (target != vtpty::SpawnSpecFd)
+            for (auto const index: std::views::iota(std::uint8_t { 0 }, vtpty::TrampolineSlotCount))
+                if (vtpty::trampolineFd(static_cast<vtpty::TrampolineSlot>(index)) == target)
+                    slots = slots.with(static_cast<vtpty::TrampolineSlot>(index));
+    CHECK((slots.raw() & ~vtpty::TerminalLaunchSlots.raw()) == 0);
+    CHECK(slots.has(vtpty::TrampolineSlot::WorkingDirectory));
+}
+
 TEST_CASE("Process.keepsWhatItSaidUntilItIsRead", "[process][pty]")
 {
     // A child that says why it cannot start, and exits, is gone before the reader looks: what it said
@@ -938,3 +1104,29 @@ TEST_CASE("Process.canAdopt.asksWithoutTakingAnything", "[process][handover]")
     CHECK_FALSE(vtpty::Process::canAdopt(*child).has_value());
 }
 #endif
+
+TEST_CASE("Process.applyCommandOverride keeps removedEnvironment and the directory", "[process]")
+{
+    auto shell = execInfo("/bin/sh", { "-l" });
+    shell.removedEnvironment = { "SHELL_WITHHELD" };
+    auto commandOverride = execInfo("claude", { "--model", "opus" });
+    commandOverride.workingDirectory = "/w/repo/item";
+    commandOverride.env = { { "GIT_CONFIG_COUNT", "1" } };
+    commandOverride.removedEnvironment = { "GIT_DIR", "GH_REPO" };
+    commandOverride.directory =
+        std::make_shared<vtpty::DirectoryHandle const>(vtpty::DirectoryHandle::unbacked("/w/repo/item"));
+
+    vtpty::Process::applyCommandOverride(shell, commandOverride);
+
+    CHECK(shell.program == "claude");
+    CHECK(shell.arguments == std::vector<std::string> { "--model", "opus" });
+    CHECK(shell.workingDirectory == "/w/repo/item");
+    CHECK(shell.env.at("GIT_CONFIG_COUNT") == "1");
+    CHECK(shell.removedEnvironment == std::vector<std::string> { "SHELL_WITHHELD", "GIT_DIR", "GH_REPO" });
+    CHECK(shell.directory == commandOverride.directory);
+
+    // An override holding no directory leaves the shell's.
+    auto plain = execInfo("/bin/sh");
+    vtpty::Process::applyCommandOverride(shell, plain);
+    CHECK(shell.directory == commandOverride.directory);
+}

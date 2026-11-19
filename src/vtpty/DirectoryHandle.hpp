@@ -49,6 +49,10 @@ class DirectoryHandle
     /// @return The directory's canonical path, read from the descriptor when it was opened.
     [[nodiscard]] std::string const& resolvedPath() const noexcept { return _resolvedPath; }
 
+    /// @return Whether the open directory has been removed since -- no name links to it any more, whatever
+    ///         stands at its path now; false for an unbacked handle, and where it cannot be told (Windows).
+    [[nodiscard]] bool isRemoved() const noexcept;
+
   private:
     OwnedFd _descriptor;
     std::string _resolvedPath;

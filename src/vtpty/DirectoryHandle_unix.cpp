@@ -176,4 +176,9 @@ IDirectoryOpener& nativeDirectoryOpener() noexcept
     return instance;
 }
 
+bool DirectoryHandle::isRemoved() const noexcept
+{
+    return descriptor() >= 0 && vtpty::isRemoved(descriptor());
+}
+
 } // namespace vtpty

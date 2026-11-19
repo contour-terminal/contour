@@ -432,6 +432,10 @@ A declared command runs only where its manifest binds it, and sees only what its
   and `GIT_ASKPASS`) and gh's repository and host selection (`GH_REPO`, `GH_HOST`, `GH_ENTERPRISE_TOKEN`) are
   withheld; everything the manifest declares is added, `command-env-for` replacing `command-env` by name.
 - **A missing program** is a refused start, never a vanished working directory.
+- **The program** is found before the spawn, on the PATH's absolute entries only, and that path is what
+  runs -- for a command and an agent pane alike. An empty entry (the working directory, as `execvp()` reads
+  it) or a relative one would find a program an agent dropped into its worktree, so both are skipped, as Go's
+  `os/exec` skips them; a program found nowhere else is not found.
 
 `file-read(root, path)` reads beneath the root's directory and nowhere else:
 
