@@ -106,6 +106,17 @@ class RunId;
 /// @return The run id, or why the item makes none.
 [[nodiscard]] std::expected<RunId, NamingError> runId(ItemRef const& item, Stamp const& stamp);
 
+/// A run's id when another run of the item already has the plain one: `<slug>-<stamp>-<ordinal>`, such as
+/// "pr-2334-20261113-150847-2" -- two runs of an item dispatched in one second, the first since finished.
+/// @param item The item the run works on.
+/// @param stamp When the run started, in local time.
+/// @param ordinal Which run of the item in that second: 1 is the plain id (runId(item, stamp)), 2 or more
+///        adds `-<ordinal>`.
+/// @return The run id, or why the item makes none.
+[[nodiscard]] std::expected<RunId, NamingError> runId(ItemRef const& item,
+                                                      Stamp const& stamp,
+                                                      uint32_t ordinal);
+
 /// A run's id, which only runId() makes: it is always a Name, so the names derived from it are a Ref and
 /// a Path.
 class RunId
@@ -120,6 +131,7 @@ class RunId
     explicit RunId(std::string text) noexcept: _text { std::move(text) } {}
 
     friend std::expected<RunId, NamingError> runId(ItemRef const& item, Stamp const& stamp);
+    friend std::expected<RunId, NamingError> runId(ItemRef const& item, Stamp const& stamp, uint32_t ordinal);
 
     std::string _text;
 };

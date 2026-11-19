@@ -89,12 +89,12 @@ TEST_CASE("agent and finished rows", "[orchestrator][view]")
     REQUIRE(running != nullptr);
     CHECK(running->text == "pr-2375 · fix CI · sonnet");
     CHECK(running->status == "working 6m");
-    CHECK(running->offers == std::vector { KeyCommand::Board, KeyCommand::EndRun });
+    CHECK(running->offers == std::vector { KeyCommand::Board, KeyCommand::Transcript, KeyCommand::EndRun });
 
     auto const* const done = rowOfRun(rows, DoneId);
     REQUIRE(done != nullptr);
     CHECK(done->status == "done · e ends it");
-    CHECK(done->offers == std::vector { KeyCommand::Board, KeyCommand::EndRun });
+    CHECK(done->offers == std::vector { KeyCommand::Board, KeyCommand::Transcript, KeyCommand::EndRun });
 
     auto const* const finished = rowOfRun(rows, KeptId);
     REQUIRE(finished != nullptr);
@@ -103,7 +103,11 @@ TEST_CASE("agent and finished rows", "[orchestrator][view]")
     CHECK(finished->text == "issue-2356 · work on issue · ended by you");
     CHECK(finished->status == "kept: 2 entries");
     CHECK(finished->offers
-          == std::vector { KeyCommand::Board, KeyCommand::RetryRemoval, KeyCommand::Dismiss });
+          == std::vector { KeyCommand::Board,
+                           KeyCommand::Transcript,
+                           KeyCommand::Dispatch,
+                           KeyCommand::RetryRemoval,
+                           KeyCommand::Dismiss });
     CHECK(finished->onOpen == OpenEffect::MarkSeen);
     CHECK(std::ranges::contains(textsOf(rows, RowKind::Heading), "AGENTS · 2 OF 4 RUNNING"));
     CHECK(std::ranges::contains(textsOf(rows, RowKind::Heading), "FINISHED · 1 NEW"));
@@ -137,7 +141,7 @@ TEST_CASE("a run outside the configuration is marked and still endable", "[orche
     auto const* const active = rowOfRun(rows, RunningId);
     REQUIRE(active != nullptr);
     CHECK(active->status == "outside the configuration");
-    CHECK(active->offers == std::vector { KeyCommand::Board, KeyCommand::EndRun });
+    CHECK(active->offers == std::vector { KeyCommand::Board, KeyCommand::Transcript, KeyCommand::EndRun });
     CHECK(active->details.front() == outside);
 
     // Its outcome wins in the row; the details still say where it belongs.
@@ -155,8 +159,12 @@ TEST_CASE("a run outside the configuration is marked and still endable", "[orche
         CHECK(finished->kind == RowKind::Finished);
         CHECK(finished->status == status);
         // A removed run's board went with its worktree.
-        auto const expected = id == KeptId ? std::vector { KeyCommand::Board, KeyCommand::Dismiss }
-                                           : std::vector { KeyCommand::Dismiss };
+        auto const expected =
+            id == KeptId ? std::vector { KeyCommand::Board,
+                                         KeyCommand::Transcript,
+                                         KeyCommand::Dispatch,
+                                         KeyCommand::Dismiss }
+                         : std::vector { KeyCommand::Transcript, KeyCommand::Dispatch, KeyCommand::Dismiss };
         CHECK(finished->offers == expected);
         CHECK(finished->details.front() == outside);
         CHECK(std::ranges::none_of(finished->details,
@@ -198,7 +206,7 @@ TEST_CASE("a refused configuration labels no run outside, and the trust hint sti
     auto const* const row = rowOfRun(rows, RunningId);
     REQUIRE(row != nullptr);
     CHECK(row->status == "waiting? see its tab");
-    CHECK(row->offers == std::vector { KeyCommand::Board, KeyCommand::EndRun });
+    CHECK(row->offers == std::vector { KeyCommand::Board, KeyCommand::Transcript, KeyCommand::EndRun });
     CHECK(std::ranges::none_of(row->details, [](DetailLine const& line) {
         return line.value.contains("outside the configuration");
     }));
@@ -492,4 +500,24 @@ TEST_CASE("a failed run says why in plain words and keeps the code in its state"
     REQUIRE(std::next(failure) != row->details.end());
     CHECK(std::next(failure)->value.contains("Flatpak or Windows build"));
     CHECK(detail("state").ends_with(": pane: not-supported-yet"));
+}
+
+TEST_CASE("a 2 KiB unbroken word wraps to the same lines as cluster by cluster", "[orchestrator][view]")
+{
+    auto word = std::string {};
+    while (word.size() < 2048)
+        word += R"("\x)";
+    word.resize(2048);
+    // Printable ASCII is broken in slices: the first line 40 cells, every further one 36, the last the rest.
+    auto expected = std::vector<std::string> { word.substr(0, 40) };
+    for (auto const index: std::views::iota(std::size_t { 0 }, (word.size() - 40 + 35) / 36))
+        expected.push_back(word.substr(40 + (index * 36), 36));
+    CHECK(wrap(word, 40, 36) == expected);
+    // After a short word, the long one starts on a line of its own, as before.
+    auto after = std::vector<std::string> { "ab" };
+    for (auto const index: std::views::iota(std::size_t { 0 }, (word.size() + 35) / 36))
+        after.push_back(word.substr(index * 36, 36));
+    CHECK(wrap("ab " + word, 40, 36) == after);
+    // A word that is not ASCII alone is still broken between clusters.
+    CHECK(wrap("日本語日本語", 4, 4) == std::vector<std::string> { "日本", "語日", "本語" });
 }

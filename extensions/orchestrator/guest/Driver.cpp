@@ -473,37 +473,44 @@ std::optional<std::string> Driver::openTab(uint32_t origin)
 
 void Driver::apply(std::string_view tab, view::UiAction const& action)
 {
-    std::visit(Overloaded {
-                   [&](view::RevealAgentAction const& reveal) { revealAgent(tab, reveal.run); },
-                   [&](view::ShowBoardAction const& show) {
-                       step(ShowBoard { .run = show.run, .tab = std::string { tab }, .monoMs = nowMs() });
-                       stepReplies();
-                   },
-                   [&](view::HideBoardAction const&) {
-                       step(HideBoard { .tab = std::string { tab }, .monoMs = nowMs() });
-                       stepReplies();
-                   },
-                   [&](view::DispatchAction const& dispatch) {
-                       // Stamped with the time it arrived: the run's names carry the wall time.
-                       auto const clock = readClock();
-                       step(Dispatch { .repo = dispatch.repo,
-                                       .item = dispatch.item,
-                                       .url = dispatch.url,
-                                       .task = dispatch.task,
-                                       .model = dispatch.model,
-                                       .note = dispatch.note,
-                                       .session = dispatch.session,
-                                       .near = dispatch.near,
-                                       .wallMs = clock.wallMs,
-                                       .monoMs = clock.monoMs });
-                       stepReplies();
-                   },
-                   [&](auto const& engineAction) {
-                       step(inputOf(engineAction, nowMs()));
-                       stepReplies();
-                   },
-               },
-               action);
+    std::visit(
+        Overloaded {
+            [&](view::RevealAgentAction const& reveal) { revealAgent(tab, reveal.run); },
+            [&](view::ShowBoardAction const& show) {
+                step(ShowBoard { .run = show.run, .tab = std::string { tab }, .monoMs = nowMs() });
+                stepReplies();
+            },
+            [&](view::ReadTranscriptAction const& read) {
+                // Each tab keeps its own page of a run.
+                step(ReadTranscript {
+                    .run = read.run, .tab = std::string { tab }, .page = read.page, .monoMs = nowMs() });
+                stepReplies();
+            },
+            [&](view::HideBoardAction const&) {
+                step(HideBoard { .tab = std::string { tab }, .monoMs = nowMs() });
+                stepReplies();
+            },
+            [&](view::DispatchAction const& dispatch) {
+                // Stamped with the time it arrived: the run's names carry the wall time.
+                auto const clock = readClock();
+                step(Dispatch { .repo = dispatch.repo,
+                                .item = dispatch.item,
+                                .url = dispatch.url,
+                                .task = dispatch.task,
+                                .model = dispatch.model,
+                                .note = dispatch.note,
+                                .session = dispatch.session,
+                                .near = dispatch.near,
+                                .wallMs = clock.wallMs,
+                                .monoMs = clock.monoMs });
+                stepReplies();
+            },
+            [&](auto const& engineAction) {
+                step(inputOf(engineAction, nowMs()));
+                stepReplies();
+            },
+        },
+        action);
 }
 
 void Driver::revealAgent(std::string_view tab, std::string_view run)
@@ -548,10 +555,10 @@ void Driver::followTabs()
             closed.push_back(entry.first);
     std::erase_if(_dashboards, unlisted);
     std::erase_if(_origins, unlisted);
-    // A closed tab shows no board: it is read no more for it.
+    // A closed tab shows no board and no transcript: they are read and kept no more for it.
     for (auto& tab: closed)
     {
-        step(HideBoard { .tab = std::move(tab), .monoMs = nowMs() });
+        step(TabClosed { .tab = std::move(tab), .monoMs = nowMs() });
         stepReplies();
     }
     for (auto const& tab: *listed)
@@ -588,11 +595,12 @@ void Driver::drawTabs()
 {
     if (_dashboards.empty())
         return;
-    // An ESC held past its deadline is the Escape key, whose action (a board hidden) reaches the engine
-    // before the frames; they measure the agents' ages by the time now.
+    // What a dashboard asks with no key typed -- an ESC held past its deadline is the Escape key (a board
+    // hidden), a transcript the engine dropped is asked for again -- reaches the engine before the frames;
+    // they measure the agents' ages by the time now.
     static_cast<void>(readClock());
     for (auto const& [tab, dashboard]: _dashboards)
-        for (auto const& action: dashboard->expireEscape())
+        for (auto const& action: dashboard->dueActions())
             apply(tab, action);
     for (auto const& [tab, dashboard]: _dashboards)
         if (auto const bytes = dashboard->frame(); !bytes.empty())

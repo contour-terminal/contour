@@ -954,6 +954,55 @@ TEST_CASE("the same item active refuses; finished does not", "[orchestrator][eng
     }
 }
 
+TEST_CASE("a new run in the second of a finished one gets an id of its own", "[orchestrator][engine]")
+{
+    auto harness = booted({});
+    harness.runToRunning(prDispatch());
+    harness.endCleanly(PrId);
+    // The same second: the clock stood still.
+    auto const refused = all<DispatchRefused>(harness.feed(prDispatch()));
+    CHECK(refused.empty());
+    auto const runs = harness.engine().runs();
+    CHECK(std::ranges::contains(runs, PrId, &Run::id));
+    CHECK(std::ranges::contains(runs, std::format("{}-2", PrId), &Run::id));
+}
+
+TEST_CASE("a new run in the second of an orphan's id gets an id of its own", "[orchestrator][engine]")
+{
+    // A worktree no run accounts for holds the plain id's path or its branch: `git worktree add -b` would
+    // refuse either, so the new run takes the next ordinal.
+    struct Row
+    {
+        std::string_view name;
+        std::string path;
+        std::string branch;
+    };
+    auto const rows = std::array {
+        Row { .name = "its path and branch",
+              .path = worktreeOf("contour", PrId),
+              .branch = std::format("agent/{}", PrId) },
+        Row { .name = "its branch alone",
+              .path = worktreeOf("contour", "moved-by-hand"),
+              .branch = std::format("agent/{}", PrId) },
+        Row { .name = "its path alone", .path = worktreeOf("contour", PrId), .branch = "something-else" },
+    };
+    for (auto const& row: rows)
+    {
+        CAPTURE(row.name);
+        auto harness = Harness { contextFor({}) };
+        harness.finish("git-worktree-list",
+                       ok(worktreeList(ContourPath, agentWorktree(row.path, row.branch))));
+        harness.boot();
+        REQUIRE(harness.engine().orphans("contour").size() == 1);
+        // The clock stands still at the second the orphan's id names.
+        auto const refused = all<DispatchRefused>(harness.feed(prDispatch()));
+        CHECK(refused.empty());
+        auto const runs = harness.engine().runs();
+        CHECK(!std::ranges::contains(runs, PrId, &Run::id));
+        CHECK(std::ranges::contains(runs, std::format("{}-2", PrId), &Run::id));
+    }
+}
+
 TEST_CASE("dispatch refusals name what is unknown", "[orchestrator][engine]")
 {
     struct Row
@@ -3337,7 +3386,7 @@ TEST_CASE("ReadTranscript runs the command in the worktree root", "[orchestrator
     auto harness = withFinishedRuns(1);
     auto const id = finishedId(0);
 
-    harness.feed(ReadTranscript { .run = id, .page = 2, .monoMs = harness.now() });
+    harness.feed(ReadTranscript { .run = id, .tab = {}, .page = 2, .monoMs = harness.now() });
 
     auto const command = harness.pending("agent-transcript");
     REQUIRE(command);
@@ -3347,13 +3396,13 @@ TEST_CASE("ReadTranscript runs the command in the worktree root", "[orchestrator
     CHECK(argumentOf(*command, "path") == worktreeOf("contour", id));
     CHECK(argumentOf(*command, "page") == "2");
     CHECK(argumentOf(*command, "format") == "1");
-    auto const* view = harness.engine().transcript(id);
+    auto const* view = harness.engine().transcript("", id);
     REQUIRE(view != nullptr);
     CHECK(view->state == FetchState::Loading);
     CHECK(view->page == 2);
 
     harness.finish("agent-transcript", ok(basicPage()));
-    view = harness.engine().transcript(id);
+    view = harness.engine().transcript("", id);
     REQUIRE(view != nullptr);
     CHECK(view->state == FetchState::Loaded);
     REQUIRE(view->content);
@@ -3361,8 +3410,9 @@ TEST_CASE("ReadTranscript runs the command in the worktree root", "[orchestrator
     CHECK(view->failure.empty());
 
     // An unknown run, or page 0, asks for nothing.
-    harness.feed(ReadTranscript { .run = "pr-1-20261113-150847", .page = 1, .monoMs = harness.now() });
-    harness.feed(ReadTranscript { .run = id, .page = 0, .monoMs = harness.now() });
+    harness.feed(
+        ReadTranscript { .run = "pr-1-20261113-150847", .tab = {}, .page = 1, .monoMs = harness.now() });
+    harness.feed(ReadTranscript { .run = id, .tab = {}, .page = 0, .monoMs = harness.now() });
     CHECK_FALSE(harness.pending("agent-transcript"));
 }
 
@@ -3371,37 +3421,38 @@ TEST_CASE("a transcript page is kept per run, four runs at most", "[orchestrator
     auto harness = withFinishedRuns(5);
     for (auto const index: std::views::iota(0, 5))
     {
-        harness.feed(ReadTranscript { .run = finishedId(index), .page = 1, .monoMs = harness.now() });
+        harness.feed(
+            ReadTranscript { .run = finishedId(index), .tab = {}, .page = 1, .monoMs = harness.now() });
         harness.finish("agent-transcript", ok(basicPage()));
     }
 
-    CHECK(harness.engine().transcript(finishedId(0)) == nullptr);
+    CHECK(harness.engine().transcript("", finishedId(0)) == nullptr);
     for (auto const index: std::views::iota(1, 5))
     {
         CAPTURE(index);
-        auto const* const view = harness.engine().transcript(finishedId(index));
+        auto const* const view = harness.engine().transcript("", finishedId(index));
         REQUIRE(view != nullptr);
         CHECK(view->state == FetchState::Loaded);
     }
 
     // Asking again keeps a run's page while the next loads, and makes it the newest: the oldest goes next.
-    harness.feed(ReadTranscript { .run = finishedId(1), .page = 1, .monoMs = harness.now() });
-    auto const* const reloading = harness.engine().transcript(finishedId(1));
+    harness.feed(ReadTranscript { .run = finishedId(1), .tab = {}, .page = 1, .monoMs = harness.now() });
+    auto const* const reloading = harness.engine().transcript("", finishedId(1));
     REQUIRE(reloading != nullptr);
     CHECK(reloading->state == FetchState::Loading);
     CHECK(reloading->content.has_value());
     harness.finish("agent-transcript", ok(basicPage()));
-    harness.feed(ReadTranscript { .run = finishedId(0), .page = 1, .monoMs = harness.now() });
-    CHECK(harness.engine().transcript(finishedId(1)) != nullptr);
-    CHECK(harness.engine().transcript(finishedId(2)) == nullptr);
+    harness.feed(ReadTranscript { .run = finishedId(0), .tab = {}, .page = 1, .monoMs = harness.now() });
+    CHECK(harness.engine().transcript("", finishedId(1)) != nullptr);
+    CHECK(harness.engine().transcript("", finishedId(2)) == nullptr);
 }
 
 TEST_CASE("a page asked for while another loads is read next", "[orchestrator][engine][transcript]")
 {
     auto harness = withFinishedRuns(1);
     auto const id = finishedId(0);
-    harness.feed(ReadTranscript { .run = id, .page = 1, .monoMs = harness.now() });
-    harness.feed(ReadTranscript { .run = id, .page = 2, .monoMs = harness.now() });
+    harness.feed(ReadTranscript { .run = id, .tab = {}, .page = 1, .monoMs = harness.now() });
+    harness.feed(ReadTranscript { .run = id, .tab = {}, .page = 2, .monoMs = harness.now() });
     CHECK(harness.pendingCount() == 1);
 
     harness.finish("agent-transcript", ok(basicPage()));
@@ -3409,7 +3460,99 @@ TEST_CASE("a page asked for while another loads is read next", "[orchestrator][e
     auto const next = harness.pending("agent-transcript");
     REQUIRE(next);
     CHECK(argumentOf(*next, "page") == "2");
-    CHECK(harness.engine().transcript(id)->state == FetchState::Loading);
+    CHECK(harness.engine().transcript("", id)->state == FetchState::Loading);
+}
+
+TEST_CASE("two tabs page one run, each on its own page", "[orchestrator][engine][transcript]")
+{
+    auto harness = withFinishedRuns(1);
+    auto const id = finishedId(0);
+    harness.feed(ReadTranscript { .run = id, .tab = "tab-1", .page = 1, .monoMs = harness.now() });
+    harness.feed(ReadTranscript { .run = id, .tab = "tab-2", .page = 2, .monoMs = harness.now() });
+    // One page of a run is read at a time.
+    CHECK(harness.pendingCount() == 1);
+
+    harness.finish("agent-transcript", ok(basicPage()));
+    auto const* const first = harness.engine().transcript("tab-1", id);
+    REQUIRE(first != nullptr);
+    CHECK(first->state == FetchState::Loaded);
+    CHECK(first->page == 1);
+    // The second tab's page is asked for next, and lands in that tab alone.
+    auto const next = harness.pending("agent-transcript");
+    REQUIRE(next);
+    CHECK(argumentOf(*next, "page") == "2");
+    harness.finish("agent-transcript", ok(basicPage()));
+    auto const* const second = harness.engine().transcript("tab-2", id);
+    REQUIRE(second != nullptr);
+    CHECK(second->state == FetchState::Loaded);
+    CHECK(second->page == 2);
+    CHECK(harness.engine().transcript("tab-1", id)->page == 1);
+    CHECK(harness.pendingCount() == 0);
+}
+
+TEST_CASE("a transcript a tab shows is kept while another tab reads five more",
+          "[orchestrator][engine][transcript]")
+{
+    auto harness = withFinishedRuns(6);
+    harness.feed(ReadTranscript { .run = finishedId(0), .tab = "tab-1", .page = 1, .monoMs = harness.now() });
+    harness.finish("agent-transcript", ok(basicPage()));
+    // Another window's tab reads five runs, one after another.
+    for (auto const index: std::views::iota(1, 6))
+    {
+        harness.feed(
+            ReadTranscript { .run = finishedId(index), .tab = "tab-2", .page = 1, .monoMs = harness.now() });
+        harness.finish("agent-transcript", ok(basicPage()));
+    }
+
+    auto const* const shown = harness.engine().transcript("tab-1", finishedId(0));
+    REQUIRE(shown != nullptr);
+    CHECK(shown->state == FetchState::Loaded);
+    // The other tab's oldest went, its last stays.
+    CHECK(harness.engine().transcript("tab-2", finishedId(1)) == nullptr);
+    CHECK(harness.engine().transcript("tab-2", finishedId(5)) != nullptr);
+}
+
+TEST_CASE("a closed tab frees the transcripts kept for it", "[orchestrator][engine][transcript]")
+{
+    auto harness = withFinishedRuns(5);
+    for (auto const index: std::views::iota(0, 3))
+    {
+        harness.feed(
+            ReadTranscript { .run = finishedId(index), .tab = "tab-2", .page = 1, .monoMs = harness.now() });
+        harness.finish("agent-transcript", ok(basicPage()));
+    }
+    harness.feed(ReadTranscript { .run = finishedId(3), .tab = "tab-1", .page = 1, .monoMs = harness.now() });
+    harness.finish("agent-transcript", ok(basicPage()));
+
+    harness.feed(TabClosed { .tab = "tab-2", .monoMs = harness.now() });
+
+    for (auto const index: std::views::iota(0, 3))
+        CHECK(harness.engine().transcript("tab-2", finishedId(index)) == nullptr);
+    // Its slots are free: a tab reading another run keeps tab-1's and every one it asked for.
+    harness.feed(ReadTranscript { .run = finishedId(4), .tab = "tab-3", .page = 1, .monoMs = harness.now() });
+    harness.finish("agent-transcript", ok(basicPage()));
+    CHECK(harness.engine().transcript("tab-1", finishedId(3)) != nullptr);
+    CHECK(harness.engine().transcript("tab-3", finishedId(4)) != nullptr);
+}
+
+TEST_CASE("a page whose tab closed lands in another tab that shows the run",
+          "[orchestrator][engine][transcript]")
+{
+    auto harness = withFinishedRuns(1);
+    auto const id = finishedId(0);
+    harness.feed(ReadTranscript { .run = id, .tab = "tab-1", .page = 1, .monoMs = harness.now() });
+    harness.feed(ReadTranscript { .run = id, .tab = "tab-2", .page = 1, .monoMs = harness.now() });
+    harness.feed(TabClosed { .tab = "tab-1", .monoMs = harness.now() });
+    CHECK(harness.pendingCount() == 1);
+
+    harness.finish("agent-transcript", ok(basicPage()));
+
+    // The page read for the closed tab is the one tab-2 waits for: it is not read twice.
+    auto const* const view = harness.engine().transcript("tab-2", id);
+    REQUIRE(view != nullptr);
+    CHECK(view->state == FetchState::Loaded);
+    CHECK(harness.pendingCount() == 0);
+    CHECK(harness.engine().transcript("tab-1", id) == nullptr);
 }
 
 TEST_CASE("a failed transcript keeps its sanitised reason", "[orchestrator][engine][transcript]")
@@ -3417,10 +3560,10 @@ TEST_CASE("a failed transcript keeps its sanitised reason", "[orchestrator][engi
     auto harness = withFinishedRuns(1);
     auto const id = finishedId(0);
 
-    harness.feed(ReadTranscript { .run = id, .page = 1, .monoMs = harness.now() });
+    harness.feed(ReadTranscript { .run = id, .tab = {}, .page = 1, .monoMs = harness.now() });
     harness.finish("agent-transcript", failed(3, "no session log for x \x1b[31min /wt\nsecond line\n"));
 
-    auto const* view = harness.engine().transcript(id);
+    auto const* view = harness.engine().transcript("", id);
     REQUIRE(view != nullptr);
     CHECK(view->state == FetchState::Failed);
     CHECK(view->failure.starts_with("no session log for x"));
@@ -3428,9 +3571,9 @@ TEST_CASE("a failed transcript keeps its sanitised reason", "[orchestrator][engi
     CHECK_FALSE(view->failure.contains("second line"));
 
     // A verb that exits 0 without a page fails too.
-    harness.feed(ReadTranscript { .run = id, .page = 1, .monoMs = harness.now() });
+    harness.feed(ReadTranscript { .run = id, .tab = {}, .page = 1, .monoMs = harness.now() });
     harness.finish("agent-transcript", ok("not json"));
-    view = harness.engine().transcript(id);
+    view = harness.engine().transcript("", id);
     REQUIRE(view != nullptr);
     CHECK(view->state == FetchState::Failed);
     CHECK_FALSE(view->failure.empty());
@@ -3441,13 +3584,13 @@ TEST_CASE("a format mismatch is its own state", "[orchestrator][engine][transcri
     auto harness = withFinishedRuns(1);
     auto const id = finishedId(0);
 
-    harness.feed(ReadTranscript { .run = id, .page = 1, .monoMs = harness.now() });
+    harness.feed(ReadTranscript { .run = id, .tab = {}, .page = 1, .monoMs = harness.now() });
     harness.finish("agent-transcript", failed(2, "unsupported transcript format 1; this contour prints 2\n"));
-    CHECK(harness.engine().transcript(id)->state == FetchState::FormatMismatch);
+    CHECK(harness.engine().transcript("", id)->state == FetchState::FormatMismatch);
 
-    harness.feed(ReadTranscript { .run = id, .page = 1, .monoMs = harness.now() });
+    harness.feed(ReadTranscript { .run = id, .tab = {}, .page = 1, .monoMs = harness.now() });
     harness.finish("agent-transcript", ok(R"({"format":2,"pages":"many"})"));
-    CHECK(harness.engine().transcript(id)->state == FetchState::FormatMismatch);
+    CHECK(harness.engine().transcript("", id)->state == FetchState::FormatMismatch);
 }
 
 TEST_CASE("reading a Finished run's transcript marks it seen", "[orchestrator][engine][transcript]")
@@ -3456,7 +3599,7 @@ TEST_CASE("reading a Finished run's transcript marks it seen", "[orchestrator][e
     auto const id = finishedId(0);
     REQUIRE(finishedOf(harness.run(id))->seen == Seen::New);
 
-    harness.feed(ReadTranscript { .run = id, .page = 1, .monoMs = harness.now() });
+    harness.feed(ReadTranscript { .run = id, .tab = {}, .page = 1, .monoMs = harness.now() });
 
     CHECK(finishedOf(harness.run(id))->seen == Seen::Opened);
 }

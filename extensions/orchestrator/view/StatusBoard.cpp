@@ -142,57 +142,34 @@ std::optional<std::string_view> boardScreenText(Engine const& engine, std::strin
     return boardStateText(board);
 }
 
-namespace
-{
-    // A board's contents as drawn lines: sanitised (displayLines()), each line word-wrapped to the
-    // columns with its indentation as the continuation's, at most MaxBoardLines in all, the last a `…` when
-    // more were cut.
-    std::vector<std::string> boardLines(std::string_view bytes, int columns)
-    {
-        auto lines = std::vector<std::string> {};
-        if (columns <= 0)
-            return lines;
-        for (auto const& line: displayLines(bytes, MaxBoardLines, MaxBoardLineChars))
-        {
-            auto const text =
-                std::string_view { line }.substr(std::min(line.find_first_not_of(' '), line.size()));
-            if (text.empty())
-            {
-                lines.emplace_back();
-                continue;
-            }
-            // An indentation the line cannot keep beside some text is narrowed to half of it.
-            auto const indent = std::min(static_cast<int>(line.size() - text.size()), columns / 2);
-            for (auto& piece: wrap(text, columns - indent, columns - indent))
-                lines.push_back(std::string(static_cast<std::size_t>(indent), ' ') + std::move(piece));
-        }
-        // A cut line, or a wrapped one, never draws past the cap.
-        if (lines.size() > MaxBoardLines)
-        {
-            lines.resize(MaxBoardLines);
-            lines.back() = "…";
-        }
-        return lines;
-    }
-} // namespace
-
 StatusBoardPanel::StatusBoardPanel(Engine const& engine,
                                    Interaction const& interaction,
                                    core::IClock const& clock,
                                    BoardPanelState& state):
-    _engine { engine }, _interaction { interaction }, _clock { clock }, _state { state }
+    _engine { engine },
+    _interaction { interaction },
+    _clock { clock },
+    _state { state },
+    _wrapped { MaxBoardLines, std::string { "…" } }
 {
 }
 
-std::vector<std::string> const& StatusBoardPanel::linesFor(std::string_view bytes, int columns)
+std::span<std::string const> StatusBoardPanel::linesFor(std::string_view bytes,
+                                                        int columns,
+                                                        std::size_t count)
 {
-    if (columns != _wrappedColumns || bytes != _wrappedBytes)
+    if (bytes != _wrappedBytes)
     {
-        _wrapped = boardLines(bytes, columns);
+        _logical = displayLines(bytes, MaxBoardLines, MaxBoardLineChars);
         _wrappedBytes = bytes;
+        _wrappedColumns = -1;
+    }
+    if (columns != _wrappedColumns)
+    {
+        _wrapped.reset(columns > 0 ? _logical.size() : 0);
         _wrappedColumns = columns;
     }
-    return _wrapped;
+    return _wrapped.through(count, [&](std::size_t line) { return wrapIndented(_logical[line], columns); });
 }
 
 void StatusBoardPanel::render(core::tui::Canvas& canvas)
@@ -229,9 +206,10 @@ void StatusBoardPanel::render(core::tui::Canvas& canvas)
     else
         inside.putString(0, 1, cut("updated at an unknown time", width), styleOf(theme, Role::Dim));
 
-    auto const& lines = linesFor(board.bytes, width);
     auto const rows = static_cast<std::size_t>(std::max(0, height - 1));
-    _state.lines = lines.size();
+    // Wrapped as far as the lines shown: a board scrolled to its end is wrapped whole.
+    auto const lines = linesFor(board.bytes, width, _interaction.scroll + rows);
+    _state.lines = _wrapped.lineCount();
     _state.rows = rows;
     // The keys keep the scroll within the board as last drawn; one that shrank since is shown from its end.
     auto const top = std::min(_interaction.scroll, lines.size() > rows ? lines.size() - rows : 0);

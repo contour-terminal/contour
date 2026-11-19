@@ -19,6 +19,8 @@ enum class Role : uint8_t
     Passing,   ///< Passing checks, an approved review, a removed worktree.
     Selection, ///< The selected row.
     Border,    ///< The frames of the panels.
+    Accent,    ///< What stands out without warning: the user's own entries in a transcript.
+    Note,      ///< A remark about the text rather than part of it: a transcript's note.
 };
 
 /// The dashboard's theme: core::tui's, with each role's style set from one table. The colours are the

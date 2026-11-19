@@ -843,7 +843,8 @@ TEST_CASE("a running agent with no status after 30 s hints at a trust prompt", "
     CHECK(statusAt(30'000).statusRole == Role::Warning);
     CHECK(std::ranges::contains(statusAt(30'000).details, hint));
     // Still endable, and nothing else: the hint answers nothing.
-    CHECK(statusAt(30'000).offers == std::vector { KeyCommand::Board, KeyCommand::EndRun });
+    CHECK(statusAt(30'000).offers
+          == std::vector { KeyCommand::Board, KeyCommand::Transcript, KeyCommand::EndRun });
 
     // The dashboard draws it at 30 s on its own, asking the engine nothing.
     auto clock = core::ManualClock { at(29'500) };

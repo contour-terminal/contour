@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <optional>
 #include <ranges>
@@ -13,9 +14,16 @@
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Prompt.hpp>
+#include <orchestrator/core/Reconcile.hpp>
 
 namespace orchestrator
 {
+
+namespace
+{
+    /// The most runs of one item a second names apart (runId()'s ordinal); one more is refused as running.
+    constexpr auto MaxRunsPerSecond = uint32_t { 99 };
+} // namespace
 
 void Engine::dispatch(Dispatch const& request, std::vector<Effect>& out)
 {
@@ -109,10 +117,28 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
         return std::unexpected { DispatchRefusal::BaseUnknown };
 
     auto prompt = buildPrompt(task->prompt, request.url, request.note);
-    auto const id = runId(request.item, stampFromUnixMs(request.wallMs, _host.utcOffsetMinutes));
+    // A run of the item dispatched in the same second, since finished, still holds the plain id, and so may a
+    // worktree no run accounts for, or its branch, which `git worktree add -b` would refuse: the new run
+    // takes the next ordinal (no active run of the item exists here; that was refused above).
+    auto const isTaken = [&](RunId const& candidate) {
+        auto const path = worktreePath(_config->worktreeRoot(), repo->name, candidate);
+        auto const branch = branchName(candidate);
+        return std::ranges::contains(_runs, candidate.text(), &Run::id)
+               || std::ranges::any_of(state->worktrees, [&](WorktreeEntry const& worktree) {
+                      return worktree.path == path || worktree.branch == branch;
+                  });
+    };
+    auto const stamp = stampFromUnixMs(request.wallMs, _host.utcOffsetMinutes);
+    auto id = runId(request.item, stamp);
+    for (auto const ordinal: std::views::iota(uint32_t { 2 }, MaxRunsPerSecond + 1))
+    {
+        if (!id || !isTaken(*id))
+            break;
+        id = runId(request.item, stamp, ordinal);
+    }
     if (!prompt || !id)
         return std::unexpected { DispatchRefusal::BadPrompt };
-    if (std::ranges::contains(_runs, id->text(), &Run::id))
+    if (isTaken(*id))
         return std::unexpected { DispatchRefusal::AlreadyRunning };
 
     auto run = Run { .id = std::string(id->text()),

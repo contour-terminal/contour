@@ -78,9 +78,18 @@ struct HideBoardAction
     [[nodiscard]] bool operator==(HideBoardAction const&) const = default;
 };
 
+/// Read a page of a run's transcript, for the dashboard's tab to show.
+struct ReadTranscriptAction
+{
+    std::string run = {}; ///< The run's id.
+    uint32_t page = 1;    ///< The 1-based page.
+    [[nodiscard]] bool operator==(ReadTranscriptAction const&) const = default;
+};
+
 /// What the dashboard asks for: the guest steps each as the engine input of the same name (DispatchAction as
-/// Dispatch, ShowBoardAction and HideBoardAction as ShowBoard and HideBoard for the dashboard's tab), but for
-/// RevealAgentAction, which it carries out itself with the host.
+/// Dispatch, ShowBoardAction and HideBoardAction as ShowBoard and HideBoard for the dashboard's tab,
+/// ReadTranscriptAction as ReadTranscript), but for RevealAgentAction, which it carries out itself with the
+/// host.
 using UiAction = std::variant<RefreshNowAction,
                               EndRunAction,
                               RetryRemovalAction,
@@ -89,7 +98,8 @@ using UiAction = std::variant<RefreshNowAction,
                               RevealAgentAction,
                               DispatchAction,
                               ShowBoardAction,
-                              HideBoardAction>;
+                              HideBoardAction,
+                              ReadTranscriptAction>;
 
 // }}}
 // {{{ the key table
@@ -97,27 +107,30 @@ using UiAction = std::variant<RefreshNowAction,
 /// What a key does on the dashboard.
 enum class KeyCommand : uint8_t
 {
-    Up,             ///< Select the row above.
-    Down,           ///< Select the row below.
-    Home,           ///< Select the first row.
-    End,            ///< Select the last row.
-    Enter,          ///< Dispatch on the selected item, reveal its agent, or open a finished run's details.
-    Back,           ///< Close what is open: a board, the help, the details page, the filter.
-    Tab,            ///< In the Medium and Narrow bands, swap the details in for the list, and back.
-    Filter,         ///< Type a filter for the rows.
-    Help,           ///< Show or hide the keys.
-    Refresh,        ///< Read the lists again now.
-    EndRun,         ///< End the selected run.
-    RetryRemoval,   ///< Check the selected kept worktree again.
-    Dismiss,        ///< Drop the selected finished run.
-    Dispatch,       ///< Open the dispatch form on the selected item, on the first task that applies to it.
-    Task,           ///< Open the dispatch form on the selected item, on the task whose key was typed.
-    Board,          ///< Show the selected run's status board; on the board, read it again now.
-    Transcript,     ///< Show the selected run's transcript.
-    ScrollPageUp,   ///< Scroll a board or a transcript up by a screen.
+    Up,           ///< Select the row above.
+    Down,         ///< Select the row below.
+    Home,         ///< Select the first row.
+    End,          ///< Select the last row.
+    Enter,        ///< Dispatch on the selected item, reveal its agent, or open a finished run's details.
+    Back,         ///< Close what is open: a board or a transcript, the help, the details page, the filter.
+    Tab,          ///< In the Medium and Narrow bands, swap the details in for the list, and back.
+    Filter,       ///< Type a filter for the rows.
+    Help,         ///< Show or hide the keys.
+    Refresh,      ///< Read the lists again now.
+    EndRun,       ///< End the selected run.
+    RetryRemoval, ///< Check the selected kept worktree again.
+    Dismiss,      ///< Drop the selected finished run.
+    Dispatch,     ///< Open the dispatch form on the selected item, on the first task that applies to it; on a
+                  ///< finished run, a board or a transcript, on the run's item and task.
+    Task,         ///< Open the dispatch form on the selected item, on the task whose key was typed.
+    Board,        ///< Show the selected run's status board; on the board, read it again now.
+    Transcript,   ///< Show the transcript of the selected run, or of the board's run, from its first page.
+    ScrollPageUp, ///< Scroll a board or a transcript up by a screen.
     ScrollPageDown, ///< Scroll a board or a transcript down by a screen.
     PreviousPage,   ///< Show the transcript's previous page.
     NextPage,       ///< Show the transcript's next page.
+    FirstPage,      ///< Show the transcript's first page.
+    LastPage,       ///< Show the transcript's last page.
 };
 
 /// What the dashboard's tab shows.
@@ -212,6 +225,8 @@ struct Interaction
     std::string notice = {}; ///< A one-line notice on the summary line, until the next key; empty: none.
     Screen screen = Screen::Dashboard; ///< What the tab shows.
     std::string subject = {};          ///< The run a board or a transcript is of; empty on the dashboard.
+    Screen back = Screen::Dashboard;   ///< Where Esc on a board or a transcript returns to: the screen it was
+                                       ///< opened from.
     uint32_t page = 1;                 ///< The transcript's 1-based page.
     std::size_t scroll = 0;            ///< The first line a board or a transcript shows.
     [[nodiscard]] bool operator==(Interaction const&) const = default;
@@ -227,6 +242,7 @@ struct KeyContext
     std::optional<std::size_t> task = {}; ///< For KeyCommand::Task: the task, an index into Config::tasks().
     std::size_t lines = 0;                ///< How many lines a board or a transcript has, as last drawn.
     std::size_t rows = 0;                 ///< How many of them the tab showed at once.
+    std::string_view tab = {};            ///< The tab, whose page of a transcript the engine keeps.
 };
 
 /// Applies one key's command.
@@ -238,9 +254,26 @@ struct KeyContext
                                                Interaction& interaction,
                                                KeyContext const& context);
 
-/// Returns from a board to the dashboard; the caller asks the engine to stop reading it (HideBoardAction).
+/// Returns from a board or a transcript to the dashboard. Leaving a board, the caller asks the engine to stop
+/// reading it (HideBoardAction).
 /// @param interaction Where the user is.
-void leaveBoard(Interaction& interaction) noexcept;
+void leaveSubject(Interaction& interaction) noexcept;
+
+/// Opens the dispatch form on an item, as `d` does on a finished run, a board or a transcript: on @p task
+/// while it still applies to the item, else on the first task that does. The form previews and refuses as
+/// every dispatch does (an item with an active run shows the refusal); nothing starts before it is
+/// confirmed. When no form opens, the summary line says why.
+/// @param interaction Where the user is: its form opened, or its notice set. Its session id is left empty
+///        for the caller, which holds the source of them, to mint.
+/// @param engine The engine: its configuration and its lists.
+/// @param repo The repository's configured name.
+/// @param item The item.
+/// @param task The id of the task the form starts on, such as the run's.
+void openFormFor(Interaction& interaction,
+                 Engine const& engine,
+                 std::string_view repo,
+                 ItemRef const& item,
+                 std::string_view task);
 
 /// @param engine The engine; nullptr: none.
 /// @param run A run's id.

@@ -30,6 +30,7 @@
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/StatusBoard.hpp>
 #include <orchestrator/view/Theme.hpp>
+#include <orchestrator/view/Transcript.hpp>
 
 using namespace std::string_view_literals;
 
@@ -100,7 +101,9 @@ namespace
         ListAndDetails, ///< The list and the details side by side (Wide).
         Body,           ///< What holds the list and the details (Medium, Narrow): the dashboard's alone.
         Board,          ///< A run's status board in the body's place.
-        Chrome,         ///< The problem lines and the summary line, which a board in the Narrow band covers.
+        Transcript,     ///< A run's transcript in the body's place.
+        Chrome, ///< The problem lines and the summary line, which a board or a transcript in the Narrow band
+                ///< covers.
     };
 
     /// The pane each of the dashboard's roles is shown in, indexed by PanelRole up to Board.
@@ -113,8 +116,9 @@ namespace
         {
             case PanelRole::Body: return interaction.screen == Screen::Dashboard;
             case PanelRole::Board: return interaction.screen == Screen::Board;
-            // The Narrow band gives a board the whole tab but for its keys.
-            case PanelRole::Chrome: return interaction.screen != Screen::Board || band != Band::Narrow;
+            case PanelRole::Transcript: return interaction.screen == Screen::Transcript;
+            // The Narrow band gives a board or a transcript the whole tab but for its keys.
+            case PanelRole::Chrome: return interaction.screen == Screen::Dashboard || band != Band::Narrow;
             default: break;
         }
         return interaction.screen == Screen::Dashboard
@@ -166,6 +170,9 @@ struct Dashboard::State
     void syncLayout();
     /// Shows the form where the band puts it, or hides it.
     void syncForm();
+    /// Keeps a board's or a transcript's scroll within what it holds, once the last draw knows its end: the
+    /// keys scroll past an end not yet wrapped, and a draw shows such a scroll from the end.
+    void clampScroll() noexcept;
     /// @return What a key is applied to.
     [[nodiscard]] KeyContext keyContext() const noexcept;
     /// @return Now, in the engine's monotonic milliseconds.
@@ -217,6 +224,7 @@ struct Dashboard::State
     std::unique_ptr<HelpOverlay> help;
     std::unique_ptr<DispatchFormView> formView; ///< Draws interaction.form.
     BoardPanelState boardPanel;                 ///< What the board panel learnt drawing itself.
+    TranscriptPanelState transcriptPanel;       ///< What the transcript panel learnt drawing itself.
     std::unique_ptr<core::tui::Responsive> root;
 };
 
@@ -353,15 +361,13 @@ namespace
         int indent = 0;              ///< The cells it starts past the value column.
     };
 
-    /// @return The details fitted to @p columns cells: word-wrapped, continuation lines indented, or cut.
+    /// @return The details fitted to @p columns cells as each says (fitted()), continuation lines indented.
     [[nodiscard]] std::vector<DetailText> detailLinesOf(std::span<DetailLine const> details, int columns)
     {
         auto lines = std::vector<DetailText> {};
         for (auto const& detail: details)
         {
-            auto wrapped = detail.fit == DetailFit::Cut
-                               ? std::vector<std::string> { cut(detail.value, columns) }
-                               : wrap(detail.value, columns, columns - ContinuationIndent);
+            auto wrapped = fitted(detail.value, detail.fit, columns, columns - ContinuationIndent);
             if (wrapped.empty())
                 wrapped.emplace_back();
             for (auto const index: std::views::iota(std::size_t { 0 }, wrapped.size()))
@@ -631,6 +637,9 @@ std::unique_ptr<Component> Dashboard::State::buildLayout(std::size_t breakpoint)
     }
     toggle(PanelRole::Board,
            column->add(std::make_unique<StatusBoardPanel>(engine, interaction, clock, boardPanel), filling));
+    toggle(
+        PanelRole::Transcript,
+        column->add(std::make_unique<TranscriptPanel>(engine, interaction, tab, transcriptPanel), filling));
     if (chosen.furniture == Furniture::Shown)
         column->add(std::make_unique<HintLine>(*this, chosen.band), layout::Style { .shrink = 0 });
     toggle(PanelRole::Chrome,
@@ -687,13 +696,16 @@ Band Dashboard::State::band() const noexcept
 
 KeyContext Dashboard::State::keyContext() const noexcept
 {
+    // What the keys scroll: the board or the transcript shown.
+    auto const isTranscript = interaction.screen == Screen::Transcript;
     return KeyContext { .band = band(),
                         .selectable = selectableCount(rows, visible),
                         .selected = selectedRow(),
                         .engine = &engine,
                         .task = std::nullopt,
-                        .lines = boardPanel.lines,
-                        .rows = boardPanel.rows };
+                        .lines = isTranscript ? transcriptPanel.lines : boardPanel.lines,
+                        .rows = isTranscript ? transcriptPanel.rows : boardPanel.rows,
+                        .tab = tab };
 }
 
 std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEvent> const& events,
@@ -723,7 +735,12 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
                 actions.emplace_back(std::move(*dispatched));
             continue;
         }
-        if (auto action = applyKey(*key, interaction, keyContext()))
+        auto const wasOnBoard = interaction.screen == Screen::Board;
+        auto action = applyKey(*key, interaction, keyContext());
+        // A board the key left, for the dashboard or a transcript, is no longer read.
+        if (wasOnBoard && interaction.screen != Screen::Board)
+            actions.emplace_back(HideBoardAction {});
+        if (action)
             actions.push_back(std::move(*action));
         // A form a key opened gets its agent's session id now.
         if (interaction.form && interaction.form->session.empty())
@@ -773,6 +790,15 @@ void Dashboard::State::syncLayout()
     }
     else if (screen.isOverlayVisible(*help))
         screen.hideOverlay(*help);
+}
+
+void Dashboard::State::clampScroll() noexcept
+{
+    auto const& [lines, rows] = interaction.screen == Screen::Transcript
+                                    ? std::pair { transcriptPanel.lines, transcriptPanel.rows }
+                                    : std::pair { boardPanel.lines, boardPanel.rows };
+    if (interaction.screen != Screen::Dashboard)
+        interaction.scroll = std::min(interaction.scroll, lines > rows ? lines - rows : 0);
 }
 
 void Dashboard::State::syncForm()
@@ -834,9 +860,11 @@ std::optional<core::SteadyTimePoint> Dashboard::pendingEscapeDeadline() const no
 
 std::optional<core::SteadyTimePoint> Dashboard::nextRepaintDue() const noexcept
 {
-    // A board shows no rows: only its age moves on with time.
-    auto const& due =
-        _state->interaction.screen == Screen::Board ? _state->boardPanel.ageChangeMs : _state->rowChangeMs;
+    // A board shows no rows: only its age moves on with time. A transcript shows nothing that does.
+    auto const screen = _state->interaction.screen;
+    if (screen == Screen::Transcript)
+        return std::nullopt;
+    auto const& due = screen == Screen::Board ? _state->boardPanel.ageChangeMs : _state->rowChangeMs;
     return due ? std::optional { core::SteadyTimePoint { std::chrono::milliseconds { *due } } }
                : std::nullopt;
 }
@@ -892,22 +920,21 @@ std::vector<UiAction> Dashboard::select(std::string_view run)
     // An end that waited for its confirmation was for the row selected before.
     state.interaction.pendingEnd.clear();
     state.repaint = State::Repaint::Needed;
-    // The row is shown on the dashboard: a board shown in its place is left, and no longer read.
-    if (state.interaction.screen != Screen::Board)
+    // The row is shown on the dashboard: a board or a transcript shown in its place is left, and a board no
+    // longer read.
+    auto const wasOnBoard = state.interaction.screen == Screen::Board;
+    leaveSubject(state.interaction);
+    if (!wasOnBoard)
         return {};
-    leaveBoard(state.interaction);
     return { UiAction { HideBoardAction {} } };
 }
 
 void Dashboard::openForm(std::string_view repo, ItemRef const& item, std::string_view task)
 {
     auto& state = *_state;
-    auto form = openDispatchForm(state.engine, repo, item, task, {});
-    if (!form)
-        return;
-    form->session = formatUuidV4(state.ids.next());
-    state.interaction.form = std::move(form);
-    state.interaction.overlay = Overlay::None;
+    openFormFor(state.interaction, state.engine, repo, item, task);
+    if (state.interaction.form && state.interaction.form->session.empty())
+        state.interaction.form->session = formatUuidV4(state.ids.next());
     state.repaint = State::Repaint::Needed;
 }
 
@@ -928,15 +955,26 @@ std::string_view Dashboard::selectedRun() const noexcept
     return row != nullptr ? std::string_view { row->run } : std::string_view {};
 }
 
-std::vector<UiAction> Dashboard::expireEscape()
+std::vector<UiAction> Dashboard::dueActions()
 {
-    return _state->resolveOverdueEscape();
+    auto& state = *_state;
+    auto actions = state.resolveOverdueEscape();
+    // A transcript whose page the engine keeps no view of for this tab -- dropped from its cache -- is asked
+    // for again; while its run is gone or the configuration is refused, the screen says so instead.
+    auto const& interaction = state.interaction;
+    if (interaction.screen == Screen::Transcript && state.engine.config() != nullptr
+        && std::ranges::contains(state.engine.runs(), interaction.subject, &Run::id))
+        if (auto const* const view = state.engine.transcript(state.tab, interaction.subject);
+            view == nullptr || view->page != interaction.page)
+            actions.emplace_back(
+                ReadTranscriptAction { .run = interaction.subject, .page = interaction.page });
+    return actions;
 }
 
 std::string Dashboard::frame()
 {
     auto& state = *_state;
-    // The guest took what an overdue Escape key asks with expireEscape(); one resolved here only closes.
+    // The guest took what an overdue Escape key asks with dueActions(); one resolved here only closes.
     static_cast<void>(state.resolveOverdueEscape());
     // A row changed with time alone (an age moved on, a trust-prompt hint fell due): the rows are built and
     // drawn again, though the engine did not change.
@@ -956,6 +994,7 @@ std::string Dashboard::frame()
     state.refilter();
     state.syncLayout();
     state.screen.draw();
+    state.clampScroll();
     // The cursor rests at the top-left, hidden: every frame addresses its cells absolutely, and a shorter tab
     // then cuts its bottom rows rather than pushing its top ones into a history -- in the terminal and in
     // every window that mirrors it.

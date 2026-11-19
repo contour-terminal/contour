@@ -214,6 +214,18 @@ TEST_CASE("Naming", "[orchestrator][naming]")
         }
     }
 
+    SECTION("a second run of an item in one second takes an ordinal")
+    {
+        auto const item = orchestrator::ItemRef { orchestrator::ChangeRequestRef { .number = 2334 } };
+        CHECK(orchestrator::runId(item, Afternoon, 1)->text() == "pr-2334-20261113-150847");
+        CHECK(orchestrator::runId(item, Afternoon, 2)->text() == "pr-2334-20261113-150847-2");
+        auto const longest =
+            orchestrator::ItemRef { orchestrator::JiraRef { .key = "ABCDEFGHIJKLMNOPQRSTUVWXYZ-12345" } };
+        auto const id = orchestrator::runId(longest, Afternoon, 99);
+        REQUIRE(id.has_value());
+        CHECK(orchestrator::argumentAccepts(orchestrator::ArgumentKind::Name, id->text()));
+    }
+
     SECTION("a key that is not a Jira key makes no run id")
     {
         constexpr auto Keys = std::array<std::string_view, 7> {

@@ -79,17 +79,20 @@ class Dashboard
     void engineChanged();
 
     /// Selects the row of a run, dropping the filter when it hides that row and an end waiting for its
-    /// confirmation, and returning from a board to the dashboard; does nothing when no row stands for the
-    /// run.
+    /// confirmation, and returning from a board or a transcript to the dashboard; does nothing when no row
+    /// stands for the run.
     /// @param run The run's id.
     /// @return What the engine is asked: HideBoardAction when a board was left; else nothing.
     [[nodiscard]] std::vector<UiAction> select(std::string_view run);
 
-    /// Opens the dispatch form on an item the engine lists, its session id taken from the dashboard's source;
-    /// does nothing when the engine does not list the item or the task does not apply to it.
+    /// Opens the dispatch form on an item the engine lists, its session id taken from the dashboard's source:
+    /// what `d` does on a finished run, a board or a transcript, through the same openFormFor(). The form
+    /// previews and refuses as every dispatch does; nothing starts before it is confirmed. When the engine
+    /// does not list the item, or no task applies to it, no form opens and the summary line says why.
     /// @param repo The repository's configured name.
     /// @param item The item.
-    /// @param task The id of the task the form starts on.
+    /// @param task The id of the task the form starts on, such as a run's; when it no longer applies to the
+    ///        item, the first task that does.
     void openForm(std::string_view repo, ItemRef const& item, std::string_view task);
 
     /// @return The dispatch form while it is open.
@@ -117,13 +120,15 @@ class Dashboard
     ///         engineChanged() or when a row changed with time. For tests.
     [[nodiscard]] std::size_t rowBuilds() const noexcept;
 
-    /// Resolves an ESC whose deadline passed (see pendingEscapeDeadline()) into the Escape key; the guest
-    /// calls it before frame(), so that what the key asks reaches the engine (Esc on a board hides it).
-    /// @return What the engine is asked, in order; empty when no ESC waited past its deadline.
-    [[nodiscard]] std::vector<UiAction> expireEscape();
+    /// What the dashboard asks of the engine with no key typed; the guest calls it before frame(), so that it
+    /// reaches the engine first. An ESC whose deadline passed (see pendingEscapeDeadline()) is the Escape key
+    /// (Esc on a board hides it); and the transcript shown is asked for again when the engine keeps no page
+    /// of it for this tab, so that the screen never waits for a page nobody reads.
+    /// @return What the engine is asked, in order; empty when nothing is due.
+    [[nodiscard]] std::vector<UiAction> dueActions();
 
     /// Resolves an ESC whose deadline passed (see pendingEscapeDeadline()), then draws. What that Escape key
-    /// asks is dropped: expireEscape() first takes it.
+    /// asks is dropped: dueActions() first takes it.
     /// @return The bytes that bring the tab up to date; empty when nothing changed since the last frame.
     [[nodiscard]] std::string frame();
 

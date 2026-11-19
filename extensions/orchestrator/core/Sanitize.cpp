@@ -159,6 +159,12 @@ bool holdsInvisible(std::string_view text) noexcept
     return false;
 }
 
+bool showsAsItIs(std::string_view text)
+{
+    // As many characters as it has bytes, so that nothing is cut.
+    return displayText(text, text.size() + 1) == text && !holdsInvisible(text);
+}
+
 std::string displayText(std::string_view input, std::size_t maxChars)
 {
     if (maxChars == 0)

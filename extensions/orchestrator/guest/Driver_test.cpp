@@ -1697,7 +1697,7 @@ TEST_CASE("a file read carries its modification time", "[guest][board]")
     CHECK(board->modifiedWallMs == Modified);
 }
 
-TEST_CASE("a served tab that closes stops showing its board", "[guest][board]")
+TEST_CASE("a served tab that closes stops showing its board and its transcript", "[guest][board]")
 {
     auto served = Served {};
     addAgent(served);
@@ -1705,15 +1705,18 @@ TEST_CASE("a served tab that closes stops showing its board", "[guest][board]")
     served.load();
     served.invoke("open");
     served.driver->apply("tab-1", view::ShowBoardAction { .run = "pr-2375-20261113-150847" });
+    served.driver->apply("tab-1", view::ReadTranscriptAction { .run = "pr-2375-20261113-150847", .page = 1 });
     REQUIRE(boardViewReads(served.observer) == 1);
+    REQUIRE(served.driver->engine().transcript("tab-1", "pr-2375-20261113-150847") != nullptr);
 
     served.host.tabList.clear();
     served.driver->update(Hint::Tabs);
 
-    auto const hidden = served.observer.inputsOf<HideBoard>();
-    REQUIRE(hidden.size() == 1);
-    CHECK(hidden.front().tab == "tab-1");
+    auto const closed = served.observer.inputsOf<TabClosed>();
+    REQUIRE(closed.size() == 1);
+    CHECK(closed.front().tab == "tab-1");
     CHECK(served.driver->engine().board("pr-2375-20261113-150847") == nullptr);
+    CHECK(served.driver->engine().transcript("tab-1", "pr-2375-20261113-150847") == nullptr);
     served.host.clock.monoMs += 10'000;
     served.driver->update(Hint::Wake);
     CHECK(boardViewReads(served.observer) == 1);
@@ -1747,6 +1750,28 @@ TEST_CASE("b and a held ESC show and hide a board through the engine", "[guest][
     CHECK(hidden.front().tab == "tab-1");
     CHECK(served.driver->engine().board(Run) == nullptr);
     CHECK(served.dashboard().interaction().screen == view::Screen::Dashboard);
+}
+
+TEST_CASE("ReadTranscriptAction reaches the engine", "[guest][transcript]")
+{
+    constexpr auto Run = "pr-2375-20261113-150847"sv;
+    auto served = Served {};
+    addAgent(served);
+    served.load();
+    served.invoke("open");
+
+    served.driver->apply("tab-1", view::ReadTranscriptAction { .run = std::string { Run }, .page = 2 });
+
+    auto const reads = served.observer.inputsOf<ReadTranscript>();
+    REQUIRE(reads.size() == 1);
+    CHECK(reads.front().run == Run);
+    CHECK(reads.front().page == 2);
+    CHECK(reads.front().tab == "tab-1");
+    CHECK(reads.front().monoMs == served.host.clock.monoMs);
+    CHECK(served.host.startsOf("agent-transcript") == 1);
+    auto const* const view = served.driver->engine().transcript("tab-1", Run);
+    REQUIRE(view != nullptr);
+    CHECK(view->page == 2);
 }
 
 TEST_CASE("a key split across two tab reads moves once", "[guest]")

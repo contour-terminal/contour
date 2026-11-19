@@ -143,7 +143,7 @@ void DashboardFixture::answerHeld()
 std::vector<UiAction> DashboardFixture::escapeTimesOut()
 {
     clock.advance(std::chrono::milliseconds { 60 });
-    auto actions = dashboard.expireEscape();
+    auto actions = dashboard.dueActions();
     static_cast<void>(dashboard.frame());
     return actions;
 }

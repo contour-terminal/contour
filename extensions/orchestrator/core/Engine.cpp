@@ -238,6 +238,7 @@ std::vector<Effect> Engine::step(Input const& input)
             [&](ReadTranscript const& request) { readTranscript(request, out); },
             [&](ShowBoard const& request) { showBoard(request, out); },
             [&](HideBoard const& request) { hideBoard(request.tab); },
+            [&](TabClosed const& closed) { closeTab(closed.tab); },
             [&](RefreshNow const&) {
                 if (!_config)
                     return;
@@ -533,6 +534,7 @@ void Engine::forget(std::string_view runId)
     if (auto const found = _boardsFound.find(runId); found != _boardsFound.end())
         _boardsFound.erase(found);
     std::erase_if(_transcripts, [&](TranscriptView const& view) { return view.run == runId; });
+    std::erase_if(_transcriptShown, [&](auto const& shown) { return shown.second == runId; });
     std::erase_if(_shownBoards, [&](ShownBoard const& shown) { return shown.board.run == runId; });
     _runs.erase(run);
 }

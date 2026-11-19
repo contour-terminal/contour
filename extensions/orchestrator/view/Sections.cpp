@@ -50,6 +50,56 @@ namespace
     /// The ellipsis a cut text ends in: one cell.
     constexpr auto Ellipsis = "…"sv;
 
+    /// @return Whether @p text is printable ASCII alone: every byte a grapheme cluster of one cell, so that
+    ///         its width is its size and it breaks anywhere, without the grapheme segmenter.
+    [[nodiscard]] bool isPrintableAscii(std::string_view text) noexcept
+    {
+        return std::ranges::all_of(text, [](char c) { return c >= ' ' && c <= '~'; });
+    }
+
+    /// @param text Sanitised text, not empty.
+    /// @param firstColumns The cells the first slice may take; positive.
+    /// @param nextColumns The cells each further slice may take; positive.
+    /// @return @p text in slices that fit, broken between grapheme clusters, a cluster wider than a slice
+    ///         standing alone; at least one.
+    [[nodiscard]] std::vector<std::string> slicesOf(std::string_view text, int firstColumns, int nextColumns)
+    {
+        auto slices = std::vector<std::string> {};
+        auto slice = std::string {};
+        auto used = 0;
+        auto const limit = [&] {
+            return slices.empty() ? firstColumns : nextColumns;
+        };
+        auto const endSlice = [&] {
+            slices.push_back(std::move(slice));
+            slice.clear();
+            used = 0;
+        };
+        // Printable ASCII is a cluster of one cell per byte, broken in slices rather than cluster by cluster.
+        if (isPrintableAscii(text))
+            for (auto rest = text; !rest.empty();)
+            {
+                if (used >= limit())
+                    endSlice();
+                auto const taken = std::min(rest.size(), static_cast<std::size_t>(limit() - used));
+                slice += rest.substr(0, taken);
+                used += static_cast<int>(taken);
+                rest.remove_prefix(taken);
+            }
+        else
+            for (auto const& cluster: unicode::utf8_grapheme_segmenter(text))
+            {
+                auto const clusterWidth = core::tui::graphemeClusterWidth(cluster);
+                if (used > 0 && used + clusterWidth > limit())
+                    endSlice();
+                for (auto const codepoint: cluster)
+                    appendUtf8(slice, codepoint);
+                used += clusterWidth;
+            }
+        endSlice();
+        return slices;
+    }
+
     /// Sanitised text for a row or a detail.
     [[nodiscard]] std::string clean(std::string_view text)
     {
@@ -323,7 +373,7 @@ namespace
                        },
                        run.state);
         // An active run outside the configuration stays endable: its cleanup works from what the run stored.
-        auto offers = std::vector<KeyCommand> { KeyCommand::Board };
+        auto offers = std::vector<KeyCommand> { KeyCommand::Board, KeyCommand::Transcript };
         if (countsAsActive(run))
             offers.push_back(KeyCommand::EndRun);
         // What the row stands out for comes first, so that a short details panel still shows it.
@@ -389,9 +439,12 @@ namespace
         else
             status = "removed";
 
-        // Its board went with its worktree.
+        // A new run on its item goes through the dispatch form, as every dispatch does. Its board went with
+        // its worktree, its transcript did not.
         auto offers =
-            keepsWorktree(run) ? std::vector<KeyCommand> { KeyCommand::Board } : std::vector<KeyCommand> {};
+            keepsWorktree(run)
+                ? std::vector<KeyCommand> { KeyCommand::Board, KeyCommand::Transcript, KeyCommand::Dispatch }
+                : std::vector<KeyCommand> { KeyCommand::Transcript, KeyCommand::Dispatch };
         if (isRetryable)
             offers.push_back(KeyCommand::RetryRemoval);
         if (!isChecking)
@@ -430,14 +483,6 @@ namespace
                      .onOpen = isNew ? OpenEffect::MarkSeen : OpenEffect::None,
                      .title = clean(text),
                      .details = std::move(details) };
-    }
-
-    /// @return Whether @p text is drawn as it is, so that what the user copies is @p text: sanitising it
-    ///         changes nothing, and it holds nothing that draws as nothing.
-    [[nodiscard]] bool showsAsItIs(std::string_view text)
-    {
-        // As many characters as it has bytes, so that nothing is cut.
-        return displayText(text, text.size() + 1) == text && !holdsInvisible(text);
     }
 
     /// @return The line that removes @p orphan by hand, run from anywhere: `git -C <checkout> worktree remove
@@ -696,24 +741,70 @@ std::vector<std::string> wrap(std::string_view text, int firstColumns, int nextC
             used = width;
             continue;
         }
-        // Wider than a line: broken between clusters, a cluster wider than the line standing alone.
-        for (auto const& cluster: unicode::utf8_grapheme_segmenter(wordText))
-        {
-            auto const clusterWidth = core::tui::graphemeClusterWidth(cluster);
-            if (used > 0 && used + clusterWidth > limit())
-                endLine();
-            for (auto const codepoint: cluster)
-                appendUtf8(line, codepoint);
-            used += clusterWidth;
-        }
+        // Wider than a line: in slices, the last of which the next word may join.
+        auto slices = slicesOf(wordText, limit(), std::max(1, nextColumns));
+        line = std::move(slices.back());
+        slices.pop_back();
+        std::ranges::move(slices, std::back_inserter(lines));
+        used = columnsOf(line);
     }
     if (used > 0)
         endLine();
     return lines;
 }
 
+std::vector<std::string> fitted(std::string_view text, DetailFit fit, int firstColumns, int nextColumns)
+{
+    switch (fit)
+    {
+        case DetailFit::Wrap: return wrap(text, firstColumns, nextColumns);
+        case DetailFit::Cut: return { cut(text, firstColumns) };
+        case DetailFit::Whole:
+            if (firstColumns <= 0)
+                return {};
+            if (auto line = displayText(text, text.size() + 1); columnsOf(line) <= firstColumns)
+                return { std::move(line) };
+            return { cut(WidenToSeeText, firstColumns) };
+    }
+    return {};
+}
+
+std::vector<std::string> wrapIndented(std::string_view line, int columns)
+{
+    auto const rest = line.substr(std::min(line.find_first_not_of(' '), line.size()));
+    if (rest.empty() || columns <= 0)
+        return { std::string {} };
+    // An indentation the line cannot keep beside some text is narrowed to half of it.
+    auto const indent = std::min(static_cast<int>(line.size() - rest.size()), columns / 2);
+    auto lines = wrap(rest, columns - indent, columns - indent);
+    for (auto& piece: lines)
+        piece.insert(0, static_cast<std::size_t>(indent), ' ');
+    return lines;
+}
+
+std::vector<std::string> indentedLines(std::string_view text,
+                                       int columns,
+                                       std::size_t maxLines,
+                                       std::size_t maxLineChars)
+{
+    auto lines = std::vector<std::string> {};
+    if (columns <= 0 || maxLines == 0)
+        return lines;
+    for (auto const& line: displayLines(text, maxLines, maxLineChars))
+        std::ranges::move(wrapIndented(line, columns), std::back_inserter(lines));
+    // A cut line, or a wrapped one, never draws past the cap.
+    if (lines.size() > maxLines)
+    {
+        lines.resize(maxLines);
+        lines.back() = "…";
+    }
+    return lines;
+}
+
 int columnsOf(std::string_view text)
 {
+    if (isPrintableAscii(text))
+        return static_cast<int>(text.size());
     return core::tui::stringWidth(text);
 }
 

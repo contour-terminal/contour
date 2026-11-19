@@ -52,9 +52,12 @@ enum class OpenEffect : uint8_t
 /// How a detail's value too wide for the panel is drawn.
 enum class DetailFit : uint8_t
 {
-    Wrap, ///< Word-wrapped over as many lines as it takes.
-    Cut,  ///< On one line, cut with a `…`: a path or a command line, which a wrap would break where a space
-          ///< is, so that a copy of it is no longer what it says.
+    Wrap,  ///< Word-wrapped over as many lines as it takes.
+    Cut,   ///< On one line, cut with a `…`: a path or a command line, which a wrap would break where a space
+           ///< is, so that a copy of it is no longer what it says.
+    Whole, ///< On one line and whole, or not at all: a command line, which a cut would shorten and a break
+           ///< would split inside an argument a copy then carries. One that does not fit says
+           ///< WidenToSeeText in its place.
 };
 
 /// One line of a row's details: a label and its value.
@@ -70,18 +73,18 @@ struct DetailLine
 /// One row of the list and the details it opens. Every text is sanitised: no control character, one line.
 struct Row
 {
-    RowKind kind = RowKind::Notice;   ///< What it stands for.
-    std::string mark = {};            ///< One cell before the text, such as `✓`; empty: a blank.
-    Role markRole = Role::Text;       ///< How the mark is drawn.
-    std::string prefix = {};          ///< The repository's name, drawn dim; empty with one repository.
-    std::string text = {};            ///< The row's text.
-    std::string status = {};          ///< Right-aligned after the text, such as `approved`; may be empty.
-    Role statusRole = Role::Dim;      ///< How the status is drawn.
-    std::string run = {};             ///< The run it stands for; empty for a pull request or an issue.
-    std::string repo = {};            ///< The repository of its item or orphan; empty for a run.
-    std::optional<ItemRef> item = {}; ///< The pull request or issue it stands for; absent for a run.
-    std::vector<KeyCommand>
-        offers = {}; ///< The run commands it accepts: Board, EndRun, RetryRemoval, Dismiss.
+    RowKind kind = RowKind::Notice;       ///< What it stands for.
+    std::string mark = {};                ///< One cell before the text, such as `✓`; empty: a blank.
+    Role markRole = Role::Text;           ///< How the mark is drawn.
+    std::string prefix = {};              ///< The repository's name, drawn dim; empty with one repository.
+    std::string text = {};                ///< The row's text.
+    std::string status = {};              ///< Right-aligned after the text, such as `approved`; may be empty.
+    Role statusRole = Role::Dim;          ///< How the status is drawn.
+    std::string run = {};                 ///< The run it stands for; empty for a pull request or an issue.
+    std::string repo = {};                ///< The repository of its item or orphan; empty for a run.
+    std::optional<ItemRef> item = {};     ///< The pull request or issue it stands for; absent for a run.
+    std::vector<KeyCommand> offers = {};  ///< The run commands it accepts: Board, Transcript, Dispatch,
+                                          ///< EndRun, RetryRemoval, Dismiss.
     OpenEffect onOpen = OpenEffect::None; ///< What opening its details tells the engine.
     std::string title = {};               ///< The details' first line.
     std::vector<DetailLine> details = {}; ///< The details' other lines.
@@ -170,5 +173,40 @@ inline constexpr auto HintSeparator = std::string_view { " · " };
 /// @param nextColumns The cells each further line may take, such as @p firstColumns less an indent.
 /// @return The lines, in order; empty when @p text is or @p firstColumns is not positive.
 [[nodiscard]] std::vector<std::string> wrap(std::string_view text, int firstColumns, int nextColumns);
+
+/// What a DetailFit::Whole line too wide for its cells says instead.
+inline constexpr std::string_view WidenToSeeText = "widen the window to see the command";
+
+/// @param text Untrusted UTF-8.
+/// @param fit How it is fitted: cut(), wrap(), or whole on one line (WidenToSeeText, cut, where it does not
+///            fit).
+/// @param firstColumns The cells the first line may take.
+/// @param nextColumns The cells each further line may take.
+/// @return Its lines, as @p fit fits them.
+[[nodiscard]] std::vector<std::string> fitted(std::string_view text,
+                                              DetailFit fit,
+                                              int firstColumns,
+                                              int nextColumns);
+
+/// One line that displayLines() returned, word-wrapped to @p columns with its indentation as the
+/// continuation's, narrowed to half the width where it would leave less.
+/// @param line A sanitised line, its indentation spaces.
+/// @param columns The cells a line may take.
+/// @return Its pieces, in order; one empty one for a line with no text.
+[[nodiscard]] std::vector<std::string> wrapIndented(std::string_view line, int columns);
+
+/// Untrusted multi-line text as drawn lines: sanitised (displayLines()), each line word-wrapped to
+/// @p columns with its indentation as the continuation's (narrowed to half the width where it would leave
+/// less), at most @p maxLines in all, the last a `…` when more were cut.
+/// @param text The text, untrusted, as read.
+/// @param columns The cells a line may take.
+/// @param maxLines The most lines returned.
+/// @param maxLineChars The most characters of a line of @p text after its indentation; a longer one is cut
+///        with a `…` before it is wrapped.
+/// @return The lines, in order.
+[[nodiscard]] std::vector<std::string> indentedLines(std::string_view text,
+                                                     int columns,
+                                                     std::size_t maxLines,
+                                                     std::size_t maxLineChars);
 
 } // namespace orchestrator::view

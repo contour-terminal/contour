@@ -104,12 +104,15 @@ add_library(orchestrator_view STATIC
     view/DispatchForm.hpp
     view/Keys.cpp
     view/Keys.hpp
+    view/LazyLines.hpp
     view/Sections.cpp
     view/Sections.hpp
     view/StatusBoard.cpp
     view/StatusBoard.hpp
     view/Theme.cpp
     view/Theme.hpp
+    view/Transcript.cpp
+    view/Transcript.hpp
 )
 target_link_libraries(orchestrator_view PUBLIC orchestrator_core core::tui_core)
 
@@ -158,6 +161,7 @@ if(ORCHESTRATOR_TESTING)
         view/Keys_test.cpp
         view/Sections_test.cpp
         view/StatusBoard_test.cpp
+        view/Transcript_test.cpp
         view/ViewFixtures.cpp
         view/ViewFixtures.hpp
     )

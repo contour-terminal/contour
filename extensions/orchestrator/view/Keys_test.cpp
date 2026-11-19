@@ -41,9 +41,9 @@ TEST_CASE("keyRows: every row's command is dispatched", "[orchestrator][view]")
     CHECK(std::ranges::all_of(keyRows(), [](KeyRow const& row) { return isDispatched(row.command); }));
 }
 
-TEST_CASE("keyRows: no review or transcript key yet", "[orchestrator][view]")
+TEST_CASE("keyRows: no review key yet", "[orchestrator][view]")
 {
-    for (auto const key: { "f"sv, "r"sv, "t"sv })
+    for (auto const key: { "f"sv, "r"sv })
     {
         CAPTURE(key);
         CHECK(std::ranges::find(keyRows(), key, &KeyRow::key) == keyRows().end());

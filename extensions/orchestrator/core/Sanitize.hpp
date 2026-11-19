@@ -62,6 +62,13 @@ inline constexpr std::size_t TabIndentColumns = 4;
 /// @return Whether one of them is in @p text.
 [[nodiscard]] bool holdsInvisible(std::string_view text) noexcept;
 
+/// Whether a text is drawn as it is, so that what the user copies of it is the text itself: sanitising it
+/// (displayText(), uncut) changes nothing, and it holds nothing that draws as nothing (holdsInvisible()).
+/// A value shown for the user to copy and run, such as a path in a command line, must pass.
+/// @param text UTF-8.
+/// @return Whether it is drawn as it is.
+[[nodiscard]] bool showsAsItIs(std::string_view text);
+
 /// A user's note, sanitised into one line that is safe to pass as a single argument.
 /// @param input The note as the user typed it.
 /// @return displayText(input, MaxNoteChars), or why it was refused: the input exceeded MaxNoteChars

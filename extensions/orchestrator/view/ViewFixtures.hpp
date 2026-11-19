@@ -112,7 +112,7 @@ struct DashboardFixture
     explicit DashboardFixture(World const& world, core::tui::Size size = { .width = 120, .height = 40 });
 
     /// Lets a held ESC wait past its deadline, and draws: it is then the Escape key.
-    /// @return What the Escape key asks, as the guest takes it (Dashboard::expireEscape()).
+    /// @return What the Escape key asks, as the guest takes it (Dashboard::dueActions()).
     std::vector<UiAction> escapeTimesOut();
 
     /// Draws a frame and returns the screen as text.

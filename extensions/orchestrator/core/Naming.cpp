@@ -59,6 +59,13 @@ std::expected<RunId, NamingError> runId(ItemRef const& item, Stamp const& stamp)
     });
 }
 
+std::expected<RunId, NamingError> runId(ItemRef const& item, Stamp const& stamp, uint32_t ordinal)
+{
+    return runId(item, stamp).transform([&](RunId const& plain) {
+        return ordinal <= 1 ? plain : RunId { std::format("{}-{}", plain.text(), ordinal) };
+    });
+}
+
 std::string branchName(RunId const& runId)
 {
     return std::format("{}{}", BranchPrefix, runId.text());

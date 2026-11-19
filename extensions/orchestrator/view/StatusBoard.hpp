@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -16,6 +17,7 @@
 #include <orchestrator/core/Board.hpp>
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/view/Keys.hpp>
+#include <orchestrator/view/LazyLines.hpp>
 
 namespace orchestrator::view
 {
@@ -51,7 +53,8 @@ struct BoardAge
 /// What the board panel learnt drawing itself, for the keys and the next repaint.
 struct BoardPanelState
 {
-    std::size_t lines = 0; ///< How many lines the board's contents took.
+    std::size_t lines = 0; ///< How many lines the board's contents take; UnknownLineCount while not all are
+                           ///< wrapped.
     std::size_t rows = 0;  ///< How many of them the panel showed at once.
     std::optional<uint64_t>
         ageChangeMs = {}; ///< When the age it shows changes, in monotonic ms; none: never.
@@ -74,16 +77,20 @@ class StatusBoardPanel final: public core::tui::Component
     void render(core::tui::Canvas& canvas) override;
 
   private:
-    /// @return The board's contents wrapped to @p columns, wrapped again only when they or the width changed.
-    [[nodiscard]] std::vector<std::string> const& linesFor(std::string_view bytes, int columns);
+    /// @return The board's contents at @p columns, from the top through line @p count: wrapped only as far as
+    ///         that, and wrapped again only when the contents or the width changed.
+    [[nodiscard]] std::span<std::string const> linesFor(std::string_view bytes,
+                                                        int columns,
+                                                        std::size_t count);
 
     Engine const& _engine;
     Interaction const& _interaction;
     core::IClock const& _clock;
     BoardPanelState& _state;
-    std::string _wrappedBytes;         ///< The bytes @ref _wrapped was made from.
-    int _wrappedColumns = -1;          ///< The width @ref _wrapped was made for.
-    std::vector<std::string> _wrapped; ///< The contents, as last wrapped.
+    std::string _wrappedBytes;         ///< The bytes @ref _logical was made from.
+    int _wrappedColumns = -1;          ///< The width @ref _wrapped is made for.
+    std::vector<std::string> _logical; ///< The contents' lines, sanitised (displayLines()), not wrapped.
+    LazyLines<std::string> _wrapped;   ///< The contents' lines, wrapped as far as a draw asked.
 };
 
 } // namespace orchestrator::view

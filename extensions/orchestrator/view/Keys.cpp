@@ -42,6 +42,7 @@ namespace
         KeyRow { .key = "d"sv, .command = KeyCommand::Dispatch, .hint = "d dispatch"sv },
         KeyRow { .key = "?"sv, .command = KeyCommand::Help, .hint = "? help"sv },
         KeyRow { .key = "b"sv, .command = KeyCommand::Board, .hint = "b board"sv },
+        KeyRow { .key = "t"sv, .command = KeyCommand::Transcript, .hint = "t transcript"sv },
         KeyRow { .key = "/"sv, .command = KeyCommand::Filter, .hint = "/ filter"sv },
         KeyRow { .key = "R"sv, .command = KeyCommand::Refresh, .hint = "R refresh"sv },
         KeyRow { .key = "e"sv, .command = KeyCommand::EndRun, .hint = "e end run"sv },
@@ -64,8 +65,48 @@ namespace
                  .command = KeyCommand::Enter,
                  .hint = "enter agent tab"sv,
                  .on = ScreenSet::Board },
-        KeyRow { .key = "esc"sv, .command = KeyCommand::Back, .hint = "esc back"sv, .on = ScreenSet::Board },
+        KeyRow { .key = "t"sv,
+                 .command = KeyCommand::Transcript,
+                 .hint = "t transcript"sv,
+                 .on = ScreenSet::Board },
+        KeyRow {
+            .key = "d"sv, .command = KeyCommand::Dispatch, .hint = "d new run"sv, .on = ScreenSet::Board },
         KeyRow { .key = "b"sv, .command = KeyCommand::Board, .hint = "b reload"sv, .on = ScreenSet::Board },
+        KeyRow { .key = "esc"sv, .command = KeyCommand::Back, .hint = "esc back"sv, .on = ScreenSet::Board },
+        // The transcript: read-only, a page at a time, so its keys page, scroll, switch to the board and
+        // leave.
+        KeyRow { .key = "left"sv,
+                 .command = KeyCommand::PreviousPage,
+                 .hint = "←→ page"sv,
+                 .on = ScreenSet::Transcript },
+        KeyRow {
+            .key = "right"sv, .command = KeyCommand::NextPage, .hint = ""sv, .on = ScreenSet::Transcript },
+        KeyRow {
+            .key = "up"sv, .command = KeyCommand::Up, .hint = "↑↓ scroll"sv, .on = ScreenSet::Transcript },
+        KeyRow { .key = "k"sv, .command = KeyCommand::Up, .hint = ""sv, .on = ScreenSet::Transcript },
+        KeyRow { .key = "down"sv, .command = KeyCommand::Down, .hint = ""sv, .on = ScreenSet::Transcript },
+        KeyRow { .key = "j"sv, .command = KeyCommand::Down, .hint = ""sv, .on = ScreenSet::Transcript },
+        KeyRow {
+            .key = "pgup"sv, .command = KeyCommand::ScrollPageUp, .hint = ""sv, .on = ScreenSet::Transcript },
+        KeyRow { .key = "pgdn"sv,
+                 .command = KeyCommand::ScrollPageDown,
+                 .hint = ""sv,
+                 .on = ScreenSet::Transcript },
+        KeyRow {
+            .key = "home"sv, .command = KeyCommand::FirstPage, .hint = ""sv, .on = ScreenSet::Transcript },
+        KeyRow { .key = "end"sv, .command = KeyCommand::LastPage, .hint = ""sv, .on = ScreenSet::Transcript },
+        KeyRow {
+            .key = "b"sv, .command = KeyCommand::Board, .hint = "b board"sv, .on = ScreenSet::Transcript },
+        KeyRow { .key = "d"sv,
+                 .command = KeyCommand::Dispatch,
+                 .hint = "d new run"sv,
+                 .on = ScreenSet::Transcript },
+        KeyRow { .key = "enter"sv,
+                 .command = KeyCommand::Enter,
+                 .hint = "enter agent tab"sv,
+                 .on = ScreenSet::Transcript },
+        KeyRow {
+            .key = "esc"sv, .command = KeyCommand::Back, .hint = "esc back"sv, .on = ScreenSet::Transcript },
     };
 
     /// The name of a key that is not a character.
@@ -86,6 +127,8 @@ namespace
         SpecialKey { .code = core::tui::KeyCode::Delete, .name = "del"sv },
         SpecialKey { .code = core::tui::KeyCode::PageUp, .name = "pgup"sv },
         SpecialKey { .code = core::tui::KeyCode::PageDown, .name = "pgdn"sv },
+        SpecialKey { .code = core::tui::KeyCode::Left, .name = "left"sv },
+        SpecialKey { .code = core::tui::KeyCode::Right, .name = "right"sv },
     };
 
     /// @return Whether @p key was pressed with Ctrl or Alt, which no row of the table names.
@@ -170,6 +213,68 @@ namespace
         return context.rows > 1 ? context.rows - 1 : 1;
     }
 
+    /// Opens the dispatch form on a run's item and task (openFormFor()); does nothing for a run the engine
+    /// no longer knows.
+    void openFormOnRun(Interaction& interaction, KeyContext const& context, std::string_view runId)
+    {
+        if (context.engine == nullptr)
+            return;
+        auto const runs = context.engine->runs();
+        auto const run = std::ranges::find(runs, runId, &Run::id);
+        if (run != runs.end())
+            openFormFor(interaction, *context.engine, run->repo, run->item, run->task);
+    }
+
+    /// @return How many pages the shown transcript has, as its last page read says; 0 while none was read.
+    [[nodiscard]] uint32_t pagesOf(Interaction const& interaction, KeyContext const& context) noexcept
+    {
+        auto const* const view = context.engine != nullptr
+                                     ? context.engine->transcript(context.tab, interaction.subject)
+                                     : nullptr;
+        return view != nullptr && view->content ? view->content->pages : 0;
+    }
+
+    /// Turns the transcript to @p page, kept within the pages it has; a page it shows or asked for already
+    /// is not asked for again.
+    /// @return What the engine is asked: the page; std::nullopt when the page does not change.
+    [[nodiscard]] std::optional<UiAction> turnTo(Interaction& interaction,
+                                                 KeyContext const& context,
+                                                 uint32_t page) noexcept
+    {
+        auto const pages = pagesOf(interaction, context);
+        // Before a page was read, the number of pages is not known: only the first is surely there.
+        auto const target = std::clamp(page, uint32_t { 1 }, std::max(pages, uint32_t { 1 }));
+        if (interaction.screen != Screen::Transcript || target == interaction.page)
+            return std::nullopt;
+        interaction.page = target;
+        interaction.scroll = 0;
+        return UiAction { ReadTranscriptAction { .run = interaction.subject, .page = target } };
+    }
+
+    /// Leaves a board or a transcript for the screen it was opened from; one opened from the dashboard
+    /// returns there. The screen returned to returns to the dashboard in turn.
+    /// @return What the engine is asked: a board returned to is read again now, and a transcript page the
+    ///         engine no longer keeps for the tab is asked for again.
+    [[nodiscard]] std::optional<UiAction> goBack(Interaction& interaction, KeyContext const& context)
+    {
+        auto const back = std::exchange(interaction.back, Screen::Dashboard);
+        if (back == Screen::Dashboard || back == interaction.screen)
+        {
+            leaveSubject(interaction);
+            return std::nullopt;
+        }
+        interaction.screen = back;
+        interaction.scroll = 0;
+        if (back == Screen::Board)
+            return UiAction { ShowBoardAction { .run = interaction.subject } };
+        auto const* const view = context.engine != nullptr
+                                     ? context.engine->transcript(context.tab, interaction.subject)
+                                     : nullptr;
+        if (view != nullptr && view->page == interaction.page)
+            return std::nullopt;
+        return UiAction { ReadTranscriptAction { .run = interaction.subject, .page = interaction.page } };
+    }
+
     using Handler = std::optional<UiAction> (*)(Interaction&, KeyContext const&);
 
     /// One command and what it does.
@@ -240,21 +345,70 @@ namespace
                         return std::nullopt;
                     return UiAction { ShowBoardAction { .run = interaction.subject } };
                 }
-                auto const* const row = context.selected;
-                if (row == nullptr || !std::ranges::contains(row->offers, KeyCommand::Board))
+                // From a transcript, the board of its run while its worktree is there; Esc then returns to
+                // the transcript.
+                auto run = interaction.subject;
+                if (interaction.screen == Screen::Dashboard)
+                {
+                    auto const* const row = context.selected;
+                    if (row == nullptr || !std::ranges::contains(row->offers, KeyCommand::Board))
+                        return std::nullopt;
+                    run = row->run;
+                }
+                else if (!hasBoardToShow(context.engine, run))
                     return std::nullopt;
+                interaction.back = interaction.screen;
                 interaction.screen = Screen::Board;
-                interaction.subject = row->run;
+                interaction.subject = run;
                 interaction.scroll = 0;
                 interaction.overlay = Overlay::None;
-                return UiAction { ShowBoardAction { .run = row->run } };
+                return UiAction { ShowBoardAction { .run = std::move(run) } };
             } },
+        // `t` shows the transcript of the selected run, or of the board's, from its first page.
+        CommandRow {
+            .command = KeyCommand::Transcript,
+            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
+                auto run = interaction.subject;
+                if (interaction.screen == Screen::Dashboard)
+                {
+                    auto const* const row = context.selected;
+                    if (row == nullptr || !std::ranges::contains(row->offers, KeyCommand::Transcript))
+                        return std::nullopt;
+                    run = row->run;
+                }
+                // Esc returns to where it was opened from: the dashboard, or the board.
+                interaction.back = interaction.screen;
+                interaction.screen = Screen::Transcript;
+                interaction.subject = run;
+                interaction.page = 1;
+                interaction.scroll = 0;
+                interaction.overlay = Overlay::None;
+                return UiAction { ReadTranscriptAction { .run = std::move(run), .page = 1 } };
+            } },
+        CommandRow { .command = KeyCommand::PreviousPage,
+                     .handler =
+                         [](Interaction& interaction, KeyContext const& context) {
+                             return turnTo(interaction, context, interaction.page - 1);
+                         } },
+        CommandRow { .command = KeyCommand::NextPage,
+                     .handler =
+                         [](Interaction& interaction, KeyContext const& context) {
+                             return turnTo(interaction, context, interaction.page + 1);
+                         } },
+        CommandRow { .command = KeyCommand::FirstPage,
+                     .handler = [](Interaction& interaction,
+                                   KeyContext const& context) { return turnTo(interaction, context, 1); } },
+        CommandRow { .command = KeyCommand::LastPage,
+                     .handler =
+                         [](Interaction& interaction, KeyContext const& context) {
+                             return turnTo(interaction, context, pagesOf(interaction, context));
+                         } },
         // Enter acts on what the row stands for: an agent is revealed, an item dispatched on (or its agent
         // revealed), a finished run's or an orphan's details opened. Tab shows any row's details.
         CommandRow {
             .command = KeyCommand::Enter,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                // On a board, Enter goes to the agent's tab while the run has one.
+                // On a board or a transcript, Enter goes to the agent's tab while the run has one.
                 if (interaction.screen != Screen::Dashboard)
                 {
                     if (!hasAgentTab(context.engine, interaction.subject))
@@ -284,10 +438,18 @@ namespace
                     return UiAction { MarkSeenAction { .run = row->run } };
                 return std::nullopt;
             } },
+        // `d` dispatches on the selected item; on a finished run, a board or a transcript, a new run on the
+        // run's item.
         CommandRow {
             .command = KeyCommand::Dispatch,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                openFormOn(interaction, context, firstTaskOf(context));
+                auto const* const row = context.selected;
+                if (interaction.screen != Screen::Dashboard)
+                    openFormOnRun(interaction, context, interaction.subject);
+                else if (row != nullptr && std::ranges::contains(row->offers, KeyCommand::Dispatch))
+                    openFormOnRun(interaction, context, row->run);
+                else
+                    openFormOn(interaction, context, firstTaskOf(context));
                 return std::nullopt;
             } },
         CommandRow {
@@ -299,22 +461,21 @@ namespace
                 openFormOn(interaction, context, &config->tasks()[*context.task]);
                 return std::nullopt;
             } },
-        CommandRow { .command = KeyCommand::Back,
-                     .handler = [](Interaction& interaction, KeyContext const&) -> std::optional<UiAction> {
-                         // A board returns to the dashboard, which then shows it no more.
-                         if (interaction.screen == Screen::Board)
-                         {
-                             leaveBoard(interaction);
-                             return UiAction { HideBoardAction {} };
-                         }
-                         if (interaction.overlay != Overlay::None)
-                             interaction.overlay = Overlay::None;
-                         else if (interaction.pane == Pane::Details)
-                             interaction.pane = Pane::List;
-                         else
-                             interaction.filter.clear();
-                         return std::nullopt;
-                     } },
+        CommandRow {
+            .command = KeyCommand::Back,
+            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
+                // A board or a transcript returns to where it was opened from (a board left is no
+                // longer read: see Dashboard).
+                if (interaction.screen != Screen::Dashboard)
+                    return goBack(interaction, context);
+                if (interaction.overlay != Overlay::None)
+                    interaction.overlay = Overlay::None;
+                else if (interaction.pane == Pane::Details)
+                    interaction.pane = Pane::List;
+                else
+                    interaction.filter.clear();
+                return std::nullopt;
+            } },
         CommandRow {
             .command = KeyCommand::Tab,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
@@ -435,11 +596,41 @@ std::optional<KeyCommand> commandFor(core::tui::KeyEvent const& key, Screen scre
     return std::nullopt;
 }
 
-void leaveBoard(Interaction& interaction) noexcept
+void leaveSubject(Interaction& interaction) noexcept
 {
     interaction.screen = Screen::Dashboard;
     interaction.subject.clear();
+    interaction.back = Screen::Dashboard;
+    interaction.page = 1;
     interaction.scroll = 0;
+}
+
+void openFormFor(Interaction& interaction,
+                 Engine const& engine,
+                 std::string_view repo,
+                 ItemRef const& item,
+                 std::string_view task)
+{
+    auto const* const config = engine.config();
+    if (config == nullptr)
+        return;
+    auto const tasks = config->tasks();
+    auto const kind = appliesToOf(item);
+    auto const* chosen = config->firstTaskFor(kind);
+    // The run's own task while the configuration still has it for such items; else the item's first.
+    if (auto const named = std::ranges::find(tasks, task, &TaskDef::id);
+        named != tasks.end() && named->appliesTo == kind)
+        chosen = &*named;
+    if (chosen == nullptr)
+    {
+        interaction.notice = "no task applies to this item";
+        return;
+    }
+    interaction.form = openDispatchForm(engine, repo, item, chosen->id, {});
+    if (interaction.form)
+        interaction.overlay = Overlay::None;
+    else
+        interaction.notice = std::format("{} is not listed any more", itemLabel(item));
 }
 
 bool hasAgentTab(Engine const* engine, std::string_view run) noexcept

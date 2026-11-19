@@ -198,10 +198,11 @@ struct MarkRunSeen
     uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
 };
 
-/// The user asked for a page of a run's transcript.
+/// The user asked for a page of a run's transcript, in a tab: each tab keeps its own page of a run.
 struct ReadTranscript
 {
     std::string run;     ///< The run's id.
+    std::string tab;     ///< The tab that shows it; empty: none named.
     uint32_t page = 1;   ///< The 1-based page.
     uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
 };
@@ -216,8 +217,15 @@ struct ShowBoard
     uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
 };
 
-/// A tab stopped showing a status board, or closed.
+/// A tab stopped showing a status board.
 struct HideBoard
+{
+    std::string tab;     ///< The tab.
+    uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
+};
+
+/// A tab closed: it shows no board and no transcript any more, and every transcript kept for it goes.
+struct TabClosed
 {
     std::string tab;     ///< The tab.
     uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
@@ -244,7 +252,8 @@ using Input = std::variant<Wake,
                            RefreshNow,
                            ReadTranscript,
                            ShowBoard,
-                           HideBoard>;
+                           HideBoard,
+                           TabClosed>;
 
 // }}}
 // {{{ effects
@@ -354,17 +363,20 @@ enum class FetchState : uint8_t
     FormatMismatch, ///< The verb and the orchestrator speak different formats: one of them needs updating.
 };
 
-/// A run's transcript, as last asked for.
+/// A run's transcript, as a tab last asked for it.
 struct TranscriptView
 {
     std::string run;                        ///< The run's id.
+    std::string tab;                        ///< The tab that shows it.
     uint32_t page = 1;                      ///< The page asked for last.
     FetchState state = FetchState::Loading; ///< How far it has come.
     std::optional<TranscriptPage> content;  ///< The page last read; kept while the next one loads.
     std::string failure;                    ///< Why it Failed, sanitised; empty otherwise.
 };
 
-/// How many runs' transcripts the engine keeps; asking for a fifth drops the one asked for longest ago.
+/// How many transcripts -- one per tab and run -- the engine keeps: asking for a fifth drops the one asked
+/// for longest ago that no open tab shows. A tab shows the transcript it asked for last, until it closes; the
+/// ones it shows are never dropped, so that the engine keeps more than this only while more tabs are open.
 inline constexpr std::size_t MaxCachedTranscripts = 4;
 
 /// What a dispatch would start, worked out as Engine::dispatch() works it out: what the form shows.
@@ -490,9 +502,14 @@ class Engine
     /// @return How many runs count as active (countsAsActive()): what `max_agents` is checked against.
     [[nodiscard]] std::size_t activeRuns() const noexcept;
 
+    /// @return What the host resolved: the view reads the local time's offset from it.
+    [[nodiscard]] HostInfo const& host() const noexcept { return _host; }
+
+    /// @param tab A tab.
     /// @param run A run's id.
-    /// @return Its transcript as last asked for (ReadTranscript); nullptr when it was not, or was dropped.
-    [[nodiscard]] TranscriptView const* transcript(std::string_view run) const noexcept;
+    /// @return The run's transcript as @p tab last asked for it (ReadTranscript); nullptr when it did not, or
+    ///         it was dropped.
+    [[nodiscard]] TranscriptView const* transcript(std::string_view tab, std::string_view run) const noexcept;
 
     /// @param run A run's id.
     /// @return Its status board, as last read for the tabs that show it (ShowBoard); nullptr when no tab
@@ -630,15 +647,20 @@ class Engine
     void onBoardRead(std::string_view runId, FileRead const& read);
     void showBoard(ShowBoard const& request, std::vector<Effect>& out);
     void hideBoard(std::string_view tab);
+    void closeTab(std::string_view tab);
     void readShownBoard(Run const& run, std::vector<Effect>& out);
     void refreshShownBoards(std::vector<Effect>& out);
     void onShownBoardRead(std::string_view runId, FileRead const& read);
 
     // Defined in EngineTranscript.cpp.
     void readTranscript(ReadTranscript const& request, std::vector<Effect>& out);
-    void issueTranscript(Run const& run, uint32_t page, std::vector<Effect>& out);
+    void issueTranscript(Run const& run, std::string_view tab, uint32_t page, std::vector<Effect>& out);
+    void issueWaitingTranscript(std::string_view runId, std::vector<Effect>& out);
+    static void applyTranscriptOutcome(TranscriptView& view, ProcessOutcome const& outcome);
     void onTranscriptResult(std::string_view runId, ProcessOutcome const& outcome, std::vector<Effect>& out);
-    [[nodiscard]] TranscriptView* findTranscript(std::string_view run) noexcept;
+    [[nodiscard]] TranscriptView* findTranscript(std::string_view tab, std::string_view run) noexcept;
+    [[nodiscard]] bool isTranscriptShown(TranscriptView const& view) const noexcept;
+    void dropUnshownTranscripts();
     void refreshOrphans();
     [[nodiscard]] RepoState* findRepoState(std::string_view name) noexcept;
     [[nodiscard]] RepoState const* findRepoState(std::string_view name) const noexcept;
@@ -664,9 +686,17 @@ class Engine
 
     std::set<std::string, std::less<>> _boardsFound; ///< The runs whose STATUS.md this instance has read.
     std::vector<ShownBoard> _shownBoards;            ///< The boards a tab shows, one entry per run.
-    std::vector<TranscriptView>
-        _transcripts; ///< At most MaxCachedTranscripts, the one asked for last at the back.
-    std::map<std::string, uint32_t, std::less<>> _transcriptCalls; ///< The page in flight, by run id.
+    std::vector<TranscriptView> _transcripts; ///< At most MaxCachedTranscripts but those a tab shows, the one
+                                              ///< asked for last at the back.
+    std::map<std::string, std::string, std::less<>>
+        _transcriptShown; ///< By tab: the run whose transcript it asked for last, until it closes.
+    /// A transcript page in flight: one per run at a time, for the tab that asked.
+    struct TranscriptCall
+    {
+        std::string tab;   ///< The tab that asked.
+        uint32_t page = 1; ///< The page asked for.
+    };
+    std::map<std::string, TranscriptCall, std::less<>> _transcriptCalls; ///< The page in flight, by run id.
     std::vector<InFlightCall> _inFlight;
     std::vector<InFlightCall> _paneOpenings; ///< The tabs asked for and not yet answered for, by run id.
     std::deque<Queued> _queue;

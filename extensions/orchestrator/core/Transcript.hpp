@@ -35,6 +35,7 @@ struct TranscriptEntry
     std::optional<int32_t> utcOffsetMinutes; ///< How far the host's local time was ahead of UTC at @ref time,
                                              ///< by its time zone's rules; std::nullopt: not known.
     std::string text;                        ///< Its text, lines joined by `\n`.
+    [[nodiscard]] bool operator==(TranscriptEntry const&) const = default;
 };
 
 /// One page of a transcript.
@@ -46,6 +47,7 @@ struct TranscriptPage
     uint32_t notUnderstood = 0; ///< The log's lines the host skipped, and the entries of a kind this
                                 ///< reader does not know.
     std::vector<TranscriptEntry> entries; ///< The page's entries, in log order.
+    [[nodiscard]] bool operator==(TranscriptPage const&) const = default;
 };
 
 /// Why a page could not be read.

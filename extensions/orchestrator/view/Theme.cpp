@@ -25,6 +25,7 @@ namespace
     constexpr auto Red = uint8_t { 1 };
     constexpr auto Green = uint8_t { 2 };
     constexpr auto Yellow = uint8_t { 3 };
+    constexpr auto Cyan = uint8_t { 6 };
 
     /// @return The terminal's default style with @p change applied.
     template <typename Change>
@@ -56,6 +57,13 @@ namespace
         RoleRow { .role = Role::Border,
                   .field = &core::tui::Theme::dialogBorder,
                   .style = styled([](core::tui::Style& style) { style.dim = true; }) },
+        RoleRow { .role = Role::Accent, .field = &core::tui::Theme::textAccent, .style = coloured(Cyan) },
+        RoleRow { .role = Role::Note,
+                  .field = &core::tui::Theme::info,
+                  .style = styled([](core::tui::Style& style) {
+                      style.dim = true;
+                      style.italic = true;
+                  }) },
     };
 
     // styleOf() indexes the table by the role.
