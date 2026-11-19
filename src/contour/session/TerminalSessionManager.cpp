@@ -3322,6 +3322,7 @@ void TerminalSessionManager::tabTitleChanged(vtworkspace::TabId tab)
 void TerminalSessionManager::tabColorChanged(vtworkspace::TabId tab)
 {
     updateStatusLine();
+    notifyDirectoriesChanged();
     if (auto* c = controllerDisplaying(_model->workspaceOfTab(tab)))
         c->notifyTabRowChanged(tab, { window::WindowController::Roles::ColorRole });
     reportTabPresentation(tab);

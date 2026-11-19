@@ -874,3 +874,39 @@ TEST_CASE("SidebarTree.unlabelled_workspace_is_numbered_as_its_host_numbers_it",
     CHECK(rows[0].title == "ops");
     CHECK(rows[2].title == "Workspace 3");
 }
+
+TEST_CASE("a coloured tab's row and its pane rows carry its colour", "[sidebar]")
+{
+    auto constexpr Orange = vtbackend::RGBColor { 0xE8, 0x85, 0x3A };
+    auto coloured = tabOf(1, "t", { paneOf(1, "a"), paneOf(2, "b") });
+    coloured.color = Orange;
+    auto const rows =
+        rowsOf(directoryOf({ workspaceOf(1, "w", { std::move(coloured), tabOf(2, "u", { paneOf(3) }) }) }));
+    REQUIRE(rows.size() == 5);
+    CHECK(rows[1].key.kind == SidebarRowKind::Tab);
+    CHECK(rows[1].tabColor == Orange);
+    CHECK(rows[2].key.kind == SidebarRowKind::Pane);
+    CHECK(rows[2].tabColor == Orange);
+    CHECK(rows[3].key.kind == SidebarRowKind::Pane);
+    CHECK(rows[3].tabColor == Orange);
+    // A tab without a colour leaves its row without one.
+    CHECK(rows[4].key.kind == SidebarRowKind::Tab);
+    CHECK_FALSE(rows[4].tabColor.has_value());
+}
+
+TEST_CASE("a workspace row carries no tab colour", "[sidebar]")
+{
+    auto coloured = tabOf(1, "t", { paneOf(1) });
+    coloured.color = vtbackend::RGBColor { 0xE8, 0x85, 0x3A };
+    auto const directory = directoryOf({ workspaceOf(1, "w", { std::move(coloured) }) });
+
+    auto const expanded = rowsOf(directory);
+    REQUIRE(expanded.size() == 2);
+    CHECK_FALSE(expanded[0].tabColor.has_value());
+
+    // Folded over its coloured tab, the workspace row still shows none of it.
+    auto const folded = rowsOf(directory, SidebarState { .collapsedWorkspaces = { 1 } });
+    REQUIRE(folded.size() == 1);
+    CHECK(folded[0].key.kind == SidebarRowKind::Workspace);
+    CHECK_FALSE(folded[0].tabColor.has_value());
+}

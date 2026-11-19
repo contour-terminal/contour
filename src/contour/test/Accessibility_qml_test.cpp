@@ -843,6 +843,7 @@ TEST_CASE(
             { "progressFraction", 0.0 },
             { "secondLine", kind == 0 ? 0 : 1 },
             { "idleLine", QString {} },
+            { "tabColor", QColor { Qt::transparent } },
             { "sidebar", QVariant::fromValue<QObject*>(nullptr) },
             { "controller", QVariant::fromValue<QObject*>(nullptr) },
         };

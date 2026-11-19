@@ -197,6 +197,20 @@ TEST_CASE("program status of an in-process pane appears", "[directory][inprocess
     CHECK(directory.workspaces[0].tabs[0].name == "vim");
 }
 
+TEST_CASE("an in-process tab's colour appears until it is reset", "[directory][inprocess]")
+{
+    auto h = Harness {};
+    auto const tab = h.addWorkspace().activeTab()->id();
+    CHECK_FALSE(h.source.directory().workspaces.at(0).tabs.at(0).color.has_value());
+
+    h.model.model.setTabColor(
+        tab, vtworkspace::TabColorSource::User, vtbackend::RGBColor { 0xE8, 0x85, 0x3A });
+    CHECK(h.source.directory().workspaces.at(0).tabs.at(0).color == vtbackend::RGBColor { 0xE8, 0x85, 0x3A });
+
+    h.model.model.resetTabColor(tab, vtworkspace::TabColorSource::User);
+    CHECK_FALSE(h.source.directory().workspaces.at(0).tabs.at(0).color.has_value());
+}
+
 TEST_CASE("a label set through the in-process store appears", "[directory][inprocess]")
 {
     auto h = Harness {};

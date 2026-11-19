@@ -2047,6 +2047,48 @@ TEST_CASE("a tab's name set through the control API names it in the window until
     gui.controller->stop();
 }
 
+TEST_CASE("a tab's colour set on the daemon reaches the window's directory until it is reset",
+          "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("root");
+    auto gui = AttachedGui { daemon };
+    requireConnected(*gui.controller);
+    REQUIRE(waitUntil([&] {
+        auto const layout = gui.controller->settledLayout();
+        return layout && layout->tabs.size() == 1;
+    }));
+
+    auto constexpr Orange = vtbackend::RGBColor { 0xE8, 0x85, 0x3A };
+    // Colours the daemon's only tab, or resets it with none.
+    auto const colourTab = [&](std::optional<vtbackend::RGBColor> color) {
+        std::ignore = daemon.onDaemon([&] {
+            auto& model = daemon.host->model();
+            auto const tab = model.workspace(daemon.host->workspaceId())->tabAt(0)->id();
+            if (color)
+                model.setTabColor(tab, vtworkspace::TabColorSource::User, *color);
+            else
+                model.resetTabColor(tab, vtworkspace::TabColorSource::User);
+            return 0;
+        });
+    };
+    // The colour the window's directory lists for its only tab.
+    auto const listed = [&](std::optional<vtbackend::RGBColor> color) {
+        return waitUntil([&] {
+            auto const directory = gui.controller->directory();
+            return !directory.workspaces.empty() && !directory.workspaces.front().tabs.empty()
+                   && directory.workspaces.front().tabs.front().color == color;
+        });
+    };
+
+    colourTab(Orange);
+    CHECK(listed(Orange));
+    colourTab(std::nullopt);
+    CHECK(listed(std::nullopt));
+
+    gui.controller->stop();
+}
+
 // Regression: a departing client that moves the daemon's client area (here the smaller of a `smallest` pair)
 // re-projects every pane onto the new one, which used to discard the per-pane grids the survivor refined. The
 // survivor's own geometry did not change, so nothing on its side re-reports them: its split panes stayed on

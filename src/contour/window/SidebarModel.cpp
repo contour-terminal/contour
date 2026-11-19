@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/platform/ColorConversion.hpp>
 #include <contour/window/AttentionJump.hpp>
 #include <contour/window/ChromeKeys.hpp>
 #include <contour/window/DisclosureWords.hpp>
@@ -15,6 +16,7 @@
 #include <QtCore/QStringList>
 #include <QtCore/QVariant>
 #include <QtCore/QVariantList>
+#include <QtGui/QColor>
 #include <QtQml/QQmlEngine>
 
 #include <algorithm>
@@ -76,6 +78,7 @@ namespace
         RoleName { SidebarModel::TreeTextContinuedRole, "treeTextContinued" },
         RoleName { SidebarModel::SecondLineRole, "secondLine" },
         RoleName { SidebarModel::IdleLineRole, "idleLine" },
+        RoleName { SidebarModel::TabColorRole, "tabColor" },
     };
 
     [[nodiscard]] QString qs(std::string const& text)
@@ -178,6 +181,7 @@ namespace
              { SidebarModel::TreeTextContinuedRole });
         note(secondLineOf(before) == secondLineOf(after), { SidebarModel::SecondLineRole });
         note(idleLineOf(before) == idleLineOf(after), { SidebarModel::IdleLineRole });
+        note(before.tabColor == after.tabColor, { SidebarModel::TabColorRole });
         // The spoken name is the title; the description folds in the kind and the status, not a running time.
         if (accessibleNameOf(before) != accessibleNameOf(after))
             for (auto const role: { static_cast<int>(SidebarModel::AccessibleNameRole),
@@ -417,6 +421,8 @@ QVariant SidebarModel::data(QModelIndex const& index, int role) const
         case TreeTextContinuedRole: return qs(treeContinuationText(*row));
         case SecondLineRole: return static_cast<int>(secondLineOf(*row));
         case IdleLineRole: return qs(idleLineOf(*row));
+        case TabColorRole:
+            return row->tabColor ? platform::toQColor(*row->tabColor) : QColor { Qt::transparent };
         default: break;
     }
     return {};

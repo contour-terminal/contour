@@ -29,7 +29,7 @@ namespace
         return wire;
     }
 
-    /// @param model Where the tabs' names are: a tree captures none.
+    /// @param model Where the tabs' names and colours are: a tree captures neither.
     vthost::proto::LayoutState layoutOf(vtworkspace::SessionModel const& model,
                                         vtworkspace::WorkspaceState const& workspace)
     {
@@ -40,8 +40,15 @@ namespace
         {
             auto wire = vthost::proto::WireTab {};
             wire.tabId = tab.id.value;
-            if (auto const* const named = model.findTab(tab.id))
-                wire.name = named->name();
+            if (auto const* const known = model.findTab(tab.id))
+            {
+                wire.name = known->name();
+                if (auto const color = known->color())
+                {
+                    wire.hasColor = 1;
+                    wire.color = color->value();
+                }
+            }
             wire.root = wirePaneOf(tab.root);
             layout.tabs.push_back(std::move(wire));
         }

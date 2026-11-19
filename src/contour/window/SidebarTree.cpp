@@ -252,6 +252,7 @@ namespace
         if (row.title.empty())
             row.title = "Terminal";
         row.selection = selection;
+        row.tabColor = tab.color;
         adopt(row, mostUrgent(leaves));
         row.leaves = countsOf(leaves);
 
@@ -270,6 +271,7 @@ namespace
                 };
                 paneRow.depth = 2;
                 paneRow.position = panePosition;
+                paneRow.tabColor = tab.color;
                 auto const& named = !pane.title.empty() ? pane.title : pane.cwd;
                 paneRow.title = rowTextOf(named);
                 if (paneRow.title.empty())

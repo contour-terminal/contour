@@ -15,10 +15,12 @@
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/WindowController.hpp>
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QPointF>
 #include <QtCore/QRectF>
 #include <QtCore/QVariantList>
 #include <QtCore/QVariantMap>
+#include <QtGui/QColor>
 #include <QtGui/QWindow>
 #include <QtQuick/QQuickWindow>
 
@@ -316,6 +318,30 @@ TEST_CASE("the displayed tab is the one holding the active pane, whatever id the
             window->sidebar().rows()[static_cast<std::size_t>(window->sidebar().currentIndex())];
         CHECK(row.key.tab == 5002);
     }
+}
+
+TEST_CASE("colouring a tab repaints its sidebar row", "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto const window =
+        contour::test::ScopedController { app.manager(), contour::config::MenuPresentation::InScene };
+    auto const made = contour::test::createSessionTabs(app.manager(), *window, 1);
+    auto const tab = made.tabs.at(0);
+    auto const row = tabRowOf(*window, tab.value);
+    auto const tabColorOfRow = [&] {
+        return window->sidebar().index(row).data(contour::window::SidebarModel::TabColorRole).value<QColor>();
+    };
+    REQUIRE(tabColorOfRow().alpha() == 0);
+
+    // Only the model is told; the window's own notifications must bring the row up to date.
+    app.manager().model().setTabColor(
+        tab, vtworkspace::TabColorSource::User, vtbackend::RGBColor { 0xE8, 0x85, 0x3A });
+    QCoreApplication::processEvents();
+    CHECK(tabColorOfRow() == QColor { 0xE8, 0x85, 0x3A });
+
+    app.manager().model().resetTabColor(tab, vtworkspace::TabColorSource::User);
+    QCoreApplication::processEvents();
+    CHECK(tabColorOfRow().alpha() == 0);
 }
 
 TEST_CASE("the sidebar is told whether anyone can see it", "[contour][sidebar][controller]")

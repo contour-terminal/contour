@@ -3,6 +3,7 @@
 
 #include <contour/window/PaneKey.hpp>
 
+#include <vtbackend/core/Color.hpp>
 #include <vtbackend/screen/GitHead.hpp>
 #include <vtbackend/vt/ProgramStatus.hpp>
 
@@ -57,6 +58,8 @@ struct DirectoryTab
     std::string name;  ///< What a list shows (vtworkspace::tabNameOf): its user-given name, its title, its
                        ///< first pane's.
     std::vector<DirectoryPane> panes; ///< Depth-first.
+    /// The tab's effective colour (vtworkspace::Tab::color()); none when it is uncoloured.
+    std::optional<vtbackend::RGBColor> color {};
     bool operator==(DirectoryTab const&) const = default;
 };
 
@@ -347,6 +350,8 @@ namespace detail
             // compat(0.9.0): an older daemon names a tab by its runtime title, which tabNameOf() falls back
             // to.
             tab.title = wireTab.title;
+            if (wireTab.hasColor != 0)
+                tab.color = vtbackend::RGBColor { wireTab.color };
             detail::collectPanes(wireTab.root, status, tab.panes);
             tab.name = vtworkspace::tabNameOf(
                 { .name = wireTab.name, .title = tab.title },

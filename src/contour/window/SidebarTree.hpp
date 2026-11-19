@@ -18,6 +18,8 @@
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/WorkspaceDirectory.hpp>
 
+#include <vtbackend/core/Color.hpp>
+
 #include <array>
 #include <chrono>
 #include <compare>
@@ -160,6 +162,9 @@ struct SidebarRow
     /// it, and so does the line down to the row's own children. Empty columns on a workspace row.
     TreeLines continued;
     LeafCounts leaves; ///< The panes beneath it, for the footer.
+    /// The colour of the tab a tab or pane row belongs to (DirectoryTab::color); none when the tab is
+    /// uncoloured, and always none on a workspace row, folded or not.
+    std::optional<vtbackend::RGBColor> tabColor {};
 
     bool operator==(SidebarRow const&) const = default;
 };

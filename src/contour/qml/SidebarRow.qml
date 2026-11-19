@@ -51,6 +51,7 @@ Item {
     required property real progressFraction
     required property int secondLine
     required property string idleLine
+    required property color tabColor
 
     /// The sidebar's model (WindowController.sidebar), which the row's actions go to. Its bindings never
     /// read it: the row compares its roles with the SidebarRows enums, so a row that outlives its model while

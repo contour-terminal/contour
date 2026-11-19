@@ -9,6 +9,7 @@
 #include <core/platform/Clock.hpp>
 
 #include <QtCore/QCoreApplication>
+#include <QtGui/QColor>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -996,4 +997,61 @@ TEST_CASE("SidebarModel: the rows' times run while the sidebar or the switcher o
           == SidebarPresence::Shown);
     CHECK(sidebarPresenceOf(SidebarVisibility::Shown, WindowExposure::Hidden, SwitcherOverWindow::Yes)
           == SidebarPresence::Hidden);
+}
+
+namespace
+{
+constexpr auto Orange = vtbackend::RGBColor { 0xE8, 0x85, 0x3A };
+
+/// A workspace with one tab split in two panes, coloured @ref Orange: rows workspace, tab, pane, pane.
+std::vector<DirectoryWorkspace> oneColouredSplitTab()
+{
+    auto workspace = directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) });
+    workspace.tabs[0].panes.push_back(directoryPaneOf(11));
+    workspace.tabs[0].color = Orange;
+    return { std::move(workspace) };
+}
+} // namespace
+
+TEST_CASE("SidebarModel: a tab's rows serve its colour, a workspace row none", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { oneColouredSplitTab() };
+    REQUIRE(t.sidebar().rowCount() == 4);
+    CHECK(t.sidebar().roleNames().value(SidebarModel::TabColorRole) == "tabColor");
+
+    auto const orange = QColor { 0xE8, 0x85, 0x3A };
+    for (auto const row: { 1, 2, 3 })
+    {
+        INFO("row " << row);
+        CHECK(t.sidebar().index(row).data(SidebarModel::TabColorRole).value<QColor>() == orange);
+    }
+    CHECK(t.sidebar().index(0).data(SidebarModel::TabColorRole).value<QColor>().alpha() == 0);
+
+    // Uncoloured, the tab's rows are transparent, the convention the tab strip's accentColor keeps.
+    t.source.listed.workspaces[0].tabs[0].color.reset();
+    t.sidebar().refreshNow();
+    CHECK(t.sidebar().index(1).data(SidebarModel::TabColorRole).value<QColor>().alpha() == 0);
+}
+
+TEST_CASE("a tab colour change is reported for the row", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { oneColouredSplitTab() };
+    t.sidebar().refreshNow();
+    auto changed = QSignalSpy { &t.sidebar(), &QAbstractItemModel::dataChanged };
+
+    t.source.listed.workspaces[0].tabs[0].color.reset();
+    t.sidebar().refreshNow();
+
+    auto const named = [&](int row) {
+        return std::ranges::any_of(changed, [row](QList<QVariant> const& signal) {
+            auto const first = signal.at(0).value<QModelIndex>().row();
+            auto const last = signal.at(1).value<QModelIndex>().row();
+            return first <= row && row <= last
+                   && signal.at(2).value<QList<int>>().contains(SidebarModel::TabColorRole);
+        });
+    };
+    CHECK_FALSE(named(0));
+    CHECK(named(1));
+    CHECK(named(2));
+    CHECK(named(3));
 }
