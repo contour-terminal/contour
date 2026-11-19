@@ -1727,7 +1727,7 @@ TEST_CASE("stateFor", "[orchestrator][run]")
     }
 }
 
-TEST_CASE("agentStatusName and agentStatusNamed", "[orchestrator][run]")
+TEST_CASE("agentStatusName", "[orchestrator][run]")
 {
     struct Row
     {
@@ -1745,9 +1745,7 @@ TEST_CASE("agentStatusName and agentStatusNamed", "[orchestrator][run]")
     {
         CAPTURE(row.name);
         CHECK(orchestrator::agentStatusName(row.status) == row.name);
-        CHECK(orchestrator::agentStatusNamed(row.name) == row.status);
     }
-    CHECK_FALSE(orchestrator::agentStatusNamed("Working").has_value());
 }
 
 TEST_CASE("gitFileIsIntact", "[orchestrator][run]")

@@ -797,11 +797,6 @@ std::string_view agentStatusName(AgentStatus status) noexcept
     return spell(AgentStatusNames, status);
 }
 
-std::optional<AgentStatus> agentStatusNamed(std::string_view name) noexcept
-{
-    return parse(AgentStatusNames, name);
-}
-
 RunState stateFor(AgentStatus status) noexcept
 {
     switch (status)

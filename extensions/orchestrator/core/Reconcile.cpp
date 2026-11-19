@@ -3,13 +3,11 @@
 
 #include <algorithm>
 #include <array>
-#include <format>
 #include <ranges>
 #include <utility>
 
 #include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Overloaded.hpp>
-#include <orchestrator/core/Sanitize.hpp>
 
 namespace orchestrator
 {
@@ -344,15 +342,6 @@ std::optional<std::string_view> mainCheckout(std::span<WorktreeEntry const> entr
     if (entries.empty() || entries.front().kind == WorktreeKind::Bare)
         return std::nullopt;
     return std::string_view { entries.front().path };
-}
-
-std::string orphanText(WorktreeEntry const& orphan)
-{
-    if (orphan.branch)
-        return displayText(std::format("{} on {}", orphan.path, *orphan.branch), MaxEntryChars);
-    if (orphan.kind == WorktreeKind::Bare)
-        return displayText(std::format("{}, a bare repository", orphan.path), MaxEntryChars);
-    return displayText(std::format("{} on a detached HEAD", orphan.path), MaxEntryChars);
 }
 
 } // namespace orchestrator

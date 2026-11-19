@@ -171,9 +171,4 @@ struct WorktreeEntry
 /// @return The first entry's path; nullopt when there is none or it is a bare repository.
 [[nodiscard]] std::optional<std::string_view> mainCheckout(std::span<WorktreeEntry const> entries) noexcept;
 
-/// An orphan as the user sees it.
-/// @param orphan The orphan.
-/// @return Its path and branch, or that its HEAD is detached; sanitised, one line.
-[[nodiscard]] std::string orphanText(WorktreeEntry const& orphan);
-
 } // namespace orchestrator

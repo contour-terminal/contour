@@ -1596,7 +1596,7 @@ TEST_CASE("a kept run survives a restart with its reason", "[orchestrator][engin
     }
 }
 
-TEST_CASE("a run whose tab vanished while the prototype was down waits for the checkout, then runs the full "
+TEST_CASE("a run whose tab vanished while the extension was down waits for the checkout, then runs the full "
           "checks",
           "[orchestrator][engine]")
 {

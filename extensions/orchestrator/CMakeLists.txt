@@ -122,49 +122,6 @@ target_link_libraries(orchestrator_guest_driver PUBLIC orchestrator_core orchest
 add_executable(orchestrator_manifest EXCLUDE_FROM_ALL tools/ManifestMain.cpp)
 target_link_libraries(orchestrator_manifest PRIVATE orchestrator_core)
 
-# The prototype driver's pure half: the pane listing, the order of its work, the store's file names and the
-# environment its children get. Portable, so the tests cover it everywhere.
-add_library(orchestrator_proto_logic STATIC
-    proto/Environment.cpp
-    proto/Environment.hpp
-    proto/Panes.cpp
-    proto/Panes.hpp
-    proto/PanesJson.hpp
-    proto/RunChanges.cpp
-    proto/RunChanges.hpp
-    proto/RunRefs.cpp
-    proto/RunRefs.hpp
-    proto/StepQueue.cpp
-    proto/StepQueue.hpp
-    proto/StoreKeys.cpp
-    proto/StoreKeys.hpp
-)
-target_link_libraries(orchestrator_proto_logic PUBLIC orchestrator_core PRIVATE glaze::glaze)
-
-# The prototype driver: the engine against git, gh and `contour api`, so the workflow can be tried before the
-# extension host exists. POSIX only (posix_spawn, poll), outside the default build, and never installed.
-if(UNIX)
-    add_executable(orchestrator_proto EXCLUDE_FROM_ALL
-        proto/Control.cpp
-        proto/Control.hpp
-        proto/Driver.cpp
-        proto/Driver.hpp
-        proto/Host.cpp
-        proto/Host.hpp
-        proto/HostJson.hpp
-        proto/Main.cpp
-        proto/Prompt.cpp
-        proto/Prompt.hpp
-        proto/Signals.cpp
-        proto/Signals.hpp
-        proto/Spawn.cpp
-        proto/Spawn.hpp
-        proto/Store.cpp
-        proto/Store.hpp
-    )
-    target_link_libraries(orchestrator_proto PRIVATE orchestrator_proto_logic orchestrator_core glaze::glaze)
-endif()
-
 if(ORCHESTRATOR_TESTING)
     enable_testing()
     add_executable(orchestrator_test
@@ -188,12 +145,6 @@ if(ORCHESTRATOR_TESTING)
         core/Utf8_test.cpp
         core/Uuid_test.cpp
         guest/Driver_test.cpp
-        proto/Environment_test.cpp
-        proto/Panes_test.cpp
-        proto/RunChanges_test.cpp
-        proto/RunRefs_test.cpp
-        proto/StepQueue_test.cpp
-        proto/StoreKeys_test.cpp
         view/Dashboard_test.cpp
         view/DispatchForm_test.cpp
         view/Keys_test.cpp
@@ -202,7 +153,7 @@ if(ORCHESTRATOR_TESTING)
         view/ViewFixtures.hpp
     )
     # glaze: GitHub_test reads the projected fixtures generically, to check them against the declared filter.
-    target_link_libraries(orchestrator_test PRIVATE orchestrator_core orchestrator_guest_driver orchestrator_proto_logic orchestrator_view core::testing Catch2::Catch2 glaze::glaze)
+    target_link_libraries(orchestrator_test PRIVATE orchestrator_core orchestrator_guest_driver orchestrator_view core::testing Catch2::Catch2 glaze::glaze)
     # Fixtures are read from the source tree: the manifest corpus Contour's host runs too, and the recorded
     # output of the tools the extension runs.
     target_compile_definitions(orchestrator_test PRIVATE

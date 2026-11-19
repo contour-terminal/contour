@@ -395,10 +395,6 @@ enum class BeginError : uint8_t
 /// @return Its name, such as `working`.
 [[nodiscard]] std::string_view agentStatusName(AgentStatus status) noexcept;
 
-/// @param name A status's name, as agentStatusName() spells it.
-/// @return The status; std::nullopt for a name not known.
-[[nodiscard]] std::optional<AgentStatus> agentStatusNamed(std::string_view name) noexcept;
-
 /// The state an agent's report puts its run in.
 /// @param status What it reported.
 /// @return Running for Idle and Working, Blocked for Blocked and Error, Done for Done.

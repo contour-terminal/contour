@@ -869,16 +869,4 @@ TEST_CASE("Reconcile.orphans.edges", "[orchestrator][reconcile]")
     CHECK(orchestrator::orphans({}, WorktreeRoot, {}).empty());
 }
 
-TEST_CASE("Reconcile.orphanText", "[orchestrator][reconcile]")
-{
-    CHECK(orchestrator::orphanText(checkout("/w/a b", "agent/x")) == "/w/a b on agent/x");
-    CHECK(orchestrator::orphanText(checkout("/w/d", std::nullopt)) == "/w/d on a detached HEAD");
-    CHECK(orchestrator::orphanText(checkout(NewLinePath, "agent/new-line"))
-          == "/home/u/worktrees/contour/new line on agent/new-line");
-    // U+202E RIGHT-TO-LEFT OVERRIDE, spelled byte by byte.
-    constexpr auto RightToLeftOverride = std::array { '\xe2', '\x80', '\xae' };
-    auto const branch = "agent/" + std::string(RightToLeftOverride.data(), RightToLeftOverride.size()) + "x";
-    CHECK(orchestrator::orphanText(checkout("/w/\x1b[31mred", branch)) == "/w/[31mred on agent/x");
-}
-
 // }}}
