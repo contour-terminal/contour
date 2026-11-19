@@ -141,6 +141,9 @@ struct Settings
     VTType terminalId = VTType::VT525;
     /// Which functions this terminal executes; fixed for its lifetime.
     SequenceAllowance sequences = SequenceAllowance::Everything;
+    /// What reads the keys typed into this terminal, a program or a served session's extension; fixed for its
+    /// lifetime. What the status line says of the input mode depends on it.
+    InputReader inputReader = InputReader::Program;
     ColorPalette colorPalette; // NB: The default color palette can be taken from the factory settings.
 
     // Set of DEC modes that are frozen and cannot be changed by the application.

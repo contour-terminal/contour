@@ -1597,6 +1597,25 @@ TEST_CASE("serializeToVT.inputModeHidesInItsMode", "[statusline][inputmode]")
     CHECK(serializeToVT(mc.terminal, segment, StatusLineStyling::Disabled) == "<NORMAL>");
 }
 
+TEST_CASE("serializeToVT.inputModeSaysNothingOfInsertToAnExtension", "[statusline][inputmode]")
+{
+    auto const segment = parseStatusLineSegment("{InputMode:Left=<,Right=>}"sv);
+    auto program = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    REQUIRE(program.terminal.inputReader() == InputReader::Program);
+    CHECK(serializeToVT(program.terminal, segment, StatusLineStyling::Disabled) == "<INSERT>");
+
+    // A served pane's keys are commands to its extension's view: Insert is no mode worth naming there.
+    auto settings = Settings {};
+    settings.pageSize = PageSize { LineCount(3), ColumnCount(20) };
+    settings.inputReader = InputReader::Extension;
+    auto served = MockTerm { std::move(settings) };
+    CHECK(serializeToVT(served.terminal, segment, StatusLineStyling::Disabled).empty());
+
+    // The modes the user enters over its page are named as in any pane.
+    served.terminal.inputHandler().setMode(ViMode::Normal);
+    CHECK(serializeToVT(served.terminal, segment, StatusLineStyling::Disabled) == "<NORMAL>");
+}
+
 TEST_CASE("statusLine.colors.modeChipReadsOnEveryScheme", "[statusline][inputmode][colors]")
 {
     // The chip is filled with its mode's pair; its text keeps the pair's foreground while that reads

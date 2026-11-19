@@ -4174,6 +4174,9 @@ class Terminal: public IStatusLinePublishTarget
         return _userInputLock.load(std::memory_order_relaxed);
     }
 
+    /// @return What reads the keys typed into this terminal. @see Settings::inputReader
+    [[nodiscard]] InputReader inputReader() const noexcept { return _settings.inputReader; }
+
     /// Searches backwards for the word vi's `*` and `#` took from under the cursor: installs @p text as the
     /// pattern (SearchOrigin::WordUnderCursor, so always literal) and moves the viewport to make the match
     /// visible. Every search reads the page on display, the one the viewport shows.

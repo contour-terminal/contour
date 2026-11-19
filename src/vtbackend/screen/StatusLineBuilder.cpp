@@ -17,6 +17,7 @@
 #include <libunicode/convert.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <concepts>
 #include <cstddef>
@@ -29,6 +30,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 using namespace std::string_view_literals;
 
@@ -71,6 +73,17 @@ namespace // helper functions
         }
         core::unreachable();
     }
+
+    /// The vi mode an `{InputMode}` item names nothing in, by the InputReader of its terminal, besides the
+    /// one its own `Hide=` names. An extension's keys reach it in Insert mode as commands to its view, so
+    /// "INSERT" says nothing there; Normal and the Visual modes are the user's own, over the page, and named
+    /// as anywhere.
+    constexpr auto SilentInputModes = std::to_array<std::optional<ViMode>>({
+        std::nullopt,   // InputReader::Program
+        ViMode::Insert, // InputReader::Extension
+    });
+    static_assert(SilentInputModes.size() == std::to_underlying(InputReader::Extension) + 1U,
+                  "every InputReader has a row");
 
     /// Joins @p segments, eliding the MIDDLE when the result would exceed @p maxWidth columns.
     /// @param segments The parts, outermost first.
@@ -649,11 +662,11 @@ namespace
             });
         }
 
-        /// The mode's name, or nothing in the mode the item hides in.
+        /// The mode's name, or nothing in the mode the item hides in, or its terminal's reader makes silent.
         [[nodiscard]] std::string visit(StatusLineDefinitions::InputMode const& item) const
         {
             auto const mode = vt.inputHandler().mode();
-            if (item.hiddenIn == mode)
+            if (item.hiddenIn == mode || SilentInputModes[std::to_underlying(vt.inputReader())] == mode)
                 return {};
             return std::string(modeString(mode));
         }
