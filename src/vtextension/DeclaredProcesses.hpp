@@ -125,10 +125,6 @@ class DeclaredProcesses final: public IProcessService
     [[nodiscard]] std::expected<void, RootError> makePathParents(DeclaredCommand const& command,
                                                                  std::vector<std::string>& argv) const;
 
-    /// Builds the argv of @p command from @p arguments, or why they are refused.
-    [[nodiscard]] std::expected<std::vector<std::string>, ProcessError> substitute(
-        DeclaredCommand const& command, ConfigMap const& arguments) const;
-
     DeclaredProcessesConfig _config;
     vtpty::IProcessRunner& _runner;
     vtpty::IDirectoryOpener& _directories;

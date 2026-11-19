@@ -18,6 +18,7 @@
 #include <vtextension/DaemonWorld.hpp>
 #include <vtextension/IDaemonHostServices.hpp>
 #include <vtextension/IHostServices.hpp>
+#include <vtextension/testing/FakePaneService.hpp>
 
 namespace vtextension::testing
 {
@@ -126,6 +127,39 @@ class FakeDaemonHostServices final: public IDaemonHostServices
         return std::vector<std::string> {};
     }
 
+    [[nodiscard]] std::expected<std::string, HostError> paneOpen(
+        std::string_view paneTemplate,
+        ConfigMap const& args,
+        std::string_view cwd,
+        std::string_view title,
+        std::string_view tag,
+        std::optional<std::string_view> near) override
+    {
+        called(DaemonImport::PaneOpen);
+        paneOpens.push_back(PaneOpenCall {
+            .paneTemplate = std::string(paneTemplate),
+            .args = args,
+            .cwd = std::string(cwd),
+            .title = std::string(title),
+            .tag = std::string(tag),
+            .near = near.transform([](std::string_view tab) { return std::string(tab); }),
+        });
+        return paneId;
+    }
+
+    [[nodiscard]] std::expected<void, HostError> paneClose(std::string_view pane) override
+    {
+        called(DaemonImport::PaneClose);
+        paneCloses.emplace_back(pane);
+        return paneAnswer;
+    }
+
+    [[nodiscard]] std::expected<std::vector<PaneInfo>, HostError> panes() override
+    {
+        called(DaemonImport::Panes);
+        return listedPanes;
+    }
+
     [[nodiscard]] std::expected<std::string, HostError> tabOpen(std::string_view scheme,
                                                                 Origin origin) override
     {
@@ -204,13 +238,18 @@ class FakeDaemonHostServices final: public IDaemonHostServices
     std::vector<std::string> storeRemovals;                    ///< Every storeRemove().
     std::expected<void, HostError> storeAnswer;                ///< What storeSet() and storeRemove() answer.
     std::pair<std::string, std::string> summary;               ///< The last summarySet().
-    std::vector<std::pair<std::string, Origin>> tabOpens;      ///< Every tabOpen().
-    std::expected<std::string, HostError> tabId = std::string { "tab-1" }; ///< What tabOpen() answers.
-    std::vector<std::string> tabCloses;                                    ///< Every tabClose().
-    std::vector<std::pair<std::string, Origin>> tabReveals;                ///< Every tabReveal().
-    std::vector<TabInfo> servedTabs;                                       ///< What tabs() answers.
-    ByteList tabInput;                                                     ///< What tabRead() answers.
-    std::vector<std::pair<std::string, ByteList>> tabWrites;               ///< Every tabWrite().
+    std::vector<PaneOpenCall> paneOpens;                       ///< Every paneOpen().
+    std::expected<std::string, HostError> paneId = std::string { "pane-1" }; ///< What paneOpen() answers.
+    std::vector<std::string> paneCloses;                                     ///< Every paneClose().
+    std::expected<void, HostError> paneAnswer;                               ///< What paneClose() answers.
+    std::expected<std::vector<PaneInfo>, HostError> listedPanes;             ///< What panes() answers.
+    std::vector<std::pair<std::string, Origin>> tabOpens;                    ///< Every tabOpen().
+    std::expected<std::string, HostError> tabId = std::string { "tab-1" };   ///< What tabOpen() answers.
+    std::vector<std::string> tabCloses;                                      ///< Every tabClose().
+    std::vector<std::pair<std::string, Origin>> tabReveals;                  ///< Every tabReveal().
+    std::vector<TabInfo> servedTabs;                                         ///< What tabs() answers.
+    ByteList tabInput;                                                       ///< What tabRead() answers.
+    std::vector<std::pair<std::string, ByteList>> tabWrites;                 ///< Every tabWrite().
     std::expected<void, HostError> tabAnswer; ///< What tabClose(), tabReveal(), tabWrite() answer.
     std::vector<ActionInfo> actions;          ///< What the next actionsTake() answers.
     std::vector<std::pair<std::string, std::string>> fileReads; ///< Every fileRead(): root and path.

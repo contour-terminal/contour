@@ -34,6 +34,7 @@
 #include <vtextension/ExtensionWorkerPool.hpp>
 #include <vtextension/FileLocker.hpp>
 #include <vtextension/IHostServices.hpp>
+#include <vtextension/PaneService.hpp>
 #include <vtextension/RootResolution.hpp>
 #include <vtextension/ServedTabService.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
@@ -153,6 +154,9 @@ struct DaemonExtensionRuntimeServices
     /// Makes the tab-and-action service of one extension, as it composes; empty for a host that serves no
     /// tabs, whose extensions are answered `not-supported-yet` (UnservedTabs).
     std::function<std::unique_ptr<IServedTabService>(ServedTabOwner const& owner)> tabsFor {};
+    /// Makes the host side of one extension's agent panes, as it composes; empty for a host that opens no
+    /// panes, whose extensions are answered `not-supported-yet` (UnservedPanes).
+    std::function<std::unique_ptr<IPaneHost>(ServedTabOwner const& owner)> panesFor {};
     /// Called for every message an extension logs, on its lane; must be cheap.
     std::function<void(std::string_view name, LogLevel level, std::string_view message)> onLog;
 };
@@ -285,6 +289,11 @@ class DaemonExtensionRuntime
     /// Makes @p extension's declared processes from Extension::processesConfig.
     /// @return Nothing; or why its roots do not fit them.
     [[nodiscard]] std::expected<void, RootError> makeProcesses(Extension& extension);
+
+    /// Makes @p extension's agent panes under its grant: the policy over its pane host, or UnservedPanes for
+    /// a host that opens none.
+    /// @return Nothing; or why its roots do not fit its pane templates.
+    [[nodiscard]] std::expected<void, RootError> makePanes(Extension& extension);
 
     /// Loads @p extension's module on the daemon world's engine, on this thread prepared for the runtime.
     /// @return Nothing once it is loaded; or why it cannot be.

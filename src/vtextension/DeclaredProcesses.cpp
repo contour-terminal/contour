@@ -20,6 +20,7 @@
 
 #include <vtextension/ArgumentKind.hpp>
 #include <vtextension/ChildEnvironment.hpp>
+#include <vtextension/DeclaredArguments.hpp>
 #include <vtextension/RootResolution.hpp>
 
 namespace vtextension
@@ -267,46 +268,6 @@ std::expected<void, RootError> DeclaredProcesses::makePathParents(DeclaredComman
     return {};
 }
 
-std::expected<std::vector<std::string>, ProcessError> DeclaredProcesses::substitute(
-    DeclaredCommand const& command, ConfigMap const& arguments) const
-{
-    auto const isPlaceholder = [&](std::string_view name) {
-        return std::ranges::any_of(command.argvTemplate, [&](std::string const& element) {
-            return placeholderName(element) == name;
-        });
-    };
-    for (auto const& [name, value]: arguments)
-        if (!isPlaceholder(name) || std::ranges::count(arguments, name, &ConfigMap::value_type::first) != 1)
-            return std::unexpected(ProcessError::ArgumentRejected);
-
-    auto argv = std::vector<std::string> {};
-    argv.reserve(command.argvTemplate.size());
-    for (auto const& element: command.argvTemplate)
-    {
-        auto const name = placeholderName(element);
-        if (!name)
-        {
-            argv.push_back(element);
-            continue;
-        }
-        auto const argument = std::ranges::find(arguments, *name, &ConfigMap::value_type::first);
-        auto const declared = std::ranges::find(_config.manifest.arguments, *name, &ArgumentDecl::name);
-        if (argument == arguments.end() || declared == _config.manifest.arguments.end()
-            || !argumentAccepts(declared->kind, argument->second))
-            return std::unexpected(ProcessError::ArgumentRejected);
-        if (declared->kind != ArgumentKind::Path)
-        {
-            argv.push_back(argument->second);
-            continue;
-        }
-        auto resolved = resolvePathArgument(_directories, _config.roots, declared->root, argument->second);
-        if (!resolved)
-            return std::unexpected(ProcessError::ArgumentRejected);
-        argv.push_back(std::move(*resolved));
-    }
-    return argv;
-}
-
 std::expected<ProcessHandle, ProcessError> DeclaredProcesses::start(std::string_view command,
                                                                     ConfigMap const& arguments,
                                                                     std::string_view cwd,
@@ -323,9 +284,10 @@ std::expected<ProcessHandle, ProcessError> DeclaredProcesses::start(std::string_
         case GrantState::Granted: break;
     }
 
-    auto argv = substitute(*declared, arguments);
+    auto argv =
+        substituteDeclared(declared->argvTemplate, _config.manifest, arguments, _directories, _config.roots);
     if (!argv)
-        return std::unexpected(argv.error());
+        return std::unexpected(ProcessError::ArgumentRejected);
 
     {
         auto const lock = std::scoped_lock { _state->mutex };

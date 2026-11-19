@@ -5,6 +5,7 @@
 #include <core/platform/Clock.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -28,6 +29,7 @@
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/ExtensionStore.hpp>
 #include <vtextension/ExtensionWorkerPool.hpp>
+#include <vtextension/PaneService.hpp>
 #include <vtextension/testing/DaemonRunnerHarness.hpp>
 
 using namespace std::chrono_literals;
@@ -448,23 +450,61 @@ TEST_CASE("DaemonExtensionRunner: destruction with a queued hint is safe", "[dae
 TEST_CASE("DaemonExtensionRunner: a not-supported-yet import does not fault", "[daemon][runner]")
 {
     auto harness = DaemonRunnerHarness {};
-    auto answer = std::optional<std::expected<std::string, HostError>> {};
+    auto answer = std::optional<UnitResult> {};
     harness.onUpdate = [&] {
         auto arguments = std::vector<uint32_t>(
-            DaemonImportRows.at(std::to_underlying(DaemonImport::PaneOpen)).parameterCount, 0);
+            DaemonImportRows.at(std::to_underlying(DaemonImport::PaneReveal)).parameterCount, 0);
         arguments.back() = ResultAddress;
-        if (auto const called = harness.call(DaemonImport::PaneOpen, arguments); !called)
+        if (auto const called = harness.call(DaemonImport::PaneReveal, arguments); !called)
             return passOn(called);
-        auto read = harness.read<std::expected<std::string, HostError>>(ResultAddress);
+        auto read = harness.read<UnitResult>(ResultAddress);
         REQUIRE(read.has_value());
-        answer = std::move(*read);
+        answer = *read;
         return returned();
     };
     harness.start();
     harness.runner->hint(DaemonHint::Wake);
     harness.scheduler.runPending();
 
-    CHECK(answer == std::expected<std::string, HostError> { std::unexpect, HostError::NotSupportedYet });
+    CHECK(answer == UnitResult { std::unexpect, HostError::NotSupportedYet });
+    CHECK(harness.runner->status().state == DaemonRunnerState::Running);
+}
+
+TEST_CASE(
+    "DaemonExtensionRunner: the pane imports reach its pane service, its refusals worded as host-errors",
+    "[daemon][runner][panes]")
+{
+    auto harness = DaemonRunnerHarness {};
+    auto const error = GENERATE(PaneError::NotDeclared,
+                                PaneError::ArgumentRejected,
+                                PaneError::CwdOutsideRoot,
+                                PaneError::CwdMissing,
+                                PaneError::CwdNotADirectory,
+                                PaneError::ProgramMissing,
+                                PaneError::BadTitle,
+                                PaneError::BadTag,
+                                PaneError::NotOwned,
+                                PaneError::TooMany,
+                                PaneError::HostRefused,
+                                PaneError::NotReconciled,
+                                PaneError::NotSupportedYet);
+    CAPTURE(std::to_underlying(error));
+    harness.panes.listAnswer = std::unexpected(error);
+    auto answer = std::optional<std::expected<std::vector<PaneInfo>, HostError>> {};
+    harness.onUpdate = [&] {
+        if (auto const called = harness.call(DaemonImport::Panes, { ResultAddress }); !called)
+            return passOn(called);
+        auto read = harness.read<std::expected<std::vector<PaneInfo>, HostError>>(ResultAddress);
+        REQUIRE(read.has_value());
+        answer = std::move(*read);
+        return returned();
+    };
+    harness.start();
+    harness.runner->hint(DaemonHint::Panes);
+    harness.scheduler.runPending();
+
+    REQUIRE(answer.has_value());
+    CHECK(*answer == std::expected<std::vector<PaneInfo>, HostError> { std::unexpect, hostErrorOf(error) });
     CHECK(harness.runner->status().state == DaemonRunnerState::Running);
 }
 

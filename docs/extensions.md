@@ -410,7 +410,16 @@ again in a later callback", which starts with a fresh budget, not "the store is 
   Every platform applies the same rules; any other key is `bad-argument` from `store-get`, `store-set` and
   `store-remove`, while `store-keys` takes any prefix. The store's directory is private (mode 0700) and held by one daemon
   at a time through an exclusive `flock` on its lock file; on NFS, `flock` maps to `fcntl` byte-range locks;
-- `pane-open`, `pane-close`, `panes`: panes the extension owns;
+- `pane-open`, `pane-close`, `panes`: agent panes the extension owns, each running one of its declared
+  `pane` templates (the checks a declared command gets: its arguments, a working directory inside the
+  template's root, opened by handle and entered by that handle, or not at all). The title is at most 64
+  code points, none a control or disguising one; the tag `[A-Za-z0-9][A-Za-z0-9._-]*` of at most 128
+  bytes. The pane withholds what a declared command withholds of the daemon's environment (git's and gh's
+  repository selection), but keeps the `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` pairs and
+  appends its template's `pane-env` pairs after them. `pane-open` returns before the pane exists; the pane
+  opens beside the served tab `near` names, else where the window focused last looks, without taking the
+  focus, and is listed from then on until its session ends. `panes` answers `limit` until the daemon has
+  restored its sessions; at most 32 panes per extension;
 - `tab-open`, `tab-close`, `tab-reveal`, `tabs`, `tab-read`, `tab-write`: tabs it serves;
 - `actions-take`, `summary-set`, `pane-reveal`: its command-palette actions and its summary;
 - `file-read`: regular files inside a root declared readable, of at most 64 KiB.
@@ -469,8 +478,7 @@ A declared command runs only where its manifest binds it, and sees only what its
 - On Windows, `file-read` answers `not-supported-yet`.
 
 An import Contour does not serve yet answers `not-supported-yet`, which an extension treats as a
-capability it lacks, not a fault. Today that is `pane-open`, `pane-close`, `panes` and `pane-reveal`, and
-`file-read` on Windows.
+capability it lacks, not a fault. Today that is `pane-reveal`, and `file-read` on Windows.
 
 ### Daemon extensions: granting
 

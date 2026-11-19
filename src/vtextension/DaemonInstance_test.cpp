@@ -132,10 +132,6 @@ using HostResult = std::expected<void, HostError>;
 
 /// Every import DaemonImportRows declares NotSupportedYet, with its WIT result.
 constexpr auto UnservedRows = std::array {
-    UnservedRow { DaemonImport::PaneOpen, &holdsNotSupportedYet<std::expected<std::string, HostError>> },
-    UnservedRow { DaemonImport::PaneClose, &holdsNotSupportedYet<HostResult> },
-    UnservedRow { DaemonImport::Panes,
-                  &holdsNotSupportedYet<std::expected<std::vector<PaneInfo>, HostError>> },
     UnservedRow { DaemonImport::PaneReveal, &holdsNotSupportedYet<HostResult> },
 };
 
@@ -347,7 +343,7 @@ TEST_CASE("DaemonInstance: the tab and action imports are served", "[daemon][ins
         CHECK(DaemonImportRows.at(std::to_underlying(import)).availability == ImportAvailability::Served);
     }
     // Every row is served exactly when its handler serves it (a static_assert in DaemonInstance.cpp); of the
-    // 24, only the four below wait for a later phase.
+    // 24, only the one below waits for a later phase.
     CHECK(std::ranges::count(DaemonImportRows, ImportAvailability::Served, &DaemonImportRow::availability)
           == static_cast<std::ptrdiff_t>(DaemonImportRows.size() - UnservedRows.size()));
 
@@ -406,6 +402,113 @@ TEST_CASE("DaemonInstance: the tab and action imports are served", "[daemon][ins
           == std::expected<std::vector<ActionInfo>, HostError> {
               std::vector { ActionInfo { .id = "open", .origin = 7 } } });
     CHECK(guest.services.tabCloses == std::vector<std::string> { "tab-1" });
+}
+
+TEST_CASE("pane-open, pane-close and panes are served", "[daemon][instance][panes]")
+{
+    for (auto const import: { DaemonImport::PaneOpen, DaemonImport::PaneClose, DaemonImport::Panes })
+    {
+        CAPTURE(DaemonImportRows.at(std::to_underlying(import)).name);
+        CHECK(DaemonImportRows.at(std::to_underlying(import)).availability == ImportAvailability::Served);
+    }
+
+    constexpr auto ResultAddress = uint32_t { 2048 };
+    constexpr auto TemplateAddress = uint32_t { 100 };
+    constexpr auto CwdAddress = uint32_t { 200 };
+    constexpr auto TitleAddress = uint32_t { 300 };
+    constexpr auto TagAddress = uint32_t { 400 };
+    constexpr auto NearAddress = uint32_t { 500 };
+    constexpr auto PaneAddress = uint32_t { 600 };
+    using OpenResult = std::expected<std::string, HostError>;
+    using ListResult = std::expected<std::vector<PaneInfo>, HostError>;
+    auto guest = FakeDaemonGuest {};
+    guest.services.paneId = std::string { "0e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b" };
+    guest.services.listedPanes =
+        std::vector<PaneInfo> { PaneInfo { .pane = "0e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
+                                           .tag = "run-1",
+                                           .status = AgentStatus::Blocked,
+                                           .program = PaneProgram::Alive } };
+    guest.services.paneAnswer = std::unexpected(HostError::NotOwned);
+    auto instance = guest.start();
+    REQUIRE(instance.has_value());
+
+    auto opened = std::optional<OpenResult> {};
+    auto openedFar = std::optional<OpenResult> {};
+    auto closed = std::optional<HostResult> {};
+    auto listed = std::optional<ListResult> {};
+    guest.onUpdate = [&](std::span<uint32_t>) -> std::expected<void, wasm::CallFailure> {
+        auto memory = FakeInstanceMemory { guest.guest() };
+        guest.put(TemplateAddress, "agent");
+        guest.put(CwdAddress, "/w/run-1");
+        guest.put(TitleAddress, "run-1");
+        guest.put(TagAddress, "run-1");
+        guest.put(NearAddress, "tab-7");
+        // template, args (an empty list), cwd, title, tag, near = some("tab-7"), the result.
+        REQUIRE(guest
+                    .call(DaemonImport::PaneOpen,
+                          { TemplateAddress,
+                            5,
+                            0,
+                            0,
+                            CwdAddress,
+                            8,
+                            TitleAddress,
+                            5,
+                            TagAddress,
+                            5,
+                            1,
+                            NearAddress,
+                            5,
+                            ResultAddress })
+                    .has_value());
+        opened = *abi::Codec<OpenResult>::load(memory, ResultAddress);
+        // near = none.
+        REQUIRE(guest
+                    .call(DaemonImport::PaneOpen,
+                          { TemplateAddress,
+                            5,
+                            0,
+                            0,
+                            CwdAddress,
+                            8,
+                            TitleAddress,
+                            5,
+                            TagAddress,
+                            5,
+                            0,
+                            0,
+                            0,
+                            ResultAddress })
+                    .has_value());
+        openedFar = *abi::Codec<OpenResult>::load(memory, ResultAddress);
+        guest.put(PaneAddress, "pane-9");
+        REQUIRE(guest.call(DaemonImport::PaneClose, { PaneAddress, 6, ResultAddress }).has_value());
+        closed = *abi::Codec<HostResult>::load(memory, ResultAddress);
+        REQUIRE(guest.call(DaemonImport::Panes, { ResultAddress }).has_value());
+        listed = *abi::Codec<ListResult>::load(memory, ResultAddress);
+        return {};
+    };
+    REQUIRE((*instance)->update(DaemonHint::Panes).has_value());
+
+    CHECK(guest.services.calls
+          == std::vector {
+              DaemonImport::PaneOpen, DaemonImport::PaneOpen, DaemonImport::PaneClose, DaemonImport::Panes });
+    REQUIRE(guest.services.paneOpens.size() == 2);
+    auto const& open = guest.services.paneOpens.front();
+    CHECK(open.paneTemplate == "agent");
+    CHECK(open.args.empty());
+    CHECK(open.cwd == "/w/run-1");
+    CHECK(open.title == "run-1");
+    CHECK(open.tag == "run-1");
+    CHECK(open.near == "tab-7");
+    CHECK_FALSE(guest.services.paneOpens.back().near.has_value());
+    CHECK(opened == OpenResult { "0e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b" });
+    // Not decomposed: clang over MSVC's STL recurses into std::expected's operator== with Catch's
+    // expression on one side.
+    CHECK((openedFar == opened));
+    CHECK(guest.services.paneCloses == std::vector<std::string> { "pane-9" });
+    CHECK(closed == HostResult { std::unexpect, HostError::NotOwned });
+    CHECK(listed == guest.services.listedPanes);
 }
 
 TEST_CASE("DaemonInstance: file-read is served", "[daemon][instance][file-read]")

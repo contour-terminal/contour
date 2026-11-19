@@ -14,6 +14,7 @@
 #include <utility>
 
 #include <vtextension/CompiledExtension.hpp>
+#include <vtextension/DeclaredPanes.hpp>
 #include <vtextension/DeclaredProcesses.hpp>
 #include <vtextension/ExtensionComposition.hpp>
 #include <vtextension/FileExtensionStore.hpp>
@@ -143,6 +144,9 @@ struct DaemonExtensionRuntime::Extension
     /// The files it may read, made as it starts under its grant; null while it does not run.
     std::shared_ptr<FileReadService> files;
     std::unique_ptr<IServedTabService> tabs; ///< The tabs it serves and the actions it takes; never null.
+    std::unique_ptr<IPaneHost> paneHost;     ///< The host side of its agent panes; null for a host with none.
+    /// Its agent panes, made as it starts under its grant; null while it does not run.
+    std::shared_ptr<IPaneService> panes;
     std::unique_ptr<DaemonExtensionRunner> runner; ///< Null until it runs; last, as it reaches the rest.
 };
 
@@ -271,6 +275,7 @@ std::expected<std::unique_ptr<DaemonExtensionRuntime::Extension>, DeclarationPro
     extension->tabs = _services.tabsFor ? _services.tabsFor(owner) : nullptr;
     if (!extension->tabs)
         extension->tabs = std::make_unique<UnservedTabs>();
+    extension->paneHost = _services.panesFor ? _services.panesFor(owner) : nullptr;
     if (auto made = makeProcesses(*extension); !made)
         return std::unexpected(
             problemOf(name, DaemonExtensionProblem::RootUnresolvable, textOf(RootErrorTexts, made.error())));
@@ -290,6 +295,25 @@ std::expected<void, RootError> DaemonExtensionRuntime::makeProcesses(Extension& 
     if (!processes)
         return std::unexpected(processes.error());
     extension.processes = std::move(*processes);
+    return {};
+}
+
+std::expected<void, RootError> DaemonExtensionRuntime::makePanes(Extension& extension)
+{
+    if (!extension.paneHost)
+    {
+        extension.panes = std::make_shared<UnservedPanes>();
+        return {};
+    }
+    auto panes = DeclaredPanes::create(
+        DeclaredPanesConfig { .manifest = extension.processesConfig.manifest,
+                              .roots = extension.roots,
+                              .inheritedEnvironment = extension.processesConfig.inheritedEnvironment },
+        _services.directories,
+        *extension.paneHost);
+    if (!panes)
+        return std::unexpected(panes.error());
+    extension.panes = std::move(*panes);
     return {};
 }
 
@@ -316,6 +340,9 @@ std::expected<void, DeclarationProblem> DaemonExtensionRuntime::run(Extension& e
         return loaded;
     extension.files = std::make_shared<FileReadService>(
         extension.processesConfig.manifest, extension.roots, _services.directories, _services.files);
+    if (auto made = makePanes(extension); !made)
+        return std::unexpected(problemOf(
+            extension.name, DaemonExtensionProblem::RootUnresolvable, textOf(RootErrorTexts, made.error())));
     extension.runner =
         std::make_unique<DaemonExtensionRunner>(extension.engine,
                                                 extension.compiled,
@@ -331,6 +358,7 @@ std::expected<void, DeclarationProblem> DaemonExtensionRuntime::run(Extension& e
                                                                  .presence = _services.presence,
                                                                  .tabs = *extension.tabs,
                                                                  .files = *extension.files,
+                                                                 .panes = *extension.panes,
                                                                  .scheduler = _pool,
                                                                  .wallClock = _services.wallClock,
                                                                  .localTime = _services.localTime,
@@ -524,7 +552,8 @@ void DaemonExtensionRuntime::revoke(std::string_view name)
     // processes of its own.
     _pool.post(_lane,
                [old = std::shared_ptr<DeclaredProcesses> { std::move(extension->processes) },
-                oldFiles = std::exchange(extension->files, nullptr)] {});
+                oldFiles = std::exchange(extension->files, nullptr),
+                oldPanes = std::exchange(extension->panes, nullptr)] {});
     if (auto made = makeProcesses(*extension); !made)
         errorLog()("daemon.extensions.{}: its processes cannot be made anew; it does not run.",
                    extension->name);
@@ -548,6 +577,7 @@ void DaemonExtensionRuntime::stop() noexcept
     {
         extension->processes.reset();
         extension->files.reset();
+        extension->panes.reset();
     }
     _provider.releaseRetired();
 }

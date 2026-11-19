@@ -21,7 +21,10 @@ An extension holds its own state between calls, and what must outlive the instan
 
 Processes and panes outlive the instance. When the host re-instantiates a guest (after a fault, or a
 daemon upgrade), running processes and open panes are kept, and the new instance finds them by the
-`tag` it gave them, through `procs` and `panes`, instead of assuming they failed.
+`tag` it gave them, through `procs` and `panes`, instead of assuming they failed. Until the daemon has
+restored its sessions after a start, an upgrade or a recovery, `panes` answers `limit`: a guest concludes
+nothing from that answer and lists again later: on the `panes` hint the daemon raises for every extension
+whose panes it kept, or at its next wake.
 
 ## What a host guarantees
 

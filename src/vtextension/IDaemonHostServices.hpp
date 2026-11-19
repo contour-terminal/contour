@@ -103,6 +103,31 @@ class IDaemonHostServices
     [[nodiscard]] virtual std::expected<std::vector<std::string>, HostError> storeKeys(
         std::string_view prefix) = 0;
 
+    /// `pane-open`: opens a pane running a declared template, without taking the focus (IPaneService).
+    /// @param paneTemplate The template's name.
+    /// @param args The values of its placeholders, by name.
+    /// @param cwd The directory it starts in.
+    /// @param title The tab's name.
+    /// @param tag The extension's own label for the pane.
+    /// @param near A served tab of the extension's whose workspace it opens in; none for the focused one.
+    /// @return The pane's id; or why it was not opened.
+    [[nodiscard]] virtual std::expected<std::string, HostError> paneOpen(
+        std::string_view paneTemplate,
+        ConfigMap const& args,
+        std::string_view cwd,
+        std::string_view title,
+        std::string_view tag,
+        std::optional<std::string_view> near) = 0;
+
+    /// `pane-close`: closes a pane the extension opened.
+    /// @param pane Its id.
+    /// @return Nothing; or why it was not closed.
+    [[nodiscard]] virtual std::expected<void, HostError> paneClose(std::string_view pane) = 0;
+
+    /// `panes`: the panes the extension opened, listed until their sessions ended.
+    /// @return Each with its tag, status and program; or why they cannot be listed now (`limit`: retry).
+    [[nodiscard]] virtual std::expected<std::vector<PaneInfo>, HostError> panes() = 0;
+
     /// `tab-open`: opens the extension's served tab where the origin's window is (IServedTabService).
     /// @param scheme What the tab is served as.
     /// @param origin The connection the invoked action came from.

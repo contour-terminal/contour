@@ -15,6 +15,8 @@ set(vtextension_SOURCES
     DaemonExtensionRuntime.cpp
     DaemonImports.cpp
     DaemonInstance.cpp
+    DeclaredArguments.cpp
+    DeclaredPanes.cpp
     DeclaredProcesses.cpp
     Engine.cpp
     EventQueue.cpp
@@ -59,6 +61,8 @@ set(vtextension_HEADERS
     DaemonLimits.hpp
     DaemonWorld.hpp
     DeadlineGuard.hpp
+    DeclaredArguments.hpp
+    DeclaredPanes.hpp
     DeclaredProcesses.hpp
     Engine.hpp
     Event.hpp
@@ -85,6 +89,7 @@ set(vtextension_HEADERS
     Instance.hpp
     Logging.hpp
     Manifest.hpp
+    PaneService.hpp
     Placement.hpp
     ProcessService.hpp
     RootPointer.hpp
@@ -140,6 +145,7 @@ if(VTEXTENSION_TESTING)
         DaemonWorld_test.cpp
         DeadlineGuard_test.cpp
         DeclaredCleanup_test.cpp
+        DeclaredPanes_test.cpp
         DeclaredProcesses_test.cpp
         Engine_test.cpp
         EventQueue_test.cpp
@@ -171,6 +177,7 @@ if(VTEXTENSION_TESTING)
         testing/FakeDaemonHostServices.hpp
         testing/FakeFileLocker.hpp
         testing/FakeFileReadService.hpp
+        testing/FakePaneService.hpp
         testing/FakeDirectoryOpener.hpp
         testing/FakeGrantStore.hpp
         testing/FakeGuestMemory.hpp

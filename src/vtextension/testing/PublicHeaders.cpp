@@ -19,6 +19,8 @@
 #include <vtextension/DaemonLimits.hpp>
 #include <vtextension/DaemonWorld.hpp>
 #include <vtextension/DeadlineGuard.hpp>
+#include <vtextension/DeclaredArguments.hpp>
+#include <vtextension/DeclaredPanes.hpp>
 #include <vtextension/DeclaredProcesses.hpp>
 #include <vtextension/Engine.hpp>
 #include <vtextension/Event.hpp>
@@ -44,6 +46,7 @@
 #include <vtextension/IHostServices.hpp>
 #include <vtextension/Instance.hpp>
 #include <vtextension/Manifest.hpp>
+#include <vtextension/PaneService.hpp>
 #include <vtextension/Placement.hpp>
 #include <vtextension/ProcessService.hpp>
 #include <vtextension/RootPointer.hpp>

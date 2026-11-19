@@ -25,6 +25,7 @@
 #include <vtextension/ExtensionStore.hpp>
 #include <vtextension/FileReadService.hpp>
 #include <vtextension/IHostServices.hpp>
+#include <vtextension/PaneService.hpp>
 #include <vtextension/ProcessService.hpp>
 #include <vtextension/Runner.hpp>
 #include <vtextension/ServedTabService.hpp>
@@ -54,6 +55,7 @@ struct DaemonServices
     IExtensionPresence& presence;   ///< Where its summary is shown.
     IServedTabService& tabs;        ///< The tabs it serves, and the actions its user invoked.
     IFileReadService& files;        ///< The files it may read.
+    IPaneService& panes;            ///< The agent panes it opens.
     IExtensionScheduler& scheduler; ///< The lane it lives on, its timers, and its monotonic clock.
     core::platform::IWallClock const& wallClock; ///< The wall-clock time `now` answers with.
     /// The time zone: `load` tells the UTC offset at the wall-clock time of each load.

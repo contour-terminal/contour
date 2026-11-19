@@ -49,6 +49,7 @@
 #include <vtextension/FileExtensionStore.hpp>
 #include <vtextension/FileLocker.hpp>
 #include <vtextension/IDaemonHostServices.hpp>
+#include <vtextension/PaneService.hpp>
 #include <vtextension/World.hpp>
 #include <vtextension/testing/DaemonRunnerHarness.hpp>
 #include <vtextension/testing/FakeDaemonHostServices.hpp>
@@ -156,6 +157,7 @@ class GuestRig
                 .presence = presence,
                 .tabs = tabs,
                 .files = files,
+                .panes = panes,
                 .scheduler = scheduler,
                 .wallClock = wallClock,
                 .localTime = localTime,
@@ -209,6 +211,7 @@ class GuestRig
     RecordingPresence presence;
     UnservedTabs tabs;         ///< This guest serves no tab here: its tab imports answer not-supported-yet.
     FakeFileReadService files; ///< It reads no file here: `file-read` answers not-supported-yet.
+    UnservedPanes panes;       ///< It opens no pane here: the pane imports answer not-supported-yet.
     ManualScheduler scheduler;
     core::platform::ManualWallClock wallClock { std::chrono::system_clock::time_point {
         std::chrono::hours { 500'000 } } };
@@ -467,6 +470,28 @@ class MeasuredServices final: public IDaemonHostServices
                                                             std::string_view /*detail*/) override
     {
         return {};
+    }
+
+    /// No pane is opened in a measurement: the pane imports answer as unserved ones would.
+    [[nodiscard]] std::expected<std::string, HostError> paneOpen(
+        std::string_view /*paneTemplate*/,
+        ConfigMap const& /*args*/,
+        std::string_view /*cwd*/,
+        std::string_view /*title*/,
+        std::string_view /*tag*/,
+        std::optional<std::string_view> /*near*/) override
+    {
+        return std::unexpected(HostError::NotSupportedYet);
+    }
+
+    [[nodiscard]] std::expected<void, HostError> paneClose(std::string_view /*pane*/) override
+    {
+        return std::unexpected(HostError::NotSupportedYet);
+    }
+
+    [[nodiscard]] std::expected<std::vector<PaneInfo>, HostError> panes() override
+    {
+        return std::unexpected(HostError::NotSupportedYet);
     }
 
     /// No file is read in a measurement: the read answers as an unserved import would.
