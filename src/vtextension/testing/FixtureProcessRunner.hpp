@@ -136,6 +136,7 @@ class FixtureProcessRunner final: public vtpty::IProcessRunner
         auto const lock = std::scoped_lock { _mutex };
         auto const token = vtpty::ProcessToken { ++_nextToken };
         _started.push_back(spec.argv);
+        _startedIn.push_back(spec.workingDirectory ? spec.workingDirectory->resolvedPath() : std::string {});
         if (_forwarded && !spec.argv.empty() && spec.argv.front() == _forwarded->program)
         {
             for (auto const& [name, value]: _forwarded->environment)
@@ -236,6 +237,14 @@ class FixtureProcessRunner final: public vtpty::IProcessRunner
         return _started;
     }
 
+    /// @return The directory every process was started in, in the order of started(); empty for one started
+    ///         in the runner's own.
+    [[nodiscard]] std::vector<std::string> startedIn() const
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return _startedIn;
+    }
+
     /// @return How many processes wait for an answer.
     [[nodiscard]] std::size_t waiting() const
     {
@@ -302,6 +311,7 @@ class FixtureProcessRunner final: public vtpty::IProcessRunner
     uint64_t _nextToken = 0;
     std::vector<Waiting> _waiting;
     std::vector<std::vector<std::string>> _started;
+    std::vector<std::string> _startedIn;     ///< Where each of @ref _started runs; empty: the runner's own.
     std::vector<ScriptedAnswer> _scripted;   ///< In the order they were scripted; the latest wins.
     std::optional<Forwarded> _forwarded;     ///< The program started for real, if any.
     std::vector<TokenPair> _forwardedTokens; ///< Every forwarded process, by this runner's token.

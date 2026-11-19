@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -850,6 +851,197 @@ TEST_CASE("the same item twice is refused", "[daemon][e2e][agents]")
     CHECK(d.world.processRunner.startsOf("git", "fetch") == fetches);
     CHECK(d.world.storedRuns().size() == 1);
     CHECK(d.world.spawnedAgents().size() == 1);
+}
+
+namespace
+{
+
+/// The board an agent wrote, as the cases have it write one.
+constexpr auto AgentBoard =
+    std::string_view { "# Status\n\n- reproduced the failure\n- fixing the reflow\n" };
+
+/// @return The contract's first page of the recorded transcript, as `contour agent transcript --json` prints
+///         it: what the orchestrator reads.
+[[nodiscard]] std::string contractPage()
+{
+    auto const contract =
+        std::filesystem::path { VTHOST_TEST_ORCHESTRATOR_TESTDATA }.parent_path().parent_path()
+        / "contract/agent-transcript/format-1/basic-page-1.json";
+    return vthost::testing::wholeFile(contract);
+}
+
+/// Writes @p text as the `STATUS.md` of the worktree @p worktree, written @p age before @p world's wall clock
+/// says it is now.
+void writeBoard(OrchestratorWorld const& world,
+                std::string const& worktree,
+                std::string_view text,
+                std::chrono::system_clock::duration age)
+{
+    auto const path = std::filesystem::path { worktree } / "STATUS.md";
+    {
+        auto file = std::ofstream { path, std::ios::binary };
+        file << text;
+    }
+    // The wall-clock instant as a file time, by its distance from now: std::chrono::clock_cast, which would
+    // say it directly, is missing from libc++ 19 (AppleClang 17's).
+    auto const distance = (world.wallClock.now() - age) - std::chrono::system_clock::now();
+    std::filesystem::last_write_time(
+        path,
+        std::filesystem::file_time_type::clock::now()
+            + std::chrono::duration_cast<std::filesystem::file_time_type::duration>(distance));
+}
+
+/// Dispatches on the first pull request, then closes its agent's tab: the run finishes, its worktree removed.
+/// @return The run as it was while it ran.
+[[nodiscard]] StoredRun finishedRun(Desk& desk, AgentDaemon& d)
+{
+    auto const dispatched = dispatch(desk, *d.live, d.world, 0, "pr-2375-");
+    report(*d.live, dispatched.agent, "working");
+    REQUIRE(desk.until([&] { return reported(d.world, "pr-2375-", "working"); }));
+    d.live->host.closeSession(dispatched.agent);
+    REQUIRE(desk.until([&] { return finishedAs(d.world, "pr-2375-", "completed", "removed"); }));
+    REQUIRE_FALSE(d.world.hasWorktree(dispatched.run.worktree));
+    return dispatched.run;
+}
+
+/// @return The argv of every `contour agent transcript` @p world's orchestrator ran, with where it ran.
+[[nodiscard]] std::vector<std::pair<std::vector<std::string>, std::string>> transcriptReads(
+    OrchestratorWorld const& world)
+{
+    auto reads = std::vector<std::pair<std::vector<std::string>, std::string>> {};
+    auto const started = world.processRunner.started();
+    auto const startedIn = world.processRunner.startedIn();
+    for (auto const index: std::views::iota(std::size_t { 0 }, started.size()))
+        if (beginsWith(started[index], { "contour", "agent", "transcript" }))
+            reads.emplace_back(started[index], startedIn[index]);
+    return reads;
+}
+
+} // namespace
+
+TEST_CASE("b shows the board an agent wrote, with its age", "[daemon][e2e][agents]")
+{
+    auto d = AgentDaemon {};
+    auto desk = Desk { *d.live, d.world };
+    auto const dispatched = dispatch(desk, *d.live, d.world, 0, "pr-2375-");
+    writeBoard(d.world, dispatched.run.worktree, AgentBoard, std::chrono::minutes { 3 });
+
+    selectRun(desk, 0, dispatched.run.id);
+    desk.type("b");
+    auto page = std::string {};
+    auto const shown = desk.until([&] {
+        page = desk.page();
+        return page.contains("fixing the reflow");
+    });
+    INFO("dashboard: " << page);
+    REQUIRE(shown);
+    CHECK(page.contains(std::format("STATUS.md · {}", dispatched.run.id)));
+    CHECK(page.contains("updated 3 min ago"));
+    CHECK(page.contains("t transcript"));
+    CHECK(page.contains("d new run"));
+}
+
+TEST_CASE("a board that appears later is picked up while shown", "[daemon][e2e][agents]")
+{
+    auto d = AgentDaemon {};
+    auto desk = Desk { *d.live, d.world };
+    auto const dispatched = dispatch(desk, *d.live, d.world, 0, "pr-2375-");
+
+    selectRun(desk, 0, dispatched.run.id);
+    desk.type("b");
+    REQUIRE(desk.until([&] { return desk.page().contains("No STATUS.md to show yet."); }));
+
+    // Written while the board is shown: the next read, within its period, shows it.
+    writeBoard(d.world, dispatched.run.worktree, AgentBoard, std::chrono::seconds { 0 });
+    auto page = std::string {};
+    auto const shown = desk.until([&] {
+        page = desk.page();
+        return page.contains("fixing the reflow");
+    });
+    INFO("dashboard: " << page);
+    REQUIRE(shown);
+    CHECK(page.contains("updated just now"));
+}
+
+TEST_CASE("t shows a finished run's transcript after its worktree is gone", "[daemon][e2e][agents]")
+{
+    auto d = AgentDaemon {};
+    auto desk = Desk { *d.live, d.world };
+    d.world.processRunner.script({ .prefix = { "contour", "agent", "transcript" },
+                                   .standardOutput = contractPage(),
+                                   .exitCode = 0,
+                                   .effect = {},
+                                   .times = std::nullopt });
+    auto const run = finishedRun(desk, d);
+
+    // The finished run is the first of the runs' rows.
+    selectRun(desk, 0, run.id);
+    desk.type("t");
+    auto page = std::string {};
+    auto const shown = desk.until([&] {
+        page = desk.page();
+        return page.contains("written by Claude Code 2.1.328");
+    });
+    INFO("dashboard: " << page);
+    INFO(runsOf(d.world));
+    REQUIRE(shown);
+    CHECK(page.contains(std::format("Transcript · {} · page 1 of 1", run.id)));
+    CHECK(page.contains("tool Bash"));
+
+    // Read through the declared command alone, for the run's session and worktree, in the worktree root: the
+    // run's own worktree is gone.
+    auto const reads = transcriptReads(d.world);
+    REQUIRE(reads.size() == 1);
+    CHECK(reads.front().first
+          == std::vector<std::string> { "contour",
+                                        "agent",
+                                        "transcript",
+                                        "--session",
+                                        run.session,
+                                        "--cwd",
+                                        run.worktree,
+                                        "--page",
+                                        "1",
+                                        "--format",
+                                        "1",
+                                        "--json" });
+    CHECK(reads.front().second == d.world.worktreeRoot());
+}
+
+TEST_CASE("d on a finished run dispatches the same item again", "[daemon][e2e][agents]")
+{
+    auto d = AgentDaemon {};
+    auto desk = Desk { *d.live, d.world };
+    // The world's clock stands still: the new run is dispatched in the same second as the finished one.
+    auto const first = finishedRun(desk, d);
+
+    selectRun(desk, 0, first.id);
+    desk.type("d");
+    auto page = std::string {};
+    auto const opened = desk.until([&] {
+        page = desk.page();
+        return page.contains("enter dispatch");
+    });
+    INFO("dashboard: " << page);
+    REQUIRE(opened);
+    CHECK(page.contains("#2375"));
+    CHECK(page.contains("fix CI"));
+    CHECK(d.world.storedRuns().size() == 1);
+
+    // Confirmed, it dispatches on the same item, as a run of its own.
+    desk.type(Enter);
+    auto second = std::string {};
+    REQUIRE(desk.until([&] {
+        for (auto const& id: d.world.storedRuns())
+            if (id.starts_with("pr-2375-") && id != first.id)
+                second = id;
+        return !second.empty();
+    }));
+    CHECK(second == std::format("{}-2", first.id));
+    auto const dispatched = awaitRunning(desk, *d.live, d.world, second);
+    CHECK(dispatched.run.worktree != first.worktree);
+    CHECK(d.world.spawnedAgents().size() == 2);
+    CHECK(d.world.spawnedAgents().back().arguments.back() == FixCiPrompt);
 }
 
 TEST_CASE("an agent that cannot start in its worktree here says so", "[daemon][e2e][agents]")
