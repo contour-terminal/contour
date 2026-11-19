@@ -263,6 +263,8 @@ namespace
                                                request.readiness == Readiness::Draft ? " · draft"sv : ""sv)),
                      .status = std::string { review.word },
                      .statusRole = review.role,
+                     .repo = std::string { repo },
+                     .item = ChangeRequestRef { request.number },
                      .title = clean(request.title),
                      .details = std::move(details) };
     }
@@ -272,6 +274,8 @@ namespace
         return Row { .kind = RowKind::Issue,
                      .prefix = prefixOf(lists, repo),
                      .text = clean(std::format("{} {}", itemLabel(issue.item), issue.title)),
+                     .repo = std::string { repo },
+                     .item = issue.item,
                      .title = clean(issue.title),
                      .details = {
                          DetailLine { .label = "issue", .value = clean(itemLabel(issue.item)) },
@@ -654,6 +658,20 @@ core::tui::Canvas insideFrame(core::tui::Canvas const& canvas)
                                               .y = 1,
                                               .width = std::max(0, canvas.width() - 2),
                                               .height = std::max(0, canvas.height() - 2) });
+}
+
+std::string joinHints(std::span<std::string_view const> hints, int columns)
+{
+    auto line = std::string {};
+    for (auto const hint: hints)
+    {
+        auto const next =
+            line.empty() ? std::string { hint } : std::format("{}{}{}", line, HintSeparator, hint);
+        if (columnsOf(next) > columns)
+            break;
+        line = next;
+    }
+    return line;
 }
 
 std::string cut(std::string_view text, int columns)

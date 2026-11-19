@@ -3,7 +3,7 @@
 │ ● #2375 Say why the stdio relay failed, and send a hello before half-closin… │
 │ ✓ ╭─ Dispatch an agent ──────────────────────────────────────────────────╮   │
 │ ✓ │ item      #2375 · Say why the stdio relay failed, and send a hello … │a… │
-│ ✗ │ task      ‹ fix CI ›                                                 │d… │
+│ ✗ │ task      ‹ fix CI › f                                               │d… │
 │ ✗ │ model     ‹ sonnet ›                                                 │a… │
 │   │ note      optional; tab to type one                                  │   │
 │ IS│ prompt    /contour-workflows:fix-ci                                  │   │
@@ -20,5 +20,5 @@
 │ ur╰──────────────────────────────────────────────────────────────────────╯   │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move · enter open · ? help · / filter · R refresh · e end run · x retry re… 
+ ↑↓ move · enter open · d dispatch · ? help · / filter · R refresh · e end run  
  ⬢ agents 0/4 · ✗2                                                              

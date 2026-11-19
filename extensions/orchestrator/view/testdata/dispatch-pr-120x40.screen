@@ -12,7 +12,7 @@
 │   #2253 Switch `daemon` Same `client`                                │ │                                             │
 │   #2163 OSC 133: o╭─ Dispatch an agent ──────────────────────────────────────────────────────────╮                   │
 │   #2162 OSC 9;9 (C│ item      #2375 · Say why the stdio relay failed, and send a hello before h… │                   │
-│                   │ task      ‹ fix CI ›                                                         │                   │
+│                   │ task      ‹ fix CI › f                                                       │                   │
 │ AGENTS · 0 OF 4 RU│ model     ‹ sonnet ›                                                         │                   │
 │ no agents         │ note      optional; tab to type one                                          │                   │
 │                   │ prompt    /contour-workflows:fix-ci                                          │                   │
@@ -36,5 +36,5 @@
 │                                                                      │ │                                             │
 │                                                                      │ │                                             │
 ╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
- ↑↓ move · enter open · ? help · / filter · R refresh · e end run · x retry removal · del dismiss · esc back            
+ ↑↓ move · enter open · d dispatch · ? help · / filter · R refresh · e end run · x retry removal · del dismiss          
  ⬢ agents 0/4 · ✗2                                                                                                      

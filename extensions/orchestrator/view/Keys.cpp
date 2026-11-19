@@ -8,12 +8,16 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <optional>
 #include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
+#include <variant>
 
+#include <orchestrator/core/Config.hpp>
+#include <orchestrator/core/Run.hpp>
 #include <orchestrator/core/Utf8.hpp>
 #include <orchestrator/view/Sections.hpp>
 
@@ -36,13 +40,15 @@ namespace
         KeyRow { .key = "home"sv, .command = KeyCommand::Home, .hint = ""sv },
         KeyRow { .key = "end"sv, .command = KeyCommand::End, .hint = ""sv },
         KeyRow { .key = "enter"sv, .command = KeyCommand::Enter, .hint = "enter open"sv },
+        KeyRow { .key = "d"sv, .command = KeyCommand::Dispatch, .hint = "d dispatch"sv },
         KeyRow { .key = "?"sv, .command = KeyCommand::Help, .hint = "? help"sv },
         KeyRow { .key = "/"sv, .command = KeyCommand::Filter, .hint = "/ filter"sv },
         KeyRow { .key = "R"sv, .command = KeyCommand::Refresh, .hint = "R refresh"sv },
         KeyRow { .key = "e"sv, .command = KeyCommand::EndRun, .hint = "e end run"sv },
         KeyRow { .key = "x"sv, .command = KeyCommand::RetryRemoval, .hint = "x retry removal"sv },
         KeyRow { .key = "del"sv, .command = KeyCommand::Dismiss, .hint = "del dismiss"sv },
-        KeyRow { .key = "tab"sv, .command = KeyCommand::Tab, .hint = "tab swap"sv, .onlyIn = Band::Medium },
+        KeyRow {
+            .key = "tab"sv, .command = KeyCommand::Tab, .hint = "tab details"sv, .hiddenIn = Band::Wide },
         KeyRow { .key = "esc"sv, .command = KeyCommand::Back, .hint = "esc back"sv },
     };
 
@@ -101,6 +107,48 @@ namespace
         return UiAction { Action { .run = context.selected->run } };
     }
 
+    /// @return The active run working on the selected item, if one does.
+    [[nodiscard]] Run const* activeRunOf(Row const& row, Engine const& engine) noexcept
+    {
+        if (!row.item)
+            return nullptr;
+        auto const runs = engine.runs();
+        auto const found = std::ranges::find_if(runs, [&](Run const& run) {
+            return countsAsActive(run) && run.repo == row.repo && run.item == *row.item;
+        });
+        return found != runs.end() ? &*found : nullptr;
+    }
+
+    /// Opens the dispatch form on the selected item, on @p task; or says why it cannot.
+    void openFormOn(Interaction& interaction, KeyContext const& context, TaskDef const* task)
+    {
+        auto const* const row = context.selected;
+        if (row == nullptr || !row->item || context.engine == nullptr)
+            return;
+        if (task == nullptr)
+        {
+            interaction.notice = "no task applies to this item";
+            return;
+        }
+        // Its session id is minted by the dashboard, which holds the source of them.
+        interaction.form = openDispatchForm(*context.engine, row->repo, *row->item, task->id, {});
+        if (!interaction.form)
+            interaction.notice = std::format("{} does not apply to this item", task->label);
+    }
+
+    /// @return The first task that applies to the selected item, as Enter and `d` offer it; nullptr when
+    /// none.
+    [[nodiscard]] TaskDef const* firstTaskOf(KeyContext const& context) noexcept
+    {
+        auto const* const config = context.engine != nullptr ? context.engine->config() : nullptr;
+        if (config == nullptr || context.selected == nullptr || !context.selected->item)
+            return nullptr;
+        auto const kind = std::holds_alternative<ChangeRequestRef>(*context.selected->item)
+                              ? AppliesTo::PullRequest
+                              : AppliesTo::Issue;
+        return config->firstTaskFor(kind);
+    }
+
     using Handler = std::optional<UiAction> (*)(Interaction&, KeyContext const&);
 
     /// One command and what it does.
@@ -135,15 +183,45 @@ namespace
                 select(interaction, context, context.selectable == 0 ? 0 : context.selectable - 1);
                 return std::nullopt;
             } },
+        // Enter acts on what the row stands for: an agent is revealed, an item dispatched on (or its agent
+        // revealed), a finished run's details opened. Tab shows any row's details.
         CommandRow {
             .command = KeyCommand::Enter,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                if (context.selected == nullptr)
+                auto const* const row = context.selected;
+                if (row == nullptr)
                     return std::nullopt;
+                switch (row->kind)
+                {
+                    case RowKind::Agent: return UiAction { RevealAgentAction { .run = row->run } };
+                    case RowKind::PullRequest:
+                    case RowKind::Issue:
+                        if (auto const* const run =
+                                context.engine != nullptr ? activeRunOf(*row, *context.engine) : nullptr)
+                            return UiAction { RevealAgentAction { .run = run->id } };
+                        openFormOn(interaction, context, firstTaskOf(context));
+                        return std::nullopt;
+                    default: break;
+                }
                 if (context.band != Band::Wide)
                     interaction.pane = Pane::Details;
-                if (context.selected->onOpen == OpenEffect::MarkSeen)
-                    return UiAction { MarkSeenAction { .run = context.selected->run } };
+                if (row->onOpen == OpenEffect::MarkSeen)
+                    return UiAction { MarkSeenAction { .run = row->run } };
+                return std::nullopt;
+            } },
+        CommandRow {
+            .command = KeyCommand::Dispatch,
+            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
+                openFormOn(interaction, context, firstTaskOf(context));
+                return std::nullopt;
+            } },
+        CommandRow {
+            .command = KeyCommand::Task,
+            .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
+                auto const* const config = context.engine != nullptr ? context.engine->config() : nullptr;
+                if (config == nullptr || !context.task || *context.task >= config->tasks().size())
+                    return std::nullopt;
+                openFormOn(interaction, context, &config->tasks()[*context.task]);
                 return std::nullopt;
             } },
         CommandRow { .command = KeyCommand::Back,
@@ -159,7 +237,7 @@ namespace
         CommandRow {
             .command = KeyCommand::Tab,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
-                if (context.band == Band::Medium)
+                if (context.band != Band::Wide)
                     interaction.pane = interaction.pane == Pane::List ? Pane::Details : Pane::List;
                 return std::nullopt;
             } },
@@ -314,13 +392,29 @@ std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,
 {
     if (typeIntoFilter(key, interaction) == FilterInput::Taken)
         return std::nullopt;
-    auto const command = commandFor(key);
+    auto command = commandFor(key);
+    auto taskContext = context;
+    // A task's key, from the configuration: the table refuses one the dashboard binds (dashboardKeys()).
+    if (auto const* const config = context.engine != nullptr ? context.engine->config() : nullptr;
+        !command && config != nullptr)
+        if (auto const printable = printableOf(key))
+        {
+            auto const tasks = config->tasks();
+            auto const task = std::ranges::find(tasks, *printable, [](TaskDef const& def) {
+                return static_cast<char32_t>(static_cast<unsigned char>(def.key));
+            });
+            if (task != tasks.end())
+            {
+                command = KeyCommand::Task;
+                taskContext.task = static_cast<std::size_t>(std::ranges::distance(tasks.begin(), task));
+            }
+        }
     if (!interaction.pendingEnd.empty() && command != KeyCommand::EndRun)
     {
         interaction.pendingEnd.clear();
         return std::nullopt;
     }
-    return command ? dispatch(*command, interaction, context) : std::nullopt;
+    return command ? dispatch(*command, interaction, taskContext) : std::nullopt;
 }
 
 } // namespace orchestrator::view

@@ -36,5 +36,5 @@ contour: the pull request list shows the first 100; there may be more
 │ ✓ #100032 contour: tab_style — shapes, fills, materials and widths … │ │                                             │
 │ ✗ #100033 vtbackend: WIP -- DEC mode 44 and a partial margin-bell t… │ │                                             │
 ╰──────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────╯
- ↑↓ move · enter open · ? help · / filter · R refresh · e end run · x retry removal · del dismiss · esc back            
+ ↑↓ move · enter open · d dispatch · ? help · / filter · R refresh · e end run · x retry removal · del dismiss          
  ⬢ agents 0/4 · ✗40                                                                                                     

@@ -38,7 +38,7 @@ The layout follows the tab's size:
 | --- | --- |
 | 100 columns or more | the list and the selected item's details side by side |
 | 60 to 99 | the list, the details below it; Tab swaps the details in for the list |
-| below 60 | the list alone; Enter opens the details as a page, Esc returns |
+| below 60 | the list alone; Tab swaps the details in for the list, Esc returns |
 
 Below 20 rows the key-hint line and the section headings go first. A list row is cut with `…` where it is
 too wide, never in the middle of a wide character. The details wrap by default, and so does the dispatch
@@ -49,15 +49,23 @@ request's title is shown as text and does nothing.
 | Key | Does |
 | --- | --- |
 | `↑` `↓` `j` `k` `Home` `End` | move the selection |
-| `Enter` | open the details (and mark a finished run as seen) |
+| `Enter` | on a pull request or an issue, open the dispatch form on the first task that applies to it, or show its agent's tab if one runs; on an agent, show its tab; on a finished run, open its details (and mark it seen) |
+| `d` | open the dispatch form on the selected item |
+| a task's `key` | open the dispatch form on that task |
 | `Esc` | close the help, the details page or the filter |
-| `Tab` | swap the details in for the list, and back (60 to 99 columns) |
+| `Tab` | swap the details in for the list, and back (below 100 columns) |
 | `/` | filter the rows by text; Enter keeps the filter, Esc drops it |
 | `?` | show the keys |
 | `R` | read the lists again now |
 | `e` | end the selected agent's run |
 | `x` | check a kept worktree again |
 | `Del` | drop a finished run from the list |
+
+The dispatch form shows the item, the task and the model (`←` `→` change the one selected, `Tab` moves
+between them and the note), the prompt, the checkout, the worktree and the agent's exact command line,
+then how many agents run. `Enter` dispatches; `Esc` cancels. A task's key may not be one of the
+dashboard's own: the configuration is refused with a line that names them. While Claude Code's status
+hooks are missing the form says so, and asks for a second `Enter`.
 
 Its screens are pinned by golden files in `view/testdata/`, one per scene and size; after a deliberate
 change, `ORCHESTRATOR_UPDATE_GOLDENS=1 orchestrator_test "[view]"` writes them again, to be checked by eye.

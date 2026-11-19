@@ -12,6 +12,7 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/Engine.hpp>
 #include <orchestrator/view/Band.hpp>
 #include <orchestrator/view/DispatchForm.hpp>
 
@@ -83,15 +84,17 @@ enum class KeyCommand : uint8_t
     Down,         ///< Select the row below.
     Home,         ///< Select the first row.
     End,          ///< Select the last row.
-    Enter,        ///< Open the selected row's details.
+    Enter,        ///< Dispatch on the selected item, reveal its agent, or open a finished run's details.
     Back,         ///< Close what is open: the help, the details page, the filter.
-    Tab,          ///< In the Medium band, swap the details in for the list, and back.
+    Tab,          ///< In the Medium and Narrow bands, swap the details in for the list, and back.
     Filter,       ///< Type a filter for the rows.
     Help,         ///< Show or hide the keys.
     Refresh,      ///< Read the lists again now.
     EndRun,       ///< End the selected run.
     RetryRemoval, ///< Check the selected kept worktree again.
     Dismiss,      ///< Drop the selected finished run.
+    Dispatch,     ///< Open the dispatch form on the selected item, on the first task that applies to it.
+    Task,         ///< Open the dispatch form on the selected item, on the task whose key was typed.
 };
 
 /// One key: what it is called, what it does, and what the hint line calls it.
@@ -101,8 +104,8 @@ struct KeyRow
         key = {}; ///< Its name: a printable character, or `up`, `down`, `enter`, `esc` and the like.
     KeyCommand command = KeyCommand::Up; ///< What it does.
     std::string_view hint = {}; ///< How the hint line and the help name it; empty: neither shows the row.
-    std::optional<Band> onlyIn =
-        std::nullopt; ///< The band whose hint line alone shows it; absent: every band's.
+    std::optional<Band> hiddenIn =
+        std::nullopt; ///< The band whose hint line does not show it, where it does nothing; absent: none.
 };
 
 /// @param row A key.
@@ -110,7 +113,7 @@ struct KeyRow
 /// @return Whether the hint line of a tab in @p band shows the row's hint.
 [[nodiscard]] constexpr bool isHintedIn(KeyRow const& row, Band band) noexcept
 {
-    return !row.hint.empty() && (!row.onlyIn || *row.onlyIn == band);
+    return !row.hint.empty() && row.hiddenIn != band;
 }
 
 /// @return Every key the dashboard acts on now, in the order the hint line and the help show them.
@@ -118,6 +121,7 @@ struct KeyRow
 
 /// @param key A key the terminal sent.
 /// @return What it does on the dashboard; std::nullopt for a key no row names, or one with Ctrl or Alt.
+///         A task's key is not in the table: applyKey() looks it up in the configuration.
 [[nodiscard]] std::optional<KeyCommand> commandFor(core::tui::KeyEvent const& key) noexcept;
 
 // }}}
@@ -161,9 +165,11 @@ struct Interaction
 /// What a key is applied to besides the interaction.
 struct KeyContext
 {
-    Band band = Band::Wide;        ///< The tab's band.
-    std::size_t selectable = 0;    ///< How many rows can be selected.
-    Row const* selected = nullptr; ///< The selected row; nullptr when there is none.
+    Band band = Band::Wide;               ///< The tab's band.
+    std::size_t selectable = 0;           ///< How many rows can be selected.
+    Row const* selected = nullptr;        ///< The selected row; nullptr when there is none.
+    Engine const* engine = nullptr;       ///< Its runs, lists and tasks; nullptr: no key dispatches.
+    std::optional<std::size_t> task = {}; ///< For KeyCommand::Task: the task, an index into Config::tasks().
 };
 
 /// Applies one key's command.
@@ -210,9 +216,9 @@ enum class FilterInput : uint8_t
 /// @return Whether the key was taken.
 [[nodiscard]] FilterInput typeIntoFilter(core::tui::KeyEvent const& key, Interaction& interaction);
 
-/// Applies one key: to the filter while it is typed, to a pending end's confirmation, else by the key table.
-/// While an end waits for its confirmation, any key but `e` on the same run keeps the run and does nothing
-/// else.
+/// Applies one key: to the filter while it is typed, to a pending end's confirmation, else by the key table,
+/// or as a task's key when the configuration binds it. While an end waits for its confirmation, any key but
+/// `e` on the same run keeps the run and does nothing else.
 /// @param key A key the terminal sent.
 /// @param interaction Where the user is; changed by the key.
 /// @param context The band and the selected row.

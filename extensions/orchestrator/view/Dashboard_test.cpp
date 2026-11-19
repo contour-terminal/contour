@@ -135,7 +135,7 @@ struct Scene
                 .sizes = { Wide } },
         Scene { .name = "kept-reasons",
                 .world = keptReasons,
-                .keys = "\x1b[F\r"sv,
+                .keys = "\x1b[F\t"sv,
                 .sizes = { Narrow } },
     };
 }
@@ -383,12 +383,12 @@ TEST_CASE("key input", "[orchestrator][view]")
           .expected = { .pane = Pane::Details } },
         { .name = "tab twice in Medium", .world = &lists, .size = Medium, .keys = "\t\t", .expected = {} },
         { .name = "tab in Wide", .world = &lists, .size = Wide, .keys = "\t", .expected = {} },
-        { .name = "enter in Narrow",
+        { .name = "tab in Narrow",
           .world = &lists,
           .size = Narrow,
-          .keys = "\r",
+          .keys = "\t",
           .expected = { .pane = Pane::Details } },
-        { .name = "enter, esc in Narrow", .world = &lists, .size = Narrow, .keys = "\r\x1b", .expected = {} },
+        { .name = "tab, esc in Narrow", .world = &lists, .size = Narrow, .keys = "\t\x1b", .expected = {} },
         { .name = "help",
           .world = &lists,
           .size = Wide,
@@ -531,6 +531,119 @@ TEST_CASE("an escape sequence split across two input calls", "[orchestrator][vie
     CHECK(fixture.dashboard.interaction() == Interaction {});
     CHECK(fixture.dashboard.input("B").empty());
     CHECK(fixture.dashboard.interaction() == Interaction { .selected = 1 });
+}
+
+// {{{ Enter, d and the task keys
+
+namespace
+{
+
+/// A configuration whose `tasks` rows are @p tasks, and otherwise the default world's.
+[[nodiscard]] World withTasks(std::string_view tasks)
+{
+    return World { .configJson =
+                       std::format(R"({{ "worktree_root": "~/worktrees", "models": ["opus", "sonnet"],
+  "repos": {}, "tasks": [ {} ] }})",
+                                   OneRepository,
+                                   tasks) };
+}
+
+constexpr auto AddressReview = R"({ "id": "address_review", "key": "a", "label": "address review",
+    "applies_to": "pr", "model": "opus", "prompt": "/contour-workflows:address-review {url}" })"sv;
+constexpr auto WorkIssue = R"({ "id": "issue", "key": "w", "label": "work on issue", "applies_to": "issue",
+    "model": "opus", "prompt": "/contour-workflows:work-issue {url}" })"sv;
+constexpr auto FixCi =
+    R"({ "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet",
+    "prompt": "/contour-workflows:fix-ci {url}" })"sv;
+
+/// @return The id of the task the open form is on.
+[[nodiscard]] std::string formTask(DashboardFixture const& fixture)
+{
+    auto const& form = fixture.dashboard.form();
+    REQUIRE(form.has_value());
+    auto const* const config = fixture.engine.config();
+    REQUIRE(config != nullptr);
+    return config->tasks()[form->task].id;
+}
+
+} // namespace
+
+TEST_CASE("the help lists the tasks' keys", "[orchestrator][view]")
+{
+    auto fixture = DashboardFixture { World {} };
+    CHECK(fixture.dashboard.input("?").empty());
+    auto const screen = fixture.screen();
+    CHECK(screen.contains(" tasks "));
+    CHECK(screen.contains("f fix CI"));
+    CHECK(screen.contains("w work on issue"));
+}
+
+TEST_CASE("a hint line is cut between hints, never inside one", "[orchestrator][view]")
+{
+    static constexpr auto Hints = std::array { "enter open"sv, "d dispatch"sv, "esc back"sv };
+    CHECK(joinHints(Hints, 100) == "enter open · d dispatch · esc back");
+    CHECK(joinHints(Hints, 30) == "enter open · d dispatch");
+    CHECK(joinHints(Hints, 22) == "enter open");
+    CHECK(joinHints(Hints, 5).empty());
+}
+
+TEST_CASE("Enter's default task follows the tasks rows", "[orchestrator][view]")
+{
+    SECTION("without fix_ci, a pull request's first task is address_review")
+    {
+        auto fixture = DashboardFixture { withTasks(std::format("{}, {}", WorkIssue, AddressReview)) };
+        CHECK(fixture.dashboard.input("\r").empty());
+        CHECK(formTask(fixture) == "address_review");
+        CHECK_FALSE(fixture.dashboard.form()->session.empty());
+        CHECK(fixture.screen().contains("Dispatch an agent"));
+    }
+    SECTION("with no task for a pull request, Enter on one opens nothing and says so")
+    {
+        auto fixture = DashboardFixture { withTasks(WorkIssue) };
+        CHECK(fixture.dashboard.input("\r").empty());
+        CHECK_FALSE(fixture.dashboard.form().has_value());
+        CHECK(fixture.screen().contains("no task applies"));
+        CHECK(fixture.ids.taken == 0);
+    }
+    SECTION("d opens the same form")
+    {
+        auto fixture = DashboardFixture { World {} };
+        CHECK(fixture.dashboard.input("d").empty());
+        CHECK(formTask(fixture) == "fix_ci");
+    }
+}
+
+TEST_CASE("task keys open the form on that task", "[orchestrator][view]")
+{
+    auto fixture = DashboardFixture { withTasks(std::format("{}, {}, {}", FixCi, AddressReview, WorkIssue)) };
+    CHECK(fixture.dashboard.input("a").empty());
+    CHECK(formTask(fixture) == "address_review");
+    CHECK(fixture.dashboard.input("\x1b").empty());
+    fixture.escapeTimesOut();
+    REQUIRE_FALSE(fixture.dashboard.form().has_value());
+
+    CHECK(fixture.dashboard.input("f").empty());
+    CHECK(formTask(fixture) == "fix_ci");
+
+    // A task for issues does not apply to a pull request: the key says so and opens nothing.
+    auto other = DashboardFixture { withTasks(std::format("{}, {}", FixCi, WorkIssue)) };
+    CHECK(other.dashboard.input("w").empty());
+    CHECK_FALSE(other.dashboard.form().has_value());
+    CHECK(other.screen().contains("work on issue does not apply to this item"));
+}
+
+TEST_CASE("Enter on an item with an active run reveals its agent", "[orchestrator][view]")
+{
+    auto fixture = DashboardFixture { World {
+        .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }) } } };
+    // The first row is #2375, whose agent runs.
+    auto const actions = fixture.dashboard.input("\r");
+    CHECK(actions == std::vector<UiAction> { RevealAgentAction { .run = std::string { RunningId } } });
+    CHECK_FALSE(fixture.dashboard.form().has_value());
+
+    // And on the agent's own row.
+    CHECK(fixture.dashboard.input("\x1b[F\r")
+          == std::vector<UiAction> { RevealAgentAction { .run = std::string { RunningId } } });
 }
 
 // }}}

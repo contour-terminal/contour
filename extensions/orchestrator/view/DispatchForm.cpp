@@ -59,9 +59,6 @@ namespace
     /// The form's other keys, in the order the hint line shows them after Enter's.
     constexpr auto OtherHints = std::array { "tab next field"sv, "esc cancel"sv };
 
-    /// What separates two hints on the hint line.
-    constexpr auto HintSeparator = " · "sv;
-
     /// Why a note is refused: the agent would read it as an option.
     constexpr auto LeadingDashText = "a note may not start with -"sv;
 
@@ -194,6 +191,12 @@ namespace
         return std::format("‹ {} ›", value);
     }
 
+    /// @return The task field: its label between the arrows, then the key that opens the form on it.
+    [[nodiscard]] std::string taskChoice(TaskDef const& task)
+    {
+        return std::format("{} {}", choice(task.label), task.key);
+    }
+
     /// @return The role a field's value is drawn in: the selection's while it has the focus.
     [[nodiscard]] Role fieldRole(DispatchFormState const& form,
                                  FormField field,
@@ -224,9 +227,7 @@ namespace
                        .text = cut(std::format("{} · {}", itemLabel(form.item), form.title), columns) });
         lines.push_back(FormLine {
             .label = "task"sv,
-            .text =
-                cut(choice(form.task < tasks.size() ? std::string_view { tasks[form.task].label } : "?"sv),
-                    columns),
+            .text = cut(form.task < tasks.size() ? taskChoice(tasks[form.task]) : choice("?"), columns),
             .role = fieldRole(form, FormField::Task) });
         lines.push_back(FormLine {
             .label = "model"sv,
@@ -299,16 +300,22 @@ namespace
         return std::move(lines);
     }
 
-    /// @return The hint line: what Enter does now, then the form's other keys.
-    [[nodiscard]] std::string hintLine(DispatchFormState const& form)
+    /// @return Whether Enter does something now: not while the note starts with `-` or the engine would
+    /// refuse.
+    [[nodiscard]] bool enterActs(DispatchFormState const& form, Engine const& engine)
     {
-        auto text = std::string { EnterHints[std::to_underlying(form.hooks)] };
-        for (auto const hint: OtherHints)
-        {
-            text += HintSeparator;
-            text += hint;
-        }
-        return text;
+        return !startsWithDash(form) && previewOf(form, engine).has_value();
+    }
+
+    /// @return The hint line in @p columns cells: what Enter does, while it does something, then the form's
+    ///         other keys.
+    [[nodiscard]] std::string hintLine(DispatchFormState const& form, Engine const& engine, int columns)
+    {
+        auto hints = std::vector<std::string_view> {};
+        if (enterActs(form, engine))
+            hints.push_back(EnterHints[std::to_underlying(form.hooks)]);
+        hints.insert(hints.end(), OtherHints.begin(), OtherHints.end());
+        return joinHints(hints, columns);
     }
 
     // }}}
@@ -444,7 +451,7 @@ std::optional<DispatchAction> applyFormKey(core::tui::KeyEvent const& key,
                 dropLastCodepoint(state.note);
             return std::nullopt;
         case core::tui::KeyCode::Enter: {
-            if (startsWithDash(state) || !previewOf(state, engine))
+            if (!enterActs(state, engine))
                 return std::nullopt;
             if (engine.hooks() == HooksState::Missing)
             {
@@ -493,7 +500,7 @@ void DispatchFormView::render(core::tui::Canvas& canvas)
         inside.putString(y, x, text, styleOf(theme, line.role));
     }
     if (inside.height() > 0)
-        inside.putString(inside.height() - 1, 1, cut(hintLine(*_form), width), styleOf(theme, Role::Dim));
+        inside.putString(inside.height() - 1, 1, hintLine(*_form, _engine, width), styleOf(theme, Role::Dim));
 }
 
 int DispatchFormView::heightAt(int width) const

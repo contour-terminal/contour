@@ -72,9 +72,6 @@ namespace
         return columns;
     }
 
-    /// What separates two hints on the hint line.
-    constexpr auto HintSeparator = " · "sv;
-
     /// @return The index into BandBreakpoints that @p size chooses: the last one whose minima it meets.
     [[nodiscard]] std::size_t breakpointFor(Size size) noexcept
     {
@@ -399,16 +396,11 @@ namespace
 
         void render(Canvas& canvas) override
         {
-            auto text = std::string {};
+            auto hinted = std::vector<std::string_view> {};
             for (auto const& row: keyRows())
-            {
-                if (!isHintedIn(row, _band))
-                    continue;
-                if (!text.empty())
-                    text += HintSeparator;
-                text += row.hint;
-            }
-            canvas.putString(0, 1, cut(text, canvas.width() - 2), styleOf(canvas.theme(), Role::Dim));
+                if (isHintedIn(row, _band))
+                    hinted.push_back(row.hint);
+            canvas.putString(0, 1, joinHints(hinted, canvas.width() - 2), styleOf(canvas.theme(), Role::Dim));
         }
 
       private:
@@ -456,27 +448,50 @@ namespace
     }
 
     /// The keys and what they do, over the dashboard.
+    /// The keys and what they do, over the dashboard: the table's hints, then the configured tasks' keys.
     class HelpOverlay final: public Component
     {
       public:
+        explicit HelpOverlay(Engine const& engine): _engine { engine } {}
+
         void render(Canvas& canvas) override
         {
             canvas.clear(styleOf(canvas.theme(), Role::Text));
             drawFrame(canvas, "Keys");
             auto inside = insideFrame(canvas);
             auto line = 0;
-            for (auto const hint: hints() | std::views::take(std::max(0, inside.height())))
-                inside.putString(
-                    line++, 1, cut(hint, inside.width() - 2), styleOf(canvas.theme(), Role::Text));
+            for (auto const& [text, role]: lines() | std::views::take(std::max(0, inside.height())))
+                inside.putString(line++, 1, cut(text, inside.width() - 2), styleOf(canvas.theme(), role));
         }
 
         [[nodiscard]] Size preferredSize() const override
         {
+            auto const all = lines();
             auto widest = 0;
-            for (auto const hint: hints())
-                widest = std::max(widest, columnsOf(hint));
-            return { .width = widest + 4, .height = static_cast<int>(std::ranges::distance(hints())) + 2 };
+            for (auto const& line: all)
+                widest = std::max(widest, columnsOf(line.first));
+            return { .width = widest + 4, .height = static_cast<int>(all.size()) + 2 };
         }
+
+      private:
+        /// @return Each line and its role: the hints, then a `tasks` heading and one `<key> <label>` per
+        /// task.
+        [[nodiscard]] std::vector<std::pair<std::string, Role>> lines() const
+        {
+            auto all = std::vector<std::pair<std::string, Role>> {};
+            for (auto const hint: hints())
+                all.emplace_back(std::string { hint }, Role::Text);
+            auto const* const config = _engine.config();
+            if (config == nullptr || config->tasks().empty())
+                return all;
+            all.emplace_back(std::string {}, Role::Text);
+            all.emplace_back("tasks", Role::Dim);
+            for (auto const& task: config->tasks())
+                all.emplace_back(std::format("{} {}", task.key, task.label), Role::Text);
+            return all;
+        }
+
+        Engine const& _engine;
     };
 
 } // namespace
@@ -497,7 +512,7 @@ Dashboard::State::State(Engine const& engine,
     surface { size, [this](std::string_view bytes) { frameBytes.append(bytes); } },
     screen { surface, core::tui::ScreenConfig {}, clock },
     size { size },
-    help { std::make_unique<HelpOverlay>() },
+    help { std::make_unique<HelpOverlay>(engine) },
     formView { std::make_unique<DispatchFormView>(engine, interaction.form) },
     root { std::make_unique<core::tui::Responsive>(std::ranges::to<std::vector<core::tui::Breakpoint>>(
         std::views::iota(std::size_t { 0 }, BandBreakpoints.size())
@@ -615,7 +630,9 @@ KeyContext Dashboard::State::keyContext() const noexcept
 {
     return KeyContext { .band = BandBreakpoints[breakpointFor(size)].band,
                         .selectable = selectableCount(rows, visible),
-                        .selected = selectedRow() };
+                        .selected = selectedRow(),
+                        .engine = &engine,
+                        .task = std::nullopt };
 }
 
 std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEvent> const& events,

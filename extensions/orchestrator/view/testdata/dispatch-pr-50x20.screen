@@ -1,6 +1,6 @@
 ╭─ Dispatch an agent ────────────────────────────╮
 │ item      #2375 · Say why the stdio relay fai… │
-│ task      ‹ fix CI ›                           │
+│ task      ‹ fix CI › f                         │
 │ model     ‹ sonnet ›                           │
 │ note      optional; tab to type one            │
 │ prompt    /contour-workflows:fix-ci            │

@@ -293,3 +293,19 @@ TEST_CASE("a paste is text, never keys", "[orchestrator][view][form]")
     CHECK(list.dashboard.input("/\x1b[200~std\nio\x1b[201~").empty());
     CHECK(list.dashboard.interaction().filter == "std io");
 }
+
+TEST_CASE("the form offers Enter only while Enter dispatches", "[orchestrator][view][form]")
+{
+    auto fixture = DashboardFixture { World {} };
+    fixture.dashboard.openForm("contour", ChangeRequestRef { 2375 }, "fix_ci");
+    CHECK(fixture.screen().contains("enter dispatch · tab next field · esc cancel"));
+    // The task field names the key that opens the form on it.
+    CHECK(fixture.screen().contains("‹ fix CI › f"));
+    CHECK(fixture.dashboard.input("\t\t-").empty());
+    CHECK_FALSE(fixture.screen().contains("enter dispatch"));
+    CHECK(fixture.screen().contains("tab next field · esc cancel"));
+
+    auto refused = DashboardFixture { limitReached() };
+    refused.dashboard.openForm("contour", ChangeRequestRef { 2375 }, "fix_ci");
+    CHECK_FALSE(refused.screen().contains("enter dispatch"));
+}

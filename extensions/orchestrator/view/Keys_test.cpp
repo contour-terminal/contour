@@ -9,6 +9,7 @@
 #include <optional>
 #include <string_view>
 
+#include <orchestrator/core/DashboardKeys.hpp>
 #include <orchestrator/view/Keys.hpp>
 #include <orchestrator/view/Sections.hpp>
 
@@ -40,9 +41,9 @@ TEST_CASE("keyRows: every row's command is dispatched", "[orchestrator][view]")
     CHECK(std::ranges::all_of(keyRows(), [](KeyRow const& row) { return isDispatched(row.command); }));
 }
 
-TEST_CASE("keyRows: no dispatch, review, board or transcript key yet", "[orchestrator][view]")
+TEST_CASE("keyRows: no review, board or transcript key yet", "[orchestrator][view]")
 {
-    for (auto const key: { "f"sv, "r"sv, "d"sv, "b"sv, "t"sv })
+    for (auto const key: { "f"sv, "r"sv, "b"sv, "t"sv })
     {
         CAPTURE(key);
         CHECK(std::ranges::find(keyRows(), key, &KeyRow::key) == keyRows().end());
@@ -139,11 +140,38 @@ TEST_CASE("ending a run asks once", "[orchestrator][view]")
     }
 }
 
-TEST_CASE("tab swap is hinted in the Medium band only", "[orchestrator][view]")
+TEST_CASE("Tab shows details in the Narrow band", "[orchestrator][view]")
 {
+    // Enter dispatches or reveals; the details are Tab's wherever the band cannot show them beside the list.
     auto const tab = std::ranges::find(keyRows(), "tab"sv, &KeyRow::key);
     REQUIRE(tab != keyRows().end());
     CHECK(isHintedIn(*tab, Band::Medium));
+    CHECK(isHintedIn(*tab, Band::Narrow));
     CHECK(!isHintedIn(*tab, Band::Wide));
-    CHECK(!isHintedIn(*tab, Band::Narrow));
+
+    auto const item = Row { .kind = RowKind::PullRequest };
+    for (auto const band: { Band::Narrow, Band::Medium })
+    {
+        auto interaction = Interaction {};
+        auto const context = KeyContext { .band = band, .selectable = 1, .selected = &item };
+        CHECK(dispatch(KeyCommand::Tab, interaction, context) == std::nullopt);
+        CHECK(interaction.pane == Pane::Details);
+        CHECK(dispatch(KeyCommand::Tab, interaction, context) == std::nullopt);
+        CHECK(interaction.pane == Pane::List);
+    }
+    auto interaction = Interaction {};
+    CHECK(dispatch(KeyCommand::Tab, interaction, KeyContext { .band = Band::Wide }) == std::nullopt);
+    CHECK(interaction.pane == Pane::List);
+}
+
+TEST_CASE("every key the view binds is a dashboard key", "[orchestrator][view]")
+{
+    // The configuration refuses a task key among dashboardKeys(): a key bound here and missing there would
+    // let a task take it, and never fire.
+    for (auto const& row: keyRows())
+    {
+        CAPTURE(row.key);
+        CHECK(
+            std::ranges::contains(orchestrator::dashboardKeys(), row.key, &orchestrator::DashboardKey::name));
+    }
 }

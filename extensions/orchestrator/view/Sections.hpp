@@ -65,6 +65,8 @@ struct Row
     std::string status = {};              ///< Right-aligned after the text, such as `approved`; may be empty.
     Role statusRole = Role::Dim;          ///< How the status is drawn.
     std::string run = {};                 ///< The run it stands for; empty for a pull request or an issue.
+    std::string repo = {};                ///< The repository of the item it stands for; empty for a run.
+    std::optional<ItemRef> item = {};     ///< The pull request or issue it stands for; absent for a run.
     std::vector<KeyCommand> offers = {};  ///< The run commands it accepts: EndRun, RetryRemoval, Dismiss.
     OpenEffect onOpen = OpenEffect::None; ///< What opening its details tells the engine.
     std::string title = {};               ///< The details' first line.
@@ -125,6 +127,16 @@ void drawFrame(core::tui::Canvas& canvas, std::string_view title);
 
 /// @return The part of @p canvas inside a box's border.
 [[nodiscard]] core::tui::Canvas insideFrame(core::tui::Canvas const& canvas);
+
+/// What separates two hints on a hint line.
+inline constexpr auto HintSeparator = std::string_view { " · " };
+
+/// A hint line: the hints joined by HintSeparator, as many whole ones as fit; a hint that does not fit is
+/// left out with every one after it, so the line is never cut inside a hint.
+/// @param hints The hints, most important first.
+/// @param columns The cells the line may take.
+/// @return The line.
+[[nodiscard]] std::string joinHints(std::span<std::string_view const> hints, int columns);
 
 /// @param text Text.
 /// @return How many cells it takes.
