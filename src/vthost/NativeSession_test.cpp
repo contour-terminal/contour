@@ -5070,6 +5070,51 @@ TEST_CASE("a screen update right after input arms an immediate flush", "[vthost]
     CHECK(NativeSessionFlushTester::armedDeadline(*client.session) == f.clock.now());
 }
 
+TEST_CASE("an echo waits for the cursor a redraw hid, then flushes at once", "[vthost][native][flush]")
+{
+    // PSReadLine's answer to a key, as ConPTY hands it over: the cursor hidden in a read of its own, the line
+    // redrawn, the cursor shown. Flushed at the hide, the window drew the cursor gone for 20 ms on every key.
+    auto f = FlushHarness {};
+    auto const id = newSession(f.h.host);
+    auto& client = f.attachPastFirstIncrement(id);
+    auto const before = incrementCount(client.received);
+
+    f.h.host.writeInput(id, "q");
+    f.clock.advance(1ms);
+    f.update(client, id, "\x1b[?25l");
+    CHECK(NativeSessionFlushTester::armedDeadline(*client.session) == f.clock.now() + 5ms);
+    f.update(client, id, "q");
+    CHECK(NativeSessionFlushTester::armedDeadline(*client.session) == f.clock.now() + 5ms);
+
+    // The echo credit was kept for this: the redraw is done, and goes out whole, at once.
+    f.update(client, id, "\x1b[?25h");
+    CHECK(NativeSessionFlushTester::armedDeadline(*client.session) == f.clock.now());
+    CHECK(turnUntil(f.h.loop, [&] { return incrementCount(client.received) == before + 1; }));
+    turnIdle(f.h.loop);
+    CHECK(incrementCount(client.received) == before + 1);
+    CHECK_FALSE(NativeSessionFlushTester::armedDeadline(*client.session).has_value());
+}
+
+TEST_CASE("an echo whose cursor stays hidden waits only the redraw grace", "[vthost][native][flush]")
+{
+    // A program that keeps the cursor hidden -- a full-screen one drawing its own -- is answered within the
+    // redraw grace, not one coalescing window.
+    auto f = FlushHarness {};
+    auto const id = newSession(f.h.host);
+    auto& client = f.attachPastFirstIncrement(id);
+    auto const before = incrementCount(client.received);
+
+    f.update(client, id, "\x1b[?25l");
+    f.clock.advance(20ms);
+    CHECK(turnUntil(f.h.loop, [&] { return incrementCount(client.received) == before + 1; }));
+
+    f.h.host.writeInput(id, "j");
+    f.update(client, id, "line");
+    CHECK(NativeSessionFlushTester::armedDeadline(*client.session) == f.clock.now() + 5ms);
+    f.clock.advance(5ms);
+    CHECK(turnUntil(f.h.loop, [&] { return incrementCount(client.received) == before + 2; }));
+}
+
 TEST_CASE("a screen update with no recent input coalesces for 20 ms", "[vthost][native][flush]")
 {
     auto f = FlushHarness {};

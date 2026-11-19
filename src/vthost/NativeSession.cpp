@@ -442,11 +442,17 @@ FlushReason NativeSession::flushReasonFor(SessionId session, core::platform::Ste
     if (follow == _followed.end() || snapshotPending(session))
         return FlushReason::Coalesce;
     auto const lastInput = _host.lastInputAt(session);
+    // Read without the terminal's lock: the modes are atomic, and the parser thread may hold the lock.
+    auto const* const terminal = _host.terminal(session);
+    auto const cursor = terminal != nullptr && !terminal->isModeEnabled(vtbackend::DECMode::VisibleCursor)
+                            ? CursorVisibility::Hidden
+                            : CursorVisibility::Visible;
     auto const reason = decideFlush(_services.flush,
                                     FlushInputs { .now = now,
                                                   .lastInput = lastInput,
                                                   .answeredInput = follow->second.answeredInput,
-                                                  .increments = follow->second.increments });
+                                                  .increments = follow->second.increments,
+                                                  .cursor = cursor });
     // Spent at once, not when the flush runs: a second update before it must not earn another.
     if (reason == FlushReason::Echo)
         follow->second.answeredInput = lastInput;
