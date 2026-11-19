@@ -67,6 +67,7 @@ namespace
     using engine::detail::judge;
     using engine::detail::later;
     using engine::detail::PollTagPrefix;
+    using engine::detail::TranscriptTagSuffix;
     using engine::detail::Verdict;
 
     /// What a stored run's key starts with.
@@ -233,6 +234,7 @@ std::vector<Effect> Engine::step(Input const& input)
                     feed(dismiss.run, Dismiss {}, out);
             },
             [&](MarkRunSeen const& seen) { feed(seen.run, MarkSeen {}, out); },
+            [&](ReadTranscript const& request) { readTranscript(request, out); },
             [&](RefreshNow const&) {
                 if (!_config)
                     return;
@@ -526,6 +528,7 @@ void Engine::forget(std::string_view runId)
         --_insideCount;
     if (auto const found = _boardsFound.find(runId); found != _boardsFound.end())
         _boardsFound.erase(found);
+    std::erase_if(_transcripts, [&](TranscriptView const& view) { return view.run == runId; });
     _runs.erase(run);
 }
 
@@ -552,6 +555,14 @@ void Engine::onProcessFinished(ProcessFinished const& finished, std::vector<Effe
     if (finished.tag.starts_with(PollTagPrefix))
     {
         onPollResult(finished.tag, finished.outcome, out);
+        return;
+    }
+    if (finished.tag.ends_with(TranscriptTagSuffix))
+    {
+        onTranscriptResult(
+            std::string_view(finished.tag).substr(0, finished.tag.size() - TranscriptTagSuffix.size()),
+            finished.outcome,
+            out);
         return;
     }
     auto const run = std::ranges::find_if(std::span(_runs).first(_insideCount), [&](Run const& candidate) {

@@ -23,6 +23,7 @@
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Reconcile.hpp>
 #include <orchestrator/core/Run.hpp>
+#include <orchestrator/core/Transcript.hpp>
 
 namespace orchestrator
 {
@@ -194,6 +195,14 @@ struct MarkRunSeen
     uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
 };
 
+/// The user asked for a page of a run's transcript.
+struct ReadTranscript
+{
+    std::string run;     ///< The run's id.
+    uint32_t page = 1;   ///< The 1-based page.
+    uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
+};
+
 /// The user asked for the lists to be read again now.
 struct RefreshNow
 {
@@ -212,7 +221,8 @@ using Input = std::variant<Wake,
                            EndRun,
                            DismissRun,
                            MarkRunSeen,
-                           RefreshNow>;
+                           RefreshNow,
+                           ReadTranscript>;
 
 // }}}
 // {{{ effects
@@ -312,6 +322,28 @@ using Effect = std::variant<RunCommand,
                             DispatchRefused>;
 
 // }}}
+
+/// How far a transcript page has come.
+enum class FetchState : uint8_t
+{
+    Loading = 0,    ///< Asked for; the verb has not answered yet.
+    Loaded,         ///< The page was read.
+    Failed,         ///< The verb failed, or printed no page: TranscriptView::failure says why.
+    FormatMismatch, ///< The verb and the orchestrator speak different formats: one of them needs updating.
+};
+
+/// A run's transcript, as last asked for.
+struct TranscriptView
+{
+    std::string run;                        ///< The run's id.
+    uint32_t page = 1;                      ///< The page asked for last.
+    FetchState state = FetchState::Loading; ///< How far it has come.
+    std::optional<TranscriptPage> content;  ///< The page last read; kept while the next one loads.
+    std::string failure;                    ///< Why it Failed, sanitised; empty otherwise.
+};
+
+/// How many runs' transcripts the engine keeps; asking for a fifth drops the one asked for longest ago.
+inline constexpr std::size_t MaxCachedTranscripts = 4;
 
 /// What a dispatch would start, worked out as Engine::dispatch() works it out: what the form shows.
 struct DispatchPreview
@@ -435,6 +467,10 @@ class Engine
 
     /// @return How many runs count as active (countsAsActive()): what `max_agents` is checked against.
     [[nodiscard]] std::size_t activeRuns() const noexcept;
+
+    /// @param run A run's id.
+    /// @return Its transcript as last asked for (ReadTranscript); nullptr when it was not, or was dropped.
+    [[nodiscard]] TranscriptView const* transcript(std::string_view run) const noexcept;
 
   private:
     /// Who a queued command is for: a run's go ahead of the polls.
@@ -561,6 +597,12 @@ class Engine
     void readBoards(std::vector<Effect>& out);
     [[nodiscard]] std::optional<uint64_t> boardDueAt(Run const& run) const;
     void onBoardRead(std::string_view runId, FileRead const& read);
+
+    // Defined in EngineTranscript.cpp.
+    void readTranscript(ReadTranscript const& request, std::vector<Effect>& out);
+    void issueTranscript(Run const& run, uint32_t page, std::vector<Effect>& out);
+    void onTranscriptResult(std::string_view runId, ProcessOutcome const& outcome, std::vector<Effect>& out);
+    [[nodiscard]] TranscriptView* findTranscript(std::string_view run) noexcept;
     void refreshOrphans();
     [[nodiscard]] RepoState* findRepoState(std::string_view name) noexcept;
     [[nodiscard]] RepoState const* findRepoState(std::string_view name) const noexcept;
@@ -577,6 +619,9 @@ class Engine
     PaneListing _paneListing =
         PaneListing::Unknown; ///< How _panes was listed; Unknown until a listing was known.
     std::set<std::string, std::less<>> _boardsFound; ///< The runs whose STATUS.md this instance has read.
+    std::vector<TranscriptView>
+        _transcripts; ///< At most MaxCachedTranscripts, the one asked for last at the back.
+    std::map<std::string, uint32_t, std::less<>> _transcriptCalls; ///< The page in flight, by run id.
     std::vector<InFlightCall> _inFlight;
     std::vector<InFlightCall> _paneOpenings; ///< The tabs asked for and not yet answered for, by run id.
     std::deque<Queued> _queue;

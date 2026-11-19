@@ -72,6 +72,9 @@ struct Judgement
 /// The suffix of the tag a status board is read with.
 inline constexpr std::string_view BoardTagSuffix = "/board";
 
+/// The suffix of the tag a run's transcript page is read with: `<run>#transcript`.
+inline constexpr std::string_view TranscriptTagSuffix = "#transcript";
+
 /// What every poll tag starts with.
 inline constexpr std::string_view PollTagPrefix = "poll/";
 

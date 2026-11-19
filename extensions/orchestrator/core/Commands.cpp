@@ -33,6 +33,8 @@ namespace
         ArgumentDecl { .name = "path", .kind = ArgumentKind::Path, .root = Root::Worktrees },
         ArgumentDecl { .name = "query", .kind = ArgumentKind::Text, .root = std::nullopt },
         ArgumentDecl { .name = "prompt", .kind = ArgumentKind::Text, .root = std::nullopt },
+        ArgumentDecl { .name = "page", .kind = ArgumentKind::Number, .root = std::nullopt },
+        ArgumentDecl { .name = "format", .kind = ArgumentKind::Number, .root = std::nullopt },
     };
 
     // }}}
@@ -218,6 +220,12 @@ namespace
     constexpr auto GitWorktreeRemoveArgv = std::array { "git"sv, "worktree"sv, "remove"sv, "{path}"sv };
     constexpr auto AgentSetupCheckArgv =
         std::array { "contour"sv, "agent"sv, "setup"sv, "--dry-run"sv, "--json"sv };
+    /// The run's worktree is passed as `--cwd`, not used as the working directory: it may be gone, and the
+    /// verb only compares it with the directories the session's log names.
+    constexpr auto AgentTranscriptArgv = std::array {
+        "contour"sv, "agent"sv,  "transcript"sv, "--session"sv, "{session}"sv, "--cwd"sv,
+        "{path}"sv,  "--page"sv, "{page}"sv,     "--format"sv,  "{format}"sv,  "--json"sv,
+    };
 
     constexpr auto CommandTable = std::array {
         CommandDecl { .name = "gh-auth",
@@ -307,6 +315,12 @@ namespace
                       .timeout = Timeout::Short,
                       .root = Root::Worktrees,
                       .argv = AgentSetupCheckArgv,
+                      .environment = {} },
+        // In the worktree root too: a Finished run's worktree is usually gone, its transcript is not.
+        CommandDecl { .name = "agent-transcript",
+                      .timeout = Timeout::Short,
+                      .root = Root::Worktrees,
+                      .argv = AgentTranscriptArgv,
                       .environment = {} },
     };
 

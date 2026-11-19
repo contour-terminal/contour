@@ -984,6 +984,39 @@ TEST_CASE("manifestLines spells the declared tables", "[orchestrator][commands][
     }
 }
 
+TEST_CASE("agent-transcript runs in the worktree root", "[orchestrator][commands][transcript]")
+{
+    auto const* const transcript = findCommand("agent-transcript");
+    REQUIRE(transcript != nullptr);
+    CHECK(transcript->root == Root::Worktrees);
+    CHECK(transcript->timeout == Timeout::Short);
+    CHECK(transcript->environment.empty());
+    CHECK(std::ranges::equal(transcript->argv,
+                             std::array { "contour"sv,
+                                          "agent"sv,
+                                          "transcript"sv,
+                                          "--session"sv,
+                                          "{session}"sv,
+                                          "--cwd"sv,
+                                          "{path}"sv,
+                                          "--page"sv,
+                                          "{page}"sv,
+                                          "--format"sv,
+                                          "{format}"sv,
+                                          "--json"sv }));
+    for (auto const name: { "page"sv, "format"sv })
+    {
+        CAPTURE(name);
+        auto const* const argument = findArgumentDecl(name);
+        REQUIRE(argument != nullptr);
+        CHECK(argument->kind == ArgumentKind::Number);
+    }
+    CHECK(std::ranges::contains(
+        manifestLines(),
+        "command agent-transcript short @worktrees = contour agent transcript --session "
+        "{session} --cwd {path} --page {page} --format {format} --json"sv));
+}
+
 TEST_CASE("the manifest-v2 corpus", "[orchestrator][commands][manifest][corpus]")
 {
     SECTION("each file gets the verdict it pins")

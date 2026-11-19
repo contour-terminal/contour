@@ -45,6 +45,7 @@ add_library(orchestrator_core STATIC
     core/EngineDetail.hpp
     core/EngineDispatch.cpp
     core/EnginePoll.cpp
+    core/EngineTranscript.cpp
     core/FailureWords.cpp
     core/FailureWords.hpp
     core/Finished.cpp
@@ -76,6 +77,9 @@ add_library(orchestrator_core STATIC
     core/RunJson.hpp
     core/Sanitize.cpp
     core/Sanitize.hpp
+    core/Transcript.cpp
+    core/Transcript.hpp
+    core/TranscriptJson.hpp
     core/Utf8.hpp
     core/Uuid.cpp
     core/Uuid.hpp
@@ -142,6 +146,7 @@ if(ORCHESTRATOR_TESTING)
         core/Reconcile_test.cpp
         core/Run_test.cpp
         core/Sanitize_test.cpp
+        core/Transcript_test.cpp
         core/Utf8_test.cpp
         core/Uuid_test.cpp
         guest/Driver_test.cpp
