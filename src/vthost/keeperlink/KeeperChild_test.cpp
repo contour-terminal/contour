@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/MockPty.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/test/ProcessTesting.hpp>
@@ -184,6 +185,33 @@ TEST_CASE("cwd and foreground name answer for a keeper child", "[keeper][keeperl
     child.reset();
     CHECK(h.turnUntil([&] { return !exists(pid); }, 10s));
     fs::remove_all(directory);
+}
+
+TEST_CASE("a keeper spawn starts in the handle's directory", "[keeper][keeperlink][spawn]")
+{
+    // The keeper is unchanged: it hands the spawn's descriptors on as they came, the directory's among them,
+    // and the trampoline enters it -- not the path, which by then names a symlink to /tmp.
+    auto h = KeeperChildHarness { 200ms };
+    INFO(h.keeper.log());
+    auto const scratch =
+        fs::canonical(fs::temp_directory_path()) / std::format("keeper-handle-{}", std::random_device {}());
+    auto const named = scratch / "worktree";
+    auto const moved = scratch / "moved";
+    fs::create_directories(named);
+    auto opened = vtpty::nativeDirectoryOpener().open(named.string());
+    REQUIRE(opened.has_value());
+    fs::rename(named, moved);
+    fs::create_directory_symlink("/tmp", named);
+
+    // 5: started where the handle is; 6: anywhere else.
+    auto exec = vtpty::testing::execInfo(
+        "/bin/sh", { "-c", std::format(R"sh([ "$(pwd -P)" = '{}' ] && exit 5; exit 6)sh", moved.string()) });
+    exec.workingDirectory = named;
+    exec.directory = std::make_shared<vtpty::DirectoryHandle const>(std::move(*opened));
+    auto const child = h.start(exec);
+    REQUIRE(h.turnUntil([&] { return child->checkStatus().has_value(); }));
+    CHECK(std::get<vtpty::NormalExit>(*child->checkStatus()).exitCode == 5);
+    fs::remove_all(scratch);
 }
 
 TEST_CASE("closing a keeper child hangs it up and the keeper kills it after the grace",

@@ -126,6 +126,8 @@ add_library(vthost STATIC
     ServedSessions.hpp
     SessionHost.cpp
     SessionHost.hpp
+    ShellPtyFactory.cpp
+    ShellPtyFactory.hpp
     WorkspaceGit.cpp
     WorkspaceGit.hpp
     CommandRunner.hpp
@@ -384,6 +386,7 @@ if(VTHOST_TESTING)
         ObjectRegistry_test.cpp
         ServedSessions_test.cpp
         SessionHost_test.cpp
+        ShellPtyFactory_test.cpp
         FlushPolicy_test.cpp
         SessionSettings_test.cpp
         SessionEnd_test.cpp

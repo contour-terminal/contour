@@ -702,7 +702,7 @@ void SessionHost::reapOrphan(SessionId session)
     _objects.forget(session);
 }
 
-void SessionHost::settleStartDirectory(SessionSpawnRequest& request) const
+std::expected<void, StartDirectoryError> SessionHost::settleStartDirectory(SessionSpawnRequest& request) const
 {
     auto& exec = *request.commandOverride;
     // A pane made from another starts where that one is, unless the request named a directory itself.
@@ -711,13 +711,24 @@ void SessionHost::settleStartDirectory(SessionSpawnRequest& request) const
         if (auto const inherited = workingDirectoryOf(*request.directoryFrom))
             exec.workingDirectory = *inherited;
     }
-    if (exec.workingDirectory.empty() || _fileSystem.isDirectory(exec.workingDirectory))
-        return;
+    auto const exists = !exec.workingDirectory.empty() && _fileSystem.isDirectory(exec.workingDirectory);
+    if (request.startDirectory == StartDirectory::Required)
+    {
+        // Started there or not at all: no fallback to the profile's directory.
+        if (exists)
+            return {};
+        sessionLog()("{} does not exist; the pane, which must start there, is not opened",
+                     core::pathToUtf8(exec.workingDirectory));
+        return std::unexpected(StartDirectoryError::Gone);
+    }
+    if (exec.workingDirectory.empty() || exists)
+        return {};
     // A directory deleted or unmounted since, or never there, is no reason to lose the pane: it starts
     // where the profile says, running what the request asked.
     sessionLog()("{} no longer exists; the pane starts in the shell's default directory",
                  core::pathToUtf8(exec.workingDirectory));
     exec.workingDirectory.clear();
+    return {};
 }
 
 namespace
@@ -838,7 +849,11 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
             request.commandOverride.emplace();
         for (auto const& [name, value]: paneEnvironment(ids.workspace, ids.tab, ids.pane))
             request.commandOverride->env.insert_or_assign(name, value);
-        settleStartDirectory(request);
+        if (!settleStartDirectory(request))
+        {
+            errorLog()("session {}: its start directory is gone; no session created", id.value);
+            return std::nullopt;
+        }
         spawn = resolveSpawn(request, id);
         pty = makePty(spawn);
     }

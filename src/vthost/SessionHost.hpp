@@ -968,6 +968,23 @@ struct PaneRuntime
     std::optional<std::string> profile {};           ///< The profile the session was spawned under, if named.
 };
 
+/// Whether a spawn may start somewhere else than the directory it names.
+enum class StartDirectory : uint8_t
+{
+    /// A directory that is gone is dropped, and the shell starts in the profile's: a pane is worth more
+    /// than its directory.
+    Preferred = 0,
+    /// The spawn starts there or not at all: an agent's pane, whose program must never run in another
+    /// directory than the one it was given (a worktree it would otherwise write into the wrong repository).
+    Required,
+};
+
+/// Why a spawn's start directory was refused.
+enum class StartDirectoryError : uint8_t
+{
+    Gone, ///< A StartDirectory::Required directory does not exist, or names none.
+};
+
 /// What ONE session-creating request overrides about the session it spawns.
 ///
 /// A struct rather than a parameter so a future per-spawn knob is a field here instead of a
@@ -1023,6 +1040,9 @@ struct SessionSpawnRequest
     /// the host, when the session is seeded (@see SessionHost::workingDirectoryOf); a pane whose directory
     /// is unknown, or no longer exists, leaves the profile's directory in force. Nullopt inherits nothing.
     std::optional<vtworkspace::SessionId> directoryFrom {};
+
+    /// Whether the spawn may fall back from the directory it names (@see SessionHost::settleStartDirectory).
+    StartDirectory startDirectory = StartDirectory::Preferred;
 
     /// Engaged for a served session: it runs no program, but adopts the device named here, and every field
     /// above that shapes a program (its command, profile, directory, history and input) is ignored. Refused
@@ -2190,9 +2210,12 @@ class SessionHost final:
     /// Settles the directory @p request's shell starts in, for every way a spawn names one: the directory
     /// of @ref SessionSpawnRequest::directoryFrom when the request names none, then a check that the
     /// directory exists. One that does not (a pane's directory deleted since, a stale path, a typo) is
-    /// logged and dropped, leaving the profile's directory in force and the program and arguments alone.
+    /// logged and dropped, leaving the profile's directory in force and the program and arguments alone --
+    /// unless the request's directory is StartDirectory::Required, which then refuses the spawn.
     /// @param request A request whose commandOverride is engaged.
-    void settleStartDirectory(SessionSpawnRequest& request) const;
+    /// @return Nothing once settled; StartDirectoryError::Gone for a Required directory that is not there.
+    [[nodiscard]] std::expected<void, StartDirectoryError> settleStartDirectory(
+        SessionSpawnRequest& request) const;
 
     /// @return The name a workspace made from @p request starts with: after the folder its first shell
     ///         @p seeded starts in (@see vtbackend::defaultWorkspaceName); empty when that is unknown.

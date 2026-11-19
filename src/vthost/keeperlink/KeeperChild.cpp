@@ -239,6 +239,8 @@ vtpty::StartResult KeeperChild::spawn()
 {
     auto prepared = vtpty::prepareTrampolineSpawn(
         *_pty, _config.exec, _config.sandbox, _config.placement->childOomScoreAdjust());
+    // The spawn holds its own copy of the directory's descriptor now: the handle is let go, as Process does.
+    _config.exec.directory.reset();
     if (!prepared)
         return std::unexpected(prepared.error());
     auto const terminal = _pty->handover();
