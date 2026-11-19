@@ -224,4 +224,6 @@ if(CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST)
                                OUTPUT_VAR ORCHESTRATOR_WASM_MODULE
                                CMAKE_ARGS "-DORCHESTRATOR_MANIFEST_SECTION_SOURCE=${_orchestrator_manifest_section}")
     add_dependencies(orchestrator_wasm_cxx orchestrator_manifest_section)
+    # Where the module lands, for the rules that install it with the bundled extensions.
+    set(CONTOUR_ORCHESTRATOR_WASM_MODULE "${ORCHESTRATOR_WASM_MODULE}" PARENT_SCOPE)
 endif()
