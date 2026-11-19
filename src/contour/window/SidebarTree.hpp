@@ -43,6 +43,9 @@ enum class SidebarRowKind : uint8_t
     Pane,          ///< One pane of a tab with more than one.
 };
 
+/// Number of @c SidebarRowKind enumerators, derived from the last one.
+inline constexpr size_t SidebarRowKindCount = static_cast<size_t>(SidebarRowKind::Pane) + 1;
+
 /// Identifies a row across rebuilds, so a view keeps its selection and focus through a refresh.
 struct SidebarRowKey
 {
@@ -87,6 +90,17 @@ enum class RowSelection : uint8_t
     None = 0,
     Selected,         ///< The tab this window displays; panes are not marked.
     ContainsSelected, ///< A folded workspace holding that tab: the selection moves to the nearest row shown.
+};
+
+/// Number of @c RowSelection enumerators, derived from the last one.
+inline constexpr size_t RowSelectionCount = static_cast<size_t>(RowSelection::ContainsSelected) + 1;
+
+/// Whether the window holding the sidebar has the user's attention: when a background pane that starts to
+/// need them is worth saying aloud, and how much of a coloured row's colour it keeps.
+enum class WindowActivity : uint8_t
+{
+    Inactive = 0, ///< Another window or application has focus.
+    Active,       ///< This window has focus.
 };
 
 /// A tree connector in one column of the Terminal look's tree.

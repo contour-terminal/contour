@@ -281,14 +281,6 @@ enum class SwitcherOverWindow : uint8_t
                : SidebarPresence::Hidden;
 }
 
-/// Whether the window has the user's attention, which is when a background pane that starts to need them
-/// is worth saying aloud.
-enum class WindowActivity : uint8_t
-{
-    Inactive = 0, ///< Another window or application has focus.
-    Active,       ///< This window has focus.
-};
-
 /// What a screen reader names a row by: its title, which is what the row shows. Its kind, fold and status are
 /// the description's (accessibleDescriptionOf()), its selection the item's own state.
 /// @param row The row.

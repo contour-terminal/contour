@@ -30,24 +30,17 @@ enum class RowPointer : uint8_t
     Hovering, ///< The pointer is over the row.
 };
 
-/// Whether the window holding a sidebar row is the active one.
-enum class WindowFocus : uint8_t
-{
-    Inactive = 0, ///< Another window, or none, has the focus.
-    Active,       ///< This window has the focus.
-};
-
 /// The tab-strip prominence a sidebar row's tab colour is drawn at.
 /// @param selection Whether the row is the window's shown tab; a folded workspace holding it counts as
 ///                  selected.
 /// @param pointer   Whether the pointer is over the row.
-/// @param focus     Whether the row's window is active.
+/// @param activity  Whether the row's window is active.
 /// @return As the tab strip decides a coloured tab's (WindowController's tabVisualStateFor): Active for the
 ///         selected row in any window, so it always keeps the most of the colour; else Hover while hovered;
 ///         else Inactive in the active window and InactiveWindowUnfocused in another.
 [[nodiscard]] constexpr TabVisualState sidebarTabVisualState(RowSelection selection,
                                                              RowPointer pointer,
-                                                             WindowFocus focus) noexcept
+                                                             WindowActivity activity) noexcept
 {
     switch (selection)
     {
@@ -57,8 +50,19 @@ enum class WindowFocus : uint8_t
     }
     if (pointer == RowPointer::Hovering)
         return TabVisualState::Hover;
-    return focus == WindowFocus::Active ? TabVisualState::Inactive : TabVisualState::InactiveWindowUnfocused;
+    return activity == WindowActivity::Active ? TabVisualState::Inactive
+                                              : TabVisualState::InactiveWindowUnfocused;
 }
+
+/// What a colour lays under a sidebar row's text and marks: the fill a tab's or a workspace's tint gives the
+/// row, and the ink everything written on it takes.
+struct SidebarRowTint
+{
+    std::optional<vtbackend::RGBColor> fill; ///< The row's fill; none where nothing tints the row.
+    std::optional<vtbackend::RGBColor> ink;  ///< The ink of what is written on the fill.
+
+    [[nodiscard]] bool operator==(SidebarRowTint const&) const = default;
+};
 
 /// What a tab's colour paints on its sidebar row; an empty member paints nothing of that kind.
 struct SidebarTabColorPaint
@@ -66,6 +70,12 @@ struct SidebarTabColorPaint
     std::optional<vtbackend::RGBColor> fill; ///< The row's fill, replacing its selection and hover fill.
     std::optional<vtbackend::RGBColor> bar;  ///< A bar at the row's leading edge.
     std::optional<vtbackend::RGBColor> ink;  ///< The name's colour.
+
+    /// @return The tint this paint lays under the row's marks; none without a fill (`bar`, `name`).
+    [[nodiscard]] SidebarRowTint tint() const
+    {
+        return fill ? SidebarRowTint { .fill = fill, .ink = ink } : SidebarRowTint {};
+    }
 
     [[nodiscard]] bool operator==(SidebarTabColorPaint const&) const = default;
 };
@@ -103,16 +113,16 @@ struct SidebarTabColorPaint
 /// tint it stands off by WCAG 1.4.11's 3:1 for non-text marks (vtbackend::MinimumMarkContrast, the floor the
 /// chrome holds every other mark to). Short of that -- an orange mark on an orange tab's tint -- it takes the
 /// tint's own ink, the black or white the row's text already reads in.
-/// @param mark  The mark's semantic colour.
-/// @param paint What the tab's colour paints on the row (sidebarTabColorPaint).
+/// @param mark The mark's semantic colour.
+/// @param tint What the tab's or the workspace's colour lays under the row (their paint's tint()).
 /// @return @p mark, or the tint's ink where @p mark would not stand off the tint.
 [[nodiscard]] inline vtbackend::RGBColor sidebarMarkInk(vtbackend::RGBColor mark,
-                                                        SidebarTabColorPaint const& paint) noexcept
+                                                        SidebarRowTint const& tint) noexcept
 {
-    if (!paint.fill || !paint.ink
-        || vtbackend::contrastRatio(mark, *paint.fill) >= vtbackend::MinimumMarkContrast)
+    if (!tint.fill || !tint.ink
+        || vtbackend::contrastRatio(mark, *tint.fill) >= vtbackend::MinimumMarkContrast)
         return mark;
-    return *paint.ink;
+    return *tint.ink;
 }
 
 } // namespace contour::window

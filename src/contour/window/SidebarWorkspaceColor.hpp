@@ -37,6 +37,9 @@ struct SidebarWorkspaceColorPaint
     std::optional<vtbackend::RGBColor> wash;   ///< Group: a faint fill behind the row.
     std::optional<vtbackend::RGBColor> swatch; ///< Swatch: the square before the name.
 
+    /// @return The tint this paint lays under the row's marks: the workspace row's under `tint`, else none.
+    [[nodiscard]] SidebarRowTint tint() const { return SidebarRowTint { .fill = fill, .ink = ink }; }
+
     [[nodiscard]] bool operator==(SidebarWorkspaceColorPaint const&) const = default;
 };
 
@@ -80,18 +83,6 @@ struct SidebarWorkspaceColorPaint
             break;
     }
     return paint;
-}
-
-/// The colour a status mark is drawn in on a sidebar row a workspace's colour paints: as on a tinted tab
-/// row (sidebarMarkInk above), only the tint's fill can swallow a mark.
-/// @param mark  The mark's semantic colour.
-/// @param paint What the workspace's colour paints on the row (sidebarWorkspaceColorPaint).
-/// @return @p mark, or the tint's ink where @p mark would not stand off the tint.
-[[nodiscard]] inline vtbackend::RGBColor sidebarMarkInk(vtbackend::RGBColor mark,
-                                                        SidebarWorkspaceColorPaint const& paint) noexcept
-{
-    return sidebarMarkInk(mark,
-                          SidebarTabColorPaint { .fill = paint.fill, .bar = std::nullopt, .ink = paint.ink });
 }
 
 } // namespace contour::window

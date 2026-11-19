@@ -115,16 +115,16 @@ TEST_CASE("sidebarWorkspaceColorPaint.a status mark on a tinted workspace row st
                                                    TabVisualState::Active);
     REQUIRE(tinted.fill);
     REQUIRE(tinted.ink);
-    CHECK(sidebarMarkInk(Magenta, tinted) == *tinted.ink);
+    CHECK(sidebarMarkInk(Magenta, tinted.tint()) == *tinted.ink);
     auto const contrasting = *tinted.ink;
-    CHECK(sidebarMarkInk(contrasting, tinted) == contrasting);
+    CHECK(sidebarMarkInk(contrasting, tinted.tint()) == contrasting);
 
     auto const swatch = sidebarWorkspaceColorPaint(SidebarWorkspaceColorStyle::Swatch,
                                                    SidebarRowKind::Workspace,
                                                    Magenta,
                                                    RowFill,
                                                    TabVisualState::Active);
-    CHECK(sidebarMarkInk(Magenta, swatch) == Magenta);
+    CHECK(sidebarMarkInk(Magenta, swatch.tint()) == Magenta);
 }
 
 TEST_CASE("sidebarWorkspaceColorPaint.the group wash is fainter than a resting tint", "[sidebar]")

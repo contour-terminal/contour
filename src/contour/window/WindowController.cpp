@@ -41,6 +41,7 @@
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SidebarMenuState.hpp>
+#include <contour/window/SidebarTabColor.hpp>
 #include <contour/window/SwitcherController.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabColorScheme.hpp>
@@ -2088,12 +2089,10 @@ namespace
                                                            bool hovered,
                                                            bool windowActive) noexcept
     {
-        if (active)
-            return window::TabVisualState::Active;
-        if (hovered)
-            return window::TabVisualState::Hover;
-        return windowActive ? window::TabVisualState::Inactive
-                            : window::TabVisualState::InactiveWindowUnfocused;
+        // The sidebar's coloured rows decide it the same way; the tab strip's tab is a row of one.
+        return sidebarTabVisualState(active ? RowSelection::Selected : RowSelection::None,
+                                     hovered ? RowPointer::Hovering : RowPointer::Away,
+                                     windowActive ? WindowActivity::Active : WindowActivity::Inactive);
     }
 } // namespace
 
