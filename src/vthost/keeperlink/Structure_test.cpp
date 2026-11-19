@@ -182,11 +182,9 @@ struct TabWatcher final: vtworkspace::ModelEvents
 TEST_CASE("every structure event has a push timing", "[keeper][structure]")
 {
     static_assert(keeperlink::StructureEventCount == 22, "a new structure event needs a row and this count");
-    auto const debounced = std::set { StructureEvent::PaneRatioChanged,
-                                      StructureEvent::TabTitleChanged,
-                                      StructureEvent::TabColorChanged,
-                                      StructureEvent::ActiveTabChanged,
-                                      StructureEvent::ActivePaneChanged };
+    auto const debounced = std::set { StructureEvent::PaneRatioChanged, StructureEvent::TabTitleChanged,
+                                      StructureEvent::TabColorChanged,  StructureEvent::WorkspaceColorChanged,
+                                      StructureEvent::ActiveTabChanged, StructureEvent::ActivePaneChanged };
     for (auto const index: std::views::iota(std::size_t { 0 }, keeperlink::StructureEventCount))
     {
         auto const event = static_cast<StructureEvent>(index);

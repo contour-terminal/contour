@@ -304,6 +304,40 @@ TEST_CASE("a workspace's colour follows a filler byte in the retired visibility 
     CHECK(encodeSnapshot(coloured) == file);
 }
 
+TEST_CASE("a workspace's colour cut short is Malformed", "[vthost][snapshot][workspace-color]")
+{
+    auto const fileWithColorBytes = [](std::size_t colorBytes) {
+        auto workspace = proto::Writer {};
+        workspace.u8(0); // identity
+        workspace.varint(0);
+        workspace.varint(0);
+        workspace.u8(0); // filler
+        workspace.u8(1); // has a colour
+        for ([[maybe_unused]] auto const index: std::views::iota(std::size_t { 0 }, colorBytes))
+            workspace.u8(0x99);
+        auto body = proto::Writer {};
+        body.svarint(5);
+        body.varint(1);
+        body.blob(workspace.view());
+        return fileAround(body.view());
+    };
+
+    SECTION("no colour bytes")
+    {
+        CHECK(decodeSnapshot(fileWithColorBytes(0)).error() == SnapshotError::Malformed);
+    }
+    SECTION("two of the four colour bytes")
+    {
+        CHECK(decodeSnapshot(fileWithColorBytes(2)).error() == SnapshotError::Malformed);
+    }
+    SECTION("all four, for contrast")
+    {
+        auto const decoded = decodeSnapshot(fileWithColorBytes(4));
+        REQUIRE(decoded);
+        CHECK(decoded->snapshot.workspaces.at(0).color == vtbackend::RGBColor { 0x999999U });
+    }
+}
+
 TEST_CASE("a snapshot written before the workspace colour decodes without one",
           "[vthost][snapshot][workspace-color]")
 {

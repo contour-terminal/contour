@@ -9,6 +9,7 @@
 #include <iostream>
 #include <ranges>
 #include <span>
+#include <vector>
 
 #include <vthost/SessionSettings.hpp>
 #include <vthost/handover/HandoverCodec.hpp>
@@ -546,4 +547,59 @@ TEST_CASE("a handover image from before the workspace colour carries none", "[ha
     CHECK_FALSE(decoded->tree.workspaces.front().color.has_value());
     // And a workspace without one is written as that daemon wrote it, so that daemon reads it back.
     CHECK(std::ranges::equal(encodeHandover(namedImage()), testing::RecordedHandoverNames));
+}
+
+namespace
+{
+
+/// @return A handover stream of one workspace (id 9) whose colour field, field 5, holds @p colorField.
+[[nodiscard]] std::vector<uint8_t> imageWithWorkspaceColorField(std::vector<uint8_t> const& colorField)
+{
+    using vtbackend::detail::fieldKey;
+    using vtbackend::detail::WireKind;
+    auto workspace = vtbackend::StateWriter::payload();
+    workspace.varint(fieldKey(1, WireKind::Varint));
+    workspace.varint(9);
+    workspace.varint(fieldKey(5, WireKind::Framed));
+    workspace.bytes(colorField);
+    auto workspaces = vtbackend::StateWriter::payload();
+    workspaces.bytes(std::move(workspace).take());
+    auto tree = vtbackend::StateWriter::payload();
+    tree.varint(fieldKey(1, WireKind::Framed));
+    tree.bytes(std::move(workspaces).take());
+    auto payload = vtbackend::StateWriter::payload();
+    payload.varint(fieldKey(3, WireKind::Framed));
+    payload.bytes(std::move(tree).take());
+    return framed(std::move(payload).take(), HandoverFormatVersion);
+}
+
+} // namespace
+
+TEST_CASE("a workspace's colour cut short in a handover image is refused", "[handover][workspace-color]")
+{
+    using vtbackend::detail::fieldKey;
+    using vtbackend::detail::WireKind;
+    // The colour record: red, green and blue, one varint field each.
+    auto const rgb = std::vector<uint8_t> { static_cast<uint8_t>(fieldKey(1, WireKind::Varint)), 0x7A,
+                                            static_cast<uint8_t>(fieldKey(2, WireKind::Varint)), 0x3E,
+                                            static_cast<uint8_t>(fieldKey(3, WireKind::Varint)), 0x1D };
+
+    SECTION("whole, for contrast")
+    {
+        auto field = std::vector<uint8_t> { 1, static_cast<uint8_t>(rgb.size()) };
+        field.insert(field.end(), rgb.begin(), rgb.end());
+        auto const decoded = decodeHandover(imageWithWorkspaceColorField(field));
+        REQUIRE(decoded.has_value());
+        REQUIRE(decoded->tree.workspaces.size() == 1);
+        CHECK(decoded->tree.workspaces.front().color == vtbackend::RGBColor { 0x7A3E1DU });
+    }
+    SECTION("present, and nothing after")
+    {
+        CHECK(decodeHandover(imageWithWorkspaceColorField({ 1 })).error() == HandoverError::Truncated);
+    }
+    SECTION("present, its record cut after two of its six bytes")
+    {
+        auto const field = std::vector<uint8_t> { 1, static_cast<uint8_t>(rgb.size()), rgb[0], rgb[1] };
+        CHECK(decodeHandover(imageWithWorkspaceColorField(field)).error() == HandoverError::Truncated);
+    }
 }
