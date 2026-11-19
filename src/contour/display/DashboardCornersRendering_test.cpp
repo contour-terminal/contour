@@ -3,8 +3,9 @@
 // A display-gated pixel test of the rounded box corners an extension's dashboard draws its panels with. The
 // box-drawing renderer's own tests check that a corner's edge pixels meet the line it continues into, glyph
 // by glyph in the atlas; this case checks the same in the frame a REAL TerminalDisplay draws through the RHI,
-// fed the orchestrator dashboard's `lists` golden, so that whatever stands between the atlas and the screen
-// (tile placement, cell geometry, blending) cannot open a step or a notch at a corner either.
+// fed the orchestrator dashboard's goldens, so that whatever stands between the atlas and the screen
+// (tile placement, cell geometry, blending) cannot open a step or a notch at a corner either. The goldens
+// cover a lone panel and the dispatch form, a popup drawn over the two panels beneath it.
 //
 // Like every [display] case this SKIPs unless CONTOUR_TEST_DISPLAY=1 opts into a real windowing system
 // (scripts/run-display-tests.sh runs it under a headless weston).
@@ -43,12 +44,39 @@ using namespace std::string_view_literals;
 namespace
 {
 
-/// The dashboard's `lists` frame at 50×20, the size the harness's window holds: one panel, its four rounded
-/// corners.
-[[nodiscard]] std::filesystem::path listsGoldenPath()
+/// A dashboard golden the case draws, and what the harness's 800×600 window needs to show it whole.
+struct Golden
+{
+    std::string_view file;          ///< The golden's file name in the view's testdata.
+    std::optional<double> fontSize; ///< The font size that fits its page in the window; empty: the profile's.
+    vtbackend::PageSize page;       ///< The page the golden was drawn for.
+    int corners;                    ///< How many rounded corners it draws.
+};
+
+/// The goldens drawn, each in its own window.
+/// @return `lists` at 50×20 (one panel, its four corners) and the dispatch form over two panels at 120×40
+///         (the panels' eight corners and the popup's four), the latter in a font small enough to fit.
+[[nodiscard]] std::array<Golden, 2> goldens()
+{
+    using vtbackend::ColumnCount;
+    using vtbackend::LineCount;
+    return {
+        Golden { .file = "lists-50x20.screen"sv,
+                 .fontSize = std::nullopt,
+                 .page = vtbackend::PageSize { LineCount(20), ColumnCount(50) },
+                 .corners = 4 },
+        Golden { .file = "dispatch-pr-120x40.screen"sv,
+                 .fontSize = 7.0,
+                 .page = vtbackend::PageSize { LineCount(40), ColumnCount(120) },
+                 .corners = 12 },
+    };
+}
+
+/// Where @p golden lives.
+[[nodiscard]] std::filesystem::path goldenPath(Golden const& golden)
 {
     return std::filesystem::path { CONTOUR_PROJECT_SOURCE_DIR } / "extensions" / "orchestrator" / "view"
-           / "testdata" / "lists-50x20.screen";
+           / "testdata" / golden.file;
 }
 
 /// The golden's rows, as the VT output that draws them: each row addressed on its own, so that a full row
@@ -198,63 +226,72 @@ TEST_CASE("display: the dashboard's rounded corners meet their lines in the real
 {
     REQUIRE_DISPLAY_OR_SKIP();
 
-    auto file = std::ifstream { listsGoldenPath(), std::ios::binary };
-    REQUIRE(file.good());
-    auto const golden = std::string { std::istreambuf_iterator<char> { file }, {} };
-
-    for (auto const arcStyle: ArcStyles)
+    for (auto const& golden: goldens())
     {
-        INFO("arc style " << static_cast<int>(arcStyle));
-        auto const variant =
-            Variant { .scheme = "contour-dark"sv, .style = contour::config::UiStyle::Native };
-        auto const h = makeHarness(
-            variant, [&](contour::config::Config& config) { config.boxArcStyle.value() = arcStyle; });
-        auto const page = h->session->terminal().pageSize();
-        REQUIRE(unbox<int>(page.columns) >= 50);
-        REQUIRE(unbox<int>(page.lines) >= 20);
+        INFO("golden " << golden.file);
+        auto file = std::ifstream { goldenPath(golden), std::ios::binary };
+        REQUIRE(file.good());
+        auto const frameText = std::string { std::istreambuf_iterator<char> { file }, {} };
 
-        h->feedAndSettle(framePainting(golden));
-        auto const frame = frameOf(*h);
-        auto const g = geometryOf(*h);
-        auto const ground = h->session->terminal().colorPalette().defaultBackground;
+        for (auto const arcStyle: ArcStyles)
+        {
+            INFO("arc style " << static_cast<int>(arcStyle));
+            auto const variant =
+                Variant { .scheme = "contour-dark"sv, .style = contour::config::UiStyle::Native };
+            auto const h = makeHarness(variant, [&](contour::config::Config& config) {
+                config.boxArcStyle.value() = arcStyle;
+                if (golden.fontSize)
+                    config.profiles.value().at("main").fonts.value().size.pt = *golden.fontSize;
+            });
+            auto const page = h->session->terminal().pageSize();
+            REQUIRE(page.columns >= golden.page.columns);
+            REQUIRE(page.lines >= golden.page.lines);
 
-        auto cornersSeen = 0;
-        auto const text = pageText(frame.buffer);
-        for (auto const& [row, codepoints]: text)
-            for (auto const [column, codepoint]: core::views::enumerate(codepoints))
-            {
-                auto const corner = std::ranges::find(Corners, codepoint, &Corner::codepoint);
-                if (corner == Corners.end())
-                    continue;
-                ++cornersSeen;
-                auto const at = CellAt { .row = row, .column = static_cast<int>(column) };
+            h->feedAndSettle(framePainting(frameText));
+            auto const frame = frameOf(*h);
+            auto const g = geometryOf(*h);
+            auto const ground = h->session->terminal().colorPalette().defaultBackground;
 
-                for (auto const [edge, line]: std::array { std::pair { corner->towardsHorizontal, U'─' },
-                                                           std::pair { corner->towardsVertical, U'│' } })
+            auto cornersSeen = 0;
+            auto const text = pageText(frame.buffer);
+            for (auto const& [row, codepoints]: text)
+                for (auto const [column, codepoint]: core::views::enumerate(codepoints))
                 {
-                    auto const across = neighbour(at, edge);
-                    INFO(std::format("corner U+{:04X} at row {} column {}, towards row {} column {}",
-                                     static_cast<uint32_t>(corner->codepoint),
-                                     at.row,
-                                     at.column,
-                                     across.row,
-                                     across.column));
-                    // The golden draws a box: every corner continues into the line it meets.
-                    REQUIRE(codepointAt(text, across) == line);
+                    auto const corner = std::ranges::find(Corners, codepoint, &Corner::codepoint);
+                    if (corner == Corners.end())
+                        continue;
+                    ++cornersSeen;
+                    auto const at = CellAt { .row = row, .column = static_cast<int>(column) };
 
-                    auto const seam = seamAt(frame.image, g, at, edge);
-                    INFO("corner side: " << hexRow(seam.inside));
-                    INFO("line side:   " << hexRow(seam.outside));
+                    for (auto const& [edge, line]: std::array { std::pair { corner->towardsHorizontal, U'─' },
+                                                                std::pair { corner->towardsVertical, U'│' } })
+                    {
+                        auto const across = neighbour(at, edge);
+                        INFO(std::format("corner U+{:04X} at row {} column {}, towards row {} column {}",
+                                         static_cast<uint32_t>(corner->codepoint),
+                                         at.row,
+                                         at.column,
+                                         across.row,
+                                         across.column));
+                        // The golden draws boxes: every corner continues into the line it meets.
+                        REQUIRE(codepointAt(text, across) == line);
 
-                    // The stroke reaches the side: a seam of nothing but page would meet trivially.
-                    CHECK(std::ranges::any_of(seam.inside, [&](auto c) { return !nearlyEqual(c, ground); }));
+                        auto const seam = seamAt(frame.image, g, at, edge);
+                        INFO("corner side: " << hexRow(seam.inside));
+                        INFO("line side:   " << hexRow(seam.outside));
 
-                    // Pixel for pixel, the arc's end lies over the line's end: no step, no notch, no fringe.
-                    CHECK(std::ranges::equal(
-                        seam.inside, seam.outside, [](auto a, auto b) { return nearlyEqual(a, b, 2); }));
+                        // The stroke reaches the side: a seam of nothing but page would meet trivially.
+                        CHECK(std::ranges::any_of(seam.inside,
+                                                  [&](auto c) { return !nearlyEqual(c, ground); }));
+
+                        // Pixel for pixel, the arc's end lies over the line's end: no step, no notch, no
+                        // fringe.
+                        CHECK(std::ranges::equal(
+                            seam.inside, seam.outside, [](auto a, auto b) { return nearlyEqual(a, b, 2); }));
+                    }
                 }
-            }
-        // ╭ ╮ ╯ ╰ of the panel.
-        CHECK(cornersSeen == 4);
+            // ╭ ╮ ╯ ╰ of every panel, and of the popup over them.
+            CHECK(cornersSeen == golden.corners);
+        }
     }
 }
