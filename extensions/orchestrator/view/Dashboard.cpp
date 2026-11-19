@@ -116,7 +116,12 @@ namespace
 /// Everything the dashboard is: the screen it draws on, where the user is, and the rows it draws.
 struct Dashboard::State
 {
-    State(Engine const& engine, core::tui::Theme theme, core::IClock const& clock, Size size);
+    State(Engine const& engine,
+          core::tui::Theme theme,
+          core::IClock const& clock,
+          Size size,
+          IUuidSource& ids,
+          std::string tab);
     ~State();
     State(State const&) = delete;
     State& operator=(State const&) = delete;
@@ -160,6 +165,8 @@ struct Dashboard::State
 
     Engine const& engine;
     core::IClock const& clock;
+    IUuidSource& ids;       ///< Where the session ids of the agents it dispatches come from.
+    std::string tab;        ///< The tab it is served in.
     std::string frameBytes; ///< What the surface was handed since the last frame.
     core::tui::HeadlessSurface surface;
     core::tui::Screen screen;
@@ -466,9 +473,16 @@ namespace
 // }}}
 // {{{ the layouts
 
-Dashboard::State::State(Engine const& engine, core::tui::Theme theme, core::IClock const& clock, Size size):
+Dashboard::State::State(Engine const& engine,
+                        core::tui::Theme theme,
+                        core::IClock const& clock,
+                        Size size,
+                        IUuidSource& ids,
+                        std::string tab):
     engine { engine },
     clock { clock },
+    ids { ids },
+    tab { std::move(tab) },
     surface { size, [this](std::string_view bytes) { frameBytes.append(bytes); } },
     screen { surface, core::tui::ScreenConfig {}, clock },
     size { size },
@@ -649,8 +663,10 @@ void Dashboard::State::syncLayout()
 Dashboard::Dashboard(Engine const& engine,
                      core::tui::Theme theme,
                      core::IClock const& clock,
-                     core::tui::Size size):
-    _state { std::make_unique<State>(engine, theme, clock, size) }
+                     core::tui::Size size,
+                     IUuidSource& ids,
+                     std::string tab):
+    _state { std::make_unique<State>(engine, theme, clock, size, ids, std::move(tab)) }
 {
 }
 
@@ -771,6 +787,16 @@ std::string Dashboard::frame()
 core::tui::Buffer const& Dashboard::rendered() const noexcept
 {
     return _state->screen.renderedBuffer();
+}
+
+std::string_view Dashboard::tab() const noexcept
+{
+    return _state->tab;
+}
+
+IUuidSource const& Dashboard::ids() const noexcept
+{
+    return _state->ids;
 }
 
 Interaction const& Dashboard::interaction() const noexcept

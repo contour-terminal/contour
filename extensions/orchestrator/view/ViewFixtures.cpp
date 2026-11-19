@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <orchestrator/view/ViewFixtures.hpp>
 
+#include <core/tui/TestHelpers.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <deque>
 #include <format>
 #include <string>
@@ -13,6 +16,7 @@
 #include <vector>
 
 #include <orchestrator/core/Fixtures.hpp>
+#include <orchestrator/view/Theme.hpp>
 
 namespace orchestrator::view::test
 {
@@ -78,6 +82,26 @@ namespace
                 queue.push_back(*command);
     }
 } // namespace
+
+DashboardFixture::DashboardFixture(World const& world, core::tui::Size size):
+    engine { bootEngine(world) },
+    // Six minutes after the engine started, as the guest's clock would read it.
+    clock { core::SteadyTimePoint { std::chrono::milliseconds { StartMonoMs + uint64_t { 360'000 } } } },
+    dashboard { engine, dashboardTheme(), clock, size, ids, std::string { Tab } }
+{
+}
+
+void DashboardFixture::escapeTimesOut()
+{
+    clock.advance(std::chrono::milliseconds { 60 });
+    static_cast<void>(dashboard.frame());
+}
+
+std::string DashboardFixture::screen()
+{
+    static_cast<void>(dashboard.frame());
+    return core::tui::test::canvasToString(dashboard.rendered());
+}
 
 Run outsideConfiguration(Run run)
 {

@@ -4,8 +4,8 @@
 # (`terminal-extensions:daemon`, wit/daemon/ in Contour's tree). A project of its own, like harness/, configured
 # with a WASI C++ toolchain; Contour builds it with contour_add_wasm_cxx_guest() (cmake/ContourWasiCxx.cmake)
 # when CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST is on. The core, the dashboard and the driver are the very sources the native
-# build compiles and tests; only WitHost.cpp and Exports.cpp, the adapter to the generated bindings, are
-# WebAssembly-only.
+# build compiles and tests; only WitHost.cpp, WitEntropy.cpp and Exports.cpp, the adapter to the generated bindings
+# and to WASI, are WebAssembly-only.
 #
 #   ORCHESTRATOR_MANIFEST_SECTION_SOURCE  the C++ source carrying the manifest section, which the host build
 #                                         generates with the native orchestrator_manifest tool
@@ -36,6 +36,8 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/.. orchestrator EXCLUDE_FROM_ALL)
 
 add_executable(orchestrator
     Exports.cpp
+    WitEntropy.cpp
+    WitEntropy.hpp
     WitHost.cpp
     WitHost.hpp
     bindings/daemon.c
@@ -47,4 +49,4 @@ target_link_libraries(orchestrator PRIVATE orchestrator_guest_driver)
 # The generated bindings, as <bindings/daemon.h>.
 target_include_directories(orchestrator PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 # The adapter is held to Contour's warnings; the generated bindings are not edited, and not warned about.
-set_source_files_properties(Exports.cpp WitHost.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Wpedantic;-Werror")
+set_source_files_properties(Exports.cpp WitEntropy.cpp WitHost.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Wpedantic;-Werror")

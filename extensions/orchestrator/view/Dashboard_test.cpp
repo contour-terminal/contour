@@ -45,40 +45,7 @@ constexpr auto Wide = Size { .width = 120, .height = 40 };
 constexpr auto Medium = Size { .width = 80, .height = 24 };
 constexpr auto Narrow = Size { .width = 50, .height = 20 };
 
-/// The engine's monotonic time six minutes after it started, as the guest's clock would read it.
-[[nodiscard]] core::SteadyTimePoint sixMinutesIn()
-{
-    return core::SteadyTimePoint { std::chrono::milliseconds { StartMonoMs + uint64_t { 360'000 } } };
-}
-
-/// The dashboard over an engine, with the clock it reads.
-struct Fixture
-{
-    explicit Fixture(World const& world, Size size = Wide):
-        engine { bootEngine(world) },
-        clock { sixMinutesIn() },
-        dashboard { engine, dashboardTheme(), clock, size }
-    {
-    }
-
-    /// Lets a held ESC wait past its deadline, and draws: it is then the Escape key.
-    void escapeTimesOut()
-    {
-        clock.advance(std::chrono::milliseconds { 60 });
-        static_cast<void>(dashboard.frame());
-    }
-
-    /// Draws a frame and returns the screen as text.
-    [[nodiscard]] std::string screen()
-    {
-        static_cast<void>(dashboard.frame());
-        return core::tui::test::canvasToString(dashboard.rendered());
-    }
-
-    Engine engine;
-    core::ManualClock clock;
-    Dashboard dashboard;
-};
+using Fixture = DashboardFixture;
 
 [[nodiscard]] Run finishedRun(std::string_view id, ItemRef item, Fate fate, Seen seen, std::string_view task)
 {
@@ -660,7 +627,9 @@ TEST_CASE("an agent's age is drawn again when it moves on", "[orchestrator][view
     auto const engine =
         bootEngine(World { .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }) } });
     auto clock = core::ManualClock { at(45'000) };
-    auto dashboard = Dashboard { engine, dashboardTheme(), clock, Wide };
+    auto ids = CountingUuids {};
+    auto dashboard =
+        Dashboard { engine, dashboardTheme(), clock, Wide, ids, std::string { DashboardFixture::Tab } };
     REQUIRE_FALSE(dashboard.frame().empty());
     CHECK(core::tui::test::canvasToString(dashboard.rendered()).contains("working 45s"));
     CHECK(dashboard.nextRepaintDue() == at(46'000));
@@ -731,7 +700,9 @@ TEST_CASE("a running agent with no status after 30 s hints at a trust prompt", "
 
     // The dashboard draws it at 30 s on its own, asking the engine nothing.
     auto clock = core::ManualClock { at(29'500) };
-    auto dashboard = Dashboard { engine, dashboardTheme(), clock, Wide };
+    auto ids = CountingUuids {};
+    auto dashboard =
+        Dashboard { engine, dashboardTheme(), clock, Wide, ids, std::string { DashboardFixture::Tab } };
     REQUIRE_FALSE(dashboard.frame().empty());
     CHECK_FALSE(core::tui::test::canvasToString(dashboard.rendered()).contains("waiting? see its tab"));
     CHECK(dashboard.nextRepaintDue() == at(30'000));

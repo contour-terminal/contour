@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <orchestrator/core/Engine.hpp>
+#include <orchestrator/core/Uuid.hpp>
 #include <orchestrator/view/Keys.hpp>
 
 namespace orchestrator::view
@@ -36,15 +37,21 @@ class Dashboard
     /// @param clock What core::tui measures hover and spinner time on, and the agents' ages are measured
     ///        against, in the engine's monotonic milliseconds; the guest's own (GuestClock).
     /// @param size The tab's size.
+    /// @param ids Where the session ids of the agents it dispatches come from; it must outlive the dashboard.
+    /// @param tab The id of the tab it is served in: where the agents it dispatches open beside.
     Dashboard(Engine const& engine,
               core::tui::Theme theme,
               core::IClock const& clock CORE_LIFETIMEBOUND,
-              core::tui::Size size);
+              core::tui::Size size,
+              IUuidSource& ids CORE_LIFETIMEBOUND,
+              std::string tab);
     /// A clock is kept, not copied: a temporary would dangle.
     Dashboard(Engine const& engine,
               core::tui::Theme theme,
               core::IClock const&& clock,
-              core::tui::Size size) = delete;
+              core::tui::Size size,
+              IUuidSource& ids,
+              std::string tab) = delete;
     ~Dashboard();
 
     Dashboard(Dashboard const&) = delete;
@@ -98,6 +105,12 @@ class Dashboard
 
     /// @return Where the user is: what is selected, open and filtered.
     [[nodiscard]] Interaction const& interaction() const noexcept;
+
+    /// @return The id of the tab it is served in.
+    [[nodiscard]] std::string_view tab() const noexcept;
+
+    /// @return Where the session ids of the agents it dispatches come from.
+    [[nodiscard]] IUuidSource const& ids() const noexcept;
 
     /// @return The index into BandBreakpoints the last frame was laid out by; std::nullopt before it.
     [[nodiscard]] std::optional<std::size_t> breakpoint() const noexcept;

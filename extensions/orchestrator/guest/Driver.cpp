@@ -283,8 +283,10 @@ std::array<Driver::ActionHandler, 3> const Driver::ActionHandlers {
     &Driver::showBlocked,   // ActionKind::ShowBlocked
 };
 
-Driver::Driver(IGuestHost& host, IDriverObserver& observer, std::string worktreeRoot, Engine engine):
+Driver::Driver(
+    IGuestHost& host, IUuidSource& ids, IDriverObserver& observer, std::string worktreeRoot, Engine engine):
     _host { host },
+    _ids { ids },
     _observer { observer },
     _worktreeRoot { std::move(worktreeRoot) },
     _engine { std::make_unique<Engine>(std::move(engine)) },
@@ -292,12 +294,13 @@ Driver::Driver(IGuestHost& host, IDriverObserver& observer, std::string worktree
 {
 }
 
-Driver Driver::load(IGuestHost& host, std::string_view configJson, HostInfo hostInfo)
+Driver Driver::load(IGuestHost& host, IUuidSource& ids, std::string_view configJson, HostInfo hostInfo)
 {
-    return load(host, configJson, std::move(hostInfo), noObserver());
+    return load(host, ids, configJson, std::move(hostInfo), noObserver());
 }
 
 Driver Driver::load(IGuestHost& host,
+                    IUuidSource& ids,
                     std::string_view configJson,
                     HostInfo hostInfo,
                     IDriverObserver& observer)
@@ -354,7 +357,7 @@ Driver Driver::load(IGuestHost& host,
     auto started = Engine::start(std::move(context));
     observer.started(started.effects);
 
-    auto driver = Driver { host, observer, std::move(worktreeRoot), std::move(started.engine) };
+    auto driver = Driver { host, ids, observer, std::move(worktreeRoot), std::move(started.engine) };
     driver.carryOut(started.effects);
     // The results the start consumed are released once its effects, its store writes among them, are done.
     for (auto const handle: taken)
@@ -513,9 +516,9 @@ void Driver::followTabs()
         if (auto const found = _dashboards.find(tab.tab); found != _dashboards.end())
             found->second->resize(sizeOf(tab));
         else
-            _dashboards.emplace(
-                tab.tab,
-                std::make_unique<view::Dashboard>(*_engine, view::dashboardTheme(), *_clock, sizeOf(tab)));
+            _dashboards.emplace(tab.tab,
+                                std::make_unique<view::Dashboard>(
+                                    *_engine, view::dashboardTheme(), *_clock, sizeOf(tab), _ids, tab.tab));
     }
 }
 

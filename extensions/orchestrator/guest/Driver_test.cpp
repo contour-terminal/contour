@@ -156,6 +156,7 @@ class FakeGuestHost final: public IGuestHost
     std::vector<ActionInfo> queuedActions;                   ///< What the next actionsTake() answers.
     std::vector<std::pair<std::string, uint32_t>> tabOpens;  ///< Every tabOpen(): scheme and origin.
     std::vector<std::pair<std::string, std::string>> writes; ///< Every tabWrite() that succeeded.
+    view::test::CountingUuids ids; ///< The session ids handed to the driver beside this host.
 
     /// @return Everything written to @p tab, in order.
     [[nodiscard]] std::string writtenTo(std::string_view tab) const
@@ -699,7 +700,7 @@ struct Served
     /// Loads the driver and answers its poll.
     void load()
     {
-        driver.emplace(Driver::load(host, configJson(), hostInfo(), observer));
+        driver.emplace(Driver::load(host, host.ids, configJson(), hostInfo(), observer));
         while (host.completeRunning() > 0)
             driver->update(Hint::Procs);
     }
@@ -767,7 +768,7 @@ TEST_CASE("load takes a finished result in contiguous pages", "[guest]")
     auto const handle = host.addFinished("poll/contour/prs", "gh-prs", 0, prs);
     auto observer = RecordingObserver {};
 
-    auto const driver = Driver::load(host, configJson(), hostInfo(), observer);
+    auto const driver = Driver::load(host, host.ids, configJson(), hostInfo(), observer);
 
     auto takes = std::vector<std::string> {};
     for (auto const& call: host.calls)
@@ -801,7 +802,7 @@ TEST_CASE("load lists running processes as in flight", "[guest]")
     host.addRunning("poll/auth", "gh-auth");
     auto observer = RecordingObserver {};
 
-    [[maybe_unused]] auto const driver = Driver::load(host, configJson(), hostInfo(), observer);
+    [[maybe_unused]] auto const driver = Driver::load(host, host.ids, configJson(), hostInfo(), observer);
 
     REQUIRE(observer.starts.size() == 1);
     CHECK(observer.starts.front().inFlight == std::vector { "poll/auth"s });
@@ -820,7 +821,7 @@ TEST_CASE("a result is released after its step's store writes", "[guest]")
     SECTION("finished while the guest was away")
     {
         auto const handle = putAway(host, away);
-        [[maybe_unused]] auto const driver = Driver::load(host, configJson("master"), hostInfo());
+        [[maybe_unused]] auto const driver = Driver::load(host, host.ids, configJson("master"), hostInfo());
         auto const set = host.positionOf(
             std::format("storeSet run/{}", away.command.tag.substr(0, away.command.tag.find('/'))));
         auto const release = host.positionOf(std::format("procRelease {}", handle));
@@ -833,7 +834,7 @@ TEST_CASE("a result is released after its step's store writes", "[guest]")
     {
         host.store = away.store;
         auto const handle = host.addRunning(away.command.tag, away.command.command);
-        auto driver = Driver::load(host, configJson("master"), hostInfo());
+        auto driver = Driver::load(host, host.ids, configJson("master"), hostInfo());
         host.calls.clear();
         FakeGuestHost::finish(host.processes.front(), 0, away.answer.stdoutText);
         REQUIRE(host.processes.front().handle == handle);
@@ -853,7 +854,7 @@ TEST_CASE("a finished process with no Procs hint is consumed on the next Wake", 
 {
     auto host = FakeGuestHost {};
     auto observer = RecordingObserver {};
-    auto driver = Driver::load(host, configJson(), hostInfo(), observer);
+    auto driver = Driver::load(host, host.ids, configJson(), hostInfo(), observer);
     auto* const auth = host.running("gh-auth");
     REQUIRE(auth != nullptr);
     auto const handle = auth->handle;
@@ -877,7 +878,7 @@ TEST_CASE("a missing program is refused, never gone", "[guest]")
     host.procStartError = HostError::BadArgument;
     auto observer = RecordingObserver {};
 
-    [[maybe_unused]] auto const driver = Driver::load(host, configJson(), hostInfo(), observer);
+    [[maybe_unused]] auto const driver = Driver::load(host, host.ids, configJson(), hostInfo(), observer);
 
     auto const finished = observer.inputsOf<ProcessFinished>();
     REQUIRE_FALSE(finished.empty());
@@ -907,7 +908,7 @@ TEST_CASE("exactly one reply per RunCommand", "[guest]")
         auto host = FakeGuestHost {};
         host.procStartError = row.error;
         auto observer = RecordingObserver {};
-        auto driver = Driver::load(host, configJson(), hostInfo(), observer);
+        auto driver = Driver::load(host, host.ids, configJson(), hostInfo(), observer);
         // Two more polls, each refused the same way.
         for ([[maybe_unused]] auto const _: std::views::iota(0, 2))
         {
@@ -936,7 +937,8 @@ TEST_CASE("exactly one reply per OpenPane", "[guest]")
     putAway(host, away);
     auto observer = RecordingObserver {};
 
-    [[maybe_unused]] auto const driver = Driver::load(host, configJson("master"), hostInfo(), observer);
+    [[maybe_unused]] auto const driver =
+        Driver::load(host, host.ids, configJson("master"), hostInfo(), observer);
 
     auto const opens = observer.effectsOf<OpenPane>();
     REQUIRE(opens.size() == 1);
@@ -1020,7 +1022,7 @@ TEST_CASE("wake is asked for the engine's latest timer only", "[guest]")
     {
         auto host = FakeGuestHost {};
         auto observer = RecordingObserver {};
-        auto driver = Driver::load(host, configJson(), hostInfo(), observer);
+        auto driver = Driver::load(host, host.ids, configJson(), hostInfo(), observer);
         auto const wakeAts = observer.effectsOf<WakeAt>();
         REQUIRE(wakeAts.size() == 1);
         CHECK(host.wakes == std::vector { WakeTimer::delayUntil(wakeAts.front().monoMs, StartMonoMs) });
@@ -1047,7 +1049,7 @@ TEST_CASE("panes not supported yet lists own records only", "[guest]")
 
     SECTION("not supported yet")
     {
-        auto driver = Driver::load(host, configJson(), hostInfo(), observer);
+        auto driver = Driver::load(host, host.ids, configJson(), hostInfo(), observer);
         REQUIRE(observer.starts.size() == 1);
         CHECK(observer.starts.front().paneListing == PaneListing::OwnRecordsOnly);
         CHECK(observer.starts.front().panes.empty());
@@ -1071,7 +1073,7 @@ TEST_CASE("panes not supported yet lists own records only", "[guest]")
                                                     .tag = "pr-1-20261113-150847",
                                                     .status = AgentStatus::Working,
                                                     .program = ProgramLiveness::Alive } };
-        [[maybe_unused]] auto const driver = Driver::load(host, configJson(), hostInfo(), observer);
+        [[maybe_unused]] auto const driver = Driver::load(host, host.ids, configJson(), hostInfo(), observer);
         REQUIRE(observer.starts.size() == 1);
         CHECK(observer.starts.front().paneListing == PaneListing::Tagged);
         CHECK(observer.starts.front().panes
@@ -1087,7 +1089,7 @@ TEST_CASE("the Panes hint lists the panes", "[guest][panes]")
     auto host = FakeGuestHost {};
     host.paneListing = std::vector<PaneInfo> {};
     auto observer = RecordingObserver {};
-    auto driver = Driver::load(host, configJson(), hostInfo(), observer);
+    auto driver = Driver::load(host, host.ids, configJson(), hostInfo(), observer);
     observer.inputs.clear();
     host.paneListing = std::vector { PaneInfo { .pane = "p1",
                                                 .tag = "pr-1-20261113-150847",
@@ -1111,7 +1113,7 @@ TEST_CASE("a listing answered limit tells the engine nothing", "[guest][panes]")
     auto host = FakeGuestHost {};
     host.paneListing = std::vector<PaneInfo> {};
     auto observer = RecordingObserver {};
-    auto driver = Driver::load(host, configJson(), hostInfo(), observer);
+    auto driver = Driver::load(host, host.ids, configJson(), hostInfo(), observer);
     observer.inputs.clear();
     host.paneListing = std::unexpected(HostError::Limit);
 
@@ -1175,7 +1177,8 @@ TEST_CASE("OpenPane passes near to pane-open", "[guest][panes]")
     putAway(host, away);
     auto observer = RecordingObserver {};
 
-    [[maybe_unused]] auto const driver = Driver::load(host, configJson("master"), hostInfo(), observer);
+    [[maybe_unused]] auto const driver =
+        Driver::load(host, host.ids, configJson("master"), hostInfo(), observer);
 
     auto const opens = observer.effectsOf<OpenPane>();
     REQUIRE(opens.size() == 1);
@@ -1191,7 +1194,7 @@ TEST_CASE("a failed store-set is logged, not fatal", "[guest]")
     host.storeSetError = HostError::Gone;
     auto observer = RecordingObserver {};
 
-    auto driver = Driver::load(host, configJson("master"), hostInfo(), observer);
+    auto driver = Driver::load(host, host.ids, configJson("master"), hostInfo(), observer);
 
     auto const errors =
         std::ranges::count(host.logged, LogLevel::Error, &std::pair<LogLevel, std::string>::first);
@@ -1213,7 +1216,7 @@ TEST_CASE("the summary reaches the host", "[guest]")
     auto host = FakeGuestHost {};
     host.answers = pollAnswers();
     auto observer = RecordingObserver {};
-    auto driver = Driver::load(host, configJson(), hostInfo(), observer);
+    auto driver = Driver::load(host, host.ids, configJson(), hostInfo(), observer);
     while (host.completeRunning() > 0)
         driver.update(Hint::Procs);
 
@@ -1235,7 +1238,7 @@ TEST_CASE("a restarted guest picks the result up by tag", "[guest]")
     auto host = FakeGuestHost {};
     host.answers = pollAnswers();
     {
-        auto driver = Driver::load(host, configJson(), hostInfo());
+        auto driver = Driver::load(host, host.ids, configJson(), hostInfo());
         auto* const auth = host.running("gh-auth");
         REQUIRE(auth != nullptr);
         FakeGuestHost::finish(*auth, 0, {});
@@ -1245,7 +1248,7 @@ TEST_CASE("a restarted guest picks the result up by tag", "[guest]")
     auto* const prs = host.running("gh-prs");
     FakeGuestHost::finish(*prs, 0, host.answers.at("gh-prs").stdoutText);
 
-    auto const driver = Driver::load(host, configJson(), hostInfo());
+    auto const driver = Driver::load(host, host.ids, configJson(), hostInfo());
 
     CHECK(host.startsOf("gh-prs") == 1);
     CHECK(host.startsOf("gh-auth") == 1);
@@ -1427,6 +1430,23 @@ TEST_CASE("a reveal without a remembered origin passes 0", "[guest][driver]")
     CHECK(served.host.paneReveals == std::vector { std::pair { *run.pane, uint32_t { 0 } } });
 }
 
+TEST_CASE("the driver hands the dashboards its uuid source", "[guest][driver]")
+{
+    auto served = Served {};
+    served.host.tabList = { TabInfo { .tab = "tab-1", .scheme = "orchestrator", .cols = 120, .rows = 40 },
+                            TabInfo { .tab = "tab-2", .scheme = "orchestrator", .cols = 80, .rows = 24 } };
+    served.load();
+    REQUIRE(served.driver->servedTabs() == 2);
+
+    for (auto const tab: { "tab-1"sv, "tab-2"sv })
+    {
+        CAPTURE(tab);
+        CHECK(&served.dashboard(tab).ids() == &served.host.ids);
+        CHECK(served.dashboard(tab).tab() == tab);
+    }
+    CHECK(served.host.ids.taken == 0); // taken only as a form opens
+}
+
 TEST_CASE("every declared action is carried out", "[guest]")
 {
     auto served = Served {};
@@ -1556,7 +1576,7 @@ TEST_CASE("a restarted guest redraws every open tab", "[guest]")
     served.host.writes.clear();
 
     served.driver.reset();
-    served.driver.emplace(Driver::load(served.host, configJson(), hostInfo()));
+    served.driver.emplace(Driver::load(served.host, served.host.ids, configJson(), hostInfo()));
 
     for (auto const tab: { "tab-1"sv, "tab-2"sv })
     {

@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/Clock.hpp>
+#include <core/tui/Rect.hpp>
+
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -10,6 +15,8 @@
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Run.hpp>
+#include <orchestrator/core/Uuid.hpp>
+#include <orchestrator/view/Dashboard.hpp>
 
 namespace orchestrator::view::test
 {
@@ -69,6 +76,42 @@ struct World
 /// @param run A run, such as storedRun() makes.
 /// @return @p run, of the repository `retired`, with its checkout and worktree named after it.
 [[nodiscard]] Run outsideConfiguration(Run run);
+
+/// UUIDs that count: the n-th next() holds n in its fourth byte, every other byte zero.
+class CountingUuids final: public IUuidSource
+{
+  public:
+    [[nodiscard]] std::array<uint8_t, 16> next() override
+    {
+        auto bytes = std::array<uint8_t, 16> {};
+        bytes[3] = static_cast<uint8_t>(++taken);
+        return bytes;
+    }
+
+    std::size_t taken = 0; ///< How many were taken.
+};
+
+/// A dashboard over an engine, with the clock it reads and its source of session ids, served in tab Tab.
+struct DashboardFixture
+{
+    /// The tab the dashboard is served in.
+    static constexpr auto Tab = std::string_view { "tab-1" };
+
+    /// @param world What the engine is started from.
+    /// @param size The tab's size.
+    explicit DashboardFixture(World const& world, core::tui::Size size = { .width = 120, .height = 40 });
+
+    /// Lets a held ESC wait past its deadline, and draws: it is then the Escape key.
+    void escapeTimesOut();
+
+    /// Draws a frame and returns the screen as text.
+    [[nodiscard]] std::string screen();
+
+    Engine engine;
+    core::ManualClock clock;
+    CountingUuids ids;
+    Dashboard dashboard;
+};
 
 /// Compares a screen with its golden file `view/testdata/<name>.screen`. With ORCHESTRATOR_UPDATE_GOLDENS set
 /// in the environment, (re)writes the file instead.

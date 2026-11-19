@@ -14,6 +14,7 @@
 #include <orchestrator/core/Config.hpp>
 #include <orchestrator/guest/Driver.hpp>
 #include <orchestrator/guest/HostCalls.hpp>
+#include <orchestrator/guest/WitEntropy.hpp>
 #include <orchestrator/guest/WitHost.hpp>
 
 namespace
@@ -75,7 +76,7 @@ extern "C"
         // The arguments were allocated for the export through cabi_realloc, and belong to it.
         daemon_string_free(configJson);
         daemon_host_info_free(info);
-        driver().emplace(Driver::load(witHost(), config, std::move(host)));
+        driver().emplace(Driver::load(witHost(), witEntropy(), config, std::move(host)));
     }
 
     void exports_daemon_update(daemon_hint_t hint)

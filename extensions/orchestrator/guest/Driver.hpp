@@ -16,6 +16,7 @@
 
 #include <orchestrator/core/Config.hpp>
 #include <orchestrator/core/Engine.hpp>
+#include <orchestrator/core/Uuid.hpp>
 #include <orchestrator/guest/GuestClock.hpp>
 #include <orchestrator/guest/HostCalls.hpp>
 #include <orchestrator/view/Dashboard.hpp>
@@ -103,18 +104,25 @@ class Driver
     /// Pulls the store, the processes and the panes into a StartContext, starts the engine, carries out its
     /// effects, and releases the results it consumed.
     /// @param host The host's calls; outlives the driver.
+    /// @param ids Where the agents' session ids come from; outlives the driver.
     /// @param configJson The extension's configuration, as JSON.
     /// @param hostInfo What the host resolved.
     /// @return The driver.
-    [[nodiscard]] static Driver load(IGuestHost& host, std::string_view configJson, HostInfo hostInfo);
+    [[nodiscard]] static Driver load(IGuestHost& host,
+                                     IUuidSource& ids,
+                                     std::string_view configJson,
+                                     HostInfo hostInfo);
 
-    /// As load(IGuestHost&, std::string_view, HostInfo), telling @p observer every start and step.
+    /// As load(IGuestHost&, IUuidSource&, std::string_view, HostInfo), telling @p observer every start and
+    /// step.
     /// @param host The host's calls; outlives the driver.
+    /// @param ids Where the agents' session ids come from; outlives the driver.
     /// @param configJson The extension's configuration, as JSON.
     /// @param hostInfo What the host resolved.
     /// @param observer Told what the engine is fed; outlives the driver.
     /// @return The driver.
     [[nodiscard]] static Driver load(IGuestHost& host,
+                                     IUuidSource& ids,
                                      std::string_view configJson,
                                      HostInfo hostInfo,
                                      IDriverObserver& observer);
@@ -144,7 +152,11 @@ class Driver
     void apply(std::string_view tab, view::UiAction const& action);
 
   private:
-    Driver(IGuestHost& host, IDriverObserver& observer, std::string worktreeRoot, Engine engine);
+    Driver(IGuestHost& host,
+           IUuidSource& ids,
+           IDriverObserver& observer,
+           std::string worktreeRoot,
+           Engine engine);
 
     /// What an action the user invoked does.
     using ActionHandler = void (Driver::*)(uint32_t origin);
@@ -176,6 +188,7 @@ class Driver
     [[nodiscard]] std::optional<uint64_t> dashboardsDueMs() const;
 
     IGuestHost& _host;
+    IUuidSource& _ids; ///< Handed to every dashboard: the session ids of the agents it dispatches.
     IDriverObserver& _observer;
     std::string _worktreeRoot; ///< What ReadFile paths are made relative to.
     // Held by pointer: the dashboards keep references to both, and the driver moves.
