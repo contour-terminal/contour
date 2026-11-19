@@ -8,6 +8,8 @@ replaced by `/home/user`:
 - `setup-hooks-missing.json` — `contour agent setup dry-run json` with an empty `~/.claude` and
   `~/.agents`. With no `~/.claude` at all, `claude-code` reads `{"selection":"skipped"}` instead.
 - `setup-hooks-present.json` — the same after a `contour agent setup json` into that home.
+- `setup-claude-absent.json` — written by hand from the above, for a home with no `~/.claude` at all:
+  `claude-code` reads `{"selection":"skipped"}`, which leaves the hooks Missing.
 
 `status-{working,blocked,done}.json` are `pane.programStatusChanged` events as `contour events follow
 json` prints them, recorded by spike D with `0.9.0-agent-orchestrator-f8d671a7d` and Claude Code

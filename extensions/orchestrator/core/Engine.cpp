@@ -494,9 +494,7 @@ void Engine::apply(std::string_view runId, std::vector<RunEffect> effects, std::
                                   static_cast<uint64_t>((PaneOpenTimeout + CallDeadlineMargin).count())) });
                     out.emplace_back(OpenPane { .run = run->id,
                                                 .paneTemplate = pane->name,
-                                                .arguments = { { .name = "model", .value = run->model },
-                                                               { .name = "session", .value = run->session },
-                                                               { .name = "prompt", .value = run->prompt } },
+                                                .arguments = agentPaneArguments(*run),
                                                 .cwd = run->worktree,
                                                 .title = run->id,
                                                 .near = run->near });
@@ -754,8 +752,7 @@ void Engine::rebuildProblems()
     for (auto const& lines: _pollProblems | std::views::values)
         problems.insert(problems.end(), lines.begin(), lines.end());
     if (_hooks == HooksState::Missing)
-        problems.emplace_back("Claude Code's status hooks are missing: every run would end before its agent "
-                              "reports; run `contour agent setup`");
+        problems.emplace_back(HooksMissingProblem);
     for (auto const& repo: _repos)
         for (auto const& orphan: repo.orphans)
             problems.push_back(displayText(

@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <optional>
 #include <ranges>
 #include <set>
@@ -365,6 +366,24 @@ TEST_CASE("Config.messages", "[config]")
     for (auto const& row: RejectRows)
         problems.insert(row.problem);
     CHECK(seen.size() == problems.size());
+}
+
+TEST_CASE("a task key the dashboard binds is refused", "[config]")
+{
+    // Keys the view binds besides the ones the first configuration reserved: a task bound to j would load
+    // and then never fire, the key moving the selection instead.
+    static constexpr auto Keys = std::array { "j"sv, "k"sv, "R"sv, "d"sv, "/"sv };
+    for (auto const key: Keys)
+    {
+        CAPTURE(key);
+        auto const replacement = std::format(R"("key": "{}")", key);
+        auto const config = parse(Input { .find = R"("key": "f")", .replace = replacement });
+        REQUIRE_FALSE(config.has_value());
+        CHECK(config.error().key == "tasks[0].key");
+        CHECK(config.error().problem == ConfigProblem::ReservedKey);
+        // The message names the keys it may not be.
+        CHECK(message(config.error()).contains(std::format(", {}", key)));
+    }
 }
 
 namespace

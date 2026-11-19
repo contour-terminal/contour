@@ -437,6 +437,37 @@ std::expected<std::vector<std::string>, SubstituteError> substitute(std::span<st
     return result;
 }
 
+std::string shellQuoted(std::span<std::string const> argv)
+{
+    // What a shell reads as part of a plain word, wherever in the word it stands.
+    constexpr auto Plain = std::string_view { "_-./:@%+=," };
+    auto const isPlain = [&](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+               || Plain.contains(c);
+    };
+    auto line = std::string {};
+    for (auto const& word: argv)
+    {
+        if (!line.empty())
+            line += ' ';
+        if (!word.empty() && std::ranges::all_of(word, isPlain))
+        {
+            line += word;
+            continue;
+        }
+        line += '\'';
+        for (auto const c: word)
+        {
+            if (c == '\'')
+                line += "'\\''";
+            else
+                line += c;
+        }
+        line += '\'';
+    }
+    return line;
+}
+
 std::vector<std::string> manifestLines()
 {
     auto lines = std::vector<std::string> {};

@@ -7,6 +7,7 @@
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <map>
 #include <optional>
 #include <ranges>
@@ -1039,3 +1040,43 @@ TEST_CASE("manifestText declares the worktree root as created on demand and post
         CHECK_FALSE(view.starts_with("inbox "));
     }
 }
+
+TEST_CASE("shellQuoted quotes what a shell would split or expand", "[orchestrator][commands][shell]")
+{
+    struct Row
+    {
+        std::vector<std::string> argv;
+        std::string_view expected;
+    };
+    auto const rows = std::array {
+        Row { .argv = { "claude", "--model", "sonnet" }, .expected = "claude --model sonnet" },
+        Row { .argv = { "fix https://x/pull/1" }, .expected = "'fix https://x/pull/1'" },
+        Row { .argv = { "it's" }, .expected = R"('it'\''s')" },
+        Row { .argv = { "", "$HOME", "a*b", "~", "#x" }, .expected = R"('' '$HOME' 'a*b' '~' '#x')" },
+    };
+    for (auto const& row: rows)
+    {
+        CAPTURE(row.expected);
+        CHECK(shellQuoted(row.argv) == row.expected);
+    }
+}
+
+#ifndef _WIN32
+TEST_CASE("shellQuoted round-trips through sh", "[orchestrator][commands][shell]")
+{
+    // A word holding a ' and a space, a newline and what a shell expands: sh must print each back as one
+    // word.
+    auto const argv =
+        std::vector<std::string> { "printf", "%s\\n", "it's a note", "$HOME `id` \"q\"", "a\nb" };
+    auto const script = shellQuoted(argv);
+    auto const command = shellQuoted(std::vector<std::string> { "sh", "-c", script });
+    auto* const pipe = popen(command.c_str(), "r");
+    REQUIRE(pipe != nullptr);
+    auto output = std::string {};
+    auto buffer = std::array<char, 256> {};
+    while (auto const read = std::fread(buffer.data(), 1, buffer.size(), pipe))
+        output.append(buffer.data(), read);
+    REQUIRE(pclose(pipe) == 0);
+    CHECK(output == "it's a note\n$HOME `id` \"q\"\na\nb\n");
+}
+#endif

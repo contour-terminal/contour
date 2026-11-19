@@ -312,6 +312,22 @@ using Effect = std::variant<RunCommand,
 
 // }}}
 
+/// What a dispatch would start, worked out as Engine::dispatch() works it out: what the form shows.
+struct DispatchPreview
+{
+    Run run;                            ///< The run it would store, stamped with the dispatch's wall time.
+    std::vector<std::string> agentArgv; ///< The agent's argv, as the pane template substitutes the run's
+                                        ///< arguments (agentPaneArguments()): what `pane-open` is given.
+    std::size_t active = 0;             ///< The active runs now (Engine::activeRuns()).
+    std::size_t maxAgents = 0;          ///< `max_agents`.
+};
+
+/// The arguments the agent's pane template is opened with for @p run: the one place OpenPane's arguments
+/// and a preview's argv come from.
+/// @param run A run.
+/// @return Its model, session and prompt, by placeholder.
+[[nodiscard]] std::vector<Argument> agentPaneArguments(Run const& run);
+
 /// The tag of the host call a run awaits: its stepTag() and its attempt.
 /// @param run The run.
 /// @return Such as "<id>/status#3"; std::nullopt when it awaits no host call.
@@ -403,6 +419,14 @@ class Engine
     /// @return Whether @p run belongs to the current configuration. One outside it stays endable, its cleanup
     ///         working from what the run stored, but its removal is never tried again.
     [[nodiscard]] RunScope scopeOf(Run const& run) const noexcept;
+
+    /// What a dispatch would start, refused as dispatch() refuses it; it changes nothing.
+    /// @param request The dispatch, as the form would send it.
+    /// @return The run, the agent's argv and the limits; or why the dispatch would be refused.
+    [[nodiscard]] std::expected<DispatchPreview, DispatchRefusal> preview(Dispatch const& request) const;
+
+    /// @return How many runs count as active (countsAsActive()): what `max_agents` is checked against.
+    [[nodiscard]] std::size_t activeRuns() const noexcept;
 
   private:
     /// Who a queued command is for: a run's go ahead of the polls.

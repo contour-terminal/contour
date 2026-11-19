@@ -9,6 +9,7 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Overloaded.hpp>
@@ -65,6 +66,23 @@ void Engine::dispatch(Dispatch const& request, std::vector<Effect>& out)
 }
 
 std::expected<Run, DispatchRefusal> Engine::prepare(Dispatch const& request) const
+{
+    return preview(request).transform([](DispatchPreview preview) { return std::move(preview.run); });
+}
+
+std::size_t Engine::activeRuns() const noexcept
+{
+    return static_cast<std::size_t>(std::ranges::count_if(_runs, countsAsActive));
+}
+
+std::vector<Argument> agentPaneArguments(Run const& run)
+{
+    return { { .name = "model", .value = run.model },
+             { .name = "session", .value = run.session },
+             { .name = "prompt", .value = run.prompt } };
+}
+
+std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& request) const
 {
     if (!_config)
         return std::unexpected { DispatchRefusal::NotConfigured };
@@ -139,7 +157,16 @@ std::expected<Run, DispatchRefusal> Engine::prepare(Dispatch const& request) con
                      .changedMonoMs = 0 };
     if (!isStorable(run))
         return std::unexpected { DispatchRefusal::BadPrompt };
-    return run;
+    auto const* const pane = findPaneTemplate(AgentPaneTemplate);
+    if (pane == nullptr)
+        return std::unexpected { DispatchRefusal::BadPrompt };
+    auto argv = substitute(pane->argv, agentPaneArguments(run));
+    if (!argv)
+        return std::unexpected { DispatchRefusal::BadPrompt };
+    return DispatchPreview { .run = std::move(run),
+                             .agentArgv = std::move(*argv),
+                             .active = activeRuns(),
+                             .maxAgents = _config->maxAgents() };
 }
 
 } // namespace orchestrator

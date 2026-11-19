@@ -38,6 +38,8 @@ add_library(orchestrator_core STATIC
     core/Config.cpp
     core/Config.hpp
     core/ConfigJson.hpp
+    core/DashboardKeys.cpp
+    core/DashboardKeys.hpp
     core/Engine.cpp
     core/Engine.hpp
     core/EngineDetail.hpp
@@ -73,6 +75,8 @@ add_library(orchestrator_core STATIC
     core/Sanitize.cpp
     core/Sanitize.hpp
     core/Utf8.hpp
+    core/Uuid.cpp
+    core/Uuid.hpp
 )
 target_compile_features(orchestrator_core PUBLIC cxx_std_23)
 # PRIVATE: glaze stays in the .cpp files, and no header of the core may pull it in (scripts/include-budget.txt).
@@ -177,6 +181,7 @@ if(ORCHESTRATOR_TESTING)
         core/Run_test.cpp
         core/Sanitize_test.cpp
         core/Utf8_test.cpp
+        core/Uuid_test.cpp
         guest/Driver_test.cpp
         proto/Environment_test.cpp
         proto/Panes_test.cpp

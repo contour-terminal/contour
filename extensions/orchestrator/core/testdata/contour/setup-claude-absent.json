@@ -1,0 +1,1 @@
+[{"agent":"claude-code","selection":"skipped"},{"agent":"codex","selection":"skipped"},{"agent":"agents","selection":"detected","skill":{"path":"/home/user/.agents/skills/contour/SKILL.md","state":"created"}}]

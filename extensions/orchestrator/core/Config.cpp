@@ -22,6 +22,7 @@
 #include <glaze/glaze.hpp>
 #include <orchestrator/core/ArgumentKinds.hpp>
 #include <orchestrator/core/ConfigJson.hpp>
+#include <orchestrator/core/DashboardKeys.hpp>
 #include <orchestrator/core/Json.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Prompt.hpp>
@@ -120,20 +121,12 @@ namespace
         return row != table.end() ? std::optional { row->meaning } : std::nullopt;
     }
 
-    /// One of the dashboard's own keys, which no task may take; the arrows are no characters.
-    struct ReservedKey
+    /// @return Whether a task key of @p character would be one the dashboard binds itself.
+    [[nodiscard]] bool isDashboardKey(char character) noexcept
     {
-        char key;
-        std::string_view name;
-    };
-
-    constexpr auto ReservedKeys = std::array {
-        ReservedKey { .key = '\r', .name = "Enter"sv }, ReservedKey { .key = '\n', .name = "newline"sv },
-        ReservedKey { .key = '\t', .name = "Tab"sv },   ReservedKey { .key = 'd', .name = "d"sv },
-        ReservedKey { .key = 'e', .name = "e"sv },      ReservedKey { .key = 'b', .name = "b"sv },
-        ReservedKey { .key = 't', .name = "t"sv },      ReservedKey { .key = 'x', .name = "x"sv },
-        ReservedKey { .key = '/', .name = "/"sv },      ReservedKey { .key = '?', .name = "?"sv },
-    };
+        return character != '\0'
+               && std::ranges::contains(dashboardKeys(), character, &DashboardKey::character);
+    }
 
     /// The accepted values a problem's message lists, taken from the table that decides them.
     enum class Listing : uint8_t
@@ -142,7 +135,7 @@ namespace
         Forges,       ///< ForgeSpellings that have a provider row.
         IssueSources, ///< IssueSources.
         ItemKinds,    ///< AppliesToSpellings.
-        ReservedKeys, ///< ReservedKeys.
+        ReservedKeys, ///< The dashboardKeys() that type a character.
     };
 
     /// What each problem means; one row per ConfigProblem, in its order.
@@ -236,8 +229,9 @@ namespace
                     values.push_back(row.text);
                 break;
             case Listing::ReservedKeys:
-                for (auto const& row: ReservedKeys)
-                    values.push_back(row.name);
+                for (auto const& row: dashboardKeys())
+                    if (row.character != '\0')
+                        values.push_back(row.name);
                 break;
         }
         return values;
@@ -471,9 +465,9 @@ namespace
     }
 
     /// @return What is wrong with @p value as a task key, if anything.
-    [[nodiscard]] constexpr std::optional<ConfigProblem> keyProblem(std::string_view value) noexcept
+    [[nodiscard]] std::optional<ConfigProblem> keyProblem(std::string_view value) noexcept
     {
-        if (value.size() == 1 && std::ranges::contains(ReservedKeys, value.front(), &ReservedKey::key))
+        if (value.size() == 1 && isDashboardKey(value.front()))
             return ConfigProblem::ReservedKey;
         if (value.size() != 1 || value.front() <= ' ' || value.front() > '~')
             return ConfigProblem::NotOneKey;

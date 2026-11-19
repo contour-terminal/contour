@@ -826,6 +826,56 @@ TEST_CASE("dispatch limits count active runs only", "[orchestrator][engine]")
     }
 }
 
+TEST_CASE("preview equals what dispatch stores", "[orchestrator][engine]")
+{
+    for (auto const& request: { prDispatch(2375), issueDispatch(2356) })
+    {
+        auto harness = booted();
+        auto withNote = request;
+        withNote.note = "keep the change small";
+        auto const preview = harness.engine().preview(withNote);
+        REQUIRE(preview.has_value());
+        CHECK(harness.engine().runs().empty()); // a preview changes nothing
+
+        harness.feed(withNote);
+        auto const* const stored = harness.run(preview->run.id);
+        REQUIRE(stored != nullptr);
+        CHECK(stored->branch == preview->run.branch);
+        CHECK(stored->worktree == preview->run.worktree);
+        CHECK(stored->prompt == preview->run.prompt);
+        CHECK(stored->session == preview->run.session);
+
+        // The argv the agent's tab is opened with is the one the preview showed.
+        harness.finish("git-fetch", ok());
+        harness.finish(harness.pending("git-worktree-add") ? "git-worktree-add" : "git-worktree-add-branch",
+                       ok());
+        if (harness.pending("gh-pr-checkout"))
+            harness.finish("gh-pr-checkout", ok());
+        auto const opened = all<OpenPane>(harness.last());
+        REQUIRE(opened.size() == 1);
+        auto const* const pane = findPaneTemplate(opened.front().paneTemplate);
+        REQUIRE(pane != nullptr);
+        CHECK(substitute(pane->argv, opened.front().arguments) == preview->agentArgv);
+        CHECK(preview->agentArgv.back() == stored->prompt);
+    }
+}
+
+TEST_CASE("preview reports the limits", "[orchestrator][engine]")
+{
+    auto harness = booted(Settings { .limits = R"("max_agents_per_repo": 4,)" });
+    for (auto const number: { 2375, 2369, 2346 })
+        harness.feed(prDispatch(static_cast<uint64_t>(number)));
+    auto const fourth = harness.engine().preview(prDispatch(2114));
+    REQUIRE(fourth.has_value());
+    CHECK(fourth->active == 3);
+    CHECK(fourth->maxAgents == 4);
+
+    harness.feed(prDispatch(2114));
+    CHECK(harness.engine().activeRuns() == 4);
+    CHECK(harness.engine().preview(prDispatch(1847)) == std::unexpected { DispatchRefusal::AgentLimit });
+    CHECK(harness.engine().preview(prDispatch(2375)) == std::unexpected { DispatchRefusal::AlreadyRunning });
+}
+
 TEST_CASE("the same item active refuses; finished does not", "[orchestrator][engine]")
 {
     enum class Stage : uint8_t
@@ -1877,7 +1927,19 @@ TEST_CASE("a missing directory and missing hooks are problems", "[orchestrator][
     CHECK(mentions(harness.engine().problems(), "hooks are missing"));
 }
 
-TEST_CASE("hooksStateOf reads the setup dry run", "[orchestrator][engine]")
+TEST_CASE("the hooks problem line says what is lost", "[orchestrator][engine][hooks]")
+{
+    auto harness = Harness { contextFor({}) };
+    harness.finish("agent-setup-check",
+                   ok(readFixture(FixtureRoot::Testdata, "contour/setup-claude-absent.json")));
+    REQUIRE(harness.engine().hooks() == HooksState::Missing);
+    // Runs still end correctly without them: what is lost is the blocked and permission states.
+    CHECK(std::ranges::contains(harness.engine().problems(), std::string { HooksMissingProblem }));
+    CHECK(mentions(harness.engine().problems(), "blocked and permission states may not show"));
+    CHECK_FALSE(mentions(harness.engine().problems(), "every run would end"));
+}
+
+TEST_CASE("hooksStateOf reads the setup dry run", "[orchestrator][engine][hooks]")
 {
     struct Row
     {
@@ -1894,6 +1956,9 @@ TEST_CASE("hooksStateOf reads the setup dry run", "[orchestrator][engine]")
               .expected = HooksState::Missing },
         Row { .name = "no claude-code",
               .text = R"([{"agent":"codex","selection":"skipped"}])",
+              .expected = HooksState::Missing },
+        Row { .name = "no ~/.claude at all",
+              .text = readFixture(FixtureRoot::Testdata, "contour/setup-claude-absent.json"),
               .expected = HooksState::Missing },
         Row { .name = "claude-code skipped",
               .text = R"([{"agent":"claude-code","selection":"skipped"}])",
