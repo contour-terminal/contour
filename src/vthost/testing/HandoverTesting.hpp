@@ -52,7 +52,7 @@ inline constexpr auto CatScript = "stty raw -echo; printf ready; exec cat";
 {
     return std::make_unique<vtpty::Process>(vtpty::testing::execInfo("/bin/sh", { "-c", std::move(script) }),
                                             vtpty::createPty(size, std::nullopt),
-                                            /*escapeSandbox=*/false,
+                                            vtpty::SandboxEscape::Contained,
                                             std::move(placement));
 }
 
@@ -67,7 +67,7 @@ inline constexpr auto CatScript = "stty raw -echo; printf ready; exec cat";
     exec.env = { { "PROMPT", "$G" } };
     return std::make_unique<vtpty::Process>(exec,
                                             vtpty::createPty(size, std::nullopt),
-                                            /*escapeSandbox=*/false,
+                                            vtpty::SandboxEscape::Contained,
                                             std::make_shared<vtpty::NoPlacement>());
 }
 #endif

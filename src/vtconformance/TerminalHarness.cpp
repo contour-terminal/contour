@@ -31,7 +31,7 @@ namespace
     {
         auto spawned = std::make_unique<vtpty::Process>(exec,
                                                         vtpty::createPty(pageSize, std::nullopt),
-                                                        /* escapeSandbox */ false,
+                                                        vtpty::SandboxEscape::Contained,
                                                         // conformance runs must not create systemd units
                                                         std::make_shared<vtpty::NoPlacement>());
         process = spawned.get();

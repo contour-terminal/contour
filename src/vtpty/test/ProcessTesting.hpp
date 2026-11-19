@@ -69,7 +69,7 @@ inline Process unplacedProcess(Process::ExecInfo const& exec, PageSize pageSize)
 {
     return Process { exec,
                      createPty(pageSize, std::nullopt),
-                     /*escapeSandbox=*/false,
+                     vtpty::SandboxEscape::Contained,
                      std::make_shared<NoPlacement>() };
 }
 

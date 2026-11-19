@@ -920,7 +920,7 @@ class ChildSession
                     std::make_unique<ByteCountingProcess>(
                         launch,
                         vtpty::createPty(settings.pageSize, std::nullopt),
-                        /*escapeSandbox=*/false,
+                        vtpty::SandboxEscape::Contained,
                         // a benchmark measures the terminal, not systemd: no scope, and no placement latency
                         std::make_shared<vtpty::NoPlacement>()),
                     settings,

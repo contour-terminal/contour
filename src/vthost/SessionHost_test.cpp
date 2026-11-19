@@ -3952,7 +3952,7 @@ TEST_CASE("a hosted shell killed by a signal ends Killed, one that exits ends Ex
                               shell.arguments = { "-c", row.script };
                               return std::make_unique<vtpty::Process>(shell,
                                                                       vtpty::createPty(size, std::nullopt),
-                                                                      false,
+                                                                      vtpty::SandboxEscape::Contained,
                                                                       std::make_shared<vtpty::NoPlacement>());
                           },
                           vtbackend::Settings {},
@@ -4675,7 +4675,7 @@ template <typename T>
     auto process =
         std::make_unique<vtpty::Process>(vtpty::testing::execInfo("/bin/sh", { "-c", std::move(script) }),
                                          vtpty::createPty(size, std::nullopt),
-                                         /*escapeSandbox=*/false,
+                                         vtpty::SandboxEscape::Contained,
                                          std::move(placement));
     settings.pageSize = size;
     return std::make_unique<vthost::HostedSession>(vtworkspace::SessionId { 1 },
@@ -5145,7 +5145,7 @@ TEST_CASE("quiesce interrupts a write the program never reads, and carries exact
         [&script](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
             return std::make_unique<vtpty::Process>(vtpty::testing::execInfo("/bin/sh", { "-c", script }),
                                                     vtpty::createPty(size, std::nullopt),
-                                                    /*escapeSandbox=*/false,
+                                                    vtpty::SandboxEscape::Contained,
                                                     std::make_shared<vtpty::NoPlacement>());
         },
         vtbackend::Settings {},
@@ -5243,7 +5243,7 @@ TEST_CASE("a reply queued while a write was interrupted goes out after the write
         [&script](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
             return std::make_unique<vtpty::Process>(vtpty::testing::execInfo("/bin/sh", { "-c", script }),
                                                     vtpty::createPty(size, std::nullopt),
-                                                    /*escapeSandbox=*/false,
+                                                    vtpty::SandboxEscape::Contained,
                                                     std::make_shared<vtpty::NoPlacement>());
         },
         vtbackend::Settings {},

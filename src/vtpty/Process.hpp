@@ -110,16 +110,18 @@ class [[nodiscard]] Process: public Pty, public ChildProcess
     }
 
     /// @param exe What to run, and where, and under which environment.
+    /// @param sandbox Whether the program runs on the sandbox's host (flatpak-spawn) or inside it.
     /// @param placement Moves each spawned child into its own resource domain before it runs; never
     ///                  null. @see ProcessPlacement.
     /// @param hangupGrace How long close() gives the child to end on the hangup before killing it.
     Process(ExecInfo exe,
             std::unique_ptr<Pty> pty,
-            bool escapeSandbox,
+            SandboxEscape sandbox,
             std::shared_ptr<ProcessPlacement> placement,
             HangupGrace hangupGrace = {});
 
     /// @param removedEnvironment Variables the child must not inherit.
+    /// @param sandbox Whether the program runs on the sandbox's host (flatpak-spawn) or inside it.
     /// @param placement Moves each spawned child into its own resource domain before it runs; never
     ///                  null. @see ProcessPlacement.
     /// @param hangupGrace How long close() gives the child to end on the hangup before killing it.
@@ -128,7 +130,7 @@ class [[nodiscard]] Process: public Pty, public ChildProcess
             std::filesystem::path const& cwd,
             Environment const& env,
             std::vector<std::string> removedEnvironment,
-            bool escapeSandbox,
+            SandboxEscape sandbox,
             std::unique_ptr<Pty> pty,
             std::shared_ptr<ProcessPlacement> placement,
             HangupGrace hangupGrace = {}):
@@ -138,7 +140,7 @@ class [[nodiscard]] Process: public Pty, public ChildProcess
                            .env = env,
                            .removedEnvironment = std::move(removedEnvironment) },
                 std::move(pty),
-                escapeSandbox,
+                sandbox,
                 std::move(placement),
                 hangupGrace)
     {

@@ -679,7 +679,7 @@ TEST_CASE("a new shell's workspace is looked up where the shell starts and not w
             auto exec = vtpty::testing::execInfo("/bin/sh", { "-c", vthost::testing::CatScript });
             exec.workingDirectory = start;
             return std::make_unique<vtpty::Process>(
-                exec, vtpty::createPty(size, std::nullopt), /*escapeSandbox=*/false, placement);
+                exec, vtpty::createPty(size, std::nullopt), vtpty::SandboxEscape::Contained, placement);
         },
         vthost::SessionHostConfig {
             .workspaceGit = vthost::WorkspaceGitServices { .probe = probe, .executor = executor } }

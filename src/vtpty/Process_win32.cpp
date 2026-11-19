@@ -157,14 +157,14 @@ void Process::Private::watchExit(Process& self)
 
 Process::Process(ExecInfo exe,
                  std::unique_ptr<Pty> pty,
-                 bool escapeSandbox,
+                 SandboxEscape sandbox,
                  std::shared_ptr<ProcessPlacement> placement,
                  HangupGrace hangupGrace):
     _d(new Private { .exec = std::move(exe), .pty = std::move(pty), .placement = std::move(placement) },
        [](Private* p) { delete p; })
 {
     // No sandbox to escape, and no grace to give: closing the pseudoconsole ends the child outright.
-    core::ignoreUnused(escapeSandbox, hangupGrace);
+    core::ignoreUnused(sandbox, hangupGrace);
 }
 
 bool Process::isFlatpak()
@@ -337,7 +337,7 @@ std::expected<std::unique_ptr<Process>, AdoptError> Process::adopt(AdoptedChild 
                                              child.cwd,
                                              Environment {},
                                              std::vector<std::string> {},
-                                             /*escapeSandbox=*/false,
+                                             SandboxEscape::Contained,
                                              std::move(pty),
                                              std::make_shared<NoPlacement>(),
                                              child.hangupGrace);

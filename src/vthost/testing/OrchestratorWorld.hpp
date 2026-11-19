@@ -403,7 +403,7 @@ struct OrchestratorWorld
             exec.program = "/bin/sh";
             return std::make_unique<vtpty::Process>(exec,
                                                     vtpty::createPty(size, std::nullopt),
-                                                    /*escapeSandbox=*/false,
+                                                    vtpty::SandboxEscape::Contained,
                                                     std::make_shared<vtpty::NoPlacement>());
         };
     }

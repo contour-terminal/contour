@@ -70,9 +70,10 @@ class UnstartablePty final: public vtpty::MockPty
 /// @return A Process for a shell on @p pty, not yet started.
 vtpty::Process shellOn(std::unique_ptr<vtpty::Pty> pty)
 {
-    return vtpty::Process {
-        execInfo("/bin/sh"), std::move(pty), /*escapeSandbox=*/false, std::make_shared<vtpty::NoPlacement>()
-    };
+    return vtpty::Process { execInfo("/bin/sh"),
+                            std::move(pty),
+                            vtpty::SandboxEscape::Contained,
+                            std::make_shared<vtpty::NoPlacement>() };
 }
 
 auto constexpr PageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) };
@@ -145,7 +146,7 @@ vtpty::Process shellRunning(std::vector<std::string> arguments,
 {
     return vtpty::Process { execInfo("/bin/sh", std::move(arguments)),
                             vtpty::createPty(PageSize, std::nullopt),
-                            /*escapeSandbox=*/false,
+                            vtpty::SandboxEscape::Contained,
                             std::move(placement),
                             hangupGrace };
 }
@@ -345,7 +346,7 @@ TEST_CASE("Process.closeGivesAChildTheGraceToEndOnTheHangup", "[process]")
         execInfo("/bin/sh",
                  { "-c", "trap 'sleep 0.5; exit 7' HUP; echo ready; while :; do sleep 0.01; done" }),
         vtpty::createPty(PageSize, std::nullopt),
-        /*escapeSandbox=*/false,
+        vtpty::SandboxEscape::Contained,
         std::make_shared<vtpty::NoPlacement>(),
         vtpty::HangupGrace { .duration = 200ms, .clock = clock });
     REQUIRE(process->start().has_value());
@@ -461,8 +462,9 @@ TEST_CASE("Process.workingDirectoryIsTheOneTheChildStartsIn", "[process][placeme
     auto exec = execInfo("/bin/sh", { "-c", "printf ready; exec sleep 30" });
     exec.workingDirectory = start;
     auto placement = std::make_shared<RecordingPlacement>();
-    auto process =
-        vtpty::Process { exec, vtpty::createPty(PageSize, std::nullopt), /*escapeSandbox=*/false, placement };
+    auto process = vtpty::Process {
+        exec, vtpty::createPty(PageSize, std::nullopt), vtpty::SandboxEscape::Contained, placement
+    };
     auto const dropOnExit = DropOnExit { *placement };
     REQUIRE(process.start().has_value());
     REQUIRE(placement->pids().size() == 1);

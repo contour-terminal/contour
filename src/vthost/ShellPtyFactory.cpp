@@ -14,10 +14,8 @@ ShellDevices ownShellDevices(std::shared_ptr<vtpty::ProcessPlacement> placement)
     return [placement = std::move(placement)](vtbackend::PageSize pageSize,
                                               vtpty::Process::ExecInfo exec,
                                               SandboxEscape sandbox) -> std::unique_ptr<vtpty::Pty> {
-        return std::make_unique<vtpty::Process>(std::move(exec),
-                                                vtpty::createPty(pageSize, std::nullopt),
-                                                sandbox == SandboxEscape::Escapes,
-                                                placement);
+        return std::make_unique<vtpty::Process>(
+            std::move(exec), vtpty::createPty(pageSize, std::nullopt), sandbox, placement);
     };
 }
 

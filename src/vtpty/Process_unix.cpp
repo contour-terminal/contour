@@ -101,7 +101,7 @@ namespace
 struct Process::Private
 {
     ExecInfo exec;
-    bool escapeSandbox;
+    SandboxEscape sandbox;
 
     unique_ptr<Pty> pty {};
     shared_ptr<ProcessPlacement> placement {};
@@ -158,11 +158,11 @@ struct Process::Private
 
 Process::Process(ExecInfo exe,
                  unique_ptr<Pty> pty,
-                 bool escapeSandbox,
+                 SandboxEscape sandbox,
                  shared_ptr<ProcessPlacement> placement,
                  HangupGrace hangupGrace):
     _d(new Private { .exec = std::move(exe),
-                     .escapeSandbox = escapeSandbox,
+                     .sandbox = sandbox,
                      .pty = std::move(pty),
                      .placement = std::move(placement),
                      .hangupGrace = hangupGrace },
@@ -390,8 +390,8 @@ StartResult Process::start()
     if (auto started = _d->pty->start(); !started)
         return started;
 
-    auto prepared = prepareTrampolineSpawn(
-        *_d->pty, _d->exec, sandboxEscapeFromConfig(_d->escapeSandbox), _d->placement->childOomScoreAdjust());
+    auto prepared =
+        prepareTrampolineSpawn(*_d->pty, _d->exec, _d->sandbox, _d->placement->childOomScoreAdjust());
     // The spawn holds its own copy of the directory's descriptor now; this process lets its handle go, so
     // that a worktree removed later is not held open by a handle nobody enters again.
     _d->exec.directory.reset();
@@ -451,7 +451,7 @@ std::expected<std::unique_ptr<Process>, AdoptError> Process::adopt(AdoptedChild 
                                              child.cwd,
                                              Environment {},
                                              std::vector<std::string> {},
-                                             /*escapeSandbox=*/false,
+                                             SandboxEscape::Contained,
                                              std::move(pty),
                                              std::make_shared<NoPlacement>(),
                                              child.hangupGrace);
