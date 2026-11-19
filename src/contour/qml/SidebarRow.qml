@@ -4,10 +4,11 @@
 // A workspace row: its disclosure, its name, its git state and the rolled-up status glyph. A tab or pane row:
 // its status glyph, its title, a second line -- its reason when there is one, else its folder and program --
 // and its time -- or its progress, as a thin meter -- at the right. A tab or pane row is always two lines
-// tall. Everything the row says, and in what order the statuses rank, is the model's (SidebarTree.hpp); every extent, ink and radius is the row's tokens (chromeStyle.sidebar,
-// chromeStyle.colors), so one file draws the source list, the navigation pane, the header pane and the cell
-// tree alike. On the Terminal row the tree's connectors are text (the treeText role) and the meter is block
-// characters (meterText), so every part stays on the cell grid.
+// tall. Everything the row says, and in what order the statuses rank, is the model's (SidebarTree.hpp);
+// every extent, ink and radius is the row's tokens (chromeStyle.sidebar, chromeStyle.colors), so one file
+// draws the source list, the navigation pane, the header pane and the cell tree alike. On the Terminal row
+// the tree's connectors are text (the treeText role) and the meter is block characters (meterText), so every
+// part stays on the cell grid.
 //
 // A click shows what the row names; a double click on a workspace or tab row renames it inline, as F2 (and,
 // for the shown workspace, the RenameWorkspace action) does; a right click opens its menu; a workspace row
