@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/cli/AgentReport.hpp>
 #include <contour/cli/AgentSkill.hpp>
+#include <contour/cli/AgentTranscript.hpp>
 #include <contour/cli/BackgroundExecutor.hpp>
 #include <contour/cli/CaptureScreen.hpp>
 #include <contour/cli/CatImageArgs.hpp>
@@ -534,6 +535,28 @@ namespace
                                     CLI::Value { false },
                                     "Removes the status hooks instead; the skill is left as it is." },
                                 CLI::Option { "json", CLI::Value { false }, "Prints the outcomes as JSON." },
+                            } },
+                    CLI::Command {
+                        .name = "transcript",
+                        .helpText =
+                            "Prints one page of a Claude Code session's transcript: its prompts, replies, "
+                            "tool calls and their results, sanitised. The session's log must have been "
+                            "written in --cwd or beneath it.",
+                        .options =
+                            CLI::OptionList {
+                                CLI::Option { "session", CLI::Value { ""s }, "The session's UUID.", "UUID" },
+                                CLI::Option { "cwd",
+                                              CLI::Value { ""s },
+                                              "The directory the session ran in: its worktree.",
+                                              "DIRECTORY" },
+                                CLI::Option { "page", CLI::Value { 1u }, "The 1-based page to print.", "N" },
+                                CLI::Option { "format",
+                                              CLI::Value { 1u },
+                                              "The JSON format to print; this contour prints format 1 only.",
+                                              "N" },
+                                CLI::Option { "json",
+                                              CLI::Value { false },
+                                              "Prints the page as JSON instead of text." },
                             } } },
         };
     }
@@ -645,6 +668,7 @@ ContourApp::ContourApp(core::Environment const& env):
     link("contour.daemon", bind(&ContourApp::daemonAction, this));
     link("contour.agent.report", bind(&ContourApp::agentReportAction, this));
     link("contour.agent.setup", bind(&ContourApp::agentSetupAction, this));
+    link("contour.agent.transcript", bind(&ContourApp::agentTranscriptAction, this));
     link("contour.mcp", bind(&ContourApp::mcpAction, this));
     for (auto const& verb: contour::cli::controlVerbs())
         link(std::format("contour.{}", verb.path), [this, &verb] { return controlVerbAction(verb); });
@@ -2187,6 +2211,29 @@ int ContourApp::agentReportAction()
     auto const payload = makeHandlePayloadReader(core::platform::standardInput(), clock);
     auto const& env = processEnvironment();
     return runAgentReport(*integration, *payload, env, makeDaemonChannelFactory(env), clock);
+}
+
+int ContourApp::agentTranscriptAction()
+{
+    constexpr auto Prefix = "contour.agent.transcript"sv;
+    auto const key = [&](std::string_view option) {
+        return std::format("{}.{}", Prefix, option);
+    };
+    auto const request = TranscriptRequest {
+        .session = parameters().get<string>(key("session")),
+        .cwd = parameters().get<string>(key("cwd")),
+        .page = parameters().get<unsigned>(key("page")),
+        .format = parameters().get<unsigned>(key("format")),
+        .output = parameters().get<bool>(key("json")) ? TranscriptOutput::Json : TranscriptOutput::Text,
+    };
+    auto const opener = makeNativeSessionLogOpener();
+    return runAgentTranscript(request,
+                              processEnvironment(),
+                              core::platform::NativeFileSystem::instance(),
+                              *opener,
+                              &vtbackend::systemLocalTime,
+                              cout,
+                              cerr);
 }
 
 int ContourApp::agentSetupAction()

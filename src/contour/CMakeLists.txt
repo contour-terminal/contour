@@ -1739,6 +1739,7 @@ if(CONTOUR_TESTING)
         cli/AgentIntegrations_test.cpp
         cli/AgentReport_test.cpp
         cli/AgentSkill_test.cpp
+        cli/AgentTranscript_test.cpp
         cli/BackgroundExecutor_test.cpp
         cli/McpCommand_test.cpp
         cli/McpScope_test.cpp
@@ -1888,8 +1889,11 @@ if(CONTOUR_TESTING)
     target_compile_definitions(contour_test PRIVATE
         CONTOUR_CONTROL_WIT="${PROJECT_SOURCE_DIR}/wit/control/world.wit"
         CONTOUR_CONTROL_API_DOC="${PROJECT_SOURCE_DIR}/docs/control-api.md"
-        CONTOUR_CONFIG_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/config/testdata")
+        CONTOUR_CONFIG_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/config/testdata"
+        CONTOUR_AGENT_TRANSCRIPT_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/cli/testdata/agent-transcript")
     if(NOT WIN32)
+        # Real files: a FIFO and a symbolic link where a session log should be.
+        target_sources(contour_test PRIVATE cli/SessionLogOpener_test.cpp)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
         target_compile_options(contour_test PRIVATE -Wno-c2y-extensions)
     endif()

@@ -42,6 +42,7 @@ add_library(contour_cli STATIC
     AgentIntegrations.cpp AgentIntegrations.hpp
     AgentReport.cpp AgentReport.hpp
     AgentSkill.cpp AgentSkill.hpp
+    AgentTranscript.cpp AgentTranscript.hpp AgentTranscriptJson.hpp
     BackgroundExecutor.cpp BackgroundExecutor.hpp
     CaptureScreen.cpp CaptureScreen.hpp
     CatImageArgs.hpp
@@ -72,6 +73,13 @@ add_library(contour_cli STATIC
     ShellIntegration.cpp ShellIntegration.hpp
     "${_shell_integration_data}"
 )
+
+# How `contour agent transcript` opens a session log without following a link or blocking on a FIFO.
+if(WIN32)
+    target_sources(contour_cli PRIVATE SessionLogOpener_win32.cpp)
+else()
+    target_sources(contour_cli PRIVATE SessionLogOpener_unix.cpp)
+endif()
 
 target_link_libraries(contour_cli
     PUBLIC contour_config core::cli
