@@ -4,6 +4,7 @@
 // and fakes of the files, the locks, the processes and the directories.
 #include <vtbackend/screen/LocalTime.hpp>
 
+#include <core/log/LogStore.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_message.hpp>
@@ -505,6 +506,37 @@ TEST_CASE("DaemonExtensionRuntime: revoke stops it and asks again", "[daemon][ru
     // A name that does not run is no one's to revoke.
     fixture.runtime->revoke("other");
     CHECK(fixture.runtime->status("good").has_value());
+}
+
+namespace
+{
+
+/// What the error category writes while it lives, instead of where it wrote before.
+struct ErrorCapture
+{
+    ErrorCapture() { core::log::errorLog.setSink(sink); }
+    ErrorCapture(ErrorCapture const&) = delete;
+    ErrorCapture& operator=(ErrorCapture const&) = delete;
+    ~ErrorCapture() { core::log::errorLog.setSink(previous); }
+
+    std::vector<std::string> lines {};
+    core::log::Sink sink { true, [this](std::string_view const& line) { lines.emplace_back(line); } };
+    core::log::Sink& previous = core::log::errorLog.sink();
+};
+
+} // namespace
+
+TEST_CASE("DaemonExtensionRuntime: a consent wait or a denial is no error", "[daemon][runtime][consent]")
+{
+    auto errors = ErrorCapture {};
+    auto fixture = Fixture {};
+    REQUIRE(fixture.create({ declared("good", "/ext/good.wasm", ExtensionAutostart::OnDemand) }).empty());
+    fixture.runtime->start("good");
+    REQUIRE(fixture.runtime->entries().at(0).phase == DaemonExtensionPhase::Pending);
+    fixture.runtime->answer("good", fixture.runtime->pending().at(0).grantDigest, GrantState::Denied);
+    REQUIRE(fixture.runtime->entries().at(0).phase == DaemonExtensionPhase::Denied);
+    fixture.runtime->start("good");
+    CHECK(errors.lines.empty());
 }
 
 TEST_CASE("DaemonExtensionRuntime: entries say where each extension stands", "[daemon][runtime][consent]")

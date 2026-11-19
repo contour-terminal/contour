@@ -18,6 +18,7 @@
 #include <vtextension/ExtensionComposition.hpp>
 #include <vtextension/FileExtensionStore.hpp>
 #include <vtextension/FileReadService.hpp>
+#include <vtextension/Logging.hpp>
 #include <vtextension/Manifest.hpp>
 #include <vtextension/RootPointer.hpp>
 #include <vtextension/World.hpp>
@@ -302,11 +303,12 @@ std::expected<void, DeclarationProblem> DaemonExtensionRuntime::run(Extension& e
     {
         case GrantState::Granted: break;
         case GrantState::Denied:
-            errorLog()("daemon.extensions.{}: the user denied it; it does not run.", extension.name);
+            daemonExtensionLog()("daemon.extensions.{}: the user denied it; it does not run.",
+                                 extension.name);
             return {};
         case GrantState::Pending:
-            errorLog()("daemon.extensions.{}: it waits for the user's consent in a Contour window.",
-                       extension.name);
+            daemonExtensionLog()("daemon.extensions.{}: it waits for the user's consent in a Contour window.",
+                                 extension.name);
             extension.consent = ConsentWait::Waiting;
             return {};
     }

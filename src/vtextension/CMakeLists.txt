@@ -83,6 +83,7 @@ set(vtextension_HEADERS
     IDaemonHostServices.hpp
     IHostServices.hpp
     Instance.hpp
+    Logging.hpp
     Manifest.hpp
     Placement.hpp
     ProcessService.hpp
