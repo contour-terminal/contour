@@ -601,6 +601,210 @@ for.
 [cxx-probe]: https://github.com/contour-terminal/contour/tree/master/extensions/testing/cxx-daemon-probe
 [wasi-sdk]: https://github.com/WebAssembly/wasi-sdk
 
+## The agent orchestrator
+
+The agent orchestrator is a daemon extension for handing pull-request and issue work to Claude Code agents.
+Its tab, `orchestrator://`, lists your open pull requests with their checks and review, the issues your
+searches find, the agents you started and the runs that finished. Starting an agent is a key and a
+confirmation: the orchestrator makes a git worktree on a branch of its own, opens a tab running `claude` in
+it, and removes the worktree when the run ends, unless it still holds work. From the same tab you read what an agent
+reports on its board and page through its transcript, also after the run has finished.
+
+Contour's `.deb`, `.rpm`, AppImage and macOS `.dmg` packages carry it as a bundled extension,
+`orchestrator.wasm`; the Flatpak build does not include it. Being installed
+runs nothing: the daemon loads it only for a `daemon.extensions.orchestrator` entry, and runs it only once a
+window has [granted it](#daemon-extensions-granting). A build from source includes it with
+`-DCONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST=ON` (see [Building a C++ guest](#building-a-c-guest)).
+
+### Configuring the orchestrator
+
+The orchestrator is configured under `daemon.extensions`, without a `path`, which selects the bundled
+module:
+
+```yaml
+daemon:
+    extensions:
+        orchestrator:
+            autostart: true
+            config:
+                worktree_root: ~/worktrees
+                models: [opus, sonnet, haiku]
+                repos:
+                    - path: ~/repo/contour
+                      forge: github
+                      issues:
+                          - { source: forge, query: "assignee:@me" }
+                tasks:
+                    - { id: fix_ci,         key: f, label: "fix CI",         applies_to: pr,    model: sonnet,
+                        prompt: "/contour-workflows:fix-ci {url}" }
+                    - { id: address_review, key: r, label: "address review", applies_to: pr,    model: opus,
+                        prompt: "/contour-workflows:address-review {url}" }
+                    - { id: issue,          key: w, label: "work on issue",  applies_to: issue, model: opus,
+                        prompt: "/contour-workflows:work-issue {url}" }
+```
+
+Key         | Meaning
+------------|------------------------------------------------------------------------------------------------
+`path`      | The module to load; without it, the bundled orchestrator.
+`autostart` | `true`: start it as the daemon starts. Otherwise it starts when something asks for it, such as its command-palette row.
+`config`    | The orchestrator's configuration, below. One that does not parse is shown on its tab, one line naming the key, and nothing is read or started until it is fixed.
+
+Its `config`:
+
+Key                   | Meaning
+----------------------|------------------------------------------------------------------------------------------
+`worktree_root`       | Required. The directory every agent's worktree is made in, created if it is missing. No repository may lie inside it.
+`models`              | The models a run may choose. Default `[opus, sonnet, haiku]`. A model with a bracketed variant, such as `opus[1m]`, is refused.
+`max_agents`          | The most agents running at once. Default `4`.
+`max_agents_per_repo` | The most agents running at once in one repository. Default `2`.
+`poll_every`          | How often the forges are asked for the lists. Default `2m`, at least `30s`.
+`status_board_after`  | How long an agent runs before the orchestrator starts looking for its board, its `STATUS.md`. Default `15m`; `0` never looks, while `b` still shows a board.
+`finished_retention`  | How long a finished run stays in the Finished list. Default `30d`.
+`repos`               | Required. The repositories, one entry each (below).
+`tasks`               | Required. What the dashboard offers to start on an item, one entry each (below).
+
+A duration is a number and a unit, `s`, `m`, `h` or `d` (`90s`, `2m`, `1h`, `30d`), or `0`. A limit of `0` is
+refused.
+
+A `repos` entry:
+
+Key      | Meaning
+---------|------------------------------------------------------------------------------------------------------
+`path`   | Required. The repository's checkout; `~` is the home directory.
+`name`   | What the dashboard calls it. Default: the name of its directory.
+`forge`  | Required. Where it lives: `github`, which the orchestrator reaches with `gh`.
+`remote` | The git remote that points at the forge. Default `origin`.
+`base`   | The branch an issue's worktree starts from. Default: the forge's default branch.
+`issues` | The searches that list the issues offered for work; none lists no issues. `{ source: forge, query: "<search>" }` searches the repository's forge, with `gh issue list --search`.
+
+**GitLab and Jira are enabled once their CLI output is recorded.** The orchestrator knows how to ask `glab`
+and Atlassian's `acli`, but it reads no tool's output that was never recorded from the real tool, so for now
+the configuration refuses `forge: gitlab` and an issue source `{ source: jira, jql: "<JQL>", site:
+"https://<site>" }`, with a line such as `repos[0].issues[0].source: is not yet supported: jira has no
+recorded fixture`.
+
+A `tasks` entry:
+
+Key          | Meaning
+-------------|---------------------------------------------------------------------------------------------------
+`id`         | Required. The task's name, unique among the tasks.
+`key`        | Required. The dashboard key that starts it: one printable character, none of the dashboard's own (the configuration names those when it refuses one).
+`label`      | Required. What the dashboard calls it.
+`applies_to` | Required. `pr` for a pull request, `issue` for an issue.
+`model`      | Required. The model it runs with, one of `models`; the dispatch form can change it.
+`prompt`     | Required. What the agent is started with; `{url}` stands for the item's URL, and must be there.
+
+An action of the extension opens the dashboard from a key binding, and its summary is a status-line segment;
+[Version 2](#version-2) and [Daemon extensions: what they show](#daemon-extensions-what-they-show) have the two
+snippets. The binding there is the one to copy:
+
+```yaml
+input_mapping:
+    - { mods: [Control, Shift], key: A, action: ExtensionAction, extension: orchestrator, id: open }
+```
+
+### The dashboard
+
+The list shows pull requests, issues, agents and finished runs, each finished run marked `●` until you open
+it; the right half, or the lower half of a narrow tab, shows the selected item's details. `?` lists the keys,
+your tasks' among them.
+
+Key                     | Does
+------------------------|---------------------------------------------------------------------------------------
+`↑` `↓` `j` `k` `Home` `End` | move the selection
+`Enter`                 | on a pull request or an issue, open the dispatch form, or show its agent's tab if one runs; on an agent, show its tab; on a finished run, open its details
+`d`                     | open the dispatch form on the selected item; on a finished run, on its item, for a new run
+a task's `key`          | open the dispatch form on that task
+`b`                     | show the selected run's board
+`t`                     | show the selected run's transcript
+`e`                     | end the selected agent's run
+`x`                     | check a kept worktree again
+`Del`                   | drop a finished run from the list
+`/`                     | filter the rows by text
+`R`                     | read the lists again now
+`Tab`                   | swap the details in for the list, in a narrow tab
+`Esc`                   | go back
+
+The dispatch form shows the item, the task, the model, the prompt, the worktree and the agent's exact command
+line. `Enter` starts the agent; `Esc` cancels. Nothing starts without it.
+
+### Boards
+
+An agent that keeps a `STATUS.md` at its worktree's root has a board: `b` shows that file on the tab, with how
+long ago it was written (`updated 3 min ago`), and reads it again every five seconds while it is shown. Once an
+agent has run for `status_board_after` the orchestrator looks for the file, and the agent's row is marked `▤`
+when it finds one.
+
+The orchestrator does not ask an agent for a board; the task's prompt does:
+
+```yaml
+- { id: fix_ci, key: f, label: "fix CI", applies_to: pr, model: sonnet,
+    prompt: "/contour-workflows:fix-ci {url} -- keep a STATUS.md at the worktree's root: what you are doing and what is left" }
+```
+
+A board is read-only and drawn inert: an escape sequence in it is shown as text, a board of more than 64 KiB
+is refused with a line saying so, and one that leads outside the worktree through a link is not read. When the
+run ends, an untracked `STATUS.md` is removed before the worktree is checked for work, so a board never keeps a
+worktree. A finished run has a board only while its worktree was kept; it is read once, as its agent writes no
+more, and a board left open when the worktree goes says it was removed when the run ended.
+
+Key                     | Does, on a board
+------------------------|---------------------------------------------------------------------------------------
+`↑` `↓` `j` `k` `PgUp` `PgDn` `Home` `End` | scroll
+`b`                     | read it again now
+`t`                     | show the run's transcript
+`d`                     | open the dispatch form on the run's item, for a new run
+`Enter`                 | show the agent's tab
+`Esc`                   | back to where it was opened from: the list or the transcript
+
+### Transcripts
+
+`t` shows the Claude Code transcript of a run, agent or finished, 30 entries a page: the prompts, the agent's
+replies, its tool calls and what they returned, each cut at 2 KiB and sanitised. It reads Claude Code's own
+session log, so it is there after the run has finished and its worktree is gone, for as long as Claude Code
+keeps the log. Each entry shows the time it was written in the local time of that moment, so an entry from
+before a daylight-saving change shows the clock as it was then; a time whose offset is not known is shown in
+UTC and says so.
+
+Key                     | Does, on a transcript
+------------------------|---------------------------------------------------------------------------------------
+`←` `→` `Home` `End`    | the previous, next, first and last page
+`↑` `↓` `j` `k` `PgUp` `PgDn` | scroll
+`b`                     | show the run's board
+`d`                     | open the dispatch form on the run's item, for a new run
+`Enter`                 | show the agent's tab
+`Esc`                   | back to where it was opened from: the list or the board
+
+The orchestrator reads the pages through `contour agent transcript`, a command its manifest declares, so the
+grant dialog lists it; the daemon runs it as its own executable, so it works where no `contour` is on the
+daemon's PATH, as for a .dmg, an AppImage or a launchd agent. It runs on its own too, its times in UTC:
+
+```sh
+contour agent transcript --session <uuid> --cwd ~/worktrees/<run>            # page 1, as text
+contour agent transcript --session <uuid> --cwd ~/worktrees/<run> --page 2 --json
+```
+
+Option            | Meaning
+------------------|------------------------------------------------------------------------------------------------
+`--session UUID`  | The Claude Code session, a lower-case UUID.
+`--cwd DIRECTORY` | The directory the session ran in: the run's worktree. A log is the session's only when at least one of its entries names the directory it was written in, and every one of them lies in `--cwd` or beneath it.
+`--page N`        | The page, from 1. Default `1`.
+`--json`          | Print the page as JSON, the format the orchestrator reads, instead of text.
+`--format N`      | The JSON format asked for. This Contour prints format `1` and refuses another: `unsupported transcript format <n>; this contour prints 1`.
+
+The log is looked for as `projects/*/<session>.jsonl` under `$CLAUDE_CONFIG_DIR`, else `~/.claude`. A log
+that is a link or not a regular file is refused, and so are two logs of one session in the same directory. A
+line the format does not know is counted and skipped, never fatal; the page says how many there were.
+
+### Limitations
+
+- **Linux and macOS.** On Windows the daemon opens no agent tab and reads no file for an extension, and the
+  Windows packages do not carry the orchestrator.
+- **No agent tabs under Flatpak.** Where the shells run on the host, Contour cannot start a program in a
+  directory it holds open, so the dashboard lists the work but cannot start an agent.
+- **GitHub only**, until GitLab's and Jira's command output is recorded (above).
+- **Claude Code only.** The agents are `claude`, and the transcript reads Claude Code's session log.
+
 ## Performance
 
 Extensions run on a small pool of worker threads, never on the threads that read the terminal's output,
