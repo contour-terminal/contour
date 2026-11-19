@@ -77,7 +77,17 @@ namespace
         return holdsServedLeaf(host, *pane.first()) || holdsServedLeaf(host, *pane.second());
     }
 
-    /// Walks a pane tree depth first, first child first, converting it.
+    /// The active tab among those a capture kept: one left out (served, or agent panes alone) maps to the tab
+    /// that would become active were it closed -- the one after it, else the one before.
+    /// @param capturedBeforeActive How many captured tabs come before the workspace's active one.
+    /// @param captured How many tabs were captured; at least one.
+    /// @return The captured active tab's index.
+    [[nodiscard]] std::uint32_t activeTabAmongCaptured(std::size_t capturedBeforeActive, std::size_t captured)
+    {
+        return static_cast<std::uint32_t>(std::min(capturedBeforeActive, captured - 1));
+    }
+
+    /// Walks a pane tree depth first, first child first, converting it; an agent's pane is pruned.
     class TreeCapture
     {
       public:
@@ -86,20 +96,27 @@ namespace
         {
         }
 
-        [[nodiscard]] PaneNode capture(vtworkspace::Pane const& pane)
+        /// @return The tree under @p pane, an extension's agent pane pruned from it -- its sibling takes the
+        ///         split's place; nullopt where no leaf is left.
+        [[nodiscard]] std::optional<PaneNode> capture(vtworkspace::Pane const& pane)
         {
-            auto node = PaneNode { .split = pane.splitState() };
             if (pane.isLeaf())
             {
+                // An agent's pane is left out: a restore would bring it back as a shell, or re-run it.
+                if (isOwned(pane.session()))
+                    return std::nullopt;
                 if (&pane == _active)
                     _activeLeaf = _leaves;
                 ++_leaves;
-                node.pane = capturePane(pane.session());
-                return node;
+                return PaneNode { .split = pane.splitState(), .pane = capturePane(pane.session()) };
             }
-            node.ratio = pane.ratio();
-            node.children.push_back(capture(*pane.first()));
-            node.children.push_back(capture(*pane.second()));
+            auto first = capture(*pane.first());
+            auto second = capture(*pane.second());
+            if (!first || !second)
+                return first ? std::move(first) : std::move(second);
+            auto node = PaneNode { .split = pane.splitState(), .ratio = pane.ratio() };
+            node.children.push_back(std::move(*first));
+            node.children.push_back(std::move(*second));
             return node;
         }
 
@@ -107,6 +124,13 @@ namespace
         [[nodiscard]] std::uint32_t activeLeaf() const noexcept { return _activeLeaf; }
 
       private:
+        /// @return Whether @p session runs a daemon-scoped extension's agent pane.
+        [[nodiscard]] bool isOwned(vtworkspace::SessionId session) const
+        {
+            auto const pane = _host.objects().uuidOf(session);
+            return pane && _host.ownedPanes().ownsPane(*pane);
+        }
+
         [[nodiscard]] PaneSnapshot capturePane(vtworkspace::SessionId session)
         {
             auto pane = PaneSnapshot {};
@@ -217,24 +241,25 @@ WorkspaceSnapshot captureWorkspace(SessionHost& host,
             // shell.
             if (tab == nullptr || tab->rootPane() == nullptr || holdsServedLeaf(host, *tab->rootPane()))
                 continue;
+            auto tree = TreeCapture { host, options, tab->activePane() };
+            auto root = tree.capture(*tab->rootPane());
+            // A tab of agent panes alone is left out as a served one is.
+            if (!root)
+                continue;
             if (tabIndex < active)
                 ++capturedBeforeActive;
-            auto tree = TreeCapture { host, options, tab->activePane() };
             auto entry = TabSnapshot {};
             entry.identity =
                 identityOf(host.objects(), vtcontrol::ObjectKind::Tab, host.objects().uuidOf(tab->id()));
             entry.color = tab->color(vtworkspace::TabColorSource::User);
-            entry.root = tree.capture(*tab->rootPane());
+            entry.root = std::move(*root);
             entry.activeLeaf = tree.activeLeaf();
             entry.zoom = tab->isZoomed() ? TabZoom::Zoomed : TabZoom::Tiled;
             captured.tabs.push_back(std::move(entry));
         }
         if (captured.tabs.empty())
             continue;
-        // The active tab among those captured; one left out maps to the tab that would become active were it
-        // closed: the one after it, else the one before.
-        captured.activeTab =
-            static_cast<std::uint32_t>(std::min(capturedBeforeActive, captured.tabs.size() - 1));
+        captured.activeTab = activeTabAmongCaptured(capturedBeforeActive, captured.tabs.size());
         snapshot.workspaces.push_back(std::move(captured));
     }
     return snapshot;

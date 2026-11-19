@@ -2132,6 +2132,10 @@ announces the exec: a save still queued then would leave the next image reconcil
   before that (its creation then spawns nothing), `Open` after; a close of an open pane posts the session's end,
   and the entry goes only with `sessionEnded`. The extension's engine reconciles its runs against that list, so a
   pane missing from it is a run that ends.
+- **A workspace snapshot leaves it out.** `captureWorkspace` prunes an agent's pane from its tab's split tree
+  (its sibling takes the split's place; a tab left with no pane is left out, and the active tab is remapped as
+  past a served tab), so a cold restart never brings an agent back as a shell nor re-runs it. A live upgrade and
+  a keeper recovery keep it, as every process.
 - **Its status is named, not newest.** `PaneStatusSources` picks the `claude-code` record (the hooks'), then the
   root record, from the session's OSC 7501 records; `program` is `gone` while a session whose child exited
   waits for its status.

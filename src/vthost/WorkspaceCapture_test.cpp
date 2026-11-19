@@ -2,10 +2,12 @@
 #include <vtbackend/shell/CommandBlock.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
+#include <vtpty/DirectoryHandle.hpp>
 #include <vtpty/MockPty.hpp>
 
 #include <core/Environment.hpp>
 #include <core/net/EventLoop.hpp>
+#include <core/net/testing/CoroTestSupport.hpp>
 #include <core/net/testing/ScriptedBackend.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -13,14 +15,19 @@
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <format>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <vthost/CommandBlockWire.hpp>
+#include <vthost/ExtensionHosting.hpp>
+#include <vthost/OwnedPanes.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/TabEdits.hpp>
 #include <vthost/WorkspaceCapture.hpp>
@@ -216,6 +223,146 @@ TEST_CASE("the active tab is remapped past a served tab", "[vthost][snapshot][ca
         REQUIRE(snapshot.workspaces[0].tabs.size() == 1);
         CHECK(snapshot.workspaces[0].activeTab == 0);
     }
+}
+
+namespace
+{
+
+/// Opens an agent pane of the orchestrator's in @p h's host, in a tab of its own, and turns the loop until it
+/// exists.
+/// @return Its tab.
+[[nodiscard]] vtworkspace::Tab& openOwned(CaptureHarness& h, std::string program = "claude")
+{
+    auto const turn = [&] {
+        h.loop.blockOn(core::net::testing::sleepFor(&h.loop, std::chrono::milliseconds { 0 }));
+    };
+    turn(); // The registry's reconciliation, which the constructor posted.
+    auto const directory = std::filesystem::temp_directory_path().string();
+    auto const pane =
+        h.host.ownedPanes().open(OwnedPaneSpawn { .extension = "orchestrator",
+                                                  .argv = { std::move(program) },
+                                                  .directory = std::make_shared<vtpty::DirectoryHandle const>(
+                                                      vtpty::DirectoryHandle::unbacked(directory)),
+                                                  .cwd = directory,
+                                                  .title = "run-1",
+                                                  .tag = "run-1" });
+    REQUIRE(pane.has_value());
+    turn();
+    for (auto const session: h.host.sessionIds())
+        if (auto const uuid = h.host.objects().uuidOf(session); uuid && vtcontrol::toString(*uuid) == *pane)
+        {
+            auto const [workspace, tab, leaf] = h.host.model().findSessionLeaf(session);
+            REQUIRE(tab != nullptr);
+            return *const_cast<vtworkspace::Tab*>(tab);
+        }
+    FAIL("the agent pane was not created");
+    throw std::logic_error { "unreachable" };
+}
+
+/// @return Every pane UUID @p node holds, depth first.
+void collectPaneUuids(PaneNode const& node, std::vector<ObjectUuid>& uuids)
+{
+    if (node.children.empty())
+    {
+        if (node.pane.identity)
+            uuids.push_back(node.pane.identity->uuid);
+        return;
+    }
+    for (auto const& child: node.children)
+        collectPaneUuids(child, uuids);
+}
+
+} // namespace
+
+TEST_CASE("a snapshot leaves owned panes out", "[vthost][snapshot][capture][panes]")
+{
+    auto h = CaptureHarness {};
+    auto* const shell = h.host.createTab();
+    REQUIRE(shell != nullptr);
+    auto const workspace = h.host.workspaceId();
+
+    SECTION("a tab of the agent alone is left out")
+    {
+        std::ignore = openOwned(h);
+        auto const snapshot = captureWorkspace(h.host, {}, Now);
+        REQUIRE(snapshot.workspaces.size() == 1);
+        REQUIRE(snapshot.workspaces[0].tabs.size() == 1);
+        CHECK(uuidOf(snapshot.workspaces[0].tabs[0]) == h.host.objects().uuidOf(shell->id())->bytes);
+    }
+    SECTION("an agent split beside a shell is pruned: the shell is the tab's one leaf, and active")
+    {
+        auto& agent = openOwned(h);
+        auto const agentSession = agent.rootPane()->session();
+        auto const shellSession = shell->rootPane()->session();
+        REQUIRE(h.host
+                    .mergeTabIntoSplit(proto::MergeTabIntoSplit {
+                        .tabSessions = { agentSession.value },
+                        .targetSession = shellSession.value,
+                        .side = std::to_underlying(vtworkspace::SplitSide::Right) })
+                    .has_value());
+        REQUIRE(shell->paneCount() == 2);
+        // The agent's pane is the active one of the merged tab.
+        auto const [found, tab, leaf] = h.host.model().findSessionLeaf(agentSession);
+        REQUIRE(leaf != nullptr);
+        h.host.model().setActivePane(shell->id(), leaf->id());
+
+        auto const snapshot = captureWorkspace(h.host, {}, Now);
+        REQUIRE(snapshot.workspaces.size() == 1);
+        REQUIRE(snapshot.workspaces[0].tabs.size() == 1);
+        auto const& captured = snapshot.workspaces[0].tabs[0];
+        CHECK(captured.root.children.empty());
+        CHECK(captured.root.pane.identity->uuid == h.host.objects().uuidOf(shellSession)->bytes);
+        CHECK(captured.activeLeaf == 0);
+    }
+    SECTION("an active agent tab is remapped as a served one is")
+    {
+        auto& agent = openOwned(h);
+        auto* const last = h.host.createTab();
+        REQUIRE(last != nullptr);
+        h.host.model().activateTab(workspace, agent.id());
+        auto const snapshot = captureWorkspace(h.host, {}, Now);
+        REQUIRE(snapshot.workspaces.size() == 1);
+        REQUIRE(snapshot.workspaces[0].tabs.size() == 2);
+        CHECK(snapshot.workspaces[0].activeTab == 1);
+    }
+}
+
+TEST_CASE("an owned pane is never re-run", "[vthost][snapshot][capture][panes]")
+{
+    // Captured, then restored cold with `claude` a program to re-run: no pane comes back running it, and none
+    // with the agent's UUID.
+    auto h = CaptureHarness {};
+    std::ignore = h.host.createTab();
+    auto& agent = openOwned(h);
+    auto const agentUuid = h.host.objects().uuidOf(agent.rootPane()->session());
+    REQUIRE(agentUuid.has_value());
+    auto const snapshot = captureWorkspace(h.host, {}, Now);
+    auto uuids = std::vector<ObjectUuid> {};
+    for (auto const& workspace: snapshot.workspaces)
+        for (auto const& tab: workspace.tabs)
+            collectPaneUuids(tab.root, uuids);
+    CHECK_FALSE(std::ranges::contains(uuids, agentUuid->bytes));
+
+    auto spawned = std::vector<std::optional<vtpty::Process::ExecInfo>> {};
+    auto restored =
+        SessionHost { h.loop,
+                      [&](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const& shell) {
+                          spawned.push_back(shell);
+                          return std::make_unique<vtpty::MockPty>(size);
+                      },
+                      vtbackend::Settings {},
+                      core::defaultEnvironment(),
+                      SessionHostConfig { .pumping = SessionPumping::Manual,
+                                          .restore = WorkspaceRestore { .snapshot = snapshot,
+                                                                        .rerunPrograms = { "claude" } } } };
+    CHECK_FALSE(spawned.empty());
+    for (auto const& shell: spawned)
+        CHECK((!shell || shell->program != "claude"));
+    // Nothing the restore spawned is the agent, nor knows its pane by its UUID: a pane the snapshot does not
+    // hold has nothing for rerun_programs to re-run.
+    for (auto const session: restored.sessionIds())
+        CHECK(restored.objects().uuidOf(session) != agentUuid);
+    CHECK(restored.sessionCount() == 1);
 }
 
 TEST_CASE("captureWorkspace of an empty host is empty", "[vthost][snapshot][capture]")
