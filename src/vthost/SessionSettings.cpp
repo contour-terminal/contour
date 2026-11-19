@@ -56,6 +56,13 @@ vtbackend::Settings hostedSessionSettings(vtbackend::Settings settings)
     return settings;
 }
 
+vtbackend::Settings servedSessionSettings(vtbackend::Settings settings)
+{
+    settings.sequences = vtbackend::SequenceAllowance::ServedTab;
+    settings.historyLimits = vtbackend::HistoryLimits::plain(vtbackend::LineCount(0));
+    return settings;
+}
+
 vtbackend::Settings defaultSessionSettings()
 {
     return hostedSessionSettings(vtbackend::Settings {});

@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -26,6 +27,7 @@
 #include <string_view>
 #include <thread>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <vtcontrol/Uuid.hpp>
@@ -35,6 +37,7 @@
 #include <vthost/ServedSessions.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/testing/FakeDaemonWorldHosting.hpp>
+#include <vthost/testing/FakeProfileCatalog.hpp>
 #include <vthost/testing/HandoverTesting.hpp>
 #include <vthost/testing/ServedTesting.hpp>
 
@@ -1105,6 +1108,40 @@ TEST_CASE("the host's frames leave the scrollback as it was", "[daemon][served]"
     bench.tabs->resumeDrawing(Orchestrator);
     REQUIRE(bench.live.eventually([&] { return bench.live.pageText(session).contains("restarting"); }));
     CHECK(historyOf() == history);
+}
+
+TEST_CASE("a served tab keeps no history whatever the profiles say", "[daemon][served]")
+{
+    auto bench = ServedBench {};
+    auto window = FakeWindow { 1 };
+    auto const origin = bench.attach(window, bench.first);
+    auto const opened = bench.tabs->open(Orchestrator, "Agents", "", AgentsScheme, origin);
+    REQUIRE(opened.has_value());
+    auto const session = bench.sessionOf(*opened);
+    auto const historyOf = [&] {
+        auto& terminal = bench.live.host.hostedSession(session)->terminal();
+        auto const lock = std::lock_guard { terminal };
+        return std::pair { terminal.settings().historyLimits, terminal.primaryScreen().historyLineCount() };
+    };
+    auto const none = vtbackend::HistoryLimits::plain(vtbackend::LineCount(0));
+    CHECK(historyOf() == std::pair { none, vtbackend::LineCount(0) });
+
+    // Twice the page scrolled through: nothing of it is kept above the page.
+    auto const lines = unbox(pageSizeOf(bench.live, session).lines);
+    auto text = std::string {};
+    for (auto const line: std::views::iota(0, 2 * lines))
+        text += std::format("line {}\r\n", line);
+    text += "the end";
+    REQUIRE(bench.tabs->write(Orchestrator, *opened, text).has_value());
+    REQUIRE(bench.live.eventually([&] { return bench.live.pageText(session).contains("the end"); }));
+    CHECK(historyOf() == std::pair { none, vtbackend::LineCount(0) });
+
+    // A reload of the profiles hands the shells their scrollback, and the served tab still none.
+    bench.live.host.replaceProfiles(std::make_shared<vthost::testing::FakeProfileCatalog>(
+        std::map<std::string, vthost::ResolvedProfile> {
+            { "main", vthost::testing::fakeProfile("/bin/zsh", vtbackend::LineCount(1000)) } },
+        "main"));
+    CHECK(historyOf().first == none);
 }
 
 TEST_CASE("a page too small for the stopped box shows its lines alone, cut", "[daemon][served]")

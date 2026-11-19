@@ -79,6 +79,13 @@ constexpr auto MaxSessionWordDelimiters = 256U;
 /// @return The settings a hosted session may actually be built with.
 [[nodiscard]] vtbackend::Settings hostedSessionSettings(vtbackend::Settings settings);
 
+/// What a served session's terminal is, whatever settings it was spawned with: it executes only the sequences
+/// that draw (@see vtbackend::ServedTabFunctions), and keeps no history, as its extension repaints the page
+/// and what scrolled off it is a stale frame.
+/// @param settings The settings the session would otherwise have.
+/// @return Them, made a served session's.
+[[nodiscard]] vtbackend::Settings servedSessionSettings(vtbackend::Settings settings);
+
 /// The factory settings a daemon hosts sessions with when no profile was loaded.
 /// @return @ref hostedSessionSettings applied to a bare `vtbackend::Settings`.
 [[nodiscard]] vtbackend::Settings defaultSessionSettings();

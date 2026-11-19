@@ -867,9 +867,10 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
     // settings' default — and not a size a requesting client named either, since the host projects
     // the pane tree onto the client area itself.
     settings.pageSize = _pageSize;
-    // A served session draws and nothing else: what its extension writes reaches nothing past the grid.
+    // A served session draws and nothing else: what its extension writes reaches nothing past the grid, and
+    // nothing of it is kept above the page.
     if (request.served)
-        settings.sequences = vtbackend::SequenceAllowance::ServedTab;
+        settings = servedSessionSettings(std::move(settings));
     if (!profileName.empty())
         sessionLog()("session {}: spawning under profile '{}'", id.value, profileName);
     else if (request.settings)
@@ -2244,7 +2245,8 @@ void SessionHost::replaceProfiles(std::shared_ptr<ProfileCatalog const> profiles
     for (auto const& [id, session]: _sessions)
     {
         // A client that named no profile stated its own settings, which no profile of this host's replaces.
-        if (session->settingsOrigin() == SettingsOrigin::Client)
+        // Nor does a served session take any profile's scrollback: it keeps none (servedSessionSettings).
+        if (session->settingsOrigin() == SettingsOrigin::Client || session->servedBy() != nullptr)
             continue;
         // Normalized as a spawn's settings are, so a reload cannot hand a running session a limit no new
         // session could have.
