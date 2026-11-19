@@ -17,7 +17,6 @@
 #include <variant>
 
 #include <orchestrator/core/Config.hpp>
-#include <orchestrator/core/Run.hpp>
 #include <orchestrator/core/Utf8.hpp>
 #include <orchestrator/view/Sections.hpp>
 
@@ -107,18 +106,6 @@ namespace
         return UiAction { Action { .run = context.selected->run } };
     }
 
-    /// @return The active run working on the selected item, if one does.
-    [[nodiscard]] Run const* activeRunOf(Row const& row, Engine const& engine) noexcept
-    {
-        if (!row.item)
-            return nullptr;
-        auto const runs = engine.runs();
-        auto const found = std::ranges::find_if(runs, [&](Run const& run) {
-            return countsAsActive(run) && run.repo == row.repo && run.item == *row.item;
-        });
-        return found != runs.end() ? &*found : nullptr;
-    }
-
     /// Opens the dispatch form on the selected item, on @p task; or says why it cannot.
     void openFormOn(Interaction& interaction, KeyContext const& context, TaskDef const* task)
     {
@@ -143,10 +130,7 @@ namespace
         auto const* const config = context.engine != nullptr ? context.engine->config() : nullptr;
         if (config == nullptr || context.selected == nullptr || !context.selected->item)
             return nullptr;
-        auto const kind = std::holds_alternative<ChangeRequestRef>(*context.selected->item)
-                              ? AppliesTo::PullRequest
-                              : AppliesTo::Issue;
-        return config->firstTaskFor(kind);
+        return config->firstTaskFor(appliesToOf(*context.selected->item));
     }
 
     using Handler = std::optional<UiAction> (*)(Interaction&, KeyContext const&);
@@ -196,8 +180,9 @@ namespace
                     case RowKind::Agent: return UiAction { RevealAgentAction { .run = row->run } };
                     case RowKind::PullRequest:
                     case RowKind::Issue:
-                        if (auto const* const run =
-                                context.engine != nullptr ? activeRunOf(*row, *context.engine) : nullptr)
+                        if (auto const* const run = context.engine != nullptr && row->item
+                                                        ? context.engine->activeRunOn(row->repo, *row->item)
+                                                        : nullptr)
                             return UiAction { RevealAgentAction { .run = run->id } };
                         openFormOn(interaction, context, firstTaskOf(context));
                         return std::nullopt;

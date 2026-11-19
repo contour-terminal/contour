@@ -75,12 +75,6 @@ namespace
     // }}}
     // {{{ the item
 
-    /// The item's task kind.
-    [[nodiscard]] AppliesTo kindOf(ItemRef const& item) noexcept
-    {
-        return std::holds_alternative<ChangeRequestRef>(item) ? AppliesTo::PullRequest : AppliesTo::Issue;
-    }
-
     /// The url and title the engine last listed for an item.
     struct Listed
     {
@@ -337,7 +331,7 @@ std::optional<DispatchFormState> openDispatchForm(Engine const& engine,
         return std::nullopt;
     auto const tasks = config->tasks();
     auto const found = std::ranges::find(tasks, task, &TaskDef::id);
-    if (found == tasks.end() || found->appliesTo != kindOf(item))
+    if (found == tasks.end() || found->appliesTo != appliesToOf(item))
         return std::nullopt;
     auto listed = listedItem(engine, repo, item);
     if (!listed)
@@ -415,7 +409,7 @@ std::optional<DispatchAction> applyFormKey(core::tui::KeyEvent const& key,
         {
             auto const tasks = config->tasks();
             state.task = cycled(state.task, tasks.size(), step, [&](std::size_t index) {
-                return tasks[index].appliesTo == kindOf(state.item);
+                return tasks[index].appliesTo == appliesToOf(state.item);
             });
             // A task comes with its own model.
             auto const models = config->models();

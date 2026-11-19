@@ -8,6 +8,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 #include <orchestrator/core/Model.hpp>
@@ -21,6 +22,13 @@ enum class AppliesTo : uint8_t
     PullRequest, ///< A change request; spelled `pr`.
     Issue,       ///< An issue; spelled `issue`.
 };
+
+/// @param item An item.
+/// @return The kind of task it takes: a change request's, or an issue's (forge or Jira).
+[[nodiscard]] constexpr AppliesTo appliesToOf(ItemRef const& item) noexcept
+{
+    return std::holds_alternative<ChangeRequestRef>(item) ? AppliesTo::PullRequest : AppliesTo::Issue;
+}
 
 /// One row of the `tasks` table: what the dashboard offers to start on an item. A new task is a new row.
 struct TaskDef

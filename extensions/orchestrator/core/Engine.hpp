@@ -426,6 +426,12 @@ class Engine
     /// @return The run, the agent's argv and the limits; or why the dispatch would be refused.
     [[nodiscard]] std::expected<DispatchPreview, DispatchRefusal> preview(Dispatch const& request) const;
 
+    /// @param repo A repository's name.
+    /// @param item An item of it.
+    /// @return The active run (countsAsActive()) working on @p item, if one does: a dispatch on it is
+    /// refused.
+    [[nodiscard]] Run const* activeRunOn(std::string_view repo, ItemRef const& item) const noexcept;
+
     /// @return How many runs count as active (countsAsActive()): what `max_agents` is checked against.
     [[nodiscard]] std::size_t activeRuns() const noexcept;
 

@@ -17,15 +17,6 @@
 namespace orchestrator
 {
 
-namespace
-{
-    /// The kind of task @p item takes.
-    [[nodiscard]] AppliesTo kindOf(ItemRef const& item) noexcept
-    {
-        return std::holds_alternative<ChangeRequestRef>(item) ? AppliesTo::PullRequest : AppliesTo::Issue;
-    }
-} // namespace
-
 void Engine::dispatch(Dispatch const& request, std::vector<Effect>& out)
 {
     auto prepared = prepare(request);
@@ -57,6 +48,13 @@ std::expected<Run, DispatchRefusal> Engine::prepare(Dispatch const& request) con
     return preview(request).transform([](DispatchPreview preview) { return std::move(preview.run); });
 }
 
+Run const* Engine::activeRunOn(std::string_view repo, ItemRef const& item) const noexcept
+{
+    auto const found = std::ranges::find_if(
+        _runs, [&](Run const& run) { return countsAsActive(run) && run.repo == repo && run.item == item; });
+    return found != _runs.end() ? &*found : nullptr;
+}
+
 std::size_t Engine::activeRuns() const noexcept
 {
     return static_cast<std::size_t>(std::ranges::count_if(_runs, countsAsActive));
@@ -77,7 +75,7 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
     if (repo == nullptr)
         return std::unexpected { DispatchRefusal::UnknownRepo };
     auto const* const task = _config->findTask(request.task);
-    if (task == nullptr || task->appliesTo != kindOf(request.item))
+    if (task == nullptr || task->appliesTo != appliesToOf(request.item))
         return std::unexpected { DispatchRefusal::UnknownTask };
     auto const& model = request.model.empty() ? task->model : request.model;
     if (!std::ranges::contains(_config->models(), model))
@@ -85,8 +83,7 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
 
     // Only active runs count: a Finished entry is history, and Done is active until the user ends it.
     auto active = _runs | std::views::filter(countsAsActive);
-    if (std::ranges::any_of(
-            active, [&](Run const& run) { return run.repo == repo->name && run.item == request.item; }))
+    if (activeRunOn(repo->name, request.item) != nullptr)
         return std::unexpected { DispatchRefusal::AlreadyRunning };
     if (std::cmp_greater_equal(std::ranges::distance(active), _config->maxAgents()))
         return std::unexpected { DispatchRefusal::AgentLimit };
