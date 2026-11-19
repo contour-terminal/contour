@@ -101,14 +101,24 @@ struct LiveHost
     explicit LiveHost(Devices devices,
                       SessionHostConfig config = sequentialIds(),
                       vtbackend::Settings settings = {}):
-        host { loop,
-               [devices = std::move(devices)](vtpty::PageSize size,
-                                              std::optional<vtpty::Process::ExecInfo> const&) {
-                   return devices(size);
-               },
-               std::move(settings),
-               core::defaultEnvironment(),
-               pumping(std::move(config)) }
+        LiveHost { PtyFactory { [devices = std::move(devices)](
+                                    vtpty::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                       return devices(size);
+                   } },
+                   std::move(config),
+                   std::move(settings) }
+    {
+    }
+
+    /// @param ptys Makes the device of each session, given the program a spawn names instead of the shell.
+    /// @param config How the host is set up; its sessions always pump.
+    /// @param settings The sessions' terminal settings.
+    explicit LiveHost(PtyFactory ptys,
+                      SessionHostConfig config = sequentialIds(),
+                      vtbackend::Settings settings = {}):
+        host {
+            loop, std::move(ptys), std::move(settings), core::defaultEnvironment(), pumping(std::move(config))
+        }
     {
     }
 

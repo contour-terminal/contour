@@ -134,7 +134,20 @@ struct UpgradeBench
     explicit UpgradeBench(LiveHost::Devices devices,
                           vtbackend::Settings settings = {},
                           SessionHostConfig config = LiveHost::sequentialIds()):
-        live { std::make_unique<LiveHost>(std::move(devices), std::move(config), std::move(settings)) }
+        UpgradeBench { std::make_unique<LiveHost>(
+            std::move(devices), std::move(config), std::move(settings)) }
+    {
+    }
+
+    /// @param ptys Makes the device of each session, given the program a spawn names instead of the shell.
+    /// @param config How the host is set up.
+    UpgradeBench(PtyFactory ptys, SessionHostConfig config):
+        UpgradeBench { std::make_unique<LiveHost>(std::move(ptys), std::move(config)) }
+    {
+    }
+
+    /// @param host The daemon's live host.
+    explicit UpgradeBench(std::unique_ptr<LiveHost> host): live { std::move(host) }
     {
         hooks.host = &live->host;
         std::ignore = files.writeFile("/home/u/Contour.AppImage", "ELF");

@@ -562,6 +562,10 @@ if(VTHOST_TESTING)
     # and in ServedSession_test.cpp, whose dashboard cases cross a live upgrade and a keeper recovery (POSIX).
     if(CONTOUR_EXTENSIONS AND CONTOUR_EXTENSIONS_ORCHESTRATOR_GUEST)
         target_sources(vthost_test PRIVATE DaemonWorldE2E_test.cpp testing/OrchestratorWorld.hpp)
+        # An agent run end to end, across a live upgrade and a keeper recovery (POSIX).
+        if(NOT WIN32)
+            target_sources(vthost_test PRIVATE AgentRun_test.cpp)
+        endif()
         target_compile_definitions(vthost_test PRIVATE
             VTHOST_TEST_ORCHESTRATOR_WASM="${CMAKE_BINARY_DIR}/wasm/orchestrator.wasm"
             VTHOST_TEST_ORCHESTRATOR_TESTDATA="${PROJECT_SOURCE_DIR}/extensions/orchestrator/core/testdata")
