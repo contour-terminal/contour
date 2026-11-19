@@ -84,12 +84,14 @@ The footer shows the key, so you find it again.
 | `ToggleSidebar`: show or hide | ⌘\ | Ctrl+Shift+B |
 | `FocusSidebar`: move keyboard focus into it, showing it first when hidden | ⌘⇧E | Ctrl+Shift+D |
 | `JumpToNextAttention` | ⌘J | Ctrl+Shift+J |
-| `CycleWorkspace`: show the next / previous workspace | ⌃⌘↓ / ⌃⌘↑ | Ctrl+Shift+Alt+PageDown / PageUp |
+| `CycleWorkspace`: show the next / previous workspace | ⌃⌘↓ / ⌃⌘↑ | Ctrl+Alt+PageDown / PageUp |
+| `MoveWorkspaceDown` / `MoveWorkspaceUp`: move the current workspace in the list | ⌃⇧⌘↓ / ⌃⇧⌘↑ | Ctrl+Shift+Alt+PageDown / PageUp |
 | `NewWorkspace`: create a workspace and show it | ⇧⌘N | Ctrl+Shift+Alt+N |
 | `FilterWorkspaces`: open the filter, showing the sidebar first when hidden | none | none |
 
-These are bound in the `native2026` defaults only, except `CycleWorkspace` and `NewWorkspace`, which every defaults
-edition binds, one level up from the tab and window chords (Ctrl+PageUp/PageDown, Ctrl+Shift+N). `FilterWorkspaces`
+These are bound in the `native2026` defaults only, except `CycleWorkspace`, `MoveWorkspaceDown`/`Up` and
+`NewWorkspace`, which every defaults edition binds, one level up from the tab and window chords (Ctrl+PageUp/PageDown,
+Ctrl+Shift+PageUp/PageDown, Ctrl+Shift+N). `FilterWorkspaces`
 has no default chord; bind one in `input_mapping`. Each control's tooltip names the chord its action is bound to at the time, so a
 binding you add shows there at once.
 

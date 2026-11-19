@@ -165,7 +165,7 @@ void TerminalSession::deliverKey(Key key,
     input::inputLog()("Key {} event received: {} {}", eventType, modifiers, key);
 
     // An ended pane waits for its footer's answer: the input mappings still run first (so the ClosePane
-    // binding closes it, through terminate()'s already-closed branch, and Alt+Enter still toggles full
+    // binding closes it, through terminate()'s already-closed branch, and F11 still toggles full
     // screen), an unmodified Return they leave alone is Restart, and nothing reaches the PTY, whose
     // program is gone. GUI-thread state, read without the lock (see _end).
     auto const ended = _end != EndReason::None;

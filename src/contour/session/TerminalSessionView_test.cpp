@@ -292,17 +292,19 @@ TEST_CASE("TerminalSession: Ctrl+Shift+P opens the palette instead of reaching t
     // is that the action still consumed the key rather than letting it through. A chord with no binding,
     // by contrast, is encoded and written to the PTY.
     session->sendCharEvent(
-        U'Y', vtbackend::KeyIdentity { .unshiftedKey = U'Y' }, ctrlShift, KeyboardEventType::Press, now);
+        U'U', vtbackend::KeyIdentity { .unshiftedKey = U'U' }, ctrlShift, KeyboardEventType::Press, now);
     CHECK_FALSE(mockPtyOf(*session).stdinBuffer().empty());
 }
 
 TEST_CASE("TerminalSession: Ctrl+Shift+, fires despite Qt delivering the shifted '<'",
           "[contour][session][input]")
 {
-    // The default binds Ctrl+Shift+',' to OpenConfiguration, but Qt reports a Shift+punctuation chord as
-    // the shifted keysym — comma+Shift arrives as '<' (Qt::Key_Less). Without base-char normalization the
-    // chord would miss its binding and fall through to the shell (a stray '<'). It must be CONSUMED.
+    // The desktop default binds Ctrl+Shift+',' to OpenConfiguration, but Qt reports a Shift+punctuation
+    // chord as the shifted keysym — comma+Shift arrives as '<' (Qt::Key_Less). Without base-char
+    // normalization the chord would miss its binding and fall through to the shell (a stray '<'). It must
+    // be CONSUMED. A Mac binds no such row (Command+Comma opens Settings), so the desktop table is pinned.
     TestApp testApp;
+    contour::test::useDesktopBindings(testApp.app().config());
     auto session = makeDisplaylessSession(testApp.app());
     auto const now = std::chrono::steady_clock::now();
     auto const ctrlShift = Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift };

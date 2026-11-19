@@ -75,7 +75,8 @@ constexpr auto XkbTranslations = std::array {
     // Text-less: the Qt key → character table names it.
     ExpectedTranslation { .row = "xkb: Ctrl+Space", .text = U" ", .chord = Ctrl },
     ExpectedTranslation { .row = "xkb: Enter", .key = Key::Enter },
-    ExpectedTranslation { .row = "xkb: Alt+Enter is a binding", .key = Key::Enter, .chord = Alt },
+    ExpectedTranslation { .row = "xkb: Alt+Enter", .key = Key::Enter, .chord = Alt },
+    ExpectedTranslation { .row = "xkb: F11 is a binding", .key = Key::F11 },
     ExpectedTranslation { .row = "xkb: Shift+Enter", .key = Key::Enter, .chord = Shift },
     ExpectedTranslation { .row = "xkb: Ctrl+U under kitty disambiguate", .text = U"U",
                           .chord = Ctrl, .unshiftedKey = U'u' },

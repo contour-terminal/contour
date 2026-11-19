@@ -3249,14 +3249,14 @@ TEST_CASE("TerminalSessionManager: a modified Return in an ended pane is left to
     REQUIRE(ended->endAction() == contour::session::FooterAction::Restart);
     auto const ptysBefore = factory->createdPtys.size();
 
-    // Alt+Enter is the default ToggleFullscreen binding (a no-op here, with no display), and Shift+Enter
-    // a chord the user may bind: neither is Restart.
-    for (auto const chord: { vtbackend::Modifiers { vtbackend::Modifier::Alt },
-                             vtbackend::Modifiers { vtbackend::Modifier::Shift } })
-        ended->sendKeyEvent(vtbackend::Key::Enter,
-                            chord,
-                            vtbackend::KeyboardEventType::Press,
-                            std::chrono::steady_clock::now());
+    // F11 is the desktop's default ToggleFullscreen binding (a no-op here, with no display), and Alt+Enter
+    // and Shift+Enter chords the user may bind: none of them is Restart.
+    for (auto const& [key, chord]:
+         { std::pair { vtbackend::Key::F11, vtbackend::Modifiers {} },
+           std::pair { vtbackend::Key::Enter, vtbackend::Modifiers { vtbackend::Modifier::Alt } },
+           std::pair { vtbackend::Key::Enter, vtbackend::Modifiers { vtbackend::Modifier::Shift } } })
+        ended->sendKeyEvent(
+            key, chord, vtbackend::KeyboardEventType::Press, std::chrono::steady_clock::now());
 
     CHECK(factory->createdPtys.size() == ptysBefore);
     CHECK(manager.sessionForId(endedId) == ended);
@@ -3300,7 +3300,7 @@ TEST_CASE("TerminalSessionManager: a pane restarted mid-command starts with no b
 TEST_CASE("TerminalSessionManager: ClosePane closes an ended pane", "[manager][paneend]")
 {
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
-    contour::test::useDesktopBindings(app.app().config()); // Ctrl+Shift+X is the desktop's ClosePane chord
+    contour::test::useDesktopBindings(app.app().config()); // Ctrl+Shift+W is the desktop's ClosePane chord
     auto& manager = app.manager();
     contour::test::ScopedController const window { manager };
 
@@ -3317,8 +3317,8 @@ TEST_CASE("TerminalSessionManager: ClosePane closes an ended pane", "[manager][p
 
     // The default ClosePane chord: the input mappings still run while the pane waits, though text does not.
     auto const ctrlShift = vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift };
-    ended->sendCharEvent(U'X',
-                         vtbackend::KeyIdentity { .unshiftedKey = U'X' },
+    ended->sendCharEvent(U'W',
+                         vtbackend::KeyIdentity { .unshiftedKey = U'W' },
                          ctrlShift,
                          vtbackend::KeyboardEventType::Press,
                          std::chrono::steady_clock::now());
@@ -6349,6 +6349,77 @@ TEST_CASE("TerminalSessionManager: a daemon's window routes the workspace mutati
 
     manager.releaseBinding(binding);
 }
+
+TEST_CASE("TerminalSessionManager: a daemon's window asks its daemon to move a tab by its action",
+          "[manager][workspace][daemon]")
+{
+    // The daemon knows the two panes made here as its sessions 1000 and 1001: tabs 100 and 101 of workspace
+    // 10, as its directory lists them.
+    contour::test::MockPtySessionFactory daemon;
+    hostAsDaemon(daemon, 7);
+    daemon.hostSessionIdBase = 1000;
+    auto binding = DaemonDirectoryBinding { daemon };
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, binding);
+    auto* const first = manager.createSession(window.id);
+    auto* const second = manager.createSession(window.id);
+    REQUIRE(first != nullptr);
+    REQUIRE(second != nullptr);
+    auto const* const workspace = manager.model().workspace(window.id);
+    REQUIRE(workspace->tabCount() == 2);
+    auto const firstTab = workspace->tabAt(0)->id();
+    auto const requireMove = [&](uint64_t source, int index, uint64_t workspaceSession = 1000) {
+        REQUIRE(daemon.requestedMoves.size() == 1);
+        auto const& move = daemon.requestedMoves.front();
+        CHECK(move.source == vtworkspace::MoveSourceKind::Tab);
+        CHECK(move.sourceSessions == std::vector<uint64_t> { source });
+        CHECK(move.target == vtworkspace::MoveTargetKind::TabWell);
+        CHECK(move.targetSession == workspaceSession);
+        CHECK(move.index == index);
+        daemon.requestedMoves.clear();
+    };
+
+    // The leftmost tab moved left is nowhere to go: the daemon is not asked.
+    manager.moveTabToLeft(first);
+    CHECK(daemon.requestedMoves.empty());
+
+    // Moved right, it is asked of the daemon, to end at the second place; the daemon's push moves it here.
+    manager.moveTabToRight(first);
+    requireMove(1000, 1);
+    CHECK(workspace->tabAt(0)->id() == firstTab);
+
+    // The second tab moved left, and the first moved to the second place by position.
+    manager.moveTabToLeft(second);
+    requireMove(1001, 0);
+    manager.moveTabTo(2, first);
+    requireMove(1000, 1);
+    CHECK(workspace->tabAt(0)->id() == firstTab);
+
+    // The daemon lists a tab of session 1002 ahead of them that this window does not mirror yet (it would
+    // place it last), so the places are the daemon's: the first tab is its second, and can move left; and
+    // there are three places to move to by position, the third being past the window's own two.
+    auto directory = binding.source.directory();
+    auto& build = directory.workspaces.front();
+    auto unmirrored = build.tabs.front();
+    unmirrored.id = 102;
+    unmirrored.panes.front().key = contour::window::PaneKey { 1002 };
+    build.tabs.insert(build.tabs.begin(), unmirrored);
+    binding.source.replaced = directory;
+    manager.moveTabToLeft(first);
+    requireMove(1000, 0, 1002);
+    manager.moveTabTo(3, first);
+    requireMove(1000, 2, 1002);
+    // The second tab is the daemon's last: there is no place to its right.
+    manager.moveTabToRight(second);
+    CHECK(daemon.requestedMoves.empty());
+    manager.moveTabTo(4, first);
+    CHECK(daemon.requestedMoves.empty());
+
+    contour::test::closeAllTabs(*window.controller);
+    manager.releaseBinding(binding);
+}
 // }}}
 
 // {{{ the sidebar's actions reach the workspace mutations
@@ -6426,6 +6497,40 @@ TEST_CASE("TerminalSessionManager: an in-process window's sidebar reaches the wo
     f.controller().moveActiveTabToWorkspace(2);
     REQUIRE(model.workspace(f.second)->tabCount() == 3);
     CHECK(model.workspace(f.second)->tabAt(2)->id().value == firstTabs[0]);
+}
+
+TEST_CASE("TerminalSessionManager: reordering an inactive tab reorders the sidebar's tab rows",
+          "[manager][workspace][sidebar]")
+{
+    using contour::window::SidebarRowKind;
+    auto f = TwoWorkspaces {};
+    // A third tab, the active one: the two reordered in front of it leave its index as it was, so the move is
+    // not also an active-tab change, which would refresh the sidebar on its own.
+    f.controller().createNewTab();
+    drainPosted();
+    auto& sidebar = f.controller().sidebar();
+    sidebar.refreshNow();
+    auto const tabs = std::ranges::to<std::vector<uint64_t>>(
+        f.controller().directorySource()->directory().workspaces[0].tabs
+        | std::views::transform(&contour::window::DirectoryTab::id));
+    REQUIRE(tabs.size() == 3);
+    REQUIRE(f.manager().model().workspace(f.first)->activeTab()->id().value == tabs[2]);
+
+    // A sidebar drag within the workspace (or tab.move): the first tab to the second place.
+    f.manager().moveTabToWorkspace(f.controller(), tabs[0], f.first.value, 1);
+    REQUIRE(f.manager().model().workspace(f.first)->tabAt(1)->id().value == tabs[0]);
+    REQUIRE(f.manager().model().workspace(f.first)->activeTab()->id().value == tabs[2]);
+    CHECK(sidebar.isRebuildPending());
+    sidebar.refreshNow();
+    CHECK(sidebarRowOf(sidebar, SidebarRowKind::Tab, f.first.value, tabs[1])
+          < sidebarRowOf(sidebar, SidebarRowKind::Tab, f.first.value, tabs[0]));
+
+    // And back: the original order returns.
+    f.manager().moveTabToWorkspace(f.controller(), tabs[0], f.first.value, 0);
+    CHECK(sidebar.isRebuildPending());
+    sidebar.refreshNow();
+    CHECK(sidebarRowOf(sidebar, SidebarRowKind::Tab, f.first.value, tabs[0])
+          < sidebarRowOf(sidebar, SidebarRowKind::Tab, f.first.value, tabs[1]));
 }
 
 TEST_CASE("TerminalSessionManager: an in-process window's CloseWorkspace action closes the shown workspace",

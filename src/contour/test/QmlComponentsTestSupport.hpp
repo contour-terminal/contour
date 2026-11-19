@@ -858,14 +858,14 @@ class MockPaneWindowController: public QObject
     [[nodiscard]] QString hostLabel() const { return _hostLabel; }
     /// Names another host, or none; before the pane tree is shown, as the property is constant.
     void setHostLabel(QString label) { _hostLabel = std::move(label); }
-    /// Mirrors WindowController::shortcutText(): a ClosePane chord (the desktop's Ctrl+Shift+X), Ctrl+Shift+D
+    /// Mirrors WindowController::shortcutText(): a ClosePane chord (the desktop's Ctrl+Shift+W), Ctrl+Shift+D
     /// for SplitVertical, nothing for any other; counted.
     [[nodiscard]] Q_INVOKABLE QString shortcutText(QString const& commandName) const
     {
         ++shortcutTextCalls;
         if (commandName == QStringLiteral("SplitVertical"))
             return QStringLiteral("Ctrl+Shift+D");
-        return commandName == QStringLiteral("ClosePane") ? QStringLiteral("Ctrl+Shift+X") : QString {};
+        return commandName == QStringLiteral("ClosePane") ? QStringLiteral("Ctrl+Shift+W") : QString {};
     }
     mutable int shortcutTextCalls = 0; ///< How often a pane asked for a chord.
     /// Mirrors WindowController::canCloseWindow(): a pane's end never closes the test's window.

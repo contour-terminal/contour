@@ -21,10 +21,12 @@ A small number of bindings are built in and do **not** appear in `input_mapping`
 |---------|--------|
 | `Ctrl+Tab` / `Ctrl+PageDown` | Switch to the tab on the right (wrapping around) |
 | `Ctrl+Shift+Tab` / `Ctrl+PageUp` | Switch to the tab on the left (wrapping around) |
-| `Ctrl+Shift+Alt+PageDown` / `Ctrl+Shift+Alt+PageUp` (Linux, Windows) / `Ctrl+Cmd+Down` / `Ctrl+Cmd+Up` (macOS) | Show the next / previous workspace of the window's daemon (`CycleWorkspace`, wrapping around) |
+| `Ctrl+Alt+PageDown` / `Ctrl+Alt+PageUp` (Linux, Windows) / `Ctrl+Cmd+Down` / `Ctrl+Cmd+Up` (macOS) | Show the next / previous workspace of the window's daemon (`CycleWorkspace`, wrapping around) |
+| `Ctrl+Shift+Alt+PageDown` / `Ctrl+Shift+Alt+PageUp` (Linux, Windows) / `Ctrl+Shift+Cmd+Down` / `Ctrl+Shift+Cmd+Up` (macOS) | Move the current workspace one place down / up the list (`MoveWorkspaceDown` / `MoveWorkspaceUp`) |
+| `Ctrl+Shift+PageUp` / `Ctrl+Shift+PageDown` | Move the active tab one place left / right (`MoveTabToLeft` / `MoveTabToRight`) |
 | `Ctrl+Shift+G` (Linux, Windows) / `Cmd+Shift+O` (macOS) | Open the last command's output in the pager named by `command_blocks.pager` (needs a shell that marks its commands with [OSC 133](../vt-extensions/osc-133-shell-integration.md)). With nothing to open the chord is swallowed rather than sent to the shell as `^G`; on the alternate screen it goes to the application |
 | `Ctrl+Shift+L` (Linux, Windows) / `Cmd+K` (macOS) | Clear the scrollback and the screen above the current prompt (`ClearToPrompt`). On the primary screen only; with nothing to clear the chord is swallowed rather than typed |
-| `Alt+Shift+Arrow` (Linux, Windows) / `Cmd+Option+Arrow` (macOS) | Move the focus to the pane on that side. Some desktops and keyboard-layout switchers grab `Alt+Shift`; if the chord never reaches Contour, bind another one to `FocusPaneLeft`/`Right`/`Up`/`Down` in `input_mapping` |
+| `Ctrl+Alt+Arrow` (Linux, Windows) / `Cmd+Option+Arrow` (macOS) | Move the focus to the pane on that side. If the chord never reaches Contour (GNOME switches workspaces with it, see [Pane chords on GNOME](#pane-chords-on-gnome)), bind another one to `FocusPaneLeft`/`Right`/`Up`/`Down` in `input_mapping` |
 | `Ctrl+Shift+E` / `Ctrl+Shift+O` (Linux, Windows) | Split the active pane side by side / stacked |
 | `Cmd+D` / `Cmd+Shift+D` (macOS) | Split the active pane side by side / stacked |
 | `Cmd+Shift+Enter` (macOS) | Zoom the active pane to fill the tab, and back |
@@ -34,8 +36,8 @@ A small number of bindings are built in and do **not** appear in `input_mapping`
 | Horizontal wheel / two-finger sideways swipe | Switch tabs |
 
 The default chords added since your configuration was generated (see [Default chords](#default-chords)) reach
-it the same way, among them `Ctrl+Shift+C`, `Ctrl+Shift+W`, the pane chords and the macOS `⌘P`, `⌘W` and `⌃⌘`
-chords.
+it the same way, among them `Ctrl+Shift+C`, `Ctrl+Shift+W`, the pane chords
+and the macOS `⌘P`, `⌘W` and `⌃⌘` chords (full screen's `⌃⌘F` too).
 
 These are consulted only when your `input_mapping` does not claim the same key or button (for the
 triple-click, the same button and click count), so binding one of them yourself replaces it.
@@ -69,16 +71,17 @@ Shift or moves, and the table says why.
 | New window (`NewTerminal`) | `Ctrl+Shift+N` | `⌘N` | |
 | New window to… (`NewWindowTo`) | `Ctrl+Shift+K` | `⇧⌘K` | `⌘K` clears to the prompt |
 | New tab (`CreateNewTab`) | `Ctrl+Shift+T` | `⌘T` | |
-| Close pane (`ClosePane`) | `Ctrl+Shift+W`, `Ctrl+Shift+X` | `⌘W` | Closes the tab with its last pane |
+| Close pane (`ClosePane`) | `Ctrl+Shift+W` | `⌘W` | Closes the tab with its last pane |
 | Close tab (`CloseTab`) | — | `⇧⌘W` | On Linux and Windows, `Ctrl+Shift` already holds Shift |
 | Select tab 1…9 (`SwitchToTab`) | `Alt+1` … `Alt+9`, `Alt+0` for the tenth | `⌘1` … `⌘9` | `⌘0` resets the font size |
-| Previous / next tab | `Ctrl+PageUp` / `Ctrl+PageDown`, `Ctrl+Shift+Tab` / `Ctrl+Tab`, `Shift+←` / `Shift+→` | the same, and `⇧⌘[` / `⇧⌘]` | |
-| Move tab left / right | `Ctrl+Shift+PageUp` / `PageDown` | `⌘PageUp` / `⌘PageDown` | |
-| Previous / next workspace (`CycleWorkspace`) | `Ctrl+Shift+Alt+PageUp` / `Ctrl+Shift+Alt+PageDown` | `⌃⌘↑` / `⌃⌘↓` | `Ctrl+Alt+PageUp`/`PageDown` stay Emacs's `C-M-prior`/`C-M-next` |
+| Previous / next tab | `Ctrl+PageUp` / `Ctrl+PageDown`, `Ctrl+Shift+Tab` / `Ctrl+Tab` | the same, and `⇧⌘[` / `⇧⌘]` | `Shift+←` / `Shift+→` stay the editor's |
+| Move tab left / right | `Ctrl+Shift+PageUp` / `PageDown` | `⌃⇧PageUp` / `⌃⇧PageDown` | The tab chord plus Shift |
+| Previous / next workspace (`CycleWorkspace`) | `Ctrl+Alt+PageUp` / `Ctrl+Alt+PageDown` | `⌃⌘↑` / `⌃⌘↓` | The tab chords one level up; shadows Emacs's `C-M-prior`/`C-M-next` |
+| Move the workspace up / down (`MoveWorkspaceUp` / `MoveWorkspaceDown`) | `Ctrl+Shift+Alt+PageUp` / `Ctrl+Shift+Alt+PageDown` | `⌃⇧⌘↑` / `⌃⇧⌘↓` | The workspace chord plus Shift |
 | Split side by side / stacked | `Ctrl+Shift+E` / `Ctrl+Shift+O` | `⌘D` / `⇧⌘D` | iTerm2's chords |
-| Focus the pane on that side | `Alt+Shift+Arrow` | `⌥⌘Arrow` | |
-| Swap with the pane on that side | `Ctrl+Alt+Arrow` | `⌃⌥Arrow` | |
-| Resize the pane | `Ctrl+Shift+Alt+Arrow` | `⌃⇧⌥Arrow` | |
+| Focus the pane on that side | `Ctrl+Alt+Arrow` | `⌥⌘Arrow` | GNOME keeps it, see [below](#pane-chords-on-gnome) |
+| Swap with the pane on that side | `Ctrl+Shift+Alt+Arrow` | `⇧⌥⌘Arrow` | The focus chord plus Shift; GNOME keeps it too |
+| Resize the pane | `Alt+Shift+Arrow` | `⌃⌥⌘Arrow` | As Windows Terminal |
 | Zoom the pane (`TogglePaneZoom`) | `Ctrl+Shift+Z` | `⇧⌘↩` | iTerm2's chord |
 | Toggle split orientation | `Ctrl+Shift+\` | `⌃⇧\` | |
 | Show or hide the workspace sidebar (`ToggleSidebar`) | `Ctrl+Shift+B` | `⌘\` | `native2026` only |
@@ -88,25 +91,50 @@ Shift or moves, and the table says why.
 | Next / previous match | `F3` / `Shift+F3` | `⌘G` / `⇧⌘G`, and `F3` / `Shift+F3` | |
 | Find the selection (`SearchSelection`) | — | `⌘E` | A macOS convention; `Ctrl+Shift+E` splits |
 | Clear search highlight | `Ctrl+Shift+H` | `⇧⌘H` | `⌘H` hides the application |
-| Previous / next command (`FocusPreviousCommand`) | `Ctrl+↑` / `Ctrl+↓` | `⌘↑` / `⌘↓` | At the prompt only, as in VS Code's terminal |
+| Scroll the scrollback | `Shift+↑` / `Shift+↓`, `Shift+PageUp` / `Shift+PageDown`, `Shift+Home` / `Shift+End` | the same | On the primary screen only; an alternate-screen application (an editor, a pager) keeps them |
+| Previous / next command (`FocusPreviousCommand`) | `Ctrl+↑` / `Ctrl+↓` | `⌘↑` / `⌘↓` | At the prompt only, as in VS Code's terminal; the jump between prompts too |
 | Select previous / next command's output | `Ctrl+Shift+↑` / `Ctrl+Shift+↓` | `⇧⌘↑` / `⇧⌘↓` | At the prompt only |
-| Previous / next prompt (`ScrollMarkUp`) | `Ctrl+Alt+K` / `Ctrl+Alt+J` | `⌃⇧↑` / `⌃⇧↓` | At the prompt only |
 | Open the last command's output | `Ctrl+Shift+G` | `⇧⌘O` | `⌘G` finds the next match |
 | Clear to the prompt (`ClearToPrompt`) | `Ctrl+Shift+L` | `⌘K` | The shell's `Ctrl+L`, plus Shift |
-| Open URLs by hint (`HintMode`) | `Ctrl+Shift+U` | `⌘U` | |
-| Font size larger / smaller / reset | `Ctrl+Shift+=` / `Ctrl+Shift+-` / `Ctrl+0` | `⌘+` / `⌘-` / `⌘0` | |
+| Open URLs by hint (`HintMode`) | `Ctrl+Shift+Y` | `⌘Y` | IBus takes `Ctrl+Shift+U` for Unicode input |
+| Font size larger / smaller / reset | `Ctrl+Shift+=` / `Ctrl+Shift+-` / `Ctrl+0` | `⌘+` / `⌘-` / `⌘0` | Not `Ctrl+Shift+0`: where `Shift+0` types `=` (German, Nordic, Spanish, Italian, Portuguese, Turkish-Q) it is `Ctrl+Shift+=` |
 | Toggle the status line | `Ctrl+Alt+.` | `⌃⌘.` | |
 | Open the file manager | `Ctrl+Alt+O` | `⌃⌘O` | |
 | Screenshot (`ScreenshotVT`) | `Ctrl+Alt+S` | `⌃⌘S` | |
 | Toggle input method handling | `Ctrl+Alt+,` | `⌃⌘,` | |
-| Settings (`OpenConfiguration`) | `Ctrl+Shift+,` | `⌘,` (menu bar), `⌃⇧,` | |
+| Settings (`OpenConfiguration`) | `Ctrl+Shift+,` | `⌘,` (menu bar) | Option composes the comma on a Mac, so there is no second chord |
 | Vi normal mode | `Ctrl+Shift+Space` | `⌃⇧Space` | |
-| Full screen | `Alt+Enter` | `⌥↩` | |
+| Full screen | `F11` | `⌃⌘F` | `Alt+Enter` reaches the program |
 | Speak the selection | `Ctrl+Shift+S` | — | macOS has its own Speak Selection (`⌥Esc`) |
 | Quit | `Ctrl+Shift+Q` | `⌘Q` (menu bar) | |
 
 A test (`ChordParity_test.cpp`) keeps the two columns complete: a command bound on one platform only fails
 the build unless it is listed there with its reason.
+
+### Pane chords on GNOME
+
+GNOME Shell takes both pane chords before any window sees them: its default `switch-to-workspace-*`
+shortcuts are `Ctrl+Alt+Arrow` and its `move-to-workspace-*` shortcuts are `Ctrl+Shift+Alt+Arrow`. So on
+GNOME, focusing and swapping panes with the defaults never reaches Contour. Either free the chords in
+GNOME's Settings › Keyboard › Keyboard Shortcuts › Navigation, or give the pane commands chords of their own
+in `input_mapping`, for example on `Alt+Arrow` and `Alt+Shift+Arrow`:
+
+```yaml
+input_mapping:
+    - { mods: [Alt],          key: LeftArrow,  action: FocusPaneLeft }
+    - { mods: [Alt],          key: RightArrow, action: FocusPaneRight }
+    - { mods: [Alt],          key: UpArrow,    action: FocusPaneUp }
+    - { mods: [Alt],          key: DownArrow,  action: FocusPaneDown }
+    - { mods: [Alt, Shift],   key: LeftArrow,  action: SwapPaneLeft }
+    - { mods: [Alt, Shift],   key: RightArrow, action: SwapPaneRight }
+    - { mods: [Alt, Shift],   key: UpArrow,    action: SwapPaneUp }
+    - { mods: [Alt, Shift],   key: DownArrow,  action: SwapPaneDown }
+```
+
+`Alt+Arrow` then no longer reaches the program in the pane, so a shell's word motion on `Alt+Left`/`Right`
+is gone. `Alt+Shift+Arrow` is the default resize chord: `input_mapping` is matched in the order it lists its
+rows, so change the `mods` of the `ResizePane` rows a generated configuration writes on `[Alt, Shift]`, or
+remove them, for the swap rows to fire.
 
 ## macOS defaults
 
@@ -228,9 +256,10 @@ the reason is reported on startup.
 ## Switching daemons and workspaces
 
 These actions re-point the window they fire in at another workspace or daemon (see
-[Switching a window](../persistent-sessions.md#switching-a-window)). Only `CycleWorkspace` is bound by default:
-`Ctrl+Shift+Alt+PageDown` / `PageUp` (Linux, Windows) and `⌃⌘↓` / `⌃⌘↑` (macOS) show the next / previous
-workspace, beside the tab chords one level down. The command palette lists them all under **Daemons**. They need a window that shows a daemon.
+[Switching a window](../persistent-sessions.md#switching-a-window)). Two of them are bound by default.
+`CycleWorkspace` is `Ctrl+Alt+PageDown` / `PageUp` (Linux, Windows) and `⌃⌘↓` / `⌃⌘↑` (macOS): it shows the
+next / previous workspace, one level up from the tab chords. `MoveWorkspaceDown` / `MoveWorkspaceUp` are the
+same chords with Shift: they move the current workspace down / up the list. The command palette lists them all under **Daemons**. They need a window that shows a daemon.
 
 | Action | Key | What it does |
 | --- | --- | --- |
@@ -245,7 +274,7 @@ workspace, beside the tab chords one level down. The command palette lists them 
 ```yaml
 input_mapping:
   - { mods: [Control, Alt], key: '2', action: SwitchToWorkspace, index: 2 }
-  - { mods: [Control, Shift, Alt], key: PageDown, action: CycleWorkspace, direction: next }
+  - { mods: [Control, Alt], key: PageDown, action: CycleWorkspace, direction: next }
   - { mods: [Control, Alt, Shift], key: RightArrow, action: CycleDaemon, direction: next }
   - { mods: [Control, Alt], key: A, action: SwitchToDaemon, name: admin }
   - { mods: [Control, Alt], key: H, action: OpenDaemon, host: home }
@@ -288,8 +317,9 @@ is not bound to a key by default.
 ## Workspace sidebar
 
 The [workspace sidebar](../sidebar.md) is shown and started by the `native2026` defaults (`defaults_edition`),
-which also bind its chords. A configuration with `defaults_edition: classic` binds none of them. A `native2026`
-configuration written before the sidebar existed still gets them, unless it binds the same chord itself.
+which also bind its chords. A configuration with `defaults_edition: classic` binds none of them but
+`MoveWorkspaceUp`/`Down`, which every edition binds beside `CycleWorkspace`. A `native2026` configuration written
+before the sidebar existed still gets them, unless it binds the same chord itself.
 
 | Action | Default (Linux / Windows) | Default (macOS) | What it does |
 | --- | --- | --- | --- |
@@ -299,7 +329,7 @@ configuration written before the sidebar existed still gets them, unless it bind
 | `JumpToNextAttention` | `Ctrl+Shift+J` | `⌘J` | Shows the next pane that needs you: blocked or bell first, then failed, then done and not seen. |
 | `MarkSeen` | none | none | Marks the active pane's output as seen. |
 | `RenameWorkspace` | none | none | Renames the current workspace inline. |
-| `MoveWorkspaceUp`, `MoveWorkspaceDown` | none | none | Moves the current workspace one place in the sidebar's list. |
+| `MoveWorkspaceUp`, `MoveWorkspaceDown` | `Ctrl+Shift+Alt+PageUp` / `PageDown` | `⌃⇧⌘↑` / `⌃⇧⌘↓` | Moves the current workspace one place in the sidebar's list. |
 | `CloseWorkspace` | none | none | Closes the current workspace and everything in it, after asking. The last workspace of an in-process window cannot be closed. |
 | `GoToPane` | none | none | Shows the pane a sidebar row names; a row of the pane menu. |
 | `MoveTabToWorkspace` | `index:` (1-based, required) | | Moves the current tab into the Nth workspace. |

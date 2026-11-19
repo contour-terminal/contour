@@ -87,6 +87,7 @@ namespace keybits
     inline constexpr int KeyLeft = 0x01000012;
     inline constexpr int KeyUp = 0x01000013;
     inline constexpr int KeyF1 = 0x01000030;
+    inline constexpr int KeyF11 = 0x0100003a;
     inline constexpr int KeyF12 = 0x0100003b;
     inline constexpr int KeySpace = 0x20;
 
@@ -181,10 +182,8 @@ namespace keybits
         add("xkb: Backspace", Xkb, { .qtKey = KeyBackspace }, "\177");
         add("xkb: Ctrl+Space", Xkb, { .qtKey = KeySpace, .qtModifiers = Ctrl }, "\0"sv);
         add("xkb: Enter", Xkb, { .qtKey = KeyReturn, .text = U"\r" }, "\r");
-        addBound("xkb: Alt+Enter is a binding",
-                 Xkb,
-                 { .qtKey = KeyReturn, .text = U"\r", .qtModifiers = Alt },
-                 "ToggleFullscreen");
+        add("xkb: Alt+Enter", Xkb, { .qtKey = KeyReturn, .text = U"\r", .qtModifiers = Alt }, "\033\r");
+        addBound("xkb: F11 is a binding", Xkb, { .qtKey = KeyF11 }, "ToggleFullscreen");
         add("xkb: Shift+Enter", Xkb, { .qtKey = KeyReturn, .text = U"\r", .qtModifiers = Shift }, "\r");
         add("xkb: Ctrl+U under kitty disambiguate",
             Xkb,
@@ -282,10 +281,8 @@ namespace keybits
         add("win32: Backspace", Win32, { .qtKey = KeyBackspace }, "\177");
         add("win32: Ctrl+Space", Win32, { .qtKey = KeySpace, .qtModifiers = Ctrl }, "\0"sv);
         add("win32: Enter", Win32, { .qtKey = KeyReturn, .text = U"\r" }, "\r");
-        addBound("win32: Alt+Enter is a binding",
-                 Win32,
-                 { .qtKey = KeyReturn, .text = U"\r", .qtModifiers = Alt },
-                 "ToggleFullscreen");
+        add("win32: Alt+Enter", Win32, { .qtKey = KeyReturn, .text = U"\r", .qtModifiers = Alt }, "\033\r");
+        addBound("win32: F11 is a binding", Win32, { .qtKey = KeyF11 }, "ToggleFullscreen");
         add("win32: Shift+Enter", Win32, { .qtKey = KeyReturn, .text = U"\r", .qtModifiers = Shift }, "\r");
         add("win32: Ctrl+U under kitty disambiguate",
             Win32,
@@ -466,16 +463,15 @@ namespace keybits
                 c.setting);
         }
 
-        // Option+Enter: a named key, so the option_as_alt branch never sees it.
-        table.push_back(KeyCharacterizationRow { .name = "mac: Option+Enter is a binding",
+        // Option+Enter: a named key, so the option_as_alt branch never sees it, and Alt stays. No default
+        // binds it (macOS goes full screen with Control+Command+F), so it reaches the program.
+        table.push_back(KeyCharacterizationRow { .name = "mac: Option+Enter",
                                                  .kind = Mac,
                                                  .event = { .qtKey = KeyReturn,
                                                             .text = U"\r",
                                                             .qtModifiers = Alt,
                                                             .nativeModifiers = MacLeftOption },
-                                                 .expectedPty = {},
-                                                 .binding = ExpectedBinding::Fires,
-                                                 .boundAction = "ToggleFullscreen" });
+                                                 .expectedPty = "\033\r" });
 
         // Command is Qt::MetaModifier. Command+C is unbound -- Copy is the menu's.
         // deliberate: spec "Deliberate behaviour changes", row 1 -- an unbound ⌘ chord is consumed. It

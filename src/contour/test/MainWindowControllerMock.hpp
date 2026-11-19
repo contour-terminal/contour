@@ -307,7 +307,7 @@ class MainWindowControllerMock: public QAbstractListModel
     std::optional<command::ChordIndex> chords;
 
     /// Mirrors WindowController::shortcutText(): with chords, the chord they bind @p commandName to, spelled
-    /// in shortcutStyle, or nothing; without, a ClosePane chord (the desktop's Ctrl+Shift+X), CreateNewTab's,
+    /// in shortcutStyle, or nothing; without, a ClosePane chord (the desktop's Ctrl+Shift+W), CreateNewTab's,
     /// Ctrl+Shift+T, JumpToNextAttention's, Ctrl+Shift+J, and nothing for any other command (an ended pane's
     /// footer names Close's).
     [[nodiscard]] Q_INVOKABLE QString shortcutText(QString const& commandName) const
@@ -327,7 +327,7 @@ class MainWindowControllerMock: public QAbstractListModel
                 vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
                 command::ShortcutInput { U'J' },
                 shortcutStyle));
-        return commandName == QStringLiteral("ClosePane") ? QStringLiteral("Ctrl+Shift+X") : QString {};
+        return commandName == QStringLiteral("ClosePane") ? QStringLiteral("Ctrl+Shift+W") : QString {};
     }
 
     /// Mirrors WindowController::showAbout(): asks the window for its About dialog.

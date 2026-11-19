@@ -12,6 +12,7 @@
 #include <contour/input/MouseMapping.hpp>
 #include <contour/input/QtKeyCapture.hpp>
 #include <contour/platform/QtPath.hpp>
+#include <contour/session/PaneProxy.hpp>
 #include <contour/session/SessionInput.hpp>
 #include <contour/session/SpawnCommand.hpp>
 #include <contour/session/TerminalSession.hpp>
@@ -591,10 +592,10 @@ TEST_CASE("the pane chords are claimed before the terminal encodes them", "[sess
         return !pty.stdinBuffer().empty();
     };
 
-    SECTION("Alt+Shift+arrow moves the focus between panes")
+    SECTION("Ctrl+Alt+arrow moves the focus between panes")
     {
         for (auto const key: { Qt::Key_Left, Qt::Key_Right, Qt::Key_Up, Qt::Key_Down })
-            CHECK_FALSE(reachedThePty(key, Qt::AltModifier | Qt::ShiftModifier, QString()));
+            CHECK_FALSE(reachedThePty(key, Qt::ControlModifier | Qt::AltModifier, QString()));
     }
 
     SECTION("a bare Alt+arrow stays the shell's word motion")
@@ -610,6 +611,49 @@ TEST_CASE("the pane chords are claimed before the terminal encodes them", "[sess
         CHECK_FALSE(
             reachedThePty(Qt::Key_O, Qt::ControlModifier | Qt::ShiftModifier, QStringLiteral("\x0f")));
     }
+}
+
+TEST_CASE("a user's Ctrl+Alt+Left swap row claims the press, and the built-in focus row never runs",
+          "[session][input][panes]")
+{
+    // A configuration written before Ctrl+Alt+Arrow focused panes bound it to swap them. The router finds the
+    // user's row first (KeyRouter_test pins that); this drives the press through a real session in a split
+    // tab, so what the swap handler answers decides whether the built-in FocusPaneLeft row is tried at all.
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    // The desktop's tables, whatever the host: Ctrl+Alt+Arrow is the desktop's focus chord.
+    contour::test::useDesktopBindings(app.app().config());
+    auto& mappings = app.app().config().inputMappings.value();
+    mappings.keyMappings = { contour::config::KeyInputMapping {
+        .modes {},
+        .modifiers = vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
+        .input = vtbackend::Key::LeftArrow,
+        .binding = { contour::actions::SwapPaneLeft {} } } };
+
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const left = window->activeSession();
+    REQUIRE(left != nullptr);
+    manager.splitActivePane(/*vertical*/ true, left);
+    auto* const right = window->activeSession();
+    REQUIRE(right != left);
+
+    auto& pty = mockPtyOf(*right);
+    pty.stdinBuffer().clear();
+    QKeyEvent ev(QEvent::KeyPress, Qt::Key_Left, Qt::ControlModifier | Qt::AltModifier, QString());
+    CHECK(contour::session::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *right));
+    CHECK(pty.stdinBuffer().empty());
+
+    // The swap moved the acting pane left and kept it focused; a focus move would have activated `left`
+    // and left the panes where they were.
+    CHECK(window->activeSession() == right);
+    auto const* root = window->activeTabRootPane();
+    REQUIRE(root != nullptr);
+    REQUIRE_FALSE(root->isLeaf());
+    CHECK(root->first()->session() == right);
+    CHECK(root->second()->session() == left);
+
+    contour::test::closeAllTabs(*window);
 }
 
 TEST_CASE("a declined Ctrl+Shift+G does not reach the shell as ^G", "[session][input][semanticblocks]")
@@ -640,6 +684,9 @@ TEST_CASE("a declined Ctrl+Shift+G does not reach the shell as ^G", "[session][i
 TEST_CASE("sendKeyEvent covers the whole special-key mapping table", "[session][input]")
 {
     contour::test::TestApp app;
+    // The Qt -> vtbackend::Key table is what this pins, not the defaults: without key rows, F11 (full screen
+    // on the desktop) is a key like the others.
+    app.app().config().inputMappings.value().keyMappings.clear();
     auto session = makeSession(app.app());
     auto& pty = mockPtyOf(*session);
 
