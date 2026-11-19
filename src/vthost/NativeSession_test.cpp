@@ -22,6 +22,7 @@
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -9927,6 +9928,7 @@ enum class OffersMeta : uint8_t
     No = 0,
     Yes,
     WithColor,
+    ColorOnly, ///< WorkspaceColor without the WorkspaceMeta that carries it.
 };
 
 /// Two workspaces of one session each, and windows on a ManualClock handshaken by hand.
@@ -9946,9 +9948,9 @@ struct MetaFixture
                                      { proto::Capability::AttachIntent, proto::Capability::DaemonFollow }),
                                  .attachIntent = { .kind = proto::AttachIntentKind::Select,
                                                    .workspace = workspace } };
-        if (offers != OffersMeta::No)
+        if (offers == OffersMeta::Yes || offers == OffersMeta::WithColor)
             hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::WorkspaceMeta));
-        if (offers == OffersMeta::WithColor)
+        if (offers == OffersMeta::WithColor || offers == OffersMeta::ColorOnly)
             hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::WorkspaceColor));
         return flush.attach(workspace == first ? inFirst : inSecond, std::move(hello));
     }
@@ -10324,7 +10326,9 @@ TEST_CASE("a client's colour for a workspace is every client's", "[vthost][nativ
 TEST_CASE("a workspace colour is refused without the capability", "[vthost][native][workspace-color]")
 {
     auto f = MetaFixture {};
-    auto& client = f.attachSelecting(f.first, OffersMeta::Yes);
+    // Without WorkspaceColor; or with it but without WorkspaceMeta, which is how the colour is announced.
+    auto const offers = GENERATE(OffersMeta::Yes, OffersMeta::ColorOnly);
+    auto& client = f.attachSelecting(f.first, offers);
     f.settle();
     NativeSessionFlushTester::serveWorkspaceVerb(
         *client.session,

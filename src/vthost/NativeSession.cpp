@@ -2567,7 +2567,8 @@ NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame con
     }
     if (auto const* recolor = std::get_if<proto::SetWorkspaceColor>(&frame.pdu))
     {
-        if (!_negotiated->shared.contains(proto::Capability::WorkspaceColor))
+        // Gated as the colour's announcement is: a client that cannot be told the colour does not set it.
+        if (!sharesWorkspaceColor())
         {
             refuse(frame);
             return TabVerb::Served;
