@@ -748,11 +748,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param beforeLeafSeed Invoked (when set) with each leaf pane immediately before its backing
     ///                 session is created — the hook attach mode uses to bind the pane about to be born
     ///                 to a specific remote session (via vthost::client::WireLayout::leafSession).
+    /// @param activation Whether each tab realized becomes @p window's active one: a daemon's tab the
+    ///                 daemon did not activate is realized in the background (contour::remote).
     /// @return false if @p layout has no tabs (nothing to apply); true otherwise.
     bool applyLayoutToWindow(vtworkspace::WorkspaceId window,
                              config::Layout const& layout,
                              std::optional<vtbackend::PageSize> pageSize = std::nullopt,
-                             std::function<void(config::LayoutPane const&)> const& beforeLeafSeed = {});
+                             std::function<void(config::LayoutPane const&)> const& beforeLeafSeed = {},
+                             vtworkspace::TabActivation activation = vtworkspace::TabActivation::Activate);
 
     // Keyboard tab navigation/reordering. Every entry point takes the ACTING session (the one that
     // received the keybinding) and targets that session's hosting window, so a keybinding in any

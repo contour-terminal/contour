@@ -593,7 +593,8 @@ namespace
         }
     }
 
-    /// Realizes ONE whole daemon tab (no leaf yet bound) via the shared realizer.
+    /// Realizes ONE whole daemon tab (no leaf yet bound) via the shared realizer, in the background: whether
+    /// it becomes the window's active tab is the daemon's to say, as applyPresentation() takes it.
     void realizeWholeTab(contour::session::TerminalSessionManager& manager,
                          vtworkspace::WorkspaceId window,
                          NativeController& controller,
@@ -604,11 +605,15 @@ namespace
         single.tabs.push_back(wireTab);
         auto const wl = vthost::client::wireToLayout(single);
         manager.applyLayoutToWindow(
-            window, wl.layout, pageSize, [&](contour::config::LayoutPane const& leaf) {
+            window,
+            wl.layout,
+            pageSize,
+            [&](contour::config::LayoutPane const& leaf) {
                 auto const it = wl.leafSession.find(&leaf);
                 if (it != wl.leafSession.end())
                     controller.setNextBindSession(it->second);
-            });
+            },
+            vtworkspace::TabActivation::Background);
     }
 } // namespace
 
@@ -687,11 +692,15 @@ void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
         gatherMovedPanes(manager, controller, bound, window, layout);
     }
 
+    // The daemon tabs this pass shows for the first time: how each is presented, whether it is the active tab
+    // included, is the daemon's -- a tab the user opened is activated there, an extension's agent tab is not.
+    auto realizedNow = std::unordered_set<uint64_t> {};
     for (auto const& wireTab: layout.tabs)
     {
         if (!anyLeafClaimed(wireTab.root, controller))
         {
             realizeWholeTab(manager, window, controller, wireTab, pageSize);
+            realizedNow.insert(wireTab.tabId);
             continue;
         }
         // The tab is already shown: catch up any new splits inside it, one at a
@@ -764,7 +773,7 @@ void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
                           std::cmp_equal(index, layout.activeTab) ? vthost::client::TabActivity::Active
                                                                   : vthost::client::TabActivity::Inactive,
                           *tab,
-                          selection);
+                          realizedNow.contains(wireTab.tabId) ? TabSelection::Seed : selection);
         // Who draws the tab is the daemon's to say, never its title's: the window marks what it is told.
         manager.noteServedTab(*tab, servedMarkOf(layout, wireTab.tabId));
     }

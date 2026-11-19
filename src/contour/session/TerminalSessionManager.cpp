@@ -1256,7 +1256,8 @@ bool TerminalSessionManager::applyLayoutToWindow(
     vtworkspace::WorkspaceId window,
     config::Layout const& layout,
     std::optional<vtbackend::PageSize> pageSize,
-    std::function<void(config::LayoutPane const&)> const& beforeLeafSeed)
+    std::function<void(config::LayoutPane const&)> const& beforeLeafSeed,
+    vtworkspace::TabActivation activation)
 {
     if (layout.tabs.empty())
     {
@@ -1308,7 +1309,7 @@ bool TerminalSessionManager::applyLayoutToWindow(
                    != nullptr;
         };
 
-        auto* modelTab = vtworkspace::realizeLayoutTab(*_model, window, tabSpec, seeder);
+        auto* modelTab = vtworkspace::realizeLayoutTab(*_model, window, tabSpec, seeder, activation);
         _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
         if (modelTab != nullptr)
         {

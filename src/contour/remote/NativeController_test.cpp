@@ -2450,6 +2450,69 @@ TEST_CASE("attach authors a tab on the daemon and reconciles it locally", "[atta
     ac->stop();
 }
 
+// A window that already shows the workspace keeps its own tab selection (TabSelection::Keep), so a tab it
+// realizes for the first time is the one place the daemon's activation still decides: a tab the daemon opened
+// in the background (an extension's agent pane) stays behind the active one, while a tab the user asked for
+// (which the daemon activates) is shown.
+TEST_CASE("a daemon tab is shown in the window only if the daemon activated it", "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+
+    auto timeline = TestTimeline {};
+    auto acOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+    auto const reconcile = [&] {
+        contour::remote::applyRemoteLayout(app.manager(),
+                                           win.id,
+                                           *ac,
+                                           ac->settledLayouts(),
+                                           std::nullopt,
+                                           std::nullopt,
+                                           contour::remote::TabSelection::Keep);
+    };
+    auto const waitForTabs = [&](std::size_t count) {
+        return waitUntil([&] {
+            auto const layout = ac->settledLayout();
+            return layout && layout->tabs.size() == count;
+        });
+    };
+
+    requireConnected(*ac);
+    REQUIRE(waitForTabs(1));
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
+    auto const* const window = app.manager().model().workspace(win.id);
+    REQUIRE(window->tabCount() == 1);
+    auto const* const first = window->tabAt(0);
+
+    SECTION("a tab the daemon opened in the background")
+    {
+        auto const* const agentTab = daemon.onDaemon([&] {
+            return daemon.host->createTabIn(
+                daemon.host->workspaceId(),
+                vthost::SessionSpawnRequest { .activation = vtworkspace::TabActivation::Background });
+        });
+        REQUIRE(agentTab != nullptr);
+        REQUIRE(waitForTabs(2));
+        reconcile();
+        REQUIRE(window->tabCount() == 2);
+        CHECK(window->activeTab() == first);
+    }
+
+    SECTION("a tab the user opened")
+    {
+        app.manager().createNewTab(win.id);
+        REQUIRE(waitForTabs(2));
+        reconcile();
+        REQUIRE(window->tabCount() == 2);
+        CHECK(window->activeTab() == window->tabAt(1));
+    }
+
+    ac->stop();
+}
+
 namespace
 {
 /// Writes a configuration file naming @p profile with @p terminalId, as a user saving it would.
