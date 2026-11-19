@@ -641,6 +641,8 @@ class Engine
     void onPollResult(std::string_view tag, ProcessOutcome const& outcome, std::vector<Effect>& out);
     void onHooksResult(ProcessOutcome const& outcome);
     void onAuthResult(ProcessOutcome const& outcome, std::vector<Effect>& out);
+    void issueSourceAuthChecks(std::vector<Effect>& out);
+    void onSourceAuthResult(std::string_view tag, ProcessOutcome const& outcome, std::vector<Effect>& out);
     void onListAnswered(std::vector<Effect>& out);
     void checkHooks(std::vector<Effect>& out);
     void recheckFinished(std::vector<Effect>& out);

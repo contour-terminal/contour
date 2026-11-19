@@ -1,0 +1,162 @@
+[
+  {
+    "expand": "operations,versionedRepresentations,editmeta,changelog,renderedFields",
+    "id": "10003",
+    "self": "https://example.atlassian.net/rest/api/3/issue/10003",
+    "key": "abc-1",
+    "fields": {
+      "summary": "A lower-case key",
+      "status": {
+        "name": "To Do",
+        "statusCategory": {
+          "key": "new",
+          "name": "To Do"
+        }
+      },
+      "issuetype": {
+        "name": "Bug",
+        "subtask": false
+      },
+      "priority": {
+        "name": "Medium"
+      },
+      "assignee": {
+        "accountId": "user",
+        "displayName": "user",
+        "active": true
+      },
+      "reporter": {
+        "accountId": "user",
+        "displayName": "user",
+        "active": true
+      },
+      "created": "2026-11-01T10:00:00.000+0000",
+      "updated": "2026-11-02T10:00:00.000+0000",
+      "labels": [],
+      "project": {
+        "key": "abc",
+        "name": "Project"
+      }
+    }
+  },
+  {
+    "expand": "operations,versionedRepresentations,editmeta,changelog,renderedFields",
+    "id": "10004",
+    "self": "https://example.atlassian.net/rest/api/3/issue/10004",
+    "key": "ABC-12;rm",
+    "fields": {
+      "summary": "A key with a shell word",
+      "status": {
+        "name": "To Do",
+        "statusCategory": {
+          "key": "new",
+          "name": "To Do"
+        }
+      },
+      "issuetype": {
+        "name": "Bug",
+        "subtask": false
+      },
+      "priority": {
+        "name": "Medium"
+      },
+      "assignee": {
+        "accountId": "user",
+        "displayName": "user",
+        "active": true
+      },
+      "reporter": {
+        "accountId": "user",
+        "displayName": "user",
+        "active": true
+      },
+      "created": "2026-11-01T10:00:00.000+0000",
+      "updated": "2026-11-02T10:00:00.000+0000",
+      "labels": [],
+      "project": {
+        "key": "ABC",
+        "name": "Project"
+      }
+    }
+  },
+  {
+    "expand": "operations,versionedRepresentations,editmeta,changelog,renderedFields",
+    "id": "10005",
+    "self": "https://example.atlassian.net/rest/api/3/issue/10005",
+    "key": "--upload-pack",
+    "fields": {
+      "summary": "A key that is an option",
+      "status": {
+        "name": "To Do",
+        "statusCategory": {
+          "key": "new",
+          "name": "To Do"
+        }
+      },
+      "issuetype": {
+        "name": "Bug",
+        "subtask": false
+      },
+      "priority": {
+        "name": "Medium"
+      },
+      "assignee": {
+        "accountId": "user",
+        "displayName": "user",
+        "active": true
+      },
+      "reporter": {
+        "accountId": "user",
+        "displayName": "user",
+        "active": true
+      },
+      "created": "2026-11-01T10:00:00.000+0000",
+      "updated": "2026-11-02T10:00:00.000+0000",
+      "labels": [],
+      "project": {
+        "key": "",
+        "name": "Project"
+      }
+    }
+  },
+  {
+    "expand": "operations,versionedRepresentations,editmeta,changelog,renderedFields",
+    "id": "10006",
+    "self": "https://example.atlassian.net/rest/api/3/issue/10006",
+    "key": "ABC-9",
+    "fields": {
+      "summary": "The one valid key",
+      "status": {
+        "name": "To Do",
+        "statusCategory": {
+          "key": "new",
+          "name": "To Do"
+        }
+      },
+      "issuetype": {
+        "name": "Bug",
+        "subtask": false
+      },
+      "priority": {
+        "name": "Medium"
+      },
+      "assignee": {
+        "accountId": "user",
+        "displayName": "user",
+        "active": true
+      },
+      "reporter": {
+        "accountId": "user",
+        "displayName": "user",
+        "active": true
+      },
+      "created": "2026-11-01T10:00:00.000+0000",
+      "updated": "2026-11-02T10:00:00.000+0000",
+      "labels": [],
+      "project": {
+        "key": "ABC",
+        "name": "Project"
+      }
+    }
+  }
+]

@@ -23,6 +23,8 @@
 #include <orchestrator/core/ArgumentKinds.hpp>
 #include <orchestrator/core/ConfigJson.hpp>
 #include <orchestrator/core/DashboardKeys.hpp>
+#include <orchestrator/core/IssueSources.hpp>
+#include <orchestrator/core/Jira.hpp>
 #include <orchestrator/core/Json.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Prompt.hpp>
@@ -109,9 +111,6 @@ namespace
         Spelling { .text = "issue"sv, .meaning = AppliesTo::Issue },
     };
 
-    /// The issue sources this version reads; Jira comes later.
-    constexpr auto IssueSources = std::array { "forge"sv };
-
     /// @return The meaning of @p text in @p table, or nothing if no row spells it.
     template <typename Meaning, std::size_t N>
     constexpr std::optional<Meaning> meaningOf(std::array<Spelling<Meaning>, N> const& table,
@@ -132,8 +131,8 @@ namespace
     enum class Listing : uint8_t
     {
         None,
-        Forges,       ///< ForgeSpellings that have a provider row.
-        IssueSources, ///< IssueSources.
+        Forges,       ///< ForgeSpellings whose provider row is Recorded.
+        IssueSources, ///< The issueSources() that are Recorded.
         ItemKinds,    ///< AppliesToSpellings.
         ReservedKeys, ///< The dashboardKeys() that type a character.
     };
@@ -189,6 +188,9 @@ namespace
         ProblemText { .problem = ConfigProblem::UnsupportedSource,
                       .text = "is not a supported issue source",
                       .listing = Listing::IssueSources },
+        ProblemText { .problem = ConfigProblem::NotASite,
+                      .text = "must be an https:// address with a host and no path, such as "
+                              "https://example.atlassian.net" },
         ProblemText { .problem = ConfigProblem::Unrecorded,
                       .text = "is not yet supported",
                       .afterSubject = " has no recorded fixture" },
@@ -215,8 +217,8 @@ namespace
     static_assert(ProblemTexts.size() == static_cast<std::size_t>(ConfigProblem::MissingUrl) + 1,
                   "ProblemTexts covers every ConfigProblem");
 
-    /// @return The values @p listing names, as the user writes them.
-    [[nodiscard]] std::vector<std::string_view> listed(Listing listing)
+    /// @return The values @p listing names, as the user writes them, of the rows @p sources holds.
+    [[nodiscard]] std::vector<std::string_view> listed(Listing listing, SourceTables const& sources)
     {
         auto values = std::vector<std::string_view> {};
         switch (listing)
@@ -224,11 +226,15 @@ namespace
             case Listing::None: break;
             case Listing::Forges:
                 for (auto const& row: ForgeSpellings)
-                    if (auto const* const provider = findProvider(row.forge);
+                    if (auto const* const provider = findProvider(sources.providers, row.forge);
                         provider != nullptr && provider->verification == Verification::Recorded)
                         values.push_back(row.name);
                 break;
-            case Listing::IssueSources: values.assign(IssueSources.begin(), IssueSources.end()); break;
+            case Listing::IssueSources:
+                for (auto const& row: sources.issueSources)
+                    if (row.verification == Verification::Recorded)
+                        values.push_back(row.name);
+                break;
             case Listing::ItemKinds:
                 for (auto const& row: AppliesToSpellings)
                     values.push_back(row.text);
@@ -326,6 +332,8 @@ namespace
     constexpr auto IssueSourceFields = std::array {
         Field { .key = "source", .type = JsonType::String },
         Field { .key = "query", .type = JsonType::String },
+        Field { .key = "jql", .type = JsonType::String },
+        Field { .key = "site", .type = JsonType::String },
     };
 
     constexpr auto TaskFields = std::array {
@@ -546,14 +554,62 @@ namespace
         return models;
     }
 
-    [[nodiscard]] Checked<std::string> issueQueryOf(JsonIssueSource const& json, std::string_view prefix)
+    /// The keys of an issue source's entry that hold its query or its site, each with the value read there.
+    struct SourceKey
     {
-        auto const sourceKey = std::format("{}.source", prefix);
+        std::string_view key;
+        std::optional<std::string> const* value;
+    };
+
+    [[nodiscard]] Checked<IssueQuery> issueQueryOf(JsonIssueSource const& json,
+                                                   std::string_view prefix,
+                                                   SourceTables const& sources)
+    {
+        auto const key = [&](std::string_view field) {
+            return std::format("{}.{}", prefix, field);
+        };
         if (!json.source)
-            return fail(sourceKey, ConfigProblem::Missing);
-        if (!std::ranges::contains(IssueSources, *json.source))
-            return fail(sourceKey, ConfigProblem::UnsupportedSource);
-        return checked(json.query, std::format("{}.query", prefix), textProblem);
+            return fail(key("source"), ConfigProblem::Missing);
+        auto const* const row = findIssueSource(sources.issueSources, *json.source);
+        if (row == nullptr)
+            return fail(key("source"), ConfigProblem::UnsupportedSource);
+        if (row->verification != Verification::Recorded)
+            return std::unexpected(ConfigError { .key = key("source"),
+                                                 .problem = ConfigProblem::Unrecorded,
+                                                 .subject = std::string(row->name) });
+
+        // A key another source reads is a mistake here, not an ignored extra.
+        auto const keys = std::array {
+            SourceKey { .key = "query", .value = &json.query },
+            SourceKey { .key = "jql", .value = &json.jql },
+            SourceKey { .key = "site", .value = &json.site },
+        };
+        for (auto const& [name, value]: keys)
+        {
+            auto const used = name == row->configKey || (name == "site" && row->site == SiteUse::Required);
+            if (value->has_value() && !used)
+                return fail(key(name), ConfigProblem::UnknownKey);
+        }
+
+        auto const query = std::ranges::find(keys, row->configKey, &SourceKey::key);
+        if (query == keys.end()) // a row naming a key no entry has: a defect, never a valid entry
+            return fail(key("source"), ConfigProblem::UnsupportedSource);
+        auto text = checked(*query->value, key(row->configKey), textProblem);
+        if (!text)
+            return std::unexpected(text.error());
+        auto site = std::string {};
+        if (row->site == SiteUse::Required)
+        {
+            if (!json.site)
+                return fail(key("site"), ConfigProblem::Missing);
+            auto const checkedSite = jira::siteOf(*json.site);
+            if (!checkedSite)
+                return fail(key("site"), ConfigProblem::NotASite);
+            site = std::string(*checkedSite);
+        }
+        return IssueQuery { .source = std::string(row->name),
+                            .text = std::move(*text),
+                            .site = std::move(site) };
     }
 
     /// @return The name a repository is known by: the one written at `name`, or else its directory's.
@@ -638,11 +694,12 @@ namespace
         if (json.base && !argumentAccepts(ArgumentKind::Ref, *json.base))
             return fail(key("base"), ConfigProblem::NotARef);
 
-        auto issueQueries = std::vector<std::string> {};
+        auto issueQueries = std::vector<IssueQuery> {};
         for (auto const& source:
              json.issues ? std::span { *json.issues } : std::span<JsonIssueSource const> {})
         {
-            auto query = issueQueryOf(source, std::format("{}.issues[{}]", prefix, issueQueries.size()));
+            auto query =
+                issueQueryOf(source, std::format("{}.issues[{}]", prefix, issueQueries.size()), sources);
             if (!query)
                 return std::unexpected(query.error());
             issueQueries.push_back(std::move(*query));
@@ -757,7 +814,7 @@ namespace
 
 } // namespace
 
-std::string describe(ConfigProblem problem)
+std::string describe(ConfigProblem problem, SourceTables const& sources)
 {
     auto const index = static_cast<std::size_t>(problem);
     if (index >= ProblemTexts.size())
@@ -765,7 +822,7 @@ std::string describe(ConfigProblem problem)
     auto const& row = ProblemTexts[index];
     auto text = std::string { row.text };
     auto separator = ": "sv;
-    for (auto const value: listed(row.listing))
+    for (auto const value: listed(row.listing, sources))
     {
         text += separator;
         text += value;
@@ -774,10 +831,10 @@ std::string describe(ConfigProblem problem)
     return text;
 }
 
-std::string message(ConfigError const& error)
+std::string message(ConfigError const& error, SourceTables const& sources)
 {
-    auto text = error.key.empty() ? describe(error.problem)
-                                  : std::format("{}: {}", error.key, describe(error.problem));
+    auto text = error.key.empty() ? describe(error.problem, sources)
+                                  : std::format("{}: {}", error.key, describe(error.problem, sources));
     if (auto const index = static_cast<std::size_t>(error.problem);
         !error.subject.empty() && index < ProblemTexts.size())
         text += std::format(": {}{}", error.subject, ProblemTexts[index].afterSubject);
@@ -786,7 +843,7 @@ std::string message(ConfigError const& error)
 
 SourceTables sourceTables() noexcept
 {
-    return SourceTables { .providers = providers() };
+    return SourceTables { .providers = providers(), .issueSources = issueSources() };
 }
 
 std::optional<std::chrono::milliseconds> parseDuration(std::string_view text) noexcept

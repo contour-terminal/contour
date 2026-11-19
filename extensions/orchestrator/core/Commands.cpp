@@ -35,6 +35,8 @@ namespace
         ArgumentDecl { .name = "prompt", .kind = ArgumentKind::Text, .root = std::nullopt },
         ArgumentDecl { .name = "page", .kind = ArgumentKind::Number, .root = std::nullopt },
         ArgumentDecl { .name = "format", .kind = ArgumentKind::Number, .root = std::nullopt },
+        // A Jira query: Text, so one that starts with '-' is refused before it could read as an option.
+        ArgumentDecl { .name = "jql", .kind = ArgumentKind::Text, .root = std::nullopt },
     };
 
     // }}}
@@ -227,8 +229,8 @@ namespace
         "{path}"sv,  "--page"sv, "{page}"sv,     "--format"sv,  "{format}"sv,  "--json"sv,
     };
 
-    // GitLab, through `glab`: written from its documentation and Unmeasured until its output is recorded, so
-    // none of them is in the manifest yet. `glab` prints the
+    // GitLab, through `glab`, and Jira, through Atlassian's `acli`: written from the tools' documentation and
+    // Unmeasured until their output is recorded, so none of them is in the manifest yet. `glab` prints the
     // REST API's objects unprojected (`-F json`); it has no `--jq`.
     constexpr auto GlabAuthArgv = std::array { "glab"sv, "auth"sv, "status"sv };
     constexpr auto GlabDefaultBranchArgv = std::array { "glab"sv, "repo"sv, "view"sv, "-F"sv, "json"sv };
@@ -238,6 +240,10 @@ namespace
     constexpr auto GlabIssuesArgv = std::array {
         "glab"sv,     "issue"sv,   "list"sv, "--assignee=@me"sv, "--per-page"sv, "100"sv,
         "--search"sv, "{query}"sv, "-F"sv,   "json"sv,
+    };
+    constexpr auto AcliAuthArgv = std::array { "acli"sv, "jira"sv, "auth"sv, "status"sv };
+    constexpr auto AcliIssuesArgv = std::array {
+        "acli"sv, "jira"sv, "workitem"sv, "search"sv, "--jql"sv, "{jql}"sv, "--limit"sv, "100"sv, "--json"sv,
     };
     constexpr auto GlabMrCheckoutArgv =
         std::array { "glab"sv, "mr"sv, "checkout"sv, "{number}"sv, "--branch"sv, "{branch}"sv };
@@ -369,6 +375,19 @@ namespace
                       .timeout = Timeout::Long,
                       .root = Root::Worktrees,
                       .argv = GlabMrCheckoutArgv,
+                      .environment = {},
+                      .verification = Verification::Unmeasured },
+        CommandDecl { .name = "acli-auth",
+                      .timeout = Timeout::Short,
+                      .root = Root::Repos,
+                      .argv = AcliAuthArgv,
+                      .environment = {},
+                      .verification = Verification::Unmeasured,
+                      .output = OutputUse::ExitStatusOnly },
+        CommandDecl { .name = "acli-issues",
+                      .timeout = Timeout::Long,
+                      .root = Root::Repos,
+                      .argv = AcliIssuesArgv,
                       .environment = {},
                       .verification = Verification::Unmeasured },
     };

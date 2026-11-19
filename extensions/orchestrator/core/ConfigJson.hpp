@@ -20,7 +20,9 @@ using JsonDuration = std::variant<uint64_t, std::string>;
 struct JsonIssueSource
 {
     std::optional<std::string> source;
-    std::optional<std::string> query;
+    std::optional<std::string> query; ///< A forge source's search.
+    std::optional<std::string> jql;   ///< A Jira source's query.
+    std::optional<std::string> site;  ///< A Jira source's site.
 };
 
 /// One `repos` entry.

@@ -18,6 +18,7 @@
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/EngineDetail.hpp>
 #include <orchestrator/core/Finished.hpp>
+#include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Provider.hpp>
 #include <orchestrator/core/Sanitize.hpp>
 
@@ -93,6 +94,46 @@ namespace
                      line(std::format("{}: {} is incomplete", repo, label)) };
         return { line(std::format("{}: {} failed: {}", repo, label, judgement.why)),
                  line(std::format("{}: {} is incomplete", repo, label)) };
+    }
+
+    /// @return Whether @p tag is a login check's: the forge's, or an issue source's (`poll/auth/<source>`).
+    [[nodiscard]] bool isAuthTag(std::string_view tag) noexcept
+    {
+        return tag == AuthTag || (tag.starts_with(AuthTag) && tag.substr(AuthTag.size()).starts_with('/'));
+    }
+
+    /// @return The tag of @p source's login check.
+    [[nodiscard]] std::string sourceAuthTag(IssueSourceRow const& source)
+    {
+        return std::format("{}/{}", AuthTag, source.name);
+    }
+
+    /// The line a failed login check leaves. Only whether it succeeded is shown, never what it printed: a
+    /// login check's output may hold a token.
+    /// @param who What it checks the login of, such as `GitHub` or `Jira`.
+    /// @param repo The repository it ran in.
+    /// @param command The declared login check.
+    /// @param judgement Its outcome, judged.
+    /// @param outcome Its outcome.
+    [[nodiscard]] std::string authFailureLine(std::string_view who,
+                                              Repo const& repo,
+                                              std::string_view command,
+                                              Judgement const& judgement,
+                                              ProcessOutcome const& outcome)
+    {
+        if (judgement.verdict == Verdict::CwdMissing)
+            return line(std::format("{}: {} does not exist", repo.name, repo.path));
+        if (outcome.start == StartResult::Refused) // the host's words, not the check's output
+            return line(std::format("{}: the login check could not start: {}", who, judgement.why));
+        if (outcome.completion == Completion::TimedOut)
+            return line(std::format("{}: the login check timed out", who));
+        // The check fails for an expired token, a locked keyring or a network error as much as for no login:
+        // the line says how to see which, by running the check itself.
+        auto const* const check = findCommand(command);
+        auto how = std::string {};
+        for (auto const word: check != nullptr ? check->argv : std::span<std::string_view const> {})
+            how += how.empty() ? std::string(word) : std::format(" {}", word);
+        return line(std::format("{}: the login check failed (run {})", who, how));
     }
 
     /// The notices a list that was read may still need: that the forge or the host's limit left some out.
@@ -230,7 +271,10 @@ void Engine::startPoll(std::vector<Effect>& out)
         issueLists(out);
     else if (provider != nullptr
              && issuePoll(std::string(AuthTag), provider->authCheck, {}, first.path, out) == Issued::Yes)
+    {
         ++_pollOutstanding;
+        issueSourceAuthChecks(out);
+    }
     // Nothing handed to the host: the poll failed, and the next one is still scheduled, backed off.
     if (_pollOutstanding == 0)
     {
@@ -240,9 +284,28 @@ void Engine::startPoll(std::vector<Effect>& out)
     issueWorktreeLists(out);
 }
 
+void Engine::issueSourceAuthChecks(std::vector<Effect>& out)
+{
+    // Each issue source a repository lists from that has a login of its own is checked once, in the first
+    // repository that names it; an Unmeasured one never runs.
+    auto checked = std::vector<std::string_view> {};
+    for (auto const& repo: _config->repos())
+        for (auto const& query: repo.issueQueries)
+        {
+            auto const* const source = findIssueSource(_config->sources().issueSources, query.source);
+            if (source == nullptr || source->authCheck.empty()
+                || source->verification != Verification::Recorded
+                || std::ranges::contains(checked, source->authCheck))
+                continue;
+            checked.push_back(source->authCheck);
+            if (issuePoll(sourceAuthTag(*source), source->authCheck, {}, repo.path, out) == Issued::Yes)
+                ++_pollOutstanding;
+        }
+}
+
 bool Engine::isResumable(std::string_view tag) const noexcept
 {
-    if (tag == AuthTag || tag == HooksTag)
+    if (isAuthTag(tag) || tag == HooksTag)
         return true;
     // A list of a repository no longer configured is answered to nobody.
     auto const parsed = parsePollTag(tag);
@@ -251,7 +314,7 @@ bool Engine::isResumable(std::string_view tag) const noexcept
 
 bool Engine::isForgePoll(std::string_view tag) const noexcept
 {
-    if (tag == AuthTag)
+    if (isAuthTag(tag))
         return true;
     auto const parsed = parsePollTag(tag);
     return parsed && parsed->list != WorktreesList && findRepoState(parsed->repo) != nullptr;
@@ -296,7 +359,7 @@ void Engine::startOrResumePoll(StartContext const& context, std::vector<Effect>&
         // A list is only ever run once the login was confirmed; the lists the previous instance had not run,
         // or whose results it took in before it went, are run now.
         auto const isList = [&](std::string_view tag) {
-            return tag != AuthTag && isForgePoll(tag);
+            return !isAuthTag(tag) && isForgePoll(tag);
         };
         if (std::ranges::any_of(answered, isList) || std::ranges::any_of(context.inFlight, isList))
         {
@@ -344,9 +407,14 @@ void Engine::issueLists(std::vector<Effect>& out)
         issueList(PrsList, provider->listChangeRequests, {});
         auto index = std::size_t { 0 };
         for (auto const& query: repo.issueQueries)
-            issueList(std::format("{}{}", IssuesList, index++),
-                      provider->listIssues,
-                      { Argument { .name = "query", .value = query } });
+        {
+            auto const list = std::format("{}{}", IssuesList, index++);
+            // The configuration accepted the source, so it has a row; the forge's lists through the provider.
+            if (auto const* const source = findIssueSource(_config->sources().issueSources, query.source))
+                issueList(list,
+                          source->command.empty() ? provider->listIssues : source->command,
+                          { Argument { .name = source->argument, .value = query.text } });
+        }
     }
 }
 
@@ -391,27 +459,36 @@ void Engine::onAuthResult(ProcessOutcome const& outcome, std::vector<Effect>& ou
         _auth = AuthState::LoggedOut;
         _pollResult = PollResult::Failed;
         auto const& first = _config->repos().front();
-        // An auth check's output may hold a token: only whether it succeeded is shown, never what it printed.
         // The configuration accepted the forge, so it has a row.
         auto const* const provider = findProvider(_config->sources().providers, first.forge);
-        auto const forge = provider != nullptr ? provider->name : forgeName(first.forge);
-        if (judgement.verdict == Verdict::CwdMissing)
-            lines.push_back(line(std::format("{}: {} does not exist", first.name, first.path)));
-        else if (outcome.start == StartResult::Refused) // the host's words, not the check's output
-            lines.push_back(
-                line(std::format("{}: the login check could not start: {}", forge, judgement.why)));
-        else if (outcome.completion == Completion::TimedOut)
-            lines.push_back(line(std::format("{}: the login check timed out", forge)));
-        else
-        {
-            // The check fails for an expired token, a locked keyring or a network error as much as for no
-            // login: the line says how to see which, by running the check itself.
-            auto const* const check = provider != nullptr ? findCommand(provider->authCheck) : nullptr;
-            auto how = std::string {};
-            for (auto const word: check != nullptr ? check->argv : std::span<std::string_view const> {})
-                how += how.empty() ? std::string(word) : std::format(" {}", word);
-            lines.push_back(line(std::format("{}: the login check failed (run {})", forge, how)));
-        }
+        lines.push_back(authFailureLine(provider != nullptr ? provider->name : forgeName(first.forge),
+                                        first,
+                                        provider != nullptr ? provider->authCheck : std::string_view {},
+                                        judgement,
+                                        outcome));
+    }
+    onListAnswered(out);
+}
+
+void Engine::onSourceAuthResult(std::string_view tag, ProcessOutcome const& outcome, std::vector<Effect>& out)
+{
+    auto const judgement = judge(outcome);
+    --_pollOutstanding;
+    auto& lines = _pollProblems[std::string(tag)];
+    lines.clear();
+    // Its exit code answers, as the forge's does: what it printed is released unread.
+    auto const sources = _config->sources().issueSources;
+    auto const source =
+        std::ranges::find_if(sources, [&](IssueSourceRow const& row) { return sourceAuthTag(row) == tag; });
+    auto const repo = std::ranges::find_if(_config->repos(), [&](Repo const& configured) {
+        return std::ranges::contains(
+            configured.issueQueries, source != sources.end() ? source->name : "", &IssueQuery::source);
+    });
+    if (judgement.verdict != Verdict::Ok && judgement.verdict != Verdict::Cut && source != sources.end()
+        && repo != _config->repos().end())
+    {
+        _pollResult = PollResult::Failed;
+        lines.push_back(authFailureLine(source->title, *repo, source->authCheck, judgement, outcome));
     }
     onListAnswered(out);
 }
@@ -427,6 +504,11 @@ void Engine::onPollResult(std::string_view tag, ProcessOutcome const& outcome, s
     if (tag == AuthTag)
     {
         onAuthResult(outcome, out);
+        return;
+    }
+    if (isAuthTag(tag))
+    {
+        onSourceAuthResult(tag, outcome, out);
         return;
     }
     auto const judgement = judge(outcome);
@@ -472,7 +554,7 @@ void Engine::onPollResult(std::string_view tag, ProcessOutcome const& outcome, s
         if (parsed->list == DefaultBranchList)
             return std::string("the default branch");
         if (query && *query < repo->issueQueries.size())
-            return std::format("the issue list \"{}\"", repo->issueQueries[*query]);
+            return std::format("the issue list \"{}\"", repo->issueQueries[*query].text);
         return std::string(parsed->list);
     }();
     auto const failed = [&](Judgement const& why) {
@@ -513,9 +595,15 @@ void Engine::onPollResult(std::string_view tag, ProcessOutcome const& outcome, s
         else
             unread();
     }
-    else if (query && *query < state->issuesByQuery.size())
+    else if (query && *query < state->issuesByQuery.size() && *query < repo->issueQueries.size())
     {
-        if (auto listed = provider->issues(outcome.stdoutText, extent))
+        auto const& issueQuery = repo->issueQueries[*query];
+        auto const* const source = findIssueSource(_config->sources().issueSources, issueQuery.source);
+        auto listed =
+            source != nullptr && source->map != nullptr
+                ? source->map(outcome.stdoutText, extent, IssueSourceContext { .site = issueQuery.site })
+                : provider->issues(outcome.stdoutText, extent);
+        if (listed)
         {
             lines = listNotices(repo->name, label, *listed);
             state->issuesByQuery[*query] = std::move(listed->items);

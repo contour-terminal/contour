@@ -10,6 +10,7 @@
 
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Config.hpp>
+#include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Provider.hpp>
 
@@ -84,6 +85,34 @@ TEST_CASE("a provider's commands share its verification", "[provider]")
     }
 }
 
+TEST_CASE("an issue source's commands share its verification", "[provider]")
+{
+    for (auto const& source: issueSources())
+    {
+        for (auto const name: { source.command, source.authCheck })
+        {
+            CAPTURE(source.name, name);
+            if (name.empty()) // the forge provider's own, checked above
+                continue;
+            auto const* const command = findCommand(name);
+            REQUIRE(command != nullptr);
+            CHECK(command->verification == source.verification);
+        }
+        // Its query fills a declared Text argument the command names, and a source with a command maps it.
+        auto const* const argument = findArgumentDecl(source.argument);
+        REQUIRE(argument != nullptr);
+        CHECK(argument->kind == ArgumentKind::Text);
+        CHECK(source.command.empty() == (source.map == nullptr));
+        if (auto const* const command = findCommand(source.command))
+            CHECK(std::ranges::contains(command->argv, std::format("{{{}}}", source.argument)));
+        if (auto const* const auth = findCommand(source.authCheck))
+            CHECK(auth->output == OutputUse::ExitStatusOnly);
+    }
+    CHECK(findIssueSource(issueSources(), "forge") != nullptr);
+    CHECK(findIssueSource(issueSources(), "jira") != nullptr);
+    CHECK(findIssueSource(issueSources(), "linear") == nullptr);
+}
+
 TEST_CASE("an auth check's output is never read", "[provider]")
 {
     for (auto const& provider: providers())
@@ -140,6 +169,17 @@ TEST_CASE("Provider.list_commands_ask_for_ListLimit", "[provider]")
             CHECK(*std::next(flag) == limit);
         }
     }
+    for (auto const& source: issueSources())
+    {
+        CAPTURE(source.name);
+        if (auto const* const command = findCommand(source.command))
+        {
+            auto const flag = std::ranges::find_first_of(command->argv, LimitFlags);
+            REQUIRE(flag != command->argv.end());
+            REQUIRE(std::next(flag) != command->argv.end());
+            CHECK(*std::next(flag) == limit);
+        }
+    }
 }
 
 TEST_CASE("Provider.one_row_per_forge", "[provider]")
@@ -171,17 +211,23 @@ TEST_CASE("an unmeasured forge is refused by the configuration", "[provider]")
     REQUIRE(!config);
     CHECK(config.error().key == "repos[0].forge");
     CHECK(config.error().problem == ConfigProblem::Unrecorded);
-    CHECK(message(config.error()) == "repos[0].forge: is not yet supported: GitLab has no recorded fixture");
+    CHECK(message(config.error(), sourceTables())
+          == "repos[0].forge: is not yet supported: GitLab has no recorded fixture");
     // The forges a configuration may name are the Recorded ones.
-    CHECK(describe(ConfigProblem::UnknownForge) == "is not a supported forge: github");
+    CHECK(describe(ConfigProblem::UnknownForge, sourceTables()) == "is not a supported forge: github");
 
     SECTION("a Recorded row is accepted")
     {
         auto recorded = std::vector<Provider>(providers().begin(), providers().end());
         for (auto& row: recorded)
             row.verification = Verification::Recorded;
-        auto const accepted = Config::parse(Json, host, SourceTables { .providers = recorded });
+        auto const accepted =
+            Config::parse(Json, host, SourceTables { .providers = recorded, .issueSources = issueSources() });
         REQUIRE(accepted);
         CHECK(accepted->repos().front().forge == Forge::GitLab);
+        // The refusal of an unknown forge lists the rows the configuration was checked against.
+        CHECK(describe(ConfigProblem::UnknownForge,
+                       SourceTables { .providers = recorded, .issueSources = issueSources() })
+              == "is not a supported forge: github, gitlab");
     }
 }

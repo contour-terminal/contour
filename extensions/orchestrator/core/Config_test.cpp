@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <optional>
 #include <ranges>
@@ -15,6 +16,7 @@
 #include <vector>
 
 #include <orchestrator/core/Config.hpp>
+#include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Model.hpp>
 
 using namespace std::string_view_literals;
@@ -139,7 +141,10 @@ TEST_CASE("Config.example", "[config]")
     CHECK(repo.forge == Forge::GitHub);
     CHECK(repo.remote == "origin");
     CHECK_FALSE(repo.base.has_value());
-    CHECK(repo.issueQueries == std::vector<std::string> { "assignee:@me" });
+    REQUIRE(repo.issueQueries.size() == 1);
+    CHECK(repo.issueQueries.front().source == "forge");
+    CHECK(repo.issueQueries.front().text == "assignee:@me");
+    CHECK(repo.issueQueries.front().site.empty());
     CHECK(config->findRepo("contour") == &repo);
     CHECK(config->findRepo("other") == nullptr);
 
@@ -292,7 +297,9 @@ constexpr auto RejectRows = std::array {
     RejectRow { "forge: gitlab has no recorded output", { .find = R"("github")", .replace = R"("gitlab")" }, "repos[0].forge", ConfigProblem::Unrecorded },
     RejectRow { "a remote that is no Name", { .find = R"("origin")", .replace = R"("-origin")" }, "repos[0].remote", ConfigProblem::NotAName },
     RejectRow { "a base that is no Ref", { .find = R"("remote": "origin",)", .replace = R"("remote": "origin", "base": "a..b",)" }, "repos[0].base", ConfigProblem::NotARef },
-    RejectRow { "an issue source other than forge", { .find = R"("source": "forge")", .replace = R"("source": "jira")" }, "repos[0].issues[0].source", ConfigProblem::UnsupportedSource },
+    RejectRow { "an issue source no row stands for", { .find = R"("source": "forge")", .replace = R"("source": "linear")" }, "repos[0].issues[0].source", ConfigProblem::UnsupportedSource },
+    RejectRow { "an unmeasured issue source", { .find = R"("source": "forge", "query": "assignee:@me")", .replace = R"j("source": "jira", "jql": "assignee = currentUser()", "site": "https://example.atlassian.net")j" }, "repos[0].issues[0].source", ConfigProblem::Unrecorded },
+    RejectRow { "a forge source with a jql", { .find = R"("query": "assignee:@me")", .replace = R"("query": "assignee:@me", "jql": "x")" }, "repos[0].issues[0].jql", ConfigProblem::UnknownKey },
     RejectRow { "an issue query starting with -", { .find = R"("assignee:@me")", .replace = R"("-label:x assignee:@me")" }, "repos[0].issues[0].query", ConfigProblem::LeadingDash },
     RejectRow { "an empty issue query", { .find = R"("assignee:@me")", .replace = R"("")" }, "repos[0].issues[0].query", ConfigProblem::Empty },
     RejectRow { "an issue query holding a NUL", { .find = R"("assignee:@me")", .replace = R"("assignee:@me\u0000")" }, "repos[0].issues[0].query", ConfigProblem::NotText },
@@ -355,12 +362,12 @@ TEST_CASE("Config.messages", "[config]")
     for (auto const& row: RejectRows)
     {
         CAPTURE(row.label);
-        auto const description = describe(row.problem);
+        auto const description = describe(row.problem, sourceTables());
         CHECK_FALSE(description.empty());
         seen.insert(description);
         auto const config = parse(row.input);
         REQUIRE_FALSE(config.has_value());
-        CHECK(message(config.error()).starts_with(row.key));
+        CHECK(message(config.error(), sourceTables()).starts_with(row.key));
     }
     auto problems = std::set<ConfigProblem> {};
     for (auto const& row: RejectRows)
@@ -382,7 +389,7 @@ TEST_CASE("a task key the dashboard binds is refused", "[config]")
         CHECK(config.error().key == "tasks[0].key");
         CHECK(config.error().problem == ConfigProblem::ReservedKey);
         // The message names the keys it may not be.
-        CHECK(message(config.error()).contains(std::format(", {}", key)));
+        CHECK(message(config.error(), sourceTables()).contains(std::format(", {}", key)));
     }
 }
 
@@ -424,4 +431,113 @@ TEST_CASE("Config.parseDuration", "[config]")
         CAPTURE(row.text);
         CHECK(parseDuration(row.text) == row.expected);
     }
+}
+
+namespace
+{
+
+/// The shipped tables, with every issue source marked Recorded, as the recording step leaves Jira's.
+[[nodiscard]] SourceTables recordedSources()
+{
+    static auto const rows = [] {
+        auto recorded = std::vector<IssueSourceRow>(issueSources().begin(), issueSources().end());
+        for (auto& row: recorded)
+            row.verification = Verification::Recorded;
+        return recorded;
+    }();
+    return SourceTables { .providers = providers(), .issueSources = rows };
+}
+
+[[nodiscard]] std::expected<Config, ConfigError> parseIssues(std::string_view issues)
+{
+    auto const input =
+        Input { .find = R"([ { "source": "forge", "query": "assignee:@me" } ])", .replace = issues };
+    return Config::parse(documentOf(input), hostOf(input), recordedSources());
+}
+
+} // namespace
+
+TEST_CASE("an unmeasured issue source is refused", "[config]")
+{
+    auto const config = parse(
+        Input { .find = R"("source": "forge", "query": "assignee:@me")",
+                .replace = R"("source": "jira", "jql": "x", "site": "https://example.atlassian.net")" });
+    REQUIRE_FALSE(config);
+    CHECK(config.error().problem == ConfigProblem::Unrecorded);
+    CHECK(message(config.error(), sourceTables())
+          == "repos[0].issues[0].source: is not yet supported: jira has no recorded fixture");
+    // The sources a configuration may name are the Recorded ones, of the rows it was checked against.
+    CHECK(describe(ConfigProblem::UnsupportedSource, sourceTables())
+          == "is not a supported issue source: forge");
+    CHECK(describe(ConfigProblem::UnsupportedSource, recordedSources())
+          == "is not a supported issue source: forge, jira");
+}
+
+TEST_CASE("a jira source needs a jql and an https site", "[config]")
+{
+    auto const accepted = parseIssues(
+        R"([ { "source": "jira", "jql": "assignee = currentUser() AND status = \"To Do\"", "site": "https://example.atlassian.net/" } ])");
+    REQUIRE(accepted);
+    auto const query = accepted->repos().front().issueQueries.front();
+    CHECK(query.source == "jira");
+    CHECK(query.text == "assignee = currentUser() AND status = \"To Do\"");
+    CHECK(query.site == "https://example.atlassian.net");
+
+    struct Row
+    {
+        std::string_view issues;
+        std::string_view key;
+        ConfigProblem problem;
+    };
+    constexpr auto Rows = std::array {
+        Row { .issues = R"([ { "source": "jira", "site": "https://example.atlassian.net" } ])",
+              .key = "repos[0].issues[0].jql",
+              .problem = ConfigProblem::Missing },
+        Row { .issues = R"([ { "source": "jira", "jql": "-x", "site": "https://example.atlassian.net" } ])",
+              .key = "repos[0].issues[0].jql",
+              .problem = ConfigProblem::LeadingDash },
+        Row { .issues = R"([ { "source": "jira", "jql": "x" } ])",
+              .key = "repos[0].issues[0].site",
+              .problem = ConfigProblem::Missing },
+        Row { .issues = R"([ { "source": "jira", "jql": "x", "site": "http://example.atlassian.net" } ])",
+              .key = "repos[0].issues[0].site",
+              .problem = ConfigProblem::NotASite },
+        Row { .issues =
+                  R"([ { "source": "jira", "jql": "x", "site": "https://example.atlassian.net/jira" } ])",
+              .key = "repos[0].issues[0].site",
+              .problem = ConfigProblem::NotASite },
+        Row {
+            .issues =
+                R"([ { "source": "jira", "query": "x", "jql": "x", "site": "https://example.atlassian.net" } ])",
+            .key = "repos[0].issues[0].query",
+            .problem = ConfigProblem::UnknownKey },
+    };
+    for (auto const& row: Rows)
+    {
+        CAPTURE(row.issues);
+        auto const config = parseIssues(row.issues);
+        REQUIRE_FALSE(config);
+        CHECK(config.error().key == row.key);
+        CHECK(config.error().problem == row.problem);
+    }
+}
+
+TEST_CASE("forge queries still load", "[config]")
+{
+    auto const config = parseIssues(R"([ { "source": "forge", "query": "label:bug" },
+                                         { "source": "jira", "jql": "project = ABC", "site": "https://example.atlassian.net" } ])");
+    REQUIRE(config);
+    auto const queries = config->repos().front().issueQueries;
+    REQUIRE(queries.size() == 2);
+    CHECK(queries[0].source == "forge");
+    CHECK(queries[0].text == "label:bug");
+    CHECK(queries[0].site.empty());
+    CHECK(queries[1].source == "jira");
+    CHECK(queries[1].text == "project = ABC");
+    // A forge source with a site is a mistake, not an ignored extra.
+    auto const withSite = parseIssues(
+        R"([ { "source": "forge", "query": "label:bug", "site": "https://example.atlassian.net" } ])");
+    REQUIRE_FALSE(withSite);
+    CHECK(withSite.error().key == "repos[0].issues[0].site");
+    CHECK(withSite.error().problem == ConfigProblem::UnknownKey);
 }

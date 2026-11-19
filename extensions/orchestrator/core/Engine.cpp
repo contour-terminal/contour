@@ -144,7 +144,7 @@ Engine::Started Engine::start(StartContext context)
                          context.wallMs);
     auto out = std::vector<Effect> {};
     if (!config)
-        engine._startProblems.push_back(message(config.error()));
+        engine._startProblems.push_back(message(config.error(), context.sources));
     engine.loadStore(context.stored);
     if (engine._config)
     {

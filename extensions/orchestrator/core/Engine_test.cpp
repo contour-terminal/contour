@@ -22,6 +22,7 @@
 #include <orchestrator/core/EngineDetail.hpp>
 #include <orchestrator/core/Fixtures.hpp>
 #include <orchestrator/core/Hooks.hpp>
+#include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Overloaded.hpp>
 #include <orchestrator/core/Provider.hpp>
 #include <orchestrator/core/Run.hpp>
@@ -460,6 +461,8 @@ class Harness
             return ok(readFixture(FixtureRoot::Testdata, "github/prs-open.json"));
         if (command.command == "gh-issues")
             return ok(readFixture(FixtureRoot::Testdata, "github/issues-open.json"));
+        if (command.command == "acli-issues")
+            return ok(readFixture(FixtureRoot::Testdata, "jira/issues-open.json"));
         if (command.command == "glab-default-branch")
             return ok(readFixture(FixtureRoot::Testdata, "gitlab/default-branch.json"));
         if (command.command == "glab-mrs")
@@ -3689,6 +3692,137 @@ TEST_CASE("an auth check's output is never kept", "[orchestrator][engine][gitlab
     CHECK(!harness.lastSummary()->detail.contains(Secret));
     for (auto const& entry: harness.stored())
         CHECK(!entry.value.contains(Secret));
+}
+
+// }}}
+
+// {{{ Jira, as a recording would enable it
+
+namespace
+{
+
+/// The shipped issue sources, each marked Recorded, as the recording step leaves Jira's.
+[[nodiscard]] std::span<IssueSourceRow const> recordedIssueSources()
+{
+    static auto const rows = [] {
+        auto recorded = std::vector<IssueSourceRow>(issueSources().begin(), issueSources().end());
+        for (auto& row: recorded)
+            row.verification = Verification::Recorded;
+        return recorded;
+    }();
+    return rows;
+}
+
+/// A GitHub repository whose issues come from its forge and from Jira.
+[[nodiscard]] StartContext jiraContext()
+{
+    auto context = contextFor(
+        Settings { .repos = R"j([ { "name": "contour", "path": "~/projects/contour", "forge": "github",
+                        "issues": [ { "source": "forge", "query": "assignee:@me" },
+                                    { "source": "jira", "jql": "assignee = currentUser()",
+                                      "site": "https://example.atlassian.net/" } ] } ])j" });
+    context.sources.issueSources = recordedIssueSources();
+    return context;
+}
+
+} // namespace
+
+TEST_CASE("a jira query runs acli in the repository", "[orchestrator][engine][jira]")
+{
+    auto harness = Harness { jiraContext() };
+    harness.finish("agent-setup-check", ok("[]"));
+    harness.finish("git-worktree-list", ok(worktreeList(ContourPath)));
+    harness.finish("gh-auth", ok());
+    harness.finish("acli-auth", ok());
+    auto const acli = harness.pending("acli-issues");
+    REQUIRE(acli);
+    CHECK(acli->cwd == ContourPath);
+    REQUIRE(acli->arguments.size() == 1);
+    CHECK(acli->arguments.front().name == "jql");
+    CHECK(acli->arguments.front().value == "assignee = currentUser()");
+    CHECK(harness.pending("gh-issues"));
+    harness.boot();
+    CHECK(!mentions(harness.engine().problems(), "issue list"));
+    auto const jiraItems =
+        std::ranges::count_if(harness.engine().unclaimedIssues("contour"),
+                              [](Issue const& issue) { return std::holds_alternative<JiraRef>(issue.item); });
+    CHECK(jiraItems == 2);
+    auto const found =
+        std::ranges::find_if(harness.engine().unclaimedIssues("contour"), [](Issue const& issue) {
+            return issue.item == ItemRef { JiraRef { .key = "ABC-123" } };
+        });
+    REQUIRE(found != harness.engine().unclaimedIssues("contour").end());
+    CHECK(found->url == "https://example.atlassian.net/browse/ABC-123");
+}
+
+TEST_CASE("each issue source's login check runs once in the poll", "[orchestrator][engine][jira]")
+{
+    // Two repositories list from Jira: its login is checked once, in the first.
+    auto context = contextFor(
+        Settings { .repos = R"j([ { "name": "contour", "path": "~/projects/contour", "forge": "github",
+                        "issues": [ { "source": "jira", "jql": "a", "site": "https://example.atlassian.net" } ] },
+                      { "name": "other", "path": "~/projects/other", "forge": "github",
+                        "issues": [ { "source": "jira", "jql": "b", "site": "https://example.atlassian.net" } ] } ])j",
+                   .repoPaths = { ContourPath, OtherPath } });
+    context.sources.issueSources = recordedIssueSources();
+    auto harness = Harness { std::move(context) };
+    auto const check = harness.pending("acli-auth");
+    REQUIRE(check);
+    CHECK(check->cwd == ContourPath);
+    CHECK(harness.commandsIssued("acli-auth") == 1);
+    CHECK(harness.pending("gh-auth"));
+
+    SECTION("a failed check says how to see why, and never what it printed")
+    {
+        constexpr auto Secret = "ATATT3xFfGF0-secret"sv;
+        harness.finish("acli-auth", failed(1, std::format("token {} expired", Secret)));
+        CHECK(std::ranges::contains(harness.engine().problems(),
+                                    "Jira: the login check failed (run acli jira auth status)"sv));
+        CHECK(!mentions(harness.engine().problems(), Secret));
+    }
+    SECTION("a passed check leaves nothing")
+    {
+        harness.boot();
+        CHECK(!mentions(harness.engine().problems(), "login check"));
+        CHECK(harness.commandsIssued("acli-auth") == 1);
+    }
+}
+
+TEST_CASE("an unmeasured issue source's login check never runs", "[orchestrator][engine][jira]")
+{
+    // The shipped Jira row is Unmeasured: the configuration naming it is refused, and nothing of it runs.
+    auto harness = Harness {
+        contextFor(
+            Settings { .repos = R"j([ { "name": "contour", "path": "~/projects/contour", "forge": "github",
+                        "issues": [ { "source": "jira", "jql": "a", "site": "https://example.atlassian.net" } ] } ])j" })
+    };
+    harness.boot();
+    CHECK(harness.commandsIssued("acli-auth") == 0);
+    CHECK(harness.commandsIssued("acli-issues") == 0);
+}
+
+TEST_CASE("a jira item dispatches on a new branch named from its key", "[orchestrator][engine][jira]")
+{
+    auto harness = Harness { jiraContext() };
+    harness.boot();
+    constexpr auto Id = "abc-123-20261113-150847"sv;
+    auto request = issueDispatch();
+    request.item = JiraRef { .key = "ABC-123" };
+    request.url = "https://example.atlassian.net/browse/ABC-123";
+    harness.feed(request);
+    auto const added = all<RunCommand>(harness.finish("git-fetch", ok()));
+    REQUIRE(added.size() == 1);
+    CHECK(added.front().command == "git-worktree-add-branch");
+    CHECK(added.front().cwd == ContourPath);
+    auto const argument = [&](std::string_view name) {
+        auto const at = std::ranges::find(added.front().arguments, name, &Argument::name);
+        return at != added.front().arguments.end() ? at->value : std::string {};
+    };
+    CHECK(argument("branch") == std::format("agent/{}", Id));
+    CHECK(argument("path") == worktreeOf("contour", Id));
+    CHECK(argument("base") == "origin/master");
+    auto const opened = all<OpenPane>(harness.finish("git-worktree-add-branch", ok()));
+    CHECK(opened.size() == 1);
 }
 
 // }}}

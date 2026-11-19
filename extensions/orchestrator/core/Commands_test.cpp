@@ -1031,9 +1031,13 @@ TEST_CASE("unmeasured commands are not in the manifest", "[orchestrator][command
         if (decl.verification == Verification::Unmeasured)
             ++unmeasured;
     }
-    // GitLab's five, until their output is recorded.
-    CHECK(unmeasured == 5);
-    CHECK(std::ranges::none_of(lines, [](std::string const& line) { return line.contains("glab"); }));
+    // GitLab's five and Jira's two, until their output is recorded.
+    CHECK(unmeasured == 7);
+    CHECK(std::ranges::none_of(
+        lines, [](std::string const& line) { return line.contains("glab") || line.contains("acli"); }));
+    // The argument only an unmeasured command names is left out too.
+    CHECK(findArgumentDecl("jql") != nullptr);
+    CHECK(std::ranges::none_of(lines, [](std::string const& line) { return line.starts_with("arg jql "); }));
     CHECK(manifestText() == readFixture(FixtureRoot::Contract, "manifest-v2/valid/orchestrator.manifest"));
 }
 

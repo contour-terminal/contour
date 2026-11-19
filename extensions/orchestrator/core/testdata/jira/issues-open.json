@@ -1,0 +1,82 @@
+[
+  {
+    "expand": "operations,versionedRepresentations,editmeta,changelog,renderedFields",
+    "id": "10001",
+    "self": "https://example.atlassian.net/rest/api/3/issue/10001",
+    "key": "ABC-123",
+    "fields": {
+      "summary": "Crash when resizing during output",
+      "status": {
+        "name": "To Do",
+        "statusCategory": {
+          "key": "new",
+          "name": "To Do"
+        }
+      },
+      "issuetype": {
+        "name": "Bug",
+        "subtask": false
+      },
+      "priority": {
+        "name": "Medium"
+      },
+      "assignee": {
+        "accountId": "user",
+        "displayName": "user",
+        "active": true
+      },
+      "reporter": {
+        "accountId": "user",
+        "displayName": "user",
+        "active": true
+      },
+      "created": "2026-11-01T10:00:00.000+0000",
+      "updated": "2026-11-02T10:00:00.000+0000",
+      "labels": [],
+      "project": {
+        "key": "ABC",
+        "name": "Project"
+      }
+    }
+  },
+  {
+    "expand": "operations,versionedRepresentations,editmeta,changelog,renderedFields",
+    "id": "10002",
+    "self": "https://example.atlassian.net/rest/api/3/issue/10002",
+    "key": "ABC-7",
+    "fields": {
+      "summary": "Document the theme keys",
+      "status": {
+        "name": "In Progress",
+        "statusCategory": {
+          "key": "new",
+          "name": "In Progress"
+        }
+      },
+      "issuetype": {
+        "name": "Bug",
+        "subtask": false
+      },
+      "priority": {
+        "name": "Medium"
+      },
+      "assignee": {
+        "accountId": "user",
+        "displayName": "user",
+        "active": true
+      },
+      "reporter": {
+        "accountId": "user",
+        "displayName": "user",
+        "active": true
+      },
+      "created": "2026-11-01T10:00:00.000+0000",
+      "updated": "2026-11-02T10:00:00.000+0000",
+      "labels": [],
+      "project": {
+        "key": "ABC",
+        "name": "Project"
+      }
+    }
+  }
+]

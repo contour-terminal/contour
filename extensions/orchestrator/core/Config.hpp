@@ -11,6 +11,7 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Provider.hpp>
 
@@ -52,15 +53,23 @@ struct HostInfo
     int32_t utcOffsetMinutes = 0;       ///< The local time's offset from UTC.
 };
 
+/// One search that lists the issues a repository offers for work.
+struct IssueQuery
+{
+    std::string source; ///< Its issue source's name: `forge` or `jira`.
+    std::string text;   ///< The query: a forge search, or a JQL; an ArgumentKind::Text.
+    std::string site;   ///< A Jira source's site, without a trailing `/`; empty for the forge.
+};
+
 /// One configured repository.
 struct Repo
 {
-    std::string name;                      ///< Unique among the repositories; an ArgumentKind::Name.
-    std::string path;                      ///< Its resolved directory, from HostInfo::repoPaths.
-    Forge forge = Forge::GitHub;           ///< The forge it lives on.
-    std::string remote;                    ///< The git remote that points at the forge; `origin` by default.
-    std::optional<std::string> base;       ///< The base branch; absent: the forge's default branch.
-    std::vector<std::string> issueQueries; ///< The forge searches that list the issues offered for work.
+    std::string name;                     ///< Unique among the repositories; an ArgumentKind::Name.
+    std::string path;                     ///< Its resolved directory, from HostInfo::repoPaths.
+    Forge forge = Forge::GitHub;          ///< The forge it lives on.
+    std::string remote;                   ///< The git remote that points at the forge; `origin` by default.
+    std::optional<std::string> base;      ///< The base branch; absent: the forge's default branch.
+    std::vector<IssueQuery> issueQueries; ///< The searches that list the issues offered for work.
 };
 
 /// What is wrong with a configuration value. Each problem has one message (see describe()).
@@ -85,7 +94,8 @@ enum class ConfigProblem : uint8_t
     BracketedModel,         ///< A model with a bracketed variant, such as `opus[1m]`.
     UnlistedModel,          ///< A task's model is not one of `models`.
     UnknownForge,           ///< Not a forge any provider stands for.
-    UnsupportedSource,      ///< An issue source other than `forge`.
+    UnsupportedSource,      ///< Not an issue source any row stands for.
+    NotASite,               ///< Not an `https://` address with a host and no path.
     Unrecorded,             ///< A forge or issue source whose tool's output was never recorded
                             ///< (Verification::Unmeasured).
     UnknownItemKind,        ///< An `applies_to` other than `pr` or `issue`.
@@ -108,19 +118,23 @@ struct ConfigError
 /// The rows a configuration may name: which forges and issue sources exist, and which of them were recorded.
 struct SourceTables
 {
-    std::span<Provider const> providers; ///< The forges.
+    std::span<Provider const> providers;          ///< The forges.
+    std::span<IssueSourceRow const> issueSources; ///< The issue sources.
 };
 
-/// @return The tables the extension ships: providers().
+/// @return The tables the extension ships: providers() and issueSources().
 [[nodiscard]] SourceTables sourceTables() noexcept;
 
 /// @param problem A configuration problem.
+/// @param sources The rows the configuration was checked against: a problem that lists the forges or the
+///        issue sources a configuration may name lists their Recorded ones.
 /// @return What it means, as one sentence the user reads after the key.
-[[nodiscard]] std::string describe(ConfigProblem problem);
+[[nodiscard]] std::string describe(ConfigProblem problem, SourceTables const& sources);
 
 /// @param error A refused configuration.
+/// @param sources The rows it was checked against (Config::parse()'s).
 /// @return The message the user reads: the key, then the problem's description.
-[[nodiscard]] std::string message(ConfigError const& error);
+[[nodiscard]] std::string message(ConfigError const& error, SourceTables const& sources);
 
 /// The most agents running at once, unless `max_agents` says otherwise.
 inline constexpr uint32_t DefaultMaxAgents = 4;
@@ -144,7 +158,8 @@ class Config
     /// Reads and validates the configuration.
     /// @param json The `config` subtree, as the host converted it to JSON.
     /// @param host What the host resolved: the paths, one per repository, and the worktree root.
-    /// @param sources The forges a repository may name; one whose row is Unmeasured is refused.
+    /// @param sources The forges and issue sources a repository may name; one whose row is Unmeasured is
+    ///                refused.
     /// @return The configuration, or the first problem found and where.
     [[nodiscard]] static std::expected<Config, ConfigError> parse(std::string_view json,
                                                                   HostInfo const& host,
