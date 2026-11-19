@@ -71,6 +71,7 @@ namespace contour::window
 /// @param directory What the window lists.
 /// @param workspace The workspace's id.
 /// @param moves What the window's host moves.
+/// @param coloring Whether the window's host keeps a workspace's colour.
 /// @param palette The colours its "Workspace Color" submenu offers.
 /// @return Its 0-based place among the workspaces and their count; for a workspace of one tab, the tabs that
 ///         tab can merge into; the palette, and the workspace's colour. Place 0 and no colour for a workspace
@@ -79,6 +80,7 @@ namespace contour::window
     WorkspaceDirectory const& directory,
     uint64_t workspace,
     command::MenuMoves moves,
+    command::MenuColoring coloring,
     std::span<vtbackend::RGBColor const> palette)
 {
     auto const holder = std::ranges::find(directory.workspaces, workspace, &DirectoryWorkspace::id);
@@ -88,7 +90,8 @@ namespace contour::window
                  .joinable = {},
                  .moves = moves,
                  .palette = { palette.begin(), palette.end() },
-                 .color = std::nullopt };
+                 .color = std::nullopt,
+                 .coloring = coloring };
     // A workspace of one tab merges into another tab as that tab does.
     return { .position = static_cast<std::size_t>(std::distance(directory.workspaces.begin(), holder)),
              .count = directory.workspaces.size(),
@@ -98,7 +101,8 @@ namespace contour::window
                                                   : std::vector<command::TabChoiceGroup> {},
              .moves = moves,
              .palette = { palette.begin(), palette.end() },
-             .color = holder->color };
+             .color = holder->color,
+             .coloring = coloring };
 }
 
 /// The tab @p workspace position @p tab position names, 1-based as MoveToTab names them.

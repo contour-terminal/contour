@@ -1724,6 +1724,12 @@ window::HostMoves TerminalSessionManager::hostMovesOf(window::WindowController c
     return factoryFor(window.displayedWorkspace()).hostMoves();
 }
 
+WorkspaceColorSupport TerminalSessionManager::workspaceColorSupportOf(
+    window::WindowController const& window) const noexcept
+{
+    return factoryFor(window.displayedWorkspace()).workspaceColorSupport();
+}
+
 window::MoveRefusal TerminalSessionManager::sidebarMoveRefusal(window::WindowController const& window,
                                                                window::DragSubject subject,
                                                                window::SidebarLanding landing) const noexcept

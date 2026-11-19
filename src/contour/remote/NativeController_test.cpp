@@ -4806,6 +4806,7 @@ TEST_CASE("a window's colour of a workspace reaches the daemon and comes back in
     requireConnected(controller);
     REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
     CHECK_FALSE(workspaceOf(controller, second.id).color.has_value());
+    CHECK(controller.workspaceColorSupport() == contour::session::WorkspaceColorSupport::Supported);
 
     auto const plum = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
     CHECK(controller.requestRemoteWorkspaceColor(second.id, plum) == contour::session::RemoteRouting::Routed);
@@ -4833,6 +4834,8 @@ TEST_CASE("a window does not send a workspace's colour to a daemon that predates
     requireConnected(controller);
     REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
 
+    // The menus gray the colour out rather than offer what would do nothing.
+    CHECK(controller.workspaceColorSupport() == contour::session::WorkspaceColorSupport::Unsupported);
     CHECK(controller.requestRemoteWorkspaceColor(second.id, vtbackend::RGBColor { 1, 2, 3 })
           == contour::session::RemoteRouting::Refused);
     // A rename after it arrives, so the colour would have too.

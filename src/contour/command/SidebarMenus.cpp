@@ -67,6 +67,11 @@ namespace
         return state.count > 1;
     }
 
+    bool canColor(WorkspaceMenuState const& state) noexcept
+    {
+        return state.coloring == MenuColoring::Available;
+    }
+
     bool hasColor(WorkspaceMenuState const& state) noexcept
     {
         return state.color.has_value();
@@ -111,7 +116,7 @@ namespace
         using namespace actions;
 
         static auto const rows = std::array {
-            WorkspaceTable::submenu("Workspace Color", workspaceColorRows),
+            WorkspaceTable::submenu("Workspace Color", workspaceColorRows).enabledWhen(canColor),
             WorkspaceTable::command(RenameWorkspace {}, "Rename…"),
             WorkspaceTable::command(MarkSeen {}, "Mark Seen"),
             WorkspaceTable::command(CreateNewTab {}, "New Tab Here"),

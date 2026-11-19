@@ -130,6 +130,13 @@ enum class MoveSupport : uint8_t
     Supported,       ///< Yes, here or on the remote end.
 };
 
+/// Whether a workspace can be given a colour in a window this factory hosts.
+enum class WorkspaceColorSupport : uint8_t
+{
+    Unsupported = 0, ///< No: tmux, or a daemon that predates the colour.
+    Supported,       ///< Yes, here or on the daemon.
+};
+
 /// Whether a request was handed to the remote end, which then owns the change.
 enum class RemoteRouting : uint8_t
 {
@@ -263,6 +270,16 @@ class SessionFactory
     [[nodiscard]] virtual MoveSupport moveSupport() const noexcept
     {
         return hosting() == SessionHosting::Local ? MoveSupport::Supported : MoveSupport::Unsupported;
+    }
+
+    /// Whether a workspace can be coloured in this factory's windows: a local factory colours its own model,
+    /// an attach factory only where its remote end keeps the colour (requestRemoteWorkspaceColor()).
+    /// @return Supported for a local factory (the default); Unsupported for a remote one that does not
+    ///         override this.
+    [[nodiscard]] virtual WorkspaceColorSupport workspaceColorSupport() const noexcept
+    {
+        return hosting() == SessionHosting::Local ? WorkspaceColorSupport::Supported
+                                                  : WorkspaceColorSupport::Unsupported;
     }
 
     /// What can be moved into this factory's windows, as the move and refusal tables read it

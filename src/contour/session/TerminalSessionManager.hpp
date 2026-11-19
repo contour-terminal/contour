@@ -538,6 +538,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @return What the host of the workspace @p window shows can move (SessionFactory::hostMoves()).
     [[nodiscard]] window::HostMoves hostMovesOf(window::WindowController const& window) const noexcept;
 
+    /// @param window A window.
+    /// @return Whether the host of the workspace @p window shows keeps a workspace's colour
+    ///         (SessionFactory::workspaceColorSupport()).
+    [[nodiscard]] WorkspaceColorSupport workspaceColorSupportOf(
+        window::WindowController const& window) const noexcept;
+
     /// @param window The window the user acts in.
     /// @param subject What moves: a tab or a pane.
     /// @param landing What the move does.

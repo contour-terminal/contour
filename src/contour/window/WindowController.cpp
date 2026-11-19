@@ -809,11 +809,14 @@ bool WindowController::isWorkspaceDropdownOpen() const noexcept
 
 command::WorkspaceMenuState WindowController::workspaceMenuStateOf(uint64_t workspace) const
 {
-    return window::workspaceMenuStateOf(_directorySource != nullptr ? _directorySource->directory()
-                                                                    : WorkspaceDirectory {},
-                                        workspace,
-                                        menuMovesOf(_manager.hostMovesOf(*this)),
-                                        _manager.model().colorPalette());
+    return window::workspaceMenuStateOf(
+        _directorySource != nullptr ? _directorySource->directory() : WorkspaceDirectory {},
+        workspace,
+        menuMovesOf(_manager.hostMovesOf(*this)),
+        _manager.workspaceColorSupportOf(*this) == session::WorkspaceColorSupport::Supported
+            ? command::MenuColoring::Available
+            : command::MenuColoring::Unavailable,
+        _manager.model().colorPalette());
 }
 
 void WindowController::runWorkspaceMenuAction(uint64_t workspace, actions::Action const& action)
@@ -3890,8 +3893,7 @@ void WindowController::openSidebarContextMenu(SidebarRow const& row, QPointF win
     switch (row.key.kind)
     {
         case SidebarRowKind::Workspace:
-            entries = command::buildWorkspaceMenu(window::workspaceMenuStateOf(
-                directory, row.key.workspace, moves, _manager.model().colorPalette()));
+            entries = command::buildWorkspaceMenu(workspaceMenuStateOf(row.key.workspace));
             break;
         case SidebarRowKind::Tab: {
             // Every workspace but the tab's own can take it.

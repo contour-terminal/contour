@@ -113,6 +113,16 @@ TEST_CASE("an uncoloured workspace's Reset is greyed out and nothing is checked"
     CHECK(colour.children[3].availability == RowAvailability::Disabled);
 }
 
+TEST_CASE("Workspace Color is greyed out where the host keeps no colour", "[sidebarmenu]")
+{
+    constexpr auto Red = vtbackend::RGBColor { 0xC0, 0x39, 0x2B };
+    auto const menu = buildWorkspaceMenu(WorkspaceMenuState {
+        .position = 0, .count = 2, .palette = { Red }, .coloring = MenuColoring::Unavailable });
+    CHECK(row(menu, "Workspace Color").availability == RowAvailability::Disabled);
+    // Everything else is offered as before.
+    CHECK(row(menu, "Rename…").availability == RowAvailability::Enabled);
+}
+
 TEST_CASE("move up and move down grey out at the ends of the list", "[sidebarmenu]")
 {
     auto const first = buildWorkspaceMenu(WorkspaceMenuState { .position = 0, .count = 3 });

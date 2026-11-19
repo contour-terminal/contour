@@ -1557,11 +1557,19 @@ contour::session::RemoteRouting NativeController::requestRemoteRenameWorkspace(u
     return contour::session::RemoteRouting::Routed;
 }
 
+contour::session::WorkspaceColorSupport NativeController::workspaceColorSupport() const noexcept
+{
+    auto const agreed = negotiated();
+    return agreed && agreed->shared.contains(vthost::proto::Capability::WorkspaceMeta)
+                   && agreed->shared.contains(vthost::proto::Capability::WorkspaceColor)
+               ? contour::session::WorkspaceColorSupport::Supported
+               : contour::session::WorkspaceColorSupport::Unsupported;
+}
+
 contour::session::RemoteRouting NativeController::requestRemoteWorkspaceColor(
     uint64_t workspace, std::optional<vtbackend::RGBColor> color)
 {
-    auto const agreed = negotiated();
-    if (!agreed || !agreed->shared.contains(vthost::proto::Capability::WorkspaceColor))
+    if (workspaceColorSupport() == contour::session::WorkspaceColorSupport::Unsupported)
         return contour::session::RemoteRouting::Refused;
     auto const wire =
         vthost::proto::WireWorkspaceColor { .rgb = color.transform(&vtbackend::RGBColor::value) };

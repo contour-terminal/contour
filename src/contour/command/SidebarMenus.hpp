@@ -39,6 +39,14 @@ enum class MenuMoves : uint8_t
     Nothing,   ///< Nothing: a tmux server.
 };
 
+/// Whether the window's host keeps a workspace's colour, as the workspace menu offers it: the "Workspace
+/// Color" submenu is grayed out where a colour would do nothing.
+enum class MenuColoring : uint8_t
+{
+    Unavailable = 0, ///< No: tmux, or a daemon that predates the colour.
+    Available,       ///< Yes: this process, or a daemon that keeps the colour.
+};
+
 /// The world, as a workspace row's context menu needs to see it.
 struct WorkspaceMenuState
 {
@@ -52,6 +60,7 @@ struct WorkspaceMenuState
     std::vector<vtbackend::RGBColor> palette {};
     /// The colour the user gave the workspace; none while it is uncoloured.
     std::optional<vtbackend::RGBColor> color {};
+    MenuColoring coloring = MenuColoring::Available; ///< Whether the window's host keeps the colour.
 };
 
 /// The workspace row's context menu for @p state.
