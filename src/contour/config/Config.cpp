@@ -3458,6 +3458,8 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 
     // An unknown word is reported and keeps the previous style, as every enum setting does.
     (void) detail::loadConfigEnum(child, "tab_color", keyPathTo(child, "tab_color"), where.tabColor, logger);
+    (void) detail::loadConfigEnum(
+        child, "workspace_color", keyPathTo(child, "workspace_color"), where.workspaceColor, logger);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, GutterConfig& where)

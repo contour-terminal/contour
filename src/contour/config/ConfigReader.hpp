@@ -961,7 +961,8 @@ struct Writer
         return format(doc,
                       v.visibility == SidebarVisibility::Shown,
                       v.width ? std::to_string(*v.width) : "null",
-                      v.tabColor);
+                      v.tabColor,
+                      v.workspaceColor);
     }
 
     [[nodiscard]] std::string format(std::string_view doc, OscContextConfig const& v)

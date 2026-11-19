@@ -96,9 +96,10 @@ struct ChromeGlyphs
     QString newTab;
     QString menu;
     QString submenu;
-    QString tabColor;  ///< A coloured tab's leading cell; empty where the colour tints the tab.
-    QString chipOpen;  ///< Opens a chip; empty where the chip is a shape.
-    QString chipClose; ///< Closes a chip; empty where the chip is a shape.
+    QString tabColor;        ///< A coloured tab's leading cell; empty where the colour tints the tab.
+    QString workspaceSwatch; ///< A coloured workspace's swatch cell; empty where the swatch is a shape.
+    QString chipOpen;        ///< Opens a chip; empty where the chip is a shape.
+    QString chipClose;       ///< Closes a chip; empty where the chip is a shape.
 
     QStringList paneActions; ///< A pane header's action buttons, indexed by config::PaneHeaderAction.
     QStringList splitLines;  ///< A split's line, side by side then stacked; empty where the gap draws it.
@@ -293,6 +294,7 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QString menuGlyph READ menuGlyph CONSTANT)
     Q_PROPERTY(QString submenuGlyph READ submenuGlyph CONSTANT)
     Q_PROPERTY(QString tabColorGlyph READ tabColorGlyph CONSTANT)
+    Q_PROPERTY(QString workspaceSwatchGlyph READ workspaceSwatchGlyph CONSTANT)
     Q_PROPERTY(QString chipOpenGlyph READ chipOpenGlyph CONSTANT)
     Q_PROPERTY(QString chipCloseGlyph READ chipCloseGlyph CONSTANT)
     Q_PROPERTY(QString drillInGlyph READ drillInGlyph CONSTANT)
@@ -959,6 +961,29 @@ class UiStyleProvider: public QObject
                                                           bool hovered,
                                                           bool windowActive) const;
 
+    /// What a workspace's colour paints on a sidebar row (window::sidebarWorkspaceColorPaint) in the
+    /// configured style.
+    ///
+    /// The QML-facing carve-out, as sidebarTabColor(): two bools, as QML holds them, converted to
+    /// window::RowPointer and window::WindowFocus at once; the enums as their underlying values.
+    /// @param style          A config::SidebarWorkspaceColorStyle as an int; anything else paints nothing.
+    /// @param kind           A window::SidebarRowKind as an int; anything else paints nothing.
+    /// @param workspaceColor The colour of the row's workspace; fully transparent (or invalid) when it has
+    /// none.
+    /// @param rowBackground  The sidebar's fill, the tint and the wash fade toward.
+    /// @param selection      A window::RowSelection as an int; anything else is no selection.
+    /// @param hovered        Whether the pointer is over the row.
+    /// @param windowActive   Whether the row's window is the active one.
+    /// @return `{ fill, ink, rail, wash, swatch }` as colours, each fully transparent when the style paints
+    ///         nothing of that kind, so QML tests each by its alpha.
+    [[nodiscard]] Q_INVOKABLE QVariantMap sidebarWorkspaceColor(int style,
+                                                                int kind,
+                                                                QColor const& workspaceColor,
+                                                                QColor const& rowBackground,
+                                                                int selection,
+                                                                bool hovered,
+                                                                bool windowActive) const;
+
     /// The colour a status mark is drawn in on a sidebar row (window::sidebarMarkInk): its own, unless a
     /// tab's tint under it would swallow it, then the tint's ink.
     /// @param mark     The mark's semantic colour.
@@ -1108,6 +1133,8 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QString const& menuGlyph() const noexcept { return _glyphs.menu; }
     [[nodiscard]] QString const& submenuGlyph() const noexcept { return _glyphs.submenu; }
     [[nodiscard]] QString const& tabColorGlyph() const noexcept { return _glyphs.tabColor; }
+    /// @return The cell a coloured workspace's swatch is drawn as; empty where it is a square shape.
+    [[nodiscard]] QString const& workspaceSwatchGlyph() const noexcept { return _glyphs.workspaceSwatch; }
     [[nodiscard]] QString const& chipOpenGlyph() const noexcept { return _glyphs.chipOpen; }
     [[nodiscard]] QString const& chipCloseGlyph() const noexcept { return _glyphs.chipClose; }
     [[nodiscard]] QString const& drillInGlyph() const noexcept { return _glyphs.drillIn; }

@@ -71,15 +71,24 @@ namespace contour::window
 /// @param directory What the window lists.
 /// @param workspace The workspace's id.
 /// @param moves What the window's host moves.
+/// @param palette The colours its "Workspace Color" submenu offers.
 /// @return Its 0-based place among the workspaces and their count; for a workspace of one tab, the tabs that
-///         tab can merge into. Place 0 for a workspace the directory does not list.
-[[nodiscard]] inline command::WorkspaceMenuState workspaceMenuStateOf(WorkspaceDirectory const& directory,
-                                                                      uint64_t workspace,
-                                                                      command::MenuMoves moves)
+///         tab can merge into; the palette, and the workspace's colour. Place 0 and no colour for a workspace
+///         the directory does not list.
+[[nodiscard]] inline command::WorkspaceMenuState workspaceMenuStateOf(
+    WorkspaceDirectory const& directory,
+    uint64_t workspace,
+    command::MenuMoves moves,
+    std::span<vtbackend::RGBColor const> palette)
 {
     auto const holder = std::ranges::find(directory.workspaces, workspace, &DirectoryWorkspace::id);
     if (holder == directory.workspaces.end())
-        return { .position = 0, .count = directory.workspaces.size(), .joinable = {}, .moves = moves };
+        return { .position = 0,
+                 .count = directory.workspaces.size(),
+                 .joinable = {},
+                 .moves = moves,
+                 .palette = { palette.begin(), palette.end() },
+                 .color = std::nullopt };
     // A workspace of one tab merges into another tab as that tab does.
     return { .position = static_cast<std::size_t>(std::distance(directory.workspaces.begin(), holder)),
              .count = directory.workspaces.size(),
@@ -87,7 +96,9 @@ namespace contour::window
                                                                   TabRef { .workspace = holder->id,
                                                                            .tab = holder->tabs.front().id })
                                                   : std::vector<command::TabChoiceGroup> {},
-             .moves = moves };
+             .moves = moves,
+             .palette = { palette.begin(), palette.end() },
+             .color = holder->color };
 }
 
 /// The tab @p workspace position @p tab position names, 1-based as MoveToTab names them.

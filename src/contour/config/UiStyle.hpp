@@ -222,6 +222,9 @@ struct UiStyleTokens
     /// The cell a coloured tab leads with, in the tab's colour; empty where the colour tints the tab
     /// instead (the native rows' pill and fill).
     std::string_view tabColorGlyph;
+    /// The cell a coloured workspace's name follows under `sidebar.workspace_color: swatch`, in the
+    /// workspace's colour; empty where the swatch is a shape (the native rows' square).
+    std::string_view workspaceSwatchGlyph;
     std::string_view chipOpenGlyph;  ///< Opens a toolbar or host chip; empty where the chip is a shape.
     std::string_view chipCloseGlyph; ///< Closes a toolbar or host chip; empty where the chip is a shape.
 
@@ -448,6 +451,7 @@ namespace detail
         .trafficLightGlyph = "",
         .tabSeparator = "",
         .tabColorGlyph = "",
+        .workspaceSwatchGlyph = "",
         .chipOpenGlyph = "",
         .chipCloseGlyph = "",
         .paneActionGlyphs = { "⊞", "⊟", "⤢", "✕" },
@@ -541,6 +545,7 @@ namespace detail
         .tabSeparator = "│",
         // The tab's colour as its leading cell, and a chip as the bracketed run a status line sets.
         .tabColorGlyph = "▌",
+        .workspaceSwatchGlyph = "■",
         .chipOpenGlyph = "[",
         .chipCloseGlyph = "]",
         // The header row's buttons as the tui board sets them: Z for zoom, the light × for close. Split

@@ -80,6 +80,8 @@ namespace
         RoleName { SidebarModel::IdleLineRole, "idleLine" },
         RoleName { SidebarModel::TabColorRole, "tabColor" },
         RoleName { SidebarModel::WorkspaceColorRole, "workspaceColor" },
+        RoleName { SidebarModel::RailTextRole, "railText" },
+        RoleName { SidebarModel::RailTextContinuedRole, "railTextContinued" },
     };
 
     [[nodiscard]] QString qs(std::string const& text)
@@ -184,6 +186,8 @@ namespace
         note(idleLineOf(before) == idleLineOf(after), { SidebarModel::IdleLineRole });
         note(before.tabColor == after.tabColor, { SidebarModel::TabColorRole });
         note(before.workspaceColor == after.workspaceColor, { SidebarModel::WorkspaceColorRole });
+        note(workspaceRailCellsOf(before) == workspaceRailCellsOf(after),
+             { SidebarModel::RailTextRole, SidebarModel::RailTextContinuedRole });
         // The spoken name is the title; the description folds in the kind and the status, not a running time.
         if (accessibleNameOf(before) != accessibleNameOf(after))
             for (auto const role: { static_cast<int>(SidebarModel::AccessibleNameRole),
@@ -428,6 +432,8 @@ QVariant SidebarModel::data(QModelIndex const& index, int role) const
         case WorkspaceColorRole:
             return row->workspaceColor ? platform::toQColor(*row->workspaceColor)
                                        : QColor { Qt::transparent };
+        case RailTextRole: return qs(workspaceRailCellsOf(*row).first);
+        case RailTextContinuedRole: return qs(workspaceRailCellsOf(*row).second);
         default: break;
     }
     return {};

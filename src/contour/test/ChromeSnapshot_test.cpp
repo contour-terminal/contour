@@ -855,7 +855,10 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 auto const* flyout = scene.openedTabColorFlyout();
                 REQUIRE(flyout != nullptr);
                 CHECK(flyout->objectName() == QStringLiteral("tabColorFlyout"));
-                CHECK(flyout->property("tabIndex").toInt() == 1); // the second tab's
+                // The second tab's: the flyout hangs from the tab that owns it.
+                auto const* tab = flyout->property("parent").value<QQuickItem*>();
+                REQUIRE(tab != nullptr);
+                CHECK(tab->property("tabIndex").toInt() == 1);
                 break;
             }
             case SnapshotScript::RemoteConnected:

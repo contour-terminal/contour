@@ -388,6 +388,13 @@ constexpr StringLiteral SidebarConfig {
     "    {comment}   bar  = a narrow bar in the colour at the row's leading edge.\n"
     "    {comment}   name = the tab's name is drawn in the colour.\n"
     "    tab_color: {}\n"
+    "    {comment} How a coloured workspace shows its colour in the sidebar (ignore-case):\n"
+    "    {comment}   tint   = the workspace's row is filled with the colour, faded as the tab strip fades "
+    "it\n"
+    "    {comment}            (default).\n"
+    "    {comment}   group  = a rail in the colour down the leading edge of the workspace's rows.\n"
+    "    {comment}   swatch = a small square in the colour before the workspace's name.\n"
+    "    workspace_color: {}\n"
     "\n"
 };
 
@@ -2979,6 +2986,7 @@ constexpr StringLiteral SidebarWeb {
     "  visible: true\n"
     "  width: null\n"
     "  tab_color: tint\n"
+    "  workspace_color: tint\n"
     "```\n"
     "\n"
     "- `visible`: Whether the sidebar starts shown. This is `false` for the "
@@ -2992,6 +3000,13 @@ constexpr StringLiteral SidebarWeb {
     "    - `tint` (default): the row is filled with the colour, faded as the tab strip fades it.\n"
     "    - `bar`: a narrow bar in the colour at the row's leading edge, the row's full height.\n"
     "    - `name`: the tab's name is drawn in the colour.\n"
+    "- `workspace_color`: How a coloured workspace shows its colour in the sidebar (ignore-case). An "
+    "uncoloured workspace looks the same in all three.\n"
+    "    - `tint` (default): the workspace's row is filled with the colour, faded as the tab strip fades "
+    "it.\n"
+    "    - `group`: a rail in the colour down the leading edge of the workspace's row and every row beneath "
+    "it, over a faint wash.\n"
+    "    - `swatch`: a small square in the colour before the workspace's name.\n"
     "\n"
 };
 

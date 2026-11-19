@@ -256,6 +256,7 @@ sidebar:
   visible: true     # start shown; what you last chose in a window wins over this
   width: 240        # logical pixels (cells under ui_style: terminal); omit for the style's own
   tab_color: tint   # tint | bar | name
+  workspace_color: tint   # tint | group | swatch
 tab_placement: sidebar   # sidebar | top
 ```
 
@@ -266,6 +267,20 @@ tab looks the same in all three, and workspace rows never carry a tab's colour.
   turns black or white to stay legible.
 - `bar`: a narrow bar in the colour runs the row's full height at its leading edge.
 - `name`: the tab's name is drawn in the colour.
+
+`workspace_color` picks how a coloured workspace shows its colour in the sidebar, independently of
+`tab_color`; an uncoloured workspace looks the same in all three, a folded workspace keeps its paint, and the
+colour is shown in the sidebar only.
+
+- `tint` (the default): the workspace's row is filled with the colour, faded as the tab strip fades a
+  coloured tab, and its text turns black or white to stay legible.
+- `group`: a rail in the colour runs down the sidebar's leading edge beside the workspace's row and every
+  row beneath it, over a faint wash of the colour; a coloured tab's own tint is drawn over the wash.
+- `swatch`: a small square in the colour stands before the workspace's name.
+
+To colour a workspace, right-click its row and pick from **Workspace Color**: a swatch, **Custom…** for the
+colour picker, or **Reset**. The `SetWorkspaceColor` action without a colour opens the picker for the shown
+workspace.
 
 See [Key mapping](configuration/key-mapping.md#workspace-sidebar) for the actions and their default chords.
 The default width is 220 px on macOS, 240 px on Fluent and ContourLinux, and 28 cells under

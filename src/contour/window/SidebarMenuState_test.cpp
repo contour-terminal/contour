@@ -3,6 +3,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
 #include <string>
 
 using namespace contour::window;
@@ -107,20 +109,27 @@ TEST_CASE("a workspace's menu state is its place, the count, and what its only t
     auto two = workspace(11, "web");
     two.tabs = { DirectoryTab { .id = 2, .title = {}, .name = "a", .panes = {} },
                  DirectoryTab { .id = 3, .title = {}, .name = "b", .panes = {} } };
+    two.color = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
     auto const directory = WorkspaceDirectory { .workspaces = { one, two }, .selected = 10 };
+    auto const palette =
+        std::array { vtbackend::RGBColor { 0xC0, 0x39, 0x2B }, vtbackend::RGBColor { 0xC2, 0x54, 0x8F } };
 
-    auto const single = workspaceMenuStateOf(directory, 10, contour::command::MenuMoves::Nodes);
+    auto const single = workspaceMenuStateOf(directory, 10, contour::command::MenuMoves::Nodes, palette);
     CHECK(single.position == 0);
     CHECK(single.count == 2);
     REQUIRE(single.joinable.size() == 1);
     CHECK(single.joinable[0].tabs.size() == 2);
+    CHECK(std::ranges::equal(single.palette, palette));
+    CHECK_FALSE(single.color.has_value());
 
-    auto const several = workspaceMenuStateOf(directory, 11, contour::command::MenuMoves::Tabs);
+    auto const several = workspaceMenuStateOf(directory, 11, contour::command::MenuMoves::Tabs, palette);
     CHECK(several.position == 1);
     CHECK(several.moves == contour::command::MenuMoves::Tabs);
     CHECK(several.joinable.empty());
+    CHECK(several.color == vtbackend::RGBColor { 0xC2, 0x54, 0x8F });
 
-    auto const unlisted = workspaceMenuStateOf(directory, 99, contour::command::MenuMoves::Nothing);
+    auto const unlisted = workspaceMenuStateOf(directory, 99, contour::command::MenuMoves::Nothing, palette);
     CHECK(unlisted.position == 0);
     CHECK(unlisted.moves == contour::command::MenuMoves::Nothing);
+    CHECK_FALSE(unlisted.color.has_value());
 }

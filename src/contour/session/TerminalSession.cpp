@@ -7346,10 +7346,9 @@ bool TerminalSession::operator()(actions::CloseWorkspace)
 
 bool TerminalSession::operator()(actions::SetWorkspaceColor const& action)
 {
-    // A colorless binding is meant to open the workspace's color picker, which does not exist yet: until it
-    // does, it changes nothing.
+    // A colorless binding opens the colour picker over the displayed workspace's row.
     if (!action.color)
-        return false;
+        return onWindowOf(*_manager, *this, &window::WindowController::beginCurrentWorkspaceColorPick);
     return onWindowOf(*_manager, *this, &window::WindowController::colorCurrentWorkspace, *action.color);
 }
 

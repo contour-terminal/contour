@@ -501,18 +501,41 @@ int parentRowOf(std::span<SidebarRow const> rows, int row) noexcept
     return -1;
 }
 
+namespace
+{
+    /// @return The cell @p glyph is drawn as.
+    [[nodiscard]] std::string_view treeGlyphText(TreeGlyph glyph) noexcept
+    {
+        switch (glyph)
+        {
+            case TreeGlyph::None: break;
+            case TreeGlyph::Tee: return "├";
+            case TreeGlyph::Last: return "└";
+            case TreeGlyph::Bar: return "│";
+        }
+        return " ";
+    }
+
+    /// @return @p glyph as the workspace rail draws it: a connector whose stroke reaches the cell's bottom.
+    [[nodiscard]] TreeGlyph railGlyphOf(TreeGlyph glyph) noexcept
+    {
+        switch (glyph)
+        {
+            case TreeGlyph::None:
+            case TreeGlyph::Bar: break;
+            case TreeGlyph::Tee:
+            case TreeGlyph::Last: return TreeGlyph::Tee;
+        }
+        return TreeGlyph::Bar;
+    }
+} // namespace
+
 std::string treeLinesText(TreeLines const& lines, uint8_t depth)
 {
     auto text = std::string {};
     for (auto const glyph: lines.columns | std::views::take(depth))
     {
-        switch (glyph)
-        {
-            case TreeGlyph::None: text += ' '; break;
-            case TreeGlyph::Tee: text += "├"; break;
-            case TreeGlyph::Last: text += "└"; break;
-            case TreeGlyph::Bar: text += "│"; break;
-        }
+        text += treeGlyphText(glyph);
         text += ' ';
     }
     return text;
@@ -522,6 +545,17 @@ std::string treeContinuationText(SidebarRow const& row)
 {
     return row.depth == 0 ? std::string {}
                           : treeLinesText(row.continued, static_cast<uint8_t>(row.continued.columns.size()));
+}
+
+RailCells workspaceRailCellsOf(SidebarRow const& row)
+{
+    if (row.depth == 0)
+        return RailCells { .first = row.expansion == RowExpansion::None
+                                        ? std::string { treeGlyphText(TreeGlyph::Bar) }
+                                        : std::string {},
+                           .second = {} };
+    return RailCells { .first = std::string { treeGlyphText(railGlyphOf(row.lines.columns.front())) },
+                       .second = std::string { treeGlyphText(railGlyphOf(row.continued.columns.front())) } };
 }
 
 std::string meterText(int percent)

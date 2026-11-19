@@ -22,6 +22,7 @@
 #include <contour/window/SidebarSelection.hpp>
 #include <contour/window/SidebarTabColor.hpp>
 #include <contour/window/SidebarToggle.hpp>
+#include <contour/window/SidebarWorkspaceColor.hpp>
 #include <contour/window/SplitChrome.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabWellLayout.hpp>
@@ -209,6 +210,7 @@ namespace
             .menu = QString::fromUtf8(tokens.menuGlyph),
             .submenu = QString::fromUtf8(tokens.submenuGlyph),
             .tabColor = QString::fromUtf8(tokens.tabColorGlyph),
+            .workspaceSwatch = QString::fromUtf8(tokens.workspaceSwatchGlyph),
             .chipOpen = QString::fromUtf8(tokens.chipOpenGlyph),
             .chipClose = QString::fromUtf8(tokens.chipCloseGlyph),
             .paneActions = stringsOf(tokens.paneActionGlyphs),
@@ -238,6 +240,30 @@ namespace
     [[nodiscard]] constexpr bool inRange(int value, size_t count) noexcept
     {
         return value >= 0 && std::cmp_less(value, count);
+    }
+
+    /// @return @p color as a colour a row paints with; none when QML hands a transparent (or invalid) one,
+    ///         its spelling of "no colour".
+    [[nodiscard]] std::optional<vtbackend::RGBColor> presentColor(QColor const& color)
+    {
+        return color.isValid() && color.alpha() > 0 ? std::optional { platform::toRGBColor(color) }
+                                                    : std::nullopt;
+    }
+
+    /// @return @p color as QML reads a paint's colour: fully transparent where it paints nothing.
+    [[nodiscard]] QColor qmlPaintColor(std::optional<vtbackend::RGBColor> const& color)
+    {
+        return color ? platform::toQColor(*color) : QColor { Qt::transparent };
+    }
+
+    /// The tab-strip prominence a sidebar row's colour is drawn at, from what QML holds.
+    /// @param selection A window::RowSelection as an int; anything else is no selection.
+    [[nodiscard]] TabVisualState sidebarRowState(int selection, bool hovered, bool windowActive) noexcept
+    {
+        auto const marked = inRange(selection, 3) ? static_cast<RowSelection>(selection) : RowSelection::None;
+        return sidebarTabVisualState(marked,
+                                     hovered ? RowPointer::Hovering : RowPointer::Away,
+                                     windowActive ? WindowFocus::Active : WindowFocus::Inactive);
     }
 
     /// @return @p name as the QString QML reads it.
@@ -685,38 +711,46 @@ QVariantMap UiStyleProvider::sidebarTabColor(int style,
                                              bool hovered,
                                              bool windowActive) const
 {
-    auto const pointer = hovered ? RowPointer::Hovering : RowPointer::Away;
-    auto const focus = windowActive ? WindowFocus::Active : WindowFocus::Inactive;
-    auto const toQml = [](std::optional<vtbackend::RGBColor> const& color) {
-        return color ? platform::toQColor(*color) : QColor { Qt::transparent };
-    };
     auto paint = SidebarTabColorPaint {};
     if (inRange(style, config::SidebarTabColorStyleCount))
-    {
-        auto const marked = inRange(selection, 3) ? static_cast<RowSelection>(selection) : RowSelection::None;
-        auto const colour = tabColor.isValid() && tabColor.alpha() > 0
-                                ? std::optional { platform::toRGBColor(tabColor) }
-                                : std::nullopt;
         paint = sidebarTabColorPaint(static_cast<config::SidebarTabColorStyle>(style),
-                                     colour,
+                                     presentColor(tabColor),
                                      platform::toRGBColor(rowBackground),
-                                     sidebarTabVisualState(marked, pointer, focus));
-    }
-    return { { QStringLiteral("fill"), toQml(paint.fill) },
-             { QStringLiteral("bar"), toQml(paint.bar) },
-             { QStringLiteral("ink"), toQml(paint.ink) } };
+                                     sidebarRowState(selection, hovered, windowActive));
+    return { { QStringLiteral("fill"), qmlPaintColor(paint.fill) },
+             { QStringLiteral("bar"), qmlPaintColor(paint.bar) },
+             { QStringLiteral("ink"), qmlPaintColor(paint.ink) } };
+}
+
+QVariantMap UiStyleProvider::sidebarWorkspaceColor(int style,
+                                                   int kind,
+                                                   QColor const& workspaceColor,
+                                                   QColor const& rowBackground,
+                                                   int selection,
+                                                   bool hovered,
+                                                   bool windowActive) const
+{
+    auto paint = SidebarWorkspaceColorPaint {};
+    if (inRange(style, config::SidebarWorkspaceColorStyleCount) && inRange(kind, 3))
+        paint = sidebarWorkspaceColorPaint(static_cast<config::SidebarWorkspaceColorStyle>(style),
+                                           static_cast<SidebarRowKind>(kind),
+                                           presentColor(workspaceColor),
+                                           platform::toRGBColor(rowBackground),
+                                           sidebarRowState(selection, hovered, windowActive));
+    return { { QStringLiteral("fill"), qmlPaintColor(paint.fill) },
+             { QStringLiteral("ink"), qmlPaintColor(paint.ink) },
+             { QStringLiteral("rail"), qmlPaintColor(paint.rail) },
+             { QStringLiteral("wash"), qmlPaintColor(paint.wash) },
+             { QStringLiteral("swatch"), qmlPaintColor(paint.swatch) } };
 }
 
 QColor UiStyleProvider::sidebarMarkInk(QColor const& mark,
                                        QColor const& tintFill,
                                        QColor const& tintInk) const
 {
-    auto const present = [](QColor const& color) {
-        return color.isValid() && color.alpha() > 0 ? std::optional { platform::toRGBColor(color) }
-                                                    : std::nullopt;
-    };
-    auto const paint =
-        SidebarTabColorPaint { .fill = present(tintFill), .bar = std::nullopt, .ink = present(tintInk) };
+    auto const paint = SidebarTabColorPaint { .fill = presentColor(tintFill),
+                                              .bar = std::nullopt,
+                                              .ink = presentColor(tintInk) };
     if (!paint.fill)
         return mark;
     return platform::toQColor(window::sidebarMarkInk(platform::toRGBColor(mark), paint));

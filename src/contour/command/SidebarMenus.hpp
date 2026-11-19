@@ -4,8 +4,11 @@
 #include <contour/command/ContextMenu.hpp>
 #include <contour/command/TabMenus.hpp>
 
+#include <vtbackend/core/Color.hpp>
+
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -45,6 +48,10 @@ struct WorkspaceMenuState
     /// nothing.
     std::vector<TabChoiceGroup> joinable {};
     MenuMoves moves = MenuMoves::Nodes; ///< What the window's host moves.
+    /// The colours the "Workspace Color" submenu offers, in order (the tab menu's palette).
+    std::vector<vtbackend::RGBColor> palette {};
+    /// The colour the user gave the workspace; none while it is uncoloured.
+    std::optional<vtbackend::RGBColor> color {};
 };
 
 /// The workspace row's context menu for @p state.

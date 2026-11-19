@@ -265,6 +265,7 @@ set(_header_files
     window/Utf16Offsets.hpp
     window/SidebarTree.hpp
     window/SidebarTabColor.hpp
+    window/SidebarWorkspaceColor.hpp
     window/SwitcherStatus.hpp
     window/SwitcherRows.hpp
     window/SwitcherKeys.hpp
@@ -1809,6 +1810,7 @@ if(CONTOUR_TESTING)
         window/SidebarTree.cpp
         window/SidebarTree_test.cpp
         window/SidebarTabColor_test.cpp
+        window/SidebarWorkspaceColor_test.cpp
         window/SwitcherStatus.cpp
         window/SwitcherStatus_test.cpp
         window/SwitcherRows.cpp

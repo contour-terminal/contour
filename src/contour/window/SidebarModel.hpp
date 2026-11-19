@@ -420,6 +420,8 @@ class SidebarModel: public QAbstractListModel
         IdleLineRole,          ///< The second line of a row with no reason (idleLineOf()).
         TabColorRole,          ///< QColor: the row's tab colour; fully transparent when it has none.
         WorkspaceColorRole,    ///< QColor: the row's workspace colour; fully transparent when it has none.
+        RailTextRole, ///< The Terminal look's workspace rail on the first line (workspaceRailCellsOf()).
+        RailTextContinuedRole, ///< The rail on the second line (workspaceRailCellsOf()).
     };
 
     /// @param host The window the sidebar sits in; must outlive the model.
@@ -516,6 +518,13 @@ class SidebarModel: public QAbstractListModel
     /// @param key A row's key.
     /// @return The row's index, or -1 when it is not listed.
     [[nodiscard]] int rowIndexOf(SidebarRowKey const& key) const noexcept;
+    /// @param workspace A workspace's id, as the window's directory lists it.
+    /// @return Its row, or -1 when it is not listed: where the sidebar's colour picker hangs.
+    [[nodiscard]] Q_INVOKABLE int workspaceRowIndex(quint64 workspace) const noexcept
+    {
+        return rowIndexOf(
+            { .kind = SidebarRowKind::Workspace, .workspace = workspace, .tab = 0, .pane = {} });
+    }
 
     /// Tells the model whether anyone can see its rows. The one-second timer runs only while they can.
     /// @param presence The sidebar's presence.

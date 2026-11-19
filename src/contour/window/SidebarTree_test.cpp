@@ -784,6 +784,41 @@ TEST_CASE("SidebarTree.tree_lines_connect_through_second_lines", "[sidebar]")
     CHECK(treeContinuationText(rows[0]).empty());
 }
 
+TEST_CASE("SidebarTree.workspace_rail_cells_run_unbroken", "[sidebar]")
+{
+    // A workspace's rail on the Terminal look is the tree's first cell on every line of its rows: drawn as
+    // the tree's own connector, a blank (a pane under the last tab, the last tab's second line) and a corner
+    // (whose stroke stops half way down) made to run on, so no line of the workspace is left without it.
+    auto const rows =
+        rowsOf(directoryOf({ workspaceOf(1,
+                                         "w",
+                                         { tabOf(1, "split", { paneOf(1, "a"), paneOf(2, "b") }),
+                                           tabOf(2, "last", { paneOf(3, "c"), paneOf(4, "d") }) }),
+                             workspaceOf(2, "empty", {}) }));
+    REQUIRE(rows.size() == 8);
+    auto const cells = std::ranges::to<std::vector>(rows | std::views::transform(workspaceRailCellsOf));
+
+    // The workspace row: its disclosure is the cell, and draws itself.
+    CHECK(cells[0] == RailCells { .first = "", .second = "" });
+    CHECK(cells[1] == RailCells { .first = "├", .second = "│" });
+    CHECK(cells[2] == RailCells { .first = "│", .second = "│" });
+    CHECK(cells[3] == RailCells { .first = "│", .second = "│" });
+    // The last tab: its corner runs on, and so do its blank second line and the cells of its panes.
+    CHECK(treeLinesText(rows[4].lines, rows[4].depth).starts_with("└"));
+    CHECK(treeContinuationText(rows[4]).starts_with(" "));
+    CHECK(cells[4] == RailCells { .first = "├", .second = "│" });
+    CHECK(treeLinesText(rows[5].lines, rows[5].depth).starts_with(" "));
+    CHECK(cells[5] == RailCells { .first = "│", .second = "│" });
+    CHECK(cells[6] == RailCells { .first = "│", .second = "│" });
+    // A workspace with nothing to fold has no disclosure: the rail draws its cell, on its one line.
+    REQUIRE(rows[7].expansion == RowExpansion::None);
+    CHECK(cells[7] == RailCells { .first = "│", .second = "" });
+
+    // Nothing the tree itself draws changes: the rail is drawn over it, not into it.
+    CHECK(treeLinesText(rows[4].lines, rows[4].depth) == "└ ");
+    CHECK(treeContinuationText(rows[5]) == "  │ ");
+}
+
 TEST_CASE("SidebarTree.meter_text_fills_eighths_of_cells", "[sidebar]")
 {
     CHECK(meterText(0) == "░░░░░");

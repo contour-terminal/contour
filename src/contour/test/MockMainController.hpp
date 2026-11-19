@@ -718,6 +718,24 @@ class MockMainController: public MainWindowControllerMock
     QStringList replacedLayouts;              ///< Every replaceLayout(), in order.
     Q_INVOKABLE void setTabColor(int, QColor const&) {}
     Q_INVOKABLE void resetTabColor(int) {}
+    /// A workspace colour the sidebar's picker asked for (setWorkspaceColor()), or a reset (no colour).
+    struct WorkspaceColorCall
+    {
+        quint64 workspace = 0;       ///< The workspace's id.
+        std::optional<QColor> color; ///< The colour; none for resetWorkspaceColor().
+    };
+    std::vector<WorkspaceColorCall>
+        workspaceColorCalls; ///< Every setWorkspaceColor() and resetWorkspaceColor().
+    /// Mirrors WindowController::setWorkspaceColor(): records the call.
+    Q_INVOKABLE void setWorkspaceColor(quint64 workspace, QColor const& color)
+    {
+        workspaceColorCalls.push_back({ .workspace = workspace, .color = color });
+    }
+    /// Mirrors WindowController::resetWorkspaceColor(): records the call.
+    Q_INVOKABLE void resetWorkspaceColor(quint64 workspace)
+    {
+        workspaceColorCalls.push_back({ .workspace = workspace, .color = std::nullopt });
+    }
     /// Mirrors WindowController::tabWorkingDirectory(): what TabItem's hover tooltip asks for the
     /// hovered tab, which a shown window's tab strip can be. No session runs anywhere, so none.
     Q_INVOKABLE [[nodiscard]] QString tabWorkingDirectory(int /*index*/) const { return {}; }
@@ -841,6 +859,8 @@ class MockMainController: public MainWindowControllerMock
     void tabTitleEditRequested(int /*index*/);
     // Matches TabItem's Connections handler; a missing signal here is a QML warning, not a silent no-op.
     void tabColorPickRequested(int /*index*/);
+    /// Mirrors WindowController::workspaceColorPickRequested(): the sidebar opens its picker over the row.
+    void workspaceColorPickRequested(quint64 workspace);
 
   private:
     /// Answers a key of the sidebar's tree as the controller does, through the same key table: Escape clears

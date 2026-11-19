@@ -409,6 +409,9 @@ struct SidebarConfig
     /// How a coloured tab shows its colour on its sidebar rows: a tint, a bar or its name's ink.
     SidebarTabColorStyle tabColor { SidebarTabColorStyle::Tint };
 
+    /// How a coloured workspace shows its colour in the sidebar: a tint, a group rail or a swatch.
+    SidebarWorkspaceColorStyle workspaceColor { SidebarWorkspaceColorStyle::Tint };
+
     bool operator==(SidebarConfig const&) const = default;
 };
 

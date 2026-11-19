@@ -812,7 +812,8 @@ command::WorkspaceMenuState WindowController::workspaceMenuStateOf(uint64_t work
     return window::workspaceMenuStateOf(_directorySource != nullptr ? _directorySource->directory()
                                                                     : WorkspaceDirectory {},
                                         workspace,
-                                        menuMovesOf(_manager.hostMovesOf(*this)));
+                                        menuMovesOf(_manager.hostMovesOf(*this)),
+                                        _manager.model().colorPalette());
 }
 
 void WindowController::runWorkspaceMenuAction(uint64_t workspace, actions::Action const& action)
@@ -3232,6 +3233,7 @@ void WindowController::restoreSidebar()
     _sidebarVisibility = config.sidebar.value().visibility;
     _tabPlacement = config.tabPlacement.value();
     _sidebarTabColorStyle = config.sidebar.value().tabColor;
+    _sidebarWorkspaceColorStyle = config.sidebar.value().workspaceColor;
     _sidebarUnits = config.sidebar.value().width.value_or(metrics.tokens.width);
 
     // What the user last chose wins over the configured defaults.
@@ -3526,6 +3528,27 @@ void WindowController::resetCurrentWorkspaceColor()
         _manager.setWorkspaceColor(*this, *shown, std::nullopt);
 }
 
+void WindowController::beginCurrentWorkspaceColorPick()
+{
+    auto const shown = shownWorkspaceId();
+    if (!shown)
+        return;
+    // The picker hangs from the workspace's row, in a sidebar shown for it.
+    focusSidebar();
+    emit workspaceColorPickRequested(*shown);
+}
+
+void WindowController::setWorkspaceColor(quint64 workspace, QColor const& color)
+{
+    if (color.isValid())
+        _manager.setWorkspaceColor(*this, workspace, platform::toRGBColor(color));
+}
+
+void WindowController::resetWorkspaceColor(quint64 workspace)
+{
+    _manager.setWorkspaceColor(*this, workspace, std::nullopt);
+}
+
 std::optional<uint64_t> WindowController::shownWorkspaceId() const
 {
     if (_directorySource == nullptr)
@@ -3655,6 +3678,21 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
         window.focusSidebar();
         emit window.sidebarRowRenameRequested(window._sidebar->rowIndexOf(key));
     };
+    constexpr Run ColorRow =
+        [](WindowController& window, SidebarRowKey const& key, actions::Action const& what) {
+            // A swatch colours the workspace; a bare one (Custom…) asks for the picker over its row.
+            if (auto const color = std::get<actions::SetWorkspaceColor>(what).color)
+                window._manager.setWorkspaceColor(window, key.workspace, *color);
+            else
+            {
+                window.focusSidebar();
+                emit window.workspaceColorPickRequested(key.workspace);
+            }
+        };
+    constexpr Run ResetRowColor =
+        [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
+            window._manager.setWorkspaceColor(window, key.workspace, std::nullopt);
+        };
     constexpr Run MoveRowUp = [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
         window.moveWorkspaceBy(key.workspace, -1);
     };
@@ -3699,6 +3737,8 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
         ByIdAction { .matches = holds<actions::MarkSeen>, .run = MarkRowSeen },
         ByIdAction { .matches = holds<actions::RenameWorkspace>, .run = RenameRow },
         ByIdAction { .matches = holds<actions::RenameTab>, .run = RenameRow },
+        ByIdAction { .matches = holds<actions::SetWorkspaceColor>, .run = ColorRow },
+        ByIdAction { .matches = holds<actions::ResetWorkspaceColor>, .run = ResetRowColor },
         ByIdAction { .matches = holds<actions::MoveWorkspaceUp>, .run = MoveRowUp },
         ByIdAction { .matches = holds<actions::MoveWorkspaceDown>, .run = MoveRowDown },
         ByIdAction { .matches = holds<actions::MoveTabToWorkspace>, .run = MoveRowTab },
@@ -3850,8 +3890,8 @@ void WindowController::openSidebarContextMenu(SidebarRow const& row, QPointF win
     switch (row.key.kind)
     {
         case SidebarRowKind::Workspace:
-            entries = command::buildWorkspaceMenu(
-                window::workspaceMenuStateOf(directory, row.key.workspace, moves));
+            entries = command::buildWorkspaceMenu(window::workspaceMenuStateOf(
+                directory, row.key.workspace, moves, _manager.model().colorPalette()));
             break;
         case SidebarRowKind::Tab: {
             // Every workspace but the tab's own can take it.

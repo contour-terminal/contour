@@ -335,6 +335,25 @@ enum class SecondLine : uint8_t
 /// @return The text, empty for a workspace row.
 [[nodiscard]] std::string treeContinuationText(SidebarRow const& row);
 
+/// What the Terminal look's workspace rail (`sidebar.workspace_color: group`) draws in a row's first cell, on
+/// each of the row's lines.
+struct RailCells
+{
+    std::string first;  ///< On the row's first line; empty where the workspace's disclosure is the cell.
+    std::string second; ///< On its second line; empty for a workspace row, which has one line.
+
+    bool operator==(RailCells const&) const = default;
+};
+
+/// The cells of a workspace's rail on @p row: the tree's own connector in its first column, made to run on,
+/// so the rail is one unbroken line from the workspace's row to the bottom of its last row. A blank (a pane
+/// under the last tab, the last tab's second line) becomes `│`, and a `└`, whose stroke stops half way down
+/// the cell, becomes `├`. The tree's own text (treeLinesText()) is left as it is.
+/// @param row The row.
+/// @return The cells. A workspace row's first is `│` when it folds nothing, so has no disclosure to draw it,
+///         and empty otherwise.
+[[nodiscard]] RailCells workspaceRailCellsOf(SidebarRow const& row);
+
 /// The cells of the Terminal look's progress meter.
 inline constexpr int MeterCells = 5;
 

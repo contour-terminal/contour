@@ -1104,3 +1104,22 @@ TEST_CASE("a workspace colour change is reported for all of its rows", "[contour
         CHECK(named(row));
     }
 }
+
+TEST_CASE("SidebarModel: every row serves the cells of its workspace's rail", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { oneColouredSplitTab() };
+    REQUIRE(t.sidebar().rowCount() == 4);
+    CHECK(t.sidebar().roleNames().value(SidebarModel::RailTextRole) == "railText");
+    CHECK(t.sidebar().roleNames().value(SidebarModel::RailTextContinuedRole) == "railTextContinued");
+    for (auto const row: { 0, 1, 2, 3 })
+    {
+        INFO("row " << row);
+        auto const cells = workspaceRailCellsOf(t.sidebar().rows()[static_cast<std::size_t>(row)]);
+        auto const index = t.sidebar().index(row);
+        CHECK(index.data(SidebarModel::RailTextRole).toString() == QString::fromStdString(cells.first));
+        CHECK(index.data(SidebarModel::RailTextContinuedRole).toString()
+              == QString::fromStdString(cells.second));
+    }
+    // The split tab is the workspace's last: its panes still carry the rail.
+    CHECK(t.sidebar().index(2).data(SidebarModel::RailTextRole).toString() == QStringLiteral("│"));
+}

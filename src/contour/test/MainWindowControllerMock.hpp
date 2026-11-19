@@ -187,6 +187,9 @@ class MainWindowControllerMock: public QAbstractListModel
     Q_PROPERTY(int tabPlacement READ tabPlacement NOTIFY tabPlacementChanged)
     // CONSTANT on the real controller; it notifies here so a test can pick the style after loading.
     Q_PROPERTY(int sidebarTabColorStyle READ sidebarTabColorStyle NOTIFY sidebarTabColorStyleChanged)
+    // CONSTANT on the real controller, as the tab colour's style; it notifies here for the same reason.
+    Q_PROPERTY(int sidebarWorkspaceColorStyle READ sidebarWorkspaceColorStyle NOTIFY
+                   sidebarWorkspaceColorStyleChanged)
     Q_PROPERTY(int otherWorkspacesUrgency READ otherWorkspacesUrgency NOTIFY otherWorkspacesUrgencyChanged)
     Q_PROPERTY(QVariantMap sidebarCommands READ sidebarCommands CONSTANT)
     // }}}
@@ -655,6 +658,13 @@ class MainWindowControllerMock: public QAbstractListModel
     {
         return static_cast<int>(_sidebarTabColorStyle);
     }
+
+    /// Mirrors WindowController::sidebarWorkspaceColorStyle(): a config::SidebarWorkspaceColorStyle's
+    /// underlying value.
+    [[nodiscard]] int sidebarWorkspaceColorStyle() const noexcept
+    {
+        return static_cast<int>(_sidebarWorkspaceColorStyle);
+    }
     /// Mirrors WindowController::otherWorkspacesUrgency().
     [[nodiscard]] int otherWorkspacesUrgency() const noexcept { return _sidebar.otherWorkspacesUrgency(); }
     /// Mirrors WindowController::sidebarCommands().
@@ -679,6 +689,13 @@ class MainWindowControllerMock: public QAbstractListModel
     {
         _sidebarTabColorStyle = style;
         emit sidebarTabColorStyleChanged();
+    }
+
+    /// How a coloured workspace shows in the sidebar, as `sidebar.workspace_color` says.
+    void setSidebarWorkspaceColorStyle(config::SidebarWorkspaceColorStyle style)
+    {
+        _sidebarWorkspaceColorStyle = style;
+        emit sidebarWorkspaceColorStyleChanged();
     }
     /// Mirrors WindowController::setSidebarWidth(): records the width the drag ended at, and takes it.
     Q_INVOKABLE void setSidebarWidth(int width)
@@ -836,6 +853,7 @@ class MainWindowControllerMock: public QAbstractListModel
     void sidebarWidthChanged();
     void tabPlacementChanged();
     void sidebarTabColorStyleChanged();
+    void sidebarWorkspaceColorStyleChanged();
     void otherWorkspacesUrgencyChanged();
     void sidebarCommandRequested(int command, QString const& text);
     /// Mirrors WindowController::sidebarFilterRequested().
@@ -919,6 +937,7 @@ class MainWindowControllerMock: public QAbstractListModel
     int _sidebarUnits = 0;
     config::TabPlacement _tabPlacement = config::TabPlacement::Top;
     config::SidebarTabColorStyle _sidebarTabColorStyle = config::SidebarTabColorStyle::Tint;
+    config::SidebarWorkspaceColorStyle _sidebarWorkspaceColorStyle = config::SidebarWorkspaceColorStyle::Tint;
     /// Declared last: it is built from everything above. A derived mock refreshes it once its own state is
     /// set.
     window::LocationChipModel _chip { chipInputs() };

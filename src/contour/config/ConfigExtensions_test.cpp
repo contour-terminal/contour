@@ -2344,6 +2344,38 @@ TEST_CASE("a written configuration documents sidebar.tab_color", "[config][sideb
     CHECK(rendered.contains("tab_color: tint"));
 }
 
+TEST_CASE("sidebar.workspace_color picks how a workspace's colour shows in the sidebar", "[config][sidebar]")
+{
+    using contour::config::SidebarWorkspaceColorStyle;
+
+    auto const styleFrom = [](std::string_view sidebarBody) {
+        QTemporaryDir dir;
+        auto const yaml = std::format("default_profile: main\n"
+                                      "sidebar:\n"
+                                      "{}"
+                                      "profiles:\n"
+                                      "    main:\n"
+                                      "        shell: /bin/sh\n",
+                                      sidebarBody);
+        return loadFromYaml(dir, yaml).sidebar.value().workspaceColor;
+    };
+
+    CHECK(styleFrom("    workspace_color: group\n") == SidebarWorkspaceColorStyle::Group);
+    CHECK(styleFrom("    workspace_color: swatch\n") == SidebarWorkspaceColorStyle::Swatch);
+    CHECK(styleFrom("    workspace_color: tint\n") == SidebarWorkspaceColorStyle::Tint);
+    CHECK(styleFrom("    width: 260\n") == SidebarWorkspaceColorStyle::Tint);
+    CHECK(styleFrom("    workspace_color: purple\n") == SidebarWorkspaceColorStyle::Tint);
+    CHECK(styleFrom("    workspace_color: \"\"\n") == SidebarWorkspaceColorStyle::Tint);
+}
+
+TEST_CASE("a written configuration documents sidebar.workspace_color", "[config][sidebar]")
+{
+    auto rendered = std::string {};
+    REQUIRE_NOTHROW(rendered = contour::config::createString<contour::config::YAMLConfigWriter>(
+                        contour::config::Config {}));
+    CHECK(rendered.contains("workspace_color: tint"));
+}
+
 TEST_CASE("Config.firstLaunchDefaults", "[config]")
 {
     SECTION("a plain Config is the newest edition")

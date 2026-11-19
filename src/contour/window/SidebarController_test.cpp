@@ -890,6 +890,106 @@ TEST_CASE("SetWorkspaceColor colours the displayed workspace's rows, ResetWorksp
     CHECK((*session)(contour::actions::ResetWorkspaceColor {}));
     QCoreApplication::processEvents();
     CHECK(colorOfRow(shownRow).alpha() == 0);
+
+    // Without a colour, the binding opens the picker for the displayed workspace.
+    auto picks = QSignalSpy { &*window, &contour::window::WindowController::workspaceColorPickRequested };
+    CHECK((*session)(contour::actions::SetWorkspaceColor {}));
+    REQUIRE(picks.count() == 1);
+    CHECK(picks.at(0).at(0).value<quint64>() == shown.value);
+}
+
+namespace
+{
+/// The rows of the submenu titled @p title among @p rows.
+[[nodiscard]] QVariantList submenuRows(QVariantList const& rows, QString const& title)
+{
+    for (auto const& value: rows)
+    {
+        auto const row = value.toMap();
+        if (row["kind"].toString() == "submenu" && row["title"].toString() == title)
+            return row["children"].toList();
+    }
+    return {};
+}
+} // namespace
+
+TEST_CASE("the workspace menu's Workspace Color colours its workspace without showing it",
+          "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    std::ignore = contour::test::createSessionTabs(manager, *window, 1);
+    auto const shown = window->displayedWorkspace();
+    auto const other = manager.createWorkspaceIn(window->windowId());
+    manager.selectWorkspace(window->windowId(), 1);
+    std::ignore = contour::test::createSessionTabs(manager, *window, 1);
+    manager.selectWorkspace(window->windowId(), 0);
+    REQUIRE(window->displayedWorkspace() == shown);
+
+    auto const otherRow = [&] {
+        return workspaceRowOf(*window, other.value);
+    };
+    auto const colorOfOther = [&] {
+        return window->sidebar()
+            .index(otherRow())
+            .data(contour::window::SidebarModel::WorkspaceColorRole)
+            .value<QColor>();
+    };
+    auto const colourRows = [&] {
+        window->sidebar().openContextMenu(otherRow(), QPointF {});
+        return submenuRows(window->sidebarContextMenuModel(), "Workspace Color");
+    };
+    REQUIRE(colorOfOther().alpha() == 0);
+
+    // The first swatch: the palette's first colour.
+    auto const palette = window->tabColorPalette();
+    REQUIRE_FALSE(palette.isEmpty());
+    auto const rows = colourRows();
+    REQUIRE_FALSE(rows.isEmpty());
+    // The swatches come as one row of them, the menu's swatch grid.
+    auto const swatchRow = rows.front().toMap();
+    REQUIRE(swatchRow["kind"].toString() == "swatches");
+    auto const swatches = swatchRow["swatches"].toList();
+    REQUIRE(swatches.size() == palette.size());
+    auto const swatch = swatches.front().toMap();
+    CHECK(swatch["color"].value<QColor>() == palette.front().value<QColor>());
+    window->triggerSidebarContextMenuAction(swatch["actionId"].toInt());
+    QCoreApplication::processEvents();
+    CHECK(colorOfOther() == palette.front().value<QColor>());
+    CHECK(window->displayedWorkspace() == shown);
+    CHECK_FALSE(window->rowActionPending());
+
+    SECTION("Reset clears it, still without showing it")
+    {
+        auto const reset = actionIdOf(colourRows(), "Reset");
+        REQUIRE(reset.has_value());
+        window->triggerSidebarContextMenuAction(*reset);
+        QCoreApplication::processEvents();
+        CHECK(colorOfOther().alpha() == 0);
+        CHECK(window->displayedWorkspace() == shown);
+    }
+    SECTION("Custom… asks for the picker over that workspace")
+    {
+        auto picks = QSignalSpy { &*window, &contour::window::WindowController::workspaceColorPickRequested };
+        auto const custom = actionIdOf(colourRows(), "Custom…");
+        REQUIRE(custom.has_value());
+        window->triggerSidebarContextMenuAction(*custom);
+        REQUIRE(picks.count() == 1);
+        CHECK(picks.at(0).at(0).value<quint64>() == other.value);
+        CHECK(window->displayedWorkspace() == shown);
+    }
+    SECTION("the picker's choice and its reset colour it by id")
+    {
+        window->setWorkspaceColor(other.value, QColor { 0x12, 0x34, 0x56 });
+        QCoreApplication::processEvents();
+        CHECK(colorOfOther() == QColor { 0x12, 0x34, 0x56 });
+        window->resetWorkspaceColor(other.value);
+        QCoreApplication::processEvents();
+        CHECK(colorOfOther().alpha() == 0);
+        CHECK(window->displayedWorkspace() == shown);
+    }
 }
 
 // {{{ The switcher over a window: the real WindowController hosting it, through the real presenter.

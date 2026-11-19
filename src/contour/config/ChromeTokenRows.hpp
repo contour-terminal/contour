@@ -609,7 +609,9 @@ namespace detail
                                                 .selectionRadius = 6,
                                                 .accentPillWidth = 0,
                                                 .hoverCardWidth = 280,
-                                                .tabColorBarWidth = 3 };
+                                                .tabColorBarWidth = 3,
+                                                .workspaceRailWidth = 3,
+                                                .workspaceSwatchSize = 10 };
 
     /// The workspace sidebar on the Fluent row: a navigation pane, its selection marked by an accent pill.
     inline constexpr SidebarTokens FluentSidebar { .width = 240,
@@ -624,7 +626,9 @@ namespace detail
                                                    .selectionRadius = 4,
                                                    .accentPillWidth = 3,
                                                    .hoverCardWidth = 320,
-                                                   .tabColorBarWidth = 3 };
+                                                   .tabColorBarWidth = 3,
+                                                   .workspaceRailWidth = 3,
+                                                   .workspaceSwatchSize = 10 };
 
     /// The workspace sidebar on the ContourLinux row: its selection a neutral fill (the label's ink at low
     /// alpha), inset and rounded as libadwaita's sidebars draw it, and as the row's own command palette does
@@ -641,7 +645,9 @@ namespace detail
                                                   .selectionRadius = 8,
                                                   .accentPillWidth = 0,
                                                   .hoverCardWidth = 320,
-                                                  .tabColorBarWidth = 3 };
+                                                  .tabColorBarWidth = 3,
+                                                  .workspaceRailWidth = 3,
+                                                  .workspaceSwatchSize = 10 };
 
     /// The workspace sidebar on the Terminal row, in cells: a tree of whole rows.
     inline constexpr SidebarTokens TerminalSidebar { .width = 28,
@@ -656,7 +662,9 @@ namespace detail
                                                      .selectionRadius = 0,
                                                      .accentPillWidth = 0,
                                                      .hoverCardWidth = 40,
-                                                     .tabColorBarWidth = 1 };
+                                                     .tabColorBarWidth = 1,
+                                                     .workspaceRailWidth = 1,
+                                                     .workspaceSwatchSize = 1 };
 
     inline constexpr ChromeTokenRow MacRow {
         .size = { .titleBar = 38,

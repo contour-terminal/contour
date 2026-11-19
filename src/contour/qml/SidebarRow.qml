@@ -55,6 +55,11 @@ Item {
     /// The colour of the workspace the row belongs to (SidebarModel's workspaceColor role); transparent when
     /// it has none.
     required property color workspaceColor
+    /// What the Terminal look's workspace rail draws on the row's first line (window::workspaceRailCellsOf()):
+    /// the tree's first cell, made to run on; empty on a workspace row whose disclosure is that cell.
+    required property string railText
+    /// What the rail draws on the row's second line; empty on a workspace row.
+    required property string railTextContinued
 
     /// The sidebar's model (WindowController.sidebar), which the row's actions go to. Its bindings never
     /// read it: the row compares its roles with the SidebarRows enums, so a row that outlives its model while
@@ -96,16 +101,35 @@ Item {
     readonly property bool tinted: row.tabPaint.fill.a > 0
     readonly property bool hasTabBar: row.tabPaint.bar.a > 0
     readonly property bool hasTabInk: row.tabPaint.ink.a > 0
+    /// What the workspace's colour paints on the row -- { fill, ink, rail, wash, swatch }, each transparent
+    /// where it paints nothing -- in the configured style (`sidebar.workspace_color`,
+    /// window::SidebarWorkspaceColor). This item only draws what it is told.
+    readonly property var workspacePaint: chromeStyle.sidebarWorkspaceColor(
+        row.controller ? row.controller.sidebarWorkspaceColorStyle : 0, row.kind, row.workspaceColor,
+        chromeStyle.colors.sidebarFill, row.selection, hover.hovered, Window.active)
+    /// Whether the workspace's colour fills the row (its own row, `tint`): it then stands in for the
+    /// selection's and the hover's fill, as a tab's tint does.
+    readonly property bool workspaceTinted: row.workspacePaint.fill.a > 0
+    readonly property bool hasWorkspaceRail: row.workspacePaint.rail.a > 0
+    readonly property bool hasWorkspaceWash: row.workspacePaint.wash.a > 0
+    readonly property bool hasWorkspaceSwatch: row.workspacePaint.swatch.a > 0
+    /// On the Terminal row the rail is the first cell of the tree's connectors, drawn in the colour.
+    readonly property bool railCell: row.cellTree && row.hasWorkspaceRail && !row.isWorkspace
+                                     && row.treeText !== ""
+    /// The tint the row's text and marks sit on, { fill, ink }: the tab's, else the workspace's.
+    readonly property var tint: row.tinted ? row.tabPaint : row.workspacePaint
+    /// Whether a colour fills the row, the tab's or the workspace's.
+    readonly property bool filled: row.tinted || row.workspaceTinted
     /// The progress meter's ink: the running status's, unless the row's tint would swallow it.
     readonly property color runningInk: chromeStyle.paletteRevision < 0 ? "transparent"
-        : chromeStyle.sidebarMarkInk(chromeStyle.statusInk(chromeStyle.statusRunning), row.tabPaint.fill, row.tabPaint.ink)
+        : chromeStyle.sidebarMarkInk(chromeStyle.statusInk(chromeStyle.statusRunning), row.tint.fill, row.tint.ink)
     readonly property color selectionInk: row.emphasized ? chromeStyle.colors.sidebarSelectionInk
                                                          : chromeStyle.colors.sidebarSelectionInkInactive
     readonly property color ink: chromeStyle.paletteRevision < 0 ? "transparent"
                                : row.marked ? row.selectionInk : chromeStyle.colors.tabText
     // On a tinted row everything the row writes takes the ink chosen for the tint, so it stays legible on it.
     readonly property color secondaryInk: chromeStyle.paletteRevision < 0 ? "transparent"
-                                        : row.tinted ? row.tabPaint.ink
+                                        : row.filled ? row.tint.ink
                                         : row.marked ? row.selectionInk : chromeStyle.colors.sidebarSecondaryInk
     // The gap between the leading glyphs and the name: at least a cell on the Terminal row, whose small
     // spacing steps are no cells at all, so `▾ billing` never reads `▾billing`.
@@ -161,6 +185,32 @@ Item {
     FontMetrics { id: titleMetrics; font: titleText.font }
     FontMetrics { id: secondLineMetrics; font: chromeStyle.type.footnote }
 
+    // A coloured workspace's wash (`sidebar.workspace_color: group`): faint, behind everything the row draws,
+    // so a coloured tab's own tint, the selection and the hover draw over it in their inset shape. It is the
+    // row's whole box, from the rail at the leading edge to the sidebar's other edge, square, so the rows of one
+    // workspace join into one unbroken band (whole cells on the Terminal row, whose rows are whole cells).
+    Rectangle {
+        objectName: "sidebarRowWorkspaceWash"
+        anchors.fill: parent
+        visible: row.hasWorkspaceWash
+        radius: 0
+        color: row.workspacePaint.wash
+        Accessible.ignored: true
+    }
+
+    // A coloured workspace's tint on its own row (`sidebar.workspace_color: tint`), as a tab's below: in place
+    // of the hover's and the selection's fill, faded by the row's state.
+    Rectangle {
+        objectName: "sidebarRowWorkspaceFill"
+        anchors.fill: parent
+        anchors.leftMargin: row.fillInset
+        anchors.rightMargin: row.fillInset
+        visible: row.workspaceTinted
+        radius: chromeStyle.sidebar.selectionRadius
+        color: row.workspacePaint.fill
+        Accessible.ignored: true
+    }
+
     // A coloured tab's tint (`sidebar.tab_color: tint`), in place of the hover's and the selection's fill, with
     // the selection's inset and radius. Its fade tells selected, hovered and resting rows apart.
     Rectangle {
@@ -180,7 +230,7 @@ Item {
         anchors.fill: parent
         anchors.leftMargin: row.fillInset
         anchors.rightMargin: row.fillInset
-        visible: chromeStyle.sidebar.rowFeedback && !row.marked && !row.tinted
+        visible: chromeStyle.sidebar.rowFeedback && !row.marked && !row.filled
                  && (primaryTap.pressed || hover.hovered)
         radius: chromeStyle.sidebar.selectionRadius
         color: chromeStyle.paletteRevision < 0 ? "transparent"
@@ -194,7 +244,7 @@ Item {
         anchors.fill: parent
         anchors.leftMargin: row.fillInset
         anchors.rightMargin: row.fillInset
-        visible: row.marked && !row.tinted
+        visible: row.marked && !row.filled
         radius: chromeStyle.sidebar.selectionRadius
         color: chromeStyle.paletteRevision < 0 ? "transparent"
              : row.emphasized ? chromeStyle.colors.sidebarSelectionFill
@@ -217,16 +267,69 @@ Item {
         hostRadius: chromeStyle.sidebar.selectionRadius
     }
 
-    // A coloured tab's bar (`sidebar.tab_color: bar`): the row's full height at its leading edge. On the
-    // Terminal row it is the tab strip's colour cell, once on each of the row's lines, in the room the lead
-    // keeps for it past the tree's connectors.
+    // A coloured workspace's rail (`sidebar.workspace_color: group`): the row's full height in the sidebar's
+    // leading gutter, outside the selection's inset, so the rows of one workspace form one unbroken line. On
+    // the Terminal row there is no gutter: the rail is the first cell of the tree's connectors, once on each
+    // of the row's lines, drawn in the colour in the room the lead keeps for it (railRoom), as the model
+    // says it (railText, railTextContinued); on a workspace row that cell is the disclosure, which takes the
+    // colour itself, or, where it folds nothing, the rail's own cell.
+    Item {
+        id: workspaceRail
+        objectName: "sidebarRowWorkspaceRail"
+        /// The rail's colour: what the native rows fill it with, and the cell tree inks its cells in.
+        readonly property color color: row.workspacePaint.rail
+        /// The cell the rail draws on the row's first line of the Terminal row; empty elsewhere.
+        readonly property string firstCell: row.cellTree && row.hasWorkspaceRail ? row.railText : ""
+        visible: row.hasWorkspaceRail
+        x: row.cellTree ? lead.x : 0
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        width: chromeStyle.sidebar.workspaceRailWidth
+        Accessible.ignored: true
+
+        Rectangle {
+            visible: !row.cellTree
+            anchors.fill: parent
+            color: workspaceRail.color
+        }
+
+        Column {
+            visible: row.cellTree
+
+            Text {
+                objectName: "sidebarRowWorkspaceRailCell"
+                height: chromeStyle.sidebar.rowHeight
+                verticalAlignment: Text.AlignVCenter
+                textFormat: Text.PlainText
+                text: workspaceRail.firstCell
+                font: chromeStyle.type.body
+                color: workspaceRail.color
+                Accessible.ignored: true
+            }
+            Text {
+                objectName: "sidebarRowWorkspaceRailCellContinued"
+                visible: !row.isWorkspace
+                height: chromeStyle.sidebar.rowHeight
+                verticalAlignment: Text.AlignVCenter
+                textFormat: Text.PlainText
+                text: row.railTextContinued
+                font: chromeStyle.type.body
+                color: workspaceRail.color
+                Accessible.ignored: true
+            }
+        }
+    }
+
+    // A coloured tab's bar (`sidebar.tab_color: bar`): the row's full height at the leading edge of the
+    // selection's fill, inside the workspace's rail. On the Terminal row it is the tab strip's colour cell,
+    // once on each of the row's lines, in the room the lead keeps for it past the tree's connectors.
     Item {
         id: tabBar
         objectName: "sidebarRowTabBar"
         /// The bar's colour: what the native rows fill it with, and the cell tree inks its glyphs in.
         readonly property color color: row.tabPaint.bar
         visible: row.hasTabBar
-        x: row.cellTree ? lead.x + barRoom.x : 0
+        x: row.cellTree ? lead.x + barRoom.x : row.fillInset
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: chromeStyle.sidebar.tabColorBarWidth
@@ -243,7 +346,10 @@ Item {
             Repeater {
                 model: Math.round(row.height / chromeStyle.sidebar.rowHeight)
                 Text {
+                    objectName: "sidebarRowTabBarCell"
                     height: chromeStyle.sidebar.rowHeight
+                    // Centred in its line, as the tree's connectors and the rail's cells are.
+                    verticalAlignment: Text.AlignVCenter
                     textFormat: Text.PlainText
                     text: chromeStyle.tabColorGlyph
                     font: chromeStyle.type.body
@@ -282,14 +388,25 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: chromeStyle.space.s3
 
-            // The Terminal look's tree: its connectors as cells.
+            // On the Terminal row, the cell the workspace's rail is drawn in (sidebarRowWorkspaceRail): the
+            // tree's first cell, which the rail draws in the colour in place of the tree.
+            Item {
+                id: railRoom
+                visible: row.railCell
+                width: chromeStyle.sidebar.workspaceRailWidth
+                // A positioner lays out no item of zero height: without one, the room would take no cell.
+                height: chromeStyle.sidebar.rowHeight
+            }
+
+            // The Terminal look's tree: its connectors as cells, past the rail's cell where it has one.
             Text {
+                id: treeCells
                 objectName: "sidebarRowTree"
-                visible: row.cellTree && row.treeText !== ""
+                visible: row.cellTree && row.treeText !== "" && !(row.railCell && row.treeText.length === 1)
                 anchors.verticalCenter: parent.verticalCenter
                 width: chromeStyle.snapToCells(implicitWidth)
                 textFormat: Text.PlainText
-                text: row.treeText
+                text: row.railCell ? row.treeText.substring(1) : row.treeText
                 font: chromeStyle.type.body
                 color: row.secondaryInk
                 Accessible.ignored: true
@@ -301,6 +418,8 @@ Item {
                 id: barRoom
                 visible: row.cellTree && row.hasTabBar
                 width: chromeStyle.sidebar.tabColorBarWidth
+                // A positioner lays out no item of zero height: without one, the bar would sit on column 0.
+                height: chromeStyle.sidebar.rowHeight
             }
 
             // A workspace's disclosure; a click folds or unfolds it. The row's token says how it is drawn: a
@@ -323,13 +442,15 @@ Item {
 
                 Text {
                     id: glyphText
+                    objectName: "sidebarRowDisclosureGlyph"
                     visible: !disclosure.chevron
                     anchors.fill: parent
                     horizontalAlignment: Text.AlignHCenter
                     textFormat: Text.PlainText
                     text: !disclosure.folds ? "" : disclosure.expanded ? chromeStyle.menuGlyph : chromeStyle.submenuGlyph
                     font: chromeStyle.type.body
-                    color: row.secondaryInk
+                    // The first cell of a workspace row: on the Terminal row the workspace's rail inks it.
+                    color: row.cellTree && row.hasWorkspaceRail ? workspaceRail.color : row.secondaryInk
                     Accessible.ignored: true
                 }
 
@@ -357,6 +478,41 @@ Item {
                 }
             }
 
+            // A coloured workspace's swatch (`sidebar.workspace_color: swatch`), before its name: a square on
+            // the native rows, one glyph cell on the Terminal row.
+            Item {
+                id: workspaceSwatch
+                objectName: "sidebarRowWorkspaceSwatch"
+                readonly property color color: row.workspacePaint.swatch
+                visible: row.hasWorkspaceSwatch
+                anchors.verticalCenter: parent.verticalCenter
+                width: chromeStyle.sidebar.workspaceSwatchSize
+                height: row.cellTree ? swatchGlyph.implicitHeight : chromeStyle.sidebar.workspaceSwatchSize
+                Accessible.ignored: true
+
+                Rectangle {
+                    visible: !row.cellTree
+                    anchors.fill: parent
+                    radius: chromeStyle.radii.control
+                    color: workspaceSwatch.color
+                }
+
+                Text {
+                    id: swatchGlyph
+                    objectName: "sidebarRowWorkspaceSwatchGlyph"
+                    visible: row.cellTree
+                    // Centred in its one cell: a fallback face may draw the square narrower than the cell.
+                    anchors.fill: parent
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    textFormat: Text.PlainText
+                    text: chromeStyle.workspaceSwatchGlyph
+                    font: chromeStyle.type.body
+                    color: workspaceSwatch.color
+                    Accessible.ignored: true
+                }
+            }
+
             // A tab's or a pane's status; the spinner is TabBadgeSlot's, still under Reduce Motion.
             TabBadgeSlot {
                 id: glyphSlot
@@ -366,7 +522,7 @@ Item {
                 width: chromeStyle.snapToCells(implicitWidth)
                 kind: row.glyph
                 shaped: !row.cellTree
-                tint: row.tabPaint
+                tint: row.tint
                 progress: row.hasProgress ? row.progress : -1
             }
 
@@ -391,7 +547,7 @@ Item {
             textFormat: Text.PlainText
             text: row.title
             font: row.isWorkspace ? chromeStyle.type.bodyStrong : chromeStyle.type.body
-            color: row.hasTabInk ? row.tabPaint.ink : row.ink
+            color: row.hasTabInk ? row.tabPaint.ink : row.workspaceTinted ? row.workspacePaint.ink : row.ink
             elide: Text.ElideRight
             Accessible.ignored: true
         }
@@ -427,7 +583,7 @@ Item {
                 width: chromeStyle.snapToCells(implicitWidth)
                 kind: row.glyph
                 shaped: !row.cellTree
-                tint: row.tabPaint
+                tint: row.tint
             }
 
             // The time in the state, the time since it ended, or the progress's percent.
@@ -508,10 +664,12 @@ Item {
     Text {
         objectName: "sidebarRowTreeContinued"
         visible: row.cellTree && !row.isWorkspace && row.treeTextContinued !== ""
-        x: lead.x
+        // Past the rail's cell, which draws the first one in the workspace's colour: under the first line's
+        // own connectors, whatever the lead's spacing.
+        x: lead.x + (row.railCell ? treeCells.x : 0)
         anchors.top: reasonLine.top
         textFormat: Text.PlainText
-        text: row.treeTextContinued
+        text: row.railCell ? row.treeTextContinued.substring(1) : row.treeTextContinued
         font: chromeStyle.type.body
         color: row.secondaryInk
         Accessible.ignored: true

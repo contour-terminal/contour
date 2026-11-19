@@ -132,6 +132,27 @@ Rectangle {
             item.startRename()
     }
 
+    /// Opens the colour picker over workspace @p workspace's row (the controller's workspaceColorPickRequested):
+    /// "Custom…" in its menu's Workspace Color, or the SetWorkspaceColor action naming no colour.
+    function openWorkspaceColorPicker(workspace) {
+        if (!root.model)
+            return
+        const index = root.model.workspaceRowIndex(workspace)
+        if (index < 0 || index >= tree.count)
+            return
+        // A sidebar shown for the picker has laid out no rows yet.
+        tree.forceLayout()
+        tree.positionViewAtIndex(index, ListView.Contain)
+        const item = tree.itemAtIndex(index)
+        if (!item)
+            return
+        workspaceColorFlyout.workspace = workspace
+        workspaceColorFlyout.currentColor = item.workspaceColor
+        // It hangs from the row, as the tab strip's hangs from its tab (TabColorFlyout's placement).
+        workspaceColorFlyout.parent = item
+        workspaceColorFlyout.open()
+    }
+
     /// The editor or the filter let go of the keyboard: the tree takes it while the sidebar holds the chrome
     /// focus, the terminal otherwise.
     function returnFocus() {
@@ -151,6 +172,27 @@ Rectangle {
         }
         function onSidebarRowRenameRequested(index) { root.renameRow(index) }
         function onSidebarFilterRequested() { root.openFilter() }
+        function onWorkspaceColorPickRequested(workspace) { root.openWorkspaceColorPicker(workspace) }
+    }
+
+    // The one colour picker of the sidebar's workspaces, hung from the row it colours when it opens. A pick
+    // colours that workspace by id, shown or not, and leaves the window where it is.
+    TabColorFlyout {
+        id: workspaceColorFlyout
+        objectName: "sidebarWorkspaceColorFlyout"
+        /// The workspace the picker colours, by its id (WindowController::workspaceColorPickRequested).
+        property var workspace: 0
+        controller: root.controller
+        // Null-guarded: the controller is torn down before this popup on window close.
+        onColorPicked: (c) => {
+            if (root.controller)
+                root.controller.setWorkspaceColor(workspaceColorFlyout.workspace, c)
+        }
+        onResetRequested: {
+            if (root.controller)
+                root.controller.resetWorkspaceColor(workspaceColorFlyout.workspace)
+        }
+        onClosed: root.returnFocus()
     }
 
     // The title row, unless the header bar draws it above the sidebar: the sidebar's toggle where the band
