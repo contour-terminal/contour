@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <orchestrator/core/Fixtures.hpp>
+#include <orchestrator/core/Reconcile.hpp>
 #include <orchestrator/view/Band.hpp>
 #include <orchestrator/view/Dashboard.hpp>
 #include <orchestrator/view/Sections.hpp>
@@ -73,6 +74,18 @@ using Fixture = DashboardFixture;
 /// What a kept run records when its checks stopped at `common-dir`.
 constexpr auto CommonDirReason =
     "git uses another directory than the main checkout's .git; nothing more was run there"sv;
+
+/// Two worktrees no run accounts for, the last one's path holding a space and a `'`.
+[[nodiscard]] World orphansWorld()
+{
+    return World { .prs = { "github/prs-empty.json" },
+                   .worktrees = {
+                       WorktreeEntry { .path = "/home/u/worktrees/contour/pr-2-20260101-000000",
+                                       .branch = std::nullopt },
+                       WorktreeEntry { .path = "/home/u/worktrees/contour/it's a test",
+                                       .branch = "agent/pr-1-20260101-000000" },
+                   } };
+}
 
 /// The worlds the golden screens are drawn from.
 struct Scene
@@ -137,6 +150,9 @@ struct Scene
                 .world = keptReasons,
                 .keys = "\x1b[F\t"sv,
                 .sizes = { Narrow } },
+        Scene { .name = "orphans", .world = orphansWorld(), .keys = "\x1b[F"sv, .sizes = { Medium } },
+        // Enter opens an orphan's details on the whole width, for its command line.
+        Scene { .name = "orphans", .world = orphansWorld(), .keys = "\x1b[F\r"sv, .sizes = { Wide, Narrow } },
     };
 }
 
@@ -835,6 +851,63 @@ TEST_CASE("a running agent with no status after 30 s hints at a trust prompt", "
     REQUIRE(engine.runs().front().lastStatus == AgentStatus::Working);
     CHECK(statusAt(31'000).status == "working 31s");
     CHECK(!std::ranges::contains(statusAt(31'000).details, hint));
+}
+
+TEST_CASE("an orphan's row is read-only: Enter and Tab show its details", "[orchestrator][view]")
+{
+    auto fixture = Fixture { orphansWorld(), Narrow };
+    CHECK(fixture.dashboard.input("\x1b[F"sv).empty());
+    CHECK(!fixture.screen().contains("by hand   git -C"));
+    // No key acts on it: nothing is asked, nothing reaches the engine.
+    for (auto const key: { "e"sv, "x"sv, "\x1b[3~"sv })
+    {
+        CAPTURE(key);
+        CHECK(fixture.dashboard.input(key).empty());
+        CHECK(!fixture.screen().contains("to confirm"));
+    }
+    CHECK(fixture.dashboard.input("\r"sv).empty());
+    CHECK(fixture.screen().contains("by hand   git -C"));
+    static_cast<void>(fixture.dashboard.input("\x1b"sv));
+    fixture.escapeTimesOut();
+    CHECK(!fixture.screen().contains("by hand   git -C"));
+    CHECK(fixture.dashboard.input("\t"sv).empty());
+    CHECK(fixture.screen().contains("by hand   git -C"));
+}
+
+TEST_CASE("Enter on an orphan in the Wide band shows its details on the whole width", "[orchestrator][view]")
+{
+    constexpr auto Command =
+        R"(git -C /home/u/projects/contour worktree remove '/home/u/worktrees/contour/it'\''s a test')"sv;
+    auto fixture = Fixture { orphansWorld(), Wide };
+    CHECK(fixture.dashboard.input("\x1b[F"sv).empty());
+    // Beside the list the panel is too narrow for the line: it is cut, never wrapped.
+    CHECK(!fixture.screen().contains(Command));
+    CHECK(fixture.dashboard.input("\r"sv).empty());
+    auto const page = fixture.screen();
+    CHECK(page.contains(Command));
+    CHECK(!page.contains("ORPHANS"));
+    static_cast<void>(fixture.dashboard.input("\x1b"sv));
+    fixture.escapeTimesOut();
+    CHECK(fixture.screen().contains("ORPHANS"));
+}
+
+TEST_CASE("rows that arrive above the selection keep its heading in view", "[orchestrator][view]")
+{
+    // The worktree list answers before the pull requests: the selection first lands on an orphan, far down,
+    // and the list scrolls to it; the pull requests then arrive above and take the selection.
+    auto world = orphansWorld();
+    world.prs = { "github/prs-open.json" };
+    world.held = { "gh-prs", "gh-issues" };
+    for (auto const index: std::views::iota(0, 4))
+        world.worktrees.push_back(WorktreeEntry {
+            .path = std::format("/home/u/worktrees/contour/pr-{}", index), .branch = std::nullopt });
+    auto fixture = Fixture { world, Medium };
+    REQUIRE(!fixture.held.empty());
+    CHECK(!fixture.screen().contains("MY PULL REQUESTS"));
+    fixture.answerHeld();
+    auto const screen = fixture.screen();
+    CHECK(screen.contains("#2375"));
+    CHECK(screen.contains("MY PULL REQUESTS"));
 }
 
 TEST_CASE("scrolling back up to a section's first item shows its heading", "[orchestrator][view]")

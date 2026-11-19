@@ -2002,7 +2002,7 @@ TEST_CASE("never more than MaxInFlight commands, and runs ahead of polls", "[orc
 // }}}
 // {{{ 17. orphans
 
-TEST_CASE("orphan worktrees are listed and reported", "[orchestrator][engine]")
+TEST_CASE("orphan worktrees are listed", "[orchestrator][engine]")
 {
     auto harness = Harness { contextFor({}) };
     auto const orphanPath = worktreeOf("contour", "pr-1-20260101-000000");
@@ -2011,11 +2011,29 @@ TEST_CASE("orphan worktrees are listed and reported", "[orchestrator][engine]")
     auto const found = harness.engine().orphans("contour");
     REQUIRE(found.size() == 1);
     CHECK(found.front().path == orphanPath);
-    CHECK(mentions(harness.engine().problems(), "orphan worktree"));
     CHECK(harness.engine().mainCheckoutOf("contour") == ContourPath);
     // Listed although gh is logged out.
     harness.finish("gh-auth", failed(1, "not logged in"));
     CHECK(harness.engine().orphans("contour").size() == 1);
+}
+
+TEST_CASE("orphans are not problem lines", "[orchestrator][engine]")
+{
+    // The dashboard lists them in a section of their own; a problem line as well would show each twice.
+    auto harness = Harness { contextFor({}) };
+    auto const problemsBefore =
+        std::vector<std::string>(harness.engine().problems().begin(), harness.engine().problems().end());
+    auto const listed =
+        harness.finish("git-worktree-list",
+                       ok(worktreeList(ContourPath,
+                                       agentWorktree(worktreeOf("contour", "pr-1-20260101-000000"),
+                                                     "agent/pr-1-20260101-000000"))));
+    REQUIRE(harness.engine().orphans("contour").size() == 1);
+    // Their section is drawn from orphans(): a new one asks for a frame.
+    CHECK(countOf<Redraw>(listed) == 1);
+    CHECK(!mentions(harness.engine().problems(), "orphan"));
+    CHECK(!mentions(harness.engine().problems(), "pr-1-20260101-000000"));
+    CHECK(std::ranges::equal(harness.engine().problems(), problemsBefore));
 }
 
 // }}}

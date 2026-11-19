@@ -397,7 +397,8 @@ class Engine
     /// @return Its worktrees no run accounts for.
     [[nodiscard]] std::span<WorktreeEntry const> orphans(std::string_view repo) const noexcept;
     /// @return What the user should know: configuration, store, `gh` and list problems, incomplete-list
-    ///         notices, runs outside the current configuration, missing hooks and orphans, one line each.
+    ///         notices, runs outside the current configuration and missing hooks, one line each; not
+    ///         the orphans, which orphans() lists.
     [[nodiscard]] std::span<std::string const> problems() const noexcept { return _problems; }
     /// @param repo A repository's name.
     /// @return Its main checkout, as its worktree listing names it; std::nullopt until it was listed.

@@ -10,6 +10,8 @@
 
 #include <orchestrator/core/Sanitize.hpp>
 
+using namespace std::string_view_literals;
+
 namespace
 {
 
@@ -155,5 +157,42 @@ TEST_CASE("Sanitize", "[orchestrator][sanitize]")
             else
                 CHECK(note.error() == row.error);
         }
+    }
+}
+
+TEST_CASE("holdsInvisible", "[orchestrator][sanitize]")
+{
+    // One code point of each range of the table, spelled in UTF-8, after a visible prefix.
+    for (auto const invisible: { "\u00AD"sv,
+                                 "\u034F"sv,
+                                 "\u115F"sv,
+                                 "\u1160"sv,
+                                 "\u180E"sv,
+                                 "\u200B"sv,
+                                 "\u200C"sv,
+                                 "\u200D"sv,
+                                 "\u2060"sv,
+                                 "\u2064"sv,
+                                 "\u3164"sv,
+                                 "\uFE00"sv,
+                                 "\uFE0F"sv,
+                                 "\uFEFF"sv,
+                                 "\uFFA0"sv,
+                                 "\U000E0001"sv,
+                                 "\U000E007F"sv,
+                                 "\U000E0100"sv,
+                                 "\U000E01EF"sv })
+    {
+        auto const text = std::string { "/w/a" } + std::string { invisible };
+        CAPTURE(text);
+        CHECK(orchestrator::holdsInvisible(text));
+        // displayText() keeps them: they are part of text people write.
+        CHECK(orchestrator::displayText(text, 100) == text);
+    }
+    for (auto const visible:
+         { ""sv, "/w/it's a test"sv, "語"sv, "\u200A"sv, "\u2065"sv, "\uFE10"sv, "\xff"sv })
+    {
+        CAPTURE(visible);
+        CHECK(!orchestrator::holdsInvisible(visible));
     }
 }

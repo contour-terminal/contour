@@ -28,7 +28,13 @@ confirmed, nothing starts on its own.
 
 The orchestrator draws its own tab (`view/`, drawn with core-cpp's headless terminal UI): your open pull
 requests with their checks and review, the issues no pull request of yours closes, your agents with their
-state and age, and the Finished list, each entry marked `●` until you open it. Problems — a failing `gh`,
+state and age, and the Finished list, each entry marked `●` until you open it. While a worktree is left
+that no run accounts for — on an `agent/…` branch or under `worktree_root` — an ORPHANS section lists it
+with its branch, or `detached`. The orchestrator never removes one: Enter opens its details on the whole
+width, with the `git -C <checkout> worktree remove <path>` line to run by hand from anywhere, each path
+quoted for the shell (a path that would not show as it is, such as one holding a zero-width character, gets
+no line), and git refuses it while it holds changes.
+Problems — a failing `gh`,
 a list cut at its limit, a configuration that does not parse — sit above the lists, one line each, and
 the line at the bottom is the summary the status line shows.
 
@@ -49,7 +55,7 @@ request's title is shown as text and does nothing.
 | Key | Does |
 | --- | --- |
 | `↑` `↓` `j` `k` `Home` `End` | move the selection |
-| `Enter` | on a pull request or an issue, open the dispatch form on the first task that applies to it, or show its agent's tab if one runs; on an agent, show its tab; on a finished run, open its details (and mark it seen) |
+| `Enter` | on a pull request or an issue, open the dispatch form on the first task that applies to it, or show its agent's tab if one runs; on an agent, show its tab; on a finished run, open its details (and mark it seen); on an orphan, open its details on the whole width |
 | `d` | open the dispatch form on the selected item |
 | a task's `key` | open the dispatch form on that task |
 | `Esc` | close the help, the details page or the filter |

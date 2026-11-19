@@ -14,6 +14,7 @@
 
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/Model.hpp>
+#include <orchestrator/core/Reconcile.hpp>
 #include <orchestrator/core/Run.hpp>
 #include <orchestrator/core/Uuid.hpp>
 #include <orchestrator/view/Dashboard.hpp>
@@ -56,12 +57,19 @@ struct World
     ListAnswer issues = { "github/issues-open.json" };                    ///< What `gh-issues` prints.
     std::vector<Run> stored = {}; ///< The runs in the store; the active ones have a live tab listed.
     std::string hooks =
-        "contour/setup-hooks-present.json"; ///< What `agent-setup-check` prints, under testdata.
+        "contour/setup-hooks-present.json";    ///< What `agent-setup-check` prints, under testdata.
+    std::vector<WorktreeEntry> worktrees = {}; ///< Listed in the contour repository after its checkout.
+    std::vector<std::string> held = {}; ///< Commands left unanswered until DashboardFixture::answerHeld().
 };
 
 /// @param world What the engine is started from.
 /// @return The engine, started and with every poll command answered.
 [[nodiscard]] Engine bootEngine(World const& world);
+
+/// @param world What the engine is started from.
+/// @param held Receives the commands World::held names, unanswered.
+/// @return The engine, started and with every other poll command answered.
+[[nodiscard]] Engine bootEngine(World const& world, std::vector<RunCommand>& held);
 
 /// A run as the store would hold it.
 /// @param state Where it stands.
@@ -109,6 +117,12 @@ struct DashboardFixture
     /// Draws a frame and returns the screen as text.
     [[nodiscard]] std::string screen();
 
+    /// Answers the commands World::held kept back, and what they lead to, as the world says; then tells
+    /// the dashboard the engine changed.
+    void answerHeld();
+
+    World world;                  ///< What the engine was started from.
+    std::vector<RunCommand> held; ///< The commands not answered yet.
     Engine engine;
     core::ManualClock clock;
     CountingUuids ids;

@@ -36,6 +36,7 @@ enum class RowKind : uint8_t
     Issue,       ///< An open issue no pull request of the user's claims.
     Agent,       ///< A run that has not finished.
     Finished,    ///< An entry of the Finished list.
+    Orphan,      ///< A worktree no run accounts for; read-only.
 };
 
 /// What opening a row's details tells the engine.
@@ -45,12 +46,21 @@ enum class OpenEffect : uint8_t
     MarkSeen, ///< The finished run was opened: it is no longer new.
 };
 
+/// How a detail's value too wide for the panel is drawn.
+enum class DetailFit : uint8_t
+{
+    Wrap, ///< Word-wrapped over as many lines as it takes.
+    Cut,  ///< On one line, cut with a `…`: a path or a command line, which a wrap would break where a space
+          ///< is, so that a copy of it is no longer what it says.
+};
+
 /// One line of a row's details: a label and its value.
 struct DetailLine
 {
-    std::string label = {}; ///< Such as `branch`; empty: the value stands alone.
-    std::string value = {}; ///< Sanitised; cut to the panel when drawn.
-    Role role = Role::Text; ///< How the value is drawn.
+    std::string label = {};          ///< Such as `branch`; empty: the value stands alone.
+    std::string value = {};          ///< Sanitised; fitted to the panel when drawn.
+    Role role = Role::Text;          ///< How the value is drawn.
+    DetailFit fit = DetailFit::Wrap; ///< How it is fitted to the panel.
     [[nodiscard]] bool operator==(DetailLine const&) const = default;
 };
 
@@ -65,7 +75,7 @@ struct Row
     std::string status = {};              ///< Right-aligned after the text, such as `approved`; may be empty.
     Role statusRole = Role::Dim;          ///< How the status is drawn.
     std::string run = {};                 ///< The run it stands for; empty for a pull request or an issue.
-    std::string repo = {};                ///< The repository of the item it stands for; empty for a run.
+    std::string repo = {};                ///< The repository of its item or orphan; empty for a run.
     std::optional<ItemRef> item = {};     ///< The pull request or issue it stands for; absent for a run.
     std::vector<KeyCommand> offers = {};  ///< The run commands it accepts: EndRun, RetryRemoval, Dismiss.
     OpenEffect onOpen = OpenEffect::None; ///< What opening its details tells the engine.

@@ -23,11 +23,13 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Config.hpp>
 #include <orchestrator/core/Finished.hpp>
 #include <orchestrator/core/Model.hpp>
 #include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Overloaded.hpp>
+#include <orchestrator/core/Reconcile.hpp>
 #include <orchestrator/core/Run.hpp>
 #include <orchestrator/core/Sanitize.hpp>
 #include <orchestrator/core/Utf8.hpp>
@@ -419,6 +421,69 @@ namespace
                      .details = std::move(details) };
     }
 
+    /// @return Whether @p text is drawn as it is, so that what the user copies is @p text: sanitising it
+    ///         changes nothing, and it holds nothing that draws as nothing.
+    [[nodiscard]] bool showsAsItIs(std::string_view text)
+    {
+        // As many characters as it has bytes, so that nothing is cut.
+        return displayText(text, text.size() + 1) == text && !holdsInvisible(text);
+    }
+
+    /// @return The line that removes @p orphan by hand, run from anywhere: `git -C <checkout> worktree remove
+    ///         <path>`, each argument one shell word; without `-C` while the checkout is not known; and
+    ///         std::nullopt when either path does not show as it is, since what is drawn could then name
+    ///         another directory -- a live run's worktree, say.
+    [[nodiscard]] std::optional<std::string> removalCommand(std::optional<std::string_view> checkout,
+                                                            WorktreeEntry const& orphan)
+    {
+        if (!showsAsItIs(orphan.path) || (checkout && !showsAsItIs(*checkout)))
+            return std::nullopt;
+        auto argv = std::vector<std::string> { "git" };
+        if (checkout)
+            argv.insert(argv.end(), { "-C", std::string { *checkout } });
+        argv.insert(argv.end(), { "worktree", "remove", orphan.path });
+        // Not clean(): both paths were checked, and its cut would lose the end of a long one.
+        return shellQuoted(argv);
+    }
+
+    /// A worktree no run accounts for. Nothing here removes it: the details say how to, by hand, with the
+    /// same safety git gives anyone (it refuses a worktree with changes).
+    [[nodiscard]] Row orphanRow(Lists const& lists, std::string_view repo, WorktreeEntry const& orphan)
+    {
+        auto const isDetached = !orphan.branch;
+        auto const branch = isDetached ? std::string { "detached" } : clean(*orphan.branch);
+        // The path is the title; what to do about it comes first, so that a short panel still shows it.
+        auto details = std::vector<DetailLine> {
+            DetailLine { .label = "",
+                         .value = "no run accounts for this worktree; it is left as it is",
+                         .role = Role::Warning },
+            DetailLine { .label = "branch", .value = branch, .fit = DetailFit::Cut },
+        };
+        if (auto command = removalCommand(lists.engine->mainCheckoutOf(repo), orphan))
+            details.push_back(
+                DetailLine { .label = "by hand", .value = std::move(*command), .fit = DetailFit::Cut });
+        else
+            details.push_back(DetailLine { .label = "by hand",
+                                           .value = "its path holds characters that cannot be shown; "
+                                                    "git worktree list names it",
+                                           .role = Role::Warning });
+        details.push_back(
+            isDetached ? DetailLine { .label = "",
+                                      .value = "its HEAD is detached: commits no branch holds are lost "
+                                               "with it",
+                                      .role = Role::Warning }
+                       : DetailLine { .label = "",
+                                      .value = "git refuses while it holds changes; its branch stays",
+                                      .role = Role::Dim });
+        return Row { .kind = RowKind::Orphan,
+                     .prefix = prefixOf(lists, repo),
+                     .text = clean(orphan.path),
+                     .status = branch,
+                     .repo = std::string { repo },
+                     .title = clean(orphan.path),
+                     .details = std::move(details) };
+    }
+
     // }}}
 
     /// Appends a section: a spacer before all but the first, its heading, and its items or its placeholder.
@@ -535,6 +600,14 @@ std::vector<Row> buildRows(Engine const& engine, uint64_t nowMonoMs)
     appendSection(rows, "MY PULL REQUESTS", "no open pull requests", std::move(pullRequests));
     appendSection(rows, "ISSUES WITHOUT A PR", "no issues without a pull request", std::move(issues));
     appendRunSections(rows, engine, lists);
+
+    // Only while there is one: an orphan is the exception, and an empty section would say nothing.
+    auto orphans = std::vector<Row> {};
+    for (auto const& repo: repos)
+        for (auto const& orphan: engine.orphans(repo))
+            orphans.push_back(orphanRow(lists, repo, orphan));
+    if (!orphans.empty())
+        appendSection(rows, "ORPHANS", {}, std::move(orphans));
     return rows;
 }
 

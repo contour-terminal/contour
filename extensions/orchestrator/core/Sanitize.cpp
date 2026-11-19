@@ -46,6 +46,29 @@ namespace
         CodepointClass { .first = 0x2066, .last = 0x2069, .disposition = Disposition::Drop },  // LRI…PDI
     };
 
+    /// A range of code points, both ends included.
+    struct CodepointRange
+    {
+        char32_t first;
+        char32_t last;
+    };
+
+    /// The code points that draw as nothing, which holdsInvisible() looks for.
+    constexpr auto InvisibleCodepoints = std::array {
+        CodepointRange { .first = 0x00AD, .last = 0x00AD },   // soft hyphen
+        CodepointRange { .first = 0x034F, .last = 0x034F },   // combining grapheme joiner
+        CodepointRange { .first = 0x115F, .last = 0x1160 },   // Hangul choseong and jungseong fillers
+        CodepointRange { .first = 0x180E, .last = 0x180E },   // Mongolian vowel separator
+        CodepointRange { .first = 0x200B, .last = 0x200D },   // zero-width space, non-joiner, joiner
+        CodepointRange { .first = 0x2060, .last = 0x2064 },   // word joiner, invisible operators
+        CodepointRange { .first = 0x3164, .last = 0x3164 },   // Hangul filler
+        CodepointRange { .first = 0xFE00, .last = 0xFE0F },   // variation selectors
+        CodepointRange { .first = 0xFEFF, .last = 0xFEFF },   // zero-width no-break space, BOM
+        CodepointRange { .first = 0xFFA0, .last = 0xFFA0 },   // halfwidth Hangul filler
+        CodepointRange { .first = 0xE0000, .last = 0xE007F }, // tags
+        CodepointRange { .first = 0xE0100, .last = 0xE01EF }, // variation selectors supplement
+    };
+
     /// The character that marks a cut.
     constexpr auto Ellipsis = U'…';
 
@@ -122,6 +145,16 @@ namespace
         return count;
     }
 } // namespace
+
+bool holdsInvisible(std::string_view text) noexcept
+{
+    for (auto const decoded: Codepoints { text })
+        // A loop rather than std::ranges::any_of, for the reason dispositionOf() gives.
+        for (auto const& range: InvisibleCodepoints)
+            if (range.first <= decoded.codepoint && decoded.codepoint <= range.last)
+                return true;
+    return false;
+}
 
 std::string displayText(std::string_view input, std::size_t maxChars)
 {

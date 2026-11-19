@@ -2,12 +2,16 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <format>
 #include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
+#include <orchestrator/core/Commands.hpp>
+#include <orchestrator/core/Reconcile.hpp>
 #include <orchestrator/view/Sections.hpp>
 #include <orchestrator/view/ViewFixtures.hpp>
 
@@ -278,4 +282,183 @@ TEST_CASE("wrap: words fill each line; a word wider than a line is broken", "[or
     for (auto const& line: wrap("語語語語語", 5, 3))
         CHECK(columnsOf(line) <= 5);
     CHECK(wrap("語語語語語", 5, 3) == std::vector<std::string> { "語語", "語", "語", "語" });
+}
+
+namespace
+{
+
+/// An orphan on a branch, its path holding a space and a `'`.
+constexpr auto QuotedOrphan = "/home/u/worktrees/contour/it's a test"sv;
+/// An orphan on a detached HEAD.
+constexpr auto DetachedOrphan = "/home/u/worktrees/contour/pr-2-20260101-000000"sv;
+/// An orphan whose path holds an escape sequence; it would show as another path.
+constexpr auto ControlOrphan = "/home/u/worktrees/contour/pr-3\x1b[31m"sv;
+
+[[nodiscard]] World orphansWorld()
+{
+    return World { .worktrees = {
+                       WorktreeEntry { .path = std::string { QuotedOrphan },
+                                       .branch = "agent/pr-1-20260101-000000" },
+                       WorktreeEntry { .path = std::string { DetachedOrphan }, .branch = std::nullopt },
+                       WorktreeEntry { .path = std::string { ControlOrphan },
+                                       .branch = "agent/pr-3-20260101-000000" },
+                   } };
+}
+
+[[nodiscard]] Row const* rowOfOrphan(std::vector<Row> const& rows, std::string_view path)
+{
+    auto const found = std::ranges::find_if(
+        rows, [path](Row const& row) { return row.kind == RowKind::Orphan && row.title == path; });
+    return found != rows.end() ? &*found : nullptr;
+}
+
+[[nodiscard]] DetailLine const* removeCommandOf(Row const& row)
+{
+    auto const found = std::ranges::find_if(
+        row.details, [](DetailLine const& line) { return line.value.starts_with("git -C "); });
+    return found != row.details.end() ? &*found : nullptr;
+}
+
+/// The words a POSIX shell reads from @p line: blanks separate them, single quotes keep everything up to the
+/// next one, a backslash outside them keeps the character after it.
+[[nodiscard]] std::vector<std::string> shellWords(std::string_view line)
+{
+    auto words = std::vector<std::string> {};
+    auto word = std::optional<std::string> {};
+    auto quoted = false;
+    auto escaped = false;
+    for (auto const c: line)
+    {
+        if (escaped)
+        {
+            word = word.value_or("") + c;
+            escaped = false;
+        }
+        else if (quoted)
+        {
+            if (c == '\'')
+                quoted = false;
+            else
+                *word += c;
+        }
+        else if (c == '\'')
+        {
+            quoted = true;
+            word = word.value_or("");
+        }
+        else if (c == '\\')
+            escaped = true;
+        else if (c == ' ')
+        {
+            if (word)
+                words.push_back(*std::exchange(word, std::nullopt));
+        }
+        else
+            word = word.value_or("") + c;
+    }
+    if (word)
+        words.push_back(*word);
+    return words;
+}
+
+} // namespace
+
+TEST_CASE("orphans have their own section", "[orchestrator][view]")
+{
+    auto const engine = bootEngine(orphansWorld());
+    REQUIRE(engine.orphans("contour").size() == 3);
+    auto const rows = buildRows(engine, StartMonoMs);
+    CHECK(textsOf(rows, RowKind::Heading).back() == "ORPHANS");
+    CHECK(rows.back().kind == RowKind::Orphan);
+    CHECK(std::ranges::count(rows, RowKind::Orphan, &Row::kind) == 3);
+
+    auto const* const quoted = rowOfOrphan(rows, QuotedOrphan);
+    REQUIRE(quoted != nullptr);
+    CHECK(quoted->text == QuotedOrphan);
+    CHECK(quoted->status == "agent/pr-1-20260101-000000");
+    CHECK(quoted->isSelectable());
+    // Read-only: no key acts on it; Enter and Tab show its details.
+    CHECK(quoted->offers.empty());
+    CHECK(quoted->onOpen == OpenEffect::None);
+    CHECK(quoted->run.empty());
+    CHECK(!quoted->item);
+
+    // The command that removes it by hand pastes as one word per argument, whatever the path holds.
+    // One line that works from any directory: git is told the checkout.
+    auto const* const command = removeCommandOf(*quoted);
+    REQUIRE(command != nullptr);
+    CHECK(command->value
+          == R"(git -C /home/u/projects/contour worktree remove '/home/u/worktrees/contour/it'\''s a test')");
+    auto const argv = std::vector<std::string> { "git",      "-C",     std::string { ContourPath },
+                                                 "worktree", "remove", std::string { QuotedOrphan } };
+    CHECK(command->value == shellQuoted(argv));
+    CHECK(shellWords(command->value) == argv);
+    // An untrusted path is cut to its cells, never wrapped.
+    CHECK(command->fit == DetailFit::Cut);
+    CHECK(command->label == "by hand");
+
+    auto const* const detached = rowOfOrphan(rows, DetachedOrphan);
+    REQUIRE(detached != nullptr);
+    CHECK(detached->status == "detached");
+    REQUIRE(removeCommandOf(*detached) != nullptr);
+    CHECK(removeCommandOf(*detached)->value
+          == std::format("git -C {} worktree remove {}", ContourPath, DetachedOrphan));
+    // Its commits are on no branch: removing it loses them, and the details say so.
+    CHECK(std::ranges::any_of(detached->details, [](DetailLine const& line) {
+        return line.role == Role::Warning && line.value.contains("detached");
+    }));
+}
+
+TEST_CASE("an orphan whose path cannot be shown as it is offers no command", "[orchestrator][view]")
+{
+    // Sanitised, the path reads as another one; a command built from it could name another worktree.
+    auto const engine = bootEngine(orphansWorld());
+    auto const rows = buildRows(engine, StartMonoMs);
+    auto const found = std::ranges::find_if(rows, [](Row const& row) {
+        return row.kind == RowKind::Orphan && row.status == "agent/pr-3-20260101-000000";
+    });
+    REQUIRE(found != rows.end());
+    CHECK(found->text == "/home/u/worktrees/contour/pr-3[31m");
+    CHECK(removeCommandOf(*found) == nullptr);
+    CHECK(std::ranges::any_of(found->details, [](DetailLine const& line) {
+        return line.role == Role::Warning && line.value.contains("git worktree list");
+    }));
+    for (auto const& line: found->details)
+        CHECK(!line.value.contains('\x1b'));
+}
+
+TEST_CASE("no orphan, no section", "[orchestrator][view]")
+{
+    auto const engine = bootEngine({});
+    REQUIRE(engine.orphans("contour").empty());
+    auto const rows = buildRows(engine, StartMonoMs);
+    CHECK(!std::ranges::contains(textsOf(rows, RowKind::Heading), "ORPHANS"));
+    CHECK(std::ranges::none_of(rows, [](Row const& row) { return row.kind == RowKind::Orphan; }));
+}
+
+TEST_CASE("an orphan whose path holds a character that draws as nothing offers no command",
+          "[orchestrator][view]")
+{
+    // `pr-4` and `pr-4` with a zero-width space look the same; the command would name the other one.
+    auto const path = std::string { "/home/u/worktrees/contour/pr-4\u200B" };
+    auto const engine = bootEngine(
+        World { .worktrees = { WorktreeEntry { .path = path, .branch = "agent/pr-4-20260101-000000" } } });
+    auto const rows = buildRows(engine, StartMonoMs);
+    auto const* const row = rowOfOrphan(rows, path);
+    REQUIRE(row != nullptr);
+    CHECK(removeCommandOf(*row) == nullptr);
+}
+
+TEST_CASE("a long orphan path keeps its whole command", "[orchestrator][view]")
+{
+    // The panel cuts it when drawn; the row itself holds every byte, so a wider panel shows more.
+    auto const path = std::format("/home/u/worktrees/contour/{}", std::string(600, 'x'));
+    auto const engine =
+        bootEngine(World { .worktrees = { WorktreeEntry { .path = path, .branch = std::nullopt } } });
+    auto const rows = buildRows(engine, StartMonoMs);
+    auto const found = std::ranges::find_if(rows, [](Row const& row) { return row.kind == RowKind::Orphan; });
+    REQUIRE(found != rows.end());
+    auto const* const command = removeCommandOf(*found);
+    REQUIRE(command != nullptr);
+    CHECK(command->value == std::format("git -C {} worktree remove {}", ContourPath, path));
 }

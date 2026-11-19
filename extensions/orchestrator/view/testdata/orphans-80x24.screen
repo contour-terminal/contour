@@ -1,0 +1,24 @@
+╭─ Agents ─────────────────────────────────────────────────────────────────────╮
+│   #2163 OSC 133: optional nonce to reject forged command lines and marks     │
+│   #2162 OSC 9;9 (ConEmu cwd) pops a "ConEmu" notification instead of settin… │
+│                                                                              │
+│ AGENTS · 0 OF 4 RUNNING                                                      │
+│ no agents                                                                    │
+│                                                                              │
+│ FINISHED · 0 NEW                                                             │
+│ nothing finished                                                             │
+│                                                                              │
+│ ORPHANS                                                                      │
+│   /home/u/worktrees/contour/pr-2-20260101-000000                    detached │
+│   /home/u/worktrees/contour/it's a test           agent/pr-1-20260101-000000 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Details ────────────────────────────────────────────────────────────────────╮
+│ /home/u/worktrees/contour/it's a test                                        │
+│                                                                              │
+│           no run accounts for this worktree; it is left as it is             │
+│ branch    agent/pr-1-20260101-000000                                         │
+│ by hand   git -C /home/u/projects/contour worktree remove '/home/u/worktree… │
+│           git refuses while it holds changes; its branch stays               │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ↑↓ move · enter open · d dispatch · ? help · / filter · R refresh · e end run  
+ ⬢ agents 0/4                                                                   

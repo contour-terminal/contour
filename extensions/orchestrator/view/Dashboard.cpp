@@ -90,16 +90,17 @@ namespace
         Selected,   ///< Drawn in the selection's.
     };
 
-    /// Where a panel of a band that cannot show the list and the details at once is shown.
+    /// Which pane a panel is shown in.
     enum class PanelRole : uint8_t
     {
-        List,         ///< The list.
-        DetailsBelow, ///< The details below the list (Medium).
-        DetailsPage,  ///< The details in the list's place.
+        List,           ///< The list.
+        DetailsBelow,   ///< The details below the list (Medium).
+        DetailsPage,    ///< The details in the list's place, the whole width.
+        ListAndDetails, ///< The list and the details side by side (Wide).
     };
 
     /// The pane each role is shown in, indexed by PanelRole.
-    constexpr auto ShownInPane = std::array { Pane::List, Pane::List, Pane::Details };
+    constexpr auto ShownInPane = std::array { Pane::List, Pane::List, Pane::Details, Pane::List };
 } // namespace
 
 // {{{ the state
@@ -330,13 +331,15 @@ namespace
         int indent = 0;              ///< The cells it starts past the value column.
     };
 
-    /// @return The details word-wrapped to @p columns cells, continuation lines indented.
+    /// @return The details fitted to @p columns cells: word-wrapped, continuation lines indented, or cut.
     [[nodiscard]] std::vector<DetailText> detailLinesOf(std::span<DetailLine const> details, int columns)
     {
         auto lines = std::vector<DetailText> {};
         for (auto const& detail: details)
         {
-            auto wrapped = wrap(detail.value, columns, columns - ContinuationIndent);
+            auto wrapped = detail.fit == DetailFit::Cut
+                               ? std::vector<std::string> { cut(detail.value, columns) }
+                               : wrap(detail.value, columns, columns - ContinuationIndent);
             if (wrapped.empty())
                 wrapped.emplace_back();
             for (auto const index: std::views::iota(std::size_t { 0 }, wrapped.size()))
@@ -563,7 +566,8 @@ std::unique_ptr<Component> Dashboard::State::buildLayout(std::size_t breakpoint)
                 std::make_unique<FlexBox>(layout::Style { .direction = layout::Direction::Row, .gap = 1 });
             body->add(std::make_unique<ListPanel>(*this), layout::Style { .grow = 3, .basis = 0 });
             body->add(std::make_unique<DetailsPanel>(*this), layout::Style { .grow = 2, .basis = 0 });
-            column->add(std::move(body), filling);
+            toggle(PanelRole::ListAndDetails, column->add(std::move(body), filling));
+            toggle(PanelRole::DetailsPage, column->add(std::make_unique<DetailsPanel>(*this), filling));
             break;
         }
         case Band::Medium: {

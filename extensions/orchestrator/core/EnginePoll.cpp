@@ -149,9 +149,17 @@ uint32_t Engine::failingChangeRequests() const noexcept
 void Engine::refreshOrphans()
 {
     for (auto& repo: _repos)
-        repo.orphans = repo.worktrees.empty() || !_config
-                           ? std::vector<WorktreeEntry> {}
-                           : orchestrator::orphans(_runs, _config->worktreeRoot(), repo.worktrees);
+    {
+        auto found = repo.worktrees.empty() || !_config
+                         ? std::vector<WorktreeEntry> {}
+                         : orchestrator::orphans(_runs, _config->worktreeRoot(), repo.worktrees);
+        // The dashboard lists them: a change is drawn.
+        if (found != repo.orphans)
+        {
+            repo.orphans = std::move(found);
+            ++_revision;
+        }
+    }
 }
 
 // }}}

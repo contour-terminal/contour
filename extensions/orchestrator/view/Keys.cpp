@@ -168,7 +168,7 @@ namespace
                 return std::nullopt;
             } },
         // Enter acts on what the row stands for: an agent is revealed, an item dispatched on (or its agent
-        // revealed), a finished run's details opened. Tab shows any row's details.
+        // revealed), a finished run's or an orphan's details opened. Tab shows any row's details.
         CommandRow {
             .command = KeyCommand::Enter,
             .handler = [](Interaction& interaction, KeyContext const& context) -> std::optional<UiAction> {
@@ -188,7 +188,8 @@ namespace
                         return std::nullopt;
                     default: break;
                 }
-                if (context.band != Band::Wide)
+                // An orphan's details hold a command line, which wants the whole width.
+                if (context.band != Band::Wide || row->kind == RowKind::Orphan)
                     interaction.pane = Pane::Details;
                 if (row->onOpen == OpenEffect::MarkSeen)
                     return UiAction { MarkSeenAction { .run = row->run } };

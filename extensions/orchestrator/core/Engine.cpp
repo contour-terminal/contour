@@ -753,10 +753,7 @@ void Engine::rebuildProblems()
         problems.insert(problems.end(), lines.begin(), lines.end());
     if (_hooks == HooksState::Missing)
         problems.emplace_back(HooksMissingProblem);
-    for (auto const& repo: _repos)
-        for (auto const& orphan: repo.orphans)
-            problems.push_back(displayText(
-                std::format("{}: orphan worktree {}", repo.name, orphanText(orphan)), MaxSummaryLineChars));
+    // Orphans are not problems: the dashboard lists them in a section of their own.
     if (problems != _problems)
     {
         _problems = std::move(problems);

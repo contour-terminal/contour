@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <deque>
 #include <format>
@@ -60,12 +61,27 @@ namespace
         return outcome;
     }
 
+    /// @return What `git worktree list --porcelain -z` prints for the repository checked out at @p checkout.
+    [[nodiscard]] std::string worktreeListing(World const& world, std::string_view checkout)
+    {
+        auto listing = std::format("worktree {}\0HEAD {}\0branch refs/heads/master\0\0"sv, checkout, Sha);
+        if (checkout != ContourPath)
+            return listing;
+        for (auto const& entry: world.worktrees)
+            listing +=
+                entry.branch
+                    ? std::format(
+                          "worktree {}\0HEAD {}\0branch refs/heads/{}\0\0"sv, entry.path, Sha, *entry.branch)
+                    : std::format("worktree {}\0HEAD {}\0detached\0\0"sv, entry.path, Sha);
+        return listing;
+    }
+
     [[nodiscard]] ProcessOutcome answerFor(World const& world, RunCommand const& command)
     {
         if (command.command == "agent-setup-check")
             return ok(readFixture(FixtureRoot::Testdata, world.hooks));
         if (command.command == "git-worktree-list")
-            return ok(std::format("worktree {}\0HEAD {}\0branch refs/heads/master\0\0"sv, command.cwd, Sha));
+            return ok(worktreeListing(world, command.cwd));
         if (command.command == "gh-default-branch")
             return ok(readFixture(FixtureRoot::Testdata, "github/default-branch.json"));
         if (command.command == "gh-prs")
@@ -81,14 +97,47 @@ namespace
             if (auto const* const command = std::get_if<RunCommand>(&effect))
                 queue.push_back(*command);
     }
+
+    /// Answers @p queue and every command the answers lead to, as @p world says; a command World::held names
+    /// goes to @p held instead, unless that is nullptr.
+    void answerAll(Engine& engine,
+                   World const& world,
+                   std::deque<RunCommand>& queue,
+                   std::vector<RunCommand>* held)
+    {
+        while (!queue.empty())
+        {
+            auto command = std::move(queue.front());
+            queue.pop_front();
+            if (held != nullptr && std::ranges::contains(world.held, command.command))
+            {
+                held->push_back(std::move(command));
+                continue;
+            }
+            auto outcome = answerFor(world, command);
+            queueCommands(engine.step(ProcessFinished { .tag = std::move(command.tag),
+                                                        .outcome = std::move(outcome),
+                                                        .monoMs = StartMonoMs }),
+                          queue);
+        }
+    }
 } // namespace
 
 DashboardFixture::DashboardFixture(World const& world, core::tui::Size size):
-    engine { bootEngine(world) },
+    world { world },
+    engine { bootEngine(world, held) },
     // Six minutes after the engine started, as the guest's clock would read it.
     clock { core::SteadyTimePoint { std::chrono::milliseconds { StartMonoMs + uint64_t { 360'000 } } } },
     dashboard { engine, dashboardTheme(), clock, size, ids, std::string { Tab } }
 {
+}
+
+void DashboardFixture::answerHeld()
+{
+    auto queue = std::deque<RunCommand> { held.begin(), held.end() };
+    held.clear();
+    answerAll(engine, world, queue, nullptr);
+    dashboard.engineChanged();
 }
 
 void DashboardFixture::escapeTimesOut()
@@ -112,6 +161,12 @@ Run outsideConfiguration(Run run)
 }
 
 Engine bootEngine(World const& world)
+{
+    auto held = std::vector<RunCommand> {};
+    return bootEngine(world, held);
+}
+
+Engine bootEngine(World const& world, std::vector<RunCommand>& held)
 {
     auto context = StartContext { .monoMs = StartMonoMs,
                                   .wallMs = DispatchWallMs,
@@ -138,16 +193,7 @@ Engine bootEngine(World const& world)
     auto engine = std::move(started.engine);
     auto queue = std::deque<RunCommand> {};
     queueCommands(started.effects, queue);
-    while (!queue.empty())
-    {
-        auto command = std::move(queue.front());
-        queue.pop_front();
-        auto outcome = answerFor(world, command);
-        queueCommands(engine.step(ProcessFinished { .tag = std::move(command.tag),
-                                                    .outcome = std::move(outcome),
-                                                    .monoMs = StartMonoMs }),
-                      queue);
-    }
+    answerAll(engine, world, queue, &held);
     return engine;
 }
 
