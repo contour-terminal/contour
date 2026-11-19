@@ -253,6 +253,7 @@ namespace
             row.title = "Terminal";
         row.selection = selection;
         row.tabColor = tab.color;
+        row.workspaceColor = workspace.color;
         adopt(row, mostUrgent(leaves));
         row.leaves = countsOf(leaves);
 
@@ -272,6 +273,7 @@ namespace
                 paneRow.depth = 2;
                 paneRow.position = panePosition;
                 paneRow.tabColor = tab.color;
+                paneRow.workspaceColor = workspace.color;
                 auto const& named = !pane.title.empty() ? pane.title : pane.cwd;
                 paneRow.title = rowTextOf(named);
                 if (paneRow.title.empty())
@@ -399,6 +401,7 @@ SidebarListing sidebarListing(WorkspaceDirectory const& directory,
         row.title = rowTextOf(workspaceTitleOf(workspace, static_cast<std::size_t>(position)));
         if (workspace.git)
             row.gitText = gitTextOf(*workspace.git);
+        row.workspaceColor = workspace.color;
         auto const best = mostUrgent(leaves);
         row.urgency = best.urgency;
         row.glyph = best.glyph;

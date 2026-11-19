@@ -60,6 +60,9 @@ class Workspace
     [[nodiscard]] int indexOf(TabId tab) const noexcept;
     [[nodiscard]] int indexOf(Tab const* tab) const noexcept;
 
+    /// @return The colour the user gave this workspace, or none for the host's default.
+    [[nodiscard]] std::optional<vtbackend::RGBColor> color() const noexcept { return _color; }
+
   private:
     friend class SessionModel;
 
@@ -76,6 +79,8 @@ class Workspace
     /// a genuine activation (createTab/activateTab), and translated/invalidated (never left dangling) by
     /// the reindexing operations (moveTab/closeTabAt).
     int _previousActiveTabIndex = -1;
+    /// The colour the user gave the workspace; none means the host's default. Set by SessionModel only.
+    std::optional<vtbackend::RGBColor> _color;
 };
 
 /// The session id a host restoring @p tree mints first, so that no new session is named as a restored one.
@@ -145,6 +150,17 @@ class SessionModel
     /// @param workspace The workspace to move.
     /// @param toIndex   Its new 0-based position.
     void moveWorkspace(WorkspaceId workspace, int toIndex);
+
+    /// Gives @p workspace the colour @p color and announces workspaceColorChanged. An unknown workspace, or
+    /// the colour it already has, changes nothing and announces nothing.
+    /// @param workspace The workspace to colour.
+    /// @param color     Its new colour.
+    void setWorkspaceColor(WorkspaceId workspace, vtbackend::RGBColor color);
+
+    /// Takes @p workspace's colour away and announces workspaceColorChanged. An unknown workspace, or one
+    /// without a colour, changes nothing and announces nothing.
+    /// @param workspace The workspace whose colour to reset.
+    void resetWorkspaceColor(WorkspaceId workspace);
 
     /// Removes a workspace and everything in it. Each contained session is reported closed.
     void removeWorkspace(WorkspaceId workspace);

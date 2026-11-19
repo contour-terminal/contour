@@ -192,10 +192,11 @@ namespace
                     }
                     return std::string {};
                 },
-                [](SetTabColor const& a) {
-                    // A colorless SetTabColor opens the picker, so it has no argument to write. The color
-                    // needs no hand-quoting: std::formatter<RGBColor> already renders it as '#RRGGBB', and
-                    // unquoted a leading '#' would start a YAML COMMENT and swallow the rest of the line.
+                [](ColorActionConcept auto const& a) {
+                    // A colorless SetTabColor/SetWorkspaceColor opens the picker, so it has no argument to
+                    // write. The color needs no hand-quoting: std::formatter<RGBColor> already renders it as
+                    // '#RRGGBB', and unquoted a leading '#' would start a YAML COMMENT and swallow the rest
+                    // of the line.
                     return a.color ? std::format(", color: {}", *a.color) : std::string {};
                 },
                 [](auto const&) { return std::string {}; },
@@ -457,6 +458,10 @@ span<ActionCatalogEntry const> actionCatalog()
         ActionCatalogEntry {
             "MoveWorkspaceDown", Action { MoveWorkspaceDown {} }, documentation::MoveWorkspaceDown },
         ActionCatalogEntry { "CloseWorkspace", Action { CloseWorkspace {} }, documentation::CloseWorkspace },
+        ActionCatalogEntry {
+            "SetWorkspaceColor", Action { SetWorkspaceColor {} }, documentation::SetWorkspaceColor },
+        ActionCatalogEntry {
+            "ResetWorkspaceColor", Action { ResetWorkspaceColor {} }, documentation::ResetWorkspaceColor },
         ActionCatalogEntry { "GoToPane", Action { GoToPane {} }, documentation::GoToPane },
         ActionCatalogEntry {
             "MoveTabToWorkspace", Action { MoveTabToWorkspace {} }, documentation::MoveTabToWorkspace },

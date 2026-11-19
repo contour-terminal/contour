@@ -910,3 +910,44 @@ TEST_CASE("a workspace row carries no tab colour", "[sidebar]")
     CHECK(folded[0].key.kind == SidebarRowKind::Workspace);
     CHECK_FALSE(folded[0].tabColor.has_value());
 }
+
+TEST_CASE("every row of a coloured workspace carries its colour", "[sidebar]")
+{
+    auto constexpr Magenta = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    auto coloured = workspaceOf(
+        1, "w", { tabOf(1, "t", { paneOf(1, "a"), paneOf(2, "b") }), tabOf(2, "u", { paneOf(3) }) });
+    coloured.color = Magenta;
+    auto const rows = rowsOf(directoryOf({ std::move(coloured) }));
+    REQUIRE(rows.size() == 5);
+    CHECK(rows[0].key.kind == SidebarRowKind::Workspace);
+    CHECK(rows[1].key.kind == SidebarRowKind::Tab);
+    CHECK(rows[2].key.kind == SidebarRowKind::Pane);
+    CHECK(rows[3].key.kind == SidebarRowKind::Pane);
+    CHECK(rows[4].key.kind == SidebarRowKind::Tab);
+    for (auto const& row: rows)
+        CHECK(row.workspaceColor == Magenta);
+}
+
+TEST_CASE("a folded coloured workspace keeps its colour", "[sidebar]")
+{
+    auto coloured = workspaceOf(1, "w", { tabOf(1, "t", { paneOf(1) }) });
+    coloured.color = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    auto const folded =
+        rowsOf(directoryOf({ std::move(coloured) }), SidebarState { .collapsedWorkspaces = { 1 } });
+    REQUIRE(folded.size() == 1);
+    CHECK(folded[0].key.kind == SidebarRowKind::Workspace);
+    CHECK(folded[0].workspaceColor == vtbackend::RGBColor { 0xC2, 0x54, 0x8F });
+}
+
+TEST_CASE("an uncoloured workspace's rows carry none", "[sidebar]")
+{
+    auto coloured = workspaceOf(1, "w", { tabOf(1, "t", { paneOf(1) }) });
+    coloured.color = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    auto const rows = rowsOf(
+        directoryOf({ std::move(coloured),
+                      workspaceOf(2, "plain", { tabOf(2, "u", { paneOf(2, "a"), paneOf(3, "b") }) }) }));
+    REQUIRE(rows.size() == 6);
+    CHECK(rows[2].key.workspace == 2);
+    for (auto const& row: rows | std::views::drop(2))
+        CHECK_FALSE(row.workspaceColor.has_value());
+}

@@ -164,6 +164,8 @@ struct RenameWorkspace;
 struct MoveWorkspaceUp;
 struct MoveWorkspaceDown;
 struct CloseWorkspace;
+struct SetWorkspaceColor;
+struct ResetWorkspaceColor;
 struct GoToPane;
 struct MoveTabToWorkspace;
 struct MoveToTab;

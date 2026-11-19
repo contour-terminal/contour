@@ -4,9 +4,11 @@
 // the user last chose), what it declares as horizontal chrome, and what a change writes back to the GUI
 // state.
 
+#include <contour/config/Actions.hpp>
 #include <contour/config/GuiStateStore.hpp>
 #include <contour/config/TabBarMode.hpp>
 #include <contour/geometry/SidebarGeometry.hpp>
+#include <contour/session/TerminalSession.hpp>
 #include <contour/test/AppFixture.hpp>
 #include <contour/test/CoreFixtures.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
@@ -850,6 +852,44 @@ TEST_CASE("a one-tab workspace's menu merges its tab into another tab", "[contou
     CHECK(model.findTab(lone.tabs[0]) == nullptr);
     CHECK(window->ownedWorkspaces().size() == 1);
     CHECK(window->displayedWorkspace() == firstWorkspace);
+}
+
+TEST_CASE("SetWorkspaceColor colours the displayed workspace's rows, ResetWorkspaceColor clears them",
+          "[contour][sidebar][controller]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto const window =
+        contour::test::ScopedController { manager, contour::config::MenuPresentation::InScene };
+    std::ignore = contour::test::createSessionTabs(manager, *window, 1);
+    auto const shown = window->displayedWorkspace();
+    auto const other = manager.createWorkspaceIn(window->windowId());
+    manager.selectWorkspace(window->windowId(), 1);
+    std::ignore = contour::test::createSessionTabs(manager, *window, 1);
+    manager.selectWorkspace(window->windowId(), 0);
+    REQUIRE(window->displayedWorkspace() == shown);
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+
+    auto const shownRow = workspaceRowOf(*window, shown.value);
+    auto const otherRow = workspaceRowOf(*window, other.value);
+    auto const colorOfRow = [&](int row) {
+        return window->sidebar()
+            .index(row)
+            .data(contour::window::SidebarModel::WorkspaceColorRole)
+            .value<QColor>();
+    };
+    REQUIRE(colorOfRow(shownRow).alpha() == 0);
+
+    // Only the action runs; the window's own notifications must bring the rows up to date.
+    CHECK((*session)(contour::actions::SetWorkspaceColor { vtbackend::RGBColor { 0xC2, 0x54, 0x8F } }));
+    QCoreApplication::processEvents();
+    CHECK(colorOfRow(shownRow) == QColor { 0xC2, 0x54, 0x8F });
+    CHECK(colorOfRow(otherRow).alpha() == 0);
+
+    CHECK((*session)(contour::actions::ResetWorkspaceColor {}));
+    QCoreApplication::processEvents();
+    CHECK(colorOfRow(shownRow).alpha() == 0);
 }
 
 // {{{ The switcher over a window: the real WindowController hosting it, through the real presenter.

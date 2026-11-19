@@ -7344,6 +7344,20 @@ bool TerminalSession::operator()(actions::CloseWorkspace)
     return onWindowOf(*_manager, *this, &window::WindowController::closeCurrentWorkspace);
 }
 
+bool TerminalSession::operator()(actions::SetWorkspaceColor const& action)
+{
+    // A colorless binding is meant to open the workspace's color picker, which does not exist yet: until it
+    // does, it changes nothing.
+    if (!action.color)
+        return false;
+    return onWindowOf(*_manager, *this, &window::WindowController::colorCurrentWorkspace, *action.color);
+}
+
+bool TerminalSession::operator()(actions::ResetWorkspaceColor)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::resetCurrentWorkspaceColor);
+}
+
 bool TerminalSession::operator()(actions::GoToPane)
 {
     return onWindowOf(*_manager, *this, &window::WindowController::goToSidebarPane);

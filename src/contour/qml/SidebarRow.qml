@@ -52,6 +52,9 @@ Item {
     required property int secondLine
     required property string idleLine
     required property color tabColor
+    /// The colour of the workspace the row belongs to (SidebarModel's workspaceColor role); transparent when
+    /// it has none.
+    required property color workspaceColor
 
     /// The sidebar's model (WindowController.sidebar), which the row's actions go to. Its bindings never
     /// read it: the row compares its roles with the SidebarRows enums, so a row that outlives its model while

@@ -3514,6 +3514,18 @@ void WindowController::closeCurrentWorkspace()
         closeWorkspace(*shown);
 }
 
+void WindowController::colorCurrentWorkspace(vtbackend::RGBColor color)
+{
+    if (auto const shown = shownWorkspaceId())
+        _manager.setWorkspaceColor(*this, *shown, color);
+}
+
+void WindowController::resetCurrentWorkspaceColor()
+{
+    if (auto const shown = shownWorkspaceId())
+        _manager.setWorkspaceColor(*this, *shown, std::nullopt);
+}
+
 std::optional<uint64_t> WindowController::shownWorkspaceId() const
 {
     if (_directorySource == nullptr)

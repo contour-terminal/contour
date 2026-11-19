@@ -1055,3 +1055,52 @@ TEST_CASE("a tab colour change is reported for the row", "[contour][sidebar]")
     CHECK(named(2));
     CHECK(named(3));
 }
+
+TEST_CASE("SidebarModel: every row of a workspace serves its colour", "[contour][sidebar]")
+{
+    auto directory = oneColouredSplitTab();
+    directory[0].color = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    auto t = SidebarUnderTest { std::move(directory) };
+    REQUIRE(t.sidebar().rowCount() == 4);
+    CHECK(t.sidebar().roleNames().value(SidebarModel::WorkspaceColorRole) == "workspaceColor");
+
+    auto const magenta = QColor { 0xC2, 0x54, 0x8F };
+    for (auto const row: { 0, 1, 2, 3 })
+    {
+        INFO("row " << row);
+        CHECK(t.sidebar().index(row).data(SidebarModel::WorkspaceColorRole).value<QColor>() == magenta);
+    }
+
+    // Uncoloured, every row is transparent.
+    t.source.listed.workspaces[0].color.reset();
+    t.sidebar().refreshNow();
+    for (auto const row: { 0, 1, 2, 3 })
+    {
+        INFO("row " << row);
+        CHECK(t.sidebar().index(row).data(SidebarModel::WorkspaceColorRole).value<QColor>().alpha() == 0);
+    }
+}
+
+TEST_CASE("a workspace colour change is reported for all of its rows", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { oneColouredSplitTab() };
+    t.sidebar().refreshNow();
+    auto changed = QSignalSpy { &t.sidebar(), &QAbstractItemModel::dataChanged };
+
+    t.source.listed.workspaces[0].color = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+    t.sidebar().refreshNow();
+
+    auto const named = [&](int row) {
+        return std::ranges::any_of(changed, [row](QList<QVariant> const& signal) {
+            auto const first = signal.at(0).value<QModelIndex>().row();
+            auto const last = signal.at(1).value<QModelIndex>().row();
+            return first <= row && row <= last
+                   && signal.at(2).value<QList<int>>().contains(SidebarModel::WorkspaceColorRole);
+        });
+    };
+    for (auto const row: { 0, 1, 2, 3 })
+    {
+        INFO("row " << row);
+        CHECK(named(row));
+    }
+}

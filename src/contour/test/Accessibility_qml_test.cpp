@@ -844,6 +844,7 @@ TEST_CASE(
             { "secondLine", kind == 0 ? 0 : 1 },
             { "idleLine", QString {} },
             { "tabColor", QColor { Qt::transparent } },
+            { "workspaceColor", QColor { Qt::transparent } },
             { "sidebar", QVariant::fromValue<QObject*>(nullptr) },
             { "controller", QVariant::fromValue<QObject*>(nullptr) },
         };

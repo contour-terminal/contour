@@ -187,10 +187,10 @@ CommandArguments commandArguments(actions::Action const& action)
             [](CycleDaemon const& a) -> CommandArguments { return cycleArguments(a.direction); },
             [](SwitchToDaemon const& a) -> CommandArguments { return daemonArguments(a.daemon); },
             [](OpenDaemon const& a) -> CommandArguments { return daemonArguments(a.daemon); },
-            [](SetTabColor const& a) -> CommandArguments {
+            [](ColorActionConcept auto const& a) -> CommandArguments {
                 // Colorless is the DEFAULT (it opens the picker), so it carries no arguments: the row
-                // keeps the plain "SetTabColor" id, and the palette can offer it straight from the
-                // catalog. A bound instance that names a color is a different command, and says so.
+                // keeps the plain "SetTabColor"/"SetWorkspaceColor" id, and the palette can offer it straight
+                // from the catalog. A bound instance that names a color is a different command, and says so.
                 if (!a.color)
                     return {};
                 auto hex = vtbackend::formatColor(*a.color);

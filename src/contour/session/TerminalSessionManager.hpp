@@ -479,6 +479,16 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param name Its new name; empty clears it.
     void renameWorkspace(window::WindowController& window, uint64_t workspace, std::string name);
 
+    /// Colours the workspace @p workspace that @p window lists, in this process's model. A workspace the
+    /// window does not own is left alone. For a window a daemon serves this does nothing yet: the daemon
+    /// learns to colour a workspace in a later change.
+    /// @param window The window the user acts in.
+    /// @param workspace The workspace's id, as the window's directory lists it (DirectoryWorkspace::id).
+    /// @param color Its new colour; std::nullopt takes its colour away.
+    void setWorkspaceColor(window::WindowController& window,
+                           uint64_t workspace,
+                           std::optional<vtbackend::RGBColor> color);
+
     /// Names the tab @p tab, whichever workspace of @p window's directory holds it, shown or not: in its
     /// daemon for a window a daemon serves (named by a session it holds), in this process's model otherwise.
     /// A tab the window does not list is left alone.
@@ -1870,6 +1880,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
                   int fromIndex,
                   int toIndex) override;
     void workspaceMoved(vtworkspace::WorkspaceId workspace, int fromIndex, int toIndex) override;
+    void workspaceColorChanged(vtworkspace::WorkspaceId workspace) override;
     void tabAboutToBeMovedToWorkspace(vtworkspace::WorkspaceId from,
                                       int fromIndex,
                                       vtworkspace::WorkspaceId to,

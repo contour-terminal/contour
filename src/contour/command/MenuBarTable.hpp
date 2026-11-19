@@ -166,6 +166,12 @@ inline constexpr std::array MenuReachabilityExemptions {
     MenuReachabilityExemption { .action = "CloseWorkspace",
                                 .reason =
                                     "reached from the sidebar's workspace menu, which asks before closing" },
+    MenuReachabilityExemption {
+        .action = "SetWorkspaceColor",
+        .reason = "reached from the palette, key bindings and the sidebar's workspace menu" },
+    MenuReachabilityExemption {
+        .action = "ResetWorkspaceColor",
+        .reason = "reached from the palette, key bindings and the sidebar's workspace menu" },
     MenuReachabilityExemption { .action = "GoToPane",
                                 .reason = "a row of the sidebar's pane menu, which knows which pane" },
     MenuReachabilityExemption {

@@ -79,6 +79,7 @@ namespace
         RoleName { SidebarModel::SecondLineRole, "secondLine" },
         RoleName { SidebarModel::IdleLineRole, "idleLine" },
         RoleName { SidebarModel::TabColorRole, "tabColor" },
+        RoleName { SidebarModel::WorkspaceColorRole, "workspaceColor" },
     };
 
     [[nodiscard]] QString qs(std::string const& text)
@@ -182,6 +183,7 @@ namespace
         note(secondLineOf(before) == secondLineOf(after), { SidebarModel::SecondLineRole });
         note(idleLineOf(before) == idleLineOf(after), { SidebarModel::IdleLineRole });
         note(before.tabColor == after.tabColor, { SidebarModel::TabColorRole });
+        note(before.workspaceColor == after.workspaceColor, { SidebarModel::WorkspaceColorRole });
         // The spoken name is the title; the description folds in the kind and the status, not a running time.
         if (accessibleNameOf(before) != accessibleNameOf(after))
             for (auto const role: { static_cast<int>(SidebarModel::AccessibleNameRole),
@@ -423,6 +425,9 @@ QVariant SidebarModel::data(QModelIndex const& index, int role) const
         case IdleLineRole: return qs(idleLineOf(*row));
         case TabColorRole:
             return row->tabColor ? platform::toQColor(*row->tabColor) : QColor { Qt::transparent };
+        case WorkspaceColorRole:
+            return row->workspaceColor ? platform::toQColor(*row->workspaceColor)
+                                       : QColor { Qt::transparent };
         default: break;
     }
     return {};

@@ -419,6 +419,7 @@ class SidebarModel: public QAbstractListModel
         SecondLineRole,        ///< SecondLine: whether the second line is the reason, the idle line or none.
         IdleLineRole,          ///< The second line of a row with no reason (idleLineOf()).
         TabColorRole,          ///< QColor: the row's tab colour; fully transparent when it has none.
+        WorkspaceColorRole,    ///< QColor: the row's workspace colour; fully transparent when it has none.
     };
 
     /// @param host The window the sidebar sits in; must outlive the model.

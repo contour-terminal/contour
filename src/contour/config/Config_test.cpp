@@ -3044,6 +3044,50 @@ input_mapping:
     }));
 }
 
+TEST_CASE("Config: SetWorkspaceColor's color is optional, and ResetWorkspaceColor binds", "[config]")
+{
+    // The workspace's mirror of SetTabColor: no color means "open the workspace's color picker".
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control], key: F1, action: SetWorkspaceColor }
+    - { mods: [Control], key: F2, action: SetWorkspaceColor, color: '#c2548f' }
+    - { mods: [Control], key: F3, action: SetWorkspaceColor, color: 'not-a-color' }
+    - { mods: [Control], key: F4, action: ResetWorkspaceColor }
+)"sv);
+
+    auto const& mappings = config.inputMappings.value();
+
+    auto const colorFor = [&](vtbackend::Key key) -> std::optional<vtbackend::RGBColor> {
+        auto const found = std::ranges::find_if(mappings.keyMappings, [&](auto const& m) {
+            return m.input == key
+                   && std::holds_alternative<contour::actions::SetWorkspaceColor>(m.binding.at(0));
+        });
+        REQUIRE(found != mappings.keyMappings.end());
+        return std::get<contour::actions::SetWorkspaceColor>(found->binding.at(0)).color;
+    };
+
+    CHECK_FALSE(colorFor(vtbackend::Key::F1).has_value());
+    CHECK(colorFor(vtbackend::Key::F2) == vtbackend::RGBColor { 0xC2, 0x54, 0x8F });
+    CHECK_FALSE(colorFor(vtbackend::Key::F3).has_value());
+    CHECK(std::ranges::any_of(mappings.keyMappings, [](auto const& m) {
+        return m.input == vtbackend::Key::F4
+               && std::holds_alternative<contour::actions::ResetWorkspaceColor>(m.binding.at(0));
+    }));
+
+    // What the config writer writes back is what this reads.
+    CHECK(std::format("{}",
+                      contour::actions::Action {
+                          contour::actions::SetWorkspaceColor { vtbackend::RGBColor { 0xC2, 0x54, 0x8F } } })
+          == "SetWorkspaceColor, color: '#C2548F'");
+    CHECK(std::format("{}", contour::actions::Action { contour::actions::SetWorkspaceColor {} })
+          == "SetWorkspaceColor");
+}
+
 TEST_CASE("Config: an unquoted SetTabColor color is a YAML comment, and does not take the binding with it",
           "[config]")
 {

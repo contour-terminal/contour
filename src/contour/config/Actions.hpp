@@ -232,6 +232,9 @@ struct RenameWorkspace{};     // rename the current workspace inline
 struct MoveWorkspaceUp{};     // move the current workspace one place up in the list
 struct MoveWorkspaceDown{};   // move the current workspace one place down in the list
 struct CloseWorkspace{};      // close the current workspace, asking first
+// Colour the current workspace. No color => open the workspace's color picker; a color => apply it right away.
+struct SetWorkspaceColor{ std::optional<vtbackend::RGBColor> color; };
+struct ResetWorkspaceColor{}; // drop the colour given to the current workspace
 struct GoToPane{};            // show the pane a sidebar row names and focus it
 struct MoveTabToWorkspace{ uint32_t index = 0; }; // move the current tab into the Nth (1-based) workspace
 struct MoveToTab{ uint32_t workspace = 0; uint32_t tab = 0; }; // join the current pane into a tab, by 1-based places
@@ -380,6 +383,8 @@ using ActionVariant = std::variant<CancelSelection,
                                    MoveWorkspaceUp,
                                    MoveWorkspaceDown,
                                    CloseWorkspace,
+                                   SetWorkspaceColor,
+                                   ResetWorkspaceColor,
                                    GoToPane,
                                    MoveTabToWorkspace,
                                    MoveToTab,
@@ -497,6 +502,12 @@ concept CommandBlockActionConcept = core::oneOf<T,
                                                 ToggleCommandFold,
                                                 OpenCommandOutput>;
 
+/// Actions that colour something and carry an OPTIONAL `color`: bare, they open a colour picker; with a
+/// colour, they apply it. The config writer and the command palette's identity treat every member the
+/// same way, so an action coloured this way joins by being named here.
+template <typename T>
+concept ColorActionConcept = core::oneOf<T, SetTabColor, SetWorkspaceColor>;
+
 /// Actions that must fire exactly once per physical keypress and be dropped on key auto-repeat.
 ///
 /// These are structural/destructive actions where a held key must not be amplified into a burst:
@@ -547,6 +558,7 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     NewWorkspace,
                                                     CloseWorkspace,
                                                     RenameWorkspace,
+                                                    SetWorkspaceColor,
                                                     MoveWorkspaceUp,
                                                     MoveWorkspaceDown,
                                                     MoveTabToWorkspace,
@@ -620,8 +632,8 @@ concept DaemonActionConcept = core::oneOf<T,
 ///
 /// Deliberately excluded: CopySelection, PasteClipboard, PasteSelection, NewTerminal and ReloadConfig
 /// all default to a meaningful argument (copy as text, paste unstripped, current profile), so they
-/// run as-is. SetTabColor and SaveLayout are excluded for the same reason from the other direction:
-/// a bare SetTabColor opens the color picker and a bare SaveLayout opens the save-as name prompt, so
+/// run as-is. SetTabColor, SetWorkspaceColor and SaveLayout are excluded for the same reason from the other
+/// direction: a bare Set*Color opens the color picker and a bare SaveLayout opens the save-as name prompt, so
 /// the bare form is a meaningful gesture the palette SHOULD offer from the catalog. LaunchLayout
 /// stays in the list — a nameless "launch which layout?" has no default; its per-name rows already
 /// reach the palette through the saved-layout source. AttachToHost likewise, through the saved-host source.
@@ -921,6 +933,13 @@ namespace documentation
     };
     constexpr inline std::string_view MarkSeen { "Marks the output of the active pane as seen." };
     constexpr inline std::string_view RenameWorkspace { "Renames the current workspace inline." };
+    constexpr inline std::string_view SetWorkspaceColor {
+        "Colorize the current workspace. Without a color, this opens the workspace's color picker; with one "
+        "(e.g. color: '#c2548f') it applies that color right away."
+    };
+    constexpr inline std::string_view ResetWorkspaceColor {
+        "Removes the color you gave the current workspace, restoring its default look."
+    };
     constexpr inline std::string_view MoveWorkspaceUp {
         "Moves the current workspace one place up in the sidebar's list."
     };

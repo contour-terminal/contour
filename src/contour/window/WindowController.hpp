@@ -1418,6 +1418,11 @@ class WindowController:
     /// Closes the displayed workspace, after asking when it may be running a program (the CloseWorkspace
     /// action).
     void closeCurrentWorkspace();
+    /// Colours the displayed workspace (the SetWorkspaceColor action carrying a colour).
+    /// @param color The workspace's new colour.
+    void colorCurrentWorkspace(vtbackend::RGBColor color);
+    /// Takes the displayed workspace's colour away (the ResetWorkspaceColor action).
+    void resetCurrentWorkspaceColor();
     /// Shows the pane of the sidebar row a menu acts on and focuses it (the GoToPane action). Nothing when no
     /// sidebar row menu is acting.
     void goToSidebarPane();

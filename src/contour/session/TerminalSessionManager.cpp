@@ -1601,6 +1601,25 @@ void TerminalSessionManager::renameWorkspace(window::WindowController& window,
         setWorkspaceName(vtworkspace::WorkspaceId { workspace }, std::move(name));
 }
 
+void TerminalSessionManager::setWorkspaceColor(window::WindowController& window,
+                                               uint64_t workspace,
+                                               std::optional<vtbackend::RGBColor> color)
+{
+    // A daemon's workspace is coloured in its daemon, which cannot be asked to yet: until the native
+    // protocol carries a workspace's colour, the request is dropped rather than coloured locally, where
+    // the daemon's next directory would undo it.
+    if (listsRemotely(window))
+        return;
+    auto const id = vtworkspace::WorkspaceId { workspace };
+    if (!ownsWorkspace(window, id))
+        return;
+    // The model announces a real change through workspaceColorChanged(), which repaints the sidebars.
+    if (color)
+        _model->setWorkspaceColor(id, *color);
+    else
+        _model->resetWorkspaceColor(id);
+}
+
 void TerminalSessionManager::renameTab(window::WindowController& window, uint64_t tab, std::string name)
 {
     auto const* const source = window.directorySource();
@@ -3077,6 +3096,12 @@ void TerminalSessionManager::workspaceMoved(vtworkspace::WorkspaceId /*workspace
                                             int /*toIndex*/)
 {
     // What an in-process window lists is in the model's order.
+    notifyDirectoriesChanged();
+}
+
+void TerminalSessionManager::workspaceColorChanged(vtworkspace::WorkspaceId /*workspace*/)
+{
+    // An in-process window lists each workspace's colour from the model.
     notifyDirectoriesChanged();
 }
 

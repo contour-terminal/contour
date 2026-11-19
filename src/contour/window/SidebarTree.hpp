@@ -165,6 +165,9 @@ struct SidebarRow
     /// The colour of the tab a tab or pane row belongs to (DirectoryTab::color); none when the tab is
     /// uncoloured, and always none on a workspace row, folded or not.
     std::optional<vtbackend::RGBColor> tabColor {};
+    /// The colour of the workspace the row belongs to (DirectoryWorkspace::color), on every row of it: the
+    /// workspace row, folded or not, its tab rows and their pane rows. None when the workspace is uncoloured.
+    std::optional<vtbackend::RGBColor> workspaceColor {};
 
     bool operator==(SidebarRow const&) const = default;
 };

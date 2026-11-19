@@ -231,6 +231,19 @@ TEST_CASE("an in-process tab's colour appears until it is reset", "[directory][i
     CHECK_FALSE(h.source.directory().workspaces.at(0).tabs.at(0).color.has_value());
 }
 
+TEST_CASE("an in-process workspace's colour appears until it is reset", "[directory][inprocess]")
+{
+    auto h = Harness {};
+    auto const workspace = h.addWorkspace().id();
+    CHECK_FALSE(h.source.directory().workspaces.at(0).color.has_value());
+
+    h.model.model.setWorkspaceColor(workspace, vtbackend::RGBColor { 0xC2, 0x54, 0x8F });
+    CHECK(h.source.directory().workspaces.at(0).color == vtbackend::RGBColor { 0xC2, 0x54, 0x8F });
+
+    h.model.model.resetWorkspaceColor(workspace);
+    CHECK_FALSE(h.source.directory().workspaces.at(0).color.has_value());
+}
+
 TEST_CASE("a label set through the in-process store appears", "[directory][inprocess]")
 {
     auto h = Harness {};
