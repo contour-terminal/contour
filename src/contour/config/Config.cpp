@@ -5219,8 +5219,16 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                 return std::nullopt;
         }
 
-        if (holds_alternative<actions::SetTabColor>(action)
-            || holds_alternative<actions::SetWorkspaceColor>(action))
+        // The colour of whichever colour action this is (actions::ColorActionConcept); none for any other.
+        auto* const actionColor = std::visit(
+            []<typename A>(A& a) -> std::optional<vtbackend::RGBColor>* {
+                if constexpr (actions::ColorActionConcept<A>)
+                    return &a.color;
+                else
+                    return nullptr;
+            },
+            action);
+        if (actionColor != nullptr)
         {
             // `color` is OPTIONAL: without it the action opens the color picker, which is a perfectly good
             // thing to bind a key to. A color that does not parse is therefore not fatal — like
@@ -5243,10 +5251,7 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                 auto const colorText = colorNode.as<std::string>();
                 if (auto const color = vtbackend::parseColor(colorText); color.has_value())
                 {
-                    if (auto* const tabColor = std::get_if<actions::SetTabColor>(&action))
-                        tabColor->color = color;
-                    else
-                        std::get<actions::SetWorkspaceColor>(action).color = color;
+                    *actionColor = color;
                     return action;
                 }
 

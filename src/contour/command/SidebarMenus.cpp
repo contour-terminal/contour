@@ -77,46 +77,16 @@ namespace
         return state.color.has_value();
     }
 
-    /// One swatch per palette colour, ticked on the workspace's own.
-    [[nodiscard]] std::vector<ContextMenuEntry> workspaceSwatchRows(WorkspaceMenuState const& state)
-    {
-        return std::ranges::to<std::vector>(
-            state.palette | std::views::transform([&](auto const& color) {
-                return detail::commandEntry(vtbackend::formatColor(color),
-                                            actions::SetWorkspaceColor { .color = color },
-                                            state.color == color ? RowCheck::Checked : RowCheck::Unchecked,
-                                            color);
-            }));
-    }
-
-    /// The "Workspace Color" submenu, as the tab menu's "Tab Color": the swatches, then the picker and a
-    /// reset.
-    [[nodiscard]] std::span<WorkspaceTable::Row const> workspaceColorTemplate()
-    {
-        static auto const rows = std::array {
-            WorkspaceTable::rows(workspaceSwatchRows),
-            WorkspaceTable::separator(),
-            // Bare: it opens the picker over the workspace's row.
-            WorkspaceTable::command(actions::SetWorkspaceColor {}, "Custom…"),
-            WorkspaceTable::command(actions::ResetWorkspaceColor {}, "Reset").enabledWhen(hasColor),
-        };
-        return rows;
-    }
-
-    [[nodiscard]] std::vector<ContextMenuEntry> workspaceColorRows(WorkspaceMenuState const& state)
-    {
-        // Tidied as the tab's submenu is: an empty palette must not open the submenu on a divider.
-        auto entries = WorkspaceTable::buildRows(workspaceColorTemplate(), state);
-        detail::dropRedundantSeparators(entries);
-        return entries;
-    }
-
     [[nodiscard]] std::span<WorkspaceTable::Row const> workspaceMenuTemplate()
     {
         using namespace actions;
 
         static auto const rows = std::array {
-            WorkspaceTable::submenu("Workspace Color", workspaceColorRows).enabledWhen(canColor),
+            // As the tab menu's "Tab Color"; its "Custom…" opens the picker over the workspace's row.
+            WorkspaceTable::submenu(
+                "Workspace Color",
+                detail::colorRows<WorkspaceMenuState, SetWorkspaceColor, ResetWorkspaceColor, hasColor>)
+                .enabledWhen(canColor),
             WorkspaceTable::command(RenameWorkspace {}, "Rename…"),
             WorkspaceTable::command(MarkSeen {}, "Mark Seen"),
             WorkspaceTable::command(CreateNewTab {}, "New Tab Here"),
