@@ -335,6 +335,13 @@ if(CONTOUR_TESTING)
         contour_add_lint_gate(check_guest_portability check-guest-portability.py)
         contour_add_lint_gate(check_guest_portability_selftest check-guest-portability.py --self-test)
 
+        # Fixtures recorded from real tools (a Claude Code session log, a forge CLI's JSON) hold no address,
+        # account, home directory, real UUID or token: the scrubber's allowlist drops them, and this gate checks
+        # that it held. Its self-test, and the scrubber's, hold both to planted samples.
+        contour_add_lint_gate(fixture-privacy check-fixture-privacy.py)
+        contour_add_lint_gate(fixture-privacy_selftest check-fixture-privacy.py --self-test)
+        contour_add_lint_gate(scrub_session_log_selftest scrub-session-log.py --self-test)
+
         # No platform test below the keyboard normalizer: the router, the default-binding table and the
         # session's key path are platform-neutral, so a platform macro or BuildKeyboardPlatformKind there
         # fails this gate. The self-test keeps the scanner itself honest.
