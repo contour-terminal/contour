@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <format>
@@ -977,6 +978,52 @@ TEST_CASE("a large log is read within its time class", "[cli][transcript]")
                          ShownEntries,
                          Blobs,
                          std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()));
+    }
+}
+// }}}
+
+// {{{ the orchestrator's contract
+TEST_CASE("the verb prints the contract's pages", "[cli][transcript][contract]")
+{
+    struct ContractPage
+    {
+        std::string_view page;     ///< The page, in format-1/.
+        std::filesystem::path log; ///< The log it was printed from, as the contract's README names it.
+        uint32_t number = 1;       ///< The page number asked for.
+    };
+    auto const pages = std::array {
+        ContractPage { .page = "basic-page-1.json",
+                       .log = std::filesystem::path { RecordedVersion } / "basic.jsonl",
+                       .number = 1 },
+        ContractPage { .page = "empty-page-1.json", .log = "synthetic/empty.jsonl", .number = 1 },
+    };
+    auto const contract = std::filesystem::path { CONTOUR_AGENT_TRANSCRIPT_CONTRACT } / "format-1";
+
+    // Every page of the contract is held to the verb: a page added there without a row here fails.
+    for (auto const& entry: std::filesystem::directory_iterator { contract })
+    {
+        INFO(entry.path().string());
+        CHECK(std::ranges::contains(pages, entry.path().filename().string(), [](ContractPage const& row) {
+            return std::string { row.page };
+        }));
+    }
+
+    for (auto const& row: pages)
+    {
+        INFO(row.page);
+        auto world = World {};
+        world.addLog("-home-user-proj", fixture(row.log));
+        auto request = World::request(Worktree, row.number);
+        request.output = TranscriptOutput::Json;
+
+        auto const outcome = world.run(request);
+
+        CHECK(outcome.status == 0);
+        CHECK(outcome.err.empty());
+        auto in = std::ifstream { contract / row.page, std::ios::binary };
+        REQUIRE(in.good());
+        CHECK(outcome.out
+              == std::string { std::istreambuf_iterator<char> { in }, std::istreambuf_iterator<char> {} });
     }
 }
 // }}}

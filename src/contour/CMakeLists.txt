@@ -1890,7 +1890,9 @@ if(CONTOUR_TESTING)
         CONTOUR_CONTROL_WIT="${PROJECT_SOURCE_DIR}/wit/control/world.wit"
         CONTOUR_CONTROL_API_DOC="${PROJECT_SOURCE_DIR}/docs/control-api.md"
         CONTOUR_CONFIG_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/config/testdata"
-        CONTOUR_AGENT_TRANSCRIPT_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/cli/testdata/agent-transcript")
+        CONTOUR_AGENT_TRANSCRIPT_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/cli/testdata/agent-transcript"
+        # The pages the orchestrator reads, printed by `contour agent transcript`: its goldens, read in place.
+        CONTOUR_AGENT_TRANSCRIPT_CONTRACT="${PROJECT_SOURCE_DIR}/extensions/orchestrator/contract/agent-transcript")
     if(NOT WIN32)
         # Real files: a FIFO and a symbolic link where a session log should be.
         target_sources(contour_test PRIVATE cli/SessionLogOpener_test.cpp)
