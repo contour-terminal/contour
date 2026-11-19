@@ -6041,7 +6041,8 @@ class Terminal: public IStatusLinePublishTarget
 
     InputGenerator _inputGenerator {};
     /// Keyboard while the bytes _inputGenerator holds include a key event, a paste or a user's raw input,
-    /// Other once they are all sent: what flushInput() tells the device they carry. Under _inputMutex.
+    /// else ButtonPress while they include the report of a mouse button pressed, Other once they are all
+    /// sent: what flushInput() tells the device they carry. Under _inputMutex.
     vtpty::InputKind _pendingInputKind = vtpty::InputKind::Other;
 
     ViCommands _viCommands;

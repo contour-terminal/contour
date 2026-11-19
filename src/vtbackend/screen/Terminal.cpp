@@ -2197,8 +2197,13 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
     auto const eventHandledByApp = [&] {
         if (allowPassMouseEventToApp(modifiers))
             return core::locked(_inputMutex, [&] {
-                return _inputGenerator.generateMousePress(
+                auto const generated = _inputGenerator.generateMousePress(
                     modifiers, button, position, pixelPosition, uiHandledHint);
+                // A button the user pressed is an action of theirs, as a key is -- a wheel step is not, nor
+                // is motion. What was typed with it still reads as typed.
+                if (generated && !isMouseWheel(button) && _pendingInputKind == vtpty::InputKind::Other)
+                    _pendingInputKind = vtpty::InputKind::ButtonPress;
+                return generated;
             });
         if (allowWheelTranslationToApp(button, modifiers))
             return core::locked(_inputMutex,

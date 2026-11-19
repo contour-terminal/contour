@@ -290,8 +290,8 @@ interface host {
     /// Shows a pane the extension owns in the origin's window: activated where that window shows its
     /// workspace, the user asked first when it is in another. An origin whose window has gone stands for
     /// the window focused last; with none attached the pane only becomes its workspace's active tab. Within
-    /// 2 s of a key typed into one of the extension's served tabs, an origin that names no attached window
-    /// (0 included) stands for the window that key came from. Otherwise an origin never handed to the
+    /// 2 s of a key typed or a mouse button pressed into one of the extension's served tabs, an origin that
+    /// names no attached window (0 included) stands for the window that key or click came from. Otherwise an origin never handed to the
     /// extension (0, another extension's) is `gone` and raises nothing; so is a pane it closed, until its
     /// session ended (`not-owned` after).
     pane-reveal: func(pane: string, origin: origin) -> result<_, host-error>;

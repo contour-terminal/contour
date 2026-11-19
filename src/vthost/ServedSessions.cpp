@@ -310,19 +310,19 @@ std::optional<vtworkspace::WorkspaceId> ServedSessions::workspaceOfTab(std::stri
 std::optional<ConnectionId> ServedSessions::recentInputFrom(std::string_view extension) const
 {
     auto const lock = std::lock_guard { _mutex };
-    auto const typed = _typed.find(extension);
-    if (typed == _typed.end() || _clock.now() - typed->second.second > ServedInputGrace)
+    auto const typed = _userInput.find(extension);
+    if (typed == _userInput.end() || _clock.now() - typed->second.second > ServedInputGrace)
         return std::nullopt;
     return typed->second.first;
 }
 
-void ServedSessions::noteTyped(vtworkspace::SessionId session, ConnectionId const& from)
+void ServedSessions::noteUserInput(vtworkspace::SessionId session, ConnectionId const& from)
 {
     auto const lock = std::lock_guard { _mutex };
     auto const tab = std::ranges::find(_tabs, std::optional { session }, &Tab::session);
     if (tab == _tabs.end())
         return;
-    _typed.insert_or_assign(tab->extension, std::pair { from, _clock.now() });
+    _userInput.insert_or_assign(tab->extension, std::pair { from, _clock.now() });
 }
 
 void ServedSessions::forget(std::string_view id)
@@ -497,7 +497,7 @@ std::expected<void, ServedTabError> ServedSessions::reveal(std::string_view exte
                                                            std::string_view tab,
                                                            Origin origin)
 {
-    // The origin's window; else that of the key that asked for it, typed into one of its tabs just now.
+    // The origin's window; else that of the key or click that asked for it, into one of its tabs just now.
     auto const connection =
         _origins.connectionOf(extension, origin).or_else([&] { return recentInputFrom(extension); });
     auto session = vtworkspace::SessionId {};

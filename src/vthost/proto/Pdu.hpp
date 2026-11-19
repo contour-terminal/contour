@@ -425,9 +425,10 @@ struct ServerHello
 /// What the bytes of an Input carry (Capability::InputKinds).
 enum class InputKind : uint8_t
 {
-    Other =
-        0,    ///< Nothing the user typed: a reply, a focus or mouse report; also all a peer without it sends.
-    Keyboard, ///< The user's key events or paste are among them.
+    Other = 0,   ///< Nothing the user did: a reply, a focus, motion or wheel report; also all a peer without
+                 ///< the capability sends.
+    Keyboard,    ///< The user's key events or paste are among them.
+    ButtonPress, ///< No key, but the report of a mouse button the user pressed is among them.
 };
 
 /// Client input bytes for one session's PTY: keys and paste, but also the replies, focus and mouse reports

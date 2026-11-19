@@ -93,12 +93,13 @@ class IServedAdmission
     [[nodiscard]] virtual ServedAdmission current() const noexcept = 0;
 };
 
-/// How long after a user typed into one of an extension's served tabs a reveal it asks for, without an
-/// origin that names an attached window, still counts as that user's: the key that asked was typed there.
+/// How long after a user typed or clicked into one of an extension's served tabs a reveal it asks for,
+/// without an origin that names an attached window, still counts as that user's: the key or click that asked
+/// went there.
 inline constexpr auto ServedInputGrace = std::chrono::seconds { 2 };
 
-/// A served tab's workspace, as the served tabs' mirror holds it; and who typed into an extension's served
-/// tabs last. Any thread.
+/// A served tab's workspace, as the served tabs' mirror holds it; and who typed or clicked into an
+/// extension's served tabs last. Any thread.
 class IServedTabLookup
 {
   public:
@@ -117,8 +118,8 @@ class IServedTabLookup
         std::string_view extension, std::string_view tab) const = 0;
 
     /// @param extension Who asks.
-    /// @return The connection whose user typed into one of @p extension's served tabs last, if that was at
-    ///         most ServedInputGrace ago; nullopt otherwise.
+    /// @return The connection whose user typed or pressed a mouse button into one of @p extension's served
+    ///         tabs last, if that was at most ServedInputGrace ago; nullopt otherwise.
     [[nodiscard]] virtual std::optional<ConnectionId> recentInputFrom(std::string_view extension) const = 0;
 };
 
@@ -258,9 +259,10 @@ class ServedSessions final: public IServedTabs, public IServedTabLookup
                                                                          std::string_view tab) const override;
     [[nodiscard]] std::optional<ConnectionId> recentInputFrom(std::string_view extension) const override;
 
-    /// Records that the user on @p from typed into @p session, if it is a served tab: a reveal its extension
-    /// asks for soon after counts as that user's (recentInputFrom()). Loop thread.
-    void noteTyped(vtworkspace::SessionId session, ConnectionId const& from);
+    /// Records that the user on @p from typed or pressed a mouse button into @p session, if it is a served
+    /// tab: a reveal its extension asks for soon after counts as that user's (recentInputFrom()). Loop
+    /// thread.
+    void noteUserInput(vtworkspace::SessionId session, ConnectionId const& from);
 
   private:
     struct DeviceState;
@@ -324,8 +326,8 @@ class ServedSessions final: public IServedTabs, public IServedTabLookup
     ServedTabHost& _host;
     core::platform::IClock const& _clock;
     mutable std::mutex _mutex; ///< Guards everything below.
-    /// Per extension: who typed into one of its served tabs last, and when.
-    std::map<std::string, std::pair<ConnectionId, core::platform::SteadyTimePoint>, std::less<>> _typed;
+    /// Per extension: who typed or clicked into one of its served tabs last, and when.
+    std::map<std::string, std::pair<ConnectionId, core::platform::SteadyTimePoint>, std::less<>> _userInput;
     std::vector<Entry> _devices;
     std::vector<Tab> _tabs;
     vtbackend::PageSize _pageSize { vtbackend::LineCount(24), vtbackend::ColumnCount(80) };

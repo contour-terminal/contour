@@ -81,11 +81,12 @@ class OwnedPaneHost
 /// What OwnedPanes reaches of its host: every collaborator its rules need, at construction.
 struct OwnedPanesServices
 {
-    IOwnedPaneStore& store;             ///< The registry files.
-    vtcontrol::UuidSource& ids;         ///< Mints pane UUIDs; thread-safe.
-    OwnedPaneHost& host;                ///< The loop-side model calls.
-    IServedTabLookup const& servedTabs; ///< `near` -> its tab's workspace; who typed into its tabs just now.
-    IExtensionActions const& origins;   ///< origin -> ConnectionId (pane-reveal).
+    IOwnedPaneStore& store;     ///< The registry files.
+    vtcontrol::UuidSource& ids; ///< Mints pane UUIDs; thread-safe.
+    OwnedPaneHost& host;        ///< The loop-side model calls.
+    IServedTabLookup const&
+        servedTabs; ///< `near` -> its tab's workspace; who typed or clicked into its tabs now.
+    IExtensionActions const& origins; ///< origin -> ConnectionId (pane-reveal).
     IConnectionWorkspaces const&
         workspaces;                    ///< ConnectionId -> selected workspace; the most recently focused.
     IServedAdmission const& admission; ///< The upgrade latch.

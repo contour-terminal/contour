@@ -1790,8 +1790,8 @@ namespace
             auto const kind = in.u8();
             if (!kind)
                 return std::unexpected(kind.error());
-            pdu.kind =
-                *kind == static_cast<uint8_t>(InputKind::Keyboard) ? InputKind::Keyboard : InputKind::Other;
+            pdu.kind = *kind <= std::to_underlying(InputKind::ButtonPress) ? static_cast<InputKind>(*kind)
+                                                                           : InputKind::Other;
         }
         return pdu;
     }

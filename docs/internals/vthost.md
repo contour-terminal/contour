@@ -2082,10 +2082,12 @@ A served session is **disposable**: nothing of it survives the daemon, and its e
   refuses. The window is the origin's (`IExtensionActions::connectionOf`, bound to the extension it was handed
   to); an origin handed to it whose connection detached since (`IExtensionActions::standingOf`) stands for
   the window focused last, as `near`'s fallback does; with no window attached the pane's tab is only activated
-  in its own workspace. A key typed into one of the extension's served tabs is a user action as well: for
+  in its own workspace. A key typed or a mouse button pressed into one of the extension's served tabs is a
+  user action as well: for
   `ServedInputGrace` (2 s, on the sessions' steady clock) after it, a reveal without an attached origin --
-  pane-reveal and tab-reveal alike -- goes to the window it came from (`ServedSessions::noteTyped`, keyboard
-  input only, from `writeInputAs`), which is how a dashboard whose guest restarted still reveals on Enter.
+  pane-reveal and tab-reveal alike -- goes to the window it came from (`ServedSessions::noteUserInput`, keyboard
+  input and button presses only -- no motion, wheel or focus report -- from `writeInputAs`), which is how a
+  dashboard whose guest restarted still reveals on Enter.
   Otherwise an origin never handed to it -- 0, made up, another extension's -- answers `gone` and raises
   nothing: an extension never raises a window without a user action behind it. The
   session is looked up on the loop, so a pending pane is revealed once created; a closed one answers `gone`.

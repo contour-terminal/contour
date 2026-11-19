@@ -229,8 +229,8 @@ std::expected<void, OwnedPaneError> OwnedPanes::reveal(std::string_view extensio
             case OwnedPaneState::Pending: break; // its creation, posted earlier, runs first
         }
     }
-    // The origin's window; else that of a key typed into one of the extension's served tabs just now, which
-    // is what asked for it (a dashboard's input carries no origin). Without either, no user action is
+    // The origin's window; else that of a key or click into one of the extension's served tabs just now,
+    // which is what asked for it (a dashboard's input carries no origin). Without either, no user action is
     // behind an origin never handed to it -- 0, made up, another extension's: an extension never raises a
     // window on its own. One that was handed and went stale stands for the window focused last (windowFor()).
     auto const connection = _services.origins.connectionOf(extension, origin).or_else([&] {

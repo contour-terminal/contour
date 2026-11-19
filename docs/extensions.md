@@ -428,8 +428,9 @@ again in a later callback", which starts with a fresh budget, not "the store is 
   made the active tab where that window shows the pane's workspace; in another workspace the window asks the
   user first, and a refusal changes nothing. An origin whose window has gone since stands for the window the
   user focused last; with no window attached the pane's tab only becomes the active one of its workspace. A
-  key typed into one of its served tabs is a user action too: for at most 2 s after it, a reveal whose origin
-  names no attached window (0 included) goes to the window that key came from -- which is how a dashboard
+  key typed or a mouse button pressed into one of its served tabs is a user action too: for at most 2 s
+  after it, a reveal whose origin names no attached window (0 included) goes to the window that key or
+  click came from -- which is how a dashboard
   reveals from its own key bindings, whose input carries no origin; `tab-reveal` follows the same rule. Past
   that, an origin it was never handed (0, or another extension's) raises no window and answers `gone`: a
   reveal needs a user action behind it. A pane it closed answers `gone` until its session ended, `not-owned` after;

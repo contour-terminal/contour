@@ -704,6 +704,45 @@ TEST_CASE("pane-reveal with no origin, just after a key typed into its dashboard
     b.detach(typing);
 }
 
+TEST_CASE("pane-reveal with no origin, just after a click into its dashboard, goes to that window",
+          "[vthost][panes]")
+{
+    auto b = PanesBench {};
+    auto clicking = FakeWindow { 1 };
+    auto focused = FakeWindow { 2 };
+    std::ignore = b.attach(clicking, b.first);
+    auto const origin = b.attach(focused, b.first); // focused last
+    auto const dashboard = b.tabs->open(Orchestrator, "Agents", "", "agents", origin);
+    REQUIRE(dashboard.has_value());
+    REQUIRE(b.eventually([&] { return b.sessionOf(*dashboard).has_value(); }));
+    auto const pane = b.openNow(b.spawn());
+    auto const session = b.sessionOf(pane);
+    REQUIRE(session.has_value());
+    auto const tab = *b.sessionOf(*dashboard);
+    auto const gone = std::expected<void, OwnedPaneError> { std::unexpect, OwnedPaneError::Gone };
+
+    // What the window sends as the pointer merely moves, scrolls or the tab gains focus asks for nothing.
+    b.host.writeInputFrom(tab, "\x1b[<35;4;2M", clicking.connectionId(), proto::InputKind::Other);
+    b.host.writeInputFrom(tab, "\x1b[<64;4;2M", clicking.connectionId(), proto::InputKind::Other);
+    b.host.writeInputFrom(tab, "\x1b[I", clicking.connectionId(), proto::InputKind::Other);
+    CHECK(b.panes().reveal(Orchestrator, pane, Origin { 0 }) == gone);
+
+    // A button the user pressed on the agent's row does.
+    b.host.writeInputFrom(tab, "\x1b[<0;4;2M", clicking.connectionId(), proto::InputKind::ButtonPress);
+    REQUIRE(b.panes().reveal(Orchestrator, pane, Origin { 0 }).has_value());
+    REQUIRE(b.eventually([&] { return clicking.reveals == std::vector { *session }; }));
+
+    // For as long as a key would.
+    b.clock.advance(std::chrono::seconds { 3 });
+    CHECK(b.panes().reveal(Orchestrator, pane, Origin { 0 }) == gone);
+
+    b.settle();
+    CHECK(clicking.reveals.size() == 1);
+    CHECK(focused.reveals.empty());
+    b.detach(focused);
+    b.detach(clicking);
+}
+
 TEST_CASE("pane-reveal with no origin raises no window", "[vthost][panes]")
 {
     auto b = PanesBench {};

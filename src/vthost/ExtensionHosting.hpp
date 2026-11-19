@@ -321,13 +321,13 @@ class IServedTabs
 
     /// Brings one of the extension's tabs in front of the origin's window: activated where it is shown, the
     /// window asked first when it is in another workspace. Without an attached origin, the window whose user
-    /// typed into one of its served tabs at most ServedInputGrace ago is the one asking. A tab not created
-    /// yet is activated by its creation.
+    /// typed or clicked into one of its served tabs at most ServedInputGrace ago is the one asking. A tab not
+    /// created yet is activated by its creation.
     /// @param extension What the daemon's configuration calls it.
     /// @param tab The tab's id.
     /// @param origin The connection the action that asked for it came from.
     /// @return Nothing; NotOwned for an id that is not one of its tabs; Gone for an origin that detached, and
-    ///         no recent typing to stand for it.
+    ///         no recent key or click to stand for it.
     [[nodiscard]] virtual std::expected<void, ServedTabError> reveal(std::string_view extension,
                                                                      std::string_view tab,
                                                                      Origin origin) = 0;
@@ -473,12 +473,11 @@ class IOwnedPanes
 
     /// Brings one of the extension's panes in front of the origin's window: activated where that window
     /// shows it, the window asked first when it is in another workspace. Without an attached origin, the
-    /// window whose user typed into one of the extension's served tabs at most ServedInputGrace ago is the
-    /// one asking. An origin handed to this extension whose connection detached since stands for the window
-    /// focused last; with no window attached, the
-    /// pane's tab is activated in its own workspace. One never handed to it (0, made up, another
-    /// extension's) reveals nothing: no user action is behind it. A pane not created yet is revealed once
-    /// it is.
+    /// window whose user typed or clicked into one of the extension's served tabs at most ServedInputGrace
+    /// ago is the one asking. An origin handed to this extension whose connection detached since stands for
+    /// the window focused last; with no window attached, the pane's tab is activated in its own workspace.
+    /// One never handed to it (0, made up, another extension's) reveals nothing: no user action is behind it.
+    /// A pane not created yet is revealed once it is.
     /// @param extension Whose pane it is.
     /// @param pane The pane's id.
     /// @param origin The connection the action that asked for it came from.

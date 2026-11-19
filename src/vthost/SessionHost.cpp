@@ -2384,9 +2384,10 @@ void SessionHost::writeInputAs(SessionId session,
         // does not, nor does what a window sends by itself -- the focus report as it is switched to, a mouse
         // report -- which is why the client says which is which.
         auto const answersIntegration = from.has_value() && kind == proto::InputKind::Keyboard;
-        // A key typed into an extension's served tab may ask it to reveal something there and then.
-        if (answersIntegration)
-            _served.noteTyped(session, *from);
+        // A key typed, or a mouse button pressed, into an extension's served tab may ask it to reveal
+        // something there and then. Motion, wheel and focus reports are not the user asking.
+        if (from.has_value() && (kind == proto::InputKind::Keyboard || kind == proto::InputKind::ButtonPress))
+            _served.noteUserInput(session, *from);
         _lastInput.insert_or_assign(session.value,
                                     LastInput { .at = _loop.clock().now(), .from = std::move(from) });
         if (answersIntegration)

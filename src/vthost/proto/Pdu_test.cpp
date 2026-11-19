@@ -3408,6 +3408,9 @@ TEST_CASE("Pdu.Input.kindRoundTripsWithAndWithoutCapability", "[vthost][proto][i
     auto const typed = Input { .session = 7, .data = bytes("ls\r"), .kind = InputKind::Keyboard };
     CHECK(roundTrip(DecodedPdu { other }) == DecodedPdu { other });
     CHECK(roundTrip(DecodedPdu { typed }) == DecodedPdu { typed });
+    auto const clicked =
+        Input { .session = 7, .data = bytes("\x1b[<0;1;1M"), .kind = InputKind::ButtonPress };
+    CHECK(roundTrip(DecodedPdu { clicked }) == DecodedPdu { clicked });
 
     // Without the capability a client sends Other, whose bytes are what an older client sends: no kind byte.
     auto const legacy = bodyOf(DecodedPdu { other });

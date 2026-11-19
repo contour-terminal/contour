@@ -143,6 +143,7 @@ namespace
         switch (kind)
         {
             case vtpty::InputKind::Keyboard: return vthost::proto::InputKind::Keyboard;
+            case vtpty::InputKind::ButtonPress: return vthost::proto::InputKind::ButtonPress;
             case vtpty::InputKind::Other: break;
         }
         return vthost::proto::InputKind::Other;
