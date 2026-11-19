@@ -675,6 +675,79 @@ void checkSwitcherScript(contour::test::snapshot::ChromeSnapshotScene const& sce
     REQUIRE(dividers.size() == 1);
     return dividers.front()->mapToScene(QPointF { 0, 0 }).x();
 }
+
+/// @return Whether the part named @p part of the sidebar row titled @p title is visible.
+[[nodiscard]] bool sidebarRowPartShown(QQuickItem const& content, QString const& title, QString const& part)
+{
+    for (auto const* row: contour::test::itemsNamed(content, QStringLiteral("sidebarRow")))
+        if (row->isVisible() && row->property("title").toString() == title)
+        {
+            auto const parts = contour::test::itemsNamed(*row, part);
+            REQUIRE(parts.size() == 1);
+            return parts.front()->isVisible();
+        }
+    FAIL("no sidebar row " << title.toStdString());
+    return false;
+}
+
+/// Checks what a sidebar colour script drew: the coloured tabs or workspaces wearing their colour in the
+/// script's style, and the uncoloured ones none.
+/// @param scene The scene the script ran in.
+/// @param variant The picture.
+void checkSidebarColourScript(contour::test::snapshot::ChromeSnapshotScene const& scene,
+                              contour::test::snapshot::SnapshotVariant const& variant)
+{
+    using namespace contour::test::snapshot;
+    using contour::config::SidebarTabColorStyle;
+    using contour::config::SidebarWorkspaceColorStyle;
+    auto const& row = scriptRow(variant.script);
+    auto const& content = *scene.window().contentItem();
+    auto const shown = [&](char const* title, char const* part) {
+        return sidebarRowPartShown(content, QString::fromUtf8(title), QString::fromUtf8(part));
+    };
+    switch (row.sidebarColor)
+    {
+        case SnapshotSidebarColor::None: break;
+        case SnapshotSidebarColor::Tabs:
+            // claude (displayed) and build wear their colour; notes, in uncoloured docs, does not.
+            for (auto const* title: { "claude", "build" })
+            {
+                INFO(title);
+                CHECK(shown(title, "sidebarRowTabFill") == (row.tabColorStyle == SidebarTabColorStyle::Tint));
+                CHECK(shown(title, "sidebarRowTabBar") == (row.tabColorStyle == SidebarTabColorStyle::Bar));
+            }
+            CHECK_FALSE(shown("notes", "sidebarRowTabFill"));
+            CHECK_FALSE(shown("notes", "sidebarRowTabBar"));
+            break;
+        case SnapshotSidebarColor::Workspaces:
+            // billing (unfolded) and infra (folded) wear their colour on their own rows; docs does not.
+            for (auto const* title: { "billing", "infra" })
+            {
+                INFO(title);
+                CHECK(shown(title, "sidebarRowWorkspaceFill")
+                      == (row.workspaceColorStyle == SidebarWorkspaceColorStyle::Tint));
+                CHECK(shown(title, "sidebarRowWorkspaceRail")
+                      == (row.workspaceColorStyle == SidebarWorkspaceColorStyle::Group));
+                CHECK(shown(title, "sidebarRowWorkspaceSwatch")
+                      == (row.workspaceColorStyle == SidebarWorkspaceColorStyle::Swatch));
+            }
+            // The group rail runs on through billing's tab and pane rows.
+            for (auto const* title: { "claude", "deploy", "server", "logs" })
+            {
+                INFO(title);
+                CHECK(shown(title, "sidebarRowWorkspaceRail")
+                      == (row.workspaceColorStyle == SidebarWorkspaceColorStyle::Group));
+            }
+            for (auto const* part:
+                 { "sidebarRowWorkspaceFill", "sidebarRowWorkspaceRail", "sidebarRowWorkspaceSwatch" })
+            {
+                INFO(part);
+                CHECK_FALSE(shown("docs", part));
+                CHECK_FALSE(shown("notes", part));
+            }
+            break;
+    }
+}
 } // namespace
 
 TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscreen)",
@@ -1216,6 +1289,37 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 REQUIRE(dot != nullptr);
                 CHECK(daemon->property("text").toString() == QStringLiteral("local"));
                 CHECK_FALSE(dot->property("visible").toBool());
+                break;
+            }
+            case SnapshotScript::SidebarTabTint:
+            case SnapshotScript::SidebarTabBar:
+            case SnapshotScript::SidebarTabName:
+            case SnapshotScript::SidebarWorkspaceTint:
+            case SnapshotScript::SidebarWorkspaceGroup:
+            case SnapshotScript::SidebarWorkspaceSwatch:
+                static_cast<void>(checkSidebarScript(scene, variant));
+                checkSidebarColourScript(scene, variant);
+                break;
+            case SnapshotScript::SidebarHoverCard: {
+                static_cast<void>(checkSidebarScript(scene, variant));
+                // The card is open, and shows the long status whole.
+                auto const* card = scene.root().findChild<QObject*>(QStringLiteral("sidebarHoverCard"));
+                REQUIRE(card != nullptr);
+                CHECK(card->property("opened").toBool());
+                auto const reasons =
+                    contour::test::itemsNamed(content, QStringLiteral("sidebarHoverCardReason"));
+                REQUIRE(reasons.size() == 1);
+                CHECK(reasons.front()->property("text").toString() == QString::fromUtf8(SnapshotLongStatus));
+                CHECK_FALSE(reasons.front()->property("truncated").toBool());
+                break;
+            }
+            case SnapshotScript::SidebarWorkspaceColorPicker: {
+                static_cast<void>(checkSidebarScript(scene, variant));
+                checkSidebarColourScript(scene, variant);
+                auto const* flyout =
+                    scene.root().findChild<QObject*>(QStringLiteral("sidebarWorkspaceColorFlyout"));
+                REQUIRE(flyout != nullptr);
+                CHECK(flyout->property("opened").toBool());
                 break;
             }
             case SnapshotScript::QuickTerminal: {

@@ -4,6 +4,7 @@
 #include <contour/session/EndReason.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/TestEnvironment.hpp>
+#include <contour/window/SidebarTree.hpp>
 
 #include <core/testing/Environment.hpp>
 
@@ -830,7 +831,8 @@ TEST_CASE("ChromeSnapshotPlan: the switcher's eight scripts precede the location
     using namespace contour::test::snapshot;
     CHECK(static_cast<int>(SnapshotScript::DaemonLocal)
           == static_cast<int>(SnapshotScript::SwitcherHover) + 1);
-    CHECK(SnapshotScripts.back().script == SnapshotScript::DaemonLocalSingleTab);
+    CHECK(static_cast<int>(SnapshotScript::DaemonLocalSingleTab)
+          == static_cast<int>(SnapshotScript::DaemonLocal) + 1);
     for (auto const script: { SnapshotScript::DaemonLocal, SnapshotScript::DaemonLocalSingleTab })
         CHECK(scriptRow(script).connection == HostConnection::LocalDaemon);
     for (auto const& [script, name, action]: std::array {
@@ -857,4 +859,36 @@ TEST_CASE("ChromeSnapshotPlan: the switcher's eight scripts precede the location
         CHECK(scriptRow(script).action == action);
         CHECK(scriptRow(script).sidebar == SnapshotSidebar::None);
     }
+}
+
+TEST_CASE("snapshot plan: the sidebar's colour scripts cover every style, with the sidebar shown",
+          "[snapshot]")
+{
+    using namespace contour::test::snapshot;
+    using contour::config::SidebarTabColorStyle;
+    using contour::config::SidebarWorkspaceColorStyle;
+    auto tabStyles = std::vector<SidebarTabColorStyle> {};
+    auto workspaceStyles = std::vector<SidebarWorkspaceColorStyle> {};
+    for (auto const& row: SnapshotScripts)
+    {
+        INFO(row.name);
+        if (row.sidebarColor != SnapshotSidebarColor::None)
+            CHECK(row.sidebar == SnapshotSidebar::Tree);
+        if (row.sidebarColor == SnapshotSidebarColor::Tabs)
+            tabStyles.push_back(row.tabColorStyle);
+        if (row.sidebarColor == SnapshotSidebarColor::Workspaces && row.action == ScriptAction::None)
+            workspaceStyles.push_back(row.workspaceColorStyle);
+    }
+    CHECK(
+        tabStyles
+        == std::vector { SidebarTabColorStyle::Tint, SidebarTabColorStyle::Bar, SidebarTabColorStyle::Name });
+    CHECK(workspaceStyles
+          == std::vector { SidebarWorkspaceColorStyle::Tint,
+                           SidebarWorkspaceColorStyle::Group,
+                           SidebarWorkspaceColorStyle::Swatch });
+    CHECK(scriptRow(SnapshotScript::SidebarHoverCard).action == ScriptAction::HoverSidebarRow);
+    CHECK(scriptRow(SnapshotScript::SidebarWorkspaceColorPicker).action
+          == ScriptAction::OpenWorkspaceColorPicker);
+    // The hover card's status is longer than any row holds, so the card is what shows it whole.
+    CHECK(SnapshotLongStatus.size() > contour::window::MaxRowTextLength);
 }

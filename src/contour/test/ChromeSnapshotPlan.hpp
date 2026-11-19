@@ -128,6 +128,15 @@ enum class SnapshotScript : uint8_t
     SwitcherHover,        //!< The switcher with the pointer over another row: its fill and new-window button.
     DaemonLocal,          //!< The default local daemon: the chip in the band names it `local`, with no dot.
     DaemonLocalSingleTab, //!< The same with one tab: the band shows the title beside the chip.
+    SidebarTabTint, //!< sidebar-tree with claude's tab (selected) and build's coloured, `tab_color: tint`.
+    SidebarTabBar,  //!< The same under `tab_color: bar`.
+    SidebarTabName, //!< The same under `tab_color: name`.
+    /// sidebar-tree with billing (unfolded) and infra (folded) coloured, `workspace_color: tint`.
+    SidebarWorkspaceTint,
+    SidebarWorkspaceGroup,  //!< The same under `workspace_color: group`: the rail over every row of each.
+    SidebarWorkspaceSwatch, //!< The same under `workspace_color: swatch`.
+    SidebarHoverCard, //!< sidebar-tree with the pointer on build's row: its hover card, a long status whole.
+    SidebarWorkspaceColorPicker, //!< sidebar-workspace-tint with the colour picker open over billing's row.
 };
 
 /// What the workspace sidebar of a script shows.
@@ -139,6 +148,14 @@ enum class SnapshotSidebar : uint8_t
     Collapsed, //!< Shown, every workspace row folded.
     TopTabs,   //!< Shown, with the tabs on top.
     Hidden,    //!< Hidden: the chip in the band stands for it.
+};
+
+/// What a script colours in the workspace sidebar.
+enum class SnapshotSidebarColor : uint8_t
+{
+    None = 0,   //!< Nothing: every row in its own ink.
+    Tabs,       //!< billing's claude tab (the one displayed) and build tab, in the script's tab colour style.
+    Workspaces, //!< billing (unfolded) and infra (folded), in the script's workspace colour style.
 };
 
 /// How a script's active tab is divided into panes.
@@ -207,6 +224,8 @@ enum class ScriptAction : uint8_t
     SwitcherDiscovering, //!< The switcher, its discovery held back.
     SwitcherRowMenu,     //!< The switcher, the selected row's menu opened as the Menu key opens it.
     HoverSwitcherRow,    //!< The switcher, the pointer moved onto its third row.
+    HoverSidebarRow, //!< build's sidebar row given a long status, the pointer resting on it: its hover card.
+    OpenWorkspaceColorPicker, //!< The sidebar's colour picker over billing's row, as Custom… opens it.
 };
 
 /// What a script's tabs carry beyond their titles.
@@ -525,6 +544,11 @@ struct SnapshotScriptRow
     SnapshotShellCard shellCard = SnapshotShellCard::None; ///< The active pane's shell integration card.
     SnapshotButtons buttons = SnapshotButtons::Desktop;    ///< Where the desktop puts the buttons.
     SnapshotSidebar sidebar = SnapshotSidebar::None;       ///< What the workspace sidebar shows.
+    SnapshotSidebarColor sidebarColor = SnapshotSidebarColor::None; ///< What the sidebar shows coloured.
+    /// How a coloured tab shows on its sidebar rows (`sidebar.tab_color`).
+    config::SidebarTabColorStyle tabColorStyle = config::SidebarTabColorStyle::Tint;
+    /// How a coloured workspace shows in the sidebar (`sidebar.workspace_color`).
+    config::SidebarWorkspaceColorStyle workspaceColorStyle = config::SidebarWorkspaceColorStyle::Tint;
 };
 
 /// The rows of the script table, in enumerator order.
@@ -2344,6 +2368,53 @@ inline constexpr auto SnapshotScripts = std::array {
                         .name = "daemon-local-single-tab",
                         .tabCount = 1,
                         .connection = HostConnection::LocalDaemon },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarTabTint,
+                        .name = "sidebar-tab-tint",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sidebarColor = SnapshotSidebarColor::Tabs,
+                        .tabColorStyle = config::SidebarTabColorStyle::Tint },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarTabBar,
+                        .name = "sidebar-tab-bar",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sidebarColor = SnapshotSidebarColor::Tabs,
+                        .tabColorStyle = config::SidebarTabColorStyle::Bar },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarTabName,
+                        .name = "sidebar-tab-name",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sidebarColor = SnapshotSidebarColor::Tabs,
+                        .tabColorStyle = config::SidebarTabColorStyle::Name },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarWorkspaceTint,
+                        .name = "sidebar-workspace-tint",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sidebarColor = SnapshotSidebarColor::Workspaces,
+                        .workspaceColorStyle = config::SidebarWorkspaceColorStyle::Tint },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarWorkspaceGroup,
+                        .name = "sidebar-workspace-group",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sidebarColor = SnapshotSidebarColor::Workspaces,
+                        .workspaceColorStyle = config::SidebarWorkspaceColorStyle::Group },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarWorkspaceSwatch,
+                        .name = "sidebar-workspace-swatch",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sidebarColor = SnapshotSidebarColor::Workspaces,
+                        .workspaceColorStyle = config::SidebarWorkspaceColorStyle::Swatch },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarHoverCard,
+                        .name = "sidebar-hover-card",
+                        .tabCount = 3,
+                        .action = ScriptAction::HoverSidebarRow,
+                        .sidebar = SnapshotSidebar::Tree },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarWorkspaceColorPicker,
+                        .name = "sidebar-workspace-color-picker",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenWorkspaceColorPicker,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sidebarColor = SnapshotSidebarColor::Workspaces },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),
@@ -2380,6 +2451,18 @@ static_assert(std::ranges::all_of(SnapshotScripts,
                                              == (row.layoutName != SnapshotLayoutName::None);
                                   }),
               "a script names a layout name exactly when it opens Save Layout");
+
+static_assert(std::ranges::all_of(SnapshotScripts,
+                                  [](SnapshotScriptRow const& row) {
+                                      return row.sidebarColor == SnapshotSidebarColor::None
+                                             || row.sidebar != SnapshotSidebar::None;
+                                  }),
+              "a script colours the sidebar's rows only where it shows them");
+
+/// The status the hover-card script gives build's pane: longer than any row, so the card shows it whole.
+inline constexpr std::string_view SnapshotLongStatus =
+    "Running the integration suite against the staging database, then rebuilding the billing reports for "
+    "every customer whose invoices changed since the last deploy";
 
 /// The row describing @p script.
 /// @param script The script to look up.

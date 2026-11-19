@@ -438,6 +438,8 @@ class ChromeSnapshotScene
             case ScriptAction::HoverSwitcherRow: openSwitcher(scriptRow(_variant.script).action); break;
             case ScriptAction::ShowNewTabToolTip: showToolTips(ToolTipOf::NewTab); break;
             case ScriptAction::ShowTabToolTip: showToolTips(ToolTipOf::Tab); break;
+            case ScriptAction::HoverSidebarRow: hoverSidebarRow(); break;
+            case ScriptAction::OpenWorkspaceColorPicker: openWorkspaceColorPicker(); break;
         }
         // The cards announce where the header lives once the panes have their size, which showSticky() reads.
         _incubation.settle();
@@ -1774,6 +1776,57 @@ class ChromeSnapshotScene
         _tabColorFlyout = flyout;
     }
 
+    /// The sidebar row titled @p title, once the tree has laid it out.
+    [[nodiscard]] QQuickItem* sidebarRowTitled(QString const& title) const
+    {
+        QQuickItem* found = nullptr;
+        auto const laidOut = [&] {
+            for (auto* row: itemsNamed(*window().contentItem(), QStringLiteral("sidebarRow")))
+                if (row->isVisible() && row->property("title").toString() == title)
+                    found = row;
+            return found != nullptr;
+        };
+        REQUIRE(QTest::qWaitFor(laidOut, PopupSettleMs));
+        return found;
+    }
+
+    /// Gives build's pane SnapshotLongStatus, rests the pointer on its row and waits for the row's hover
+    /// card.
+    void hoverSidebarRow()
+    {
+        using namespace std::chrono_literals;
+        REQUIRE(QTest::qWaitForWindowExposed(&window(), PopupSettleMs));
+        auto& build = _controller.sidebarSource().listed.workspaces.at(0).tabs.at(1).panes.at(0);
+        build.status = { sidebarRecord(
+            vtbackend::ProgramState::Working, std::string(SnapshotLongStatus), 252s) };
+        _controller.sidebarModel().refreshNow();
+        _incubation.settle();
+        QCoreApplication::processEvents();
+        auto const* row = sidebarRowTitled(QStringLiteral("build"));
+        auto* card = root().findChild<QObject*>(QStringLiteral("sidebarHoverCard"));
+        REQUIRE(card != nullptr);
+        auto const rest = row->mapToScene(QPointF { row->width() / 2, row->height() / 2 }).toPoint();
+        // The pointer outlives the windows of earlier scenes: come from elsewhere, or a move to where it was
+        // sends no hover.
+        QTest::mouseMove(&window(), QPoint { window().width() - 10, window().height() - 10 });
+        QTest::qWait(HoverStepMs);
+        QTest::mouseMove(&window(), rest - QPoint { 0, 1 });
+        QTest::qWait(HoverStepMs);
+        QTest::mouseMove(&window(), rest);
+        REQUIRE(QTest::qWaitFor([&] { return card->property("opened").toBool(); }, PopupSettleMs));
+    }
+
+    /// Opens the sidebar's colour picker over billing's row, as its menu's Custom… does, and waits for it.
+    void openWorkspaceColorPicker()
+    {
+        REQUIRE(QTest::qWaitForWindowExposed(&window(), PopupSettleMs));
+        static_cast<void>(sidebarRowTitled(QStringLiteral("billing")));
+        auto* flyout = root().findChild<QObject*>(QStringLiteral("sidebarWorkspaceColorFlyout"));
+        REQUIRE(flyout != nullptr);
+        emit _controller.workspaceColorPickRequested(1);
+        REQUIRE(QTest::qWaitFor([&] { return flyout->property("opened").toBool(); }, PopupSettleMs));
+    }
+
     /// Rests the pointer on @p point of the window. Two moves, because a move to where the pointer already
     /// is sends nothing.
     void pointAt(QPoint point) const
@@ -1859,13 +1912,22 @@ class ChromeSnapshotScene
         return record;
     }
 
-    /// Lists what the sidebar shows of the window's workspaces for @p sidebar: `billing` with a blocked
+    /// claude's and build's tab colours under SnapshotSidebarColor::Tabs.
+    static constexpr auto SidebarTabColours =
+        std::array { vtbackend::RGBColor { 0x4C, 0x5F, 0xD5 }, vtbackend::RGBColor { 0xE8, 0x85, 0x3A } };
+    /// billing's and infra's colours under SnapshotSidebarColor::Workspaces.
+    static constexpr auto SidebarWorkspaceColours =
+        std::array { vtbackend::RGBColor { 0xC2, 0x54, 0x8F }, vtbackend::RGBColor { 0x3F, 0xA7, 0x7A } };
+
+    /// Lists what the sidebar shows of the window's workspaces for @p script: `billing` with a blocked
     /// agent, a working tab, a finished one nobody looked at, a failed command and a split tab, on a branch
-    /// two commits ahead; `docs`, idle; and `infra`, folded. Nothing for SnapshotSidebar::None.
-    /// @param sidebar What the script shows of the sidebar.
-    void listWorkspaces(SnapshotSidebar sidebar)
+    /// two commits ahead; `docs`, idle; and `infra`, folded; coloured as the script says. Nothing for
+    /// SnapshotSidebar::None.
+    /// @param script The script.
+    void listWorkspaces(SnapshotScriptRow const& script)
     {
         using namespace std::chrono_literals;
+        auto const sidebar = script.sidebar;
         if (sidebar == SnapshotSidebar::None)
             return;
         auto blocked = sidebarRecord(vtbackend::ProgramState::Blocked, "Bash: psql $DEV_URL", 30s);
@@ -1890,6 +1952,23 @@ class ChromeSnapshotScene
         split.panes = { directoryPaneOf(14, "server"), directoryPaneOf(15, "logs") };
         billing.tabs.push_back(std::move(split));
         billing.git = window::DirectoryGit { .branch = "feat/billing", .ahead = 2 };
+        auto infra = directoryWorkspaceOf(3, "infra", { directoryPaneOf(30, "terraform") });
+        switch (script.sidebarColor)
+        {
+            case SnapshotSidebarColor::None: break;
+            // The tab the window displays, and one it does not.
+            case SnapshotSidebarColor::Tabs:
+                billing.tabs.at(0).color = SidebarTabColours[0];
+                billing.tabs.at(1).color = SidebarTabColours[1];
+                break;
+            // One unfolded, one folded below.
+            case SnapshotSidebarColor::Workspaces:
+                billing.color = SidebarWorkspaceColours[0];
+                infra.color = SidebarWorkspaceColours[1];
+                break;
+        }
+        _controller.setSidebarTabColorStyle(script.tabColorStyle);
+        _controller.setSidebarWorkspaceColorStyle(script.workspaceColorStyle);
 
         auto const shown = sidebar == SnapshotSidebar::NeedsYou || sidebar == SnapshotSidebar::Hidden
                                ? uint64_t { 2 }
@@ -1902,7 +1981,7 @@ class ChromeSnapshotScene
                                                      directoryPaneOf(21, "preview"),
                                                      directoryPaneOf(22, "publish") }),
                               // Folded below, so every sidebar picture shows the collapsed disclosure too.
-                              directoryWorkspaceOf(3, "infra", { directoryPaneOf(30, "terraform") }) };
+                              std::move(infra) };
         listed.selected = shown;
         // The band names the shown workspace's tabs as the directory does, so the breadcrumb and the sidebar
         // agree on the tab's name.
@@ -1912,9 +1991,10 @@ class ChromeSnapshotScene
             window::TabRef { .workspace = shown, .tab = shown == 1 ? 10u : 20u };
         _controller.sidebarModel().refreshNow();
         auto const& rows = _controller.sidebarModel().rows();
-        auto const infra = std::ranges::find_if(rows, [](auto const& row) { return row.key.workspace == 3; });
-        REQUIRE(infra != rows.end());
-        _controller.sidebarModel().collapse(static_cast<int>(std::distance(rows.begin(), infra)));
+        auto const infraRow =
+            std::ranges::find_if(rows, [](auto const& row) { return row.key.workspace == 3; });
+        REQUIRE(infraRow != rows.end());
+        _controller.sidebarModel().collapse(static_cast<int>(std::distance(rows.begin(), infraRow)));
         if (sidebar == SnapshotSidebar::Collapsed)
         {
             // The first row is billing; once it is folded, docs is the second.
@@ -1968,7 +2048,7 @@ class ChromeSnapshotScene
         // The panes the active tab shows, as WindowController counts them: two or more make cards.
         _controller.setVisiblePaneCount(static_cast<int>(paneCount(scriptRow(_variant.script).panes)));
         _engine.rootContext()->setContextProperty(QStringLiteral("newDefaults"), &_newDefaults);
-        listWorkspaces(scriptRow(_variant.script).sidebar);
+        listWorkspaces(scriptRow(_variant.script));
         auto root = loadMainWindow(_engine, _controller, _warnings, chrome);
         REQUIRE(qobject_cast<QQuickWindow*>(root.get()) != nullptr);
         showSidebar(scriptRow(_variant.script).sidebar);
