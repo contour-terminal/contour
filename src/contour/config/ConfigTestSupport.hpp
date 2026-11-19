@@ -15,9 +15,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cerrno>
 #include <filesystem>
 #include <fstream>
 #include <string_view>
+#include <system_error>
 #include <variant>
 
 namespace contour::test::configSupport
@@ -28,10 +30,15 @@ using namespace std::string_view_literals;
 /// Writes @p yaml to a fresh file inside @p dir and returns its path.
 [[nodiscard]] inline std::filesystem::path writeConfig(QTemporaryDir& dir, std::string_view yaml)
 {
+    INFO("temporary dir: " << dir.errorString().toStdString());
+    REQUIRE(dir.isValid());
     auto const path = std::filesystem::path(dir.path().toStdU16String()) / "contour.yml";
     {
         auto out = std::ofstream(path);
         out << yaml;
+        out.close();
+        INFO("writing " << path.string() << ": " << std::generic_category().message(errno));
+        REQUIRE(out.good());
     }
     return path;
 }

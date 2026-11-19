@@ -5,6 +5,7 @@
 // QGuiApplication that the QML components need before running the Catch2 session.
 
 #include <contour/platform/ControlsStyleProbe.hpp>
+#include <contour/platform/OpenFileLimit.hpp>
 #include <contour/session/Permission.hpp>
 #include <contour/test/NotificationFixtures.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
@@ -125,6 +126,10 @@ int main(int argc, char* argv[])
     vtpty::runSpawnTrampolineIfRequested(argc, argv);
 
     core::testing::suppressWindowsDialogs();
+
+    // As the application does: a run renders through many font shapers, each holding its fonts open.
+    if (auto const raised = contour::platform::raiseOpenFileLimit(); !raised)
+        std::cerr << raised.error() << '\n';
 
     /// Default to the headless "offscreen" platform (CI-safe, no display server). The Qt Quick scene
     /// graph, however, cannot stand up a real render loop there — so the display-gated rendering

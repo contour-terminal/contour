@@ -1019,6 +1019,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/AudioNote_test.cpp
             platform/ControlsStyleProbe_test.cpp
             platform/FontFamilySource_test.cpp
+            platform/OpenFileLimit_test.cpp
             platform/GuiTheme_test.cpp
             platform/DBusGlobalShortcutsChannel_test.cpp
             platform/DBusPortalSettingsChannel_test.cpp

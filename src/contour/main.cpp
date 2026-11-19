@@ -18,6 +18,7 @@
 #include <contour/cli/ContourApp.hpp>
 #include <contour/cli/DaemonVerbs.hpp>
 #include <contour/cli/LegacyArguments.hpp>
+#include <contour/platform/OpenFileLimit.hpp>
 
 #include <vtpty/SpawnTrampoline.hpp>
 
@@ -297,6 +298,10 @@ int main(int argc, char const* argv[])
     if (!IsDebuggerPresent())
         core::testing::suppressWindowsDialogs();
 #endif
+
+    // Before anything opens a file: each font shaper holds its fonts open. @see OpenFileLimit.hpp.
+    if (auto const raised = contour::platform::raiseOpenFileLimit(); !raised)
+        printNotes(std::span(&raised.error(), 1));
 
     // This is the process's composition root, and the environment is the one ambient resource
     // everything below reads: the app takes it here, once, and hands it on to what it builds.
