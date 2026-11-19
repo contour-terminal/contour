@@ -339,7 +339,7 @@ before the sidebar existed still gets them, unless it binds the same chord itsel
 `NewWorkspace` is listed under [Switching daemons and workspaces](#switching-daemons-and-workspaces); the
 sidebar's **＋** button runs it.
 
-The settings are `sidebar: { visible, width }` and `tab_placement: sidebar | top`; see
-[the sidebar guide](../sidebar.md#configuration).
+The settings are `sidebar: { visible, width, tab_color, workspace_color }` and
+`tab_placement: sidebar | top`; see [the sidebar guide](../sidebar.md#configuration).
 
 --8<-- "configuration/key-mapping-actions.md"

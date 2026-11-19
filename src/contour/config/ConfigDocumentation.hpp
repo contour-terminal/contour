@@ -394,6 +394,8 @@ constexpr StringLiteral SidebarConfig {
     "    {comment}            (default).\n"
     "    {comment}   group  = a rail in the colour down the leading edge of the workspace's rows.\n"
     "    {comment}   swatch = a small square in the colour before the workspace's name.\n"
+    "    {comment} tab_color and workspace_color are read when a window opens: a window that is open when\n"
+    "    {comment} the configuration is reloaded keeps the styles it opened with.\n"
     "    workspace_color: {}\n"
     "\n"
 };
@@ -3007,6 +3009,10 @@ constexpr StringLiteral SidebarWeb {
     "    - `group`: a rail in the colour down the leading edge of the workspace's row and every row beneath "
     "it, over a faint wash.\n"
     "    - `swatch`: a small square in the colour before the workspace's name.\n"
+    "\n"
+    "`tab_color` and `workspace_color` are read when a window opens: a window that is open when the "
+    "configuration is reloaded keeps the styles it opened with, and a window opened after it uses the new "
+    "ones.\n"
     "\n"
 };
 

@@ -12,14 +12,19 @@ is waiting for you, which finished while you were looking elsewhere, and takes y
 
 ## What a row shows
 
-A workspace row is one line; a tab or pane row has a status glyph, a title, a time on the right and, when its
-program has something to say, a second line with the reason.
+A workspace row is one line. A tab or pane row is always two lines tall, so the list never jumps as a program
+starts or stops talking: a status glyph, a title and a time on the right, and beneath them a second line. The
+second line is the reason when the program has something to say, and otherwise the **idle line**: the folder
+the pane is in and the program running there, such as `~/src/billing · claude`, either one left out when it is
+not known.
 
 | Row | Title | Right-hand side | Second line |
 | --- | --- | --- | --- |
 | Workspace | Its name, or the folder or repository it was started in | The git branch with `↑` commits ahead and `↓` behind its upstream, such as `feat/billing ↑2 ↓1`, then the status glyph of its most urgent pane | None |
-| Tab | Its name, or the title its program or the title template gives it | Time in the current state | What the program in it says it is doing |
+| Tab | Its name, or the title its program or the title template gives it | Time in the current state | What the program in it says it is doing; otherwise its folder and program |
 | Pane | Shown only for a tab with more than one pane | The same | The same |
+
+A tab's rows list in the order of the tab strip, and follow it when a tab is moved there.
 
 - **Status and reason.** The status comes from agent hooks (see `contour agent setup`), from a blocked
   program, from OSC 133 shell integration (a command that finished, with its exit code) and from the bell. The
@@ -127,25 +132,28 @@ filter is only a view: it never changes what a drag or a rename acts on.
 ## Mouse
 
 - **Click** a row to show it. Click the disclosure triangle to fold or unfold it.
-- **Double-click** a workspace's or a tab's name to rename it. Return commits, Escape cancels. A workspace's
-  or a tab's name is shared: every window of the daemon and every `object.renamed` subscriber of the
+- **Double-click** a workspace's or a tab's name to rename it, or press **F2** on its row. Return commits,
+  Escape cancels. A workspace's or a tab's name is shared: every window of the daemon and every `object.renamed` subscriber of the
   [control API](control-api.md) hears it, and `contour rename` addresses the object by it (`tab:logs`).
 - **Right-click** for the row's menu:
-    - a workspace: Rename…, Mark Seen, New Tab Here, Move Up, Move Down, **Merge into Tab** (a workspace of
-      one tab only), Close Workspace… (the last workspace of an in-process window cannot be closed);
-    - a tab: the tab strip's menu (its close row reads Close Tab…), plus **Move to Workspace**, **Merge into
-      Tab** and **Move to New Workspace**;
-    - a pane: Go to Pane, Mark Seen, **Move to Tab**, **Move to New Tab**, **Move to New Workspace**, Close
-      Pane….
+    - a workspace: **Workspace Color**, Rename…, Mark Seen, New Tab Here, Move Up, Move Down, **Merge into
+      Tab** (a workspace of one tab only), Close Workspace… (the last workspace of an in-process window cannot
+      be closed);
+    - a tab: the tab strip's menu (Tab Color, Rename…, and its close row reads Close Tab…), then **Split
+      Vertically** and **Split Horizontally**, which split the tab's active pane, then **Move to Workspace**,
+      **Merge into Tab** and **Move to New Workspace**;
+    - a pane: Go to Pane, Mark Seen, **Split Vertically**, **Split Horizontally**, **Move to Tab**, **Move to
+      New Tab**, **Move to New Workspace**, Close Pane….
 
   Move to Tab and Merge into Tab list every other tab, under the name of its workspace; the pane, or the
   tab's panes, join that tab as splits, as a drop on its row does. Move to New Workspace makes a workspace
   named as any new one is, which an in-process window then shows. Move to New Workspace is greyed out for a workspace's
   only tab, which already is a workspace of its own.
 
-  Mark Seen, Rename…, Move Up, Move Down and the Move and Merge rows act on the row the menu was opened on and
-  leave the window where it is. The rest (Go to Pane, New Tab Here and the tab strip's own commands) act on
-  what the window shows, so the window shows that row first.
+  Workspace Color, Mark Seen, Rename…, Move Up, Move Down and the Move and Merge rows act on the row the menu
+  was opened on and leave the window where it is. The rest (Go to Pane, New Tab Here, the Split rows and the
+  tab strip's own commands) act on what the window shows, so the window shows that row first; a Split row
+  then splits the pane the row names, or the tab's active pane.
 
   The three close rows (Close Workspace…, Close Tab…, Close Pane…) always ask first, in one confirmation
   that names what ends (the tabs and panes, and the running command where known). Cancel is the default
@@ -190,8 +198,8 @@ the same, with an optional `cwd` and `name`.
 ## The hover card
 
 Resting the pointer on a row opens a card with the full reason line, wrapped instead of cut off (up to 2000
-characters, so a runaway one cannot flood it), and the program, the folder and the time. It follows the pointer onto itself, so you can read it, and closes when the
-pointer leaves.
+characters, so a runaway one cannot flood it), and the program, the folder and the time, the folder shown to
+its end. It follows the pointer onto itself, so you can read it, and closes when the pointer leaves.
 
 ## The footer
 
@@ -233,7 +241,7 @@ a remote daemon, and opens the same switcher below itself with the same tooltip.
 - Below this daemon's workspaces the popup lists every other local daemon and saved host, as the
   `ShowSwitcher` popup does: the click and the chord open the same rows.
 - Right-click a workspace (or press the Menu key, or Shift+F10) for the same menu its sidebar row has:
-  rename, mark seen, new tab, move, close.
+  colour, rename, mark seen, new tab, move, close.
 - Escape, or a click elsewhere, closes it and changes nothing; Escape does not narrow it first.
 
 The switcher keeps the sidebar's times running while it is open, so a working workspace's time moves on even
@@ -280,7 +288,12 @@ colour is shown in the sidebar only.
 
 To colour a workspace, right-click its row and pick from **Workspace Color**: a swatch, **Custom…** for the
 colour picker, or **Reset**. The `SetWorkspaceColor` action without a colour opens the picker for the shown
-workspace.
+workspace. A workspace's colour belongs to the daemon, as its name does: every window of the daemon shows it,
+and it survives a restart and a live upgrade. Against tmux, or a daemon that predates workspace colours,
+**Workspace Color** is greyed out. A tab is coloured from **Tab Color** in its menu, as on the tab strip.
+
+`tab_color` and `workspace_color` are read when a window opens: a window that is open when the configuration
+is reloaded keeps the styles it opened with, and a window opened after it uses the new ones.
 
 See [Key mapping](configuration/key-mapping.md#workspace-sidebar) for the actions and their default chords.
 The default width is 220 px on macOS, 240 px on Fluent and ContourLinux, and 28 cells under
