@@ -863,7 +863,7 @@ TEST_CASE(
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("accessibility: a workspace's colour changes neither its row's name nor its description",
+TEST_CASE("accessibility: a coloured workspace's row says what it is handed, and its paint is decoration",
           "[contour][gui][qml][a11y][sidebar]")
 {
     QQmlEngine engine;
@@ -918,9 +918,13 @@ TEST_CASE("accessibility: a workspace's colour changes neither its row's name no
     auto* colouredAttached = accessibleAttachedOf(coloured.get());
     REQUIRE(plainAttached != nullptr);
     REQUIRE(colouredAttached != nullptr);
-    CHECK(colouredAttached->property("name").toString() == plainAttached->property("name").toString());
-    CHECK(colouredAttached->property("description").toString()
-          == plainAttached->property("description").toString());
+    // Both say the model's words (SidebarModel's accessibleName and accessibleDescription roles), which
+    // SidebarModel_test checks are the same with and without a colour.
+    for (auto const* attached: { plainAttached, colouredAttached })
+    {
+        CHECK(attached->property("name").toString() == QStringLiteral("contour"));
+        CHECK(attached->property("description").toString() == QStringLiteral("Workspace, expanded"));
+    }
 
     // What the colour draws is decoration, whichever style draws it.
     for (auto const* part: { "sidebarRowWorkspaceFill",

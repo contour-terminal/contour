@@ -549,6 +549,34 @@ TEST_CASE("SidebarModel: counts take their plural form, and zeros are left out",
     CHECK(accessibleDescriptionOf(row) == "Tab, failed");
 }
 
+TEST_CASE("SidebarModel: a colour changes neither a row's accessible name nor its description",
+          "[contour][sidebar]")
+{
+    auto const coloured = [](SidebarRow row) {
+        row.tabColor = vtbackend::RGBColor { 0x29, 0x80, 0xB9 };
+        row.workspaceColor = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
+        return row;
+    };
+    auto workspace = SidebarRow {};
+    workspace.key.kind = SidebarRowKind::Workspace;
+    workspace.title = "contour";
+    workspace.expansion = RowExpansion::Expanded;
+    auto tab = SidebarRow {};
+    tab.key.kind = SidebarRowKind::Tab;
+    tab.depth = 1;
+    tab.title = "claude";
+    tab.urgency = Urgency::Failed;
+    for (auto const& row: { workspace, tab })
+    {
+        CAPTURE(row.title);
+        CHECK(accessibleNameOf(coloured(row)) == accessibleNameOf(row));
+        CHECK(accessibleNameOf(coloured(row)) == QString::fromStdString(row.title));
+        CHECK(accessibleDescriptionOf(coloured(row)) == accessibleDescriptionOf(row));
+    }
+    CHECK(accessibleDescriptionOf(coloured(workspace)) == "Workspace, expanded");
+    CHECK(accessibleDescriptionOf(coloured(tab)) == "Tab, failed");
+}
+
 TEST_CASE("SidebarModel: a fold that hides the displayed tab selects its workspace", "[contour][sidebar]")
 {
     auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }),

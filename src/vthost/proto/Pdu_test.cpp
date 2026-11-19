@@ -2769,16 +2769,34 @@ TEST_CASE("WorkspaceMeta carries the colour after the position, as a has-colour 
         auto const body = metaBytes(0b1000, [](Writer& out) { out.u8(1); });
         CHECK_FALSE(decodePdu(frameOf(PduType::WorkspaceMeta, body.view())).has_value());
     }
-    SECTION("an older client skips the colour: it is the last field, and its bit is one it never tests")
+    SECTION("the colour is the last field, so an older client reads the fields it knows and stops before it")
     {
-        auto const body = metaBytes(0b1001, [](Writer& out) {
+        auto const name = [](Writer& out) {
             out.string("ops");
+        };
+        auto const coloured = metaBytes(0b1001, [&](Writer& out) {
+            name(out);
             out.u8(1);
             out.u32(0xC2548F);
         });
-        auto const decoded = decodeAs<WorkspaceMeta>(frameOf(PduType::WorkspaceMeta, body.view()));
+        auto const decoded = decodeAs<WorkspaceMeta>(frameOf(PduType::WorkspaceMeta, coloured.view()));
         CHECK(decoded.name == std::optional<std::string> { "ops" });
         CHECK_FALSE(decoded.position.has_value());
+        CHECK(decoded.color == std::optional { WireWorkspaceColor { .rgb = 0xC2548F } });
+
+        // Byte for byte, the meta an older daemon sends with the same name, the colour's five bytes after it,
+        // and only the mask's colour bit set besides: what an older client reads ends where its own fields
+        // do, and the bit it never tests is the only other difference.
+        auto const plain = metaBytes(0b0001, name);
+        auto const colouredBytes = coloured.view();
+        auto const plainBytes = plain.view();
+        REQUIRE(colouredBytes.size() == plainBytes.size() + 5);
+        auto const differing = std::ranges::count_if(
+            std::views::zip(colouredBytes.first(plainBytes.size()), plainBytes), [](auto const& pair) {
+                auto const& [left, right] = pair;
+                return left != right;
+            });
+        CHECK(differing == 1);
     }
 }
 

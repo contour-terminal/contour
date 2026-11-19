@@ -33,7 +33,7 @@ constexpr auto States = std::array { TabVisualState::Active,
 constexpr auto Magenta = RGBColor { 0xC2, 0x54, 0x8F };
 constexpr auto RowFill = RGBColor { 0x20, 0x20, 0x20 };
 
-/// The paint the brief's rules give, spelled out per style and kind, for a coloured workspace.
+/// The paint each style gives, spelled out per style and kind, for a coloured workspace.
 SidebarWorkspaceColorPaint expectedPaint(SidebarWorkspaceColorStyle style,
                                          SidebarRowKind kind,
                                          TabVisualState state)
