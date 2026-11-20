@@ -85,8 +85,8 @@ struct OwnedPanesServices
     vtcontrol::UuidSource& ids; ///< Mints pane UUIDs; thread-safe.
     OwnedPaneHost& host;        ///< The loop-side model calls.
     IServedTabLookup const&
-        servedTabs; ///< `nearTab` -> its tab's workspace; who typed or clicked into its tabs now.
-    IExtensionActions const& origins; ///< origin -> ConnectionId (pane-reveal).
+        servedTabs;             ///< `nearTab` -> its tab's workspace; who typed or clicked into its tabs now.
+    IExtensionActions& origins; ///< origin -> ConnectionId, claimed by a pane-reveal.
     IConnectionWorkspaces const&
         workspaces;                    ///< ConnectionId -> selected workspace; the most recently focused.
     IServedAdmission const& admission; ///< The upgrade latch.
@@ -185,12 +185,6 @@ class OwnedPanes final: public IOwnedPanes
     /// @return Where a pane opened near @p nearTab opens. Loop thread.
     [[nodiscard]] std::optional<vtworkspace::WorkspaceId> workspaceFor(
         std::string_view extension, std::optional<std::string> const& nearTab) const;
-
-    /// @param origin The connection of a reveal's origin; nullopt for one that detached.
-    /// @return The window to reveal in, and the workspace it shows: the origin's own, else the one focused
-    ///         last; nullopt when no window shows a workspace. Any thread.
-    [[nodiscard]] std::optional<std::pair<ConnectionId, vtworkspace::WorkspaceId>> windowFor(
-        std::optional<ConnectionId> const& origin) const;
 
     /// Writes @p extension's open panes to its registry file. Loop thread.
     void save(std::string_view extension);

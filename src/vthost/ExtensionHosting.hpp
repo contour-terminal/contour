@@ -212,13 +212,10 @@ struct ExtensionActionRows
 /// Minted once per connection, never reused.
 using Origin = uint32_t;
 
-/// What an origin is to the extension that names it.
-enum class OriginStanding : uint8_t
-{
-    Unknown = 0, ///< Never handed to it: 0, made up, or another extension's.
-    Detached,    ///< Handed to it, and its connection has detached since.
-    Attached,    ///< Handed to it, and its connection is attached.
-};
+/// How long after a user action a reveal it produced still counts as that user's: after an action invoked
+/// through an origin, or a key typed or a button pressed into one of an extension's served tabs. Past it the
+/// user is doing something else, and a window raised then would take the keys meant for it.
+inline constexpr auto ServedInputGrace = std::chrono::seconds { 2 };
 
 /// The actions the user invoked, per extension, with the connection each came from: what an extension's
 /// `actions-take` reads.
@@ -246,11 +243,16 @@ class IExtensionActions
     [[nodiscard]] virtual std::optional<ConnectionId> connectionOf(std::string_view extension,
                                                                    Origin origin) const = 0;
 
-    /// From any thread. Tells an origin that went stale from one there never was a user action behind.
+    /// Claims @p origin for one reveal, from any thread. An origin authorises a reveal -- a window raised, a
+    /// tab activated -- only for ServedInputGrace after the action the user invoked through it, and once:
+    /// the first reveal consumes it, and the next action the user invokes allows the next one.
     /// @param extension What the daemon's configuration calls the extension asking.
     /// @param origin An origin it names.
-    /// @return Whether take() handed @p origin to @p extension, and whether its connection is still attached.
-    [[nodiscard]] virtual OriginStanding standingOf(std::string_view extension, Origin origin) const = 0;
+    /// @return The connection @p origin stands for, if take() handed it to @p extension, that connection is
+    ///         attached, and an action invoked through it at most ServedInputGrace ago was not claimed yet;
+    ///         nullopt otherwise.
+    [[nodiscard]] virtual std::optional<ConnectionId> claimReveal(std::string_view extension,
+                                                                  Origin origin) = 0;
 };
 
 /// Why a call about a served tab was refused.
@@ -298,8 +300,10 @@ class IServedTabs
     IServedTabs& operator=(IServedTabs&&) = delete;
     virtual ~IServedTabs() = default;
 
-    /// Opens the extension's tab in the workspace the origin's window shows, or reveals the one it has there.
-    /// Returns before the tab's session exists: it is created on the loop, activated in its workspace.
+    /// Opens the extension's tab in the workspace the origin's window shows, or reveals the one it has there
+    /// -- only as IExtensionActions::claimReveal() allows: the origin's action invoked just now, and not
+    /// claimed yet. Returns before the tab's session exists: it is created on the loop, activated in its
+    /// workspace.
     /// @param extension What the daemon's configuration calls it.
     /// @param title The tab's fixed name: the manifest's `title`, else the extension's name.
     /// @param moduleDigest The hex SHA-256 of the module that draws it, which the chrome names.
@@ -320,14 +324,15 @@ class IServedTabs
                                                                     std::string_view tab) = 0;
 
     /// Brings one of the extension's tabs in front of the origin's window: activated where it is shown, the
-    /// window asked first when it is in another workspace. Without an attached origin, the window whose user
-    /// typed or clicked into one of its served tabs at most ServedInputGrace ago is the one asking. A tab not
-    /// created yet is activated by its creation.
+    /// window asked first when it is in another workspace. The origin counts once, and only for
+    /// ServedInputGrace after the action the user invoked through it (IExtensionActions::claimReveal());
+    /// without it, the window whose user typed or clicked into one of its served tabs at most
+    /// ServedInputGrace ago is the one asking. A tab not created yet is activated by its creation.
     /// @param extension What the daemon's configuration calls it.
     /// @param tab The tab's id.
     /// @param origin The connection the action that asked for it came from.
-    /// @return Nothing; NotOwned for an id that is not one of its tabs; Gone for an origin that detached, and
-    ///         no recent key or click to stand for it.
+    /// @return Nothing; NotOwned for an id that is not one of its tabs; Gone for an origin that is stale,
+    ///         claimed already or detached, and no recent key or click to stand for it.
     [[nodiscard]] virtual std::expected<void, ServedTabError> reveal(std::string_view extension,
                                                                      std::string_view tab,
                                                                      Origin origin) = 0;
@@ -472,17 +477,17 @@ class IOwnedPanes
         std::string_view extension) const = 0;
 
     /// Brings one of the extension's panes in front of the origin's window: activated where that window
-    /// shows it, the window asked first when it is in another workspace. Without an attached origin, the
-    /// window whose user typed or clicked into one of the extension's served tabs at most ServedInputGrace
-    /// ago is the one asking. An origin handed to this extension whose connection detached since stands for
-    /// the window focused last; with no window attached, the pane's tab is activated in its own workspace.
-    /// One never handed to it (0, made up, another extension's) reveals nothing: no user action is behind it.
-    /// A pane not created yet is revealed once it is.
+    /// shows it, the window asked first when it is in another workspace. The origin counts once, and only
+    /// for ServedInputGrace after the action the user invoked through it (IExtensionActions::claimReveal());
+    /// without it, the window whose user typed or clicked into one of the extension's served tabs at most
+    /// ServedInputGrace ago is the one asking. Without either -- an origin never handed to it (0, made up,
+    /// another extension's), gone stale, claimed already, or whose window detached -- it reveals nothing, and
+    /// activates nothing: no user action is behind it. A pane not created yet is revealed once it is.
     /// @param extension Whose pane it is.
     /// @param pane The pane's id.
     /// @param origin The connection the action that asked for it came from.
-    /// @return Nothing; NotOwned for an id that is not one of its panes; Gone for one it closed, or for an
-    ///         origin never handed to it; NotReconciled until the host restored its sessions.
+    /// @return Nothing; NotOwned for an id that is not one of its panes; Gone for one it closed, or with no
+    ///         user action behind it; NotReconciled until the host restored its sessions.
     [[nodiscard]] virtual std::expected<void, OwnedPaneError> reveal(std::string_view extension,
                                                                      std::string_view pane,
                                                                      Origin origin) = 0;

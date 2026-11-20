@@ -261,7 +261,8 @@ struct Fixture
     int presenceChanges = 0;
     RecordingTabs tabs;
     RecordingOwnedPanes panes;
-    vthost::ExtensionActions actions { [](std::string_view /*extension*/, vthost::ServedHint /*hint*/) {} };
+    vthost::ExtensionActions actions { [](std::string_view /*extension*/, vthost::ServedHint /*hint*/) {},
+                                       core::platform::defaultSteadyClock() };
     /// Made once its module is on disk.
     std::unique_ptr<vthost::DaemonWorldExtensions> world;
 };
@@ -414,7 +415,8 @@ TEST_CASE("DaemonWorldExtensions: a served-tab call reaches the host in the mani
 {
     auto tabs = RecordingTabs {};
     auto panes = RecordingOwnedPanes {};
-    auto actions = vthost::ExtensionActions { [](std::string_view, vthost::ServedHint) {} };
+    auto actions = vthost::ExtensionActions { [](std::string_view, vthost::ServedHint) {},
+                                              core::platform::defaultSteadyClock() };
     auto const scheme = std::string_view { "agents" };
     auto service = vthost::servedTabServiceOf(
         vtextension::ServedTabOwner {
@@ -987,7 +989,8 @@ TEST_CASE("DaemonWorldExtensions: the daemon world reads files through the nativ
     auto tabs = RecordingTabs {};
     auto panes = RecordingOwnedPanes {};
     auto actions =
-        vthost::ExtensionActions { [](std::string_view /*extension*/, vthost::ServedHint /*hint*/) {} };
+        vthost::ExtensionActions { [](std::string_view /*extension*/, vthost::ServedHint /*hint*/) {},
+                                   core::platform::defaultSteadyClock() };
     auto world = vthost::DaemonWorldExtensions(
         vtextension::DaemonExtensionRuntimeConfig {
             .declarations = { vtextension::DaemonExtensionDeclaration {
@@ -1037,7 +1040,8 @@ TEST_CASE("DaemonWorldExtensions: the pane calls reach the host's owned panes in
 {
     auto tabs = RecordingTabs {};
     auto panes = RecordingOwnedPanes {};
-    auto actions = vthost::ExtensionActions { [](std::string_view, vthost::ServedHint) {} };
+    auto actions = vthost::ExtensionActions { [](std::string_view, vthost::ServedHint) {},
+                                              core::platform::defaultSteadyClock() };
     auto host = vthost::paneHostOf(
         vtextension::ServedTabOwner {
             .extension = "orchestrator", .title = "Agents", .scheme = std::nullopt, .moduleDigest = "" },

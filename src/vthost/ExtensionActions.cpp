@@ -10,8 +10,9 @@
 namespace vthost
 {
 
-ExtensionActions::ExtensionActions(std::function<void(std::string_view extension, ServedHint hint)> raise):
-    _raise { std::move(raise) }
+ExtensionActions::ExtensionActions(std::function<void(std::string_view extension, ServedHint hint)> raise,
+                                   core::platform::IClock const& clock):
+    _raise { std::move(raise) }, _clock { clock }
 {
 }
 
@@ -32,14 +33,11 @@ void ExtensionActions::forget(ConnectionId const& connection)
     auto const gone = std::ranges::find(_origins, connection, &std::pair<ConnectionId, Origin>::first);
     if (gone == _origins.end())
         return;
-    for (auto& [extension, handed]: _handedOut)
-        if (std::erase(handed, gone->second) > 0)
-        {
-            auto& detached = _detachedOut[extension];
-            detached.push_back(gone->second);
-            if (detached.size() > MaxDetachedOrigins)
-                detached.pop_front();
-        }
+    for (auto& handed: _handedOut | std::views::values)
+        std::erase(handed, gone->second);
+    for (auto& unclaimed: _unclaimed | std::views::values)
+        std::erase_if(unclaimed,
+                      [origin = gone->second](auto const& entry) { return entry.first == origin; });
     _origins.erase(gone);
 }
 
@@ -60,6 +58,10 @@ void ExtensionActions::deliver(std::string_view extension, std::string_view acti
             queue->second.pop_front();
         }
         queue->second.emplace_back(std::string(action), origin);
+        // The user acted just now: what the action asks to reveal may be revealed, once and soon.
+        auto& unclaimed = _unclaimed[std::string(extension)];
+        std::erase_if(unclaimed, [origin](auto const& entry) { return entry.first == origin; });
+        unclaimed.emplace_back(origin, _clock.now());
     }
     if (_raise)
         _raise(extension, ServedHint::Actions);
@@ -104,16 +106,28 @@ std::optional<ConnectionId> ExtensionActions::connectionOf(std::string_view exte
     return known->first;
 }
 
-OriginStanding ExtensionActions::standingOf(std::string_view extension, Origin origin) const
+std::optional<ConnectionId> ExtensionActions::claimReveal(std::string_view extension, Origin origin)
 {
     auto const lock = std::scoped_lock { _mutex };
+    auto const unclaimed = _unclaimed.find(extension);
+    if (unclaimed == _unclaimed.end())
+        return std::nullopt;
+    auto const entry = std::ranges::find(
+        unclaimed->second, origin, &std::pair<Origin, core::platform::SteadyTimePoint>::first);
+    if (entry == unclaimed->second.end())
+        return std::nullopt;
+    // Claimed, whether in time or not: a stale one is no use to anyone later either.
+    auto const invokedAt = entry->second;
+    unclaimed->second.erase(entry);
+    if (_clock.now() - invokedAt > ServedInputGrace)
+        return std::nullopt;
     if (auto const handed = _handedOut.find(extension);
-        handed != _handedOut.end() && std::ranges::contains(handed->second, origin))
-        return OriginStanding::Attached;
-    if (auto const detached = _detachedOut.find(extension);
-        detached != _detachedOut.end() && std::ranges::contains(detached->second, origin))
-        return OriginStanding::Detached;
-    return OriginStanding::Unknown;
+        handed == _handedOut.end() || !std::ranges::contains(handed->second, origin))
+        return std::nullopt;
+    auto const known = std::ranges::find(_origins, origin, &std::pair<ConnectionId, Origin>::second);
+    if (known == _origins.end())
+        return std::nullopt;
+    return known->first;
 }
 
 } // namespace vthost

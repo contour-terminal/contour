@@ -93,11 +93,6 @@ class IServedAdmission
     [[nodiscard]] virtual ServedAdmission current() const noexcept = 0;
 };
 
-/// How long after a user typed or clicked into one of an extension's served tabs a reveal it asks for,
-/// without an origin that names an attached window, still counts as that user's: the key or click that asked
-/// went there.
-inline constexpr auto ServedInputGrace = std::chrono::seconds { 2 };
-
 /// A served tab's workspace, as the served tabs' mirror holds it; and who typed or clicked into an
 /// extension's served tabs last. Any thread.
 class IServedTabLookup
@@ -199,7 +194,7 @@ class ServedSessions final: public IServedTabs, public IServedTabLookup
     /// @param host The host's loop-thread face.
     /// @param clock The host loop's steady clock, which input is stamped and judged by; thread-safe.
     ServedSessions(std::shared_ptr<vtcontrol::UuidSource> ids,
-                   IExtensionActions const& origins,
+                   IExtensionActions& origins,
                    IConnectionWorkspaces const& workspaces,
                    IServedAdmission const& admission,
                    Raise raise,
@@ -318,7 +313,7 @@ class ServedSessions final: public IServedTabs, public IServedTabLookup
     void forget(std::string_view id);
 
     std::shared_ptr<vtcontrol::UuidSource> _ids; ///< Where the UUIDs of served tabs come from.
-    IExtensionActions const& _origins;
+    IExtensionActions& _origins;
     IConnectionWorkspaces const& _workspaces;
     IServedAdmission const& _admission;
     Raise _raise;

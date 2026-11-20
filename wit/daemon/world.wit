@@ -280,7 +280,8 @@ interface host {
     tab-open: func(scheme: string, origin: origin) -> result<string, host-error>;
     /// Closes a served tab.
     tab-close: func(tab: string) -> result<_, host-error>;
-    /// Activates a served tab already open in the origin's workspace.
+    /// Activates a served tab already open in the origin's workspace, as `pane-reveal` reveals a pane: an
+    /// origin counts once, and only for 2 s after the user invoked the action it came with.
     tab-reveal: func(tab: string, origin: origin) -> result<_, host-error>;
     /// Lists the served tabs.
     tabs: func() -> result<list<tab-info>, host-error>;
@@ -299,12 +300,13 @@ interface host {
     /// detail as shown is at most 128 KiB.
     summary-set: func(short: string, detail: string) -> result<_, host-error>;
     /// Shows a pane the extension owns in the origin's window: activated where that window shows its
-    /// workspace, the user asked first when it is in another. An origin whose window has gone stands for
-    /// the window focused last; with none attached the pane only becomes its workspace's active tab. Within
-    /// 2 s of a key typed or a mouse button pressed into one of the extension's served tabs, an origin that
-    /// names no attached window (0 included) stands for the window that key or click came from. Otherwise an origin never handed to the
-    /// extension (0, another extension's) is `gone` and raises nothing; so is a pane it closed, until its
-    /// session ended (`not-owned` after).
+    /// workspace, the user asked first when it is in another. An origin counts once, and only for 2 s after
+    /// the user invoked the action it came with: the first reveal consumes it. Within 2 s of a key typed or
+    /// a mouse button pressed into one of the extension's served tabs, a reveal without such an origin (0
+    /// included) goes to the window that key or click came from. Otherwise -- an origin never handed to the
+    /// extension (0, another extension's), one gone stale or consumed, one whose window has gone -- it is
+    /// `gone`, and raises and activates nothing; so is a pane it closed, until its session ended
+    /// (`not-owned` after).
     pane-reveal: func(pane: string, origin: origin) -> result<_, host-error>;
     /// Reads a regular file inside a root declared readable.
     file-read: func(root: string, path: string) -> result<file-content, file-error>;

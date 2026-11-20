@@ -558,7 +558,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _defaultCellPixelSize(config.defaultCellPixelSize),
     _nextSessionId(config.firstSessionId),
     _extensions(std::move(config.extensions)),
-    _extensionActions(hintRaiser()),
+    _extensionActions(hintRaiser(), _clocks.steady.get()),
     // Before _objects takes config.uuids over.
     _served(config.servedIds ? config.servedIds : config.uuids,
             _extensionActions,

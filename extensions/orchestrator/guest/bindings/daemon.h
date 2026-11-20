@@ -471,7 +471,8 @@ extern bool terminal_extensions_daemon_host_panes(terminal_extensions_daemon_hos
 extern bool terminal_extensions_daemon_host_tab_open(daemon_string_t *scheme, terminal_extensions_daemon_host_origin_t origin, daemon_string_t *ret, terminal_extensions_daemon_host_host_error_t *err);
 // Closes a served tab.
 extern bool terminal_extensions_daemon_host_tab_close(daemon_string_t *tab, terminal_extensions_daemon_host_host_error_t *err);
-// Activates a served tab already open in the origin's workspace.
+// Activates a served tab already open in the origin's workspace, as `pane-reveal` reveals a pane: an
+// origin counts once, and only for 2 s after the user invoked the action it came with.
 extern bool terminal_extensions_daemon_host_tab_reveal(daemon_string_t *tab, terminal_extensions_daemon_host_origin_t origin, terminal_extensions_daemon_host_host_error_t *err);
 // Lists the served tabs.
 extern bool terminal_extensions_daemon_host_tabs(terminal_extensions_daemon_host_list_tab_info_t *ret, terminal_extensions_daemon_host_host_error_t *err);
@@ -490,12 +491,13 @@ extern bool terminal_extensions_daemon_host_actions_take(terminal_extensions_dae
 // detail as shown is at most 128 KiB.
 extern bool terminal_extensions_daemon_host_summary_set(daemon_string_t *short_, daemon_string_t *detail, terminal_extensions_daemon_host_host_error_t *err);
 // Shows a pane the extension owns in the origin's window: activated where that window shows its
-// workspace, the user asked first when it is in another. An origin whose window has gone stands for
-// the window focused last; with none attached the pane only becomes its workspace's active tab. Within
-// 2 s of a key typed or a mouse button pressed into one of the extension's served tabs, an origin that
-// names no attached window (0 included) stands for the window that key or click came from. Otherwise an origin never handed to the
-// extension (0, another extension's) is `gone` and raises nothing; so is a pane it closed, until its
-// session ended (`not-owned` after).
+// workspace, the user asked first when it is in another. An origin counts once, and only for 2 s after
+// the user invoked the action it came with: the first reveal consumes it. Within 2 s of a key typed or
+// a mouse button pressed into one of the extension's served tabs, a reveal without such an origin (0
+// included) goes to the window that key or click came from. Otherwise -- an origin never handed to the
+// extension (0, another extension's), one gone stale or consumed, one whose window has gone -- it is
+// `gone`, and raises and activates nothing; so is a pane it closed, until its session ended
+// (`not-owned` after).
 extern bool terminal_extensions_daemon_host_pane_reveal(daemon_string_t *pane, terminal_extensions_daemon_host_origin_t origin, terminal_extensions_daemon_host_host_error_t *err);
 // Reads a regular file inside a root declared readable.
 extern bool terminal_extensions_daemon_host_file_read(daemon_string_t *root, daemon_string_t *path, terminal_extensions_daemon_host_file_content_t *ret, terminal_extensions_daemon_host_file_error_t *err);

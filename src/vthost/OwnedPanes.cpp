@@ -229,41 +229,30 @@ std::expected<void, OwnedPaneError> OwnedPanes::reveal(std::string_view extensio
             case OwnedPaneState::Pending: break; // its creation, posted earlier, runs first
         }
     }
-    // The origin's window; else that of a key or click into one of the extension's served tabs just now,
-    // which is what asked for it (a dashboard's input carries no origin). Without either, no user action is
-    // behind an origin never handed to it -- 0, made up, another extension's: an extension never raises a
-    // window on its own. One that was handed and went stale stands for the window focused last (windowFor()).
-    auto const connection = _services.origins.connectionOf(extension, origin).or_else([&] {
+    // The origin's window, if the user invoked the action behind it just now and no reveal claimed it yet;
+    // else that of a key or click into one of the extension's served tabs just now, which is what asked for
+    // it (a dashboard's input carries no origin). Without either no user action is behind the reveal -- an
+    // origin never handed to it (0, made up, another extension's), one gone stale, one a reveal claimed
+    // already, one whose window detached: an extension never raises a window on its own, and never long after
+    // the user acted, when what they type would follow the window it raised.
+    auto const connection = _services.origins.claimReveal(extension, origin).or_else([&] {
         return _services.servedTabs.recentInputFrom(extension);
     });
-    if (!connection && _services.origins.standingOf(extension, origin) == OriginStanding::Unknown)
+    auto const workspace = connection ? _services.workspaces.selectedBy(*connection) : std::nullopt;
+    if (!workspace)
         return std::unexpected(OwnedPaneError::Gone);
     // Looked up on the loop: a pending pane's session exists only once its creation ran there.
-    _services.post([this, pane = *id, window = windowFor(connection)] {
+    _services.post([this, pane = *id, connection = *connection, workspace = *workspace] {
         auto session = std::optional<vtworkspace::SessionId> {};
         {
             auto const lock = std::lock_guard { _mutex };
             if (auto const found = std::ranges::find(_entries, pane, &Entry::pane); found != _entries.end())
                 session = found->session;
         }
-        if (!session)
-            return;
-        if (window)
-            revealSession(_services.tabHost, *session, window->first, window->second);
-        else
-            _services.tabHost.activate(*session); // no window to tell: its tab is the one its workspace shows
+        if (session)
+            revealSession(_services.tabHost, *session, connection, workspace);
     });
     return {};
-}
-
-std::optional<std::pair<ConnectionId, vtworkspace::WorkspaceId>> OwnedPanes::windowFor(
-    std::optional<ConnectionId> const& origin) const
-{
-    // The origin's window; else, for one that detached, where the user looked last.
-    for (auto const& connection: { origin, _services.workspaces.mostRecentlyFocused() })
-        if (auto const workspace = connection ? _services.workspaces.selectedBy(*connection) : std::nullopt)
-            return std::pair { *connection, *workspace };
-    return std::nullopt;
 }
 
 void OwnedPanes::reconcile(std::span<HostedPane const> hosted)

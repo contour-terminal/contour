@@ -225,7 +225,7 @@ struct ServedSessions::DeviceState
 };
 
 ServedSessions::ServedSessions(std::shared_ptr<vtcontrol::UuidSource> ids,
-                               IExtensionActions const& origins,
+                               IExtensionActions& origins,
                                IConnectionWorkspaces const& workspaces,
                                IServedAdmission const& admission,
                                Raise raise,
@@ -382,8 +382,9 @@ std::expected<std::string, ServedTabError> ServedSessions::open(std::string_view
         _post([this, id, title = std::string(title), moduleDigest = std::string(moduleDigest)] {
             create(id, title, moduleDigest);
         });
-    else if (reveal)
-        _post([this, session = reveal->first, connection = *connection, workspace = reveal->second] {
+    else if (auto const claimed = reveal ? _origins.claimReveal(extension, origin) : std::nullopt)
+        // Shown again only as an action the user invoked just now asks.
+        _post([this, session = reveal->first, connection = *claimed, workspace = reveal->second] {
             revealSession(_host, session, connection, workspace);
         });
     return id;
@@ -497,11 +498,7 @@ std::expected<void, ServedTabError> ServedSessions::reveal(std::string_view exte
                                                            std::string_view tab,
                                                            Origin origin)
 {
-    // The origin's window; else that of the key or click that asked for it, into one of its tabs just now.
-    auto const connection =
-        _origins.connectionOf(extension, origin).or_else([&] { return recentInputFrom(extension); });
     auto session = vtworkspace::SessionId {};
-    auto workspace = vtworkspace::WorkspaceId {};
     {
         auto const lock = std::lock_guard { _mutex };
         auto const* const found = ownedBy(extension, tab);
@@ -510,13 +507,17 @@ std::expected<void, ServedTabError> ServedSessions::reveal(std::string_view exte
         // A pending tab is activated by its creation.
         if (!found->session)
             return {};
-        auto const selected = connection ? _workspaces.selectedBy(*connection) : std::nullopt;
-        if (!selected)
-            return std::unexpected(ServedTabError::Gone);
         session = *found->session;
-        workspace = *selected;
     }
-    _post([this, session, connection = *connection, workspace] {
+    // The origin's window, if the user invoked the action behind it just now and no reveal claimed it yet;
+    // else that of the key or click that asked for it, into one of its tabs just now. A stale origin, or one
+    // a reveal claimed already, raises nothing.
+    auto const connection =
+        _origins.claimReveal(extension, origin).or_else([&] { return recentInputFrom(extension); });
+    auto const workspace = connection ? _workspaces.selectedBy(*connection) : std::nullopt;
+    if (!workspace)
+        return std::unexpected(ServedTabError::Gone);
+    _post([this, session, connection = *connection, workspace = *workspace] {
         revealSession(_host, session, connection, workspace);
     });
     return {};

@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <core/platform/Clock.hpp>
+
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -52,9 +55,15 @@ constexpr auto EffectRows = std::array {
 struct Recorder
 {
     std::vector<std::pair<std::string, ServedHint>> raised;
-    ExtensionActions actions { [this](std::string_view extension, ServedHint hint) {
-        raised.emplace_back(std::string(extension), hint);
-    } };
+    core::platform::ManualClock clock {
+        core::platform::SteadyTimePoint {}
+    }; ///< When an action was invoked, and a reveal asked for.
+    ExtensionActions actions {
+        [this](std::string_view extension, ServedHint hint) {
+            raised.emplace_back(std::string(extension), hint);
+        },
+        clock,
+    };
 };
 
 } // namespace
@@ -111,24 +120,50 @@ TEST_CASE("ExtensionActions: an origin acts only for the extension it was handed
     CHECK(actions.connectionOf("notes", origin) == connection(1));
 }
 
-TEST_CASE("ExtensionActions: an origin's standing tells a stale one from one never handed out",
+TEST_CASE("ExtensionActions: an origin reveals once, and only just after the action that produced it",
           "[daemon][presence]")
 {
     auto recorder = Recorder {};
     auto& actions = recorder.actions;
+    auto& clock = recorder.clock;
     auto const origin = actions.originOf(connection(1));
-    CHECK(actions.standingOf("orchestrator", origin) == vthost::OriginStanding::Unknown);
+    // Never handed out: no user action is behind it.
+    CHECK(actions.claimReveal("orchestrator", origin) == std::nullopt);
     actions.deliver("orchestrator", "open", origin);
     REQUIRE(actions.take("orchestrator").size() == 1);
-    CHECK(actions.standingOf("orchestrator", origin) == vthost::OriginStanding::Attached);
 
-    actions.forget(connection(1));
-
-    CHECK(actions.standingOf("orchestrator", origin) == vthost::OriginStanding::Detached);
-    CHECK(actions.connectionOf("orchestrator", origin) == std::nullopt);
-    // Never handed to another extension, nor is 0 to anyone.
-    CHECK(actions.standingOf("notes", origin) == vthost::OriginStanding::Unknown);
-    CHECK(actions.standingOf("orchestrator", 0) == vthost::OriginStanding::Unknown);
+    SECTION("within the grace, once")
+    {
+        clock.advance(vthost::ServedInputGrace);
+        CHECK(actions.claimReveal("orchestrator", origin) == connection(1));
+        // Consumed by the first reveal: a second one has no user action behind it.
+        CHECK(actions.claimReveal("orchestrator", origin) == std::nullopt);
+        // The origin still names its window for what is not a reveal.
+        CHECK(actions.connectionOf("orchestrator", origin) == connection(1));
+        // The next action the user invokes through it allows the next reveal.
+        actions.deliver("orchestrator", "open", origin);
+        REQUIRE(actions.take("orchestrator").size() == 1);
+        CHECK(actions.claimReveal("orchestrator", origin) == connection(1));
+    }
+    SECTION("past the grace, never: hours later the user is doing something else")
+    {
+        clock.advance(vthost::ServedInputGrace + std::chrono::milliseconds { 1 });
+        CHECK(actions.claimReveal("orchestrator", origin) == std::nullopt);
+        clock.advance(std::chrono::hours { 3 });
+        CHECK(actions.claimReveal("orchestrator", origin) == std::nullopt);
+    }
+    SECTION("its connection detached, never")
+    {
+        actions.forget(connection(1));
+        CHECK(actions.claimReveal("orchestrator", origin) == std::nullopt);
+    }
+    SECTION("for another extension, or as 0, never")
+    {
+        CHECK(actions.claimReveal("notes", origin) == std::nullopt);
+        CHECK(actions.claimReveal("orchestrator", 0) == std::nullopt);
+        // Nor did that consume the orchestrator's.
+        CHECK(actions.claimReveal("orchestrator", origin) == connection(1));
+    }
 }
 
 TEST_CASE("ExtensionActions: every delivery raises Actions", "[daemon][presence]")

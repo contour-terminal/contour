@@ -802,7 +802,7 @@ TEST_CASE("pane-reveal into another workspace asks, and refused changes nothing"
     b.detach(window);
 }
 
-TEST_CASE("pane-reveal with a detached origin reveals in the most recently focused window", "[vthost][panes]")
+TEST_CASE("pane-reveal with a detached origin raises no other window", "[vthost][panes]")
 {
     auto b = PanesBench {};
     auto const pane = b.openNow(b.spawn());
@@ -810,30 +810,26 @@ TEST_CASE("pane-reveal with a detached origin reveals in the most recently focus
     REQUIRE(session.has_value());
     auto* const second = b.host.createWorkspace();
     REQUIRE(second != nullptr);
-    auto const secondId = second->id();
     auto gone = FakeWindow { 1 };
     auto stays = FakeWindow { 2 };
     auto const origin = b.attach(gone, b.first);
-    std::ignore = b.attach(stays, secondId); // focused last
+    std::ignore = b.attach(stays, second->id()); // focused last
     b.detach(gone);
 
-    REQUIRE(b.panes().reveal(Orchestrator, pane, origin).has_value());
+    // The window the user acted in went: the one focused last is not where they asked for it.
+    CHECK(b.panes().reveal(Orchestrator, pane, origin)
+          == std::expected<void, OwnedPaneError> { std::unexpect, OwnedPaneError::Gone });
 
-    // The window focused last is asked, as the origin's would have been: it shows another workspace.
-    REQUIRE(b.eventually([&] { return stays.switches.size() == 1; }));
-    CHECK(stays.switches.front().workspace == secondId.value);
-    b.host.completeSwitch(stays.connectionId(),
-                          proto::SwitchReply { .request = stays.switches.front().request,
-                                               .outcome = proto::SwitchOutcome::Switched });
     b.settle();
-    CHECK(stays.reveals == std::vector { *session });
-    CHECK(b.activeTabIn(b.first) == b.tabOf(*session));
+    CHECK(stays.switches.empty());
+    CHECK(stays.reveals.empty());
     CHECK(gone.switches.empty());
     CHECK(gone.reveals.empty());
+    CHECK(b.activeTabIn(b.first) == b.shellTab);
     b.detach(stays);
 }
 
-TEST_CASE("pane-reveal with no window attached activates in place", "[vthost][panes]")
+TEST_CASE("pane-reveal with no window attached activates nothing", "[vthost][panes]")
 {
     auto b = PanesBench {};
     auto const pane = b.openNow(b.spawn());
@@ -844,10 +840,49 @@ TEST_CASE("pane-reveal with no window attached activates in place", "[vthost][pa
     auto const origin = b.attach(window, b.first);
     b.detach(window);
 
-    // The origin's window went, and no other is attached: none to tell; the pane's own workspace shows it.
-    REQUIRE(b.panes().reveal(Orchestrator, pane, origin).has_value());
+    CHECK(b.panes().reveal(Orchestrator, pane, origin)
+          == std::expected<void, OwnedPaneError> { std::unexpect, OwnedPaneError::Gone });
 
-    REQUIRE(b.eventually([&] { return b.activeTabIn(b.first) == b.tabOf(*session); }));
+    b.settle();
+    CHECK(b.activeTabIn(b.first) == b.shellTab);
+}
+
+TEST_CASE("pane-reveal stands on the user's action for its grace, and once", "[vthost][panes]")
+{
+    auto b = PanesBench {};
+    auto window = FakeWindow { 1 };
+    auto const origin = b.attach(window, b.first); // the user invokes an action: "Agents: Refresh now"
+    auto const pane = b.openNow(b.spawn());
+    auto const session = b.sessionOf(pane);
+    REQUIRE(session.has_value());
+    auto const gone = std::expected<void, OwnedPaneError> { std::unexpect, OwnedPaneError::Gone };
+
+    SECTION("within the grace, the first reveal raises the window; a second one does not")
+    {
+        b.clock.advance(vthost::ServedInputGrace);
+        REQUIRE(b.panes().reveal(Orchestrator, pane, origin).has_value());
+        REQUIRE(b.eventually([&] { return window.reveals == std::vector { *session }; }));
+        CHECK(b.panes().reveal(Orchestrator, pane, origin) == gone);
+        b.settle();
+        CHECK(window.reveals.size() == 1);
+    }
+    SECTION("hours later, while the user types elsewhere, nothing is raised or activated")
+    {
+        b.clock.advance(std::chrono::hours { 3 });
+        CHECK(b.panes().reveal(Orchestrator, pane, origin) == gone);
+        b.settle();
+        CHECK(window.reveals.empty());
+        CHECK(window.switches.empty());
+        CHECK(b.activeTabIn(b.first) == b.shellTab);
+    }
+    SECTION("just past the grace, nothing either")
+    {
+        b.clock.advance(vthost::ServedInputGrace + std::chrono::milliseconds { 1 });
+        CHECK(b.panes().reveal(Orchestrator, pane, origin) == gone);
+        b.settle();
+        CHECK(window.reveals.empty());
+    }
+    b.detach(window);
 }
 
 TEST_CASE("pane-reveal of a pending pane reveals it once created", "[vthost][panes]")
