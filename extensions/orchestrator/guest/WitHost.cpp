@@ -290,7 +290,7 @@ namespace
             std::string_view cwd,
             std::string_view title,
             std::string_view tag,
-            std::optional<std::string_view> near) override
+            std::optional<std::string_view> nearTab) override
         {
             auto templateText = borrowed(paneTemplate);
             auto borrowedArguments = BorrowedArguments { arguments };
@@ -298,7 +298,7 @@ namespace
             auto cwdText = borrowed(cwd);
             auto titleText = borrowed(title);
             auto tagText = borrowed(tag);
-            auto nearText = borrowed(near.value_or(std::string_view {}));
+            auto nearText = borrowed(nearTab.value_or(std::string_view {}));
             auto pane = daemon_string_t {};
             auto error = HostErrorCode {};
             if (!terminal_extensions_daemon_host_pane_open(&templateText,
@@ -306,7 +306,7 @@ namespace
                                                            &cwdText,
                                                            &titleText,
                                                            &tagText,
-                                                           near ? &nearText : nullptr,
+                                                           nearTab ? &nearText : nullptr,
                                                            &pane,
                                                            &error))
                 return std::unexpected(hostErrorOf(error));

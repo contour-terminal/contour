@@ -31,7 +31,7 @@ void Engine::dispatch(Dispatch const& request, std::vector<Effect>& out)
     if (!prepared)
     {
         out.emplace_back(
-            DispatchRefused { .repo = request.repo, .reason = prepared.error(), .near = request.near });
+            DispatchRefused { .repo = request.repo, .reason = prepared.error(), .nearTab = request.nearTab });
         return;
     }
     auto const id = prepared->id;
@@ -45,7 +45,7 @@ void Engine::dispatch(Dispatch const& request, std::vector<Effect>& out)
     {
         forget(id);
         out.emplace_back(DispatchRefused {
-            .repo = request.repo, .reason = DispatchRefusal::BadPrompt, .near = request.near });
+            .repo = request.repo, .reason = DispatchRefusal::BadPrompt, .nearTab = request.nearTab });
         return;
     }
     apply(id, std::move(*effects), out);
@@ -156,7 +156,7 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
                      .branch = branchName(*id),
                      .worktree = worktreePath(_config->worktreeRoot(), repo->name, *id),
                      .pane = std::nullopt,
-                     .near = request.near,
+                     .nearTab = request.nearTab,
                      .state = Preparing { PrepareStep::Fetch },
                      .lastStatus = std::nullopt,
                      .failure = std::nullopt,

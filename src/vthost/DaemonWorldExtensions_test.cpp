@@ -1053,14 +1053,14 @@ TEST_CASE("DaemonWorldExtensions: the pane calls reach the host's owned panes in
                                               .cwd = "/w/run-1",
                                               .title = "run-1",
                                               .tag = "run-1",
-                                              .near = "tab-7" })
+                                              .nearTab = "tab-7" })
           == std::expected<std::string, vtextension::PaneError> { "pane-1" });
     REQUIRE(panes.opens.size() == 1);
     CHECK(panes.opens.front().extension == "orchestrator");
     CHECK(panes.opens.front().argv == std::vector<std::string> { "claude" });
     CHECK(panes.opens.front().removedEnvironment == std::vector<std::string> { "GIT_DIR" });
     CHECK(panes.opens.front().directory == directory);
-    CHECK(panes.opens.front().near == "tab-7");
+    CHECK(panes.opens.front().nearTab == "tab-7");
 
     CHECK(host->close("pane-1").has_value());
     CHECK(panes.closes == std::vector<std::string> { "orchestrator pane-1" });

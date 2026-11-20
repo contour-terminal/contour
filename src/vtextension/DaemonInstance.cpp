@@ -193,14 +193,14 @@ struct DaemonInstance::HostCalls
         auto const tag = lift<std::string>(instance, reader);
         if (!tag)
             return std::unexpected(tag.error());
-        auto const near = lift<std::optional<std::string>>(instance, reader);
-        if (!near)
-            return std::unexpected(near.error());
+        auto const nearTab = lift<std::optional<std::string>>(instance, reader);
+        if (!nearTab)
+            return std::unexpected(nearTab.error());
         return answer(
             instance,
             arguments,
             instance._services.paneOpen(
-                *paneTemplate, *args, *cwd, *title, *tag, near->transform([](std::string const& tab) {
+                *paneTemplate, *args, *cwd, *title, *tag, nearTab->transform([](std::string const& tab) {
                     return std::string_view { tab };
                 })));
     }

@@ -161,23 +161,24 @@ using RunState = std::variant<Preparing, Running, Blocked, Done, Ending, Finishe
 /// One agent run, from dispatch to the Finished list.
 struct Run
 {
-    std::string id;                     ///< runId(): a Name.
-    std::string repo;                   ///< The repository's configured name.
-    std::string repoPath;               ///< The repository's directory.
-    Forge forge = Forge::GitHub;        ///< The repository's forge: its provider row prepares the worktree.
-    std::string remote;                 ///< The remote to fetch from: a Name.
-    std::string base;                   ///< The base branch; the worktree starts at `<remote>/<base>`.
-    ItemRef item;                       ///< What the run works on.
-    std::string url;                    ///< The item's web page.
-    std::string task;                   ///< The task's id.
-    std::string model;                  ///< The model the agent runs: a Name.
-    std::string prompt;                 ///< The agent's first prompt: a Text.
-    std::string session;                ///< The agent's session: a Uuid.
-    std::string branch;                 ///< `agent/<id>`: a Ref.
-    std::string worktree;               ///< The worktree's directory: a Path.
-    std::optional<std::string> pane;    ///< The agent's tab, a Name, once open and until it is gone.
-    std::optional<std::string> near {}; ///< The dashboard tab it was dispatched from, a Name; none: unknown.
-    RunState state;                     ///< Where it stands.
+    std::string id;                  ///< runId(): a Name.
+    std::string repo;                ///< The repository's configured name.
+    std::string repoPath;            ///< The repository's directory.
+    Forge forge = Forge::GitHub;     ///< The repository's forge: its provider row prepares the worktree.
+    std::string remote;              ///< The remote to fetch from: a Name.
+    std::string base;                ///< The base branch; the worktree starts at `<remote>/<base>`.
+    ItemRef item;                    ///< What the run works on.
+    std::string url;                 ///< The item's web page.
+    std::string task;                ///< The task's id.
+    std::string model;               ///< The model the agent runs: a Name.
+    std::string prompt;              ///< The agent's first prompt: a Text.
+    std::string session;             ///< The agent's session: a Uuid.
+    std::string branch;              ///< `agent/<id>`: a Ref.
+    std::string worktree;            ///< The worktree's directory: a Path.
+    std::optional<std::string> pane; ///< The agent's tab, a Name, once open and until it is gone.
+    std::optional<std::string>
+        nearTab {}; ///< The dashboard tab it was dispatched from, a Name; none: unknown.
+    RunState state; ///< Where it stands.
     std::optional<AgentStatus> lastStatus; ///< What the agent last reported; std::nullopt: never reported.
     std::optional<RunFailure> failure;     ///< The preparation step that failed, if one did.
     uint64_t startedWallMs = 0;            ///< When it was dispatched, in wall-clock milliseconds.

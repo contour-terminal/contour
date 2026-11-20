@@ -24,7 +24,7 @@ struct PaneOpenCall
     std::string cwd;
     std::string title;
     std::string tag;
-    std::optional<std::string> near;
+    std::optional<std::string> nearTab;
 };
 
 /// Records every call, and answers each with what the test set; `not-supported-yet` until it sets otherwise.
@@ -36,7 +36,7 @@ class FakePaneService final: public IPaneService
                                                              std::string_view cwd,
                                                              std::string_view title,
                                                              std::string_view tag,
-                                                             std::optional<std::string_view> near) override
+                                                             std::optional<std::string_view> nearTab) override
     {
         opens.push_back(PaneOpenCall {
             .paneTemplate = std::string { paneTemplate },
@@ -44,7 +44,7 @@ class FakePaneService final: public IPaneService
             .cwd = std::string { cwd },
             .title = std::string { title },
             .tag = std::string { tag },
-            .near = near.transform([](std::string_view tab) { return std::string { tab }; }),
+            .nearTab = nearTab.transform([](std::string_view tab) { return std::string { tab }; }),
         });
         return openAnswer;
     }

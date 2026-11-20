@@ -7,8 +7,9 @@
 #include <vector>
 
 /// A run as Run.cpp stores it; nothing else includes this header. Glaze reflects only types with linkage,
-/// so these cannot sit in Run.cpp's anonymous namespace. The keys are the members' names; a member that
-/// only some states have is optional, every other one must be present.
+/// so these cannot sit in Run.cpp's anonymous namespace. The keys are the members' names (but for nearTab,
+/// see Run.cpp's glz::meta); a member that only some states have is optional, every other one must be
+/// present.
 namespace orchestrator::run::detail
 {
 
@@ -51,7 +52,7 @@ struct JsonRun
     std::string branch;
     std::string worktree;
     std::optional<std::string> pane;
-    std::optional<std::string> near; ///< Absent in a run stored before it existed: read as none.
+    std::optional<std::string> nearTab; ///< Absent in a run stored before it existed: read as none.
     std::string state;
     std::optional<std::string> step;
     std::optional<std::string> cause;

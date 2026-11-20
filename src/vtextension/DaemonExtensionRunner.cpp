@@ -425,10 +425,10 @@ class DaemonExtensionRunner::Core final: public IDaemonHostServices, public std:
         std::string_view cwd,
         std::string_view title,
         std::string_view tag,
-        std::optional<std::string_view> near) override
+        std::optional<std::string_view> nearTab) override
     {
         return servedUnlessClosed([&] {
-            return _services.panes.open(paneTemplate, args, cwd, title, tag, near)
+            return _services.panes.open(paneTemplate, args, cwd, title, tag, nearTab)
                 .transform_error([](PaneError error) { return hostErrorOf(error); });
         });
     }

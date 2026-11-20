@@ -180,7 +180,7 @@ std::expected<std::string, PaneError> DeclaredPanes::open(std::string_view paneT
                                                           std::string_view cwd,
                                                           std::string_view title,
                                                           std::string_view tag,
-                                                          std::optional<std::string_view> near)
+                                                          std::optional<std::string_view> nearTab)
 {
     auto const declared = std::ranges::find(_config.manifest.panes, paneTemplate, &PaneTemplate::name);
     if (declared == _config.manifest.panes.end())
@@ -209,7 +209,7 @@ std::expected<std::string, PaneError> DeclaredPanes::open(std::string_view paneT
         .cwd = std::move(resolvedCwd),
         .title = std::string { title },
         .tag = std::string { tag },
-        .near = near.transform([](std::string_view tab) { return std::string { tab }; }),
+        .nearTab = nearTab.transform([](std::string_view tab) { return std::string { tab }; }),
     });
 }
 

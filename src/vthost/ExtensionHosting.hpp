@@ -426,7 +426,7 @@ struct OwnedPaneSpawn
     std::string cwd {};                                              ///< The directory's resolved path.
     std::string title {};                                            ///< The tab's fixed name.
     std::string tag {};                                              ///< The extension's own label.
-    std::optional<std::string> near {}; ///< The served tab whose workspace it opens in, if any.
+    std::optional<std::string> nearTab {}; ///< The served tab whose workspace it opens in, if any.
 };
 
 /// The most agent panes one extension may have at once, pending ones included.

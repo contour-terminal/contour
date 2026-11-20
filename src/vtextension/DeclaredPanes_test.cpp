@@ -138,7 +138,7 @@ TEST_CASE("pane-open spawns the template's argv", "[vtextension][panes]")
     CHECK(spawn.cwd == "/w/run-1");
     CHECK(spawn.title == "run-1");
     CHECK(spawn.tag == "run-1");
-    CHECK(spawn.near == "tab-7");
+    CHECK(spawn.nearTab == "tab-7");
 }
 
 TEST_CASE("pane-open refuses", "[vtextension][panes]")

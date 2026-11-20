@@ -361,10 +361,10 @@ class FakeGuestHost final: public IGuestHost
         std::string_view /*cwd*/,
         std::string_view /*title*/,
         std::string_view tag,
-        std::optional<std::string_view> near) override
+        std::optional<std::string_view> nearTab) override
     {
         paneOpens.emplace_back(tag);
-        paneOpenNears.push_back(near.transform([](std::string_view tab) { return std::string { tab }; }));
+        paneOpenNears.push_back(nearTab.transform([](std::string_view tab) { return std::string { tab }; }));
         return std::unexpected(HostError::NotSupportedYet);
     }
 
@@ -563,7 +563,7 @@ template <typename T>
                                  .model = "",
                                  .note = std::nullopt,
                                  .session = std::string(Session),
-                                 .near = std::nullopt,
+                                 .nearTab = std::nullopt,
                                  .wallMs = WallMs,
                                  .monoMs = StartMonoMs }));
     for ([[maybe_unused]] auto const _: std::views::iota(0, 20))
@@ -677,7 +677,7 @@ constexpr auto MeasuredConfig =
             .model = "",
             .note = std::nullopt,
             .session = std::format("123e4567-e89b-12d3-a456-4266141740{:02}", index),
-            .near = std::nullopt,
+            .nearTab = std::nullopt,
             .wallMs = WallMs,
             .monoMs = StartMonoMs }));
         REQUIRE(calls.size() == 1);
@@ -1217,7 +1217,7 @@ TEST_CASE("a load whose listing answers limit ends no run", "[guest][panes]")
     CHECK_FALSE(countsAsActive(stored()));
 }
 
-TEST_CASE("OpenPane passes near to pane-open", "[guest][panes]")
+TEST_CASE("OpenPane passes nearTab to pane-open", "[guest][panes]")
 {
     auto const away = awayCallBefore<OpenPane>();
     auto host = FakeGuestHost {};
@@ -1230,7 +1230,7 @@ TEST_CASE("OpenPane passes near to pane-open", "[guest][panes]")
     auto const opens = observer.effectsOf<OpenPane>();
     REQUIRE(opens.size() == 1);
     REQUIRE(host.paneOpenNears.size() == 1);
-    CHECK(host.paneOpenNears.front() == opens.front().near);
+    CHECK(host.paneOpenNears.front() == opens.front().nearTab);
 }
 
 TEST_CASE("a failed store-set is logged, not fatal", "[guest]")
@@ -1550,7 +1550,7 @@ TEST_CASE("a confirmed form dispatches with a fresh session", "[guest][driver][f
     auto const dispatched = served.observer.inputsOf<Dispatch>();
     REQUIRE(dispatched.size() == 1);
     CHECK(dispatched.front().session == session);
-    CHECK(dispatched.front().near == std::optional<std::string> { "tab-1" });
+    CHECK(dispatched.front().nearTab == std::optional<std::string> { "tab-1" });
     CHECK(dispatched.front().wallMs == served.host.clock.wallMs);
     CHECK(dispatched.front().task == "fix_ci");
     CHECK_FALSE(served.dashboard().form().has_value());
@@ -1575,7 +1575,7 @@ TEST_CASE("a refused dispatch is drawn", "[guest][driver][form]")
                                .model = "sonnet",
                                .note = std::nullopt,
                                .session = "00000001-0000-4000-8000-000000000000",
-                               .near = "tab-1" });
+                               .nearTab = "tab-1" });
     served.driver->update(Hint::Tabs);
 
     CHECK(served.host.writesTo("tab-1") > 0); // drawn, not only remembered

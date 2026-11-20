@@ -186,10 +186,10 @@ struct PanesBench
             std::map<std::string, ResolvedProfile> { { "main", std::move(profile) } }, "main");
     }
 
-    /// @return A spawn of @p extension's agent, tagged @p tag, near @p near, running @p program.
+    /// @return A spawn of @p extension's agent, tagged @p tag, near @p nearTab, running @p program.
     [[nodiscard]] OwnedPaneSpawn spawn(std::string_view extension = Orchestrator,
                                        std::string_view tag = "run-1",
-                                       std::optional<std::string> near = std::nullopt,
+                                       std::optional<std::string> nearTab = std::nullopt,
                                        std::string program = "claude") const
     {
         return OwnedPaneSpawn {
@@ -201,7 +201,7 @@ struct PanesBench
             .cwd = directory->resolvedPath(),
             .title = "run-1",
             .tag = std::string(tag),
-            .near = std::move(near),
+            .nearTab = std::move(nearTab),
         };
     }
 

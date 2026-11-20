@@ -99,12 +99,13 @@ class DeclaredPanes final: public IPaneService
     /// For create() only.
     DeclaredPanes(Key key, DeclaredPanesConfig config, vtpty::IDirectoryOpener& directories, IPaneHost& host);
 
-    [[nodiscard]] std::expected<std::string, PaneError> open(std::string_view paneTemplate,
-                                                             ConfigMap const& args,
-                                                             std::string_view cwd,
-                                                             std::string_view title,
-                                                             std::string_view tag,
-                                                             std::optional<std::string_view> near) override;
+    [[nodiscard]] std::expected<std::string, PaneError> open(
+        std::string_view paneTemplate,
+        ConfigMap const& args,
+        std::string_view cwd,
+        std::string_view title,
+        std::string_view tag,
+        std::optional<std::string_view> nearTab) override;
     [[nodiscard]] std::expected<void, PaneError> close(std::string_view pane) override;
     [[nodiscard]] std::expected<std::vector<PaneInfo>, PaneError> list() override;
     [[nodiscard]] std::expected<void, PaneError> reveal(std::string_view pane, Origin origin) override;

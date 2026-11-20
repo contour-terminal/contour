@@ -56,7 +56,7 @@ struct PaneSpawn
     std::string cwd {};                                              ///< The directory's resolved path.
     std::string title {};                                            ///< The tab's fixed name.
     std::string tag {};                                              ///< The extension's own label.
-    std::optional<std::string> near {}; ///< The served tab whose workspace it opens in, if any.
+    std::optional<std::string> nearTab {}; ///< The served tab whose workspace it opens in, if any.
 };
 
 /// The agent panes of one extension: its template, arguments, root and environment checked.
@@ -76,7 +76,7 @@ class IPaneService
     /// @param cwd The directory it starts in: absolute, inside the template's root.
     /// @param title The tab's name.
     /// @param tag The extension's own label for the pane.
-    /// @param near A served tab of the extension's whose workspace it opens in; none for the focused one.
+    /// @param nearTab A served tab of the extension's whose workspace it opens in; none for the focused one.
     /// @return The pane's id, before the pane exists; or why it was not opened.
     [[nodiscard]] virtual std::expected<std::string, PaneError> open(
         std::string_view paneTemplate,
@@ -84,7 +84,7 @@ class IPaneService
         std::string_view cwd,
         std::string_view title,
         std::string_view tag,
-        std::optional<std::string_view> near) = 0;
+        std::optional<std::string_view> nearTab) = 0;
 
     /// `pane-close`: closes a pane the extension opened.
     /// @param pane Its id.
@@ -139,7 +139,7 @@ class UnservedPanes final: public IPaneService
         std::string_view /*cwd*/,
         std::string_view /*title*/,
         std::string_view /*tag*/,
-        std::optional<std::string_view> /*near*/) override
+        std::optional<std::string_view> /*nearTab*/) override
     {
         return std::unexpected(PaneError::NotSupportedYet);
     }

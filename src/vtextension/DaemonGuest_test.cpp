@@ -497,7 +497,7 @@ class MeasuredServices final: public IDaemonHostServices
         std::string_view /*cwd*/,
         std::string_view /*title*/,
         std::string_view /*tag*/,
-        std::optional<std::string_view> /*near*/) override
+        std::optional<std::string_view> /*nearTab*/) override
     {
         return std::unexpected(HostError::NotSupportedYet);
     }

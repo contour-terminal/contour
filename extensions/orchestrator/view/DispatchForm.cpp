@@ -354,7 +354,7 @@ std::optional<DispatchFormState> openDispatchForm(Engine const& engine,
     };
 }
 
-DispatchAction actionOf(DispatchFormState const& form, Engine const& engine, std::string_view near)
+DispatchAction actionOf(DispatchFormState const& form, Engine const& engine, std::string_view nearTab)
 {
     auto const* const config = engine.config();
     auto const tasks = config != nullptr ? config->tasks() : std::span<TaskDef const> {};
@@ -367,7 +367,7 @@ DispatchAction actionOf(DispatchFormState const& form, Engine const& engine, std
         .model = form.model < models.size() ? models[form.model] : std::string {},
         .note = form.note.empty() ? std::nullopt : std::optional { form.note },
         .session = form.session,
-        .near = std::string { near },
+        .nearTab = std::string { nearTab },
     };
 }
 
@@ -382,7 +382,7 @@ std::expected<DispatchPreview, DispatchRefusal> previewOf(DispatchFormState cons
                                      .model = std::move(action.model),
                                      .note = std::move(action.note),
                                      .session = std::move(action.session),
-                                     .near = std::nullopt,
+                                     .nearTab = std::nullopt,
                                      .wallMs = 0,
                                      .monoMs = 0 });
 }
@@ -391,7 +391,7 @@ std::optional<DispatchAction> applyFormKey(core::tui::KeyEvent const& key,
                                            std::optional<DispatchFormState>& form,
                                            Engine const& engine,
                                            HooksWarning hooksAtInput,
-                                           std::string_view near)
+                                           std::string_view nearTab)
 {
     if (!form)
         return std::nullopt;
@@ -459,7 +459,7 @@ std::optional<DispatchAction> applyFormKey(core::tui::KeyEvent const& key,
                 if (hooksAtInput != HooksWarning::Confirmed)
                     return std::nullopt;
             }
-            auto action = actionOf(state, engine, near);
+            auto action = actionOf(state, engine, nearTab);
             form.reset();
             return action;
         }

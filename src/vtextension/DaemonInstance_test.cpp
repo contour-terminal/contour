@@ -508,8 +508,8 @@ TEST_CASE("pane-open, pane-close, panes and pane-reveal are served", "[daemon][i
     CHECK(open.cwd == "/w/run-1");
     CHECK(open.title == "run-1");
     CHECK(open.tag == "run-1");
-    CHECK(open.near == "tab-7");
-    CHECK_FALSE(guest.services.paneOpens.back().near.has_value());
+    CHECK(open.nearTab == "tab-7");
+    CHECK_FALSE(guest.services.paneOpens.back().nearTab.has_value());
     CHECK(opened == OpenResult { "0e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b" });
     // Not decomposed: clang over MSVC's STL recurses into std::expected's operator== with Catch's
     // expression on one side.

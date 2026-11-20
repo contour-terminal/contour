@@ -508,7 +508,7 @@ void Engine::apply(std::string_view runId, std::vector<RunEffect> effects, std::
                                                 .arguments = agentPaneArguments(*run),
                                                 .cwd = run->worktree,
                                                 .title = run->id,
-                                                .near = run->near });
+                                                .nearTab = run->nearTab });
                 },
                 [&](CloseAgentPane const&) {
                     auto panes = std::vector<std::string> {};

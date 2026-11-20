@@ -508,7 +508,7 @@ void Driver::apply(std::string_view tab, view::UiAction const& action)
                                 .model = dispatch.model,
                                 .note = dispatch.note,
                                 .session = dispatch.session,
-                                .near = dispatch.near,
+                                .nearTab = dispatch.nearTab,
                                 .wallMs = clock.wallMs,
                                 .monoMs = clock.monoMs });
                 stepReplies();
@@ -785,13 +785,14 @@ void Driver::carryOut(std::span<Effect const> effects)
                     _replies.emplace_back(std::move(reply));
                 },
                 [&](OpenPane const& open) {
-                    auto pane = _host.paneOpen(
-                        open.paneTemplate,
-                        open.arguments,
-                        open.cwd,
-                        open.title,
-                        open.run,
-                        open.near.transform([](std::string const& tab) { return std::string_view { tab }; }));
+                    auto pane = _host.paneOpen(open.paneTemplate,
+                                               open.arguments,
+                                               open.cwd,
+                                               open.title,
+                                               open.run,
+                                               open.nearTab.transform([](std::string const& tab) {
+                                                   return std::string_view { tab };
+                                               }));
                     if (pane)
                         _replies.emplace_back(
                             PaneOpenedFor { .run = open.run, .pane = std::move(*pane), .monoMs = nowMs() });
@@ -836,7 +837,7 @@ void Driver::carryOut(std::span<Effect const> effects)
                                           DispatchRefusalNames[std::to_underlying(refused.reason)]));
                     // The dashboard it was confirmed in says why.
                     if (auto const dashboard =
-                            refused.near ? _dashboards.find(*refused.near) : _dashboards.end();
+                            refused.nearTab ? _dashboards.find(*refused.nearTab) : _dashboards.end();
                         dashboard != _dashboards.end())
                         dashboard->second->dispatchRefused(refused.reason);
                 },

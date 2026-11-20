@@ -186,7 +186,7 @@ TEST_CASE("hooks missing needs a second Enter", "[orchestrator][view][form]")
 
     auto const dispatched = dispatchesIn(fixture.dashboard.input("\r"));
     REQUIRE(dispatched.size() == 1);
-    CHECK(dispatched.front().near == DashboardFixture::Tab);
+    CHECK(dispatched.front().nearTab == DashboardFixture::Tab);
 }
 
 TEST_CASE("two Enters in one read do not confirm the hooks warning", "[orchestrator][view][form]")

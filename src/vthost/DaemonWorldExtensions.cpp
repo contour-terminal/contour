@@ -185,7 +185,7 @@ namespace
                                        .cwd = std::move(spawn.cwd),
                                        .title = std::move(spawn.title),
                                        .tag = std::move(spawn.tag),
-                                       .near = std::move(spawn.near) })
+                                       .nearTab = std::move(spawn.nearTab) })
                 .transform_error(paneErrorOf);
         }
 

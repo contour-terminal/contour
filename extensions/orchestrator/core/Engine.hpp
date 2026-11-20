@@ -161,14 +161,14 @@ struct PaneOpenFailedFor
 /// The user confirmed the dispatch form.
 struct Dispatch
 {
-    std::string repo;                ///< The repository's configured name.
-    ItemRef item;                    ///< The item to work on.
-    std::string url;                 ///< The item's web page.
-    std::string task;                ///< The task's id.
-    std::string model;               ///< The model; empty: the task's.
-    std::optional<std::string> note; ///< The user's note, if any.
-    std::string session;             ///< A fresh session UUID for the agent.
-    std::optional<std::string> near; ///< The dashboard tab the form was confirmed in, if known.
+    std::string repo;                   ///< The repository's configured name.
+    ItemRef item;                       ///< The item to work on.
+    std::string url;                    ///< The item's web page.
+    std::string task;                   ///< The task's id.
+    std::string model;                  ///< The model; empty: the task's.
+    std::optional<std::string> note;    ///< The user's note, if any.
+    std::string session;                ///< A fresh session UUID for the agent.
+    std::optional<std::string> nearTab; ///< The dashboard tab the form was confirmed in, if known.
     uint64_t wallMs = 0; ///< Now, in wall-clock milliseconds: what the run's names are stamped with.
     uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
 };
@@ -280,12 +280,12 @@ struct ReadFile
 /// Open a run's agent tab, tagged with the run's id.
 struct OpenPane
 {
-    std::string run;                 ///< The run's id: the tab's tag.
-    std::string_view paneTemplate;   ///< The declared pane template's name.
-    std::vector<Argument> arguments; ///< Its arguments, by placeholder.
-    std::string cwd;                 ///< Its working directory: the run's worktree.
-    std::string title;               ///< The tab's title.
-    std::optional<std::string> near; ///< The dashboard tab it opens beside (Run::near), if any.
+    std::string run;                    ///< The run's id: the tab's tag.
+    std::string_view paneTemplate;      ///< The declared pane template's name.
+    std::vector<Argument> arguments;    ///< Its arguments, by placeholder.
+    std::string cwd;                    ///< Its working directory: the run's worktree.
+    std::string title;                  ///< The tab's title.
+    std::optional<std::string> nearTab; ///< The dashboard tab it opens beside (Run::nearTab), if any.
 };
 
 /// Store a value.
@@ -337,9 +337,10 @@ enum class DispatchRefusal : uint8_t
 /// A dispatch was refused.
 struct DispatchRefused
 {
-    std::string repo;                ///< The repository it named.
-    DispatchRefusal reason;          ///< Why.
-    std::optional<std::string> near; ///< The dashboard tab it was confirmed in (Dispatch::near), if known.
+    std::string repo;       ///< The repository it named.
+    DispatchRefusal reason; ///< Why.
+    std::optional<std::string>
+        nearTab; ///< The dashboard tab it was confirmed in (Dispatch::nearTab), if known.
 };
 
 /// What the engine asks its driver to do, in order. A StoreSet of a run precedes every command, file read

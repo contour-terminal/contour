@@ -82,13 +82,13 @@ std::expected<std::string, OwnedPaneError> OwnedPanes::open(OwnedPaneSpawn spawn
     return vtcontrol::toString(pane);
 }
 
-std::optional<vtworkspace::WorkspaceId> OwnedPanes::workspaceFor(std::string_view extension,
-                                                                 std::optional<std::string> const& near) const
+std::optional<vtworkspace::WorkspaceId> OwnedPanes::workspaceFor(
+    std::string_view extension, std::optional<std::string> const& nearTab) const
 {
     // Beside the dashboard it was dispatched from; else where the user looked last; else anywhere. A
     // dashboard that closed, or another extension's tab, is no reason to fail.
-    if (near)
-        if (auto const workspace = _services.servedTabs.workspaceOfTab(extension, *near))
+    if (nearTab)
+        if (auto const workspace = _services.servedTabs.workspaceOfTab(extension, *nearTab))
             return workspace;
     if (auto const focused = _services.workspaces.mostRecentlyFocused())
         if (auto const workspace = _services.workspaces.selectedBy(*focused))
@@ -124,7 +124,7 @@ void OwnedPanes::create(vtcontrol::Uuid pane, OwnedPaneSpawn const& spawn)
     auto const admitted = _services.admission.current() == ServedAdmission::Open
                           && _services.host.heldDirectorySpawn() == vtpty::HeldDirectorySpawn::Supported
                           && !(spawn.directory && spawn.directory->isRemoved());
-    if (auto const workspace = admitted ? workspaceFor(spawn.extension, spawn.near) : std::nullopt)
+    if (auto const workspace = admitted ? workspaceFor(spawn.extension, spawn.nearTab) : std::nullopt)
         session = _services.host.createOwnedTab(spawn, pane, *workspace); // opened out of focus
 
     auto closeNow = false;

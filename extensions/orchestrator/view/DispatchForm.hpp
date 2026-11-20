@@ -28,7 +28,7 @@ struct DispatchAction
     std::string model = {};               ///< The model.
     std::optional<std::string> note = {}; ///< The user's note; absent when none was typed.
     std::string session = {};             ///< The agent's fresh session UUID.
-    std::string near = {};                ///< The dashboard tab the form was confirmed in.
+    std::string nearTab = {};             ///< The dashboard tab the form was confirmed in.
     [[nodiscard]] bool operator==(DispatchAction const&) const = default;
 };
 
@@ -89,11 +89,11 @@ inline constexpr std::string_view HooksMissingWarning =
 
 /// @param form An open form.
 /// @param engine The engine it was opened with.
-/// @param near The dashboard tab it is shown in.
+/// @param nearTab The dashboard tab it is shown in.
 /// @return What confirming it now would send.
 [[nodiscard]] DispatchAction actionOf(DispatchFormState const& form,
                                       Engine const& engine,
-                                      std::string_view near);
+                                      std::string_view nearTab);
 
 /// @param form An open form.
 /// @param engine The engine it was opened with.
@@ -111,13 +111,13 @@ inline constexpr std::string_view HooksMissingWarning =
 /// @param engine The engine it was opened with.
 /// @param hooksAtInput The form's HooksWarning as the input that holds @p key began: two Enters in one read,
 ///        such as a paste, confirm the warning and nothing more.
-/// @param near The dashboard tab it is shown in.
+/// @param nearTab The dashboard tab it is shown in.
 /// @return The dispatch, when the key confirmed the form.
 [[nodiscard]] std::optional<DispatchAction> applyFormKey(core::tui::KeyEvent const& key,
                                                          std::optional<DispatchFormState>& form,
                                                          Engine const& engine,
                                                          HooksWarning hooksAtInput,
-                                                         std::string_view near);
+                                                         std::string_view nearTab);
 
 /// The form, drawn in a rounded box titled `Dispatch an agent`: what it dispatches, what that runs, and the
 /// keys. Shown as an overlay over the dashboard, at the size the dashboard places it at.

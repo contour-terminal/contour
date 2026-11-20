@@ -167,7 +167,7 @@ constexpr auto CleanIndex = "H 100644 78981922613b2afb6025042ff6bd878ac1994e85 0
                       .model = "",
                       .note = std::nullopt,
                       .session = std::string(Session),
-                      .near = std::nullopt,
+                      .nearTab = std::nullopt,
                       .wallMs = DispatchWallMs };
 }
 
@@ -180,7 +180,7 @@ constexpr auto CleanIndex = "H 100644 78981922613b2afb6025042ff6bd878ac1994e85 0
                       .model = "",
                       .note = std::nullopt,
                       .session = std::string(Session),
-                      .near = std::nullopt,
+                      .nearTab = std::nullopt,
                       .wallMs = DispatchWallMs };
 }
 
@@ -2754,21 +2754,21 @@ TEST_CASE("a tab that never opens is given up at its deadline", "[orchestrator][
     }
 }
 
-TEST_CASE("a dispatch's near reaches its OpenPane", "[orchestrator][engine][panes]")
+TEST_CASE("a dispatch's nearTab reaches its OpenPane", "[orchestrator][engine][panes]")
 {
-    for (auto const& near: { std::optional<std::string> { "tab-7" }, std::optional<std::string> {} })
+    for (auto const& nearTab: { std::optional<std::string> { "tab-7" }, std::optional<std::string> {} })
     {
-        CAPTURE(near.value_or("none"));
+        CAPTURE(nearTab.value_or("none"));
         auto harness = booted();
         auto dispatch = prDispatch();
-        dispatch.near = near;
+        dispatch.nearTab = nearTab;
         harness.feed(dispatch);
-        CHECK(harness.run(PrId)->near == near);
+        CHECK(harness.run(PrId)->nearTab == nearTab);
         harness.finish("git-fetch", ok());
         harness.finish("git-worktree-add", ok());
         auto const opened = all<OpenPane>(harness.finish("gh-pr-checkout", ok()));
         REQUIRE(opened.size() == 1);
-        CHECK(opened.front().near == near);
+        CHECK(opened.front().nearTab == nearTab);
     }
 }
 
