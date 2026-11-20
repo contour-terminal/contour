@@ -2529,9 +2529,9 @@ TEST_CASE("a two-line sidebar row per look and sidebar.row_spacing", "[chrometok
     using namespace contour::config;
     struct Expected
     {
-        ChromeStyle style;
-        SidebarRowSpacing spacing;
-        SidebarTwoLineRow row;
+        ChromeStyle style {};
+        SidebarRowSpacing spacing {};
+        SidebarTwoLineRow row {};
     };
     // Compact is the 36 px the pixel looks first shipped with; comfortable adds the room between the rows.
     // The Terminal look's rows are two whole cells at either spacing.
