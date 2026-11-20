@@ -396,12 +396,15 @@ class Renderer
     /// @param offset  Y pixel offset for smooth scrolling.
     void setSmoothScrollOffset(int offset);
 
-    /// Renders @p cells, each with the soft font glyph @p softGlyphs holds for its position, if any.
+    /// Renders @p cells, each with the soft font glyph @p softGlyphs holds for its position, if any, or the
+    /// glyph @p registeredGlyphs holds for its codepoint.
     /// @param cells The cells to render.
     /// @param softGlyphs The frame's soft glyphs, sorted by position; empty for a frame without any.
+    /// @param registeredGlyphs The frame's Glyph Protocol glyphs; null for a frame without any.
     /// @param yPixelOffset The smooth scroll offset.
     void renderCells(std::span<vtbackend::RenderCell const> cells,
                      std::span<vtbackend::RenderSoftGlyph const> softGlyphs,
+                     vtbackend::RegisteredGlyphs const* registeredGlyphs,
                      int yPixelOffset = 0);
 
     /// Renders a span of lines to the background, decoration, and text renderers.
@@ -471,9 +474,11 @@ class Renderer
     ///
     /// @see renderImpl
     /// @param header The header the render buffer carries.
+    /// @param registeredGlyphs The frame's Glyph Protocol glyphs; null for a frame without any.
     /// @param row The screen row it covers -- the main page's first (Terminal::mainPageTopRow()).
     /// @param columns The main page's width.
     void renderStickyHeader(vtbackend::RenderStickyHeader const& header,
+                            vtbackend::RegisteredGlyphs const* registeredGlyphs,
                             vtbackend::LineOffset row,
                             vtbackend::ColumnCount columns);
 

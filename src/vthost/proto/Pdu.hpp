@@ -105,6 +105,7 @@ enum class PduType : uint8_t
     CloseWorkspace = 59,
     Goodbye = 60,
     OpenFirstTab = 61,
+    RegisteredGlyphState = 62,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1195,11 +1196,47 @@ struct SoftFontState
     bool operator==(SoftFontState const&) const = default;
 };
 
+/// One slot of a session's Glyph Protocol glossary on the wire: the glyph registered there, or that the
+/// slot is clear. A glyph travels as the application stated it -- the `vg` payload and where it is placed
+/// -- and the receiver reads it with the parser the daemon read it with, so it is judged by the same rules
+/// on both ends. Nothing about identity travels: a glyph's atlas id is a hash of its content.
+struct WireRegisteredGlyph
+{
+    uint16_t slot = 0;      ///< The codepoint minus U+100000; below 1024.
+    uint8_t registered = 0; ///< 1 a glyph is registered; 0 the slot is clear, and nothing below is read.
+    /// The viewBox as x, y, width, height: each float's bits, so the values arrive as they were.
+    std::array<uint32_t, 4> viewBox = {};
+    uint8_t fit = 0;        ///< vtbackend::GlyphFit.
+    uint8_t horizontal = 0; ///< vtbackend::GlyphAlignment.
+    uint8_t vertical = 0;   ///< vtbackend::GlyphAlignment.
+    uint8_t span = 0;       ///< vtbackend::GlyphRenderSpan: 1 or 2.
+    std::string payload = {}; ///< The `vg` payload: printable ASCII.
+    bool operator==(WireRegisteredGlyph const&) const = default;
+};
+
+/// Server→client push (Capability::RegisteredGlyphs): slots of a session's Glyph Protocol glossary that
+/// changed. Sent ahead of the rows that may show them, on attach when the session has glyphs and whenever
+/// they change. A glossary too large for one push arrives as several, the first of which may replace.
+struct RegisteredGlyphState
+{
+    uint64_t session = 0; ///< The session the glyphs belong to.
+    /// 1 the receiver first clears every slot it holds for the session; 0 the slots named are changed and
+    /// the rest stand.
+    uint8_t replace = 0;
+    std::vector<WireRegisteredGlyph> glyphs = {};
+    bool operator==(RegisteredGlyphState const&) const = default;
+};
+
 /// Any per-session push a mirror applies as it arrives -- the transient events, and the program-status set --
 /// as a type-safe alternative set: what a consumer handling "a session did something" dispatches over,
 /// without enumerating the catalog's tags itself.
-using SessionEventPdu = std::
-    variant<SessionBell, SessionNotify, SessionClipboard, ProgramStatus, SessionInputEcho, SoftFontState>;
+using SessionEventPdu = std::variant<SessionBell,
+                                     SessionNotify,
+                                     SessionClipboard,
+                                     ProgramStatus,
+                                     SessionInputEcho,
+                                     SoftFontState,
+                                     RegisteredGlyphState>;
 
 /// One node of a tab's split tree on the wire (pre-order): a leaf carries a
 /// session and no children; a split carries a ratio and exactly two children.
@@ -2015,7 +2052,8 @@ using DecodedPdu = std::variant<Invalid,
                                 SetWorkspaceName,
                                 CloseWorkspace,
                                 Goodbye,
-                                OpenFirstTab>;
+                                OpenFirstTab,
+                                RegisteredGlyphState>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

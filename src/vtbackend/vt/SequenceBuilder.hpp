@@ -215,9 +215,15 @@ class SequenceBuilder
         // terminal answered as if the transmission had succeeded, leaving the client with no reason
         // to retry with the chunking that would have worked.
         if (_apcTruncated)
+        {
             vtParserLog()("APC body exceeded {} bytes and was dropped. Chunked transmission (m=1) is "
                           "the supported way to send a payload this large.",
                           Sequence::MaxOscLength);
+            // Told all the same, as a body that is not one: the Glyph Protocol has no chunking, its
+            // sender waits for an answer, and the parameters that say which one are at the front.
+            if constexpr (requires { _handler.processOversizedAPC(std::string_view {}); })
+                _handler.processOversizedAPC(_apcBuffer);
+        }
         else
             _handler.processAPC(_apcBuffer);
 

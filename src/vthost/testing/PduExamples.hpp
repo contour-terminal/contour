@@ -261,6 +261,8 @@ namespace vthost::testing
         { proto::PduType::CloseWorkspace, proto::DecodedPdu { proto::CloseWorkspace { .workspace = 3 } } },
         { proto::PduType::Goodbye, proto::DecodedPdu { proto::Goodbye {} } },
         { proto::PduType::OpenFirstTab, proto::DecodedPdu { proto::OpenFirstTab { .workspace = 4 } } },
+        { proto::PduType::RegisteredGlyphState,
+          proto::DecodedPdu { proto::RegisteredGlyphState { .session = 3, .replace = 1 } } },
         { proto::PduType::SetWorkspaceName,
           proto::DecodedPdu { proto::SetWorkspaceName { .workspace = 3, .name = "secret-label" } } },
     };

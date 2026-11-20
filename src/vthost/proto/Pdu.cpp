@@ -358,6 +358,10 @@ namespace
     {
         return std::to_underlying(PduType::OpenFirstTab);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(RegisteredGlyphState const&) noexcept
+    {
+        return std::to_underlying(PduType::RegisteredGlyphState);
+    }
     [[nodiscard]] constexpr uint64_t tagOf(CloseWorkspace const&) noexcept
     {
         return std::to_underlying(PduType::CloseWorkspace);
@@ -1058,6 +1062,31 @@ namespace
     void encodeBody(Writer& out, OpenFirstTab const& pdu)
     {
         out.varint(pdu.workspace);
+    }
+
+    void encodeBody(Writer& out, RegisteredGlyphState const& pdu)
+    {
+        out.varint(pdu.session);
+        out.u8(pdu.replace);
+        out.varint(pdu.glyphs.size());
+        // A record of its own, so the fields a later version appends to a glyph stay inside it.
+        for (auto const& glyph: pdu.glyphs)
+        {
+            auto record = Writer {};
+            record.u16(glyph.slot);
+            record.u8(glyph.registered);
+            if (glyph.registered != 0)
+            {
+                for (auto const bits: glyph.viewBox)
+                    record.u32(bits);
+                record.u8(glyph.fit);
+                record.u8(glyph.horizontal);
+                record.u8(glyph.vertical);
+                record.u8(glyph.span);
+                record.string(glyph.payload);
+            }
+            out.blob(record.view());
+        }
     }
 
     void encodeSoftGlyph(Writer& out, WireSoftGlyph const& glyph)
@@ -2374,6 +2403,41 @@ namespace
         return Goodbye {};
     }
 
+    /// Reads one slot of a glossary. Only its shape is judged here; whether the glyph is one the Glyph
+    /// Protocol could have registered is the receiver's to say (@see stageGlyphUpdate).
+    [[nodiscard]] std::expected<WireRegisteredGlyph, DecodeError> decodeRegisteredGlyph(Reader& outer)
+    {
+        auto const record = outer.blob();
+        if (!record)
+            return std::unexpected(record.error());
+        auto in = Reader { *record };
+        auto glyph = WireRegisteredGlyph {};
+        auto error = DecodeError {};
+        if (!assign(in.u16(), glyph.slot, error) || !assign(in.u8(), glyph.registered, error))
+            return std::unexpected(error);
+        if (glyph.registered == 0)
+            return glyph;
+        for (auto& bits: glyph.viewBox)
+            if (!assign(in.u32(), bits, error))
+                return std::unexpected(error);
+        if (!assign(in.u8(), glyph.fit, error) || !assign(in.u8(), glyph.horizontal, error)
+            || !assign(in.u8(), glyph.vertical, error) || !assign(in.u8(), glyph.span, error)
+            || !assign(in.string(), glyph.payload, error))
+            return std::unexpected(error);
+        return glyph;
+    }
+
+    DecodeResult decodeRegisteredGlyphState(Reader& in)
+    {
+        auto pdu = RegisteredGlyphState {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.session, error) || !assign(in.u8(), pdu.replace, error))
+            return std::unexpected(error);
+        if (auto const decoded = decodeVector(in, pdu.glyphs, decodeRegisteredGlyph); !decoded)
+            return std::unexpected(decoded.error());
+        return pdu;
+    }
+
     DecodeResult decodeOpenFirstTab(Reader& in)
     {
         auto pdu = OpenFirstTab {};
@@ -2863,6 +2927,7 @@ namespace
         DecodeRow { PduType::CloseWorkspace, decodeCloseWorkspace },
         DecodeRow { PduType::Goodbye, decodeGoodbye },
         DecodeRow { PduType::OpenFirstTab, decodeOpenFirstTab },
+        DecodeRow { PduType::RegisteredGlyphState, decodeRegisteredGlyphState },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

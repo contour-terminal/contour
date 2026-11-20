@@ -4,6 +4,7 @@
 #include <vtrasterizer/AtlasBudget.hpp>
 #include <vtrasterizer/GutterCells.hpp>
 #include <vtrasterizer/RailGeometry.hpp>
+#include <vtrasterizer/RegisteredGlyphPlacement.hpp>
 #include <vtrasterizer/TextRenderer.hpp>
 #include <vtrasterizer/Utils.hpp>
 
@@ -23,6 +24,7 @@
 #include <cassert>
 #include <format>
 #include <memory>
+#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -805,10 +807,12 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
     // by the content scrolling beneath it. Before the cursor: a bar or underline cursor on the covered row is
     // drawn over the header, while a block cursor at rest -- painted into the page's cells by inverting them
     // -- is hidden under it with the rest of that row.
-    auto const renderStickyHeaderStep = [&](vtbackend::RenderStickyHeader const& header) {
+    auto const renderStickyHeaderStep = [&](vtbackend::RenderStickyHeader const& header,
+                                            vtbackend::RegisteredGlyphs const* registeredGlyphs) {
         setSmoothScrollOffset(0);
-        renderPass(false,
-                   [&] { renderStickyHeader(header, terminal.mainPageTopRow(), mainPageSize.columns); });
+        renderPass(false, [&] {
+            renderStickyHeader(header, registeredGlyphs, terminal.mainPageTopRow(), mainPageSize.columns);
+        });
     };
 
     // The status line and the page, as the buffer holds them: the page first with the status line at the
@@ -842,7 +846,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         _gridMetrics.pageMargin.left -= shift;
         auto const restore = core::Finally { [&] { _gridMetrics.pageMargin.left += shift; } };
         renderPass(false, [&] {
-            renderCells(split.statusCells, buffer.softGlyphs);
+            renderCells(split.statusCells, buffer.softGlyphs, buffer.registeredGlyphs.get());
             renderLines(split.statusLines);
         });
     };
@@ -868,7 +872,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         renderPass(primaryPressure, [&] {
             if (auto const& bar = buffer.statusBar)
                 renderStatusBar(*bar);
-            renderCells(split.mainCells, buffer.softGlyphs);
+            renderCells(split.mainCells, buffer.softGlyphs, buffer.registeredGlyphs.get());
             renderLineFlash(buffer.lineFlash, mainPageSize.columns, 0);
             renderBlockHighlight(buffer.blockHighlight, mainPageSize.columns, 0);
             renderLines(split.mainLines);
@@ -882,7 +886,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         if (auto const* const header = inGridStickyHeader(buffer))
         {
             _renderTarget->execute(now);
-            renderStickyHeaderStep(*header);
+            renderStickyHeaderStep(*header, buffer.registeredGlyphs.get());
         }
     }
     else
@@ -896,7 +900,10 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         auto const split = splitStatus(renderBuffer.get());
 
         renderPass(primaryPressure, [&] {
-            renderCells(split.mainCells, renderBuffer.get().softGlyphs, smoothPixelOffset);
+            renderCells(split.mainCells,
+                        renderBuffer.get().softGlyphs,
+                        renderBuffer.get().registeredGlyphs.get(),
+                        smoothPixelOffset);
             renderLineFlash(renderBuffer.get().lineFlash, mainPageSize.columns, smoothPixelOffset);
             renderBlockHighlight(renderBuffer.get().blockHighlight, mainPageSize.columns, smoothPixelOffset);
             renderLines(split.mainLines);
@@ -924,7 +931,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 
         // The scissored step has flushed the page, and the header is not clipped with the content under it.
         if (auto const* const header = inGridStickyHeader(renderBuffer.get()))
-            renderStickyHeaderStep(*header);
+            renderStickyHeaderStep(*header, renderBuffer.get().registeredGlyphs.get());
 
         // Pass 2: Status line (no scroll offset, no scissor), its bar ahead of its rows.
         setSmoothScrollOffset(0);
@@ -1006,6 +1013,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 
 void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells,
                            std::span<vtbackend::RenderSoftGlyph const> softGlyphs,
+                           vtbackend::RegisteredGlyphs const* registeredGlyphs,
                            int yPixelOffset)
 {
     ZoneScoped;
@@ -1017,14 +1025,27 @@ void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells,
     // cells, finds each cell's glyph.
     assert(std::ranges::is_sorted(softGlyphs, {}, &vtbackend::RenderSoftGlyph::position));
     auto glyphCursor = SoftGlyphCursor { softGlyphs };
-    for (auto const& cell: cells)
+    for (auto const index: std::views::iota(size_t { 0 }, cells.size()))
     {
+        auto const& cell = cells[index];
         try
         {
             _backgroundRenderer.renderCell(cell);
             _decorationRenderer.renderCell(cell);
             if (auto const* const glyph = glyphCursor.find(cell.position))
                 _textRenderer.renderCell(cell, *glyph);
+            // Ordinary cells only: a cell of a scaled block (OSC 66) is sized and placed by the text path,
+            // and each row of the block repeats its head's text.
+            else if (auto const* const registered =
+                         registeredGlyphs != nullptr && cell.sizing.scale.isOrdinary()
+                             ? vtbackend::registeredGlyphOf(registeredGlyphs, cell.codepoints)
+                             : nullptr)
+                // The cell after this one decides whether a two-cell glyph has room to overflow into.
+                _textRenderer.renderCell(
+                    cell,
+                    *registered,
+                    registeredGlyphSpan(
+                        *registered, cell, index + 1 < cells.size() ? &cells[index + 1] : nullptr));
             else
                 _textRenderer.renderCell(cell);
             if (cell.image)
@@ -1231,6 +1252,7 @@ void Renderer::renderStatusBar(vtbackend::RenderStatusBar const& bar)
 }
 
 void Renderer::renderStickyHeader(vtbackend::RenderStickyHeader const& header,
+                                  vtbackend::RegisteredGlyphs const* registeredGlyphs,
                                   vtbackend::LineOffset row,
                                   vtbackend::ColumnCount columns)
 {
@@ -1246,8 +1268,10 @@ void Renderer::renderStickyHeader(vtbackend::RenderStickyHeader const& header,
     _renderTarget->renderRectangle(
         top.x, top.y, width, _gridMetrics.cellSize.height, vtbackend::RGBAColor(header.background, Opaque));
     // Laid out by the terminal, the chip included: nothing here decides where a glyph goes.
-    renderCells(header.cells, {});
-    renderCells(header.chip, {});
+    // With the frame's registered glyphs: a header repeats a command line, and an icon in that line is the
+    // same icon up here.
+    renderCells(header.cells, {}, registeredGlyphs);
+    renderCells(header.chip, {}, registeredGlyphs);
 
     _renderTarget->renderRectangle(
         top.x, bottom.y - 1, width, vtbackend::Height(1), vtbackend::RGBAColor(header.separator, Opaque));

@@ -484,6 +484,12 @@ class SequenceHandler
     /// APC has no shared grammar the way CSI and OSC do -- each application-defined protocol carries
     /// its own -- so it is dispatched as a raw body rather than through the function table.
     virtual void processAPC(std::string_view body) = 0;
+
+    /// Told of an APC body that overran its length cap and is therefore not processed: a protocol whose
+    /// sender waits for an answer can say that the message was too large.
+    /// @param front The start of the body, as much as the cap let in. It is NOT a whole message, and must
+    ///              not be acted on as one.
+    virtual void processOversizedAPC(std::string_view /*front*/) {}
     virtual void writeText(char32_t codepoint) = 0;
     virtual void writeText(std::string_view codepoints, size_t cellCount) = 0;
     virtual void writeTextEnd() = 0;

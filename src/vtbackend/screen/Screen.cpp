@@ -23,6 +23,7 @@
 #include <vtbackend/vt/ClipboardSelection.hpp>
 #include <vtbackend/vt/ControlCode.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
+#include <vtbackend/vt/GlyphProtocol.hpp>
 #include <vtbackend/vt/HierarchicalContext.hpp>
 #include <vtbackend/vt/JsonString.hpp>
 #include <vtbackend/vt/MacroDefinition.hpp>
@@ -5912,7 +5913,13 @@ void Screen::processAPC(std::string_view body)
 {
     ZoneScoped;
     // APC carries application-defined protocols that share no grammar, so each is recognised by its
-    // own introducer. 'G' is the kitty graphics protocol; anything else is not ours to interpret.
+    // own introducer. `25a1;` is the Glyph Protocol and 'G' the kitty graphics protocol; anything else is
+    // not ours to interpret.
+    if (isGlyphProtocol(body))
+    {
+        _terminal->processGlyphProtocol(body);
+        return;
+    }
     if (body.empty() || body.front() != 'G')
         return;
 
@@ -5921,6 +5928,14 @@ void Screen::processAPC(std::string_view body)
     // Once here rather than at each path that starts, stops, re-arms or frees an animation: there are many,
     // and the terminal tells the display only when the deadline actually moved.
     publishKittyAnimationDue();
+}
+
+void Screen::processOversizedAPC(std::string_view front)
+{
+    // The kitty graphics protocol has chunking for a large payload and is not answered. A Glyph Protocol
+    // registration has not, and its sender is told why nothing was registered.
+    if (auto const answer = answerOversizedGlyphMessage(front); !answer.empty())
+        reply(answer);
 }
 
 void Screen::replyKittyGraphics(kitty_graphics::Command const& command, std::string_view status)

@@ -3114,6 +3114,77 @@ TEST_CASE("SoftFontState round-trips, and carries each font's load rank", "[vtho
     CHECK(asSessionEvent(DecodedPdu { state }).has_value());
 }
 
+TEST_CASE("RegisteredGlyphState round-trips, registered and cleared slots alike", "[vthost][pdu][glyph]")
+{
+    auto const glyph = WireRegisteredGlyph {
+        .slot = 1023,
+        .registered = 1,
+        .viewBox = { 0xBFC00000, 0x40000000, 0x41C00000, 0x41C80000 },
+        .fit = 2,
+        .horizontal = 2,
+        .vertical = 1,
+        .span = 2,
+        .payload = "fill=nonzero,fg:M4 4h16v16H4Z|stroke=2/butt/miter,#e5534bff:M6 12h12",
+    };
+    auto const state = RegisteredGlyphState { .session = 4,
+                                              .replace = 1,
+                                              .glyphs = { glyph, WireRegisteredGlyph { .slot = 7 } } };
+    CHECK(roundTrip(DecodedPdu { state }) == DecodedPdu { state });
+    CHECK(roundTrip(DecodedPdu { RegisteredGlyphState { .session = 4 } })
+          == DecodedPdu { RegisteredGlyphState { .session = 4 } });
+
+    STATIC_CHECK(std::to_underlying(PduType::RegisteredGlyphState) == 62);
+    STATIC_CHECK(std::to_underlying(Capability::RegisteredGlyphs) == 33);
+    CHECK(std::ranges::any_of(CapabilityTable, [](CapabilityRow const& row) {
+        return row.capability == Capability::RegisteredGlyphs && row.name == "registered-glyphs";
+    }));
+    // A per-session push, so a mirror receives it with the other session events.
+    auto const event = asSessionEvent(DecodedPdu { state });
+    REQUIRE(event.has_value());
+    CHECK(sessionOf(*event) == 4);
+}
+
+TEST_CASE("a RegisteredGlyphState cut short is malformed", "[vthost][pdu][glyph]")
+{
+    auto const decodes = [](std::span<std::byte const> body) {
+        return decodePdu(frameOf(PduType::RegisteredGlyphState, body)).has_value();
+    };
+    // session, replace, one glyph: a record of slot 0, registered -- and nothing of the glyph.
+    auto record = Writer {};
+    record.u16(0);
+    record.u8(1);
+    auto body = Writer {};
+    body.varint(4);
+    body.u8(0);
+    body.varint(1);
+    body.blob(record.view());
+    CHECK_FALSE(decodes(body.view()));
+
+    // The viewBox and the placement, and a payload that says it is longer than what follows.
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
+        record.u32(0);
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
+        record.u8(0);
+    record.varint(100);
+    auto shortPayload = Writer {};
+    shortPayload.varint(4);
+    shortPayload.u8(0);
+    shortPayload.varint(1);
+    shortPayload.blob(record.view());
+    CHECK_FALSE(decodes(shortPayload.view()));
+
+    // A cleared slot is the two fields alone, and whole.
+    auto cleared = Writer {};
+    cleared.u16(7);
+    cleared.u8(0);
+    auto clearedBody = Writer {};
+    clearedBody.varint(4);
+    clearedBody.u8(0);
+    clearedBody.varint(1);
+    clearedBody.blob(cleared.view());
+    CHECK(decodes(clearedBody.view()));
+}
+
 TEST_CASE("a SoftFontState glyph that does not fit its bitmap is malformed", "[vthost][pdu][softfont]")
 {
     auto const accepted = [](std::vector<std::byte> const& body) {

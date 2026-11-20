@@ -304,6 +304,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void executeControlCode(char controlCode) override;
     void processSequence(Sequence const& seq) override;
     void processAPC(std::string_view body) override;
+    void processOversizedAPC(std::string_view front) override;
 
     // {{{ kitty animation playback
     /// Advances every playing kitty animation whose next frame is due at @p now to the frame @p now shows:

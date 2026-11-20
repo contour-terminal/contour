@@ -139,10 +139,11 @@ class RendererTest
     static void renderStickyHeader(Renderer& renderer,
                                    vtbackend::RenderStickyHeader const& header,
                                    vtbackend::LineOffset row,
-                                   vtbackend::ColumnCount columns)
+                                   vtbackend::ColumnCount columns,
+                                   vtbackend::RegisteredGlyphs const* registeredGlyphs = nullptr)
     {
         renderer._textRenderer.beginFrame();
-        renderer.renderStickyHeader(header, row, columns);
+        renderer.renderStickyHeader(header, registeredGlyphs, row, columns);
         renderer._textRenderer.endFrame();
     }
 };
@@ -2211,6 +2212,105 @@ TEST_CASE("Renderer.reconfig.tiles_follow_the_atlas_across_a_rebuild", "[rendere
           == Catch::Approx(unbox<float>(tile->bitmapSize.width)));
     CHECK(normalized.height * unbox<float>(sizeAfterGrow.height)
           == Catch::Approx(unbox<float>(tile->bitmapSize.height)));
+}
+
+TEST_CASE("Renderer.registeredGlyph.isDrawnInPlaceOfItsCellsText", "[renderer][glyphprotocol]")
+{
+    // Through the renderer's own cell loop, which is where a cell's codepoint is matched to its glyph and
+    // the cell after it decides how far a two-cell glyph may reach.
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+    auto& backend = fixture.renderTarget.getMockBackend();
+
+    // The whole viewBox, stretched over the render span: every tile of it is solid ink.
+    auto glossary = vtbackend::GlyphGlossary {};
+    glossary.registerGlyph(0x100000,
+                           vtbackend::parseGlyphDefinition(
+                               vtbackend::GlyphStatement { .viewBox = "0,0,8,8",
+                                                           .fit = "stretch",
+                                                           .width = "2",
+                                                           .payload = "fill=nonzero,fg:M0 0H8V8H0Z" })
+                               .value());
+    auto const glyphs = glossary.snapshot();
+
+    auto header = vtbackend::RenderStickyHeader { .kind = StickyHeaderKind::Command,
+                                                  .block = CommandBlockId { 1 },
+                                                  .cells = {},
+                                                  .chip = {},
+                                                  .background = 0x303030_rgb,
+                                                  .separator = 0x808080_rgb,
+                                                  .presentation = StickyHeaderPresentation::InGrid,
+                                                  .outcome = vtbackend::CommandBlockOutcome::Success,
+                                                  .commandLine = {} };
+    auto const cellAt = [](int column, std::u32string text, vtbackend::GlyphSizing sizing = {}) {
+        return vtbackend::RenderCell { .codepoints = std::move(text),
+                                       .image = {},
+                                       .position = CellLocation { .line = LineOffset(2),
+                                                                  .column = ColumnOffset(column) },
+                                       .attributes = RenderAttributes { .foregroundColor = 0xFFFFFF_rgb,
+                                                                        .backgroundColor = 0x204060_rgb,
+                                                                        .decorationColor = 0xFFFFFF_rgb,
+                                                                        .flags = {},
+                                                                        .lineFlags = LineFlag::None },
+                                       .width = 1,
+                                       .sizing = sizing,
+                                       .groupStart = column == 0,
+                                       .groupEnd = false };
+    };
+    auto const solidTiles = [&] {
+        return std::ranges::count_if(backend.uploadCommands, [](auto const& upload) {
+            return !upload.bitmap.empty()
+                   && std::ranges::all_of(upload.bitmap, [](uint8_t pixel) { return pixel == 0xFF; });
+        });
+    };
+    auto const draw = [&](std::vector<vtbackend::RenderCell> cells,
+                          vtbackend::RegisteredGlyphs const* frame) {
+        backend.uploadCommands.clear();
+        backend.renderCommands.clear();
+        header.cells = std::move(cells);
+        RendererTest::renderStickyHeader(fixture.renderer, header, LineOffset(2), ColumnCount(80), frame);
+    };
+
+    SECTION("a blank cell after it gives a two-cell glyph its second cell")
+    {
+        // Seeded metrics: 10x20 cells, no margin -- so column 0 is at x 0 and column 1 at x 10.
+        draw({ cellAt(0, U"\U00100000"), cellAt(1, U"") }, glyphs.get());
+        CHECK(solidTiles() == 2);
+        REQUIRE(backend.renderCommands.size() == 2);
+        CHECK(backend.renderCommands[0].x.value == 0);
+        CHECK(backend.renderCommands[1].x.value == 10);
+    }
+
+    SECTION("text after it, or the end of the row, keeps it to one cell")
+    {
+        draw({ cellAt(0, U"\U00100000"), cellAt(1, U"\U00100000") }, glyphs.get());
+        // The same one-cell tile serves both cells.
+        CHECK(solidTiles() == 1);
+        REQUIRE(backend.renderCommands.size() == 2);
+        CHECK(backend.renderCommands[0].x.value == 0);
+        CHECK(backend.renderCommands[1].x.value == 10);
+    }
+
+    SECTION("a frame without registered glyphs draws the cell's text")
+    {
+        draw({ cellAt(0, U"\U00100000"), cellAt(1, U"") }, nullptr);
+        CHECK(solidTiles() == 0);
+    }
+
+    SECTION("a codepoint with nothing registered draws the cell's text")
+    {
+        draw({ cellAt(0, U"\U00100001"), cellAt(1, U"") }, glyphs.get());
+        CHECK(solidTiles() == 0);
+    }
+
+    SECTION("a cell of a scaled block is left to the text path")
+    {
+        auto const doubled =
+            vtbackend::GlyphSizing { .scale = vtbackend::CellScale { .scale = 2 }, .columns = 2 };
+        draw({ cellAt(0, U"\U00100000", doubled) }, glyphs.get());
+        CHECK(solidTiles() == 0);
+    }
 }
 
 TEST_CASE("Renderer.stickyHeader.drawsABandItsCellsTheChipAndASeparator", "[renderer][stickyheader]")

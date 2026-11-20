@@ -11,6 +11,7 @@
 
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
+#include <vtbackend/vt/GlyphProtocol.hpp>
 #include <vtbackend/vt/ProgramStatus.hpp>
 
 #include <core/async/AsyncQueue.hpp>
@@ -222,6 +223,11 @@ struct RemoteScreen
     /// @ref programStatus is) and for a replay.
     std::vector<proto::WireSoftFont> softFonts;
     uint64_t softFontGeneration = 0; ///< The daemon's store generation @ref softFonts was captured at.
+    /// The session's Glyph Protocol glyphs as the daemon last stated them, by slot, kept for a mirror bound
+    /// later and for a replay. Empty unless both ends negotiated Capability::RegisteredGlyphs.
+    std::map<uint16_t, proto::WireRegisteredGlyph> registeredGlyphs;
+    /// Counts the changes to @ref registeredGlyphs, so a mirror can tell whether it holds them as they are.
+    uint64_t registeredGlyphRevision = 0;
     /// Fetched image pixels by pool-local image id. The id pool is per session,
     /// so this map is already session-scoped. Filled on ImageData, dropped on
     /// ImageGone.
@@ -261,6 +267,10 @@ struct RemoteScreen
 
     /// Replaces the soft fonts with the set @p fonts states.
     void apply(proto::SoftFontState const& fonts);
+
+    /// Changes the registered glyphs as @p glyphs states: the slots it names, after clearing them all when
+    /// it replaces.
+    void apply(proto::RegisteredGlyphState const& glyphs);
 
     /// @return The row currently at viewport row @p line (0-based), or nullptr
     ///         for a row the client has no data for (render as blank).

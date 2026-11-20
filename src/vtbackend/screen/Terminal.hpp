@@ -53,6 +53,7 @@
 #include <vtbackend/shell/StickyHeader.hpp>
 #include <vtbackend/shell/UserMarkIndex.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
+#include <vtbackend/vt/GlyphGlossary.hpp>
 #include <vtbackend/vt/MacroDefinition.hpp>
 #include <vtbackend/vt/PointerShape.hpp>
 #include <vtbackend/vt/ProgramStatus.hpp>
@@ -567,6 +568,7 @@ class TraceHandler: public SequenceHandler
     void executeControlCode(char controlCode) override;
     void processSequence(Sequence const& sequence) override;
     void processAPC(std::string_view body) override;
+    void processOversizedAPC(std::string_view front) override;
     void writeText(char32_t codepoint) override;
     void writeText(std::string_view codepoints, size_t cellCount) override;
     void writeTextEnd() override;
@@ -680,6 +682,14 @@ class Terminal: public IStatusLinePublishTarget
 
         virtual void requestCaptureBuffer(LineCount /*lines*/, CaptureLineMode /*mode*/) {}
         virtual void bell() {}
+        /// Asked by a Glyph Protocol query, on the thread that parses the application's output.
+        /// @param codepoint A Unicode scalar value.
+        /// @return Whether a font in the fallback chain draws @p codepoint. A listener that knows of no
+        ///         font says Absent, which only costs an application a registration it could have spared.
+        [[nodiscard]] virtual GlyphSources::System systemGlyphCoverage(char32_t /*codepoint*/)
+        {
+            return GlyphSources::System::Absent;
+        }
         /// Another page came on display -- not the cursor's page, which with DECPCCM reset may be another.
         /// @param type The screen type of the page now on display.
         virtual void bufferChanged(ScreenType /*type*/) {}
@@ -1251,6 +1261,16 @@ class Terminal: public IStatusLinePublishTarget
     /// The DECDLD soft fonts.
     [[nodiscard]] SoftFontStore const& softFonts() const noexcept { return _softFonts; }
     [[nodiscard]] SoftFontStore& softFonts() noexcept { return _softFonts; }
+    // }}}
+
+    // {{{ Glyph Protocol (APC 25a1)
+    /// The glyphs the application registered through the Glyph Protocol.
+    [[nodiscard]] GlyphGlossary const& glyphGlossary() const noexcept { return _glyphGlossary; }
+    [[nodiscard]] GlyphGlossary& glyphGlossary() noexcept { return _glyphGlossary; }
+
+    /// Carries out one Glyph Protocol message: answers it, and redraws the screen when it changed a glyph.
+    /// @param body The APC body, starting with `25a1;`.
+    void processGlyphProtocol(std::string_view body);
     // }}}
 
     // {{{ DEC Locator (DECELR / DECLRP / DECSLE / DECRQLP)
@@ -5765,6 +5785,7 @@ class Terminal: public IStatusLinePublishTarget
     /// reported, and only theirs, so the host never sees an up without its down or a down without its up.
     uint8_t _locatorButtonsOwnedByApp = 0;
     SoftFontStore _softFonts;
+    GlyphGlossary _glyphGlossary;
 
     Modes _modes;
     std::map<DECMode, std::vector<bool>> _savedModes; //!< saved DEC modes
@@ -5903,6 +5924,10 @@ class Terminal: public IStatusLinePublishTarget
             terminal.sequenceHandler().processSequence(sequence);
         }
         void processAPC(std::string_view body) { terminal.sequenceHandler().processAPC(body); }
+        void processOversizedAPC(std::string_view front)
+        {
+            terminal.sequenceHandler().processOversizedAPC(front);
+        }
         void writeText(char32_t codepoint) { terminal.sequenceHandler().writeText(codepoint); }
         void writeText(std::string_view codepoints, size_t cellCount)
         {

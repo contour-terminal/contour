@@ -608,6 +608,15 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        return std::format("workspace={}", std::get<OpenFirstTab>(pdu).workspace);
                    } },
+        TraceRow { PduType::RegisteredGlyphState,
+                   "RegisteredGlyphState",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<RegisteredGlyphState>(pdu);
+                       return std::format("session={} replace={} glyphs={}",
+                                          value.session,
+                                          value.replace,
+                                          value.glyphs.size());
+                   } },
         TraceRow { PduType::SoftFontState,
                    "SoftFontState",
                    +[](DecodedPdu const& pdu) {

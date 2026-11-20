@@ -62,6 +62,7 @@ set(vtbackend_HEADERS
     vt/ProgramStatus.hpp
     vt/SemanticBlockQuery.hpp
     vt/UserVar.hpp
+    vt/VectorGlyph.hpp
     screen/ProgramStatusSet.hpp
     vt/JsonString.hpp
     input/vi/HintModeHandler.hpp
@@ -99,6 +100,8 @@ set(vtbackend_HEADERS
     screen/LocalTime.hpp
     screen/PrintedLinks.hpp
     Logging.hpp
+    vt/GlyphGlossary.hpp
+    vt/GlyphProtocol.hpp
     vt/MacroDefinition.hpp
     vt/SoftFont.hpp
     vt/SoftFontStore.hpp
@@ -200,6 +203,7 @@ set(vtbackend_SOURCES
     vt/PresentationState.cpp
     vt/ProgramStatus.cpp
     vt/UserVar.cpp
+    vt/VectorGlyph.cpp
     screen/ProgramStatusSet.cpp
     vt/JsonString.cpp
     core/WorkingDirectory.cpp
@@ -227,6 +231,8 @@ set(vtbackend_SOURCES
     grid/LineSoA.cpp
     shell/LivePromptMarks.cpp
     screen/LocalTime.cpp
+    vt/GlyphGlossary.cpp
+    vt/GlyphProtocol.cpp
     vt/MacroDefinition.cpp
     vt/SoftFont.cpp
     vt/SoftFontStore.cpp
@@ -371,6 +377,7 @@ if(LIBTERMINAL_TESTING)
         vt/PresentationState_test.cpp
         vt/ProgramStatus_test.cpp
         vt/UserVar_test.cpp
+        vt/VectorGlyph_test.cpp
         screen/ProgramStatusSet_test.cpp
         screen/Terminal_programStatus_test.cpp
         vt/JsonString_test.cpp
@@ -427,6 +434,8 @@ if(LIBTERMINAL_TESTING)
         vt/RectangularAreaChecksum_test.cpp
         vt/ClipboardSelection_test.cpp
         vt/KittyClipboard_test.cpp
+        vt/GlyphGlossary_test.cpp
+        vt/GlyphProtocol_test.cpp
         vt/MacroDefinition_test.cpp
         vt/SoftFont_test.cpp
         vt/SoftFontStore_test.cpp
@@ -443,6 +452,7 @@ if(LIBTERMINAL_TESTING)
         screen/Screen_rect_test.cpp
         screen/Screen_modes_test.cpp
         screen/Screen_osc_test.cpp
+        screen/Screen_glyphprotocol_test.cpp
         screen/Screen_softfont_test.cpp
         screen/Screen_macros_test.cpp
         screen/Screen_multipage_test.cpp

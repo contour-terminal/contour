@@ -2982,6 +2982,7 @@ namespace
         }
 
         void processAPC(std::string_view body) { targetScreen.processAPC(body); }
+        void processOversizedAPC(std::string_view front) { targetScreen.processOversizedAPC(front); }
 
         /// Writes @p codepoint where it fits on the row, and nothing once one has not.
         /// @param codepoint The character.
@@ -6622,6 +6623,32 @@ std::string foldC1ControlsToEightBit(std::string_view sevenBit)
     return out;
 }
 
+void Terminal::processGlyphProtocol(std::string_view body)
+{
+    /// Asks the listener what the fonts in use draw.
+    class ListenerCoverage final: public SystemGlyphCoverage
+    {
+      public:
+        explicit ListenerCoverage(Events& listener) noexcept: _listener { listener } {}
+
+        [[nodiscard]] GlyphSources::System systemCoverage(char32_t codepoint) const override
+        {
+            return _listener.systemGlyphCoverage(codepoint);
+        }
+
+      private:
+        Events& _listener;
+    };
+
+    auto const generation = _glyphGlossary.generation();
+    auto const answer = executeGlyphProtocol(_glyphGlossary, ListenerCoverage { _eventListener }, body);
+    if (!answer.empty())
+        reply(answer);
+    // A cell already on screen may show the glyph that was just registered, replaced or cleared.
+    if (_glyphGlossary.generation() != generation)
+        markScreenDirty();
+}
+
 void Terminal::reply(string_view text)
 {
     // Under S8C1T the terminal transmits its C1 control introducers as single 8-bit bytes (CSI -> 0x9B,
@@ -8479,6 +8506,9 @@ void Terminal::hardReset()
     // ReallyReset clears its UDKs and Windows Terminal's HardReset its soft font -- on RIS alone.
     clearUDKs();
     _softFonts.clear();
+    // The Glyph Protocol lets a reset clear the glossary; a program that died mid-run then leaves no glyph
+    // behind for the next one to trip over.
+    _glyphGlossary.clear();
 
     // A pointer shape is application state like any other, so RIS withdraws it: a program that dies
     // holding a hand cursor must not leave the user with one. The stack keeps its bottom entry -- the
@@ -10071,6 +10101,13 @@ void TraceHandler::processSequence(Sequence const& sequence)
         display->processSequence(sequence);
     else
         _pendingSequences.emplace_back(sequence);
+}
+
+void TraceHandler::processOversizedAPC(std::string_view front)
+{
+    // Not queued: nothing of it is carried out, so there is no order for it to keep, and its answer is
+    // only that it was too large.
+    _terminal->activeDisplay().processOversizedAPC(front);
 }
 
 void TraceHandler::processAPC(std::string_view body)
