@@ -79,6 +79,7 @@ set(vtbackend_HEADERS
     graphics/KittyAnimation.hpp
     graphics/KittyGraphics.hpp
     graphics/KittyInflate.hpp
+    graphics/KittyPlaceholders.hpp
     grid/Line.hpp
     core/LineFlags.hpp
     grid/LineSoA.hpp
@@ -243,6 +244,7 @@ set(vtbackend_SOURCES
     graphics/KittyAnimation.cpp
     graphics/KittyGraphics.cpp
     graphics/KittyInflate.cpp
+    graphics/KittyPlaceholders.cpp
     vt/TextSizing.cpp
     screen/LinkDetector.cpp
     links/LinkIndex.cpp
@@ -439,6 +441,7 @@ if(LIBTERMINAL_TESTING)
         graphics/KittyAnimation_test.cpp
         graphics/KittyGraphics_test.cpp
         graphics/KittyInflate_test.cpp
+        graphics/KittyPlaceholders_test.cpp
         vt/TextSizing_test.cpp
         screen/ScreenTestFixtures.cpp
         screen/TerminalTestFixtures.cpp

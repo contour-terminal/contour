@@ -330,7 +330,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void processKittyGraphics(std::string_view body);
 
     /// Answers a kitty graphics command, unless it asked to be left alone (`q=`).
-    void replyKittyGraphics(kitty_graphics::Command const& command, std::string_view status);
+    /// @param keys Extra keys to put before the status, each with a leading comma; only on success.
+    void replyKittyGraphics(kitty_graphics::Command const& command,
+                            std::string_view status,
+                            std::string_view keys = {});
 
     /// Whether showKittyFrame() found a placement to show the frame in.
     enum class Placed : uint8_t
@@ -341,6 +344,16 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Places @p image at the cursor, sized per the command's `c=`/`r=` or derived from its pixels.
     void renderKittyImage(kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image);
+
+    /// Makes a virtual placement (`U=1`) of @p image: fits it into the command's span, aspect-preserved
+    /// and centred, as kitty does. Writes no cell and leaves the cursor. Replaces the image's virtual
+    /// placement of the same placement id.
+    /// @return The reason it was refused, as the reply's status.
+    [[nodiscard]] std::expected<void, std::string_view> createKittyVirtualPlacement(
+        kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image);
+
+    /// Removes @p imageId's virtual placement @p placementId, if it has one.
+    void eraseKittyVirtualPlacement(uint32_t imageId, KittyPlacementId placementId);
 
     /// Moves the cursor past a placed image as ImageCursorPolicy::AdvancePastImage describes.
     /// @param topLeft the image's top-left cell, where the cursor was when it was placed.
@@ -1275,6 +1288,22 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         return it != _kittyImages.end() ? it->second : nullptr;
     }
 
+    /// A kitty virtual placement (`U=1`): an image fitted into a span of cells that no cell holds until
+    /// Unicode placeholder cells name it. The raster is built once, when the placement is made, and
+    /// every placeholder cell's fragment shares it.
+    struct KittyVirtualPlacement
+    {
+        KittyPlacementId placementId;                  ///< `p=`; zero for none.
+        std::shared_ptr<RasterizedImage const> raster; ///< The image fitted into the placement's span.
+    };
+
+    /// Looks up a virtual placement the way a placeholder cell names it.
+    /// @param imageId The kitty image id.
+    /// @param placementId The placement id; zero means the image's first virtual placement.
+    /// @return The placement, or null when the image has none of that id. Valid until the next kitty command.
+    [[nodiscard]] KittyVirtualPlacement const* findKittyVirtualPlacement(uint32_t imageId,
+                                                                         KittyPlacementId placementId) const;
+
     /// @return the image of 1-based frame @p number of @p imageId, or nullptr if there is none.
     ///         Unlike kittyAnimationFor(), this creates no animation, so a command may consult it
     ///         before it has decided to succeed.
@@ -1960,6 +1989,11 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     std::unordered_map<uint32_t, std::shared_ptr<Image const>> _kittyImages {};
 
     std::unordered_map<uint32_t, KittyAnimation> _kittyAnimations {};
+
+    /// Virtual placements (`U=1`) by image id, in the order they were made: the front one is what a
+    /// placeholder cell without a placement id shows.
+    std::unordered_map<uint32_t, std::vector<KittyVirtualPlacement>> _kittyVirtualPlacements {};
+
     /// Not captured: a cost counter tests read, which counts this process's walks only.
     uint64_t _kittyFragmentWalks = 0; ///< @see kittyFragmentWalks()
 

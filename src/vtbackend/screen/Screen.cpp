@@ -311,7 +311,14 @@ namespace // {{{ helper
         }
     }
 
-    /// Common parameters shared by GIP render and oneshot operations.
+    /// Most kitty virtual placements (`U=1`) one screen holds. A virtual placement covers no cell, so
+    /// unlike a placement at the cursor nothing else bounds them: every new placement id is another one.
+    constexpr auto MaxKittyVirtualPlacements = size_t { 4096 };
+
+    /// Largest span, in cells along either axis, a kitty virtual placement may ask for. Not the page: a
+    /// picture taller than the page is shown in parts as its placeholder rows scroll by.
+    constexpr auto MaxKittyVirtualPlacementSpan = uint32_t { 0xFFFF };
+
     /// Clamps an application-supplied cell count to what the page can actually hold.
     ///
     /// Every image protocol lets the application state the display size in cells, and every one of them
@@ -328,6 +335,8 @@ namespace // {{{ helper
     {
         return std::min(requested, static_cast<unsigned>(unbox(limit)));
     }
+
+    /// Common parameters shared by GIP render and oneshot operations.
     struct GipRenderParams
     {
         LineCount screenRows {};
@@ -5923,7 +5932,9 @@ void Screen::processAPC(std::string_view body)
     publishKittyAnimationDue();
 }
 
-void Screen::replyKittyGraphics(kitty_graphics::Command const& command, std::string_view status)
+void Screen::replyKittyGraphics(kitty_graphics::Command const& command,
+                                std::string_view status,
+                                std::string_view keys)
 {
     auto const isError = !status.starts_with("OK");
     if (command.quietAlways || (command.quietOnSuccess && !isError))
@@ -5935,10 +5946,12 @@ void Screen::replyKittyGraphics(kitty_graphics::Command const& command, std::str
     if (command.imageId == 0 && command.imageNumber == 0)
         return;
 
+    // kitty puts the extra keys only on a success.
+    auto const extra = isError ? std::string_view {} : keys;
     if (command.imageNumber != 0)
-        reply("\033_Gi={},I={};{}\033\\", command.imageId, command.imageNumber, status);
+        reply("\033_Gi={},I={}{};{}\033\\", command.imageId, command.imageNumber, extra, status);
     else
-        reply("\033_Gi={};{}\033\\", command.imageId, status);
+        reply("\033_Gi={}{};{}\033\\", command.imageId, extra, status);
 }
 
 std::optional<std::string_view> Screen::validateKittyTransmission(
@@ -6145,6 +6158,7 @@ void Screen::resetKittyState() noexcept
     // The frames are full copies of the image, and far larger than the map holding them. Leaving them
     // behind would make RIS reclaim the base image and none of the animation built on it.
     _kittyAnimations.clear();
+    _kittyVirtualPlacements.clear();
     _terminal->kittyClipboardWrite().clear();
     _terminal->kittyClipboardWriteOpen() = false;
 }
@@ -6177,6 +6191,14 @@ void Screen::processKittyGraphics(std::string_view body)
         return;
     }
     auto command = std::move(parsed.value());
+
+    // A feature query (`a=q,e=`) transmits nothing and performs nothing, so it is answered before the
+    // chunk stitching below: kitty requires that it leave a chunked transmission in progress alone.
+    if (command.action == Action::Query && command.queryFeature != 0)
+    {
+        replyKittyGraphics(command, "OK", supportedFeatureKeys(command));
+        return;
+    }
 
     auto const abandonChunkedTransmission = [this] {
         _kittyChunkedCommand.reset();
@@ -6250,9 +6272,19 @@ void Screen::processKittyGraphics(std::string_view body)
             auto const current =
                 animation != _kittyAnimations.end() ? animation->second.currentImage() : nullptr;
             // Placing again under an existing (i, p) pair replaces that placement rather than adding one;
-            // placements without `p=` are each their own, and `p=` means nothing without an `i=`.
+            // placements without `p=` are each their own, and `p=` means nothing without an `i=`. The pair
+            // names one placement whichever kind it is, so a virtual one replaces one at the cursor and
+            // the other way round, as in kitty.
             if (command.imageId != 0 && command.placementId != 0)
                 removeKittyPlacementOf(command.imageId, KittyPlacementId { command.placementId });
+            if (command.placementKind == PlacementKind::Virtual)
+            {
+                auto const created = createKittyVirtualPlacement(command, current ? current : it->second);
+                replyKittyGraphics(command, created ? "OK"sv : created.error());
+                return;
+            }
+            if (command.placementId != 0)
+                eraseKittyVirtualPlacement(command.imageId, KittyPlacementId { command.placementId });
             renderKittyImage(command, current ? current : it->second);
             // A playing animation that held for want of a placement has one again. Only here: a=T replaces
             // the image under its id, and its animation with it.
@@ -6358,13 +6390,140 @@ void Screen::processKittyGraphics(std::string_view body)
         if (command.action == Action::TransmitAndDisplay && command.placementId != 0)
             removeKittyPlacementOf(command.imageId, KittyPlacementId { command.placementId });
         _kittyAnimations.erase(command.imageId);
+        // A re-transmission ends every placement of the image it replaces that has no cell of its own,
+        // as kitty's free_image_resources() does: the virtual placements were fitted to the old pixels.
+        _kittyVirtualPlacements.erase(command.imageId);
         _kittyImages[command.imageId] = image;
     }
 
     if (command.action == Action::TransmitAndDisplay)
+    {
+        if (command.placementKind == PlacementKind::Virtual)
+        {
+            auto const created = createKittyVirtualPlacement(command, image);
+            replyKittyGraphics(command, created ? "OK"sv : created.error());
+            return;
+        }
+        if (command.imageId != 0 && command.placementId != 0)
+            eraseKittyVirtualPlacement(command.imageId, KittyPlacementId { command.placementId });
         renderKittyImage(command, image);
+    }
 
     replyKittyGraphics(command, "OK");
+}
+
+Screen::KittyVirtualPlacement const* Screen::findKittyVirtualPlacement(uint32_t imageId,
+                                                                       KittyPlacementId placementId) const
+{
+    auto const placements = _kittyVirtualPlacements.find(imageId);
+    if (placements == _kittyVirtualPlacements.end() || placements->second.empty())
+        return nullptr;
+    if (placementId == KittyPlacementId {})
+        return &placements->second.front();
+    auto const found =
+        std::ranges::find(placements->second, placementId, &KittyVirtualPlacement::placementId);
+    return found != placements->second.end() ? &*found : nullptr;
+}
+
+void Screen::eraseKittyVirtualPlacement(uint32_t imageId, KittyPlacementId placementId)
+{
+    auto const placements = _kittyVirtualPlacements.find(imageId);
+    if (placements == _kittyVirtualPlacements.end())
+        return;
+    std::erase_if(placements->second, [&](KittyVirtualPlacement const& placement) {
+        return placement.placementId == placementId;
+    });
+    if (placements->second.empty())
+        _kittyVirtualPlacements.erase(placements);
+}
+
+std::expected<void, std::string_view> Screen::createKittyVirtualPlacement(
+    kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image)
+{
+    // A placeholder cell names its image by id, so a virtual placement of an anonymous image could never
+    // be shown.
+    if (command.imageId == 0)
+        return std::unexpected { "EINVAL:virtual placement without image id"sv };
+    // Nor is a virtual placement part of a relative one: kitty refuses one that names a parent.
+    if (command.parentImageId != 0)
+        return std::unexpected { "EINVAL:virtual placement cannot refer to a parent"sv };
+
+    auto const placementId = KittyPlacementId { command.placementId };
+    auto& placements = _kittyVirtualPlacements[command.imageId];
+    auto const existing = std::ranges::find(placements, placementId, &KittyVirtualPlacement::placementId);
+
+    // A virtual placement occupies no cell, so nothing else bounds how many an application can make: each
+    // new placement id is another one.
+    if (existing == placements.end())
+    {
+        auto total = size_t { 0 };
+        for (auto const& perImage: _kittyVirtualPlacements | std::views::values)
+            total += perImage.size();
+        if (total >= MaxKittyVirtualPlacements)
+        {
+            if (placements.empty())
+                _kittyVirtualPlacements.erase(command.imageId);
+            return std::unexpected { "ENOSPC:too many virtual placements"sv };
+        }
+    }
+
+    // The source rectangle (`x=`, `y=`, `w=`, `h=`), clamped to the image; a zero extent means "to the
+    // image's edge", as kitty reads it.
+    auto const imageWidth = unbox<uint32_t>(image->width());
+    auto const imageHeight = unbox<uint32_t>(image->height());
+    auto const sourceX = std::min(command.sourceX, imageWidth);
+    auto const sourceY = std::min(command.sourceY, imageHeight);
+    auto const sourceWidth =
+        command.sourceWidth != 0 ? std::min(command.sourceWidth, imageWidth - sourceX) : imageWidth - sourceX;
+    auto const sourceHeight = command.sourceHeight != 0
+                                  ? std::min(command.sourceHeight, imageHeight - sourceY)
+                                  : imageHeight - sourceY;
+
+    auto const cellSize = _terminal->cellPixelSize();
+    if ((command.columns == 0 || command.rows == 0) && cellSize.area() == 0)
+    {
+        logImageDroppedForUnknownCellSize("kitty", image->size());
+        if (placements.empty())
+            _kittyVirtualPlacements.erase(command.imageId);
+        return {};
+    }
+
+    // `c=`/`r=` state the span in cells; without them it follows from the source size, rounded up. Unlike a
+    // placement at the cursor the span is not bounded by the page: a picture taller than the page is shown
+    // in parts as its placeholder rows scroll by. It is bounded all the same, so that the count stays a
+    // positive one whatever arrived on the wire.
+    auto const spanOf = [](uint32_t requested, uint32_t pixels, int cellPixels) {
+        auto const derived = requested != 0 ? requested
+                                            : (pixels + static_cast<uint32_t>(cellPixels) - 1)
+                                                  / static_cast<uint32_t>(cellPixels);
+        return std::min(derived, MaxKittyVirtualPlacementSpan);
+    };
+    auto const span = GridSize {
+        .lines = LineCount::cast_from(spanOf(command.rows, sourceHeight, unbox<int>(cellSize.height))),
+        .columns = ColumnCount::cast_from(spanOf(command.columns, sourceWidth, unbox<int>(cellSize.width))),
+    };
+
+    // kitty fits a virtual placement aspect-preserved and centred in its span. The gap is transparent, so
+    // the cell's own background shows around the picture.
+    auto raster = std::make_shared<RasterizedImage const>(
+        image,
+        ImageAlignment::MiddleCenter,
+        ImageResize::ResizeToFit,
+        RGBAColor {},
+        span,
+        cellSize,
+        ImageLayer::Replace,
+        PixelCoordinate { .x = { static_cast<int>(sourceX) }, .y = { static_cast<int>(sourceY) } },
+        ImageSize { Width::cast_from(sourceWidth), Height::cast_from(sourceHeight) },
+        placementId,
+        ImageOrigin::Placeholder);
+
+    if (existing != placements.end())
+        existing->raster = std::move(raster);
+    else
+        placements.push_back(
+            KittyVirtualPlacement { .placementId = placementId, .raster = std::move(raster) });
+    return {};
 }
 
 size_t Screen::storedKittyBytes() const
