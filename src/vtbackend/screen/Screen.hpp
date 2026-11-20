@@ -1366,6 +1366,11 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// resolved from what the line holds once they have.
     void resolveKittyPlaceholders();
 
+    /// @return How many lines the last resolveKittyPlaceholders() that ran walked: the page plus the rows
+    ///         scrolled into the history since the first placeholder of the batch, or the whole history
+    ///         after a change that can resolve cells printed long ago. Observable so the bound is testable.
+    [[nodiscard]] size_t kittyPlaceholderLinesWalked() const noexcept { return _kittyPlaceholderLinesWalked; }
+
     /// Looks up a virtual placement the way a placeholder cell names it.
     /// @param imageId The kitty image id.
     /// @param placementId The placement id; zero means the image's first virtual placement.
@@ -2074,6 +2079,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Pending resolve also walks the rows scrolled into the history since then, which the same batch may
     /// have pushed a picture's top rows into.
     uint64_t _kittyPlaceholderScrollMark = 0;
+
+    /// See kittyPlaceholderLinesWalked().
+    size_t _kittyPlaceholderLinesWalked = 0;
 
     /// Virtual placements (`U=1`) by image id, in the order they were made: the front one is what a
     /// placeholder cell without a placement id shows.

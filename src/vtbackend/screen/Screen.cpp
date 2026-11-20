@@ -6667,6 +6667,7 @@ void Screen::resolveKittyPlaceholders()
             : std::min(_linesScrolledIntoHistory - _kittyPlaceholderScrollMark, historyLines);
     auto const firstLine = -static_cast<int>(scrolledOff);
     _kittyPlaceholders = PlaceholderScan::Idle;
+    _kittyPlaceholderLinesWalked = static_cast<size_t>(scrolledOff) + unbox<size_t>(pageSize().lines);
     // Only the flag of each line is read: an unflagged line, the history's bulk, is never materialised.
     for (auto const line: std::views::iota(firstLine, *pageSize().lines))
         if (std::as_const(_grid).lineAt(LineOffset(line)).isFlagEnabled(LineFlag::ImagePlaceholders))
@@ -6836,15 +6837,6 @@ KittyAnimation& Screen::storeKittyFrame(uint32_t imageId,
     // while every later delta is silently accepted.
     if (target == animation->currentFrame)
         showKittyFrame(imageId, animation->frames[target - 1].image, previous);
-    else if (target == 1 && previous)
-    {
-        // Whatever still shows the pre-edit root -- a virtual placement made before the animation began --
-        // shows the edit instead.
-        auto swaps = KittyFrameSwaps {};
-        swaps.insert_or_assign(previous.get(),
-                               KittyFrameSwap { .next = animation->frames[0].image, .imageId = imageId });
-        (void) showKittyFrames(swaps);
-    }
     return *animation;
 }
 

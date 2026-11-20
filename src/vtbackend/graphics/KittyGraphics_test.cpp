@@ -2874,6 +2874,12 @@ TEST_CASE("KittyGraphics.image_number", "[kitty][placeholder]")
         CHECK(mock.terminal.peekInput() == "\033_Gi=31,e=d,d=a;OK\033\\");
     }
 
+    SECTION("a feature query without d= echoes no d= key")
+    {
+        mock.writeToScreen("\033_Ga=q,i=31,e=d\033\\"sv);
+        CHECK(mock.terminal.peekInput() == "\033_Gi=31,e=d;OK\033\\");
+    }
+
     SECTION("a feature query naming an id and a number is refused, as kitty checks that first")
     {
         mock.writeToScreen("\033_Ga=q,i=31,I=3,e=T\033\\"sv);

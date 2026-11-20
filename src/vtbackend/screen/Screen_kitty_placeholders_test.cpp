@@ -279,6 +279,15 @@ TEST_CASE("KittyPlaceholders.delete.all_spares_virtual_placements", "[kitty][pla
         CHECK(mock.screen().kittyImage(9) != nullptr);
     }
 
+    SECTION("a bare a=d deletes as d=a")
+    {
+        mock.writeToScreen("\033_Ga=d\033\\"sv);
+        CHECK_FALSE(mock.screen().at(LineOffset(5), ColumnOffset(0)).imageFragment());
+        checkPictureResolved(mock.screen());
+        CHECK(mock.screen().findKittyVirtualPlacement(7, KittyPlacementId {}) != nullptr);
+        CHECK(mock.screen().kittyImage(9) != nullptr);
+    }
+
     SECTION("d=A frees no image a virtual placement still shows")
     {
         mock.writeToScreen("\033_Ga=d,d=A\033\\"sv);
@@ -418,6 +427,29 @@ TEST_CASE("KittyPlaceholders.screen.rows_scrolled_into_history_in_the_same_batch
             CHECK(fragment->offset()
                   == CellLocation { .line = LineOffset(row), .column = ColumnOffset(column) });
         }
+}
+
+TEST_CASE("KittyPlaceholders.screen.pending_resolve_walks_only_what_scrolled_since", "[kitty][placeholder]")
+{
+    // A batch that writes placeholder cells walks the page and the rows it scrolled off, not the history the
+    // earlier batches left behind: the per-batch cost stays independent of the scrollback's length.
+    auto mock = PlaceholderTerm { PageSize { LineCount(10), ColumnCount(20) }, LineCount(100) };
+    mock.writeToScreen(transmitVirtual());
+    mock.writeToScreen(placeholderPicture() + std::string(40, '\n'));
+    REQUIRE(mock.screen().historyLineCount() == LineCount(33));
+
+    SECTION("a later batch at the bottom walks the page and the five lines it scrolled")
+    {
+        // The cursor sits on the last line: each of the picture's two rows ends in a scroll, then three more.
+        mock.writeToScreen(placeholderPicture() + std::string(3, '\n'));
+        CHECK(mock.screen().kittyPlaceholderLinesWalked() == 10 + 5);
+    }
+
+    SECTION("a change that can resolve old cells walks the whole history")
+    {
+        mock.writeToScreen(transmitVirtual());
+        CHECK(mock.screen().kittyPlaceholderLinesWalked() == 10 + 33);
+    }
 }
 
 TEST_CASE("KittyPlaceholders.screen.animation_frame_keeps_placeholder_origin", "[kitty][placeholder]")
